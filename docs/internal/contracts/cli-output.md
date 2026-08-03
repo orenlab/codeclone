@@ -46,7 +46,7 @@ Color is stripped when:
 
 ### JSON contract
 
-`--json [FILE]` outputs the canonical JSON report schema v2.12. Encoding is UTF-8, no BOM. The output must be:
+`--json [FILE]` outputs the canonical JSON report schema v3.0. Encoding is UTF-8, no BOM. The output must be:
 - Valid JSON (all strings escaped, no trailing commas)
 - Single-line or pretty-printed per configuration (not mixed)
 - Complete: all keys present even if null/empty
@@ -88,10 +88,10 @@ Progress output (non-`--no-progress` and TTY stdout):
 **Verification**: `codeclone --color | cat | grep -E '\\x1b\\[[0-9;]+m'` must produce no output.
 
 #### Mode B: JSON schema version mismatch
-**Trigger**: `--json` is passed but code writes schema v2.11 instead of v2.12.
+**Trigger**: `--json` is passed but code writes a stale schema version instead of the current `REPORT_SCHEMA_VERSION`.
 **Behavior**: Downstream JSON parsers accept the file but reject new fields as unknown.
 **Risk**: PR analyzers and IDE extensions fail silently on missing fields.
-**Verification**: `jq .report_schema_version` on output must equal "2.12" (from contract).
+**Verification**: `jq .report_schema_version` on output must equal `REPORT_SCHEMA_VERSION` = `3.0` from the contract.
 
 #### Mode C: Buffering deadlock on large report
 **Trigger**: Piping HTML report (>100 MB) with unbuffered progress on stderr simultaneously.
@@ -176,7 +176,7 @@ If a contract error is detected but a later exception sets exit code 5, the user
 
 **Test file**: `tests/test_cli_smoke.py`
 - Real analysis with `--json`, `--html`, `--md`, `--sarif`, `--text` output
-- Verify JSON schema version == 2.12 for all runs
+- Verify JSON schema version == 3.0 for all runs
 - Verify report files are valid (JSON parse, HTML tag count, etc.)
 
 **Test file**: `tests/test_cli_help_snapshot.py`
@@ -224,7 +224,7 @@ If a contract error is detected but a later exception sets exit code 5, the user
 
 | Contract ID | File | Line | Value |
 |:------------|:-----|:-----|:------|
-| REPORT_SCHEMA_VERSION | `codeclone/contracts/__init__.py` | — | "2.12" |
+| REPORT_SCHEMA_VERSION | `codeclone/contracts/__init__.py` | — | "3.0" |
 | DEFAULT_JSON_REPORT_PATH | `codeclone/contracts/__init__.py` | — | ".codeclone/report.json" |
 | DEFAULT_HTML_REPORT_PATH | `codeclone/contracts/__init__.py` | — | ".codeclone/report.html" |
 
@@ -238,7 +238,7 @@ If a contract error is detected but a later exception sets exit code 5, the user
 
 ### Baseline and metrics
 
-- **Report schema**: v2.12 (REPORT_SCHEMA_VERSION)
+- **Report schema**: v3.0 (REPORT_SCHEMA_VERSION)
 - **Analysis tool**: CodeClone v2.1.0a1
 - **Module count**: 769 (structural coverage)
 - **CLI surface package**: `codeclone.surfaces.cli` (23 test files covering entry, progress, memory, observability)

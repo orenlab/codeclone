@@ -56,7 +56,7 @@ graph TB
 
 The four core tiers:
 
-1. **Analysis engine**: Deterministic detector, fingerprint matching, metric aggregation. No mutation of source, baseline, or cache. Outputs keyed to schema versions (`BASELINE_FINGERPRINT_VERSION=1`, `CACHE_VERSION=2.11`, `REPORT_SCHEMA_VERSION=2.12`).
+1. **Analysis engine**: Deterministic detector, fingerprint matching, metric aggregation. No mutation of source, baseline, or cache. Outputs keyed to schema versions (`BASELINE_FINGERPRINT_VERSION=3`, `CACHE_VERSION=3.2`, `REPORT_SCHEMA_VERSION=3.0`).
 
 2. **Structural controller**: Pre-edit intent declaration, workspace liveness checking, scope verification. Single active intent per MCP session; eviction on new `start_controlled_change` without prior `finish`. No memory of prior intents across restart.
 
@@ -113,7 +113,7 @@ analyze_changed_paths, analyze_repository, check_clones, check_cohesion, check_c
 ### Observable spans and metrics
 
 - **Analysis spans**: pipeline.baseline, pipeline.cache_load, pipeline.report (MCP wrapped; CLI instrumentation TBD)
-- **Metrics baseline** (`METRICS_BASELINE_SCHEMA_VERSION=1.2`): Cobertura join, health computation (7-factor weight per `HEALTH_WEIGHTS`)
+- **Metrics baseline** (`METRICS_BASELINE_SCHEMA_VERSION=1.3`): Cobertura join, health computation (7-factor weight per `HEALTH_WEIGHTS`)
 
 ### Cache wire paths
 

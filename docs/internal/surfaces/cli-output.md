@@ -136,7 +136,7 @@ graph TD
 - Baseline is corrupted or unreadable
 - Baseline root digest does not authenticate the container
 - Baseline schema version does not match `BASELINE_SCHEMA_VERSION` ("3.0")
-- Baseline fingerprint version does not match `BASELINE_FINGERPRINT_VERSION` ("2")
+- Baseline fingerprint version does not match `BASELINE_FINGERPRINT_VERSION` ("3")
 - Baseline exceeds `DEFAULT_MAX_BASELINE_SIZE_MB` (5 MB)
 
 **Remediation:** Use `--update-baseline` to regenerate, or remove the baseline and re-run.
@@ -168,7 +168,7 @@ lane matches the current runtime contract.
 ### Invalid cache (contract error, exit code 2)
 
 - Cache file is corrupted
-- Cache schema version does not match `CACHE_VERSION` ("2.11")
+- Cache schema version does not match `CACHE_VERSION` ("3.2")
 - Cache exceeds `DEFAULT_MAX_CACHE_SIZE_MB` (50 MB)
 
 **Remediation:** Delete `.codeclone/cache.json` and re-run.

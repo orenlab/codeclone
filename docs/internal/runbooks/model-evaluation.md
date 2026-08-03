@@ -27,7 +27,7 @@ This runbook covers:
 | `HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER` | float | 2.0 |
 | `HEALTH_DEPENDENCY_DEPTH_P95_MARGIN` | int | 1 |
 | `DEFAULT_HEALTH_THRESHOLD` | int | 60 |
-| `REPORT_SCHEMA_VERSION` | str | 2.12 |
+| `REPORT_SCHEMA_VERSION` | str | 3.0 |
 
 Risk thresholds (independent from weights):
 - `COMPLEXITY_RISK_LOW_MAX`: 10
@@ -93,7 +93,7 @@ Dependency penalties apply after dimensional scoring:
 ## Verification
 
 1. **Unit test coverage**: Dimension scorers and health constants are exercised in `tests/test_report.py` and `tests/test_defaults_contract.py` (there is no dedicated `tests/test_health.py`).
-2. **Contract schema**: Verify `REPORT_SCHEMA_VERSION` matches deployed report version (current: 2.12).
+2. **Contract schema**: Verify `REPORT_SCHEMA_VERSION` matches deployed report version (current: 3.0).
 3. **Threshold alignment**: Confirm that `DEFAULT_HEALTH_THRESHOLD` (60) is intentional; lower thresholds increase sensitive findings.
 4. **Weight audit**: Ensure `HEALTH_WEIGHTS` sum to 1.0 before deployment.
 5. **Cyclic dependency test**: Run `codeclone .` on a known cyclic codebase and inspect the coupling findings in the report; verify the penalty is applied.
@@ -115,7 +115,7 @@ uv run pytest -q tests/test_report.py tests/test_defaults_contract.py
 | `HEALTH_WEIGHTS` mapping | Supported | `codeclone/contracts/__init__.py` |
 | `HEALTH_DEPENDENCY_CYCLE_PENALTY` constant | Supported | `codeclone/contracts/__init__.py` |
 | Depth penalty formula (4 points per level) | Supported | `codeclone/contracts/__init__.py` |
-| Report schema version 2.12 | Supported | `codeclone/contracts/__init__.py` |
+| Report schema version 3.0 | Supported | `codeclone/contracts/__init__.py` |
 | Risk thresholds for complexity, cohesion, coupling | Supported | `codeclone/contracts/__init__.py` |
 | Unit test coverage for health calculation | Path only | `tests/test_report.py`, `tests/test_defaults_contract.py` |
 | Mermaid dependency graph | Supported | Derived from contract structure |

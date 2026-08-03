@@ -22,7 +22,7 @@ The graph is retrieved via the module-map analysis surface (get_report_section /
 | **Depth-2 packages** | 303 | Primary structural units (e.g., `codeclone.memory`, `codeclone.surfaces.mcp`) |
 | **Overloaded modules** | 43 candidates | Require unwinding (multi-responsibility) |
 | **Unwind candidates** | 25 high-priority | Production=2; Tests=23 |
-| **Schema version** | 2.12 (report) | REPORT_SCHEMA_VERSION from contracts/__init__.py |
+| **Schema version** | 3.0 (report) | REPORT_SCHEMA_VERSION from contracts/__init__.py |
 
 **Central sinks** (high fan-in, low fan-out):
 - `codeclone.report.meta` (fan_in=44, fan_out=5) — non-candidate; dependency_score=0.9912
@@ -115,7 +115,7 @@ graph TD
 
 | Evidence | Source | Status | Detail |
 |----------|--------|--------|--------|
-| Module count (769) | `codeclone_mcp_module_map` | supported | Retrieved via get_report_section; REPORT_SCHEMA_VERSION=2.12 |
+| Module count (769) | `codeclone_mcp_module_map` | supported | Retrieved via get_report_section; REPORT_SCHEMA_VERSION=3.0 |
 | Central sinks (meta, json_io, audit.reader) | `module_map_unwind_candidates` | supported | Fan-in/out scores from current run; non-candidates are design-intended bottlenecks |
 | Unwind candidates (25 active) | `module_map_unwind_candidates` | supported | 2 production (sqlite_store, _session_workflow_mixin); 23 test modules flagged for instability |
 | Layering rules | `engineering_memory_records` (5 change_rationale + 1 risk_note) | path_only | Background context only; verify against code for active boundaries |
