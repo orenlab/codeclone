@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from codeclone.analysis.fingerprint import (
     _cfg_fingerprint_and_complexity,
     bucket_loc,
@@ -110,17 +112,30 @@ def test_match_constants_and_delimiter_payloads_normalize() -> None:
     assert injected == innocuous
 
 
-def test_exception_types_and_try_kind_are_semantic() -> None:
-    value_error = _fingerprint(
-        "def f():\n"
-        "    try:\n"
-        "        work()\n"
-        "    except ValueError:\n"
-        "        recover()\n"
-    )
+_TRY_VALUE_ERROR = (
+    "def f():\n    try:\n        work()\n    except ValueError:\n        recover()\n"
+)
+
+
+def test_exception_types_are_semantic() -> None:
     type_error = _fingerprint(
         "def f():\n    try:\n        work()\n    except TypeError:\n        recover()\n"
     )
+    assert _fingerprint(_TRY_VALUE_ERROR) != type_error
+
+
+def test_try_kind_is_semantic() -> None:
+    """``except*`` is 3.11+ grammar, so the interpreter decides whether to run.
+
+    The wire registers except-star only when the interpreter exposes it, so the
+    contract genuinely holds on 3.10 -- there is simply no TryStar to fingerprint
+    there. Splitting the case away from ``test_exception_types_are_semantic``
+    keeps the exception-type half running on every matrix leg while this half
+    keeps its full strength from 3.11 up.
+    """
+
+    if sys.version_info < (3, 11):
+        pytest.skip("except-star grammar was introduced in Python 3.11")
     try_star = _fingerprint(
         "def f():\n"
         "    try:\n"
@@ -128,8 +143,7 @@ def test_exception_types_and_try_kind_are_semantic() -> None:
         "    except* ValueError:\n"
         "        recover()\n"
     )
-    assert value_error != type_error
-    assert value_error != try_star
+    assert _fingerprint(_TRY_VALUE_ERROR) != try_star
 
 
 def test_phase_ledger_does_not_change_fingerprint_bytes() -> None:
