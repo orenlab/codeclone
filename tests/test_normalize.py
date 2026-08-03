@@ -262,7 +262,6 @@ def f():
 def test_normalization_commutative_binop_not_reordered(src1: str, src2: str) -> None:
     cfg = NormalizationConfig(
         normalize_names=False,
-        normalize_attributes=False,
         normalize_constants=False,
     )
     _assert_normalized_not_equal(src1, src2, cfg)
@@ -449,7 +448,6 @@ def f(x: int, /, y: int, *, z: int, **k: int) -> int:
     cfg = NormalizationConfig(
         ignore_docstrings=False,
         ignore_type_annotations=False,
-        normalize_attributes=False,
         normalize_constants=False,
         normalize_names=False,
     )
@@ -483,7 +481,7 @@ def test_normalization_dump_is_string_for_supported_function_shapes(src: str) ->
     assert isinstance(dump, str)
 
 
-def test_normalization_names_constants_attributes_disabled() -> None:
+def test_normalization_names_and_constants_disabled() -> None:
     src = """
 def f():
     obj.attr = 7
@@ -491,10 +489,35 @@ def f():
 """
     cfg = NormalizationConfig(
         normalize_names=False,
-        normalize_attributes=False,
         normalize_constants=False,
     )
     node = ast.parse(src).body[0]
     dump = normalized_ast_dump(node, cfg)
     assert "attr" in dump
     assert "7" in dump
+
+
+def test_every_normalization_config_field_is_read() -> None:
+    """A field nothing reads is a switch that silently does nothing.
+
+    Each field must be read as an attribute somewhere under ``codeclone/``.
+    Construction keywords do not count: passing ``field=False`` to a config
+    nobody consults changes no behaviour.
+    """
+    import dataclasses
+    import pathlib
+
+    package_root = pathlib.Path(normalize_mod.__file__).resolve().parents[1]
+    read_attributes: set[str] = set()
+    for path in sorted(package_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        read_attributes.update(
+            node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+        )
+
+    unread = sorted(
+        field.name
+        for field in dataclasses.fields(NormalizationConfig)
+        if field.name not in read_attributes
+    )
+    assert unread == [], f"NormalizationConfig fields never read: {unread}"

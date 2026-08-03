@@ -92,7 +92,6 @@ def f():
     assert isinstance(func2, ast.FunctionDef)
     cfg = NormalizationConfig(
         normalize_names=False,
-        normalize_attributes=False,
         normalize_constants=False,
     )
     seg1 = extract_segments(

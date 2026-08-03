@@ -42,7 +42,6 @@ def _api_signature_wire_config() -> NormalizationConfig:
 
     return NormalizationConfig(
         ignore_type_annotations=False,
-        normalize_attributes=False,
         normalize_constants=False,
         normalize_names=False,
     )
