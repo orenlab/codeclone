@@ -733,6 +733,14 @@ class CodeCloneMCPRunStore:
         self._lock = RLock()
         self._records: OrderedDict[MCPRunKey, MCPRunRecord] = OrderedDict()
         self._latest_run_id: MCPRunKey | None = None
+        # Monotonic registration ordinals. Run ids are content-addressed, so
+        # re-registering the *same* key can only mean one thing: a fresh
+        # recompute observed the tree and produced byte-identical analysis
+        # facts. That advance is the only in-session evidence distinguishing
+        # "recomputed and unchanged" from "never recomputed", and identity
+        # alone cannot carry it — the record it replaces is indistinguishable.
+        self._registrations: dict[MCPRunKey, int] = {}
+        self._registration_seq: int = 0
         # Insertion-ordered so the oldest pin is identifiable: the record
         # itself carries no timestamp, and pin order is the only evidence of
         # which pin has been held longest. The value is a reference count —
@@ -747,8 +755,30 @@ class CodeCloneMCPRunStore:
             self._records[key] = record
             self._records.move_to_end(key)
             self._latest_run_id = key
+            self._registration_seq += 1
+            self._registrations[key] = self._registration_seq
             self._prune_unpinned_locked()
         return record
+
+    def registration_ordinal(
+        self,
+        run_id: str | None = None,
+        *,
+        root: Path,
+    ) -> int | None:
+        """Return when this exact ``(root, run_id)`` was last registered.
+
+        Ordinals are comparable only against other ordinals from this store.
+        ``None`` means the run is not held under *root* at all, which is a
+        refusal to answer rather than a claim about freshness.
+        """
+
+        resolved_root = root.resolve()
+        with self._lock:
+            key = self._resolve_key_locked(run_id, root=resolved_root)
+            if key is None:
+                return None
+            return self._registrations.get(key)
 
     def get_for_root(
         self,
@@ -770,9 +800,15 @@ class CodeCloneMCPRunStore:
             if run_id is not None and self._roots_holding_locked(run_id):
                 raise MCPRunRootMismatchError(
                     f"Run id '{run_id}' belongs to a different repository root "
-                    f"than {resolved_root}."
+                    f"than {resolved_root}. Run ids are content-addressed and "
+                    f"collide between checkouts at the same commit. Call "
+                    f"analyze_repository(root='{resolved_root}') and use the "
+                    f"run_id it returns."
                 )
-            raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+            raise MCPRunNotFoundError(
+                f"No MCP analysis run is available for {resolved_root}. Call "
+                f"analyze_repository(root='{resolved_root}') first."
+            )
 
     def resolve_any_root(self, run_id: str | None = None) -> MCPRunRecord:
         """Resolve a run whose root the caller genuinely does not constrain.
@@ -873,6 +909,7 @@ class CodeCloneMCPRunStore:
             removed_run_ids = tuple(key[1] for key in self._records)
             self._records.clear()
             self._pinned_run_ids.clear()
+            self._registrations.clear()
             self._latest_run_id = None
             return removed_run_ids
 
@@ -882,6 +919,7 @@ class CodeCloneMCPRunStore:
                 if key in self._pinned_run_ids:
                     continue
                 self._records.pop(key, None)
+                self._registrations.pop(key, None)
                 if self._latest_run_id == key:
                     self._latest_run_id = next(reversed(self._records), None)
                 break
