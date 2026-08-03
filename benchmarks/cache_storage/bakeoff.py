@@ -1511,7 +1511,7 @@ def _execute_scenario(
     if scenario == "corrupt_entry":
         backend.corrupt_one()
         loaded = backend.load_all()
-        status = (
+        status: RecoveryStatus = (
             "pass"
             if loaded["recovery_result"] in {"bucket_miss:1", "entry_miss:1"}
             and len(loaded["entries"]) < len(entries)
