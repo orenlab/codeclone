@@ -993,6 +993,33 @@ def _graph_svg(node_count: int) -> str:
     )
 
 
+def test_promotion_opens_as_a_full_width_row_not_an_in_cell_blob() -> None:
+    """A six-line TOML block cannot live in the narrowest column of a table.
+
+    The proposal rendered inside the rightmost Propose cell, so on the real
+    report it was cut mid-word at the cell edge and the table grew a
+    horizontal scrollbar. Wrapping cannot rescue a cell that narrow: the
+    panel has to leave the cell. It becomes a row of its own spanning the
+    table, carrying the wave's detail-panel idiom, opened by the summary that
+    stays in the cell -- no script involved.
+    """
+
+    panel = _discovery_panel_html()
+
+    assert 'class="detail-row"' in panel, "the proposal is still an in-cell blob"
+    detail = panel[panel.index('class="detail-row"') :]
+    detail = detail[: detail.index("</tr>")]
+    assert "colspan=" in detail, "the detail row does not span the table"
+    assert "detail-panel" in detail, "the detail row does not use the panel idiom"
+    assert "codebox" in detail, "the proposal did not move into the panel"
+
+    from codeclone.report.html.assets.css import build_css
+
+    assert "tr:has(details[open])" in build_css().replace(" ", ""), (
+        "nothing links the summary to its detail row"
+    )
+
+
 def test_graph_keeps_the_designed_row_rhythm() -> None:
     """The canvas was designed. Only the block sizing needed grooming.
 

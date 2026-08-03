@@ -505,6 +505,22 @@ _TABLES = """\
 .table .col-chips{max-width:300px}
 .table-empty{padding:var(--sp-8);text-align:center;color:var(--text-muted);font-size:var(--fs-md)}
 
+/* A row's detail panel spans the whole table instead of living in one cell.
+   The summary stays in its cell and drives this row through :has(), so the
+   disclosure still needs no script. The panel's cell is the full table width,
+   which is what lets a six-line TOML block wrap instead of being cut at a cell
+   edge and dragging a horizontal scrollbar across the table. */
+.table .detail-row{display:none}
+.table tbody tr:has(details[open]) + .detail-row{display:table-row}
+.table .detail-row > td{padding:0 var(--sp-3) var(--sp-3);border-bottom:none;
+  background:none}
+/* The panel must not drive the table's intrinsic width: the table is sized
+   max-content, so a wide panel would widen every row. Zero basis removes it
+   from that calculation, and the minimum fills the width the other rows set. */
+.table .detail-row .detail-panel{margin:0;inline-size:0;min-inline-size:100%}
+.table .detail-row .codebox{max-inline-size:100%;white-space:pre-wrap;
+  overflow-wrap:anywhere;overflow-x:auto}
+
 /* A table's meta band belongs to the table: it spans exactly the same width
    and shares its edges, so what introduces a table never reads as a separate
    column of a different width floating above it. The lead sits left, the

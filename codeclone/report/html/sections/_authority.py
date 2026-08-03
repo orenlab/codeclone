@@ -173,7 +173,7 @@ def _candidate_owner_html(owner: str) -> str:
     )
 
 
-def _candidate_promotion_html(item: Mapping[str, object]) -> str:
+def _candidate_promotion_html(item: Mapping[str, object]) -> tuple[str, str]:
     """Render the paste-ready registry entry for one discovery candidate.
 
     Promotion is a governance act. This writes nothing: it renders the TOML a
@@ -188,7 +188,7 @@ def _candidate_promotion_html(item: Mapping[str, object]) -> str:
         if text
     ]
     if not producers:
-        return "-"
+        return "-", ""
     owner, *alternatives = producers
     lines = [
         "[[tool.codeclone.authority]]",
@@ -199,23 +199,37 @@ def _candidate_promotion_html(item: Mapping[str, object]) -> str:
         f'required_provenance = ["{owner}"]',
     ]
     if alternatives:
-        lines.append("# other producers sharing this fact: " + ", ".join(alternatives))
+        # The co-producers are a list, so the comment states its policy rather
+        # than pasting it: on this repository the joined form reached hundreds
+        # of thousands of characters on one line, and a TOML line that long
+        # drove the whole table's intrinsic width. The full set is one click
+        # away in the Producers column of the same row.
+        shown = ", ".join(alternatives[:3])
+        rest = len(alternatives) - 3
+        tail = f" (+{rest} more, see Producers)" if rest > 0 else ""
+        lines.append(f"# other producers sharing this fact: {shown}{tail}")
     # Highlighted as TOML at build time: this is the one real configuration
     # block in the report, and a reader must be able to tell the placeholder
     # contract id from the key that names it. The text copied is unchanged.
     snippet = highlight_block("\n".join(lines), language="toml")
     # Collapsed by construction: fifty open TOML blocks cannot happen, because
-    # a proposal only expands when a human asks for that one.
-    return (
+    # a proposal only expands when a human asks for that one. The summary is
+    # all that stays in the cell -- the block itself is returned separately and
+    # rendered as a full-width row, because six lines of TOML in the narrowest
+    # column of the table were cut mid-word at the cell edge.
+    summary = (
         '<details class="authority-promotion">'
         '<summary class="authority-promotion-summary">Propose</summary>'
+        "</details>"
+    )
+    body = (
         '<div class="authority-promotion-body authority-copy-host">'
         '<button class="btn authority-copy-btn" type="button" '
         "data-authority-copy>Copy</button>"
         f'<pre class="codebox"><code>{snippet}</code></pre>'
         "</div>"
-        "</details>"
     )
+    return summary, body
 
 
 def _authority_answer(
@@ -322,6 +336,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         for item in suppressed
     ]
     candidate_rows = []
+    candidate_details: list[str] = []
     for item in strong_candidates[:_CANDIDATE_ROW_LIMIT]:
         producers = [
             text
@@ -329,15 +344,17 @@ def render_authority_panel(ctx: ReportContext) -> str:
             for text in (str(value).strip(),)
             if text
         ]
+        propose_summary, propose_body = _candidate_promotion_html(item)
         candidate_rows.append(
             (
                 _candidate_owner_html(producers[0] if producers else ""),
                 str(item.get("level", "")).replace("_", " "),
                 str(_as_int(item.get("score"))),
                 _candidate_producers_html(producers),
-                _candidate_promotion_html(item),
+                propose_summary,
             )
         )
+        candidate_details.append(propose_body)
 
     enabled = bool(summary.get("enforcement_enabled"))
     unresolved_governed = sum(
@@ -391,6 +408,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
             empty_message="No semantic-authority discovery candidates.",
             raw_html_headers=("Owner", "Producers", "Propose"),
             column_types={"Score": "meter_neutral", "Level": "chips"},
+            row_details=candidate_details,
             ctx=ctx,
         )
         + _candidate_cut_note_html(candidates)

@@ -131,6 +131,7 @@ def render_rows_table(
     empty_description: str | None = "Nothing to report - keep up the good work.",
     raw_html_headers: Collection[str] = (),
     column_types: Mapping[str, str] | None = None,
+    row_details: Sequence[str] | None = None,
     ctx: ReportContext | None = None,
 ) -> str:
     """Render a data table with badges, tooltips, and col sizing.
@@ -200,10 +201,27 @@ def render_rows_table(
             )
         return f"<td{cls_attr}>{_escape_html(cell)}</td>"
 
-    body_html = "".join(
-        "<tr>" + "".join(_td(i, cell) for i, cell in enumerate(row)) + "</tr>"
-        for row in rows
-    )
+    # A row may carry a detail panel. It cannot live inside a cell: a six-line
+    # TOML block in the narrowest column is cut mid-word and drags a horizontal
+    # scrollbar across the table. It becomes a row of its own spanning every
+    # column, opened by the summary that stays in the cell -- see the
+    # tr:has(details[open]) rule, which needs no script.
+    details = tuple(row_details or ())
+    span = len(lower_headers)
+
+    def _row(index: int, row: Sequence[str]) -> str:
+        cells = "".join(_td(i, cell) for i, cell in enumerate(row))
+        detail = details[index] if index < len(details) else ""
+        if not detail:
+            return f"<tr>{cells}</tr>"
+        return (
+            f"<tr>{cells}</tr>"
+            f'<tr class="detail-row"><td colspan="{span}">'
+            f'<div class="detail-panel">{detail}</div>'
+            "</td></tr>"
+        )
+
+    body_html = "".join(_row(index, row) for index, row in enumerate(rows))
 
     return (
         '<div class="table-wrap"><table class="table">'
