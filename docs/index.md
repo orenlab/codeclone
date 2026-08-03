@@ -40,6 +40,20 @@ New here? Jump to:
 - [MCP tools reference](reference/mcp-tools.md) — the 38 MCP tools
 - [Controlled change](concepts/controlled-change.md) — the intent-first edit workflow
 
+## New in 2.1.0a2
+
+Upgrading from 2.1.0a1? Start with
+[Upgrading from 2.1.0a1 to 2.1.0a2](guides/migration-a1-a2.md) — baseline
+regeneration is mandatory and two flags were removed.
+
+- [Baseline container and lane trust](concepts/baseline-container.md) — one container, per-lane trust, tri-state novelty
+- [Semantic authority governance](concepts/semantic-authority.md) — the reviewed authority registry
+- [Near-miss clones](concepts/near-miss-clones.md) — the opt-in, gate-neutral clone tier
+- [Unreachable statements](concepts/unreachable-statements.md) — statement-level reachability
+- [Source-kind classification](concepts/source-kinds.md) — production, tests, fixtures
+- [Health explainability](concepts/health-explainability.md) — how each dimension spends its points
+- [Full-McCabe complexity](concepts/complexity.md) — why complexity values rose
+
 ## Key concepts
 
 | Concept | Definition |
