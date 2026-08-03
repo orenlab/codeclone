@@ -116,6 +116,18 @@ GLOSSARY: dict[str, str] = {
     "violations": "Semantic-authority violations found against governed contracts",
     "owner": "The producer proposed as the canonical owner of a shared fact",
     "producers": "Other functions sharing this candidate's fact",
+    # The full governance rule. The discovery table states the short form
+    # ("Tools propose, humans own.") on its meta band; the reader who wants
+    # the whole rule, including where a proposal is pasted, hovers Propose.
+    "propose": (
+        "Authority is a governance act: tools propose, humans own. Copy a "
+        "proposal into [[tool.codeclone.authority]] to govern it; nothing "
+        "here changes your configuration"
+    ),
+    "level": (
+        "Evidence strength behind a candidate, strongest first; only the top "
+        "levels earn a row, and every level is counted in the strip above"
+    ),
     # Suggestion stat cards
     "total suggestions": "Total actionable improvement suggestions generated",
     "warning": "Suggestions with warning severity worth reviewing",

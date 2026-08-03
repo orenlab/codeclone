@@ -68,18 +68,40 @@ _STRONG_CANDIDATE_LEVELS: Final = (
     "same_output_fact_and_input_family",
 )
 
-#: Discovery proposes; a human decides. Promotion is a copy-paste into
-#: pyproject, never a write by this tool.
-_CANDIDATE_CAPTION = (
-    "Discovered owners, ranked by evidence strength. Authority is a governance "
-    "act: tools propose, humans own. Copy a proposal into "
-    "[[tool.codeclone.authority]] to govern it; nothing here changes your "
-    "configuration."
-)
+#: Discovery proposes; a human decides. The short line rides the table's meta
+#: band; the full governance rule is a tooltip on the Propose column, because
+#: a reader who already knows it should not read it on every visit.
+_CANDIDATE_LEAD = "Discovered owners, ranked by evidence strength."
+_CANDIDATE_DOCTRINE = "Tools propose, humans own."
 
 
-def _level_histogram_text(candidates: Sequence[Mapping[str, object]]) -> str:
-    """Count every level, so the levels held back from the table stay visible."""
+def _candidate_meta_html(shown: int, total: int) -> str:
+    """State the lead and the shown-of-total count on the table's own band.
+
+    A count belongs beside the table it counts, not inside a sentence: the
+    reader who wants to know how much is hidden looks to the table's edge.
+    """
+
+    count = (
+        f'<span class="table-meta-count">Showing {shown} of {total}</span>'
+        if total > shown
+        else ""
+    )
+    return (
+        '<div class="table-meta">'
+        f'<span class="table-meta-lead">{_escape_html(_CANDIDATE_LEAD)} '
+        f"{_escape_html(_CANDIDATE_DOCTRINE)}</span>"
+        f"{count}"
+        "</div>"
+    )
+
+
+def _level_strip_html(candidates: Sequence[Mapping[str, object]]) -> str:
+    """Count every level as chips, so the held-back levels stay visible.
+
+    This was a prose histogram inside a ten-line caption. It is a distribution:
+    it is read by scanning, never by reading, so it renders as counts.
+    """
 
     if not candidates:
         return ""
@@ -90,29 +112,29 @@ def _level_histogram_text(candidates: Sequence[Mapping[str, object]]) -> str:
         counts.items(),
         key=lambda row: (-_LEVEL_RANK.get(row[0], 0), row[0]),
     )
-    parts = ", ".join(f"{level.replace('_', ' ')} {count}" for level, count in ordered)
-    weak = ", ".join(
-        level.replace("_", " ")
-        for level in sorted(counts)
-        if level not in _STRONG_CANDIDATE_LEVELS
+    pairs = tuple((level.replace("_", " "), count) for level, count in ordered)
+    return f'<div class="level-strip">{_micro_badges(*pairs)}</div>'
+
+
+def _candidate_cut_note_html(candidates: Sequence[Mapping[str, object]]) -> str:
+    """Name the levels that earn no row, and the route to them."""
+
+    weak = sorted(
+        {
+            str(item.get("level", "")).strip().replace("_", " ")
+            for item in candidates
+            if str(item.get("level", "")).strip() not in _STRONG_CANDIDATE_LEVELS
+            and str(item.get("level", "")).strip()
+        }
     )
-    cut = (
-        f" Levels below the cut ({weak}) are counted here only; "
-        'drill into them with check_authority(section="candidates") over MCP.'
-        if weak
-        else ""
-    )
-    return f" By level: {parts}.{cut}"
-
-
-def _sink_population_note(sink_total: int) -> str:
-    """Account for the discovery population instead of dropping it silently."""
-
-    if sink_total <= 0:
+    if not weak:
         return ""
     return (
-        f" Discovery examined {sink_total} semantic sinks; the candidates below "
-        "are the subset carrying shared-fact evidence."
+        '<div class="table-footnote">'
+        f"Levels below the cut ({_escape_html(', '.join(weak))}) are counted "
+        "above only; drill into them with "
+        '<code>check_authority(section="candidates")</code> over MCP.'
+        "</div>"
     )
 
 
@@ -347,28 +369,27 @@ def render_authority_panel(ctx: ReportContext) -> str:
         empty_message="No suppressed semantic-authority findings.",
         ctx=ctx,
     )
+    # The caption was five facts in one paragraph, in a reading measure that
+    # left a ragged half-width column floating over a full-width table. Each
+    # fact now sits where it is actually read: the lead and the shown-of-total
+    # count on the table's own meta band, the level distribution as a count
+    # strip, the governance rule as a tooltip on Propose, and the route to the
+    # held-back levels as a footnote under the table. Nothing was dropped, and
+    # the sink population is no longer said twice -- the Discovery stat card
+    # already carries it.
     shown = len(candidate_rows)
-    tail_note = (
-        f" Showing the {shown} strongest of {len(candidates)} candidates."
-        if len(candidates) > shown
-        else ""
-    )
-    histogram = _level_histogram_text(candidates)
-    candidate_caption = (
-        '<p class="muted authority-candidate-note">'
-        f"{_escape_html(_CANDIDATE_CAPTION)}"
-        f"{_escape_html(_sink_population_note(sink_total))}"
-        f"{_escape_html(tail_note)}"
-        f"{_escape_html(histogram)}"
-        "</p>"
-    )
-    candidate_panel = candidate_caption + render_rows_table(
-        headers=("Owner", "Level", "Score", "Producers", "Propose"),
-        rows=candidate_rows,
-        empty_message="No semantic-authority discovery candidates.",
-        raw_html_headers=("Owner", "Producers", "Propose"),
-        column_types={"Score": "meter_neutral", "Level": "chips"},
-        ctx=ctx,
+    candidate_panel = (
+        _candidate_meta_html(shown, len(candidates))
+        + _level_strip_html(candidates)
+        + render_rows_table(
+            headers=("Owner", "Level", "Score", "Producers", "Propose"),
+            rows=candidate_rows,
+            empty_message="No semantic-authority discovery candidates.",
+            raw_html_headers=("Owner", "Producers", "Propose"),
+            column_types={"Score": "meter_neutral", "Level": "chips"},
+            ctx=ctx,
+        )
+        + _candidate_cut_note_html(candidates)
     )
     # The narrative contract: the answer first, then the numbers a reader acts
     # on, then the evidence. Until now this panel jumped from the answer

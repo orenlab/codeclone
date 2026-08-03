@@ -490,6 +490,25 @@ _TABLES = """\
 .table .col-chips{max-width:300px}
 .table-empty{padding:var(--sp-8);text-align:center;color:var(--text-muted);font-size:var(--fs-md)}
 
+/* A table's meta band belongs to the table: it spans exactly the same width
+   and shares its edges, so what introduces a table never reads as a separate
+   column of a different width floating above it. The lead sits left, the
+   count that qualifies the rows sits right, against the table's own edge. */
+.table-meta{display:flex;flex-wrap:wrap;align-items:baseline;
+  justify-content:space-between;gap:var(--sp-2) var(--sp-4);
+  width:100%;margin:0 0 var(--sp-2);
+  font-size:var(--fs-xs);color:var(--text-muted);line-height:1.5}
+.table-meta-lead{min-width:0}
+.table-meta-count{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
+  color:var(--text-secondary);white-space:nowrap}
+/* A distribution is scanned, never read: counts, not sentences. */
+.level-strip{display:flex;flex-wrap:wrap;gap:var(--sp-1);width:100%;
+  margin:0 0 var(--sp-3)}
+/* One line under the table, for the route to what the table does not hold. */
+.table-footnote{width:100%;margin:calc(-1 * var(--sp-2)) 0 var(--sp-4);
+  font-size:var(--fs-2xs);color:var(--text-muted);line-height:1.5}
+.table-footnote code{font-size:inherit;color:var(--text-secondary)}
+
 /* Typed table cells: score bar, status pill, chips (shared badge vocabulary) */
 .score-bar{display:inline-flex;align-items:center;gap:7px;min-width:110px}
 .score-bar-track{flex:1;height:5px;border-radius:3px;background:var(--accent-muted);overflow:hidden}
@@ -1230,11 +1249,13 @@ _SUGGESTIONS = """\
   font-size:var(--fs-2xs);padding:var(--sp-1) var(--sp-2)}
 .authority-copy-btn--ok{color:var(--success);border-color:var(--success)}
 /* Explanatory prose is read line by line, so it gets a measure. Running a
-   sentence across the full report width is the hardest length to read; these
-   two notes carry the wave's arithmetic and its governance caveat, which are
-   exactly the sentences a reader must not skip. */
-.clones-health-note,.authority-candidate-note{margin:var(--sp-2) 0;
-  max-width:78ch;line-height:1.55}
+   sentence across the full report width is the hardest length to read; this
+   note carries the clone-health arithmetic, which is exactly the sentence a
+   reader must not skip. A measure only helps text that is genuinely read:
+   applied above a full-width table it produced a ragged half-width column of
+   a different width to the thing it introduced, which is why the discovery
+   caption was decomposed instead of measured. */
+.clones-health-note{margin:var(--sp-2) 0;max-width:78ch;line-height:1.55}
 .suggestion-details{border-top:1px solid var(--border)}
 .suggestion-details summary{padding:var(--sp-2) var(--sp-4);font-size:var(--fs-xs);
   display:flex;align-items:center;gap:var(--sp-2);background:none}

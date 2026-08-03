@@ -5368,6 +5368,19 @@ def _all_level_candidates() -> list[dict[str, object]]:
     ]
 
 
+def _candidate_rows_html(html: str) -> str:
+    """The discovery table's rows, anchored on the panel that owns them.
+
+    Six tests used to slice from the literal '>Propose<'. A column header is
+    not an anchor: the moment Propose earned a glossary tooltip the marker
+    moved and every one of those slices silently addressed the wrong region.
+    """
+
+    start = html.index('data-clone-panel="candidates"')
+    panel = html[start : html.index('data-clone-panel="suppressed"', start)]
+    return panel[panel.index("<tbody>") : panel.index("</tbody>")]
+
+
 def test_html_authority_renders_discovery_candidates(tmp_path: Path) -> None:
     """Computed candidates must reach the panel, not be dropped by the renderer.
 
@@ -5386,8 +5399,7 @@ def test_html_authority_renders_discovery_candidates(tmp_path: Path) -> None:
     for level, _score in _CANDIDATE_LEVELS:
         # every level is accounted for, in the table or in the histogram
         assert level.replace("_", " ") in html
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     for level, score in _CANDIDATE_LEVELS:
         if level in _STRONG_LEVELS:
             assert f"pkg.{level}:owner" in body
@@ -5439,7 +5451,13 @@ def test_html_authority_report_only_insight_counts_candidates(
 def test_html_authority_states_the_unrendered_sink_population(
     tmp_path: Path,
 ) -> None:
-    """The discovery population is stated, so no item kind drops in silence."""
+    """The discovery population is stated, so no item kind drops in silence.
+
+    Moved expectation: this pinned the caption sentence "7 semantic sinks".
+    The population is still stated and still exactly once -- on the Discovery
+    stat card, which always carried it. The caption was the second copy, and
+    saying a number twice is not the same as accounting for it.
+    """
 
     html = _authority_report_html(
         tmp_path,
@@ -5449,7 +5467,10 @@ def test_html_authority_states_the_unrendered_sink_population(
         enforcement_enabled=False,
     )
 
-    assert "7 semantic sinks" in html
+    assert '>7</span><span class="kpi-micro-lbl">sinks examined<' in html
+    # the caption's second copy is gone (the governed table's empty message
+    # legitimately says "No governed semantic sinks.", which is not a count)
+    assert "Discovery examined" not in html
 
 
 def test_document_orders_authority_candidates_by_score() -> None:
@@ -5629,14 +5650,19 @@ def test_html_authority_table_cuts_weak_levels_to_a_histogram(
         enforcement_enabled=False,
     )
 
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     assert "codeclone.strong:owner" in body
     assert "codeclone.weak:owner" not in body
     assert "codeclone.weaker:owner" not in body
-    # the cut is stated, and the weak mass is counted rather than hidden
-    assert "overlapping transform chain 1" in html
-    assert "divergent projection 1" in html
+    # Moved expectation: the counts were prose ("overlapping transform chain
+    # 1"). A distribution is scanned, not read, so it is now a count strip --
+    # value first, then the level it counts. Nothing is hidden either way.
+    strip = html[html.index('class="level-strip"') :]
+    strip = strip[: strip.index("</div>")]
+    for level in ("overlapping transform chain", "divergent projection"):
+        assert f'>1</span><span class="kpi-micro-lbl">{level}<' in strip
+    # and the cut still names the route to the levels that earn no row
+    assert "check_authority" in html
 
 
 def test_html_authority_promotion_is_collapsed_and_copyable(tmp_path: Path) -> None:
@@ -5672,8 +5698,7 @@ def test_html_authority_candidate_without_producers_proposes_nothing(
         enforcement_enabled=False,
     )
 
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     assert "[[tool.codeclone.authority]]" not in body
     assert "authority-promotion" not in body
 
@@ -5723,8 +5748,7 @@ def test_html_authority_row_never_dumps_an_unbounded_producer_string(
         enforcement_enabled=False,
     )
 
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     row = re.findall(r"<tr>(.*?)</tr>", body, re.S)[0]
     cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
     visible = [" ".join(re.sub(r"<[^>]+>", " ", cell).split()) for cell in cells]
@@ -5765,8 +5789,7 @@ def test_html_authority_lone_producer_needs_no_disclosure(tmp_path: Path) -> Non
         enforcement_enabled=False,
     )
 
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     assert "authority-producers" not in body
 
 

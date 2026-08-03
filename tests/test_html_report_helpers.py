@@ -1161,6 +1161,129 @@ def _authority_panel_html() -> str:
     return render_authority_panel(ctx)
 
 
+def _discovery_panel_html(*, sinks: int = 9) -> str:
+    """Render the authority panel with candidates spread across every level."""
+
+    from codeclone.report.html.sections._authority import render_authority_panel
+
+    levels = (
+        ("exact_contract_ir", 5, 2),
+        ("same_effect_signature", 4, 1),
+        ("overlapping_transform_chain", 2, 3),
+        ("divergent_projection", 1, 4),
+    )
+    items: list[dict[str, object]] = []
+    for level, score, count in levels:
+        items.extend(
+            {
+                "item_kind": "candidate",
+                "candidate_id": f"{level}-{index}",
+                "level": level,
+                "score": score,
+                "producers": [f"pkg.{level}{index}:owner", "pkg.other:twin"],
+                "shared_fact": "effect:artifact_write:os.replace",
+                "source_kind": "production",
+            }
+            for index in range(count)
+        )
+    authority = {
+        "summary": {
+            "enabled": True,
+            "enforcement_enabled": True,
+            "registry_contracts": 2,
+            "sinks": sinks,
+        },
+        "items": items,
+    }
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            metrics_map={"semantic_authority": authority},
+            relative_path=lambda value: value,
+        ),
+    )
+    return render_authority_panel(ctx)
+
+
+def _discovery_tab_html(*, sinks: int = 9) -> str:
+    """Just the discovery sub-panel, without its sibling authority tabs."""
+
+    html = _discovery_panel_html(sinks=sinks)
+    start = html.index('data-clone-panel="candidates"')
+    return html[start : html.index('data-clone-panel="suppressed"', start)]
+
+
+def test_discovery_replaces_its_caption_wall_with_scannable_homes() -> None:
+    """Five facts packed into one paragraph, each sent where it is read.
+
+    The caption ran ten lines of prose above a full-width table: the doctrine,
+    the sink population, the shown-of-total count, a per-level histogram and
+    the MCP route to the rest, all as sentences. Nothing is deleted here --
+    every fact keeps a home, but the home is the one a reader scans.
+    """
+
+    whole = _discovery_panel_html(sinks=7)
+    panel = _discovery_tab_html(sinks=7)
+
+    # zero paragraphs: the wall is gone, and so is the class that styled it
+    assert "authority-candidate-note" not in whole
+    assert "<p " not in panel and "<p>" not in panel
+
+    # (a) the sink population is stated once, on the stat card, not twice
+    assert "Discovery examined" not in panel
+    assert "semantic sinks" not in panel
+    assert '7</span><span class="kpi-micro-lbl">sinks examined' in whole
+
+    # (b) shown-of-total is a table meta-line, not a sentence
+    assert "table-meta-count" in panel
+    assert "strongest of" not in panel
+
+    # (c) the histogram is a count strip, not prose
+    assert "By level:" not in panel
+    assert "level-strip" in panel
+
+    # (d) one short doctrine line survives; the full rule moved to a tooltip
+    band = panel[panel.index("table-meta-lead") :]
+    band = band[: band.index("</div>")]
+    assert "Tools propose, humans own." in band
+    assert "[[tool.codeclone.authority]]" not in band, "the rule is still prose"
+    tips = re.findall(r'data-tip="([^"]*)"', panel)
+    assert any("[[tool.codeclone.authority]]" in tip for tip in tips), (
+        "the governance rule lost its home instead of moving to one"
+    )
+
+    # (e) the below-the-cut route is a one-line footnote under the table
+    assert "table-footnote" in panel
+    assert "check_authority" in panel
+
+
+def test_discovery_counts_every_level_including_those_below_the_cut() -> None:
+    """The strip is the only place the held-back levels are counted."""
+
+    panel = _discovery_panel_html()
+    strip = panel[panel.index("level-strip") :]
+    strip = strip[: strip.index("</div>", strip.index("</span>"))]
+
+    # the two strong levels that earned rows
+    assert "exact contract ir" in strip
+    assert "same effect signature" in strip
+    # and the two below the cut, which have no rows at all
+    assert "overlapping transform chain" in strip
+    assert "divergent projection" in strip
+
+
+def test_discovery_meta_band_shares_the_width_of_its_table() -> None:
+    """The 'криво' was a ragged text column floating over a full-width table."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    band = _css_rule(css, ".table-meta")
+
+    assert "width:100%" in band, "the meta band does not span its table"
+    assert "max-width" not in band, "a reading measure makes the band ragged again"
+
+
 def _css_rule(css: str, selector: str) -> str:
     """Return the body of the rule whose selector list states *selector*.
 
@@ -1408,26 +1531,21 @@ def test_empty_summary_cards_do_not_stretch_to_a_full_sibling() -> None:
 def test_explanatory_prose_has_a_reading_measure() -> None:
     """Explanations are read, so they get a line length, not the pane width.
 
-    Both notes this wave added -- the clones health arithmetic and the
-    authority candidate caption -- were prose spanning the full report width,
-    which is the hardest possible line length to read.
+    Moved expectation: this covered two notes. The authority candidate caption
+    is no longer one of them -- it was decomposed into a meta band, a count
+    strip and a footnote, because a measure only helps text that is genuinely
+    read. Applied above a full-width table it produced a ragged half-width
+    column of a different width to the table it introduced. The clone-health
+    arithmetic is still prose and still carries its measure.
     """
 
     from codeclone.report.html.assets.css import build_css
 
-    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
-    for selector in (".clones-health-note", ".authority-candidate-note"):
-        # the selector may be stated on its own or in a group
-        rule = next(
-            (
-                body
-                for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
-                if selector in [part.strip() for part in heads.split(",")]
-            ),
-            None,
-        )
-        assert rule is not None, f"{selector} has no styling at all"
-        assert "max-width" in rule, f"{selector} has no reading measure"
+    css = build_css()
+
+    assert "max-width" in _css_rule(css, ".clones-health-note")
+    # and the decomposed caption keeps no prose class to measure
+    assert ".authority-candidate-note" not in css
 
 
 def test_non_verdict_numbers_never_render_as_risk() -> None:
@@ -1439,8 +1557,10 @@ def test_non_verdict_numbers_never_render_as_risk() -> None:
     """
 
     html = _authority_panel_html()
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    # anchored on the panel, not on a column header: Propose now carries a
+    # glossary tooltip, so '>Propose<' no longer marks the header at all
+    panel = html[html.index('data-clone-panel="candidates"') :]
+    body = panel[panel.index("<tbody>") : panel.index("</tbody>")]
 
     assert "metric-meter--high" not in body
     assert "metric-meter--mid" not in body
