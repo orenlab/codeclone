@@ -251,6 +251,11 @@ def _render_suppressed_clone_panel(
                 matched_patterns or "-",
             )
         )
+    # Rule and Pattern say why these groups are here, not what they are: on a
+    # configured repository one rule covers every row and the patterns are a
+    # handful. They are declared as provenance so the table states them once
+    # above the rows instead of repeating them down every one -- and the
+    # renderer keeps them as columns if they ever tell two rows apart.
     return render_rows_table(
         headers=("Kind", "Group", "File", "Type", "Occurrences", "Rule", "Pattern"),
         rows=rows,
@@ -261,6 +266,8 @@ def _render_suppressed_clone_panel(
             "Rule": "code",
             "Pattern": "code",
         },
+        meta_columns=("Rule", "Pattern"),
+        count_identical_rows=True,
         ctx=ctx,
     )
 

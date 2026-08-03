@@ -47,7 +47,7 @@ _COL_WIDTHS: dict[str, str] = {
     "fields": "68px",
     "priority": "74px",
     "risk": "78px",
-    "confidence": "94px",
+    "confidence": "116px",
     "severity": "82px",
     "effort": "78px",
     "category": "100px",
@@ -58,7 +58,40 @@ _COL_WIDTHS: dict[str, str] = {
     "fan-out": "100px",
     "loc": "100px",
     "complexity total": "136px",
-    "source": "104px",
+    "source": "136px",
+    # Identity columns: wide enough for a qualname, bounded so one long value
+    # cannot set the width of the table.
+    "name": "240px",
+    "module": "240px",
+    "function": "240px",
+    "class": "240px",
+    "group": "300px",
+    "owner": "420px",
+    "sink": "240px",
+    "canonical owner": "220px",
+    "contract": "170px",
+    "file": "190px",
+    "location": "190px",
+    "cycle": "300px",
+    "longest chain": "300px",
+    # Value and provenance columns.
+    "occurrences": "110px",
+    "resolution": "126px",
+    "why": "190px",
+    "producers": "170px",
+    "propose": "110px",
+    "rule": "130px",
+    "pattern": "180px",
+    "reason": "130px",
+    "held by tests": "100px",
+    "capability": "150px",
+    "evidence": "180px",
+    "review": "170px",
+    "coverage": "110px",
+    "signals": "190px",
+    "fan-in/out": "110px",
+    "score": "130px",
+    "groups": "84px",
 }
 
 _COL_CLS: dict[str, str] = {}
@@ -120,7 +153,168 @@ _CELL_TYPE_WIDTHS = {
     "status": "124px",
     "source_kind": "104px",
     "code": "240px",
+    "meter": "110px",
+    "meter_neutral": "110px",
 }
+
+#: The bound a column takes when nothing else claims one. A table is sized to
+#: its content, so a column with no declared width is sized by whatever the data
+#: happens to be, and one long value pushes the whole table past its wrap. This
+#: is the floor that makes that impossible: an unregistered header still gets a
+#: width, so a new table cannot reintroduce a self-sizing column.
+_DEFAULT_COL_WIDTH = "160px"
+
+
+#: A provenance column is lifted onto the meta band only while it names few
+#: enough values that the line can still state all of them.
+_META_COLUMN_MAX_VALUES = 4
+
+#: Header of the column that carries how many identical rows were counted.
+_COUNT_HEADER = "Groups"
+
+
+def _column_values(rows: Sequence[Sequence[str]], index: int) -> list[str]:
+    return [row[index] if index < len(row) else "" for row in rows]
+
+
+def _drop_empty_columns(
+    headers: list[str],
+    rows: list[list[str]],
+) -> tuple[list[str], list[list[str]]]:
+    """Remove every column that is empty in every row.
+
+    An all-empty column states nothing, so it renders nothing -- not a header
+    over thirteen blanks, which is what the suppressed clone table shipped.
+    """
+    keep = [
+        index
+        for index in range(len(headers))
+        if any(value.strip() for value in _column_values(rows, index))
+    ]
+    if len(keep) == len(headers):
+        return headers, rows
+    return (
+        [headers[index] for index in keep],
+        [[row[index] if index < len(row) else "" for index in keep] for row in rows],
+    )
+
+
+def _lift_meta_columns(
+    headers: list[str],
+    rows: list[list[str]],
+    meta_columns: Collection[str],
+) -> tuple[list[str], list[list[str]], list[tuple[str, list[str]]]]:
+    """Move near-constant provenance columns onto the table's meta band.
+
+    A column is lifted only when it names few enough values to state them all,
+    and only when removing it leaves every row still distinguishable. A column
+    that tells two rows apart carries per-row information and stays a column,
+    whatever the call site declared -- that is what keeps the lift lossless.
+    """
+    wanted = {header.lower() for header in meta_columns}
+    lifted = [
+        index
+        for index, header in enumerate(headers)
+        if header.lower() in wanted
+        and 0
+        < len(dict.fromkeys(_column_values(rows, index)))
+        <= _META_COLUMN_MAX_VALUES
+    ]
+    if not lifted:
+        return headers, rows, []
+    keep = [index for index in range(len(headers)) if index not in set(lifted)]
+    reduced = [
+        tuple(row[index] if index < len(row) else "" for index in keep) for row in rows
+    ]
+    if len(set(reduced)) < len({tuple(row) for row in rows}):
+        return headers, rows, []
+    parts = [
+        (
+            headers[index],
+            [
+                value
+                for value in dict.fromkeys(_column_values(rows, index))
+                if value.strip()
+            ],
+        )
+        for index in lifted
+    ]
+    return (
+        [headers[index] for index in keep],
+        [list(row) for row in reduced],
+        parts,
+    )
+
+
+def _meta_band_html(parts: Sequence[tuple[str, Sequence[str]]]) -> str:
+    """State the lifted columns once, above the rows they used to repeat in."""
+    chunks = []
+    for label, values in parts:
+        shown = list(values[:_META_COLUMN_MAX_VALUES])
+        text = ", ".join(shown)
+        if len(values) > len(shown):
+            text = f"{text} +{len(values) - len(shown)} more"
+        chunks.append(
+            f'{_escape_html(label)}: <span class="table-meta-value">'
+            f"{_escape_html(text)}</span>"
+        )
+    return (
+        '<div class="table-meta"><span class="table-meta-lead">'
+        f"{' &middot; '.join(chunks)}</span></div>"
+    )
+
+
+def _count_identical_rows(
+    headers: list[str],
+    rows: list[list[str]],
+) -> tuple[list[str], list[list[str]]]:
+    """Collapse byte-identical rows into one row carrying how many there were.
+
+    Seven rows a reader cannot tell apart say nothing the count does not. The
+    rows are identical across every rendered column, so the count is the only
+    fact the repetition was carrying.
+    """
+    counts: dict[tuple[str, ...], int] = {}
+    for row in rows:
+        key = tuple(row)
+        counts[key] = counts.get(key, 0) + 1
+    if len(counts) == len(rows):
+        return headers, rows
+    return (
+        [*headers, _COUNT_HEADER],
+        [
+            [*key, f"&times;{count}" if count > 1 else ""]
+            for key, count in counts.items()
+        ],
+    )
+
+
+def _condense_rows(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    *,
+    meta_columns: Collection[str],
+    count_identical: bool,
+    has_details: bool,
+) -> tuple[list[str], list[list[str]], str]:
+    """Drop what says nothing, lift provenance, and count what repeats.
+
+    Skipped entirely for a table with detail rows: those are index-aligned to
+    the rows, so removing or merging a row would open the wrong panel.
+    """
+    working_headers = list(headers)
+    working_rows = [list(row) for row in rows]
+    if has_details:
+        return working_headers, working_rows, ""
+    working_headers, working_rows = _drop_empty_columns(working_headers, working_rows)
+    working_headers, working_rows, lifted = _lift_meta_columns(
+        working_headers, working_rows, meta_columns
+    )
+    if count_identical:
+        working_headers, working_rows = _count_identical_rows(
+            working_headers, working_rows
+        )
+    return working_headers, working_rows, _meta_band_html(lifted) if lifted else ""
 
 
 def render_rows_table(
@@ -132,6 +326,8 @@ def render_rows_table(
     raw_html_headers: Collection[str] = (),
     column_types: Mapping[str, str] | None = None,
     row_details: Sequence[str] | None = None,
+    meta_columns: Collection[str] = (),
+    count_identical_rows: bool = False,
     ctx: ReportContext | None = None,
 ) -> str:
     """Render a data table with badges, tooltips, and col sizing.
@@ -140,12 +336,26 @@ def render_rows_table(
     progress bar + value), ``"status"`` (candidate-status pill), or ``"chips"``
     (comma-separated values as compact chips). Typed columns own their own
     badge markup, so the table stays the single rendering authority.
+
+    *meta_columns* names provenance columns -- why the rows are here rather
+    than what they are -- which are lifted onto the meta band when they are
+    near-constant and lifting keeps every row distinguishable.
+    *count_identical_rows* collapses rows that are identical across every
+    rendered column into one row carrying the count.
     """
     if not rows:
         return _tab_empty(empty_message, description=empty_description)
 
+    headers, rows, meta_html = _condense_rows(
+        headers,
+        rows,
+        meta_columns=meta_columns,
+        count_identical=count_identical_rows,
+        has_details=bool(row_details),
+    )
+
     lower_headers = [h.lower() for h in headers]
-    raw_html_set = {h.lower() for h in raw_html_headers}
+    raw_html_set = {h.lower() for h in raw_html_headers} | {_COUNT_HEADER.lower()}
     typed_cols = {h.lower(): t for h, t in (column_types or {}).items()}
 
     # Meter columns self-scale: each bar fills relative to that column's max.
@@ -156,11 +366,18 @@ def render_rows_table(
         values = [_safe_abs_float(row[col_idx]) for row in rows if col_idx < len(row)]
         meter_max[col_idx] = max([*values, 0.0])
 
-    # colgroup: an explicit header width wins, else the declared type's width
+    # colgroup: an explicit header width wins, else the declared type's width,
+    # else the default bound. Every column declares one: the table is sized to
+    # its content, so a column that declares nothing is sized by the data and
+    # one long value drags the whole table past its wrap.
     cg = ["<colgroup>"]
     for h in lower_headers:
-        w = _COL_WIDTHS.get(h) or _CELL_TYPE_WIDTHS.get(typed_cols.get(h, ""))
-        cg.append(f'<col style="width:{w}">' if w else "<col>")
+        w = (
+            _COL_WIDTHS.get(h)
+            or _CELL_TYPE_WIDTHS.get(typed_cols.get(h, ""))
+            or _DEFAULT_COL_WIDTH
+        )
+        cg.append(f'<col style="width:{w}">')
     cg.append("</colgroup>")
 
     # thead
@@ -224,6 +441,7 @@ def render_rows_table(
     body_html = "".join(_row(index, row) for index, row in enumerate(rows))
 
     return (
+        f"{meta_html}"
         '<div class="table-wrap"><table class="table">'
         f"{''.join(cg)}"
         f"<thead><tr>{''.join(th_parts)}</tr></thead>"

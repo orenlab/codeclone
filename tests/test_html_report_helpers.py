@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+import ast
+import importlib
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -1742,8 +1744,13 @@ def test_chip_columns_reserve_a_fixed_width() -> None:
 
     assert len(cols) == 2
     assert "width:" in cols[1], f"the chip column reserves no width: {cols[1]}"
-    # a name column still sizes to its content
-    assert "width:" not in cols[0]
+    # Moved expectation. This line used to assert that a name column sizes to
+    # its content, which is the defect the wave closed: a self-sizing column is
+    # sized by whatever the data happens to be and drags the table past its
+    # wrap. Every column now reserves a width; the chip column's still comes
+    # from its declared type rather than from its header.
+    assert "width:" in cols[0], f"the owner column reserves no width: {cols[0]}"
+    assert "width:200px" in cols[1], "the chip width no longer comes from the type"
 
 
 def test_row_disclosure_reads_as_a_connected_detail_panel() -> None:
@@ -2012,3 +2019,362 @@ def test_owner_copy_button_sits_beside_its_value_not_over_it() -> None:
     )
     assert rule is not None, "the owner cell button has no layout rule"
     assert "position:static" in rule, "the owner button still floats over the qualname"
+
+
+# The wrap a report table gets on the self-repo document at a 1280px viewport,
+# read back from the live DOM. A table wider than this scrolls sideways inside
+# its own frame, which is the defect this budget exists to forbid.
+_TABLE_WRAP_PX_AT_1280 = 1215
+
+
+def _parse_report_tables(
+    html: str,
+) -> list[tuple[list[str], list[str], list[list[str]]]]:
+    """Return (headers, declared col widths, rows) for every table in *html*."""
+
+    tables = []
+    for body in re.findall(
+        r'<div class="table-wrap"><table class="table">(.*?)</table></div>', html, re.S
+    ):
+        head, _, rest = body.partition("</thead>")
+        headers = [
+            re.sub(r"<[^>]+>", "", cell).strip().rstrip("?").strip()
+            for cell in re.findall(r"<th>(.*?)</th>", head, re.S)
+        ]
+        widths = re.findall(
+            r'<col(?: style="width:([^"]+)")?>', body.split("</colgroup>")[0]
+        )
+        rows = [
+            [
+                re.sub(r"<[^>]+>", "", cell).strip()
+                for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+            ]
+            for row in re.findall(r"<tr[^>]*>(.*?)</tr>", rest, re.S)
+            if "<td" in row
+        ]
+        tables.append((headers, widths, rows))
+    return tables
+
+
+def _suppressed_clone_groups() -> list[dict[str, object]]:
+    """The thirteen suppressed groups this repository actually reports.
+
+    Read off the self-repo document: seven Block groups render byte-identically
+    because the label comes from the first item's qualname, one rule value
+    covers every row, and no group carries a filepath at all.
+    """
+
+    def group(
+        kind: str, qualname: str, clone_type: str, count: int, pattern: str
+    ) -> dict[str, object]:
+        return {
+            "clone_kind": kind,
+            "items": [{"qualname": qualname}],
+            "clone_type": clone_type,
+            "count": count,
+            "suppression_rule": "golden_fixture",
+            "suppression_source": "project_config",
+            "matched_patterns": [pattern],
+        }
+
+    tiers = "tests/fixtures/clone_tiers"
+    golden = "tests/fixtures/golden_*"
+    groups = [
+        group(
+            "function",
+            "tests.fixtures.golden_project.alpha:transform_alpha",
+            "Type-2",
+            4,
+            golden,
+        ),
+        group(
+            "function",
+            "tests.fixtures.clone_tiers.pairs:authorize_refund",
+            "Type-2",
+            2,
+            tiers,
+        ),
+        group(
+            "function",
+            "tests.fixtures.design_metrics.original.acme.complexity_cases:branchy",
+            "Type-2",
+            2,
+            "tests/fixtures/design_metrics",
+        ),
+        group(
+            "function",
+            "tests.fixtures.clone_tiers.pairs:positive_sum_loop",
+            "Type-2",
+            2,
+            tiers,
+        ),
+        group(
+            "function",
+            "tests.fixtures.clone_tiers.pairs_renamed:permit_credit",
+            "Type-2",
+            2,
+            tiers,
+        ),
+        group(
+            "function",
+            "tests.fixtures.clone_tiers.pairs:positive_sum_comprehension",
+            "Type-2",
+            2,
+            tiers,
+        ),
+    ]
+    groups += [
+        group(
+            "block",
+            "tests.fixtures.golden_project.alpha:transform_alpha",
+            "Type-4",
+            4,
+            golden,
+        )
+        for _ in range(7)
+    ]
+    return groups
+
+
+def _suppressed_clone_panel() -> str:
+    from codeclone.report.html.sections._clones import _render_suppressed_clone_panel
+
+    ctx = cast(Any, SimpleNamespace(relative_path=lambda value: value))
+    return _render_suppressed_clone_panel(ctx, _suppressed_clone_groups())
+
+
+def test_suppressed_clone_table_drops_what_it_cannot_show() -> None:
+    """A column that is empty in every row renders nothing, not a header.
+
+    On the self-repo document the File column is empty in all thirteen rows --
+    no suppressed group carries a filepath -- yet it still claimed a column and
+    a header. An all-empty column states nothing; it is removed.
+    """
+
+    headers, _widths, rows = _parse_report_tables(_suppressed_clone_panel())[0]
+
+    assert "File" not in headers, (
+        f"the all-empty File column still claims a header: {headers}"
+    )
+    for row in rows:
+        assert len(row) == len(headers), "a row no longer matches its header count"
+
+
+def test_suppressed_clone_table_lifts_its_provenance_out_of_the_rows() -> None:
+    """One rule and three patterns repeated down thirteen rows are not data.
+
+    Both columns describe why the rows are here, not what they are, and they
+    are near-constant: the rule has exactly one distinct value, the pattern
+    three. They belong on the table's meta band, stated once, where every
+    distinct value is still named.
+    """
+
+    panel = _suppressed_clone_panel()
+    headers, _widths, _rows = _parse_report_tables(panel)[0]
+
+    assert "Rule" not in headers and "Pattern" not in headers, (
+        f"provenance still repeats down the rows: {headers}"
+    )
+    meta = panel[: panel.index('<div class="table-wrap">')]
+    assert "golden_fixture@project_config" in meta, "the rule was dropped, not lifted"
+    for pattern in (
+        "tests/fixtures/clone_tiers",
+        "tests/fixtures/design_metrics",
+        "tests/fixtures/golden_*",
+    ):
+        assert pattern in meta, f"pattern {pattern} was dropped rather than stated"
+
+
+def test_suppressed_clone_table_counts_rows_it_cannot_tell_apart() -> None:
+    """Seven identical rows are one fact with a count, not seven rows.
+
+    Seven distinct Block groups render byte-identically because the label is
+    the first item's qualname. Repeating an indistinguishable row seven times
+    tells the reader nothing the count does not. Collapsing must preserve every
+    visible fact: the rows that come back out must be exactly the rows that
+    went in.
+    """
+
+    panel = _suppressed_clone_panel()
+    headers, _widths, rows = _parse_report_tables(panel)[0]
+
+    assert len(rows) == 7, f"identical rows are still repeated: {len(rows)} rows"
+
+    # Fact preservation: expand each rendered row by its count and compare the
+    # multiset against the columns the untouched groups would have rendered.
+    count_idx = headers.index("Groups") if "Groups" in headers else None
+    expanded: list[tuple[str, ...]] = []
+    for row in rows:
+        multiplicity = 1
+        cells = list(row)
+        if count_idx is not None:
+            raw = cells.pop(count_idx)
+            multiplicity = int(re.sub(r"[^0-9]", "", raw) or "1")
+        else:
+            marks = re.findall(r"&times;\s*(\d+)", " ".join(cells))
+            multiplicity = int(marks[0]) if marks else 1
+            cells = [re.sub(r"&times;\s*\d+", "", c).strip() for c in cells]
+        expanded.extend([tuple(cells)] * multiplicity)
+
+    assert len(expanded) == 13, (
+        f"the counted rows expand to {len(expanded)}, not the 13 groups suppressed"
+    )
+    assert len(set(expanded)) == 7, "collapsing merged rows that were distinct"
+
+
+def test_discovery_table_bounds_every_data_column() -> None:
+    """The residual sideways scroll on Discovery came from the data columns.
+
+    With the proposal panel out of the cells, the table still measured 1240px
+    in a 1215px wrap. Owner alone took 772px because no column but Level
+    declared a width, so the data set the table's size.
+    """
+
+    headers, widths, _rows = _parse_report_tables(_discovery_panel_html())[0]
+
+    unbounded = [h for h, w in zip(headers, widths, strict=True) if not w]
+    assert not unbounded, f"Discovery columns still size themselves: {unbounded}"
+    total = sum(int(re.sub(r"[^0-9]", "", w) or "0") for w in widths)
+    assert total <= _TABLE_WRAP_PX_AT_1280, (
+        f"Discovery declares {total}px into a {_TABLE_WRAP_PX_AT_1280}px wrap"
+    )
+
+
+def _table_width_problem(
+    parsed: list[tuple[list[str], list[str], list[list[str]]]],
+) -> str:
+    """Why this table could outgrow its wrap, or "" when it cannot."""
+
+    if not parsed:
+        return "rendered no table"
+    headers, widths, _rows = parsed[0]
+    unbounded = [h for h, w in zip(headers, widths, strict=True) if not w]
+    if unbounded:
+        return f"unbounded {unbounded}"
+    total = sum(int(re.sub(r"[^0-9]", "", w) or "0") for w in widths)
+    return f"declares {total}px" if total > _TABLE_WRAP_PX_AT_1280 else ""
+
+
+def _render_rows_table_calls(tree: ast.AST) -> list[ast.Call]:
+    """Every call to render_rows_table in one parsed module."""
+
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (getattr(node.func, "id", None) or getattr(node.func, "attr", None))
+        == "render_rows_table"
+    ]
+
+
+def _literal_headers(
+    node: ast.expr | None,
+    path: Path,
+    root: Path,
+) -> tuple[str, ...] | None:
+    """Resolve a headers= argument to its column names, literal or named."""
+
+    if isinstance(node, ast.Tuple | ast.List):
+        literals = [e.value for e in node.elts if isinstance(e, ast.Constant)]
+        if len(literals) != len(node.elts):
+            return None
+        return tuple(str(value) for value in literals)
+    if isinstance(node, ast.Name):
+        rel = path.relative_to(root.parents[2]).with_suffix("")
+        module = importlib.import_module(".".join(rel.parts))
+        value = getattr(module, node.id, None)
+        if isinstance(value, tuple | list):
+            return tuple(str(item) for item in value)
+    return None
+
+
+def _literal_column_types(node: ast.expr | None) -> dict[str, str]:
+    if not isinstance(node, ast.Dict):
+        return {}
+    return {
+        str(key.value): str(value.value)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if isinstance(key, ast.Constant) and isinstance(value, ast.Constant)
+    }
+
+
+def _report_table_header_sets() -> list[tuple[str, tuple[str, ...], dict[str, str]]]:
+    """Every headers= a render_rows_table call site in the report can pass.
+
+    Read from the source rather than from one rendered document: a table that
+    this repository happens not to populate is still a table the report ships.
+    """
+
+    root = Path(__file__).resolve().parents[1] / "codeclone" / "report" / "html"
+    found: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in _render_rows_table_calls(tree):
+            kwargs = {kw.arg: kw.value for kw in node.keywords}
+            headers = _literal_headers(kwargs.get("headers"), path, root)
+            if headers is not None:
+                found.append(
+                    (
+                        f"{path.name}:{node.lineno}",
+                        headers,
+                        _literal_column_types(kwargs.get("column_types")),
+                    )
+                )
+    return found
+
+
+def test_no_report_table_can_outgrow_its_wrap() -> None:
+    """The wave's closing invariant: no table scrolls sideways in its own frame.
+
+    A table used to be sized to its content (inline-size:max-content), so a
+    single column that declared no width was sized by whatever the data
+    happened to be, and one long value pushed the whole table past its wrap.
+    Every column now declares a width and the layout is fixed, which makes this
+    budget a proof rather than an estimate: under a fixed layout the rendered
+    table is exactly max(wrap, sum of the declared widths), so a sum that fits
+    the wrap cannot produce a horizontal scrollbar at that viewport or wider.
+
+    The budget is the wrap at 1280px. Below it -- a 1024px viewport gives a
+    959px wrap -- the widest tables still exceed it by exactly the difference,
+    and the wrap's overflow-x:auto is the designed fallback there.
+    """
+
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    call_sites = _report_table_header_sets()
+    assert len(call_sites) >= 10, (
+        f"only {len(call_sites)} table call sites resolved; the sweep is not exhaustive"
+    )
+
+    offenders: list[str] = []
+    for where, headers, column_types in call_sites:
+        html = render_rows_table(
+            headers=headers,
+            rows=[tuple(f"value {i}" for i in range(len(headers)))],
+            empty_message="none",
+            column_types=column_types or None,
+        )
+        problem = _table_width_problem(_parse_report_tables(html))
+        if problem:
+            offenders.append(f"{where}: {problem}")
+
+    assert not offenders, "tables that can outgrow their wrap:\n" + "\n".join(offenders)
+
+
+def test_an_unregistered_column_is_still_bounded() -> None:
+    """The invariant holds by construction, not by keeping a list current.
+
+    A header nobody has registered a width for is exactly how the defect came
+    back each time. An unknown column takes the default bound, so a new table
+    cannot reintroduce a self-sizing column.
+    """
+
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Totally Unregistered Column",),
+        rows=[("x" * 400,)],
+        empty_message="none",
+    )
+    _headers, widths, _rows = _parse_report_tables(html)[0]
+    assert widths and all(widths), "an unregistered column still sizes itself"

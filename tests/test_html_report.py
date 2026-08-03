@@ -978,7 +978,10 @@ def test_html_report_table_css_matches_rendered_column_classes() -> None:
     _assert_html_contains(
         html,
         ".table-wrap{display:block;inline-size:100%;max-inline-size:100%;min-inline-size:0;overflow-x:auto;",
-        ".table{inline-size:max-content;min-inline-size:100%;border-collapse:collapse;",
+        # Moved expectation: the table used to be sized to its content, which
+        # is the defect this wave closed. min-inline-size already held it to
+        # the full wrap, so max-content only ever added the sideways scroll.
+        ".table{table-layout:fixed;inline-size:100%;max-inline-size:100%;",
         (
             ".table .col-file,.table .col-path{color:var(--text-muted);"
             "max-width:240px;overflow:hidden;"

@@ -473,7 +473,14 @@ _TABLES = """\
     linear-gradient(to right,rgba(0,0,0,.15),transparent) left center / 14px 100% no-repeat scroll,
     linear-gradient(to left,rgba(0,0,0,.15),transparent) right center / 14px 100% no-repeat scroll,
     var(--table-surface)}
-.table{inline-size:max-content;min-inline-size:100%;border-collapse:collapse;font-size:var(--fs-sm);
+/* The table fills its wrap and never exceeds it. It used to be sized to its
+   content (max-content), which only ever mattered when the content was too
+   wide -- min-inline-size already held it to the full wrap -- so max-content
+   contributed nothing but the sideways scroll. With a fixed layout the widths
+   the columns declare are the widths they get, which is what makes "every
+   column declares a width" a bound rather than a preference. */
+.table{table-layout:fixed;inline-size:100%;max-inline-size:100%;
+  border-collapse:collapse;font-size:var(--fs-sm);
   font-family:var(--font-sans)}
 /* Hierarchy from type and space, not from fill: smaller, wider-tracked, muted,
    with the column's air above it and a single quiet rule below. */
@@ -488,8 +495,10 @@ _TABLES = """\
 .table th[data-sortable]:hover{color:var(--text-primary)}
 .table th .sort-icon{display:inline-flex;margin-left:var(--sp-1);opacity:.4}
 .table th[aria-sort] .sort-icon{opacity:1;color:var(--accent-primary)}
+/* A qualname or dotted module path offers no break opportunity, so under a
+   fixed layout it would poke out of its column. Cells may break anywhere. */
 .table td{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--table-rule);
-  color:var(--text-secondary);vertical-align:top}
+  color:var(--text-secondary);vertical-align:top;overflow-wrap:anywhere}
 .table tbody tr:last-child td{border-bottom:none}
 .table tbody tr:hover td{background:var(--table-row-hover)}
 .table .col-name{font-weight:500;color:var(--text-primary);max-width:360px;overflow:hidden;
@@ -530,6 +539,9 @@ _TABLES = """\
   width:100%;margin:0 0 var(--sp-2);
   font-size:var(--fs-xs);color:var(--text-muted);line-height:1.5}
 .table-meta-lead{min-width:0}
+/* A value lifted out of the rows keeps the weight it had as a cell, so the
+   band reads as the column it replaced rather than as prose about it. */
+.table-meta-value{color:var(--text-secondary);font-family:var(--font-mono)}
 .table-meta-count{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
   color:var(--text-secondary);white-space:nowrap}
 /* A distribution is scanned, never read: counts, not sentences. */
