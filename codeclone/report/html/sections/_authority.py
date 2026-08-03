@@ -17,7 +17,10 @@ from codeclone.utils.coerce import as_mapping as _as_mapping
 from codeclone.utils.coerce import as_sequence as _as_sequence
 
 from ..primitives.escape import _escape_html
+from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
+from ..widgets.glossary import glossary_tip
+from ..widgets.highlight import highlight_block
 from ..widgets.tables import render_rows_table
 from ..widgets.tabs import render_split_tabs
 
@@ -66,18 +69,40 @@ _STRONG_CANDIDATE_LEVELS: Final = (
     "same_output_fact_and_input_family",
 )
 
-#: Discovery proposes; a human decides. Promotion is a copy-paste into
-#: pyproject, never a write by this tool.
-_CANDIDATE_CAPTION = (
-    "Discovered owners, ranked by evidence strength. Authority is a governance "
-    "act: tools propose, humans own. Copy a proposal into "
-    "[[tool.codeclone.authority]] to govern it; nothing here changes your "
-    "configuration."
-)
+#: Discovery proposes; a human decides. The short line rides the table's meta
+#: band; the full governance rule is a tooltip on the Propose column, because
+#: a reader who already knows it should not read it on every visit.
+_CANDIDATE_LEAD = "Discovered owners, ranked by evidence strength."
+_CANDIDATE_DOCTRINE = "Tools propose, humans own."
 
 
-def _level_histogram_text(candidates: Sequence[Mapping[str, object]]) -> str:
-    """Count every level, so the levels held back from the table stay visible."""
+def _candidate_meta_html(shown: int, total: int) -> str:
+    """State the lead and the shown-of-total count on the table's own band.
+
+    A count belongs beside the table it counts, not inside a sentence: the
+    reader who wants to know how much is hidden looks to the table's edge.
+    """
+
+    count = (
+        f'<span class="table-meta-count">Showing {shown} of {total}</span>'
+        if total > shown
+        else ""
+    )
+    return (
+        '<div class="table-meta">'
+        f'<span class="table-meta-lead">{_escape_html(_CANDIDATE_LEAD)} '
+        f"{_escape_html(_CANDIDATE_DOCTRINE)}</span>"
+        f"{count}"
+        "</div>"
+    )
+
+
+def _level_strip_html(candidates: Sequence[Mapping[str, object]]) -> str:
+    """Count every level as chips, so the held-back levels stay visible.
+
+    This was a prose histogram inside a ten-line caption. It is a distribution:
+    it is read by scanning, never by reading, so it renders as counts.
+    """
 
     if not candidates:
         return ""
@@ -88,29 +113,63 @@ def _level_histogram_text(candidates: Sequence[Mapping[str, object]]) -> str:
         counts.items(),
         key=lambda row: (-_LEVEL_RANK.get(row[0], 0), row[0]),
     )
-    parts = ", ".join(f"{level.replace('_', ' ')} {count}" for level, count in ordered)
-    weak = ", ".join(
-        level.replace("_", " ")
-        for level in sorted(counts)
-        if level not in _STRONG_CANDIDATE_LEVELS
+    pairs = tuple((level.replace("_", " "), count) for level, count in ordered)
+    return f'<div class="level-strip">{_micro_badges(*pairs)}</div>'
+
+
+def _candidate_cut_note_html(candidates: Sequence[Mapping[str, object]]) -> str:
+    """Name the levels that earn no row, and the route to them."""
+
+    weak = sorted(
+        {
+            str(item.get("level", "")).strip().replace("_", " ")
+            for item in candidates
+            if str(item.get("level", "")).strip() not in _STRONG_CANDIDATE_LEVELS
+            and str(item.get("level", "")).strip()
+        }
     )
-    cut = (
-        f" Levels below the cut ({weak}) are counted here only; "
-        'drill into them with check_authority(section="candidates") over MCP.'
-        if weak
-        else ""
-    )
-    return f" By level: {parts}.{cut}"
-
-
-def _sink_population_note(sink_total: int) -> str:
-    """Account for the discovery population instead of dropping it silently."""
-
-    if sink_total <= 0:
+    if not weak:
         return ""
     return (
-        f" Discovery examined {sink_total} semantic sinks; the candidates below "
-        "are the subset carrying shared-fact evidence."
+        '<div class="table-footnote">'
+        f"Levels below the cut ({_escape_html(', '.join(weak))}) are counted "
+        "above only; drill into them with "
+        '<code>check_authority(section="candidates")</code> over MCP.'
+        "</div>"
+    )
+
+
+def _candidate_producers_html(producers: Sequence[str]) -> str:
+    """Disclose the co-producers instead of pasting them into the cell.
+
+    The owner leads the row on its own; everyone else sharing the fact is one
+    click away. Joining them into the cell produced forty thousand characters
+    of unscannable, unclickable text on this repository.
+    """
+
+    if len(producers) <= 1:
+        return "-"
+    rest = producers[1:]
+    items = "".join(f"<li><code>{_escape_html(name)}</code></li>" for name in rest)
+    return (
+        '<details class="authority-producers">'
+        f"<summary>+{len(rest)} more</summary>"
+        f'<ul class="detail-panel authority-producer-list">{items}</ul>'
+        "</details>"
+    )
+
+
+def _candidate_owner_html(owner: str) -> str:
+    """Render the proposed owner as the row's primary, copyable fact."""
+
+    if not owner:
+        return "-"
+    return (
+        '<div class="authority-owner authority-copy-host">'
+        f"<code>{_escape_html(owner)}</code>"
+        '<button class="btn authority-copy-btn" type="button" '
+        'data-authority-copy title="Copy qualname">Copy</button>'
+        "</div>"
     )
 
 
@@ -141,13 +200,16 @@ def _candidate_promotion_html(item: Mapping[str, object]) -> str:
     ]
     if alternatives:
         lines.append("# other producers sharing this fact: " + ", ".join(alternatives))
-    snippet = _escape_html("\n".join(lines))
+    # Highlighted as TOML at build time: this is the one real configuration
+    # block in the report, and a reader must be able to tell the placeholder
+    # contract id from the key that names it. The text copied is unchanged.
+    snippet = highlight_block("\n".join(lines), language="toml")
     # Collapsed by construction: fifty open TOML blocks cannot happen, because
     # a proposal only expands when a human asks for that one.
     return (
         '<details class="authority-promotion">'
         '<summary class="authority-promotion-summary">Propose</summary>'
-        '<div class="authority-promotion-body">'
+        '<div class="authority-promotion-body authority-copy-host">'
         '<button class="btn authority-copy-btn" type="button" '
         "data-authority-copy>Copy</button>"
         f'<pre class="codebox"><code>{snippet}</code></pre>'
@@ -259,16 +321,23 @@ def render_authority_panel(ctx: ReportContext) -> str:
         )
         for item in suppressed
     ]
-    candidate_rows = [
-        (
-            str(item.get("level", "")).replace("_", " "),
-            str(_as_int(item.get("score"))),
-            ", ".join(str(value) for value in _as_sequence(item.get("producers"))),
-            str(item.get("shared_fact", "")),
-            _candidate_promotion_html(item),
+    candidate_rows = []
+    for item in strong_candidates[:_CANDIDATE_ROW_LIMIT]:
+        producers = [
+            text
+            for value in _as_sequence(item.get("producers"))
+            for text in (str(value).strip(),)
+            if text
+        ]
+        candidate_rows.append(
+            (
+                _candidate_owner_html(producers[0] if producers else ""),
+                str(item.get("level", "")).replace("_", " "),
+                str(_as_int(item.get("score"))),
+                _candidate_producers_html(producers),
+                _candidate_promotion_html(item),
+            )
         )
-        for item in strong_candidates[:_CANDIDATE_ROW_LIMIT]
-    ]
 
     enabled = bool(summary.get("enforcement_enabled"))
     unresolved_governed = sum(
@@ -304,41 +373,77 @@ def render_authority_panel(ctx: ReportContext) -> str:
         empty_message="No suppressed semantic-authority findings.",
         ctx=ctx,
     )
+    # The caption was five facts in one paragraph, in a reading measure that
+    # left a ragged half-width column floating over a full-width table. Each
+    # fact now sits where it is actually read: the lead and the shown-of-total
+    # count on the table's own meta band, the level distribution as a count
+    # strip, the governance rule as a tooltip on Propose, and the route to the
+    # held-back levels as a footnote under the table. Nothing was dropped, and
+    # the sink population is no longer said twice -- the Discovery stat card
+    # already carries it.
     shown = len(candidate_rows)
-    tail_note = (
-        f" Showing the {shown} strongest of {len(candidates)} candidates."
-        if len(candidates) > shown
-        else ""
+    candidate_panel = (
+        _candidate_meta_html(shown, len(candidates))
+        + _level_strip_html(candidates)
+        + render_rows_table(
+            headers=("Owner", "Level", "Score", "Producers", "Propose"),
+            rows=candidate_rows,
+            empty_message="No semantic-authority discovery candidates.",
+            raw_html_headers=("Owner", "Producers", "Propose"),
+            column_types={"Score": "meter_neutral", "Level": "chips"},
+            ctx=ctx,
+        )
+        + _candidate_cut_note_html(candidates)
     )
-    histogram = _level_histogram_text(candidates)
-    candidate_caption = (
-        '<p class="muted authority-candidate-note">'
-        f"{_escape_html(_CANDIDATE_CAPTION)}"
-        f"{_escape_html(_sink_population_note(sink_total))}"
-        f"{_escape_html(tail_note)}"
-        f"{_escape_html(histogram)}"
-        "</p>"
-    )
-    candidate_panel = candidate_caption + render_rows_table(
-        headers=("Level", "Score", "Producers", "Shared fact", "Propose"),
-        rows=candidate_rows,
-        empty_message="No semantic-authority discovery candidates.",
-        raw_html_headers=("Propose",),
-        column_types={"Score": "meter"},
-        ctx=ctx,
-    )
-    return insight_block(
-        question="Is each governed semantic contract owned by one authority?",
-        answer=answer,
-        tone=tone,
-    ) + render_split_tabs(
-        group_id="semantic-authority",
-        tabs=(
-            ("violations", "Violations", len(active), active_panel),
-            ("governed", "Governed sinks", len(governed), governed_panel),
-            ("candidates", "Candidates", len(candidates), candidate_panel),
-            ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
+    # The narrative contract: the answer first, then the numbers a reader acts
+    # on, then the evidence. Until now this panel jumped from the answer
+    # straight into four tabs, so the counts lived only as tab badges.
+    cards = [
+        _stat_card(
+            "Violations",
+            len(active),
+            detail=_micro_badges(("suppressed", len(suppressed))),
+            value_tone="bad" if active else "good",
+            glossary_tip_fn=glossary_tip,
         ),
+        _stat_card(
+            "Governed contracts",
+            _as_int(summary.get("registry_contracts")),
+            detail=_micro_badges(("owners", len(governed))),
+            value_tone="muted" if not enabled else "",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Discovery",
+            len(candidates),
+            detail=_micro_badges(("sinks examined", sink_total or "n/a")),
+            value_tone="muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Unresolved owners",
+            unresolved_governed,
+            secondary=f"of {len(governed)}" if governed else "",
+            value_tone="warn" if unresolved_governed else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    return (
+        insight_block(
+            question="Is each governed semantic contract owned by one authority?",
+            answer=answer,
+            tone=tone,
+        )
+        + f'<div class="stat-cards">{"".join(cards)}</div>'
+        + render_split_tabs(
+            group_id="semantic-authority",
+            tabs=(
+                ("violations", "Violations", len(active), active_panel),
+                ("governed", "Contracts", len(governed), governed_panel),
+                ("candidates", "Discovery", len(candidates), candidate_panel),
+                ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
+            ),
+        )
     )
 
 

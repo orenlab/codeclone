@@ -8,6 +8,7 @@ import importlib
 import json
 import re
 from collections.abc import Callable, Mapping
+from html import unescape
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
@@ -3700,7 +3701,9 @@ def test_html_report_empty_states_use_ui_font_stack() -> None:
         "font-family:var(--font-sans)}",
         ".tab-empty-title{font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-1);",
         "font-family:var(--font-display)}",
-        ".tab-empty-desc{font-size:.85rem;color:var(--text-muted);max-width:320px;font-family:var(--font-sans)}",
+        # Size moved onto the type scale; the assertion follows the token so
+        # it keeps testing the font stack, not a hardcoded size.
+        ".tab-empty-desc{font-size:var(--fs-sm);color:var(--text-muted);max-width:320px;font-family:var(--font-sans)}",
         ".inline-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;",
         "font-family:var(--font-sans)}",
     )
@@ -3763,15 +3766,17 @@ def test_html_report_findings_empty_state_keeps_intro_banner() -> None:
         block_groups={},
         segment_groups={},
     )
+    # Moved expectation: the banner still survives an empty result, which is
+    # what this test is for. What it pinned was the definition -- the tab spent
+    # its question slot explaining its own title. It now asks about the code,
+    # answers in the clean case, and the definition lives in the glossary.
     _assert_html_contains(
         html,
-        "What are structural findings?",
-        (
-            "Repeated non-overlapping branch-body shapes detected inside "
-            "individual functions."
-        ),
+        "Which functions repeat their own shape?",
+        "No function repeats a branch body.",
         "No structural findings detected.",
     )
+    assert "insight-ok" in html, "a clean result no longer reads as clean"
 
 
 def test_html_report_dependency_hubs_deterministic_tie_order() -> None:
@@ -5369,6 +5374,32 @@ def _all_level_candidates() -> list[dict[str, object]]:
     ]
 
 
+def _promotion_text(html: str) -> str:
+    """The proposal exactly as a human copies it: markup stripped, entities back.
+
+    The block is highlighted TOML, so its lines are split across token spans.
+    Highlighting is allowed to change how the proposal looks and forbidden to
+    change what it says.
+    """
+
+    block = html[html.index('<pre class="codebox">') :]
+    block = block[: block.index("</pre>")]
+    return unescape(re.sub(r"<[^>]+>", "", block))
+
+
+def _candidate_rows_html(html: str) -> str:
+    """The discovery table's rows, anchored on the panel that owns them.
+
+    Six tests used to slice from the literal '>Propose<'. A column header is
+    not an anchor: the moment Propose earned a glossary tooltip the marker
+    moved and every one of those slices silently addressed the wrong region.
+    """
+
+    start = html.index('data-clone-panel="candidates"')
+    panel = html[start : html.index('data-clone-panel="suppressed"', start)]
+    return panel[panel.index("<tbody>") : panel.index("</tbody>")]
+
+
 def test_html_authority_renders_discovery_candidates(tmp_path: Path) -> None:
     """Computed candidates must reach the panel, not be dropped by the renderer.
 
@@ -5387,8 +5418,7 @@ def test_html_authority_renders_discovery_candidates(tmp_path: Path) -> None:
     for level, _score in _CANDIDATE_LEVELS:
         # every level is accounted for, in the table or in the histogram
         assert level.replace("_", " ") in html
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     for level, score in _CANDIDATE_LEVELS:
         if level in _STRONG_LEVELS:
             assert f"pkg.{level}:owner" in body
@@ -5416,8 +5446,12 @@ def test_html_authority_candidate_offers_a_paste_ready_promotion(
         enforcement_enabled=False,
     )
 
-    assert "[[tool.codeclone.authority]]" in html
-    assert "canonical_owner = &quot;pkg.alpha:publish&quot;" in html
+    # Moved expectation: the proposal is now highlighted TOML, so the line is
+    # split across token spans. What must not change is the text a human
+    # copies, so that is what this asserts -- tags stripped, the block reads
+    # exactly as before.
+    assert "[[tool.codeclone.authority]]" in _promotion_text(html)
+    assert 'canonical_owner = "pkg.alpha:publish"' in _promotion_text(html)
     assert "contract_id" in html
     # the other producer is offered as an alternative, never auto-selected
     assert "pkg.beta:publish" in html
@@ -5440,7 +5474,13 @@ def test_html_authority_report_only_insight_counts_candidates(
 def test_html_authority_states_the_unrendered_sink_population(
     tmp_path: Path,
 ) -> None:
-    """The discovery population is stated, so no item kind drops in silence."""
+    """The discovery population is stated, so no item kind drops in silence.
+
+    Moved expectation: this pinned the caption sentence "7 semantic sinks".
+    The population is still stated and still exactly once -- on the Discovery
+    stat card, which always carried it. The caption was the second copy, and
+    saying a number twice is not the same as accounting for it.
+    """
 
     html = _authority_report_html(
         tmp_path,
@@ -5450,7 +5490,10 @@ def test_html_authority_states_the_unrendered_sink_population(
         enforcement_enabled=False,
     )
 
-    assert "7 semantic sinks" in html
+    assert '>7</span><span class="kpi-micro-lbl">sinks examined<' in html
+    # the caption's second copy is gone (the governed table's empty message
+    # legitimately says "No governed semantic sinks.", which is not a count)
+    assert "Discovery examined" not in html
 
 
 def test_document_orders_authority_candidates_by_score() -> None:
@@ -5500,7 +5543,8 @@ def test_html_authority_promotion_handles_lone_and_absent_producers(
         enforcement_enabled=False,
     )
 
-    assert "canonical_owner = &quot;pkg.only:one&quot;" in html
+    # Moved expectation: highlighted TOML, so this asserts the copied text.
+    assert 'canonical_owner = "pkg.only:one"' in _promotion_text(html)
     assert "other producers sharing this fact" not in html
 
 
@@ -5630,14 +5674,19 @@ def test_html_authority_table_cuts_weak_levels_to_a_histogram(
         enforcement_enabled=False,
     )
 
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     assert "codeclone.strong:owner" in body
     assert "codeclone.weak:owner" not in body
     assert "codeclone.weaker:owner" not in body
-    # the cut is stated, and the weak mass is counted rather than hidden
-    assert "overlapping transform chain 1" in html
-    assert "divergent projection 1" in html
+    # Moved expectation: the counts were prose ("overlapping transform chain
+    # 1"). A distribution is scanned, not read, so it is now a count strip --
+    # value first, then the level it counts. Nothing is hidden either way.
+    strip = html[html.index('class="level-strip"') :]
+    strip = strip[: strip.index("</div>")]
+    for level in ("overlapping transform chain", "divergent projection"):
+        assert f'>1</span><span class="kpi-micro-lbl">{level}<' in strip
+    # and the cut still names the route to the levels that earn no row
+    assert "check_authority" in html
 
 
 def test_html_authority_promotion_is_collapsed_and_copyable(tmp_path: Path) -> None:
@@ -5673,8 +5722,7 @@ def test_html_authority_candidate_without_producers_proposes_nothing(
         enforcement_enabled=False,
     )
 
-    table = html[html.index(">Propose<") :]
-    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    body = _candidate_rows_html(html)
     assert "[[tool.codeclone.authority]]" not in body
     assert "authority-promotion" not in body
 
@@ -5694,3 +5742,123 @@ def test_html_build_span_and_counter_names_are_reviewed() -> None:
         "unreviewed HTML counter keys: "
         f"{sorted(set(HTML_BUILD_COUNTER_KEYS) - COUNTER_KEYS)}"
     )
+
+
+def _authority_producers(count: int) -> list[str]:
+    return [
+        f"pkg.module{index:02d}:producer_with_a_long_qualname" for index in range(count)
+    ]
+
+
+def test_html_authority_row_never_dumps_an_unbounded_producer_string(
+    tmp_path: Path,
+) -> None:
+    """A cell is not a place to paste a thousand qualnames.
+
+    The panel dumped every producer comma-joined into one cell: forty thousand
+    characters on this repository, unreadable and unclickable.
+    """
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(
+                level="exact_contract_ir",
+                score=5,
+                producers=_authority_producers(40),
+            )
+        ],
+        enforcement_enabled=False,
+    )
+
+    body = _candidate_rows_html(html)
+    row = re.findall(r"<tr>(.*?)</tr>", body, re.S)[0]
+    cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+    visible = [" ".join(re.sub(r"<[^>]+>", " ", cell).split()) for cell in cells]
+
+    # the owner leads the row, on its own, and is the thing users take away
+    assert visible[0].startswith("pkg.module00:producer_with_a_long_qualname")
+    assert "data-authority-copy" in cells[0]
+    # the rest are disclosed, not dumped: summary states the count only
+    producers_cell = next(cell for cell in cells if "authority-producers" in cell)
+    summary = re.search(r"<summary[^>]*>(.*?)</summary>", producers_cell, re.S)
+    assert summary is not None
+    assert "39 more" in summary.group(1)
+    assert "<details" in producers_cell
+    # nothing is an endless string when collapsed: measure what the row shows
+    # before any disclosure is opened
+    collapsed = [
+        " ".join(
+            re.sub(
+                r"<[^>]+>",
+                " ",
+                re.sub(
+                    r"</summary>.*?</details>", "</summary></details>", cell, flags=re.S
+                ),
+            ).split()
+        )
+        for cell in cells
+    ]
+    assert max(len(cell) for cell in collapsed) < 120, collapsed
+
+
+def test_html_authority_lone_producer_needs_no_disclosure(tmp_path: Path) -> None:
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(level="exact_contract_ir", score=5, producers=["pkg.only:one"])
+        ],
+        enforcement_enabled=False,
+    )
+
+    body = _candidate_rows_html(html)
+    assert "authority-producers" not in body
+
+
+def test_html_authority_tabs_speak_product_language(tmp_path: Path) -> None:
+    """Tab labels name what a user looks for, with the domain term on hover."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[
+            _governed_sink(
+                contract="baseline.publication/v1",
+                sink="pkg.mod:owner",
+                status="authoritative",
+                resolution="resolved",
+            )
+        ],
+        candidates=[
+            _candidate(level="exact_contract_ir", score=5, producers=["pkg.a:owner"])
+        ],
+    )
+
+    nav = html[html.index('data-subtab-group="semantic-authority"') :][:1200]
+    assert ">Contracts " in nav
+    assert ">Discovery " in nav
+    # the jargon is demoted, not deleted: never the label, always the tooltip
+    assert ">Governed sinks " not in nav
+    assert 'title="Governed sinks' in nav
+
+
+def test_html_report_every_main_tab_renders_an_icon() -> None:
+    """No tab may ship as bare text while its siblings carry icons.
+
+    Authority was the only main tab without one. The invariant is written over
+    every tab rather than that one, so the next tab added cannot arrive naked.
+    """
+
+    html = build_html_report(
+        func_groups={}, block_groups={}, segment_groups={}, title="Icons"
+    )
+
+    buttons = re.findall(
+        r'<button class="main-tab"[^>]*data-tab="([a-z-]+)"[^>]*>(.*?)</button>',
+        html,
+        re.S,
+    )
+    assert buttons, "no main tabs rendered"
+    naked = [tab for tab, markup in buttons if "main-tab-icon" not in markup]
+    assert not naked, f"main tabs rendered without an icon: {naked}"

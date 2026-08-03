@@ -90,7 +90,14 @@ def overview_source_breakdown_html(breakdown: Mapping[str, object]) -> str:
     )
     rows = [(kind, count) for kind, count in sorted_items if count > 0]
     if not rows:
-        return _inline_empty("No source data available", tone="neutral")
+        return _inline_empty(
+            "No source data available",
+            tone="neutral",
+            reason=(
+                "Source-kind counts appear once the analyzed set spans more than "
+                "one kind of code -- production, tests or fixtures."
+            ),
+        )
 
     total = sum(c for _, c in rows)
     parts: list[str] = []

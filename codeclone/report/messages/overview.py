@@ -66,6 +66,12 @@ RADAR_LABELS: Final[dict[str, str]] = {
 KPI_HEALTH: Final = "Health"
 KPI_HEALTH_NA: Final = "n/a"
 ISSUE_BREAKDOWN_EMPTY: Final = "No issues detected"
+# An empty result and an unmeasured one look identical unless the panel
+# says which one it is.
+ISSUE_BREAKDOWN_EMPTY_REASON: Final = (
+    "Clone, structural, dead-code and design families were all analysed and "
+    "each returned nothing."
+)
 
 ISSUE_BREAKDOWN_ROW_LABELS: Final[dict[str, str]] = {
     "clones": "Clone Groups",
@@ -117,7 +123,9 @@ CLUSTER_RADAR_CAPTION_SUFFIX: Final = " Red labels highlight dimensions below 60
 EXECUTIVE_SCAN_SCOPE_DEFAULT: Final = (
     "Project-wide context derived from the full scanned root."
 )
-EXECUTIVE_HEALTH_SNAPSHOT_QUESTION: Final = "Current health snapshot"
+# The face of the report asks what a reader opens it to ask, in the same
+# slot every other panel uses for its question.
+EXECUTIVE_HEALTH_SNAPSHOT_QUESTION: Final = "How healthy is this repository right now?"
 EXECUTIVE_THRESHOLDS_PREFIX: Final = "Thresholds: "
 
 ADOPTION_API_DISABLED: Final = "Disabled in this run."

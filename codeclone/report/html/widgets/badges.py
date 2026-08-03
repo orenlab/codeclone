@@ -19,9 +19,6 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from codeclone.domain.quality import (
-    EFFORT_EASY,
-    EFFORT_HARD,
-    EFFORT_MODERATE,
     RISK_HIGH,
     RISK_LOW,
     RISK_MEDIUM,
@@ -38,6 +35,7 @@ __all__ = [
     "INFO_CIRCLE_SVG",
     "_chips_html",
     "_inline_empty",
+    "_level_chip_html",
     "_micro_badges",
     "_quality_badge_html",
     "_render_chain_flow",
@@ -49,12 +47,6 @@ __all__ = [
     "_tab_empty",
     "_tab_empty_info",
 ]
-
-_EFFORT_CSS: dict[str, str] = {
-    EFFORT_EASY: "success",
-    EFFORT_MODERATE: "warning",
-    EFFORT_HARD: "error",
-}
 
 CHECK_CIRCLE_SVG = (
     '<svg class="tab-empty-icon" viewBox="0 0 24 24" fill="none" '
@@ -88,7 +80,13 @@ def _micro_badges(*pairs: tuple[str, object]) -> str:
 
 
 def _quality_badge_html(text: str) -> str:
-    """Render a risk / severity / effort value as a styled badge."""
+    """Render a risk or severity verdict as a semantically coloured badge.
+
+    Verdicts only. Every caller supplies one: ``finding_card`` normalises
+    through :func:`severity_key` to critical/warning/info, and the table
+    renderer routes only its verdict headers here. Levels -- confidence and
+    effort -- render through :func:`_level_chip_html` instead.
+    """
     r = text.strip().lower()
     if r in (RISK_LOW, RISK_HIGH, RISK_MEDIUM):
         return (
@@ -99,11 +97,15 @@ def _quality_badge_html(text: str) -> str:
             f'<span class="severity-badge severity-{_escape_html(r)}">'
             f"{_escape_html(r)}</span>"
         )
-    if r in _EFFORT_CSS:
-        return (
-            f'<span class="risk-badge risk-{_escape_html(r)}">{_escape_html(r)}</span>'
-        )
     return _escape_html(text)
+
+
+def _level_chip_html(text: str) -> str:
+    """Render a level -- a position on a scale -- as a muted chip."""
+    value = text.strip()
+    if not value:
+        return ""
+    return f'<span class="level-chip">{_escape_html(value)}</span>'
 
 
 def _source_kind_badge_html(source_kind: str) -> str:
@@ -148,12 +150,22 @@ def _score_bar_html(value: str) -> str:
     )
 
 
-def _metric_meter_html(value: str, *, fraction: float) -> str:
+def _metric_meter_html(
+    value: str,
+    *,
+    fraction: float,
+    neutral: bool = False,
+) -> str:
     """Render a numeric metric as its value plus a magnitude bar.
 
     *fraction* (0..1) is the value's share of the column maximum; the bar fills
     to that share and tints by band (low/mid/high) so table magnitudes read at a
     glance without altering the underlying number.
+
+    *neutral* — the column's magnitude is not a verdict, so the bar uses one
+    quiet ramp and no risk banding. Discovery score is the case that named this:
+    five is the strongest candidate, and painting the best rows red is alarm
+    noise where red is reserved for actual risk.
     """
     text = str(value).strip()
     try:
@@ -161,7 +173,9 @@ def _metric_meter_html(value: str, *, fraction: float) -> str:
     except (TypeError, ValueError):
         return _escape_html(text)
     pct = max(0, min(100, round(fraction * 100)))
-    if fraction >= 0.66:
+    if neutral:
+        band = " metric-meter--neutral"
+    elif fraction >= 0.66:
         band = " metric-meter--high"
     elif fraction >= 0.33:
         band = " metric-meter--mid"
@@ -208,7 +222,7 @@ _INLINE_EMPTY_ICONS: dict[str, str] = {
 }
 
 
-def _inline_empty(message: str, *, tone: str = "neutral") -> str:
+def _inline_empty(message: str, *, tone: str = "neutral", reason: str = "") -> str:
     """Compact single-row empty-state for inline/card contexts.
 
     Use for summary items, breakdown panels, and other small cards where a
@@ -217,13 +231,23 @@ def _inline_empty(message: str, *, tone: str = "neutral") -> str:
     *tone*:
       - ``"good"``  — green check (positive: "nothing to report").
       - ``"neutral"`` — muted info dot (missing or unavailable data).
+
+    *reason* — one sentence saying why the panel is empty and what would fill
+    it. An empty state that only reports absence leaves the reader unable to
+    tell a clean result from a measurement that never ran.
     """
     tone_key = tone if tone in _INLINE_EMPTY_ICONS else "neutral"
     icon = _INLINE_EMPTY_ICONS[tone_key]
+    reason_html = (
+        f'<span class="inline-empty-reason">{_escape_html(reason)}</span>'
+        if reason
+        else ""
+    )
     return (
         f'<div class="inline-empty inline-empty--{tone_key}">'
         f"{icon}"
         f'<span class="inline-empty-text">{_escape_html(message)}</span>'
+        f"{reason_html}"
         "</div>"
     )
 
@@ -283,22 +307,51 @@ def _short_label(name: str, max_len: int = 18) -> str:
     return label
 
 
+#: Hops shown inline before a chain folds. A chain is read for its shape and
+#: its endpoints; printing every hop turned the cell into a sideways scroll.
+_CHAIN_INLINE_HOPS = 3
+
+
+def _chain_nodes(parts: Sequence[str], *, arrows: bool) -> list[str]:
+    nodes: list[str] = []
+    for index, module in enumerate(parts):
+        short = _short_label(str(module))
+        nodes.append(
+            f'<span class="chain-node" title="{_escape_html(str(module))}">'
+            f"{_escape_html(short)}</span>"
+        )
+        if arrows and index < len(parts) - 1:
+            nodes.append('<span class="chain-arrow">\u2192</span>')
+    return nodes
+
+
 def _render_chain_flow(
     parts: Sequence[str],
     *,
     arrows: bool = False,
 ) -> str:
-    """Render a sequence of names as chain-node spans, optionally with arrows."""
-    nodes: list[str] = []
-    for i, mod in enumerate(parts):
-        short = _short_label(str(mod))
-        nodes.append(
-            f'<span class="chain-node" title="{_escape_html(str(mod))}">'
-            f"{_escape_html(short)}</span>"
-        )
-        if arrows and i < len(parts) - 1:
-            nodes.append('<span class="chain-arrow">\u2192</span>')
-    return f'<span class="chain-flow">{"".join(nodes)}</span>'
+    """Render a sequence of names as chain-node spans, optionally with arrows.
+
+    Long chains keep their first hops inline and fold the rest behind a
+    disclosure, so the cell states where the chain starts and how long it is
+    without running off the table.
+    """
+
+    if len(parts) <= _CHAIN_INLINE_HOPS + 1:
+        inline = "".join(_chain_nodes(parts, arrows=arrows))
+        return f'<span class="chain-flow">{inline}</span>'
+
+    head_html = "".join(_chain_nodes(list(parts[:_CHAIN_INLINE_HOPS]), arrows=arrows))
+    tail = list(parts[_CHAIN_INLINE_HOPS:])
+    if arrows:
+        head_html += '<span class="chain-arrow">\u2192</span>'
+    tail_html = "".join(_chain_nodes(tail, arrows=arrows))
+    return (
+        f'<span class="chain-flow">{head_html}'
+        f'<details class="chain-more"><summary>+{len(tail)} more</summary>'
+        f'<span class="chain-flow">{tail_html}</span>'
+        "</details></span>"
+    )
 
 
 def _stat_card(

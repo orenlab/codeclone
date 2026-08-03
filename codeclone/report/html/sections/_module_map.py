@@ -43,6 +43,12 @@ _CANDIDATE = "candidate"
 _OVERLOADED_TABLE_CAP = 50
 _OVERLOADED_HEADING = "Overloaded Modules"
 _EMPTY_GRAPH_MESSAGE = "Dependency graph is not available."
+#: An empty panel must separate a clean result from a measurement that
+#: never ran, so it says what would draw a graph here.
+_EMPTY_GRAPH_DESC = (
+    "A graph is drawn once the analysed set contains modules that import "
+    "one another, so a single module or a skipped metrics run leaves it empty."
+)
 _OVERLOADED_EMPTY_MESSAGE = "Overloaded-module profiling is not available."
 _METRICS_SKIPPED = "Metrics are skipped for this run."
 
@@ -106,7 +112,7 @@ def _mm_node_style(node: Mapping[str, object], *, hub_threshold: int) -> BlockNo
 def _render_module_map_svg(graph: Mapping[str, object]) -> str:
     nodes = [_as_mapping(node) for node in _as_sequence(graph.get("nodes"))]
     if not nodes:
-        return _tab_empty(_EMPTY_GRAPH_MESSAGE)
+        return _tab_empty(_EMPTY_GRAPH_MESSAGE, description=_EMPTY_GRAPH_DESC)
     node_ids = [str(node.get("id")) for node in nodes]
     by_id = {str(node.get("id")): node for node in nodes}
     edge_rows = [_as_mapping(edge) for edge in _as_sequence(graph.get("edges"))]
@@ -229,6 +235,10 @@ def _mm_unwind_table(unwind_candidates: Sequence[object], ctx: ReportContext) ->
         headers=("Module", "Fan-in", "Fan-out", "Score", "Status", "Signals"),
         rows=rows,
         empty_message="No unwind candidates detected.",
+        empty_description=(
+            "A candidate appears when a module carries enough dependents and "
+            "dependencies at once for unwinding one to pay for itself."
+        ),
         column_types={
             "Fan-in": "meter",
             "Fan-out": "meter",
@@ -346,6 +356,10 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
             ),
             rows=rows,
             empty_message=_OVERLOADED_EMPTY_MESSAGE,
+            empty_description=(
+                "Overload profiling needs the module metrics an analysis run "
+                "produces, so this stays empty when metrics were skipped."
+            ),
             column_types={
                 "Score": "score",
                 "Status": "status",
@@ -360,7 +374,7 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
 def _render_graph_block(ctx: ReportContext, module_map: Mapping[str, object]) -> str:
     summary = _as_mapping(module_map.get("summary"))
     if not module_map or not bool(summary.get("available")):
-        return _tab_empty(_EMPTY_GRAPH_MESSAGE)
+        return _tab_empty(_EMPTY_GRAPH_MESSAGE, description=_EMPTY_GRAPH_DESC)
 
     default_zoom = str(module_map.get("default_zoom") or "packages")
     graph_packages = _as_mapping(module_map.get("graph_packages"))

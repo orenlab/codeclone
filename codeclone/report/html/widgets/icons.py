@@ -160,6 +160,14 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<circle cx="18" cy="6" r="2.5"/><path d="M8.5 6h7"/>'
         '<path d="M6 8.5v7a2 2 0 0 0 2 2h7"/>',
     ),
+    # Ownership under guarantee: a shield for the governed contract, a check
+    # for the owner answering for it. Same 24-grid, same stroke weight as the
+    # rest of the nav set so it reads as a sibling at tab size.
+    "authority": (
+        "2",
+        '<path d="M12 3l7 3v5.5c0 4.2-2.9 7.6-7 8.5-4.1-.9-7-4.3-7-8.5V6z"/>'
+        '<path d="M9 12l2 2 4-4"/>',
+    ),
     "top-risks": (
         "2",
         '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86'

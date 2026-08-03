@@ -115,6 +115,10 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         ),
         rows=active_rows,
         empty_message="No dead code detected.",
+        empty_description=(
+            "An entry appears when a definition has no reference anywhere in "
+            "the analysed set, so an empty list means every definition is used."
+        ),
         ctx=ctx,
     )
     suppressed_panel = render_rows_table(
@@ -131,6 +135,10 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         ),
         rows=suppressed_rows,
         empty_message="No suppressed dead-code candidates.",
+        empty_description=(
+            "Entries land here when a suppression rule in your configuration "
+            "excludes a candidate, so this fills only once a rule matches."
+        ),
         column_types={"Source": "source_kind"},
         ctx=ctx,
     )

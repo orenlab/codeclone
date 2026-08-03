@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -314,10 +315,13 @@ def test_block_diagram_medium_graph_uses_comfortable_density() -> None:
         aria_label="Medium graph",
     )
 
+    # The 900px literal here was the old minimum render width: this graph is
+    # 144 units wide, so the floor inflated it 6.25x and every box with it.
+    # Density still selects the type scale; the width is now the graph's own.
     assert_all_contained(
         svg,
         'data-graph-density="comfortable"',
-        "width:100%;max-width:900px",
+        "width:100%;max-width:144px",
     )
 
 
@@ -518,7 +522,14 @@ def _make_suggestion(**overrides: object) -> Suggestion:
 
 
 def test_html_badges_and_cards_cover_effort_and_tip_paths() -> None:
-    assert 'risk-badge risk-moderate">moderate<' in _quality_badge_html("moderate")
+    # Moved expectation, second and final step. This originally pinned
+    # 'risk-badge risk-moderate' -- effort rendered as a risk verdict through a
+    # class the stylesheet never defined. Stint 7 routed it to the muted level
+    # chip; stint 8 established no caller could reach that branch at all and
+    # deleted it, so effort is asserted on its live path.
+    from codeclone.report.html.widgets.badges import _level_chip_html
+
+    assert _level_chip_html("moderate") == '<span class="level-chip">moderate</span>'
 
     card_html = _stat_card(
         "High Complexity",
@@ -584,8 +595,10 @@ def test_render_overview_panel_surfaces_baselined_and_partially_baselined_kpis()
 def test_render_overview_panel_summarizes_metrics_without_health_score() -> None:
     panel_html = render_overview_panel(cast(Any, _section_ctx()))
 
+    # "1 dependency cycles" now agrees with its own count; the rest of the
+    # sentence is unchanged.
     assert (
-        "4 clone groups; 4 dead-code items (0 suppressed); 1 dependency cycles."
+        "4 clone groups; 4 dead-code items (0 suppressed); 1 dependency cycle."
         in panel_html
     )
 
@@ -949,3 +962,879 @@ def test_finding_card_renders_all_slots_and_severity_fallback() -> None:
         "severity-badge severity-warning",  # reused severity badge
         "Overloaded module",
     )
+
+
+def _chain_diagram_geometry(node_count: int) -> tuple[float, float, float]:
+    """Render a linear chain and return (viewbox width, height, render width)."""
+
+    from codeclone.report.html.widgets.dep_graph_layout import (
+        BlockNodeStyle,
+        render_block_diagram,
+    )
+
+    nodes = [f"pkg.layer{index}" for index in range(node_count)]
+    svg = render_block_diagram(
+        nodes,
+        [(nodes[index], nodes[index + 1]) for index in range(node_count - 1)],
+        style_fn=lambda _node: BlockNodeStyle(
+            fill="var(--bg-surface)",
+            text_fill="var(--text-primary)",
+        ),
+        aria_label="dependency chain",
+    )
+    view_box = re.search(r'viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"', svg)
+    width_match = re.search(r"max-width:(\d+)px", svg)
+    assert view_box is not None
+    assert width_match is not None
+    return (
+        float(view_box.group(1)),
+        float(view_box.group(2)),
+        float(width_match.group(1)),
+    )
+
+
+def test_block_diagram_never_upscales_a_graph_that_already_fits() -> None:
+    """A narrow graph must render at its own size, not stretched to the pane.
+
+    The render width carried a minimum, so a 574-unit graph was blown up to
+    1040px: boxes a third of a screen wide and a chain two viewports tall.
+    """
+
+    vb_w, vb_h, render_width = _chain_diagram_geometry(20)
+
+    # never magnified: the pane may shrink a graph, never inflate it
+    assert render_width <= vb_w * 1.02, (
+        f"graph upscaled {render_width / vb_w:.2f}x ({vb_w:.0f} -> {render_width:.0f})"
+    )
+    # and the whole graph stays near one screen instead of paging: this chain
+    # rendered 1848px tall before, two viewports of mostly whitespace
+    assert vb_h <= 1100, f"a 20-node chain is {vb_h:.0f} units tall"
+
+
+def test_block_diagram_keeps_a_short_chain_inside_one_viewport() -> None:
+    """The maintainer's case: four boxes are a graph, not a slideshow."""
+
+    vb_w, vb_h, render_width = _chain_diagram_geometry(4)
+    rendered_height = vb_h * (render_width / vb_w)
+
+    assert rendered_height <= 700, f"a four-node chain renders {rendered_height:.0f}px"
+
+
+def _css_rule_bodies(css: str) -> str:
+    """Return the stylesheet without its token-declaration blocks."""
+
+    rules = css
+    for block in re.findall(r":root\s*\{.*?\}|\[data-theme[^{]*\{.*?\}", css, re.S):
+        rules = rules.replace(block, "")
+    return rules
+
+
+def test_report_css_declares_a_type_scale_and_uses_it() -> None:
+    """Font sizes come from a scale, not from taste at each call site.
+
+    The stylesheet carried thirty-one distinct raw font sizes, eight of them
+    crowded between .68rem and .9rem — near-identical steps chosen ad hoc,
+    which is what makes a UI read as assembled rather than designed.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    declared = set(re.findall(r"(--fs-[a-z0-9]+)\s*:", css))
+    assert {
+        "--fs-3xs",
+        "--fs-2xs",
+        "--fs-xs",
+        "--fs-sm",
+        "--fs-md",
+        "--fs-lg",
+    } <= declared
+
+    # rule bodies reference the scale rather than restating sizes
+    rules = _css_rule_bodies(css)
+    micro = re.findall(r"font-size:\s*(\.\d+)rem", rules)
+    assert not micro, (
+        f"{len(micro)} micro font sizes bypass the scale: {sorted(set(micro))}"
+    )
+
+
+def test_report_css_names_its_on_accent_colour() -> None:
+    """White on indigo is a decision, so it gets a name, not a literal."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    assert "--accent-on:" in css
+    printable = re.sub(
+        r"@media print\s*\{.*?\n\}", "", _css_rule_bodies(css), flags=re.S
+    )
+    assert "#fff" not in printable
+
+
+def _collapsed_text(markup: str) -> str:
+    """Text a reader sees before opening any disclosure."""
+
+    shrunk = re.sub(
+        r"</summary>.*?</details>", "</summary></details>", markup, flags=re.S
+    )
+    return " ".join(re.sub(r"<[^>]+>", " ", shrunk).split())
+
+
+def test_chain_flow_discloses_a_long_chain_instead_of_running_off() -> None:
+    """The report's last unbounded string: a chain printed every hop inline.
+
+    On this repository the longest-chain cell reached 371 characters of chips
+    in a single table cell, which scrolls sideways instead of reading.
+    """
+
+    from codeclone.report.html.widgets.badges import _render_chain_flow
+
+    parts = [f"pkg.layer{index}.module_with_a_long_name" for index in range(12)]
+    markup = _render_chain_flow(parts, arrows=True)
+
+    assert "<details" in markup
+    # three hops stay inline, the remaining nine fold
+    assert "+9 more" in markup
+    # the first hop is still rendered, full name preserved on the chip
+    assert 'title="pkg.layer0.module_with_a_long_name"' in markup
+    # and nothing is lost: the last hop is in the disclosed tail
+    assert 'title="pkg.layer11.module_with_a_long_name"' in markup
+    assert len(_collapsed_text(markup)) < 120, _collapsed_text(markup)
+
+
+def test_chain_flow_leaves_a_short_chain_inline() -> None:
+    from codeclone.report.html.widgets.badges import _render_chain_flow
+
+    markup = _render_chain_flow(["pkg.a", "pkg.b", "pkg.c"], arrows=True)
+
+    assert "<details" not in markup
+    assert "pkg.c" in markup
+
+
+def test_dep_graph_card_shrink_wraps_its_graph() -> None:
+    """A small graph gets a small card, not a pane of empty gradient."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    wrap = re.search(r"\.dep-graph-wrap\{[^}]*\}", css, re.S)
+    assert wrap is not None
+    assert "width:fit-content" in wrap.group(0)
+    assert "max-width:100%" in wrap.group(0)
+
+
+def _authority_panel_html() -> str:
+    """Render the authority panel from a minimal context stub."""
+
+    from codeclone.report.html.sections._authority import render_authority_panel
+
+    authority = {
+        "summary": {
+            "enabled": True,
+            "enforcement_enabled": True,
+            "registry_contracts": 2,
+            "sinks": 9,
+        },
+        "items": [
+            {
+                "item_kind": "governed_sink",
+                "contract_id": "snapshot.publication/v1",
+                "sink_identity": "pkg.store:publish",
+                "authority_status": "authoritative",
+                "resolution_state": "resolved",
+            },
+            {
+                "item_kind": "candidate",
+                "candidate_id": "cand-1",
+                "level": "exact_contract_ir",
+                "score": 5,
+                "producers": ["pkg.a:owner", "pkg.b:twin"],
+                "shared_fact": "effect:artifact_write:os.replace",
+                "source_kind": "production",
+            },
+        ],
+    }
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            metrics_map={"semantic_authority": authority},
+            relative_path=lambda value: value,
+        ),
+    )
+    return render_authority_panel(ctx)
+
+
+def _discovery_panel_html(*, sinks: int = 9) -> str:
+    """Render the authority panel with candidates spread across every level."""
+
+    from codeclone.report.html.sections._authority import render_authority_panel
+
+    levels = (
+        ("exact_contract_ir", 5, 2),
+        ("same_effect_signature", 4, 1),
+        ("overlapping_transform_chain", 2, 3),
+        ("divergent_projection", 1, 4),
+    )
+    items: list[dict[str, object]] = []
+    for level, score, count in levels:
+        items.extend(
+            {
+                "item_kind": "candidate",
+                "candidate_id": f"{level}-{index}",
+                "level": level,
+                "score": score,
+                "producers": [f"pkg.{level}{index}:owner", "pkg.other:twin"],
+                "shared_fact": "effect:artifact_write:os.replace",
+                "source_kind": "production",
+            }
+            for index in range(count)
+        )
+    authority = {
+        "summary": {
+            "enabled": True,
+            "enforcement_enabled": True,
+            "registry_contracts": 2,
+            "sinks": sinks,
+        },
+        "items": items,
+    }
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            metrics_map={"semantic_authority": authority},
+            relative_path=lambda value: value,
+        ),
+    )
+    return render_authority_panel(ctx)
+
+
+def _discovery_tab_html(*, sinks: int = 9) -> str:
+    """Just the discovery sub-panel, without its sibling authority tabs."""
+
+    html = _discovery_panel_html(sinks=sinks)
+    start = html.index('data-clone-panel="candidates"')
+    return html[start : html.index('data-clone-panel="suppressed"', start)]
+
+
+def test_discovery_replaces_its_caption_wall_with_scannable_homes() -> None:
+    """Five facts packed into one paragraph, each sent where it is read.
+
+    The caption ran ten lines of prose above a full-width table: the doctrine,
+    the sink population, the shown-of-total count, a per-level histogram and
+    the MCP route to the rest, all as sentences. Nothing is deleted here --
+    every fact keeps a home, but the home is the one a reader scans.
+    """
+
+    whole = _discovery_panel_html(sinks=7)
+    panel = _discovery_tab_html(sinks=7)
+
+    # zero paragraphs: the wall is gone, and so is the class that styled it
+    assert "authority-candidate-note" not in whole
+    assert "<p " not in panel and "<p>" not in panel
+
+    # (a) the sink population is stated once, on the stat card, not twice
+    assert "Discovery examined" not in panel
+    assert "semantic sinks" not in panel
+    assert '7</span><span class="kpi-micro-lbl">sinks examined' in whole
+
+    # (b) shown-of-total is a table meta-line, not a sentence
+    assert "table-meta-count" in panel
+    assert "strongest of" not in panel
+
+    # (c) the histogram is a count strip, not prose
+    assert "By level:" not in panel
+    assert "level-strip" in panel
+
+    # (d) one short doctrine line survives; the full rule moved to a tooltip
+    band = panel[panel.index("table-meta-lead") :]
+    band = band[: band.index("</div>")]
+    assert "Tools propose, humans own." in band
+    assert "[[tool.codeclone.authority]]" not in band, "the rule is still prose"
+    tips = re.findall(r'data-tip="([^"]*)"', panel)
+    assert any("[[tool.codeclone.authority]]" in tip for tip in tips), (
+        "the governance rule lost its home instead of moving to one"
+    )
+
+    # (e) the below-the-cut route is a one-line footnote under the table
+    assert "table-footnote" in panel
+    assert "check_authority" in panel
+
+
+def test_discovery_counts_every_level_including_those_below_the_cut() -> None:
+    """The strip is the only place the held-back levels are counted."""
+
+    panel = _discovery_panel_html()
+    strip = panel[panel.index("level-strip") :]
+    strip = strip[: strip.index("</div>", strip.index("</span>"))]
+
+    # the two strong levels that earned rows
+    assert "exact contract ir" in strip
+    assert "same effect signature" in strip
+    # and the two below the cut, which have no rows at all
+    assert "overlapping transform chain" in strip
+    assert "divergent projection" in strip
+
+
+def test_promotion_toml_is_highlighted_at_build_time() -> None:
+    """The one real config block in the report reads as config, not as text.
+
+    The proposal is TOML a human pastes into pyproject: keys, strings and a
+    comment. It rendered as one flat escaped string, so the reader could not
+    tell the contract id placeholder from the key naming it. Highlighting is
+    static spans emitted at build time -- the report ships no highlighter.
+    """
+
+    panel = _discovery_panel_html()
+    block = panel[panel.index('<pre class="codebox">') :]
+    block = block[: block.index("</pre>")]
+
+    # tokens the TOML lexer must have found
+    assert 'class="k"' in block or 'class="nn"' in block, block[:400]
+    assert 'class="s2"' in block, "the quoted values are not strings"
+    assert 'class="c1"' in block, "the co-producer comment is not a comment"
+    # and the copied text is unchanged: no highlighter markup leaks into it
+    assert "[[tool.codeclone.authority]]" in re.sub(r"<[^>]+>", "", block)
+
+
+def _findings_panel_html(groups: object = ()) -> str:
+    """Render the structural-findings panel from a group list."""
+
+    from codeclone.report.html.sections._structural import (
+        build_structural_findings_html_panel,
+    )
+
+    return build_structural_findings_html_panel(
+        cast(Any, groups), [], scan_root="/repo"
+    )
+
+
+def test_findings_tab_asks_about_this_repository_not_for_a_definition() -> None:
+    """Every tab opens with a real question. This one opened with a glossary.
+
+    "What are structural findings?" is what the term means, not what this
+    repository is doing. Dependencies asks whether module dependencies form
+    cycles; authority asks whether each governed contract has one owner. The
+    definition is not deleted -- it moves to where definitions live.
+    """
+
+    panel = _findings_panel_html()
+
+    assert "What are structural findings?" not in panel, "the tab still defines"
+    question = panel[panel.index("insight-question") :]
+    question = question[question.index(">") + 1 : question.index("</div>")]
+    assert question.endswith("?"), question
+    assert "structural findings" not in question.lower(), (
+        f"the question still names the widget rather than the code: {question}"
+    )
+
+    from codeclone.report.messages.glossary import GLOSSARY
+
+    assert "branch-body" in GLOSSARY.get("findings", ""), (
+        "the definition was dropped instead of re-homed"
+    )
+
+
+def test_findings_tab_states_its_counts_between_answer_and_evidence() -> None:
+    """Answer, then the numbers a reader acts on, then the evidence."""
+
+    from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
+
+    sig = {"branches": "2", "shape": "if/else"}
+    occurrences = tuple(
+        StructuralFindingOccurrence(
+            finding_kind="duplicated_branches",
+            finding_key="a" * 40,
+            file_path=f"/repo/{name}.py",
+            qualname=f"{name}:fn",
+            start=start,
+            end=start + 2,
+            signature=sig,
+        )
+        for name, start in (("a", 10), ("b", 20))
+    )
+    panel = _findings_panel_html(
+        [
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="a" * 40,
+                signature=sig,
+                items=occurrences,
+            )
+        ]
+    )
+
+    assert "stat-cards" in panel, "the panel jumps from the answer to the cards"
+    assert (
+        panel.index("insight-banner")
+        < panel.index("stat-cards")
+        < panel.index("sf-list")
+    ), "answer, numbers and evidence are out of order"
+
+
+def test_every_empty_state_in_the_six_tabs_explains_itself() -> None:
+    """An empty panel that says only what is missing is not an answer.
+
+    The reader cannot tell a clean result from a measurement that never ran,
+    so each empty state says what would fill it.
+    """
+
+    from codeclone.report.html.sections._structural import (
+        build_structural_findings_html_panel,
+    )
+
+    panel = cast(Any, build_structural_findings_html_panel)([], [], scan_root="/repo")
+    desc = panel[panel.index("tab-empty-desc") :]
+    desc = desc[desc.index(">") + 1 : desc.index("</div>")]
+
+    assert "keep up the good work" not in desc.lower(), (
+        "the generic filler is not an explanation"
+    )
+    assert len(desc) > 40, f"the empty state explains nothing: {desc!r}"
+
+
+def test_quality_badge_carries_no_unreachable_effort_branch() -> None:
+    """Dead presentation code is still dead code.
+
+    _quality_badge_html only ever receives a verdict: finding_card normalises
+    through severity_key to critical/warning/info, and the table renderer
+    routes only risk and severity here. No caller could reach the effort
+    branch, and no table declares an Effort header. Levels reach the muted
+    chip through _level_chip_html, which is the live path and stays.
+    """
+
+    from codeclone.report.html.widgets.badges import _level_chip_html
+
+    for effort in ("easy", "moderate", "hard"):
+        assert _quality_badge_html(effort) == effort, "the dead branch survives"
+    # the level vocabulary itself is untouched and still reachable
+    assert _level_chip_html("moderate") == '<span class="level-chip">moderate</span>'
+    # a real verdict still renders as one
+    assert "severity-critical" in _quality_badge_html("critical")
+
+
+def test_codebox_base_colour_is_tokenised_not_borrowed() -> None:
+    """The code block's colour must not be whatever the import happened to set.
+
+    Pygments' dark style paints .codebox #F8F8F2, and the whitespace token
+    inherited it, so the report carried a borrowed literal as the base colour
+    of its code blocks.
+    """
+
+    from codeclone.report.html.assets.css import build_syntax_css
+
+    rules = build_syntax_css()
+
+    assert ".codebox{" in rules.replace(" ", ""), (
+        "the code block never states its own colour, so it keeps the imported one"
+    )
+    assert "#" not in rules, "the syntax map carries a raw literal colour"
+
+
+def test_syntax_hues_never_collide_with_the_semantic_palette() -> None:
+    """Syntax colour is not a verdict either.
+
+    Red, amber, green and blue mean risk, warning, ok and info everywhere else
+    in this report. A syntax palette that reuses those hues teaches the reader
+    that a string literal is a success and a keyword is an error.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    syntax = [
+        float(h) for h in re.findall(r"--syn-[a-z]+:oklch\([^)]*?\s([\d.]+)\)", css)
+    ]
+    assert syntax, "no syntax hues are declared on the token layer"
+
+    semantic = {20.0: "error", 74.0: "warning", 162.0: "success", 238.0: "info"}
+    for hue in syntax:
+        for value, name in semantic.items():
+            gap = abs(hue - value)
+            gap = min(gap, 360 - gap)
+            assert gap >= 35, f"syntax hue {hue} sits {gap:.0f}deg from {name}"
+
+
+def test_discovery_meta_band_shares_the_width_of_its_table() -> None:
+    """The 'криво' was a ragged text column floating over a full-width table."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    band = _css_rule(css, ".table-meta")
+
+    assert "width:100%" in band, "the meta band does not span its table"
+    assert "max-width" not in band, "a reading measure makes the band ragged again"
+
+
+def _css_rule(css: str, selector: str) -> str:
+    """Return the body of the rule whose selector list states *selector*.
+
+    Five tests had grown their own copy of this scan; the report's own clone
+    gate is the reason it lives here once.
+    """
+
+    stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    rules: list[tuple[str, str]] = re.findall(r"([^{}]+)\{([^}]*)\}", stripped)
+    for heads, body in rules:
+        if selector in [part.strip() for part in heads.split(",")]:
+            return body
+    raise AssertionError(f"no rule states {selector!r}")
+
+
+def _demo_table(**overrides: Any) -> str:
+    """Render one table through the shared renderer, with defaults."""
+
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    kwargs: dict[str, Any] = {
+        "headers": ("Name", "Confidence", "Effort", "Severity"),
+        "rows": [("pkg.a:f", "high", "hard", "critical")],
+        "empty_message": "nothing here",
+    }
+    kwargs.update(overrides)
+    return render_rows_table(**kwargs)
+
+
+def test_table_header_is_neutral_and_carries_no_accent_tint() -> None:
+    """The header separates by typography, not by painting a coloured band.
+
+    The maintainer's verdict on the discovery table was about colour. The
+    header ran a tinted fill plus a two-pixel rule mixed from the brand accent,
+    so every table in the report opened with a lavender strip that competed
+    with the data underneath it.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    head = _css_rule(build_css(), ".table th")
+
+    assert "var(--bg-overlay)" not in head, "the header still paints a tinted band"
+    assert "accent" not in head, "the header rule still mixes in the brand accent"
+    assert "var(--table-rule-strong)" in head, "the header rule is not tokenised"
+
+
+def test_table_separates_rows_exactly_one_way() -> None:
+    """Zebra and hairline are two answers to one question; the idiom picks one."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    rules = _css_rule_bodies(css)
+
+    assert "tbody tr:nth-child(even)" not in rules, (
+        "zebra striping and per-row hairlines both separate rows"
+    )
+    assert "var(--table-rule)" in _css_rule(css, ".table td"), (
+        "the row hairline is not tokenised"
+    )
+    assert "accent" not in _css_rule(css, ".table tbody tr:hover td"), (
+        "row hover still tints with the brand accent"
+    )
+
+
+def test_confidence_and_effort_render_as_muted_levels_not_verdicts() -> None:
+    """A level is not a verdict.
+
+    Confidence is evidence strength and effort is a cost. Both ran through the
+    risk palette, so a high-confidence dead-code row rendered in error red --
+    the same magnitude-as-verdict mistake the neutral meter already fixed.
+    Effort was worse: it emitted risk-easy/moderate/hard, classes the
+    stylesheet never defined, so those chips had no colour rule at all.
+    """
+
+    table = _demo_table()
+
+    assert 'class="level-chip"' in table, "there is no muted level vocabulary"
+    assert "risk-high" not in table, "confidence still renders as a risk verdict"
+    assert "risk-hard" not in table, "effort still emits an undefined risk class"
+    # a real verdict keeps its semantic colour
+    assert "severity-critical" in table
+
+
+def test_chip_columns_reserve_a_fixed_width() -> None:
+    """A chip column that resizes with its content makes tables jump.
+
+    The width belongs to the declared column type, not to a header name, so a
+    future chip column arrives sized instead of needing its own entry.
+    """
+
+    table = _demo_table(
+        headers=("Owner", "Level"),
+        rows=[("pkg.a:f", "same effect signature")],
+        column_types={"Level": "chips"},
+    )
+    colgroup = table[table.index("<colgroup>") : table.index("</colgroup>")]
+    cols = re.findall(r"<col(?:\s[^>]*)?>", colgroup)
+
+    assert len(cols) == 2
+    assert "width:" in cols[1], f"the chip column reserves no width: {cols[1]}"
+    # a name column still sizes to its content
+    assert "width:" not in cols[0]
+
+
+def test_row_disclosure_reads_as_a_connected_detail_panel() -> None:
+    """An opened disclosure is a subordinate panel, not a monstrous row."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    panel = _css_rule(build_css(), ".detail-panel")
+
+    assert "border-left" in panel, "the panel is not connected to its row"
+    assert re.search(r"\bpadding:", panel), "the panel does not inset its content"
+    assert "background" in panel, "the panel does not read as subordinate"
+    assert "detail-panel" in _authority_panel_html(), (
+        "the producers disclosure does not use the panel idiom"
+    )
+
+
+def test_report_css_states_one_disclosure_idiom() -> None:
+    """Every disclosure in the report behaves the same way, described once.
+
+    Three components had grown their own near-identical summary rules and a
+    fourth, the authority producer list, had none at all and rendered with
+    browser defaults beside them.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    shared = [
+        rule
+        for rule in re.findall(r"([^{}]*)\{[^}]*cursor:pointer[^}]*\}", css)
+        if "summary" in rule
+    ]
+    joined = " ".join(shared)
+    for component in (
+        ".authority-promotion",
+        ".authority-producers",
+        ".chain-more",
+        ".suggestion-details",
+    ):
+        assert f"{component} summary" in joined, f"{component} has no disclosure rule"
+
+    # one rule carries them, rather than four copies of the same intent
+    grouped = [rule for rule in shared if rule.count("summary") >= 4]
+    assert grouped, "disclosure behaviour is still restated per component"
+
+
+def test_authority_panel_leads_with_scannable_decision_numbers() -> None:
+    """The narrative contract: the answer, then the numbers a reader acts on."""
+
+    html = _authority_panel_html()
+
+    answer_at = html.index("Is each governed semantic contract owned by one authority?")
+    cards_at = html.index('class="stat-cards"')
+    tabs_at = html.index('data-subtab-group="semantic-authority"')
+    assert answer_at < cards_at < tabs_at
+    assert "Violations" in html
+    assert "Governed contracts" in html
+
+
+def _overview_answer(html: str) -> str:
+    match = re.search(r'<div class="insight-answer">(.*?)</div>', html, re.S)
+    assert match is not None
+    return " ".join(re.sub(r"<[^>]+>", " ", match.group(1)).split())
+
+
+def test_overview_asks_its_question_like_every_other_tab() -> None:
+    """The face of the report must ask, not label.
+
+    Every other panel opens with a question a reader recognises. The overview
+    opened with the words "Current health snapshot", which names a widget
+    rather than answering anything.
+    """
+
+    from codeclone.report.messages.overview import (
+        EXECUTIVE_HEALTH_SNAPSHOT_QUESTION as question,
+    )
+
+    assert question.endswith("?"), question
+    assert "snapshot" not in question.lower()
+
+
+def test_overview_answer_agrees_with_its_own_counts() -> None:
+    """One clone group is not "1 clone groups"."""
+
+    from codeclone.report.html.sections._overview import _overview_counts_sentence
+
+    single = _overview_counts_sentence(
+        clone_groups=1, dead_total=1, dead_suppressed=0, dependency_cycles=1
+    )
+    plural = _overview_counts_sentence(
+        clone_groups=3, dead_total=0, dead_suppressed=2, dependency_cycles=0
+    )
+
+    assert "1 clone group;" in single
+    assert "1 dead-code item " in single
+    assert "1 dependency cycle." in single
+    assert "3 clone groups;" in plural
+    assert "0 dead-code items " in plural
+    assert "0 dependency cycles." in plural
+
+
+def test_inline_empty_can_explain_the_absence() -> None:
+    """An empty state that only says "no data" tells the reader nothing."""
+
+    from codeclone.report.html.widgets.badges import _inline_empty
+
+    markup = _inline_empty(
+        "No source data available",
+        tone="neutral",
+        reason="Counts appear once the analyzed set spans more than one kind.",
+    )
+
+    assert "No source data available" in markup
+    assert "Counts appear once the analyzed set spans more than one kind." in markup
+    assert "inline-empty-reason" in markup
+
+
+def test_source_breakdown_empty_state_says_what_would_fill_it() -> None:
+    from codeclone.report.html.widgets.components import overview_source_breakdown_html
+
+    markup = overview_source_breakdown_html({})
+
+    assert "inline-empty-reason" in markup
+    text = " ".join(re.sub(r"<[^>]+>", " ", markup).split()).lower()
+    assert "production" in text and "tests" in text
+
+
+def test_empty_summary_cards_do_not_stretch_to_a_full_sibling() -> None:
+    """An empty card states what it holds; it does not match a full one."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    assert re.search(
+        r"\.overview-summary-item:has\(\.inline-empty\)\{[^}]*align-self:start",
+        css,
+    ), "empty summary cards still stretch to their sibling's height"
+
+
+def test_explanatory_prose_has_a_reading_measure() -> None:
+    """Explanations are read, so they get a line length, not the pane width.
+
+    Moved expectation: this covered two notes. The authority candidate caption
+    is no longer one of them -- it was decomposed into a meta band, a count
+    strip and a footnote, because a measure only helps text that is genuinely
+    read. Applied above a full-width table it produced a ragged half-width
+    column of a different width to the table it introduced. The clone-health
+    arithmetic is still prose and still carries its measure.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+
+    assert "max-width" in _css_rule(css, ".clones-health-note")
+    # and the decomposed caption keeps no prose class to measure
+    assert ".authority-candidate-note" not in css
+
+
+def test_non_verdict_numbers_never_render_as_risk() -> None:
+    """Magnitude is not a verdict.
+
+    The discovery score is evidence strength: five is the strongest candidate,
+    not an error. Rendering it through the risk meter painted every best row
+    red, which is alarm noise where the token rules reserve red for real risk.
+    """
+
+    html = _authority_panel_html()
+    # anchored on the panel, not on a column header: Propose now carries a
+    # glossary tooltip, so '>Propose<' no longer marks the header at all
+    panel = html[html.index('data-clone-panel="candidates"') :]
+    body = panel[panel.index("<tbody>") : panel.index("</tbody>")]
+
+    assert "metric-meter--high" not in body
+    assert "metric-meter--mid" not in body
+    # the number still reads as a magnitude, on a neutral ramp
+    assert "metric-meter--neutral" in body
+
+
+def test_neutral_meter_is_tokenised_and_not_semantic() -> None:
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".metric-meter--neutral .metric-meter-fill"
+            in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None, "the neutral meter has no fill rule"
+    assert "var(--error)" not in rule and "var(--warning)" not in rule
+
+
+def test_every_copy_button_has_a_positioned_host() -> None:
+    """An absolutely positioned control must be anchored by its own host.
+
+    The owner cell's copy button was positioned absolutely inside a host that
+    never established a containing block, so it resolved against the tab panel
+    and rendered at the page's top-right corner -- visible in every report with
+    discovery candidates, even with the disclosure closed.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    html = _authority_panel_html()
+    for match in re.finditer(r"data-authority-copy", html):
+        before = html[: match.start()]
+        host_at = before.rfind("authority-copy-host")
+        opened_at = before.rfind("<div")
+        assert host_at != -1 and host_at > before.rfind("</div>"), (
+            "a copy button sits outside any copy host"
+        )
+        assert opened_at != -1
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".authority-copy-host" in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None, ".authority-copy-host has no rule"
+    assert "position:relative" in rule, "the copy host establishes no containing block"
+
+
+def test_promotion_code_block_fits_its_container() -> None:
+    """A TOML proposal must not be clipped mid-word by the cell that holds it."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".authority-promotion-body .codebox"
+            in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None
+    assert "white-space:pre-wrap" in rule, "long TOML lines still cannot wrap"
+    assert "overflow-wrap:anywhere" in rule or "word-break" in rule
+
+
+def test_owner_copy_button_sits_beside_its_value_not_over_it() -> None:
+    """In a table cell the control shares the row; it does not float over it."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".authority-owner .authority-copy-btn"
+            in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None, "the owner cell button has no layout rule"
+    assert "position:static" in rule, "the owner button still floats over the qualname"
