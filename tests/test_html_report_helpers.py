@@ -1009,3 +1009,54 @@ def test_block_diagram_keeps_a_short_chain_inside_one_viewport() -> None:
     rendered_height = vb_h * (render_width / vb_w)
 
     assert rendered_height <= 700, f"a four-node chain renders {rendered_height:.0f}px"
+
+
+def _css_rule_bodies(css: str) -> str:
+    """Return the stylesheet without its token-declaration blocks."""
+
+    rules = css
+    for block in re.findall(r":root\s*\{.*?\}|\[data-theme[^{]*\{.*?\}", css, re.S):
+        rules = rules.replace(block, "")
+    return rules
+
+
+def test_report_css_declares_a_type_scale_and_uses_it() -> None:
+    """Font sizes come from a scale, not from taste at each call site.
+
+    The stylesheet carried thirty-one distinct raw font sizes, eight of them
+    crowded between .68rem and .9rem — near-identical steps chosen ad hoc,
+    which is what makes a UI read as assembled rather than designed.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    declared = set(re.findall(r"(--fs-[a-z0-9]+)\s*:", css))
+    assert {
+        "--fs-3xs",
+        "--fs-2xs",
+        "--fs-xs",
+        "--fs-sm",
+        "--fs-md",
+        "--fs-lg",
+    } <= declared
+
+    # rule bodies reference the scale rather than restating sizes
+    rules = _css_rule_bodies(css)
+    micro = re.findall(r"font-size:\s*(\.\d+)rem", rules)
+    assert not micro, (
+        f"{len(micro)} micro font sizes bypass the scale: {sorted(set(micro))}"
+    )
+
+
+def test_report_css_names_its_on_accent_colour() -> None:
+    """White on indigo is a decision, so it gets a name, not a literal."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    assert "--accent-on:" in css
+    printable = re.sub(
+        r"@media print\s*\{.*?\n\}", "", _css_rule_bodies(css), flags=re.S
+    )
+    assert "#fff" not in printable

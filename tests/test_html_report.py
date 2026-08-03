@@ -3697,7 +3697,9 @@ def test_html_report_empty_states_use_ui_font_stack() -> None:
         "font-family:var(--font-sans)}",
         ".tab-empty-title{font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-1);",
         "font-family:var(--font-display)}",
-        ".tab-empty-desc{font-size:.85rem;color:var(--text-muted);max-width:320px;font-family:var(--font-sans)}",
+        # Size moved onto the type scale; the assertion follows the token so
+        # it keeps testing the font stack, not a hardcoded size.
+        ".tab-empty-desc{font-size:var(--fs-sm);color:var(--text-muted);max-width:320px;font-family:var(--font-sans)}",
         ".inline-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;",
         "font-family:var(--font-sans)}",
     )
