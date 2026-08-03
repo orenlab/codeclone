@@ -96,6 +96,18 @@ GLOSSARY: dict[str, str] = {
     "excluded groups": (
         "Accepted clone groups excluded by suppression policy before scoring"
     ),
+    # Semantic-authority tabs: product labels, domain terms preserved here
+    "contracts": (
+        "Governed sinks: the semantic contracts declared in "
+        "[[tool.codeclone.authority]] and the owners answering for them"
+    ),
+    "discovery": (
+        "Discovered owner candidates proposed by analysis; promotion into "
+        "configuration is a human decision"
+    ),
+    "violations": "Semantic-authority violations found against governed contracts",
+    "owner": "The producer proposed as the canonical owner of a shared fact",
+    "producers": "Other functions sharing this candidate's fact",
     # Suggestion stat cards
     "total suggestions": "Total actionable improvement suggestions generated",
     "warning": "Suggestions with warning severity worth reviewing",

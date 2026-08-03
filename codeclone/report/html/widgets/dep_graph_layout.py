@@ -37,12 +37,12 @@ _BOX_W_MAX = 184
 _BOX_CHAR_W = 8
 _BOX_PAD_X = 30
 _LABEL_PAD_X = 28
-_ROW_GAP = 92
+_ROW_GAP = 44
 _COL_GAP = 30
 _BLOCK_PAD = 34
 _LABEL_MAX = 20
 _MAX_ROW_WIDTH = 980
-_WRAPPED_ROW_GAP = 54
+_WRAPPED_ROW_GAP = 32
 # Fan endpoints spread across this fraction of a box edge so converging arrows
 # enter/leave at distinct points instead of clumping at the centre.
 _FAN_SPREAD_FRAC = 0.70
@@ -554,16 +554,18 @@ def render_block_diagram(
     vb_h = height + _BLOCK_PAD * 2
     if len(nodes) >= _WIDE_NODE_LIMIT or vb_w >= 980:
         density = "wide"
-        render_width = min(max(round(vb_w * 1.08), 1040), _WIDE_RENDER_MAX)
-        svg_style = f"width:100%;max-width:{render_width}px"
+        density_max = _WIDE_RENDER_MAX
     elif len(nodes) > _COMPACT_NODE_LIMIT:
         density = "comfortable"
-        render_width = min(max(round(vb_w * 1.18), 900), _COMFORTABLE_RENDER_MAX)
-        svg_style = f"width:100%;max-width:{render_width}px"
+        density_max = _COMFORTABLE_RENDER_MAX
     else:
         density = "compact"
-        render_width = min(round(vb_w * 1.45), _COMPACT_RENDER_MAX)
-        svg_style = f"width:100%;max-width:{render_width}px"
+        density_max = _COMPACT_RENDER_MAX
+    # The pane may shrink a graph, never inflate it. The old minimum widths
+    # stretched a narrow graph to fill the pane, which scaled every box with
+    # it: a 574-unit graph rendered at 1040px, boxes a third of a screen wide.
+    render_width = min(round(vb_w), density_max)
+    svg_style = f"width:100%;max-width:{render_width}px"
     return (
         '<div class="dep-graph-wrap">'
         f'<svg viewBox="{-_BLOCK_PAD} {-_BLOCK_PAD} {vb_w} {vb_h}" '

@@ -114,6 +114,40 @@ def _sink_population_note(sink_total: int) -> str:
     )
 
 
+def _candidate_producers_html(producers: Sequence[str]) -> str:
+    """Disclose the co-producers instead of pasting them into the cell.
+
+    The owner leads the row on its own; everyone else sharing the fact is one
+    click away. Joining them into the cell produced forty thousand characters
+    of unscannable, unclickable text on this repository.
+    """
+
+    if len(producers) <= 1:
+        return "-"
+    rest = producers[1:]
+    items = "".join(f"<li><code>{_escape_html(name)}</code></li>" for name in rest)
+    return (
+        '<details class="authority-producers">'
+        f"<summary>+{len(rest)} more</summary>"
+        f'<ul class="authority-producer-list">{items}</ul>'
+        "</details>"
+    )
+
+
+def _candidate_owner_html(owner: str) -> str:
+    """Render the proposed owner as the row's primary, copyable fact."""
+
+    if not owner:
+        return "-"
+    return (
+        '<div class="authority-owner authority-copy-host">'
+        f"<code>{_escape_html(owner)}</code>"
+        '<button class="btn authority-copy-btn" type="button" '
+        'data-authority-copy title="Copy qualname">Copy</button>'
+        "</div>"
+    )
+
+
 def _candidate_promotion_html(item: Mapping[str, object]) -> str:
     """Render the paste-ready registry entry for one discovery candidate.
 
@@ -259,16 +293,23 @@ def render_authority_panel(ctx: ReportContext) -> str:
         )
         for item in suppressed
     ]
-    candidate_rows = [
-        (
-            str(item.get("level", "")).replace("_", " "),
-            str(_as_int(item.get("score"))),
-            ", ".join(str(value) for value in _as_sequence(item.get("producers"))),
-            str(item.get("shared_fact", "")),
-            _candidate_promotion_html(item),
+    candidate_rows = []
+    for item in strong_candidates[:_CANDIDATE_ROW_LIMIT]:
+        producers = [
+            text
+            for value in _as_sequence(item.get("producers"))
+            for text in (str(value).strip(),)
+            if text
+        ]
+        candidate_rows.append(
+            (
+                _candidate_owner_html(producers[0] if producers else ""),
+                str(item.get("level", "")).replace("_", " "),
+                str(_as_int(item.get("score"))),
+                _candidate_producers_html(producers),
+                _candidate_promotion_html(item),
+            )
         )
-        for item in strong_candidates[:_CANDIDATE_ROW_LIMIT]
-    ]
 
     enabled = bool(summary.get("enforcement_enabled"))
     unresolved_governed = sum(
@@ -320,11 +361,11 @@ def render_authority_panel(ctx: ReportContext) -> str:
         "</p>"
     )
     candidate_panel = candidate_caption + render_rows_table(
-        headers=("Level", "Score", "Producers", "Shared fact", "Propose"),
+        headers=("Owner", "Level", "Score", "Producers", "Propose"),
         rows=candidate_rows,
         empty_message="No semantic-authority discovery candidates.",
-        raw_html_headers=("Propose",),
-        column_types={"Score": "meter"},
+        raw_html_headers=("Owner", "Producers", "Propose"),
+        column_types={"Score": "meter", "Level": "chips"},
         ctx=ctx,
     )
     return insight_block(
@@ -335,8 +376,8 @@ def render_authority_panel(ctx: ReportContext) -> str:
         group_id="semantic-authority",
         tabs=(
             ("violations", "Violations", len(active), active_panel),
-            ("governed", "Governed sinks", len(governed), governed_panel),
-            ("candidates", "Candidates", len(candidates), candidate_panel),
+            ("governed", "Contracts", len(governed), governed_panel),
+            ("candidates", "Discovery", len(candidates), candidate_panel),
             ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
         ),
     )

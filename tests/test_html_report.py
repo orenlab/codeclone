@@ -5691,3 +5691,104 @@ def test_html_build_span_and_counter_names_are_reviewed() -> None:
         "unreviewed HTML counter keys: "
         f"{sorted(set(HTML_BUILD_COUNTER_KEYS) - COUNTER_KEYS)}"
     )
+
+
+def _authority_producers(count: int) -> list[str]:
+    return [
+        f"pkg.module{index:02d}:producer_with_a_long_qualname" for index in range(count)
+    ]
+
+
+def test_html_authority_row_never_dumps_an_unbounded_producer_string(
+    tmp_path: Path,
+) -> None:
+    """A cell is not a place to paste a thousand qualnames.
+
+    The panel dumped every producer comma-joined into one cell: forty thousand
+    characters on this repository, unreadable and unclickable.
+    """
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(
+                level="exact_contract_ir",
+                score=5,
+                producers=_authority_producers(40),
+            )
+        ],
+        enforcement_enabled=False,
+    )
+
+    table = html[html.index(">Propose<") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    row = re.findall(r"<tr>(.*?)</tr>", body, re.S)[0]
+    cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+    visible = [" ".join(re.sub(r"<[^>]+>", " ", cell).split()) for cell in cells]
+
+    # the owner leads the row, on its own, and is the thing users take away
+    assert visible[0].startswith("pkg.module00:producer_with_a_long_qualname")
+    assert "data-authority-copy" in cells[0]
+    # the rest are disclosed, not dumped: summary states the count only
+    producers_cell = next(cell for cell in cells if "authority-producers" in cell)
+    summary = re.search(r"<summary[^>]*>(.*?)</summary>", producers_cell, re.S)
+    assert summary is not None
+    assert "39 more" in summary.group(1)
+    assert "<details" in producers_cell
+    # nothing is an endless string when collapsed: measure what the row shows
+    # before any disclosure is opened
+    collapsed = [
+        " ".join(
+            re.sub(
+                r"<[^>]+>",
+                " ",
+                re.sub(
+                    r"</summary>.*?</details>", "</summary></details>", cell, flags=re.S
+                ),
+            ).split()
+        )
+        for cell in cells
+    ]
+    assert max(len(cell) for cell in collapsed) < 120, collapsed
+
+
+def test_html_authority_lone_producer_needs_no_disclosure(tmp_path: Path) -> None:
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(level="exact_contract_ir", score=5, producers=["pkg.only:one"])
+        ],
+        enforcement_enabled=False,
+    )
+
+    table = html[html.index(">Propose<") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    assert "authority-producers" not in body
+
+
+def test_html_authority_tabs_speak_product_language(tmp_path: Path) -> None:
+    """Tab labels name what a user looks for, with the domain term on hover."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[
+            _governed_sink(
+                contract="baseline.publication/v1",
+                sink="pkg.mod:owner",
+                status="authoritative",
+                resolution="resolved",
+            )
+        ],
+        candidates=[
+            _candidate(level="exact_contract_ir", score=5, producers=["pkg.a:owner"])
+        ],
+    )
+
+    nav = html[html.index('data-subtab-group="semantic-authority"') :][:1200]
+    assert ">Contracts " in nav
+    assert ">Discovery " in nav
+    # the jargon is demoted, not deleted: never the label, always the tooltip
+    assert ">Governed sinks " not in nav
+    assert 'title="Governed sinks' in nav

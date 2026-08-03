@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -314,10 +315,13 @@ def test_block_diagram_medium_graph_uses_comfortable_density() -> None:
         aria_label="Medium graph",
     )
 
+    # The 900px literal here was the old minimum render width: this graph is
+    # 144 units wide, so the floor inflated it 6.25x and every box with it.
+    # Density still selects the type scale; the width is now the graph's own.
     assert_all_contained(
         svg,
         'data-graph-density="comfortable"',
-        "width:100%;max-width:900px",
+        "width:100%;max-width:144px",
     )
 
 
@@ -949,3 +953,59 @@ def test_finding_card_renders_all_slots_and_severity_fallback() -> None:
         "severity-badge severity-warning",  # reused severity badge
         "Overloaded module",
     )
+
+
+def _chain_diagram_geometry(node_count: int) -> tuple[float, float, float]:
+    """Render a linear chain and return (viewbox width, height, render width)."""
+
+    from codeclone.report.html.widgets.dep_graph_layout import (
+        BlockNodeStyle,
+        render_block_diagram,
+    )
+
+    nodes = [f"pkg.layer{index}" for index in range(node_count)]
+    svg = render_block_diagram(
+        nodes,
+        [(nodes[index], nodes[index + 1]) for index in range(node_count - 1)],
+        style_fn=lambda _node: BlockNodeStyle(
+            fill="var(--bg-surface)",
+            text_fill="var(--text-primary)",
+        ),
+        aria_label="dependency chain",
+    )
+    view_box = re.search(r'viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"', svg)
+    width_match = re.search(r"max-width:(\d+)px", svg)
+    assert view_box is not None
+    assert width_match is not None
+    return (
+        float(view_box.group(1)),
+        float(view_box.group(2)),
+        float(width_match.group(1)),
+    )
+
+
+def test_block_diagram_never_upscales_a_graph_that_already_fits() -> None:
+    """A narrow graph must render at its own size, not stretched to the pane.
+
+    The render width carried a minimum, so a 574-unit graph was blown up to
+    1040px: boxes a third of a screen wide and a chain two viewports tall.
+    """
+
+    vb_w, vb_h, render_width = _chain_diagram_geometry(20)
+
+    # never magnified: the pane may shrink a graph, never inflate it
+    assert render_width <= vb_w * 1.02, (
+        f"graph upscaled {render_width / vb_w:.2f}x ({vb_w:.0f} -> {render_width:.0f})"
+    )
+    # and the whole graph stays near one screen instead of paging: this chain
+    # rendered 1848px tall before, two viewports of mostly whitespace
+    assert vb_h <= 1100, f"a 20-node chain is {vb_h:.0f} units tall"
+
+
+def test_block_diagram_keeps_a_short_chain_inside_one_viewport() -> None:
+    """The maintainer's case: four boxes are a graph, not a slideshow."""
+
+    vb_w, vb_h, render_width = _chain_diagram_geometry(4)
+    rendered_height = vb_h * (render_width / vb_w)
+
+    assert rendered_height <= 700, f"a four-node chain renders {rendered_height:.0f}px"

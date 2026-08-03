@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ...messages.glossary import GLOSSARY
 from ..primitives.escape import _escape_html
 
 
@@ -44,11 +45,15 @@ def render_split_tabs(
             )
         else:
             badge = f'<span class="tab-count">{count}</span>'
+        # A product label on the tab, the domain term on hover: renaming a tab
+        # for readers must not delete the vocabulary the docs use.
+        glossary_term = GLOSSARY.get(label.lower(), "")
+        title_attr = f' title="{_escape_html(glossary_term)}"' if glossary_term else ""
         nav.append(
             f'<button class="clone-nav-btn{active}" '
             f'data-clone-tab="{tab_id}" '
             f'data-subtab-group="{_escape_html(group_id)}" '
-            f'type="button">{_escape_html(label)} {badge}</button>'
+            f'type="button"{title_attr}>{_escape_html(label)} {badge}</button>'
         )
     nav.append("</nav>")
 
