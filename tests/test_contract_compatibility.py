@@ -218,3 +218,44 @@ def test_contract_and_config_authorities_are_not_redeclared() -> None:
             "codeclone/config/resolver.py"
         ],
     }
+
+
+def test_every_public_contract_constant_is_exported() -> None:
+    """``__all__`` is the contract surface of ``codeclone.contracts``.
+
+    A public constant missing from it is a version or digest domain that
+    consumers cannot import by contract, only by reaching into the module.
+    """
+    import codeclone.contracts as contracts_pkg
+
+    tree = ast.parse(Path(contracts_pkg.__file__).read_text(encoding="utf-8"))
+
+    defined: set[str] = set()
+    exported: set[str] = set()
+    for node in tree.body:
+        targets: list[str] = []
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            targets = [
+                target.id for target in node.targets if isinstance(target, ast.Name)
+            ]
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+            value = node.value
+        if targets == ["__all__"] and isinstance(value, (ast.List, ast.Tuple)):
+            exported = {
+                element.value
+                for element in value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+        defined.update(
+            name for name in targets if name.isupper() and not name.startswith("_")
+        )
+
+    unexported = sorted(defined - exported)
+    assert unexported == [], f"public contract constants not in __all__: {unexported}"
+
+    # The other direction: __all__ must not promise a symbol that is not there.
+    dangling = sorted(name for name in exported if not hasattr(contracts_pkg, name))
+    assert dangling == [], f"__all__ names undefined symbols: {dangling}"
