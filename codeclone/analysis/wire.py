@@ -187,6 +187,31 @@ def _build_wire_fields() -> dict[type[ast.AST], tuple[str, ...]]:
 
 _WIRE_FIELDS: Final[dict[type[ast.AST], tuple[str, ...]]] = _build_wire_fields()
 
+
+_WireContract = tuple[tuple[str, ...], frozenset[str], tuple[str, ...], tuple[str, ...]]
+
+
+def _build_wire_field_check() -> dict[type[ast.AST], _WireContract]:
+    """Resolve each type's whole wire contract once, for the per-node read.
+
+    ``allowed`` and the resulting ``unknown`` tuple are pure functions of the
+    node type, so deriving them per emitted node recomputed a constant millions
+    of times. ``class_fields`` is carried by identity so the check can tell a
+    normal node — whose ``_fields`` *is* the class attribute — from an instance
+    that shadows it, which must still be scanned and refused.
+    """
+
+    table: dict[type[ast.AST], _WireContract] = {}
+    for node_type, node_fields in _WIRE_FIELDS.items():
+        allowed = frozenset(node_fields) | _EXCLUDED_FIELDS
+        class_fields = node_type._fields
+        unknown = tuple(field for field in class_fields if field not in allowed)
+        table[node_type] = (node_fields, allowed, class_fields, unknown)
+    return table
+
+
+_WIRE_FIELD_CHECK: Final[dict[type[ast.AST], _WireContract]] = _build_wire_field_check()
+
 _IDENTIFIER: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _STRUCTURAL_INT_FIELDS: Final = frozenset({"conversion", "is_async", "level", "simple"})
 _COMPREHENSION_TYPES: Final = (
@@ -228,11 +253,7 @@ def _emit_node(
     cfg: NormalizationConfig,
     bindings: BindingContext,
 ) -> str:
-    node_type = type(node)
-    fields = _WIRE_FIELDS.get(node_type)
-    if fields is None:
-        raise WireUnsupportedNode(f"unsupported AST node: {node_type.__name__}")
-    _check_fields(node, fields)
+    node_type, fields = _wire_contract(node)
 
     if isinstance(node, ast.AugAssign):
         return _emit_aug_assign(node, cfg, bindings)
@@ -256,14 +277,30 @@ def _emit_node(
     return "".join(parts)
 
 
-def _check_fields(node: ast.AST, fields: tuple[str, ...]) -> None:
-    allowed = frozenset(fields) | _EXCLUDED_FIELDS
-    unknown = tuple(field for field in node._fields if field not in allowed)
+def _wire_contract(node: ast.AST) -> tuple[type[ast.AST], tuple[str, ...]]:
+    """Admit one node to the wire and hand back its reviewed field contract.
+
+    Both emit paths need the same three things — the node's type, its field
+    tuple, and the refusal of anything outside the whitelist — so they read
+    them from one table in one lookup here rather than repeating the sequence.
+    """
+
+    node_type = type(node)
+    entry = _WIRE_FIELD_CHECK.get(node_type)
+    if entry is None:
+        raise WireUnsupportedNode(f"unsupported AST node: {node_type.__name__}")
+    fields, allowed, class_fields, unknown = entry
+    node_fields = node._fields
+    if node_fields is not class_fields:
+        # The instance shadows its type's field tuple, so the precomputed
+        # verdict does not describe it. Scan it.
+        unknown = tuple(field for field in node_fields if field not in allowed)
     if unknown:
         joined = ",".join(unknown)
         raise WireUnsupportedNode(
-            f"unsupported fields on {type(node).__name__}: {joined}"
+            f"unsupported fields on {node_type.__name__}: {joined}"
         )
+    return node_type, fields
 
 
 def _emit_field(
@@ -367,11 +404,7 @@ def _emit_comprehension(
     inner: BindingContext,
     iter_bindings: BindingContext,
 ) -> str:
-    node_type = type(node)
-    fields = _WIRE_FIELDS.get(node_type)
-    if fields is None:
-        raise WireUnsupportedNode(f"unsupported AST node: {node_type.__name__}")
-    _check_fields(node, fields)
+    node_type, fields = _wire_contract(node)
     parts: list[str] = [node_type.__name__, "("]
     for index, field in enumerate(fields):
         if index:
