@@ -15450,3 +15450,42 @@ def test_authority_candidate_last_page_offers_no_cursor(tmp_path: Path) -> None:
     continuation = cast("dict[str, object]", page["continuation"])
     assert continuation["omitted"] == 0
     assert "cursor" not in continuation
+
+
+def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
+    """Pins must not be an unbounded retention path.
+
+    Every change intent pins one full run record and pinned runs are exempt
+    from the history LRU. Intents left behind on failure paths therefore held
+    their run for the life of the session with no cap, no TTL and no timestamp
+    on the record -- the one genuinely unbounded retention path in the server.
+    """
+
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    pinned: list[str] = []
+    for index in range(mcp_shared_mod.MAX_PINNED_MCP_RUNS + 3):
+        run_id = f"run-{index:03d}"
+        store.register(_dummy_run_record(tmp_path, run_id))
+        store.pin(run_id)
+        pinned.append(run_id)
+
+    retained = tuple(record.run_id for record in store.records())
+    assert len(retained) <= mcp_shared_mod.MAX_PINNED_MCP_RUNS + 1, (
+        f"pinned runs grew without bound: {len(retained)} retained"
+    )
+    # The newest pins survive; the oldest abandoned ones are released.
+    assert pinned[-1] in retained
+    assert pinned[0] not in retained
+
+
+def test_pinning_keeps_the_most_recent_pins_protected(tmp_path: Path) -> None:
+    """Bounding pins must not evict a live intent's run under the LRU."""
+
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    store.register(_dummy_run_record(tmp_path, "active"))
+    store.pin("active")
+    for index in range(6):
+        store.register(_dummy_run_record(tmp_path, f"noise-{index}"))
+
+    retained = tuple(record.run_id for record in store.records())
+    assert "active" in retained, "an active pin was dropped by history pruning"

@@ -287,6 +287,12 @@ _VALID_HELP_TOPICS = frozenset(
 _VALID_HELP_DETAILS = frozenset({"compact", "normal"})
 DEFAULT_MCP_HISTORY_LIMIT = 4
 MAX_MCP_HISTORY_LIMIT = 10
+# Pinned runs are exempt from the history LRU, so without a ceiling an intent
+# left behind on a failure path retains its whole run for the life of the
+# session. The bound is deliberately well above plausible concurrent-intent
+# counts: releasing a pin that a live intent still needs would break that
+# intent, so this is a backstop against abandonment, not a working limit.
+MAX_PINNED_MCP_RUNS = 10
 _VALID_REPORT_SECTIONS = frozenset(
     {
         "all",
@@ -683,7 +689,10 @@ class CodeCloneMCPRunStore:
         self._lock = RLock()
         self._records: OrderedDict[str, MCPRunRecord] = OrderedDict()
         self._latest_run_id: str | None = None
-        self._pinned_run_ids: set[str] = set()
+        # Insertion-ordered so the oldest pin is identifiable: the record
+        # itself carries no timestamp, and pin order is the only evidence of
+        # which pin has been held longest.
+        self._pinned_run_ids: OrderedDict[str, None] = OrderedDict()
 
     def register(self, record: MCPRunRecord) -> MCPRunRecord:
         with self._lock:
@@ -726,13 +735,15 @@ class CodeCloneMCPRunStore:
             resolved_run_id = self._resolve_run_id(run_id)
             if resolved_run_id is None:
                 raise MCPRunNotFoundError("No matching MCP analysis run is available.")
-            self._pinned_run_ids.add(resolved_run_id)
+            self._pinned_run_ids.pop(resolved_run_id, None)
+            self._pinned_run_ids[resolved_run_id] = None
+            self._release_pins_over_cap_locked()
             return resolved_run_id
 
     def unpin(self, run_id: str) -> None:
         with self._lock:
             resolved_run_id = self._resolve_run_id(run_id) or run_id
-            self._pinned_run_ids.discard(resolved_run_id)
+            self._pinned_run_ids.pop(resolved_run_id, None)
             self._prune_unpinned_locked()
 
     def clear(self) -> tuple[str, ...]:
@@ -754,7 +765,22 @@ class CodeCloneMCPRunStore:
                 break
             else:
                 break
-        self._pinned_run_ids.intersection_update(self._records)
+        for run_id in tuple(self._pinned_run_ids):
+            if run_id not in self._records:
+                self._pinned_run_ids.pop(run_id, None)
+
+    def _release_pins_over_cap_locked(self) -> None:
+        """Release the longest-held pins once the ceiling is exceeded.
+
+        Oldest-first: a pin held across many later intents is the one most
+        likely to belong to an abandoned intent. Released runs become ordinary
+        history and the existing LRU decides whether they survive.
+        """
+
+        while len(self._pinned_run_ids) > MAX_PINNED_MCP_RUNS:
+            oldest_run_id, _ = self._pinned_run_ids.popitem(last=False)
+            del oldest_run_id
+        self._prune_unpinned_locked()
 
     def _unpinned_count_locked(self) -> int:
         return sum(1 for run_id in self._records if run_id not in self._pinned_run_ids)
