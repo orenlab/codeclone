@@ -15,6 +15,7 @@ from ..baseline.trust import current_python_tag
 from ..config.memory import MemoryConfig, resolve_memory_config
 from ..report.meta import current_report_timestamp_utc
 from ..utils.coerce import as_mapping
+from ..utils.mapping_paths import section
 from ..utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -110,11 +111,8 @@ def analysis_fingerprint_from_report(report_document: dict[str, object]) -> str:
 
 
 def report_digest_from_report(report_document: dict[str, object]) -> str | None:
-    integrity = as_mapping(report_document.get("integrity"))
-    digests = as_mapping(integrity.get("digests"))
-    comparison = as_mapping(digests.get("comparison"))
-    value = str(comparison.get("value", "")).strip()
-    return value or None
+    comparison = section(report_document, "integrity.digests.comparison")
+    return str(comparison.get("value", "")).strip() or None
 
 
 def module_repo_path(module_key: str) -> str:
