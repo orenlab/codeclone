@@ -392,7 +392,6 @@ class CFGBuilder:
             if handler.type is not None:
                 symbol_config = replace(
                     self.normalization_config,
-                    normalize_attributes=False,
                     normalize_names=False,
                 )
                 type_repr = emit_wire(handler.type, symbol_config, self.bindings)

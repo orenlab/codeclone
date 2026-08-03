@@ -62,6 +62,7 @@ class CLIArgsLike(Protocol):
     root: str | Path
     baseline: str | Path
     baseline_scope_id: str | None
+    project_label: str | None
     cache_path: str | Path | None
     html_out: str | None
     json_out: str | None

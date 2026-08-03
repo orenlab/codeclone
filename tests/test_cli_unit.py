@@ -11,6 +11,7 @@ import sys
 import webbrowser
 from argparse import Namespace
 from collections.abc import Callable
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -148,6 +149,7 @@ def _baseline_state_args(**overrides: object) -> SimpleNamespace:
         "max_baseline_size_mb": 10,
         "update_baseline": False,
         "baseline_scope_id": "018f4b8e-5a5f-7d35-9c21-4af5d18df420",
+        "project_label": None,
         "fail_on_new": False,
         "skip_metrics": False,
         "fail_on_new_metrics": False,
@@ -209,6 +211,72 @@ def test_baseline_state_recovery_and_invalid_scope_are_typed(
         is None
     )
     assert "baseline_scope_id" in "\n".join(printer.lines)
+
+
+@pytest.mark.parametrize("console_kind", ["rich", "plain"])
+def test_missing_scope_id_error_keeps_config_table_name(
+    tmp_path: Path,
+    console_kind: str,
+) -> None:
+    """`[tool.codeclone]` is the only actionable token in this error.
+
+    Both console implementations strip Rich markup tags, so the message must
+    reach the user through a non-markup print path.
+    """
+    console: Any = (
+        cli_console.make_console(no_color=True, width=200)
+        if console_kind == "rich"
+        else cli_console.PlainConsole()
+    )
+    buffer = StringIO()
+    with redirect_stdout(buffer):
+        cli_baselines_mod._required_scope_id(
+            args=_baseline_state_args(
+                baseline_scope_id=None,
+                update_baseline=True,
+            ),
+            baseline_path=tmp_path / "baseline.json",
+            console=console,
+        )
+
+    printed = buffer.getvalue()
+    assert "CONTRACT ERROR:" in printed
+    assert "[error]" not in printed
+    assert "[tool.codeclone]" in printed
+
+
+def test_baseline_update_forwards_configured_project_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolved config label must reach the publisher, not stop at the CLI."""
+
+    forwarded: dict[str, object] = {}
+
+    def _capture(**kwargs: object) -> None:
+        forwarded.update(kwargs)
+
+    monkeypatch.setattr(cli_baselines_mod, "publish_baseline", _capture)
+    monkeypatch.setattr(baseline_mod.Baseline, "load", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        baseline_mod.Baseline,
+        "verify_compatibility",
+        lambda *_a, **_k: None,
+    )
+
+    cli_baselines_mod.resolve_clone_baseline_state(
+        args=_baseline_state_args(
+            update_baseline=True,
+            project_label="Acme Payments",
+        ),
+        baseline_path=tmp_path / "baseline.json",
+        baseline_exists=False,
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+        console=_RecordingPrinter(),
+        required_lanes=frozenset(),
+    )
+
+    assert forwarded["project_label"] == "Acme Payments"
 
 
 @pytest.mark.parametrize("fail_on_new", [False, True])

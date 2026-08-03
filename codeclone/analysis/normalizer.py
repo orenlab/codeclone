@@ -14,7 +14,6 @@ from dataclasses import dataclass
 class NormalizationConfig:
     ignore_docstrings: bool = True
     ignore_type_annotations: bool = True
-    normalize_attributes: bool = True
     normalize_constants: bool = True
     normalize_names: bool = True
 

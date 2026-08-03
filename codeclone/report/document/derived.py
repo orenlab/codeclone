@@ -19,6 +19,9 @@ from ...domain.findings import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
+    CLONE_NOVELTY_KNOWN,
+    CLONE_NOVELTY_NEW,
+    CLONE_NOVELTY_UNAVAILABLE,
     FAMILY_AUTHORITY,
     FAMILY_CLONE,
     FAMILY_CLONES,
@@ -475,7 +478,7 @@ def _build_derived_suggestions(
     ]
 
 
-_REVIEW_QUEUE_SCHEMA_VERSION: Final = "2"
+_REVIEW_QUEUE_SCHEMA_VERSION: Final = "3"
 _REVIEW_SEVERITIES: Final = ("critical", "warning", "info")
 _REVIEW_FAMILIES: Final = (
     "clones",
@@ -637,7 +640,9 @@ def _finding_identity(group: Mapping[str, object]) -> dict[str, object]:
         "category": str(group.get("category", "")),
         "severity": str(group.get("severity", SEVERITY_INFO)),
         "priority": _as_float(group.get("priority")),
-        "novelty": str(group.get("novelty") or "known"),
+        # A finding the baseline never compared is neither new nor known.
+        # Defaulting to "known" would assert a comparison that never happened.
+        "novelty": str(group.get("novelty") or CLONE_NOVELTY_UNAVAILABLE),
     }
 
 
@@ -678,7 +683,9 @@ def _suggestion_review_item(suggestion: Suggestion) -> dict[str, object]:
         "category": suggestion.category,
         "severity": suggestion.severity,
         "priority": suggestion.priority,
-        "novelty": "known",
+        # A suggestion with no backing finding group carries no baseline
+        # comparison, so its novelty is unavailable rather than known.
+        "novelty": CLONE_NOVELTY_UNAVAILABLE,
         **_suggestion_review_fields(suggestion),
     }
 
@@ -708,7 +715,7 @@ def _dedup_append(
 def _review_summary(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
     by_severity = dict.fromkeys(_REVIEW_SEVERITIES, 0)
     by_family = dict.fromkeys(_REVIEW_FAMILIES, 0)
-    by_novelty = {"new": 0, "known": 0}
+    by_novelty = {CLONE_NOVELTY_NEW: 0, CLONE_NOVELTY_KNOWN: 0}
     actionable = 0
     for item in items:
         severity = str(item.get("severity"))
@@ -716,7 +723,10 @@ def _review_summary(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
             by_severity[severity] += 1
         family = str(item.get("family"))
         by_family[family] = by_family.get(family, 0) + 1
-        by_novelty["new" if str(item.get("novelty")) == "new" else "known"] += 1
+        # Every novelty gets its own bucket. Folding anything that is not "new"
+        # into "known" would report an uncompared finding as a compared one.
+        novelty = str(item.get("novelty"))
+        by_novelty[novelty] = by_novelty.get(novelty, 0) + 1
         if item.get("has_action"):
             actionable += 1
     return {

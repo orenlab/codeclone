@@ -91,11 +91,8 @@ Without it:
 ```text
 CONTRACT ERROR:
 baseline_scope_id is required for baseline update and gating; set a stable
-canonical UUID under .
+canonical UUID under [tool.codeclone].
 ```
-
-The message ends with a bare `.` because the console currently swallows the
-bracketed table name. The table it means is `[tool.codeclone]`.
 
 Generate it once (`python -c "import uuid; print(uuid.uuid4())"`), commit it, and
 never change it — it is what stops one project's baseline being compared against
@@ -130,7 +127,7 @@ Seven new keys, plus the authority array of tables:
 | Key | Flag | Effect |
 |-----|------|--------|
 | `baseline_scope_id` | — | Required for baseline update and gating |
-| `project_label` | — | Accepted but currently inert |
+| `project_label` | — | Project name recorded in the published baseline metadata |
 | `source_roots` | — | Explicit import roots for module identity |
 | `semantic_authority` | `--semantic-authority` | Report-only authority candidates |
 | `fail_on_authority_violation` | `--fail-on-authority-violation` | Exit 3 on a governed-contract violation |

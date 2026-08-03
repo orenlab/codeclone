@@ -167,8 +167,14 @@ def build_container(
     scope_id: UUID,
     *,
     transition: EpochTransitionEvidence | None = None,
+    project_label: str | None = None,
 ) -> BaselineContainerV3:
-    """Build a complete native v3 container without publishing it."""
+    """Build a complete native v3 container without publishing it.
+
+    ``project_label`` is the operator-facing name from ``[tool.codeclone]``. It
+    is descriptive metadata only: it rides in ``meta`` but stays out of the root
+    digest, exactly like ``created_at``.
+    """
 
     with span(name="baseline.container.build") as build_span:
         observation_lanes = build_observation_lanes(bundle)
@@ -224,7 +230,7 @@ def build_container(
                 ),
                 python_tag=current_python_tag(),
                 created_at=_utc_now_z(),
-                project_label=None,
+                project_label=project_label,
                 root_digest=placeholder,
             ),
             contracts=_container_contracts(bundle),
