@@ -1185,9 +1185,19 @@ _SUGGESTIONS = """\
 
 /* Expandable details */
 .authority-promotion summary{font-size:var(--fs-xs);white-space:nowrap}
+/* A copy button is positioned against its host, never against whatever
+   happens to be positioned further up the tree. Both hosts declare the
+   contract, so a disclosure dropped into any table cell still anchors. */
+.authority-copy-host{position:relative}
+/* Where the host is a table cell, the button sits beside the value in flow:
+   floating it would overlay the qualname it is meant to copy. Only the code
+   block floats its button, over padding reserved for exactly that. */
+.authority-owner{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
+.authority-owner code{overflow-wrap:anywhere}
+.authority-owner .authority-copy-btn{position:static;flex:0 0 auto}
 .authority-promotion-body{position:relative;margin-top:var(--sp-2)}
 .authority-promotion-body .codebox{margin:0;font-family:var(--font-mono);font-size:var(--fs-xs);
-  white-space:pre;overflow-x:auto}
+  white-space:pre-wrap;overflow-wrap:anywhere;padding-right:var(--sp-8)}
 .authority-copy-btn{position:absolute;top:var(--sp-2);right:var(--sp-2);z-index:1;
   font-size:var(--fs-2xs);padding:var(--sp-1) var(--sp-2)}
 .authority-copy-btn--ok{color:var(--success);border-color:var(--success)}

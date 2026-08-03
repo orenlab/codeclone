@@ -1338,3 +1338,76 @@ def test_neutral_meter_is_tokenised_and_not_semantic() -> None:
     )
     assert rule is not None, "the neutral meter has no fill rule"
     assert "var(--error)" not in rule and "var(--warning)" not in rule
+
+
+def test_every_copy_button_has_a_positioned_host() -> None:
+    """An absolutely positioned control must be anchored by its own host.
+
+    The owner cell's copy button was positioned absolutely inside a host that
+    never established a containing block, so it resolved against the tab panel
+    and rendered at the page's top-right corner -- visible in every report with
+    discovery candidates, even with the disclosure closed.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    html = _authority_panel_html()
+    for match in re.finditer(r"data-authority-copy", html):
+        before = html[: match.start()]
+        host_at = before.rfind("authority-copy-host")
+        opened_at = before.rfind("<div")
+        assert host_at != -1 and host_at > before.rfind("</div>"), (
+            "a copy button sits outside any copy host"
+        )
+        assert opened_at != -1
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".authority-copy-host" in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None, ".authority-copy-host has no rule"
+    assert "position:relative" in rule, "the copy host establishes no containing block"
+
+
+def test_promotion_code_block_fits_its_container() -> None:
+    """A TOML proposal must not be clipped mid-word by the cell that holds it."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".authority-promotion-body .codebox"
+            in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None
+    assert "white-space:pre-wrap" in rule, "long TOML lines still cannot wrap"
+    assert "overflow-wrap:anywhere" in rule or "word-break" in rule
+
+
+def test_owner_copy_button_sits_beside_its_value_not_over_it() -> None:
+    """In a table cell the control shares the row; it does not float over it."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".authority-owner .authority-copy-btn"
+            in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None, "the owner cell button has no layout rule"
+    assert "position:static" in rule, "the owner button still floats over the qualname"

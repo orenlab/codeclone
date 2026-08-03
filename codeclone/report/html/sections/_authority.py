@@ -183,7 +183,7 @@ def _candidate_promotion_html(item: Mapping[str, object]) -> str:
     return (
         '<details class="authority-promotion">'
         '<summary class="authority-promotion-summary">Propose</summary>'
-        '<div class="authority-promotion-body">'
+        '<div class="authority-promotion-body authority-copy-host">'
         '<button class="btn authority-copy-btn" type="button" '
         "data-authority-copy>Copy</button>"
         f'<pre class="codebox"><code>{snippet}</code></pre>'
