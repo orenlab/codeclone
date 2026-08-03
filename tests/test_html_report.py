@@ -5794,3 +5794,24 @@ def test_html_authority_tabs_speak_product_language(tmp_path: Path) -> None:
     # the jargon is demoted, not deleted: never the label, always the tooltip
     assert ">Governed sinks " not in nav
     assert 'title="Governed sinks' in nav
+
+
+def test_html_report_every_main_tab_renders_an_icon() -> None:
+    """No tab may ship as bare text while its siblings carry icons.
+
+    Authority was the only main tab without one. The invariant is written over
+    every tab rather than that one, so the next tab added cannot arrive naked.
+    """
+
+    html = build_html_report(
+        func_groups={}, block_groups={}, segment_groups={}, title="Icons"
+    )
+
+    buttons = re.findall(
+        r'<button class="main-tab"[^>]*data-tab="([a-z-]+)"[^>]*>(.*?)</button>',
+        html,
+        re.S,
+    )
+    assert buttons, "no main tabs rendered"
+    naked = [tab for tab, markup in buttons if "main-tab-icon" not in markup]
+    assert not naked, f"main tabs rendered without an icon: {naked}"
