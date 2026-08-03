@@ -17,7 +17,7 @@ The change-control surface (`codeclone.budget`, `codeclone.controller_insights`,
 |----------|-------|------|
 | `PATCH_TRAIL_SCHEMA_VERSION` | "1" | Audit trail format for declared/changed/untouched files, scope check, verification, workspace hygiene |
 | `AUDIT_PROJECTION_VERSION` | "audit-v1" | Immutable audit event storage for start/finish artifacts and repair trails |
-| `BASELINE_SCHEMA_VERSION` | "2.1" | Baseline version for health/patch_health_delta computation |
+| `BASELINE_SCHEMA_VERSION` | "3.0" | Baseline version for health/patch_health_delta computation |
 | Session intent constraint | One active per MCP session | Calling `start_controlled_change` before finishing evicts prior intent; recover via `manage_change_intent(action='recover')` |
 | Scope shape | `{"allowed_files": ["path.py", ...]}` | Relative paths under project root; verified from live testing |
 

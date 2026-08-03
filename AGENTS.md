@@ -267,7 +267,7 @@ uv run pytest -q tests/test_sync_integrations.py
 
 ---
 
-## 4) Baseline contract (v2, stable)
+## 4) Baseline contract (v3, stable)
 
 ### Versioned constants (single source of truth)
 
@@ -278,11 +278,11 @@ doc.** Current central values (verified at write time):
 
 | Constant                                 | Current value   |
 |------------------------------------------|-----------------|
-| `BASELINE_SCHEMA_VERSION`                | `2.1`           |
-| `BASELINE_FINGERPRINT_VERSION`           | `1`             |
-| `CACHE_VERSION`                          | `2.11`          |
-| `REPORT_SCHEMA_VERSION`                  | `2.12`          |
-| `METRICS_BASELINE_SCHEMA_VERSION`        | `1.2`           |
+| `BASELINE_SCHEMA_VERSION`                | `3.0`           |
+| `BASELINE_FINGERPRINT_VERSION`           | `3`             |
+| `CACHE_VERSION`                          | `3.2`           |
+| `REPORT_SCHEMA_VERSION`                  | `3.0`           |
+| `METRICS_BASELINE_SCHEMA_VERSION`        | `1.3`           |
 | `ENGINEERING_MEMORY_SCHEMA_VERSION`      | `1.7`           |
 | `SEMANTIC_INDEX_FORMAT_VERSION`          | `3`             |
 | `SEMANTIC_PROJECTION_REVISION_VERSION`   | `1`             |
@@ -322,35 +322,87 @@ versions from another document.
 
 ### Baseline file structure (canonical)
 
+Schema `3.0` is a lane container (see `codeclone/baseline/container.py`),
+not the flat v2 `meta`/`clones`/`metrics` layout. Skeleton (elided values
+as `…`):
+
 ```json
 {
+  "format": "codeclone-baseline",
+  "baseline_scope_id": "…",
   "meta": {
+    "container_version": "3.0",
     "generator": {
       "name": "codeclone",
       "version": "X.Y.Z"
     },
-    "schema_version": "2.1",
-    "fingerprint_version": "1",
     "python_tag": "cp314",
     "created_at": "2026-02-08T14:20:15Z",
-    "payload_sha256": "…"
+    "project_label": "…",
+    "root_digest": {
+      "domain": "codeclone.baseline.root.v1",
+      "algorithm": "sha256",
+      "value": "…"
+    }
   },
-  "clones": {
-    "functions": [],
-    "blocks": []
+  "contracts": {
+    "BASELINE_FINGERPRINT_VERSION": "3",
+    "…": "required contract versions sampled at write time"
   },
-  "metrics": {
-    "...": "optional embedded snapshot"
-  }
+  "lanes": {
+    "clones.functions": {
+      "descriptor": {
+        "name": "clones.functions",
+        "payload_schema": "…",
+        "algorithm_revision": "…",
+        "required_contracts": []
+      },
+      "digest": {
+        "domain": "codeclone.baseline.lane.v1",
+        "algorithm": "sha256",
+        "value": "…"
+      },
+      "observation_digest": "…",
+      "payload": "…",
+      "required": false
+    },
+    "…": "one entry per enabled observation lane"
+  },
+  "observation_contract": {
+    "enabled_lanes": [],
+    "observation_digest_version": "…",
+    "descriptors": []
+  },
+  "source": {
+    "analysis_scope_digest": "…",
+    "module_identity_manifest_digest": "…",
+    "module_registry_digest": "…",
+    "observation_digest": "…"
+  },
+  "transition": "one-shot 2.1→3.0 epoch-transition evidence, when migrated"
 }
 ```
 
 ### Rules
 
-- `schema_version` is **baseline schema**, not package version.
-- Runtime writes baseline schema `2.1`.
-- Runtime accepts baseline schema `1.0` and `2.0`–`2.1` (governed by
-  `_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR` in `codeclone/baseline/trust.py`).
+- `meta.container_version` is the **baseline schema version**, not the
+  package version. The loader maps it onto `schema_version`
+  (`codeclone/baseline/clone_baseline.py`).
+- Runtime writes the current `BASELINE_SCHEMA_VERSION` = `3.0`.
+- Acceptance is **exact match**, not a range: `verify_compatibility` in both
+  baseline containers (`codeclone/baseline/clone_baseline.py` and
+  `codeclone/baseline/metrics_baseline.py`) compares the stored schema
+  version against the current `BASELINE_SCHEMA_VERSION`; any other value
+  fails with `MISMATCH_SCHEMA_VERSION` and the baseline is untrusted. There
+  is no minor-version acceptance window and no downgrade path.
+- The only cross-version path is the one-shot legacy migration in
+  `codeclone/baseline/transition.py`: `read_legacy_transition` authenticates
+  the exact bytes of a schema-`2.1` artifact (generator match, canonical
+  sorted-unique clone ids, constant-time `payload_sha256` check), records
+  epoch-transition evidence targeting schema `3.0`, and imports **no** lane
+  data — every lane is regenerated from the current run.
+  `preserve_legacy_backup` keeps the legacy bytes once as an immutable
+  `*.v2.<digest>.json` backup and never overwrites it.
 - Baseline novelty is **baseline-relative**, not patch-relative:
   `novelty="known"` means a finding fingerprint is accepted by the trusted
   baseline. It does not prove that the current patch did not introduce or
@@ -359,13 +411,18 @@ versions from another document.
   (`compare_runs` / `check_patch_contract(mode="verify")`), not a single run's
   baseline novelty.
 - Compatibility is tied to:
-    - `fingerprint_version`
-    - `python_tag`
-    - `generator.name == "codeclone"`
-- `payload_sha256` is computed from a **canonical payload**:
-    - stable key order
-    - clone id lists are **sorted and unique**
-    - integrity check uses constant‑time compare (e.g., `hmac.compare_digest`)
+    - schema version (exact match, above)
+    - `fingerprint_version` (exact match)
+    - `python_tag`, `baseline_scope_id`, and per-lane required contracts
+      (lane-level trust: one stale lane is reported as unavailable instead
+      of condemning the whole container)
+    - `generator.name == "codeclone"` (checked at container read)
+- Integrity is digest-based: every lane carries a `digest` and the container
+  carries `meta.root_digest` over the lane digests
+  (`codeclone/baseline/container_digest.py`); comparisons use constant-time
+  `hmac.compare_digest`. The legacy `payload_sha256` canonical-payload check
+  (stable key order, sorted-unique clone id lists) survives only inside the
+  2.1→3.0 transition authenticator.
 
 ### Trust model
 

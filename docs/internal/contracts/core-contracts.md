@@ -19,11 +19,11 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 
 | Constant | Value | Scope | Constraint |
 |----------|-------|-------|-----------|
-| `BASELINE_SCHEMA_VERSION` | `"2.1"` | baseline.json structure | Defines JSON schema for baseline artifacts. Bump only when baseline dict structure changes. |
-| `BASELINE_FINGERPRINT_VERSION` | `"1"` | fingerprint algorithm | Never change without explicit `BASELINE_FINGERPRINT_VERSION` review. Alters cloning semantics. |
-| `CACHE_VERSION` | `"2.11"` | analysis cache format | Invalidates `.codeclone/cache.json` on mismatch. Bump on cache layout or serialization change. |
-| `REPORT_SCHEMA_VERSION` | `"2.12"` | report artifact JSON | Governs report.json, report.sarif structure. Bump on schema shape change. |
-| `METRICS_BASELINE_SCHEMA_VERSION` | `"1.2"` | metrics baseline JSON | Structure of the metrics baseline artifact used for regression gating. |
+| `BASELINE_SCHEMA_VERSION` | `"3.0"` | baseline.json structure | Defines JSON schema for baseline artifacts. Bump only when baseline dict structure changes. |
+| `BASELINE_FINGERPRINT_VERSION` | `"3"` | fingerprint algorithm | Never change without explicit `BASELINE_FINGERPRINT_VERSION` review. Alters cloning semantics. |
+| `CACHE_VERSION` | `"3.2"` | analysis cache format | Invalidates `.codeclone/cache.json` on mismatch. Bump on cache layout or serialization change. |
+| `REPORT_SCHEMA_VERSION` | `"3.0"` | report artifact JSON | Governs report.json, report.sarif structure. Bump on schema shape change. |
+| `METRICS_BASELINE_SCHEMA_VERSION` | `"1.3"` | metrics baseline JSON | Structure of the metrics baseline artifact used for regression gating. |
 | `PATCH_TRAIL_SCHEMA_VERSION` | `"1"` | audit trail encoding | Controls patch_trail.json serialization in intent workspaces. |
 | `AUDIT_PROJECTION_VERSION` | `"audit-v1"` | audit event marshaling | Semantic versioning for audit fact format. |
 | `MEMORY_PROJECTION_VERSION` | `"memory-v1"` | engineering memory events | Semantic versioning for memory projection codec. |
@@ -43,7 +43,7 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 | `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `"1"` | profile manifest | Profile metadata structure. |
 | `IDE_GOVERNANCE_PROTOCOL_VERSION` | `2` (int) | IDE MCP protocol | Major version of IDE governance API. Bumps break all IDE clients. |
 | `TRAJECTORY_QUALITY_SCORE_VERSION` | `"2"` | quality scoring algorithm | Determines how quality scores are computed. |
-| `METRICS_BASELINE_SCHEMA_VERSION` | `"1.2"` | metrics baseline storage | Metrics artifact encoding version. |
+| `METRICS_BASELINE_SCHEMA_VERSION` | `"1.3"` | metrics baseline storage | Metrics artifact encoding version. |
 
 ### Risk Thresholds and Defaults
 
@@ -150,7 +150,7 @@ When a constant is referenced, the source location is always `codeclone.contract
 
 ### Version Mismatches
 
-- **Baseline artifact read fails**: Reader code checks `BASELINE_SCHEMA_VERSION` before parsing baseline.json. If stored version < reader version, the baseline is considered stale and requires re-analysis.
+- **Baseline artifact read fails**: Reader code compares the stored schema version against `BASELINE_SCHEMA_VERSION` with an exact match. Any other stored value — older or newer — makes the baseline untrusted (`MISMATCH_SCHEMA_VERSION`) and requires regeneration; the only cross-version path is the one-shot 2.1→3.0 migration in `codeclone/baseline/transition.py`.
 - **Report artifact incompatibility**: CodeClone tools consuming reports check `REPORT_SCHEMA_VERSION`. A version mismatch blocks report loading.
 - **Cache invalidation**: Analysis cache becomes invalid if `CACHE_VERSION` increments. Cached analysis is discarded on first run.
 

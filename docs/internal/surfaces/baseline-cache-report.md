@@ -25,12 +25,12 @@ This page documents the contracts, mapping, failure modes, and verification requ
 
 | Contract | Value | Schema or Scope |
 |----------|-------|-----------------|
-| `BASELINE_SCHEMA_VERSION` | 2.1 | Baseline JSON structure (fingerprints, metadata, metrics) |
-| `BASELINE_FINGERPRINT_VERSION` | 1 | Fingerprint stability; changes block historical comparison |
-| `CACHE_VERSION` | 2.11 | Cache file serialization and projection format |
-| `REPORT_SCHEMA_VERSION` | 2.12 | Report JSON sections: meta, metrics, findings, derived, integrity, inventory |
+| `BASELINE_SCHEMA_VERSION` | 3.0 | Baseline JSON structure (fingerprints, metadata, metrics) |
+| `BASELINE_FINGERPRINT_VERSION` | 3 | Fingerprint stability; changes block historical comparison |
+| `CACHE_VERSION` | 3.2 | Cache file serialization and projection format |
+| `REPORT_SCHEMA_VERSION` | 3.0 | Report JSON sections: meta, metrics, findings, derived, integrity, inventory |
 | `AUDIT_PROJECTION_VERSION` | audit-v1 | Audit trail projection into report integrity section |
-| `METRICS_BASELINE_SCHEMA_VERSION` | 1.2 | Metrics baseline metrics formatting for `compare_runs` |
+| `METRICS_BASELINE_SCHEMA_VERSION` | 1.3 | Metrics baseline metrics formatting for `compare_runs` |
 
 **Critical rule:** Incrementing `BASELINE_FINGERPRINT_VERSION` breaks all baseline comparisons. Any change to fingerprint logic (AST walk, block hash, slice boundary) requires explicit version bump and migration.
 
@@ -144,11 +144,11 @@ codeclone .
 
 ### Report schema evolution
 
-**Condition:** Report schema bumps from 2.11 to 2.12 (e.g., new field added to findings). Older MCP servers or reports remain at 2.11.
+**Condition:** Report schema bumps (e.g., a new field added to findings, `REPORT_SCHEMA_VERSION` incremented). Older MCP servers or reports remain at the previous version.
 
 **Effect:** `get_report_section(section='findings')` may omit or misinterpret new fields in old reports.
 
-**Recovery:** Reanalyze the repository on the new version to generate a 2.12 report.
+**Recovery:** Reanalyze the repository on the new version to generate a report at the current schema version.
 
 **Prevention:** Report consumers validate `report_schema_version` from the `meta` section before interpreting findings.
 
@@ -213,8 +213,8 @@ git commit -m "chore: update baseline"
 |---------|--------|--------|
 | Cache wire path containment (repo-relative decode, symlink hardening) | supported | `codeclone/cache/projection.py`; memory mem-231f686b92ba4103a6322e683ead9e6a |
 | Security hardening (path validation, config symlink rejection) | supported | `codeclone/cache/projection.py`; memory mem-bc26f97ebb0944a9986de756b857c9d3 |
-| Report schema version 2.12 current | supported | context.reports.schema_version |
-| Baseline schema version 2.1 current | supported | BASELINE_SCHEMA_VERSION contract |
-| Cache version 2.11 current | supported | CACHE_VERSION contract |
+| Report schema version 3.0 current | supported | context.reports.schema_version |
+| Baseline schema version 3.0 current | supported | BASELINE_SCHEMA_VERSION contract |
+| Cache version 3.2 current | supported | CACHE_VERSION contract |
 | MCP tool surface (get_run_summary, get_report_section, compare_runs) | supported | context.mcp_tools.tools |
 | Default paths and size limits | supported | contracts (DEFAULT_BASELINE_PATH, DEFAULT_MAX_CACHE_SIZE_MB, etc.) |
