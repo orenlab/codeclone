@@ -656,6 +656,10 @@ def _normalize_metrics_families(
             item["contract_id"],
             item["sink_identity"],
             item["kind"],
+            # Discovery candidates rank by evidence strength, strongest first,
+            # so the report opens on the proposal worth reading. The identity
+            # tail keeps the order total.
+            -_as_int(item["score"]),
             item["candidate_id"],
         ),
     )

@@ -15,6 +15,7 @@ from codeclone.utils.coerce import as_int as _as_int
 from codeclone.utils.coerce import as_mapping as _as_mapping
 from codeclone.utils.coerce import as_sequence as _as_sequence
 
+from ..primitives.escape import _escape_html
 from ..widgets.components import Tone, insight_block
 from ..widgets.tables import render_rows_table
 from ..widgets.tabs import render_split_tabs
@@ -42,6 +43,68 @@ def _unresolved_reason_text(item: Mapping[str, object]) -> str:
     return ", ".join(reasons) if reasons else "-"
 
 
+#: Candidate rows rendered before the tail is summarised. Discovery proposes on
+#: the scale of the whole tree, so the panel shows the strongest evidence and
+#: says how much it is not showing.
+_CANDIDATE_ROW_LIMIT = 50
+
+#: Discovery proposes; a human decides. Promotion is a copy-paste into
+#: pyproject, never a write by this tool.
+_CANDIDATE_CAPTION = (
+    "Discovered owners, ranked by evidence strength. Authority is a governance "
+    "act: tools propose, humans own. Copy a proposal into "
+    "[[tool.codeclone.authority]] to govern it; nothing here changes your "
+    "configuration."
+)
+
+
+def _sink_population_note(sink_total: int) -> str:
+    """Account for the discovery population instead of dropping it silently."""
+
+    if sink_total <= 0:
+        return ""
+    return (
+        f" Discovery examined {sink_total} semantic sinks; the candidates below "
+        "are the subset carrying shared-fact evidence."
+    )
+
+
+def _candidate_promotion_html(item: Mapping[str, object]) -> str:
+    """Render the paste-ready registry entry for one discovery candidate.
+
+    Promotion is a governance act. This writes nothing: it renders the TOML a
+    human copies into pyproject, with the contract id left as a placeholder
+    because only a human can name the contract a producer is meant to own.
+    """
+
+    producers = [
+        text
+        for value in _as_sequence(item.get("producers"))
+        for text in (str(value).strip(),)
+        if text
+    ]
+    if not producers:
+        return "-"
+    owner, *alternatives = producers
+    lines = [
+        "[[tool.codeclone.authority]]",
+        'contract_id = "<name.this.contract/v1>"',
+        f'canonical_owner = "{owner}"',
+        "allowed_adapters = []",
+        "forbidden_raw_inputs = []",
+        f'required_provenance = ["{owner}"]',
+    ]
+    if alternatives:
+        lines.append("# other producers sharing this fact: " + ", ".join(alternatives))
+    snippet = _escape_html("\n".join(lines))
+    return (
+        "<details class='authority-promotion'>"
+        "<summary>Propose</summary>"
+        f"<pre class='codebox'><code>{snippet}</code></pre>"
+        "</details>"
+    )
+
+
 def _authority_answer(
     *,
     enabled: bool,
@@ -50,6 +113,7 @@ def _authority_answer(
     registry_contracts: int,
     governed_total: int,
     unresolved_total: int,
+    candidate_total: int = 0,
 ) -> tuple[str, Tone]:
     """Decide what the panel claims, worst-known first.
 
@@ -59,6 +123,12 @@ def _authority_answer(
     """
 
     if not enabled:
+        if candidate_total:
+            return (
+                "Semantic-authority discovery is report-only; "
+                f"{candidate_total} discovery candidates found.",
+                "info",
+            )
         return (
             "Semantic-authority discovery is report-only; no registry is configured.",
             "info",
@@ -94,6 +164,16 @@ def render_authority_panel(ctx: ReportContext) -> str:
     )
     active = tuple(item for item in violations if not bool(item.get("suppressed")))
     suppressed = tuple(item for item in violations if bool(item.get("suppressed")))
+    candidates = tuple(
+        item for item in items if str(item.get("item_kind", "")) == "candidate"
+    )
+    # The "sink" item kind is deliberately not rendered as rows: it is the raw
+    # discovery population, one entry per semantic sink in the tree, and it is
+    # evidence for the candidates rather than a list anybody acts on. Its size
+    # is stated below so the kind is accounted for instead of dropped.
+    sink_total = sum(
+        1 for item in items if str(item.get("item_kind", "")) == "sink"
+    ) or _as_int(summary.get("sinks"))
 
     governed_rows = [
         (
@@ -123,6 +203,16 @@ def render_authority_panel(ctx: ReportContext) -> str:
         )
         for item in suppressed
     ]
+    candidate_rows = [
+        (
+            str(item.get("level", "")).replace("_", " "),
+            str(_as_int(item.get("score"))),
+            ", ".join(str(value) for value in _as_sequence(item.get("producers"))),
+            str(item.get("shared_fact", "")),
+            _candidate_promotion_html(item),
+        )
+        for item in candidates[:_CANDIDATE_ROW_LIMIT]
+    ]
 
     enabled = bool(summary.get("enforcement_enabled"))
     unresolved_governed = sum(
@@ -137,6 +227,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         registry_contracts=_as_int(summary.get("registry_contracts")),
         governed_total=len(governed),
         unresolved_total=unresolved_governed,
+        candidate_total=len(candidates),
     )
     governed_panel = render_rows_table(
         headers=("Contract", "Sink", "Status", "Resolution", "Why"),
@@ -157,6 +248,27 @@ def render_authority_panel(ctx: ReportContext) -> str:
         empty_message="No suppressed semantic-authority findings.",
         ctx=ctx,
     )
+    shown = len(candidate_rows)
+    tail_note = (
+        f" Showing the {shown} strongest of {len(candidates)} candidates."
+        if len(candidates) > shown
+        else ""
+    )
+    candidate_caption = (
+        '<p class="muted authority-candidate-note">'
+        f"{_escape_html(_CANDIDATE_CAPTION)}"
+        f"{_escape_html(_sink_population_note(sink_total))}"
+        f"{_escape_html(tail_note)}"
+        "</p>"
+    )
+    candidate_panel = candidate_caption + render_rows_table(
+        headers=("Level", "Score", "Producers", "Shared fact", "Propose"),
+        rows=candidate_rows,
+        empty_message="No semantic-authority discovery candidates.",
+        raw_html_headers=("Propose",),
+        column_types={"Score": "meter"},
+        ctx=ctx,
+    )
     return insight_block(
         question="Is each governed semantic contract owned by one authority?",
         answer=answer,
@@ -166,6 +278,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         tabs=(
             ("violations", "Violations", len(active), active_panel),
             ("governed", "Governed sinks", len(governed), governed_panel),
+            ("candidates", "Candidates", len(candidates), candidate_panel),
             ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
         ),
     )

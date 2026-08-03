@@ -5133,6 +5133,9 @@ def _authority_report_html(
     *,
     governed: list[dict[str, object]],
     active_violations: int = 0,
+    candidates: list[dict[str, object]] | None = None,
+    sinks: int = 0,
+    enforcement_enabled: bool = True,
 ) -> str:
     payload = _metrics_payload(
         health_score=88,
@@ -5158,19 +5161,30 @@ def _authority_report_html(
         }
         for index in range(active_violations)
     ]
+    sink_items = [
+        {
+            "item_kind": "sink",
+            "sink_identity": f"pkg.mod:sink{index}",
+            "authority_status": "unavailable",
+            "resolution_state": "unavailable",
+        }
+        for index in range(sinks)
+    ]
     payload["semantic_authority"] = {
         "summary": {
             "enabled": True,
-            "report_only": False,
-            "enforcement_enabled": True,
+            "report_only": not enforcement_enabled,
+            "enforcement_enabled": enforcement_enabled,
             "registry_version": "1",
             "registry_contracts": len(governed),
             "governed_sinks": len(governed),
+            "candidates": len(candidates or ()),
+            "sinks": sinks,
             "violations": active_violations,
             "active_violations": active_violations,
             "suppressed_violations": 0,
         },
-        "items": [*governed, *violations],
+        "items": [*governed, *violations, *(candidates or ()), *sink_items],
     }
     report_document = build_report_document(
         func_groups={},
@@ -5303,3 +5317,173 @@ def test_html_authority_insight_stays_clean_when_everything_resolved(
 
     assert "0 active violations across 1 governed contracts" in html
     assert "Authority cannot be asserted" not in html
+
+
+def _candidate(
+    *,
+    level: str,
+    score: int,
+    producers: list[str],
+    shared_fact: str = "effect:artifact_write:os.replace",
+) -> dict[str, object]:
+    return {
+        "item_kind": "candidate",
+        "candidate_id": f"{level}-{score}-{'-'.join(producers) or 'none'}",
+        "level": level,
+        "score": score,
+        "producers": producers,
+        "shared_fact": shared_fact,
+        "independence": True,
+        "semantic_divergence": False,
+        "sink_statuses": ["unavailable"],
+    }
+
+
+_CANDIDATE_LEVELS = (
+    ("exact_contract_ir", 5),
+    ("same_effect_signature", 4),
+    ("same_output_fact_and_input_family", 3),
+    ("overlapping_transform_chain", 2),
+    ("divergent_projection", 1),
+)
+
+
+def _all_level_candidates() -> list[dict[str, object]]:
+    """One candidate per level, deliberately supplied worst-score-first."""
+
+    return [
+        _candidate(
+            level=level,
+            score=score,
+            producers=[f"pkg.{level}:owner", f"pkg.{level}:twin"],
+        )
+        for level, score in reversed(_CANDIDATE_LEVELS)
+    ]
+
+
+def test_html_authority_renders_discovery_candidates(tmp_path: Path) -> None:
+    """Computed candidates must reach the panel, not be dropped by the renderer.
+
+    The payload emits four item kinds; the panel consumed two, so discovery
+    candidates were computed, carried in the document and silently dropped.
+    """
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=_all_level_candidates(),
+        enforcement_enabled=False,
+    )
+
+    assert "Candidates" in html
+    for level, score in _CANDIDATE_LEVELS:
+        assert level.replace("_", " ") in html
+        assert f"pkg.{level}:owner" in html
+        # the closed vocabulary keeps its integer rank in the row
+        assert f">{score}<" in html
+
+
+def test_html_authority_candidate_offers_a_paste_ready_promotion(
+    tmp_path: Path,
+) -> None:
+    """Tools propose, humans own: the promotion path is copy-paste, not a write."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(
+                level="exact_contract_ir",
+                score=5,
+                producers=["pkg.alpha:publish", "pkg.beta:publish"],
+            )
+        ],
+        enforcement_enabled=False,
+    )
+
+    assert "[[tool.codeclone.authority]]" in html
+    assert "canonical_owner = &quot;pkg.alpha:publish&quot;" in html
+    assert "contract_id" in html
+    # the other producer is offered as an alternative, never auto-selected
+    assert "pkg.beta:publish" in html
+    assert "tools propose, humans own" in html.lower()
+
+
+def test_html_authority_report_only_insight_counts_candidates(
+    tmp_path: Path,
+) -> None:
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=_all_level_candidates(),
+        enforcement_enabled=False,
+    )
+
+    assert "5 discovery candidates found" in html
+
+
+def test_html_authority_states_the_unrendered_sink_population(
+    tmp_path: Path,
+) -> None:
+    """The discovery population is stated, so no item kind drops in silence."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=_all_level_candidates(),
+        sinks=7,
+        enforcement_enabled=False,
+    )
+
+    assert "7 semantic sinks" in html
+
+
+def test_document_orders_authority_candidates_by_score() -> None:
+    """Ordering is decided in the document builder, worst-first by score."""
+
+    payload = _metrics_payload(
+        health_score=88,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    payload["semantic_authority"] = {
+        "summary": {"enabled": True, "enforcement_enabled": False},
+        "items": _all_level_candidates(),
+    }
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo", "metrics_computed": sorted(payload)},
+        metrics=payload,
+    )
+
+    items = _family_items(cast(Mapping[str, Any], document), "semantic_authority")
+    scores = [item["score"] for item in items if item["item_kind"] == "candidate"]
+    assert scores == [5, 4, 3, 2, 1]
+
+
+def test_html_authority_promotion_handles_lone_and_absent_producers(
+    tmp_path: Path,
+) -> None:
+    """A single producer needs no alternatives line; none at all proposes nothing."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(level="exact_contract_ir", score=5, producers=["pkg.only:one"]),
+            _candidate(level="divergent_projection", score=1, producers=[]),
+        ],
+        enforcement_enabled=False,
+    )
+
+    assert "canonical_owner = &quot;pkg.only:one&quot;" in html
+    assert "other producers sharing this fact" not in html
