@@ -12911,20 +12911,11 @@ _INVARIANT_MODULE = (
 _INVARIANT_PYPROJECT = '[project]\nname = "invariant"\nversion = "0.1.0"\n'
 
 
-def _analyzer_invariant_repo(root: Path) -> None:
-    """A committed repo whose analysis facts are stable under blind edits."""
-    package = root / "pkg"
-    package.mkdir(parents=True, exist_ok=True)
-    package.joinpath("__init__.py").write_text("", encoding="utf-8")
-    package.joinpath("a.py").write_text(_INVARIANT_MODULE, encoding="utf-8")
-    root.joinpath("pyproject.toml").write_text(_INVARIANT_PYPROJECT, encoding="utf-8")
-    root.joinpath(".gitignore").write_text(
-        ".codeclone/\ncodeclone.baseline.json\n", encoding="utf-8"
-    )
-    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+def _git_commit_all(root: Path, message: str) -> None:
+    """Stage and commit everything, with a deterministic identity."""
     subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
     subprocess.run(
-        ["git", "commit", "-m", "init"],
+        ["git", "commit", "-m", message],
         cwd=root,
         check=True,
         capture_output=True,
@@ -12936,6 +12927,20 @@ def _analyzer_invariant_repo(root: Path) -> None:
             "GIT_COMMITTER_EMAIL": "t@e.com",
         },
     )
+
+
+def _analyzer_invariant_repo(root: Path) -> None:
+    """A committed repo whose analysis facts are stable under blind edits."""
+    package = root / "pkg"
+    package.mkdir(parents=True, exist_ok=True)
+    package.joinpath("__init__.py").write_text("", encoding="utf-8")
+    package.joinpath("a.py").write_text(_INVARIANT_MODULE, encoding="utf-8")
+    root.joinpath("pyproject.toml").write_text(_INVARIANT_PYPROJECT, encoding="utf-8")
+    root.joinpath(".gitignore").write_text(
+        ".codeclone/\ncodeclone.baseline.json\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    _git_commit_all(root, "init")
 
 
 def _analyze_root(service: CodeCloneMCPService, root: Path) -> str:
@@ -13243,6 +13248,89 @@ def test_mcp_verify_refuses_superseded_run_as_invariance_evidence(
 
     assert verified["status"] == "unverified"
     assert verified["reason"] == "after_run_not_new"
+
+
+def test_mcp_verify_analyzer_invariant_names_unobserved_changed_files(
+    tmp_path: Path,
+) -> None:
+    """The stated residual: acceptance that names what it could not observe.
+
+    Committing before the recompute leaves the config edit in neither lane —
+    analysis never reads it, and it was not dirty when the run was taken.
+    That is missing evidence, not a contradiction, so it is accepted with the
+    file named rather than refused into a dead end re-analysis cannot clear.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    _git_commit_all(tmp_path, "config")
+    after_run = _analyze_root(service, tmp_path)
+    assert after_run == before_run
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=after_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+
+    assert verified["status"] == "accepted"
+    assert verified["reason"] == "analyzer_invariant"
+    assert verified["observed_changed_files"] is False
+    limitations = " ".join(
+        str(item) for item in cast("list[object]", verified["limitations"])
+    )
+    assert "pyproject.toml" in limitations
+    assert "newest analysis of the root" in limitations
+
+
+def test_analyzer_invariance_observation_fails_closed(tmp_path: Path) -> None:
+    """Unreadable evidence is a mismatch, never a clean bill of health."""
+    from codeclone.surfaces.mcp._analyzer_invariance import observation_evidence
+
+    tracked = tmp_path / "kept.py"
+    tracked.write_text("x = 1\n", encoding="utf-8")
+    stat = tracked.stat()
+    empty: frozenset[str] = frozenset()
+
+    # A stat that still matches disk is the only clean case.
+    contradicted, unobserved = observation_evidence(
+        root=tmp_path,
+        changed_files=["./kept.py"],
+        manifest={"kept.py": {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}},
+        dirty_paths=empty,
+    )
+    assert (contradicted, unobserved) == ((), ())
+
+    # A recorded file that no longer exists cannot be re-stat'd.
+    contradicted, _unobserved = observation_evidence(
+        root=tmp_path,
+        changed_files=["gone.py"],
+        manifest={"gone.py": {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}},
+        dirty_paths=empty,
+    )
+    assert contradicted == ("gone.py",)
+
+    # Malformed manifest entries are refused rather than trusted.
+    for broken in ({"mtime_ns": "nope", "size": 1}, "not-a-mapping"):
+        contradicted, _unobserved = observation_evidence(
+            root=tmp_path,
+            changed_files=["kept.py"],
+            manifest={"kept.py": broken},
+            dirty_paths=empty,
+        )
+        assert contradicted == ("kept.py",)
+
+    # Outside the manifest, the run's dirty snapshot is the remaining lane.
+    contradicted, unobserved = observation_evidence(
+        root=tmp_path,
+        changed_files=["pyproject.toml", "docs/guide.md"],
+        manifest=None,
+        dirty_paths=frozenset({"pyproject.toml"}),
+    )
+    assert contradicted == ()
+    assert unobserved == ("docs/guide.md",)
 
 
 def test_mcp_after_run_not_new_next_step_is_executable(tmp_path: Path) -> None:
