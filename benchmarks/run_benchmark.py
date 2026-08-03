@@ -59,6 +59,12 @@ BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "--min-docstring-coverage",
     "-1",
     "--no-api-surface",
+    # The authority lanes are gates too, and this repository turns both on in
+    # pyproject.toml. Left on, they collide with the --skip-metrics scenario,
+    # which the CLI rejects outright. Owning assertion: tests/test_cli_unit.py
+    # ::test_benchmark_scenarios_stay_neutral_against_this_repository_config.
+    "--no-semantic-authority",
+    "--no-fail-on-authority-violation",
     # Baseline writing stays off: a benchmark measures, it never publishes.
     "--no-update-baseline",
 )

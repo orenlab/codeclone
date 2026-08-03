@@ -2301,6 +2301,54 @@ def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("profile", ["smoke", "extended", "diagnostic"])
+def test_benchmark_scenarios_stay_neutral_against_this_repository_config(
+    profile: str,
+) -> None:
+    """No benchmark scenario may trip the metrics-mode contract on this repo.
+
+    The benchmark harness disables metrics gating one flag at a time so that it
+    measures rather than gates. Checking that those flags parse proves only that
+    they exist; it cannot prove the list is still complete. A gate this
+    repository later switches on in ``pyproject.toml`` simply has no counterpart
+    in the list, and ``--skip-metrics`` then collides with it here.
+
+    That is exactly how ``warm_clones_only`` broke: ``semantic_authority`` and
+    ``fail_on_authority_violation`` were enabled in ``pyproject.toml`` with no
+    neutral counterpart, so every run of that scenario exited 2 on a contract
+    error. Nobody saw it, because the benchmark was already dying in an earlier
+    scenario for an unrelated reason.
+
+    The scenarios are resolved against this repository's real configuration and
+    then handed to the predicate this module's subject uses, so the harness can
+    never again fall behind the set of flags the contract counts. It lives here,
+    beside ``_configure_metrics_mode``, because that is the contract it reads.
+    """
+
+    from benchmarks.run_benchmark import BENCHMARK_NEUTRAL_ARGS, _scenario_profile
+    from codeclone.config.pyproject_loader import load_pyproject_config
+
+    repo_root = Path(__file__).resolve().parents[1]
+    config_values = load_pyproject_config(repo_root)
+
+    for scenario in _scenario_profile(profile):  # type: ignore[arg-type]
+        argv = [str(repo_root), *BENCHMARK_NEUTRAL_ARGS, *scenario.extra_args]
+        parser = build_parser("test")
+        args = parser.parse_args(argv)
+        cli.apply_pyproject_config_overrides(
+            args=args,
+            config_values=config_values,
+            explicit_cli_dests=cli.collect_explicit_cli_dests(parser, argv=argv),
+            root_path=repo_root,
+        )
+        # _configure_metrics_mode exits 2 on exactly this pair, so no scenario
+        # the harness builds may present it.
+        assert not (
+            bool(getattr(args, "skip_metrics", False))
+            and cli_runtime._metrics_flags_requested(args)
+        ), f"benchmark scenario {scenario.name} trips the metrics-flag contract"
+
+
 def test_configure_metrics_mode_preserves_explicit_full_metrics_request() -> None:
     args = Namespace(
         skip_metrics=False,
