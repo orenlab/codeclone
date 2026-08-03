@@ -760,6 +760,20 @@ class CodeCloneMCPRunStore:
             self._prune_unpinned_locked()
         return record
 
+    def is_latest_registration(self, run_id: str, *, root: Path) -> bool:
+        """Is this the newest registration held for ``root``?
+
+        A run that a later analysis superseded is stale evidence even when it
+        was itself registered fresh, so invariance never rests on one.
+        """
+
+        resolved_root = root.resolve()
+        with self._lock:
+            key = self._resolve_key_locked(run_id, root=resolved_root)
+            if key is None:
+                return False
+            return key == self._resolve_key_locked(None, root=resolved_root)
+
     def registration_ordinal(
         self,
         run_id: str | None = None,

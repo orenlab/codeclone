@@ -21,8 +21,8 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         " new run_id as after_run_id."
     ),
     "after_run_not_new": (
-        "No analysis ran for this root since the intent went active, so the "
-        "after-run is still the intent's before-run. Call "
+        "No analysis ran for this root since the intent went active, or the "
+        "run offered did not observe the edit. Call "
         "analyze_repository(root=<intent root>) now, after the edit, and pass "
         "its run_id as after_run_id. A different run_id verifies structurally; "
         "an identical one is accepted as analyzer_invariant, because a fresh "
@@ -138,6 +138,25 @@ ANALYZER_INVARIANT_LIMITATIONS: Final[tuple[str, ...]] = (
     "Invariance is evidence about analysis facts only. Behaviour, typing and "
     "runtime effects of the change are outside what CodeClone observed.",
 )
+
+
+def analyzer_invariant_unobserved_limitation(paths: Sequence[str]) -> str:
+    """State plainly which changed files the after-run did not record.
+
+    Analysis reads no stat for these and the run did not see them modified,
+    so nothing pins the recompute as having happened after that edit. Naming
+    them beats implying the whole patch was byte-verified.
+    """
+
+    rendered = ", ".join(sorted(paths))
+    return (
+        f"The after-run recorded no observation of {rendered}: analysis does "
+        "not read these files and they were not modified in the working tree "
+        "when it ran, so the recompute is not independently proven to "
+        "postdate that edit. Invariance for them rests on this being the "
+        "newest analysis of the root."
+    )
+
 
 VERIFY_ACCEPTED: Final = "Patch contract accepted."
 VERIFY_ACCEPTED_EXTERNAL: Final = (

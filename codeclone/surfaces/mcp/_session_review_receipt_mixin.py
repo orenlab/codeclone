@@ -441,6 +441,10 @@ class _MCPSessionReviewReceiptMixin:
             if intent is not None and _patch_session(self)._analyzer_invariance_proven(
                 intent=intent,
                 after=record,
+                changed_files=self._receipt_changed_paths(
+                    record=record,
+                    intent=intent,
+                ),
             ):
                 from .messages import patch_contract as patch_msgs
 

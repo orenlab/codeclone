@@ -13040,6 +13040,9 @@ def test_mcp_verify_accepts_analyzer_invariant_governance_config(
     )
     assert verification["verification_profile"] == "governance_config"
     assert finished["intent_cleared"] is True
+    # pyproject.toml has no manifest stat, but the run saw it modified, so
+    # observation is proved rather than falling back to the narrowing.
+    assert verification["observed_changed_files"] is True
 
 
 def test_mcp_verify_accepts_analyzer_invariant_python_structural(
@@ -13179,6 +13182,69 @@ def test_mcp_receipt_records_analyzer_invariant_evidence_class(
     assert "not_available" not in content
 
 
+def test_mcp_verify_refuses_recompute_taken_before_the_edit(tmp_path: Path) -> None:
+    """A recompute that predates the edit is not invariance evidence.
+
+    Freshness alone cannot see ordering: analysing straight after start
+    re-registers the same id and advances the mark, so the run looks fresh
+    while having observed none of the edit. The after-run's own manifest
+    settles it — it records the bytes analysis actually read.
+    """
+    _analyzer_invariant_repo(tmp_path)
+    service = CodeCloneMCPService(history_limit=6)
+    before_run = _analyze_root(service, tmp_path)
+    intent_id = _start_invariant_intent(service, tmp_path, allowed=["pkg/a.py"])
+
+    # Recompute before touching anything: same id, mark advances.
+    stale = _analyze_root(service, tmp_path)
+    assert stale == before_run
+
+    # Only now make a real, analysis-visible change, and replay the stale run.
+    _edit_new_function(tmp_path)
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+
+
+def test_mcp_verify_refuses_superseded_run_as_invariance_evidence(
+    tmp_path: Path,
+) -> None:
+    """A freshly registered run that a later run superseded is not evidence.
+
+    Config files sit outside the analysis manifest, so per-file observation
+    cannot be proved for them. The narrowing is that the invariant run must
+    still be the newest registration for its own root.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    invariant_run = _analyze_root(service, tmp_path)
+    assert invariant_run == before_run
+
+    # A later analysis of the same root supersedes it.
+    _edit_new_function(tmp_path)
+    superseding = _analyze_root(service, tmp_path)
+    assert superseding != before_run
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+
+
 def test_mcp_after_run_not_new_next_step_is_executable(tmp_path: Path) -> None:
     """Following the next_step text verbatim must clear the dead end."""
     service, intent_id, before_run = _edited_invariant_intent(
@@ -13255,6 +13321,13 @@ def test_mcp_typed_outcomes_are_documented_not_tribal_knowledge() -> None:
     emitted = {chunk.split('"', 1)[0] for chunk in source.split('reason="')[1:]}
     undocumented = emitted - patch_msgs.FINISH_OUTCOME_REASONS
     assert not undocumented, f"undocumented typed outcomes: {sorted(undocumented)}"
+
+    # An accepted outcome must publish what its evidence does NOT cover.
+    # Acceptance without a stated boundary is the failure mode this guards.
+    profiles_topic = str(HELP_TOPIC_SPECS["verification_profiles"])
+    assert "Residual limitation" in profiles_topic
+    assert "newest analysis" in profiles_topic
+    assert "manifest stat" in profiles_topic
 
 
 def test_mcp_help_documents_analyzer_invariant_outcome() -> None:

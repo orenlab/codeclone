@@ -33,6 +33,7 @@ from ...utils.coerce import as_int as _coerce_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
+from ._analyzer_invariance import observation_evidence
 from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_intent_mixin import _MCPSessionIntentMixin
@@ -59,6 +60,16 @@ from ._verification_profile import (
 )
 
 MAX_WORSENED_ITEMS = 20
+
+
+def _run_dirty_paths(record: MCPRunRecord) -> frozenset[str]:
+    """Paths git reported as modified when *record* was analysed."""
+
+    snapshot = record.dirty_snapshot
+    if snapshot is None or not snapshot.git_available:
+        return frozenset()
+    return frozenset(entry.path for entry in snapshot.entries)
+
 
 # Checks whose evidence is a before/after comparison. Under analyzer
 # invariance there is no pair to compare, so these are reported as satisfied
@@ -308,6 +319,7 @@ class _MCPSessionPatchContractMixin:
             classification=classification,
             scope_check=scope_check,
             scope_violated=scope_violated,
+            actual_changed_files=actual_changed_files,
         )
         if matching_ids is not None:
             return matching_ids
@@ -675,14 +687,16 @@ class _MCPSessionPatchContractMixin:
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
         scope_violated: bool,
+        actual_changed_files: Sequence[str],
     ) -> dict[str, object] | None:
         """Resolve a before/after pair that carries the same run id.
 
         Identical ids are ambiguous on their own: either nothing was
         re-analysed, or a fresh recompute landed on exactly the same facts.
-        The store's registration mark separates the two, and only the second
-        is evidence. Returns ``None`` when the ids differ or the profile does
-        not require an after-run, leaving the normal paths untouched.
+        The registration mark and the run's own record of the changed files
+        separate the two, and only the second is evidence. Returns ``None``
+        when the ids differ or the profile does not require an after-run,
+        leaving the normal paths untouched.
         """
 
         if before.run_id != after.run_id:
@@ -692,7 +706,12 @@ class _MCPSessionPatchContractMixin:
             VerificationProfile.GOVERNANCE_CONFIG,
         }:
             return None
-        if not self._analyzer_invariance_proven(intent=intent, after=after):
+        unobserved = self._analyzer_invariance_evidence(
+            intent=intent,
+            after=after,
+            changed_files=actual_changed_files,
+        )
+        if unobserved is None:
             return self._unverified_patch_contract(
                 reason="after_run_not_new",
                 before=before,
@@ -715,9 +734,10 @@ class _MCPSessionPatchContractMixin:
             strictness=strictness,
             classification=classification,
             scope_check=scope_check,
+            unobserved=unobserved,
         )
 
-    def _analyzer_invariance_proven(
+    def _invariance_run_is_fresh(
         self,
         *,
         intent: IntentRecord | None,
@@ -729,7 +749,8 @@ class _MCPSessionPatchContractMixin:
         "since when" to measure against, so identical ids stay ambiguous and
         the typed dead end remains the honest answer. The mark is compared on
         the intent's own ``(root, run_id)``: a recompute under a sibling
-        checkout, or of some other run, proves nothing about this one.
+        checkout, or of some other run, proves nothing about this one. A run a
+        later analysis superseded is stale however fresh it once was.
         """
 
         if intent is None:
@@ -742,7 +763,50 @@ class _MCPSessionPatchContractMixin:
         if intent.root.resolve() != after.root.resolve():
             return False
         current = self._runs.registration_ordinal(after.run_id, root=intent.root)
-        return current is not None and current > mark
+        if current is None or current <= mark:
+            return False
+        return self._runs.is_latest_registration(after.run_id, root=intent.root)
+
+    def _analyzer_invariance_evidence(
+        self,
+        *,
+        intent: IntentRecord | None,
+        after: MCPRunRecord,
+        changed_files: Sequence[str],
+    ) -> tuple[str, ...] | None:
+        """Unobserved changed paths, or ``None`` when invariance is refused.
+
+        Freshness cannot see ordering, so a fresh run must also have observed
+        the edit. A recorded stat that no longer matches disk proves the run
+        predates the edit and is refused outright. An empty tuple is the
+        strongest result, not a falsy failure — test against ``None``.
+        """
+
+        if not self._invariance_run_is_fresh(intent=intent, after=after):
+            return None
+        contradicted, unobserved = observation_evidence(
+            root=after.root,
+            changed_files=changed_files,
+            manifest=after.manifest,
+            dirty_paths=_run_dirty_paths(after),
+        )
+        return None if contradicted else unobserved
+
+    def _analyzer_invariance_proven(
+        self,
+        *,
+        intent: IntentRecord | None,
+        after: MCPRunRecord,
+        changed_files: Sequence[str],
+    ) -> bool:
+        return (
+            self._analyzer_invariance_evidence(
+                intent=intent,
+                after=after,
+                changed_files=changed_files,
+            )
+            is not None
+        )
 
     def _analyzer_invariant_accepted(
         self,
@@ -753,11 +817,17 @@ class _MCPSessionPatchContractMixin:
         strictness: StrictnessProfile,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
+        unobserved: Sequence[str],
     ) -> dict[str, object]:
         """Accept a patch whose analysis facts are provably unmoved."""
 
         from .messages import patch_contract as patch_msgs
 
+        limitations = list(patch_msgs.ANALYZER_INVARIANT_LIMITATIONS)
+        if unobserved:
+            limitations.append(
+                patch_msgs.analyzer_invariant_unobserved_limitation(unobserved)
+            )
         matrix = check_matrix(classification.profile)
         performed = [
             check
@@ -789,7 +859,8 @@ class _MCPSessionPatchContractMixin:
             **classification.to_payload(),
             "checks_performed": performed,
             "checks_satisfied_by_run_identity": satisfied,
-            "limitations": list(patch_msgs.ANALYZER_INVARIANT_LIMITATIONS),
+            "observed_changed_files": not unobserved,
+            "limitations": limitations,
             "claim_validation_recommended": self._claim_validation_recommended(
                 classification
             ),
