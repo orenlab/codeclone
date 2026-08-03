@@ -22,7 +22,6 @@ from codeclone.baseline.metrics_baseline import (
     MetricsBaselineStatus,
     probe_metrics_baseline_section,
 )
-from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import (
     COMPLEXITY_RISK_MEDIUM_MAX,
     COUPLING_RISK_MEDIUM_MAX,
@@ -754,8 +753,13 @@ def test_metrics_baseline_schema_version_is_provenance_not_authority(
         "9.9",
         raising=False,
     )
+    # The fixture container is written with a pinned ``cp314`` tag, so the
+    # runtime tag is held to the same value here, as every sibling test does.
+    # Reading it from the live interpreter instead made this test pass only on
+    # 3.14 and fail every other leg of the CI matrix on a lane-compatibility
+    # mismatch that has nothing to do with the schema stamp under test.
     baseline.verify_compatibility(
-        runtime_python_tag=current_python_tag(),
+        runtime_python_tag="cp314",
         baseline_scope_id=_SCOPE_ID,
     )
 

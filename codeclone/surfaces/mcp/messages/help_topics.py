@@ -518,6 +518,72 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "Out-of-scope dirt is advisory — may yield "
                 "accepted_with_external_changes."
             ),
+            # Typed outcome vocabulary. Every reason finish/verify can return is
+            # listed here with the action that clears it, so no outcome depends
+            # on session lore. The procedure-coverage guard enforces this.
+            (
+                "no_before_run: no analysis is registered for this root. Call "
+                "analyze_repository(root=...) and pass its run_id as "
+                "before_run_id, or pass intent_id to auto-resolve it."
+            ),
+            (
+                "no_after_run: the after-run is missing. Call "
+                "analyze_repository(root=...) after editing and pass its run_id "
+                "as after_run_id."
+            ),
+            (
+                "after_run_not_new: no analysis ran since the intent went "
+                "active. Re-run analyze_repository now; a new run_id verifies "
+                "structurally, an identical one is accepted as "
+                "analyzer_invariant. Do not redeclare the intent."
+            ),
+            (
+                "analyzer_invariant: accepted. A fresh recompute produced the "
+                "same content-addressed run_id, proving the change is invisible "
+                "to analysis. Never report it as 'structural checks passed'."
+            ),
+            (
+                "after_run_required_for_governance: governance config changed. "
+                "Run analyze_repository and pass after_run_id — this profile "
+                "cannot verify from changed_files alone."
+            ),
+            (
+                "before_run_root_mismatch: the before-run belongs to another "
+                "checkout. Run analyze_repository on the intent's own absolute "
+                "root and use that run_id — ids are content-addressed and "
+                "collide between same-commit worktrees."
+            ),
+            (
+                "incomparable_runs: the two runs used different analysis "
+                "settings. Re-run analyze_repository with identical thresholds "
+                "and profile, then finish again."
+            ),
+            (
+                "intent_not_active: the intent is queued. Call "
+                "manage_change_intent(action='promote', intent_id=...) and edit "
+                "only once it reports active."
+            ),
+            (
+                "report_digest_mismatch: the intent was declared against a "
+                "different report. Finish with the original intent_id and its "
+                "original before_run_id; never redeclare on the after-run."
+            ),
+            (
+                "scope_violation: files outside declared scope changed. Either "
+                "revert them, or call start_controlled_change again with the "
+                "widened scope after user approval."
+            ),
+            (
+                "state_artifact_mutation: baseline, cache or generated state was "
+                "touched. Remove those paths from the patch — they need a "
+                "separate explicit workflow."
+            ),
+            (
+                "workspace_hygiene: read finish_block_reason. missing_evidence "
+                "means in-scope dirty files are absent from changed_files; "
+                "foreign_dirty_overlap means another live intent holds them. "
+                "Atomic verify does not bypass either."
+            ),
             ("Optional CODECLONE_STRICT_FINISH env may block own_unscoped_dirty."),
             ("patch_trail + audit patch_trail.computed do not authorize edits."),
             (
@@ -829,8 +895,53 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 ".cache/codeclone/**) is violated, not verified."
             ),
             (
-                "after_run_not_new when before and after runs match for "
-                "structural profiles."
+                "Matching before/after run ids resolve two ways: "
+                "analyzer_invariant when the after-run is a fresh recompute of "
+                "this same (root, run_id), after_run_not_new when it is not."
+            ),
+            (
+                "analyzer_invariant is an accepted outcome. Run ids are "
+                "content-addressed, so an identical id from a fresh recompute "
+                "proves identical analysis facts — zero structural movement by "
+                "construction."
+            ),
+            (
+                "analyzer_invariant proves only that the change is invisible to "
+                "analysis. It says nothing about behaviour, typing or runtime "
+                "effects, and its structural checks were satisfied by run "
+                "identity rather than performed."
+            ),
+            (
+                "Never report analyzer_invariant as 'structural checks passed'. "
+                "The honest wording is 'change proven invisible to analysis; "
+                "identical content-addressed run under fresh recompute'."
+            ),
+            (
+                "'no structural regressions' is valid under analyzer_invariant; "
+                "any claim implying new analysis results is not."
+            ),
+            (
+                "analyzer_invariant also requires the after-run to have observed "
+                "the edit and to be the newest analysis of its root. A recorded "
+                "manifest stat that no longer matches the file on disk proves "
+                "the run predates the edit, and is refused rather than treated "
+                "as merely unproven."
+            ),
+            (
+                "Residual limitation: files analysis never reads, such as "
+                "pyproject.toml, carry no manifest stat, so per-file observation "
+                "cannot be proved for them unless the run saw them modified. "
+                "Acceptance then rests on the run being the newest analysis of "
+                "the root, and verification.limitations names those files. A "
+                "recompute taken after start but before a config-only edit is "
+                "not detected."
+            ),
+            (
+                "after_run_not_new means no analyze_repository ran for this root "
+                "since the intent went active, or the run offered did not observe "
+                "the edit. Run it after editing and pass the resulting run_id: a "
+                "changed id verifies normally, an identical one is accepted as "
+                "analyzer_invariant."
             ),
             (
                 "accepted means patch contract passed for scope — not unchanged "

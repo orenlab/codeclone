@@ -21,8 +21,13 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         " new run_id as after_run_id."
     ),
     "after_run_not_new": (
-        "After-run matches the intent before-run. Run analyze_repository "
-        "after editing and pass the new run_id as after_run_id."
+        "No analysis ran for this root since the intent went active, or the "
+        "run offered did not observe the edit. Call "
+        "analyze_repository(root=<intent root>) now, after the edit, and pass "
+        "its run_id as after_run_id. A different run_id verifies structurally; "
+        "an identical one is accepted as analyzer_invariant, because a fresh "
+        "recompute landing on the same content-addressed id proves the change "
+        "is invisible to analysis. Do not redeclare the intent."
     ),
     "after_run_required_for_governance": (
         "Governance config changes require a post-edit analysis."
@@ -43,25 +48,48 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         " manage_change_intent(action='promote')."
     ),
     "report_digest_mismatch": (
-        "Intent was declared against a different report."
-        " Do not redeclare on the after-run — use the original"
-        " intent_id with the original before_run_id."
+        "Intent was declared against a different report. Call "
+        "finish_controlled_change with the original intent_id and its original "
+        "before_run_id. Do not redeclare on the after-run: a fresh intent "
+        "would bind to the post-edit report, making before and after the same "
+        "run. If the original before-run is gone from this session, bridge it "
+        "with manage_change_intent(action='declare', run_id=<pre-edit run_id>) "
+        "before verifying."
     ),
     "state_artifact_mutation": (
-        "Baseline, cache, or generated state was touched."
-        " Remove those files from the patch and use a separate"
-        " workflow."
+        "Baseline, cache, or generated state was touched. Revert those paths, "
+        "then call finish_controlled_change again with changed_files listing "
+        "only source files. Baseline and generated state require a separate "
+        "explicit workflow and never verify through this contract."
     ),
     "scope_violation": (
-        "Patch touched files outside declared scope."
-        " Redeclare intent with expanded scope, or remove the"
-        " out-of-scope changes."
+        "Patch touched files outside declared scope. Either revert the "
+        "out-of-scope files and call finish_controlled_change again, or — "
+        "after user approval — call start_controlled_change with the widened "
+        "scope and finish against the new intent_id."
     ),
 }
 
 
 def next_step_hint(reason: str) -> str | None:
     return NEXT_STEP_HINTS.get(reason)
+
+
+# Outcomes that are already terminal and successful: remediation would be
+# meaningless, so they carry no next_step. They still owe the reader an
+# explanation of what the outcome does and does not prove.
+ACCEPTED_OUTCOME_REASONS: Final[frozenset[str]] = frozenset({"analyzer_invariant"})
+
+# Reasons finish resolves outside the patch-contract hint table.
+WORKFLOW_OUTCOME_REASONS: Final[frozenset[str]] = frozenset({"workspace_hygiene"})
+
+# The complete typed-outcome vocabulary of finish/verify. A new outcome must
+# join this set, and must arrive with executable remediation and a help-topic
+# mention — see the procedure-coverage guard in the MCP service tests. Typed
+# outcomes are a contract with the next agent, not session lore.
+FINISH_OUTCOME_REASONS: Final[frozenset[str]] = frozenset(
+    {*NEXT_STEP_HINTS, *ACCEPTED_OUTCOME_REASONS, *WORKFLOW_OUTCOME_REASONS}
+)
 
 
 QUEUED_BUDGET_MESSAGE: Final = (
@@ -82,6 +110,53 @@ BUDGET_RELAXED_ADVISORY: Final = (
 )
 BUDGET_OUTSIDE: Final = "Current run is already outside the selected patch budget."
 BUDGET_INSIDE: Final = "Current run is inside the selected patch budget."
+
+# ── analyzer invariance ─────────────────────────────────────────────
+# An after-run whose content-addressed id equals the before-run's, produced by
+# a fresh post-start recompute, is not a missing after-run: it is the strongest
+# structural evidence available. Identical digest means identical analysis
+# facts, so the structural delta is empty by construction rather than
+# unmeasured. The wording below never claims checks "passed" — nothing was
+# compared; the change was shown to be invisible to analysis.
+ANALYZER_INVARIANT_REASON: Final = "analyzer_invariant"
+
+ANALYZER_INVARIANT_EVIDENCE: Final = (
+    "change proven invisible to analysis; identical content-addressed run "
+    "under fresh recompute"
+)
+
+VERIFY_ACCEPTED_ANALYZER_INVARIANT: Final = (
+    "Patch contract accepted: change proven invisible to analysis; identical "
+    "content-addressed run under fresh recompute. No structural comparison "
+    "was performed because the two runs carry the same analysis facts."
+)
+
+ANALYZER_INVARIANT_LIMITATIONS: Final[tuple[str, ...]] = (
+    "Structural checks were satisfied by run identity, not by comparing two "
+    "different analyses; report this as analyzer-invariance, not as a passed "
+    "structural review.",
+    "Invariance is evidence about analysis facts only. Behaviour, typing and "
+    "runtime effects of the change are outside what CodeClone observed.",
+)
+
+
+def analyzer_invariant_unobserved_limitation(paths: Sequence[str]) -> str:
+    """State plainly which changed files the after-run did not record.
+
+    Analysis reads no stat for these and the run did not see them modified,
+    so nothing pins the recompute as having happened after that edit. Naming
+    them beats implying the whole patch was byte-verified.
+    """
+
+    rendered = ", ".join(sorted(paths))
+    return (
+        f"The after-run recorded no observation of {rendered}: analysis does "
+        "not read these files and they were not modified in the working tree "
+        "when it ran, so the recompute is not independently proven to "
+        "postdate that edit. Invariance for them rests on this being the "
+        "newest analysis of the root."
+    )
+
 
 VERIFY_ACCEPTED: Final = "Patch contract accepted."
 VERIFY_ACCEPTED_EXTERNAL: Final = (

@@ -311,6 +311,10 @@ class _MCPSessionIntentMixin:
                 expected_effects=normalized_expected_effects,
                 guards=DEFAULT_INTENT_GUARDS,
                 blast_radius_summary=blast_summary,
+                before_run_registration_ordinal=self._runs.registration_ordinal(
+                    record.run_id,
+                    root=record.root,
+                ),
             )
             self._active_intents[intent_id] = record_payload
             self._runs.pin(record.run_id, root=record.root)
@@ -1218,6 +1222,14 @@ class _MCPSessionIntentMixin:
                 expected_effects=(),
                 guards=DEFAULT_INTENT_GUARDS,
                 blast_radius_summary=dict(workspace_record.blast_radius_summary),
+                # Recovery re-opens the edit window in this session, so the
+                # invariance mark is taken here too. Without it a recovered
+                # intent could never prove analyzer invariance and would sit in
+                # a dead end no amount of re-analysis could clear.
+                before_run_registration_ordinal=self._runs.registration_ordinal(
+                    recovery_run.record.run_id,
+                    root=recovery_run.record.root,
+                ),
             )
             self._active_intents[workspace_record.intent_id] = recovered
             self._runs.pin(

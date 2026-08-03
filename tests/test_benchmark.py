@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from subprocess import CompletedProcess
+from typing import cast
 
 import pytest
 
@@ -18,12 +21,15 @@ from benchmarks.run_benchmark import (
     Scenario,
     _comparison_metrics,
     _load_benchmark_payload,
+    _read_report,
     _require_json_object,
     _run_cli_once,
     _scenario_profile,
     _timing_regressions,
     _validate_inventory_sample,
 )
+
+from ._report_fixtures import build_test_report_document
 
 
 def _measurement(
@@ -46,6 +52,18 @@ def _measurement(
         artifact_bytes={"json": 128},
         cache_bytes=256,
     )
+
+
+def _digest_tiers(document: dict[str, object]) -> dict[str, object]:
+    """The five named digest tiers of a report the product's builder produced.
+
+    The shape is the report contract, not a guess, so this narrows in one step
+    instead of repeating an isinstance ladder the suite already carries
+    elsewhere. A document that does not match fails on the next subscript.
+    """
+
+    integrity = cast(dict[str, object], document["integrity"])
+    return cast(dict[str, object], integrity["digests"])
 
 
 def _benchmark_payload(
@@ -384,9 +402,76 @@ def test_benchmark_neutral_args_are_a_valid_cli_contract() -> None:
 
     This parses the real argument list with the real parser, so the harness can
     never again disagree with the contract it calls.
+
+    Parsing proves the flags exist; it cannot prove they still mean "measure, do
+    not gate" once this repository's own configuration is resolved on top. That
+    second half lives in tests/test_cli_unit.py, next to the contract it reads.
     """
 
     from codeclone.config.argparse_builder import build_parser
 
     parser = build_parser("test")
     parser.parse_args([".", *BENCHMARK_NEUTRAL_ARGS])
+
+
+def test_benchmark_report_reader_reads_a_document_the_product_builds(
+    tmp_path: Path,
+) -> None:
+    """The reader is pinned against a real report, with nothing stubbed out.
+
+    Every other test in this module replaces ``_read_report`` with a stub, so
+    the reader was free to drift away from the report it consumes -- and it did.
+    The v3 digest hierarchy replaced the single ``integrity.digest`` with five
+    named tiers under ``integrity.digests``, and the harness kept asking for the
+    old key. Nothing went red, because the benchmark was already dying earlier
+    on a stale CLI flag; the moment that flag was fixed the harness reached its
+    first report and raised "digest block missing".
+
+    The flag guard above proves the harness agrees with the CLI it calls. This
+    proves it agrees with the document that CLI produces, by building one with
+    the product's own builder.
+    """
+
+    document = build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        inventory={
+            "files": {
+                "total_found": 7,
+                "analyzed": 5,
+                "cached": 2,
+                "skipped": 1,
+            }
+        },
+    )
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(document), encoding="utf-8")
+
+    digest, files = _read_report(report_path)
+
+    evaluation = _digest_tiers(document)["evaluation"]
+    assert isinstance(evaluation, dict)
+    assert digest == evaluation["value"]
+    assert files == {"found": 7, "analyzed": 5, "cached": 2, "skipped": 1}
+
+
+def test_benchmark_report_reader_names_the_tier_it_cannot_find(
+    tmp_path: Path,
+) -> None:
+    """A missing tier must say which key path is absent, not just "digest".
+
+    The original message named a key that had not existed for weeks, which cost
+    a reader the time to discover the block was there under a different name.
+    """
+
+    document = build_test_report_document(
+        func_groups={}, block_groups={}, segment_groups={}
+    )
+    del _digest_tiers(document)["evaluation"]
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=re.escape("integrity.digests.evaluation")):
+        _read_report(report_path)

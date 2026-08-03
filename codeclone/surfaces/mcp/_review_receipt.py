@@ -298,6 +298,7 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
             "",
             receipt_msgs.RECEIPT_MD_SECTION_STRUCTURAL_DELTA,
             f"**Verdict:** {structural_delta.get('verdict', 'stable')}",
+            *_structural_delta_evidence(structural_delta),
             f"**Health delta:** {_signed_delta(structural_delta.get('health_delta'))}",
             "",
             receipt_msgs.RECEIPT_MD_SECTION_HUMAN_DECISIONS,
@@ -324,6 +325,19 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _structural_delta_evidence(
+    structural_delta: Mapping[str, object],
+) -> list[str]:
+    """Render the stated reason behind a non-numeric structural verdict.
+
+    Verdicts that carry no delta (``not_comparable``, ``analyzer_invariant``)
+    are only honest when the receipt also says *why* no comparison was made.
+    """
+
+    reason = str(structural_delta.get("reason", "")).strip()
+    return [f"**Evidence:** {reason}"] if reason else []
 
 
 def _render_verification_profile(

@@ -59,6 +59,12 @@ BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "--min-docstring-coverage",
     "-1",
     "--no-api-surface",
+    # The authority lanes are gates too, and this repository turns both on in
+    # pyproject.toml. Left on, they collide with the --skip-metrics scenario,
+    # which the CLI rejects outright. Owning assertion: tests/test_cli_unit.py
+    # ::test_benchmark_scenarios_stay_neutral_against_this_repository_config.
+    "--no-semantic-authority",
+    "--no-fail-on-authority-violation",
     # Baseline writing stays off: a benchmark measures, it never publishes.
     "--no-update-baseline",
 )
@@ -211,12 +217,26 @@ def _read_report(report_path: Path) -> tuple[str, dict[str, int]]:
     integrity_obj = payload.get("integrity")
     if not isinstance(integrity_obj, dict):
         raise RuntimeError(f"integrity block missing in {report_path}")
-    digest_obj = integrity_obj.get("digest")
-    if not isinstance(digest_obj, dict):
-        raise RuntimeError(f"digest block missing in {report_path}")
-    digest_value = str(digest_obj.get("value", "")).strip()
+    digests_obj = integrity_obj.get("digests")
+    if not isinstance(digests_obj, dict):
+        raise RuntimeError(f"integrity.digests block missing in {report_path}")
+    # The benchmark asserts that repeated runs of one scenario produce the same
+    # report, so it needs the deepest tier that is a pure function of the
+    # analysis. Each tier hashes the one before it -- observation ->
+    # analysis_facts -> comparison -> evaluation -- so equal evaluation digests
+    # mean the whole chain agreed. The fifth tier, envelope, seals the entire
+    # document including the wall-clock in meta.runtime and the cache path, so
+    # it differs between two identical runs and cannot express determinism.
+    evaluation_obj = digests_obj.get("evaluation")
+    if not isinstance(evaluation_obj, dict):
+        raise RuntimeError(
+            f"integrity.digests.evaluation block missing in {report_path}"
+        )
+    digest_value = str(evaluation_obj.get("value", "")).strip()
     if not digest_value:
-        raise RuntimeError(f"digest value missing in {report_path}")
+        raise RuntimeError(
+            f"integrity.digests.evaluation value missing in {report_path}"
+        )
 
     inventory_obj = payload.get("inventory")
     if not isinstance(inventory_obj, dict):

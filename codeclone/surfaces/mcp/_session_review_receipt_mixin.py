@@ -433,6 +433,26 @@ class _MCPSessionReviewReceiptMixin:
             }
         previous = self._attested_before_run(record=record, intent=intent)
         if previous is None:
+            # Same-id before/after is the analyzer-invariant case, not an
+            # absent comparison — but only when the store shows this exact run
+            # was recomputed after the intent went active. Additive verdict in
+            # this section's existing non-numeric idiom (controller sanction
+            # mem-d67159cc), so RECEIPT_VERSION stays "1".
+            if intent is not None and _patch_session(self)._analyzer_invariance_proven(
+                intent=intent,
+                after=record,
+                changed_files=self._receipt_changed_paths(
+                    record=record,
+                    intent=intent,
+                ),
+            ):
+                from .messages import patch_contract as patch_msgs
+
+                return {
+                    "available": False,
+                    "verdict": patch_msgs.ANALYZER_INVARIANT_REASON,
+                    "reason": patch_msgs.ANALYZER_INVARIANT_EVIDENCE,
+                }
             return {
                 "available": False,
                 "regressions": 0,
