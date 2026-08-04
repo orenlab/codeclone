@@ -95,7 +95,11 @@ not the current working directory.
 | Key | Type | Default | CLI flag | Purpose |
 |-----|------|---------|----------|---------|
 | `cache_path` | str | unset (`<root>/.codeclone/cache.json`) | `--cache-path` | Analysis cache file path |
-| `max_cache_size_mb` | int | `50` | `--max-cache-size-mb` | Maximum cache size (MB) |
+| `max_cache_size_mb` | int | `256` | `--max-cache-size-mb` | Maximum cache size (MB) |
+
+The cap is a memory and decompression-bomb guard on cache load. A repository whose
+saved cache exceeds `max_cache_size_mb` is ignored on load with a warning, and every
+run falls back to cold analysis until the cap is raised or the cache shrinks.
 
 ### Baselines and CI
 

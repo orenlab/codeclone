@@ -110,7 +110,7 @@ Penalties applied when computing health from dependency metrics.
 | `DEFAULT_SARIF_REPORT_PATH` | `".codeclone/report.sarif"` | SARIF report destination. |
 | `DEFAULT_PROCESSES` | `4` | Parallel workers for analysis. |
 | `DEFAULT_MAX_BASELINE_SIZE_MB` | `5` | Max baseline file size (MB). |
-| `DEFAULT_MAX_CACHE_SIZE_MB` | `50` | Max analysis cache size (MB). |
+| `DEFAULT_MAX_CACHE_SIZE_MB` | `256` | Max analysis cache size (MB). |
 
 ### Reporting Thresholds (Design Report)
 
@@ -162,7 +162,7 @@ When a constant is referenced, the source location is always `codeclone.contract
 
 ### Path and Resource Exhaustion
 
-- **Cache overflow**: Analysis with `DEFAULT_MAX_CACHE_SIZE_MB = 50` may fail if a single project's cache exceeds 50 MB. No spillover mechanism exists; analysis is aborted.
+- **Cache overflow**: With `DEFAULT_MAX_CACHE_SIZE_MB = 256`, a cache file above the cap is ignored on load with a warning (`TOO_LARGE`), and every run falls back to cold analysis. No spillover mechanism exists; the cap remains a memory and decompression-bomb guard.
 - **Process pool contention**: `DEFAULT_PROCESSES = 4` may starve system resources on low-core machines or in containerized environments.
 
 ## Verification

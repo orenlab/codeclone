@@ -42,7 +42,7 @@ This page documents the contracts, mapping, failure modes, and verification requ
 | Report (JSON) | `.codeclone/report.json` | Ephemeral; keyed to run_id and input hash |
 | Report (HTML) | `.codeclone/report.html` | Ephemeral; renders `.codeclone/report.json` |
 | Report (Markdown) | `.codeclone/report.md` | Ephemeral; plain-text derivation of JSON |
-| Cache root | `.codeclone/` | Repo-relative; max 50 MB (DEFAULT_MAX_CACHE_SIZE_MB); security-hardened wire paths |
+| Cache root | `.codeclone/` | Repo-relative; max 256 MB (DEFAULT_MAX_CACHE_SIZE_MB); security-hardened wire paths |
 | State intents | `.codeclone/intents/` | Workspace coordination only; never user-edited |
 
 ### Security hardening

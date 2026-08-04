@@ -39,6 +39,8 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- The default cache size limit (`max_cache_size_mb`) is raised from 50 MB to 256 MB so large repositories keep their
+  warm-cache path. A repository whose cache exceeds the limit falls back to full re-analysis on every run.
 - Report tables are ordered by operational risk rather than by file path.
 - New documentation chapters cover the baseline container, full-McCabe complexity, and health explainability, alongside
   the upgrade guide.

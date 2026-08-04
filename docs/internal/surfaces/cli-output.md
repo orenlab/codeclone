@@ -169,9 +169,11 @@ lane matches the current runtime contract.
 
 - Cache file is corrupted
 - Cache schema version does not match `CACHE_VERSION` ("3.2")
-- Cache exceeds `DEFAULT_MAX_CACHE_SIZE_MB` (50 MB)
 
 **Remediation:** Delete `.codeclone/cache.json` and re-run.
+
+A cache above `DEFAULT_MAX_CACHE_SIZE_MB` (256 MB) is not a contract error: the
+file is ignored on load with a warning and the run falls back to cold analysis.
 
 ### Report file write failure (contract error, exit code 2)
 
