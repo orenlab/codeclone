@@ -75,6 +75,14 @@ def test_size_byte_limits_derive_from_contract_megabyte_defaults() -> None:
     assert MAX_BASELINE_SIZE_BYTES == DEFAULT_MAX_BASELINE_SIZE_MB * 1024 * 1024
 
 
+def test_cache_cap_default_pins_maintainer_ruling_value() -> None:
+    # Maintainer ruling 2026-08-04 (perf-ledger #1, option B): the default
+    # cache cap is 256 MB. Drifting back to a smaller cap silently re-opens
+    # the over-cap cold-fallback cliff for large repositories; changing this
+    # value requires an explicit maintainer decision.
+    assert DEFAULT_MAX_CACHE_SIZE_MB == 256
+
+
 def test_runtime_and_gate_defaults_follow_contract_defaults(tmp_path: Path) -> None:
     service = CodeCloneMCPService()
     args = service._build_args(

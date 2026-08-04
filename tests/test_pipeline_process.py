@@ -1474,10 +1474,15 @@ def test_worker_identity_guards_fail_closed(
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "perf-ledger #1 save/load cap asymmetry: save() ignores max_size_bytes, "
-        "so it writes cache files that load() under the same configuration "
-        "rejects as TOO_LARGE; every repository whose cache outgrows the cap "
-        "silently loses the warm path on every subsequent run"
+        "perf-ledger #1 save/load cap asymmetry remains by maintainer ruling "
+        "2026-08-04: save() ignores max_size_bytes while load() rejects "
+        "TOO_LARGE, so a repository whose cache outgrows the cap loses the "
+        "warm path on every subsequent run. The default cap was raised "
+        "50 -> 256 MB as the bridge, which moves the cliff without fixing "
+        "the class; the real fix (cache backend redesign) is deferred to the "
+        "post-release cache-backend phase. Do not resolve this xfail by "
+        "raising the cap again or by compressing the monolith (rejected as "
+        "a de-facto backend format choice)."
     ),
 )
 def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
@@ -1486,8 +1491,10 @@ def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
 
     Today ``save()`` never enforces ``max_size_bytes`` while ``load()`` hard
     rejects any file above it, so the tool writes caches it then refuses to
-    read (Django 5.2 shape: 73 MB written vs the 50 MB default load cap =>
-    permanently cold at defaults). This strict xfail keeps the defect pinned:
+    read (Django 5.2 shape: 73 MB written vs the then-default 50 MB load cap
+    => permanently cold at defaults; the 256 MB default since the 2026-08-04
+    ruling moves that cliff without removing it). This strict xfail keeps the
+    defect pinned:
     it starts erroring the moment save/load symmetry is restored, and any fix
     that only suppresses the write without giving the second run its cache
     hits back keeps failing the ``cache_hits`` assertion by design.
@@ -1499,7 +1506,8 @@ def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
     boot = analysis_boot(tmp_path, min_loc=1, min_stmt=1, skip_metrics=True)
     cache_path = tmp_path / "cache.json"
     # Any saved single-entry cache is larger than this cap; the unit-scale
-    # mirror of a >50 MB real-repo cache meeting the 50 MB default.
+    # mirror of a real-repo cache outgrowing its configured cap (the default
+    # moved 50 -> 256 MB on 2026-08-04; the cliff moved with it).
     cap_bytes = 256
 
     cold_cache = Cache(cache_path, root=tmp_path, max_size_bytes=cap_bytes)
