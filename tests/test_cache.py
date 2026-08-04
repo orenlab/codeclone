@@ -3421,7 +3421,16 @@ def test_cache_load_retries_stat_after_transient_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A transient stat failure inside the first probe is retried before the
-    size ceiling is enforced."""
+    size ceiling is enforced.
+
+    ``Path.exists`` is patched alongside the flaky ``Path.stat`` because on
+    CPython <= 3.13 ``Path.exists()`` is implemented via ``self.stat()``: left
+    unpatched, the flaky stat fires inside the existence probe, ``load()``
+    takes the MISSING branch, and the size-probe retry under test never runs.
+    Owning both seams pins the product's first-probe-tolerated -> second-probe
+    retry on every supported interpreter instead of a pathlib implementation
+    detail.
+    """
 
     cache_path = tmp_path / "cache.json"
     cache_path.write_text("{}", encoding="utf-8")
@@ -3429,6 +3438,12 @@ def test_cache_load_retries_stat_after_transient_failure(
 
     calls = {"count": 0}
     real_stat = Path.stat
+    real_exists = Path.exists
+
+    def fake_exists(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self == cache_path:
+            return True
+        return real_exists(self, *args, **kwargs)
 
     def flaky_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
         if self == cache_path:
@@ -3437,8 +3452,9 @@ def test_cache_load_retries_stat_after_transient_failure(
                 raise OSError("transient stat failure")
         return real_stat(self, *args, **kwargs)
 
+    monkeypatch.setattr(Path, "exists", fake_exists)
     monkeypatch.setattr(Path, "stat", flaky_stat)
     cache.load()
     monkeypatch.undo()
-    assert calls["count"] >= 2
-    assert cache.load_status is not None
+    assert calls["count"] == 2
+    assert cache.load_status is CacheStatus.INVALID_TYPE
