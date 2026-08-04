@@ -38,7 +38,7 @@ graph LR
 | Action | Command | Notes |
 |--------|---------|-------|
 | Retrieve context | `get_relevant_memory(root=..., scope=... \| intent_id=...)` | After edit_allowed=true. Read corroboration_status. |
-| Write a note | `manage_engineering_memory(action=record_candidate, record_type=risk_note \| change_rationale, statement=..., subject_path=...)` | Before finish. Max 1000 chars. Target ≤300. |
+| Write a note | `manage_engineering_memory(action=record_candidate, record_type=risk_note \| change_rationale, statement=..., subject_path=...)` | Before finish. Max 1000 chars. Target ≤300; batch mean warns over 200. Safe Markdown subset (leading `## ` title, code spans, bold/italic, depth-1 lists, compact tables, blockquotes, bare URLs); images, raw HTML, and `[text](url)` links are rejected. |
 | Search memory | `query_engineering_memory(mode=for_path \| search \| stale \| trajectory_*)` | Read-only inspection; use get_relevant_memory for edits. |
 | Approve drafts | VS Code Memory view (human only) | Agents cannot approve via MCP; use UI. |
 

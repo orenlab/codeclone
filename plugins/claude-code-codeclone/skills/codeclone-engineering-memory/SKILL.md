@@ -90,9 +90,50 @@ One card = one durable fact, not a session narrative.
 | **Target** | ≤ **300** | Preferred durable-card size |
 | **Soft** | ≤ **500** | Governance / `validate_claims` may warn — compress |
 | **Hard** | ≤ **1000** | `record_candidate` **rejects** the statement |
+| **Batch mean** | ≤ **200** | Mean across a batch (`validate_claims` blank-line-separated notes, `propose_memory` candidates) warns above 200 |
 
 Several independent facts → separate candidates with appropriate anchors. Do not
 split one fact merely to bypass the hard limit.
+
+## Statement format (Markdown subset)
+
+Statements may use a safe Markdown subset — it degrades gracefully as plain
+text and renders in the VS Code Memory view and the Enacta Memory inbox:
+
+- one optional `## ` title as the **first** line (H2 is the enforced level);
+- `code spans` for paths, symbols, digests, versions, flags;
+- **bold** / *italic*;
+- lists nested at most once;
+- compact tables (the size gates bound them);
+- `> ` blockquotes for quoting maintainer rulings;
+- bare URLs (renderers autolink them).
+
+**Hard-rejected** — security class, typed `memory_md_*` errors, fail-closed:
+
+| Construct | Reason |
+|-----------|--------|
+| `![…](…)` images | a rendered image pings its URL (exfiltration channel) |
+| raw HTML tags | injection into webview render surfaces |
+| `[text](url)` links | link text masks the target; bare URLs only |
+
+Literal markup belongs in a backtick code span. A second heading or a
+non-leading heading rejects (`memory_md_heading_structure`); a non-`##`
+heading level or list nesting deeper than one warns.
+
+New records carry `statement_format="md-v1"` in the record payload. Records
+without the marker are plain text and are never markdown-rendered.
+
+Template (copy and adapt, ≤300 chars):
+
+```
+## Cache keys normalize once
+`resolve_cache_path()` lowercases keys; **eviction compares raw paths** (miss on case-variant paths).
+| probe | result |
+| --- | --- |
+| `Foo.py` | miss |
+> Ruling: normalize at write, never at compare.
+Why: prevents double entries per path casing.
+```
 
 ## Draft through MCP
 

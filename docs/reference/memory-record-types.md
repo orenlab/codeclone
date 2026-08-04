@@ -92,6 +92,45 @@ query_engineering_memory(
 | `stale_marker` | A marker that a prior record is outdated or superseded by a newer one. | "Old: memory stores on disk-inventory anchors. Current: must be commit-anchored." |
 | `test_anchor` | A test file or scenario that validates a critical invariant or contract. | "tests/test_memory_durability.py validates fsync and unclean exit recovery." |
 
+## Statement format
+
+Statements accept a safe Markdown subset. It degrades gracefully as plain text, and the
+VS Code Memory view and the Enacta Memory inbox render it:
+
+- one optional `## ` title as the **first** line (H2 is the enforced level);
+- `code spans` for paths, symbols, digests, versions, and flags;
+- **bold** / *italic*;
+- lists nested at most once;
+- compact tables (bounded by the size gates, no dedicated row limit);
+- `> ` blockquotes for quoting maintainer rulings;
+- bare URLs (renderers autolink them).
+
+Security-class constructs are rejected with typed `memory_md_*` errors: `![…](…)` images
+(a rendered image pings its URL), raw HTML tags (injection into webview surfaces), and
+`[text](url)` links (link text masks the target — bare URLs only). Put literal markup in a
+backtick code span. A second heading or a non-leading heading rejects
+(`memory_md_heading_structure`); a non-`##` heading level or list nesting deeper than one
+warns.
+
+Size gates: target 300, warn over 500, hard-reject over 1,000 characters per statement.
+Batches (blank-line-separated notes in `validate_claims`, `propose_memory` candidates)
+warn when their mean statement length exceeds 200 characters.
+
+Records written through `record_candidate` carry `statement_format: "md-v1"` in the record
+payload. Records without the marker are plain text and are never markdown-rendered.
+
+Template (copy and adapt, ≤300 chars):
+
+```
+## Cache keys normalize once
+`resolve_cache_path()` lowercases keys; **eviction compares raw paths** (miss on case-variant paths).
+| probe | result |
+| --- | --- |
+| `Foo.py` | miss |
+> Ruling: normalize at write, never at compare.
+Why: prevents double entries per path casing.
+```
+
 ## Common mistakes
 
 **Overwriting memory instead of recording a note**: Memory is append-only. If you need to correct a fact, write a `contradiction_note` or `stale_marker`, not a replacement. Agents need to see the history.

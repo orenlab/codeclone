@@ -36,6 +36,10 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   `known`, or explicitly `unavailable` instead of assumed.
 - The report explains the arithmetic behind the health score instead of only publishing the number.
 - `project_label` records an operator-facing project name in published baseline metadata.
+- Engineering Memory statements accept a safe Markdown subset (one `## ` title line, code spans, bold/italic, depth-1
+  lists, compact tables, blockquotes, bare URLs) that memory UIs render and plain text preserves. Images, raw HTML, and
+  `[text](url)` links are rejected at write time as render-surface security risks, and new records carry a
+  `statement_format: "md-v1"` marker so legacy plain-text notes are never markdown-rendered.
 
 ### Changed
 
