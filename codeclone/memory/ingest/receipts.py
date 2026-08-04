@@ -14,6 +14,10 @@ from ..enums import MemoryRecordType, validate_memory_record_type
 from ..governance import record_candidate
 from ..models import MemoryProject, generate_memory_id
 from ..sqlite_store import SqliteEngineeringMemoryStore
+from ..statement_markdown import (
+    STATEMENT_FORMAT_PAYLOAD_KEY,
+    resolve_statement_format,
+)
 
 
 def _try_append_text_candidate(
@@ -50,12 +54,16 @@ def _try_append_text_candidate(
 
             record_counter("memory.propose_candidate_dropped")
         return None
-    return {
+    summary: dict[str, object] = {
         "id": record.id,
         "type": record.type,
         "status": record.status,
         "statement": record.statement,
     }
+    marker = resolve_statement_format(record.statement, record.payload)
+    if marker is not None:
+        summary[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
+    return summary
 
 
 def propose_memory_from_finish_payload(
@@ -94,14 +102,16 @@ def propose_memory_from_finish_payload(
                     )
                 except Exception:
                     continue
-                candidates.append(
-                    {
-                        "id": record.id,
-                        "type": record.type,
-                        "status": record.status,
-                        "statement": record.statement,
-                    }
-                )
+                summary: dict[str, object] = {
+                    "id": record.id,
+                    "type": record.type,
+                    "status": record.status,
+                    "statement": record.statement,
+                }
+                marker = resolve_statement_format(record.statement, record.payload)
+                if marker is not None:
+                    summary[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
+                candidates.append(summary)
 
     claims_text = finish_payload.get("claims_text")
     claims_candidate = _try_append_text_candidate(

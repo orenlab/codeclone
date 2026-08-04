@@ -117,7 +117,10 @@ Batches (blank-line-separated notes in `validate_claims`, `propose_memory` candi
 warn when their mean statement length exceeds 200 characters.
 
 Records written through `record_candidate` carry `statement_format: "md-v1"` in the record
-payload. Records without the marker are plain text and are never markdown-rendered.
+payload, and every statement-bearing reader surface re-emits the marker — including for
+unstamped legacy records whose leading `## ` title still validates against the subset
+(rows written before the stamp existed, or by a server process that predated it).
+Records without the marker are plain text and are never markdown-rendered.
 
 Template (copy and adapt, ≤300 chars):
 

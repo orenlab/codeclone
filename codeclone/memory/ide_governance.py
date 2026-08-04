@@ -20,6 +20,10 @@ from .governance import approve_record, archive_record, reject_record
 from .models import MemoryRecord
 from .project import compute_project_id
 from .sqlite_store import SqliteEngineeringMemoryStore
+from .statement_markdown import (
+    STATEMENT_FORMAT_PAYLOAD_KEY,
+    resolve_statement_format,
+)
 
 IDE_GOVERNANCE_TICKET_TTL_SECONDS = 120
 IDE_GOVERNANCE_MIN_KEY_BYTES = 32
@@ -411,6 +415,26 @@ def prepare_governance(
     )
     state.tickets[ticket_id] = ticket
     subjects = store.list_subjects_for_memory(record.id)
+    record_summary: dict[str, object] = {
+        "id": record.id,
+        "type": record.type,
+        "status": record.status,
+        "statement": record.statement,
+        "confidence": record.confidence,
+        "subjects": [
+            {
+                "subject_kind": item.subject_kind,
+                "subject_key": item.subject_key,
+                "relation": item.relation,
+            }
+            for item in subjects
+        ],
+    }
+    # The IDE approval view markdown-renders md-v1 statements; the marker
+    # must ride the echo so the human reviews the rendered shape.
+    marker = resolve_statement_format(record.statement, record.payload)
+    if marker is not None:
+        record_summary[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
     return {
         "action": "prepare_governance",
         "status": "ok",
@@ -420,21 +444,7 @@ def prepare_governance(
         "confirmation_nonce": nonce,
         "project_id": project_id,
         "statement_digest": statement_digest,
-        "record": {
-            "id": record.id,
-            "type": record.type,
-            "status": record.status,
-            "statement": record.statement,
-            "confidence": record.confidence,
-            "subjects": [
-                {
-                    "subject_kind": item.subject_kind,
-                    "subject_key": item.subject_key,
-                    "relation": item.relation,
-                }
-                for item in subjects
-            ],
-        },
+        "record": record_summary,
     }
 
 

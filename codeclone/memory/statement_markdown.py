@@ -18,11 +18,16 @@ Records written through :func:`codeclone.memory.governance.record_candidate`
 are stamped ``statement_format="md-v1"`` in the record payload; the absence
 of the marker means plain text and renderers must not markdown-render it.
 This marker rides the free-form payload JSON — no store schema change.
+On the wire the marker is resolved per statement body through
+:func:`resolve_statement_format`, which also derives md-v1 for unstamped
+records carrying a leading validated ``## `` title — the stamp alone cannot
+cover rows written by a server process that predated the stamping code.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Final
 
 from ..models import StatementMarkdownIssue, StatementMarkdownReport
@@ -224,6 +229,42 @@ def markdown_reject_error(report: StatementMarkdownReport) -> str:
     return " | ".join(issue.message for issue in report.rejects)
 
 
+def resolve_statement_format(
+    statement: str,
+    payload: Mapping[str, object] | None = None,
+) -> str | None:
+    """Decide the wire ``statement_format`` marker for one statement body.
+
+    Returns ``"md-v1"`` or ``None`` (= plain: emit no key). Two honest
+    sources, in order:
+
+    1. The write-time payload stamp — authorship truth recorded by
+       :func:`codeclone.memory.governance.record_candidate`.
+    2. Structural derivation — a leading ``## `` title line on a statement
+       the validator accepts is the md-v1 signature by construction. This
+       heals records whose writer predated the stamp: a wave's memory notes
+       are recorded through a server process older than the wave's own code,
+       so the stamp alone can never cover the store.
+
+    Statements without the leading title never derive: there is no
+    unambiguous markdown-authorship signal, and legacy plain text must not
+    be force-rendered. Rejecting reports (images, raw HTML, masked links,
+    broken heading structure) stay plain, so the render-surface security
+    bans hold for legacy rows too.
+    """
+    if (
+        isinstance(payload, Mapping)
+        and payload.get(STATEMENT_FORMAT_PAYLOAD_KEY) == STATEMENT_FORMAT_MD
+    ):
+        return STATEMENT_FORMAT_MD
+    if (
+        statement.startswith("## ")
+        and not validate_statement_markdown(statement).rejects
+    ):
+        return STATEMENT_FORMAT_MD
+    return None
+
+
 __all__ = [
     "STATEMENT_FORMAT_MD",
     "STATEMENT_FORMAT_PAYLOAD_KEY",
@@ -233,5 +274,6 @@ __all__ = [
     "StatementMarkdownIssue",
     "StatementMarkdownReport",
     "markdown_reject_error",
+    "resolve_statement_format",
     "validate_statement_markdown",
 ]

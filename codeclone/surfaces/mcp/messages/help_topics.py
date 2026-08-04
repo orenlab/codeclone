@@ -873,8 +873,11 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "backtick code span instead. memory_md_heading_structure "
                 "rejects a second heading or a non-leading heading; "
                 "memory_md_heading_level and memory_md_list_nesting warn. "
-                "New records carry statement_format=md-v1; records without "
-                "the marker are plain text and must not be markdown-rendered."
+                "statement_format=md-v1 rides every statement-bearing read "
+                "surface: stamped at write for new records, derived on read "
+                "for unstamped legacy statements with a validating leading "
+                "'## ' title. Records without the marker are plain text and "
+                "must not be markdown-rendered."
             ),
             (
                 "Size gates: target 300 / warn over 500 / hard-reject over "

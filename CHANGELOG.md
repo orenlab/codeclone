@@ -39,7 +39,8 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 - Engineering Memory statements accept a safe Markdown subset (one `## ` title line, code spans, bold/italic, depth-1
   lists, compact tables, blockquotes, bare URLs) that memory UIs render and plain text preserves. Images, raw HTML, and
   `[text](url)` links are rejected at write time as render-surface security risks, and new records carry a
-  `statement_format: "md-v1"` marker so legacy plain-text notes are never markdown-rendered.
+  `statement_format: "md-v1"` marker so legacy plain-text notes are never markdown-rendered; the marker now rides
+  every statement-bearing reader surface, derived at read time for unstamped md-titled legacy records.
 - MCP memory responses (`get_relevant_memory`, `query_engineering_memory`) carry a `store_provenance` witness —
   which resolution branch produced the store and the count of approved records visible — so a freshly
   bootstrapped hollow store is distinguishable from a knowledge-bearing one, and an unresolvable git state carries an

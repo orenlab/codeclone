@@ -28,7 +28,7 @@ An AI agent session is ephemeral — a new session, a context-window reset, or a
 
 Memory is retrieved mid-workflow, after [controlled change](controlled-change.md) has declared an edit scope, and is filtered to that scope rather than the whole repository. Writing new records happens through the same MCP surface, not by asserting things in chat. Draft records require human approval (via the CodeClone VS Code Memory view) before being treated as established facts — memory cannot authorize edits, expand scope, or override structural findings on its own.
 
-Statements accept a safe Markdown subset (one leading `## ` title, code spans, bold/italic, depth-1 lists, compact tables, blockquotes, bare URLs) that degrades gracefully as plain text. Images, raw HTML, and `[text](url)` links are rejected at write time as render-surface security risks. Records authored under the subset carry `statement_format: "md-v1"`; legacy records have no marker and are treated as plain text, never markdown-rendered.
+Statements accept a safe Markdown subset (one leading `## ` title, code spans, bold/italic, depth-1 lists, compact tables, blockquotes, bare URLs) that degrades gracefully as plain text. Images, raw HTML, and `[text](url)` links are rejected at write time as render-surface security risks. Records authored under the subset carry `statement_format: "md-v1"` on every statement-bearing reader surface — stamped in the payload at write time, and derived at read time for unstamped legacy records whose leading `## ` title still validates; records without the marker are plain text, never markdown-rendered.
 
 ```mermaid
 graph LR

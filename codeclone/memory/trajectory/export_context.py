@@ -13,8 +13,12 @@ from typing import TypeGuard
 
 import orjson
 
-from ..models import MemoryProject
+from ..models import MemoryProject, parse_payload_json
 from ..paths import normalize_memory_scope_path
+from ..statement_markdown import (
+    STATEMENT_FORMAT_PAYLOAD_KEY,
+    resolve_statement_format,
+)
 from .models import Trajectory
 from .patch_trail import patch_trail_from_mapping
 from .profiles import TrajectoryExportProfile, trajectory_eligible_for_export
@@ -285,7 +289,8 @@ def _memory_precedents(
 
     linked_rows = conn.execute(
         """
-        SELECT m.id, m.type, m.status, m.statement, e.evidence_kind
+        SELECT m.id, m.type, m.status, m.statement, m.payload_json,
+               e.evidence_kind
         FROM memory_evidence e
         JOIN memory_records m ON m.id = e.memory_id
         WHERE m.project_id = ?
@@ -316,7 +321,8 @@ def _memory_precedents(
     placeholders = ", ".join("?" for _ in normalized_scope)
     path_rows = conn.execute(
         f"""
-        SELECT DISTINCT m.id, m.type, m.status, m.statement, s.subject_key
+        SELECT DISTINCT m.id, m.type, m.status, m.statement, m.payload_json,
+               s.subject_key
         FROM memory_records m
         JOIN memory_subjects s ON s.memory_id = m.id
         WHERE m.project_id = ?
@@ -336,7 +342,8 @@ def _memory_precedents(
         if len(precedents) >= MAX_MEMORY_PRECEDENTS:
             break
         row = conn.execute(
-            "SELECT id, type, status, statement FROM memory_records WHERE id=?",
+            "SELECT id, type, status, statement, payload_json "
+            "FROM memory_records WHERE id=?",
             (memory_id,),
         ).fetchone()
         if row is None:
@@ -437,16 +444,30 @@ def _memory_precedent_row(
     link_kind: str,
     overlap_paths: Sequence[str],
 ) -> dict[str, object]:
+    statement = str(row["statement"])
     payload: dict[str, object] = {
         "memory_id": str(row["id"]),
         "record_type": str(row["type"]),
         "status": str(row["status"]),
-        "statement_preview": _preview_text(str(row["statement"])),
+        "statement_preview": _preview_text(statement),
         "link_kind": link_kind,
     }
+    # Resolve from the FULL statement: the preview may cut the body, but the
+    # md-v1 signature (stamp or leading validated '## ' title) is a property
+    # of the record, and export consumers render the preview accordingly.
+    marker = resolve_statement_format(
+        statement, parse_payload_json(_optional_text(row, "payload_json"))
+    )
+    if marker is not None:
+        payload[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
     if overlap_paths:
         payload["overlap_paths"] = list(overlap_paths)
     return payload
+
+
+def _optional_text(row: sqlite3.Row, key: str) -> str | None:
+    value = row[key]
+    return value if isinstance(value, str) else None
 
 
 def _prefer_trajectory_projection(

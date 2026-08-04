@@ -42,8 +42,8 @@ from ..semantic.chunking import (
 )
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..statement_markdown import (
-    STATEMENT_FORMAT_MD,
     STATEMENT_FORMAT_PAYLOAD_KEY,
+    resolve_statement_format,
 )
 from ..status_report import build_memory_status_report
 from ..trajectory.analytics import (
@@ -303,6 +303,9 @@ def _serialize_experience(
         "status": experience.status,
         "statement": statement,
     }
+    marker = resolve_statement_format(experience.statement)
+    if marker is not None:
+        payload[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
     agent_facet_items = sorted(
         (
             (facet.facet_value, facet.count)
@@ -496,14 +499,12 @@ def _serialize_record_summary(
         payload["subjects_truncated"] = len(serialized_subjects) < len(subjects)
         if statement_length > len(statement_value):
             payload["statement_truncated"] = True
-    record_payload = record.payload
-    if (
-        isinstance(record_payload, dict)
-        and record_payload.get(STATEMENT_FORMAT_PAYLOAD_KEY) == STATEMENT_FORMAT_MD
-    ):
-        # Authored under the validated markdown subset. Absent marker means
-        # plain text: renderers must not markdown-render legacy statements.
-        payload[STATEMENT_FORMAT_PAYLOAD_KEY] = STATEMENT_FORMAT_MD
+    marker = resolve_statement_format(record.statement, record.payload)
+    if marker is not None:
+        # Stamped at write or structurally md-v1 (leading validated '## '
+        # title). Absent marker still means plain text: renderers must not
+        # markdown-render unmarked statements.
+        payload[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
     if record.stale_reason:
         payload["stale_reason"] = record.stale_reason
     payload.update(_retrieval_lane_payload(record))
