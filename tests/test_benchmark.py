@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+import textwrap
 from pathlib import Path
 from subprocess import CompletedProcess
 from typing import cast
@@ -25,6 +27,7 @@ from benchmarks.run_benchmark import (
     _require_json_object,
     _run_cli_once,
     _scenario_profile,
+    _scenario_result,
     _timing_regressions,
     _validate_inventory_sample,
 )
@@ -475,3 +478,170 @@ def test_benchmark_report_reader_names_the_tier_it_cannot_find(
 
     with pytest.raises(RuntimeError, match=re.escape("integrity.digests.evaluation")):
         _read_report(report_path)
+
+
+def _write_tiny_target(root: Path) -> Path:
+    """A minimal but real analysis target: two typed, documented modules."""
+
+    target = root / "target"
+    target.mkdir()
+    (target / "alpha.py").write_text(
+        textwrap.dedent(
+            '''
+            def add(a: int, b: int) -> int:
+                """Add two integers."""
+                return a + b
+            '''
+        ),
+        encoding="utf-8",
+    )
+    (target / "beta.py").write_text(
+        textwrap.dedent(
+            '''
+            def mul(a: int, b: int) -> int:
+                """Multiply two integers."""
+                return a * b
+            '''
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def test_benchmark_scenario_leaves_no_per_iteration_reports_after_success(
+    tmp_path: Path,
+) -> None:
+    """A completed scenario must not keep any per-iteration report artifacts.
+
+    The harness writes ``seed-report.json``, ``warmup-report-{idx}.json``, and
+    ``run-report-{idx}.json`` -- plus one sibling per extra report format --
+    for every iteration and never deleted any of them. The smoke profile
+    multiplies that by runs x warmups x scenarios inside a small container, so
+    the reports accumulated until the disk was gone: CI died mid-scenario at
+    ``cold_full/run-report-9.json`` with "No space left on device". Once an
+    iteration's measurement is extracted the files carry no further signal --
+    determinism compares digest strings and inventory validation reads
+    measurement fields -- so a successful scenario must leave its directory
+    clean of them, bounding disk use by construction. Nothing is stubbed:
+    the real CLI runs against a real target.
+    """
+
+    target = _write_tiny_target(tmp_path)
+    workspace = tmp_path / "workspace"
+    scenario = Scenario(name="warm_tiny", mode="warm", report_formats=("html",))
+
+    result = _scenario_result(
+        scenario=scenario,
+        target=target,
+        python_executable=sys.executable,
+        workspace=workspace,
+        warmups=1,
+        runs=2,
+    )
+
+    assert result["deterministic"] is True
+    scenario_dir = workspace / scenario.name
+    leftover_reports = sorted(
+        path.name
+        for path in scenario_dir.iterdir()
+        if path.name.startswith(("seed-report", "warmup-report", "run-report"))
+    )
+    assert leftover_reports == []
+    # Only report artifacts are bounded; the warm cache is the scenario's
+    # working state and stays.
+    assert (scenario_dir / "shared-cache.json").exists()
+
+
+def _write_report_artifacts(
+    tmp_path: Path,
+    document: dict[str, object],
+) -> tuple[Path, Path]:
+    """Materialize one iteration's report and its html sibling on disk."""
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(document), encoding="utf-8")
+    html_path = tmp_path / "report.html"
+    html_path.write_text("<html></html>", encoding="utf-8")
+    return report_path, html_path
+
+
+def _run_stubbed_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    report_path: Path,
+) -> RunMeasurement:
+    """Drive one ``_run_cli_once`` iteration over a pre-written report."""
+
+    monkeypatch.setattr(
+        "benchmarks.run_benchmark.subprocess.run",
+        lambda cmd, *, check, capture_output, text, env: CompletedProcess(
+            cmd, 0, stdout="", stderr=""
+        ),
+    )
+    return _run_cli_once(
+        target=tmp_path,
+        python_executable="python3",
+        cache_path=tmp_path / "cache.json",
+        report_path=report_path,
+        extra_args=(),
+        report_formats=("html",),
+    )
+
+
+def test_benchmark_runner_deletes_report_artifacts_after_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """One successful iteration deletes its report and format siblings.
+
+    Deletion must happen only after the measurement is extracted: the
+    returned ``artifact_bytes`` still carries the sizes of the files that
+    are gone from disk.
+    """
+
+    document = build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        inventory={
+            "files": {
+                "total_found": 2,
+                "analyzed": 2,
+                "cached": 0,
+                "skipped": 0,
+            }
+        },
+    )
+    report_path, html_path = _write_report_artifacts(tmp_path, document)
+    json_size = report_path.stat().st_size
+    html_size = html_path.stat().st_size
+
+    measurement = _run_stubbed_iteration(monkeypatch, tmp_path, report_path)
+
+    assert measurement.artifact_bytes == {"html": html_size, "json": json_size}
+    assert not report_path.exists()
+    assert not html_path.exists()
+
+
+def test_benchmark_runner_preserves_report_artifacts_on_contract_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed iteration leaves its report artifacts on disk for forensics.
+
+    When the report violates its contract the exception is the measurement,
+    and the file that produced it is the evidence; cleanup applies only to
+    iterations whose measurement was extracted successfully.
+    """
+
+    document = build_test_report_document(
+        func_groups={}, block_groups={}, segment_groups={}
+    )
+    del _digest_tiers(document)["evaluation"]
+    report_path, html_path = _write_report_artifacts(tmp_path, document)
+
+    with pytest.raises(RuntimeError, match=re.escape("integrity.digests.evaluation")):
+        _run_stubbed_iteration(monkeypatch, tmp_path, report_path)
+
+    assert report_path.exists()
+    assert html_path.exists()

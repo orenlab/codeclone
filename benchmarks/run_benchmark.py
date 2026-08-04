@@ -321,6 +321,17 @@ def _run_cli_once(
         )
 
     digest, files = _read_report(report_path)
+    artifact_bytes = _artifact_size_map(artifact_paths)
+    cache_bytes = _file_size(cache_path)
+    # The measurement is extracted; nothing downstream reads these files again
+    # (determinism compares digest strings, inventory validation reads
+    # measurement fields). Deleting them here bounds disk use by construction:
+    # the smoke profile runs many iterations across scenarios inside a small
+    # container, and accumulated per-iteration reports have filled its disk.
+    # Every failure path above raises before this point, deliberately leaving
+    # the offending iteration's artifacts on disk for forensics.
+    for _name, artifact_path in sorted(artifact_paths.items()):
+        artifact_path.unlink(missing_ok=True)
     return RunMeasurement(
         elapsed_seconds=elapsed_seconds,
         child_user_seconds=child_user_seconds,
@@ -331,8 +342,8 @@ def _run_cli_once(
         files_analyzed=files["analyzed"],
         files_cached=files["cached"],
         files_skipped=files["skipped"],
-        artifact_bytes=_artifact_size_map(artifact_paths),
-        cache_bytes=_file_size(cache_path),
+        artifact_bytes=artifact_bytes,
+        cache_bytes=cache_bytes,
     )
 
 
