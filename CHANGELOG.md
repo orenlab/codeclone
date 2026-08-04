@@ -39,6 +39,10 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- Terminal output follows one design system across every command: consistent number formatting and pluralization,
+  one color and glyph vocabulary, and error messages that always name an executable next step. Bracketed details in
+  warnings (such as `[Errno 2]`) are no longer lost, and every CLI option now documents itself in `--help`. Machine
+  outputs (`--json`, SARIF, Markdown, `--ci` lines) are unchanged.
 - The default cache size limit (`max_cache_size_mb`) is raised from 50 MB to 256 MB so large repositories keep their
   warm-cache path. A repository whose cache exceeds the limit falls back to full re-analysis on every run.
 - Report tables are ordered by operational risk rather than by file path.
