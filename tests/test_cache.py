@@ -2544,6 +2544,78 @@ def test_cache_v3_semantic_decoder_covers_closed_vocabulary_edges() -> None:
     )
 
 
+def test_cache_v3_semantic_facts_decode_reuses_identical_embedded_events() -> None:
+    """Perf-ledger #2 dedup proof: value-identical embedded rows share objects.
+
+    Contract summaries embed their events on the wire and four of five
+    embedded rows are exact copies of flat ``se`` rows, so the decoder must
+    hand back the already-decoded object for a copy (the decode-count
+    reduction the ledger demands) while a row that diverges only in its
+    resolution view must keep decoding independently with its own values.
+    """
+
+    shared_row: list[object] = [
+        "event-1",
+        "assign",
+        "m:f",
+        [["param", "x"]],
+        ["event", "event-1"],
+        [],
+        1,
+        "unavailable",
+    ]
+    resolved_row: list[object] = [
+        "event-1",
+        "assign",
+        "m:f",
+        [["param", "x"]],
+        ["event", "event-1"],
+        [],
+        1,
+        "resolved",
+    ]
+    fresh_row: list[object] = [
+        "event-2",
+        "field_write",
+        "m:g",
+        [["param", "x"], ["param", "y"]],
+        None,
+        [],
+        2,
+        "resolved",
+    ]
+    facts = cache_wire_decode._decode_semantic_facts(
+        {
+            "se": [shared_row, fresh_row],
+            "fc": [
+                ["m:f", [shared_row, resolved_row], [], [["param", "x"]], False],
+                ["m:g", [fresh_row], [], [], False],
+            ],
+        },
+        filepath="m.py",
+    )
+    assert facts is not None
+    flat_by_id = {event.event_id: event for event in facts.events}
+    summary_f, summary_g = facts.function_contract_summaries
+
+    # Exact wire copies decode to the very same object as the flat lane.
+    assert summary_f.events[0] is flat_by_id["event-1"]
+    assert summary_g.events[0] is flat_by_id["event-2"]
+
+    # The resolution-upgraded copy keeps its own decode and its own values.
+    assert summary_f.events[1] is not flat_by_id["event-1"]
+    assert summary_f.events[1].resolution == "resolved"
+    assert flat_by_id["event-1"].resolution == "unavailable"
+
+    # Fact refs with equal payloads are interned within one file decode.
+    assert (
+        flat_by_id["event-1"].inputs[0]
+        is flat_by_id["event-2"].inputs[0]
+        is summary_f.returns[0]
+    )
+    assert flat_by_id["event-2"].inputs[1].ref == "y"
+
+
 def test_cache_v3_wire_edge_decoders_are_fail_closed() -> None:
     assert cache_wire_decode._decode_wire_stat({"st": [1, 2]}) == {
         "mtime_ns": 1,

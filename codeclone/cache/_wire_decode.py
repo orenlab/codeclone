@@ -174,7 +174,11 @@ def _event_resolution(value: object) -> SemanticEventResolution | None:
             return None
 
 
-def _decode_fact_ref(value: object) -> FactRef | None:
+def _decode_fact_ref(
+    value: object,
+    *,
+    ref_intern: dict[tuple[FactRefKind, str], FactRef] | None = None,
+) -> FactRef | None:
     row = _as_list(value)
     if row is None or len(row) != 2:
         return None
@@ -182,10 +186,26 @@ def _decode_fact_ref(value: object) -> FactRef | None:
     ref = _as_str(row[1])
     if kind is None or ref is None:
         return None
-    return FactRef(kind=kind, ref=ref)
+    if ref_intern is None:
+        return FactRef(kind=kind, ref=ref)
+    # FactRef is frozen with value equality, so handing every repeat of one
+    # (kind, ref) pair the same object is invisible to consumers while it
+    # removes the dominant allocation of the semantic-facts decode: a real
+    # corpus repeats each distinct fact ref almost four times.
+    key = (kind, ref)
+    known = ref_intern.get(key)
+    if known is None:
+        known = FactRef(kind=kind, ref=ref)
+        ref_intern[key] = known
+    return known
 
 
-def _decode_semantic_event(value: object, *, filepath: str) -> SemanticEvent | None:
+def _decode_semantic_event(
+    value: object,
+    *,
+    filepath: str,
+    ref_intern: dict[tuple[FactRefKind, str], FactRef] | None = None,
+) -> SemanticEvent | None:
     row = _as_list(value)
     if row is None or len(row) != 8:
         return None
@@ -208,13 +228,17 @@ def _decode_semantic_event(value: object, *, filepath: str) -> SemanticEvent | N
         or resolution is None
     ):
         return None
-    inputs = tuple(_decode_fact_ref(item) for item in inputs_raw)
+    inputs = tuple(_decode_fact_ref(item, ref_intern=ref_intern) for item in inputs_raw)
     if any(item is None for item in inputs):
         return None
     guards = tuple(_as_str(item) for item in guards_raw)
     if any(item is None for item in guards):
         return None
-    output = None if output_raw is None else _decode_fact_ref(output_raw)
+    output = (
+        None
+        if output_raw is None
+        else _decode_fact_ref(output_raw, ref_intern=ref_intern)
+    )
     if output_raw is not None and output is None:
         return None
     return SemanticEvent(
@@ -229,10 +253,38 @@ def _decode_semantic_event(value: object, *, filepath: str) -> SemanticEvent | N
     )
 
 
+def _reuse_or_decode_semantic_event(
+    value: object,
+    *,
+    filepath: str,
+    event_reuse: dict[str, tuple[object, SemanticEvent]] | None,
+    ref_intern: dict[tuple[FactRefKind, str], FactRef] | None,
+) -> SemanticEvent | None:
+    """Reuse the flat-lane event when the embedded wire row is its exact copy.
+
+    Contract summaries embed their events on the wire, and on a real corpus
+    four of five embedded rows are byte-for-byte copies of rows already
+    decoded from the flat ``se`` lane. SemanticEvent is frozen with value
+    equality, so returning the already-decoded object for a value-identical
+    row is invisible to consumers. Rows that differ (summaries may carry a
+    later resolution view of the same event id) keep the full decode path.
+    """
+
+    if event_reuse:
+        row = _as_list(value)
+        if row is not None and row and isinstance(row[0], str):
+            known = event_reuse.get(row[0])
+            if known is not None and known[0] == value:
+                return known[1]
+    return _decode_semantic_event(value, filepath=filepath, ref_intern=ref_intern)
+
+
 def _decode_contract_summary(
     value: object,
     *,
     filepath: str,
+    event_reuse: dict[str, tuple[object, SemanticEvent]] | None = None,
+    ref_intern: dict[tuple[FactRefKind, str], FactRef] | None = None,
 ) -> FunctionContractSummary | None:
     row = _as_list(value)
     if row is None or len(row) != 5:
@@ -251,9 +303,17 @@ def _decode_contract_summary(
     ):
         return None
     events = tuple(
-        _decode_semantic_event(item, filepath=filepath) for item in events_raw
+        _reuse_or_decode_semantic_event(
+            item,
+            filepath=filepath,
+            event_reuse=event_reuse,
+            ref_intern=ref_intern,
+        )
+        for item in events_raw
     )
-    returns = tuple(_decode_fact_ref(item) for item in returns_raw)
+    returns = tuple(
+        _decode_fact_ref(item, ref_intern=ref_intern) for item in returns_raw
+    )
     if any(item is None for item in events) or any(item is None for item in returns):
         return None
     flows: list[tuple[str, str]] = []
@@ -284,19 +344,29 @@ def _decode_semantic_facts(
     summaries_raw = _as_list(obj.get("fc"))
     if events_raw is None or summaries_raw is None:
         return None
-    events = tuple(
-        _decode_semantic_event(item, filepath=filepath) for item in events_raw
-    )
-    summaries = tuple(
-        _decode_contract_summary(item, filepath=filepath) for item in summaries_raw
-    )
-    if any(item is None for item in events) or any(item is None for item in summaries):
-        return None
+    ref_intern: dict[tuple[FactRefKind, str], FactRef] = {}
+    events: list[SemanticEvent] = []
+    event_reuse: dict[str, tuple[object, SemanticEvent]] = {}
+    for item in events_raw:
+        event = _decode_semantic_event(item, filepath=filepath, ref_intern=ref_intern)
+        if event is None:
+            return None
+        events.append(event)
+        event_reuse[event.event_id] = (item, event)
+    summaries: list[FunctionContractSummary] = []
+    for item in summaries_raw:
+        summary = _decode_contract_summary(
+            item,
+            filepath=filepath,
+            event_reuse=event_reuse,
+            ref_intern=ref_intern,
+        )
+        if summary is None:
+            return None
+        summaries.append(summary)
     return SemanticFileFacts(
-        events=tuple(item for item in events if item is not None),
-        function_contract_summaries=tuple(
-            item for item in summaries if item is not None
-        ),
+        events=tuple(events),
+        function_contract_summaries=tuple(summaries),
     )
 
 
