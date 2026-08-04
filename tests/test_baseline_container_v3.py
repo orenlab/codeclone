@@ -41,6 +41,7 @@ from codeclone.baseline.lanes import (
     payload_from_input,
     validate_descriptor,
 )
+from codeclone.contracts import BASELINE_FINGERPRINT_VERSION
 from codeclone.models import (
     BaselineContainerV3,
     BaselineContainerV3Input,
@@ -55,6 +56,7 @@ from codeclone.models import (
     ContractIndex,
     DigestObject,
     EpochTransitionEvidence,
+    EpochTransitionEvidenceInput,
     ModuleIdentityColumnarPayload,
     ObservabilityConfig,
     ObservationBundle,
@@ -895,6 +897,44 @@ def test_future_major_malformed_type_and_descriptor_taxonomy(
         for name, lane in descriptor_result.container.lanes.items()
         if name != "api_surface"
     )
+
+
+def test_transition_wire_accepts_historic_and_live_target_fingerprints() -> None:
+    """Both pre-fix and live ``to_fingerprint`` evidence must stay readable.
+
+    Containers migrated before the fix carry ``to_fingerprint: "2"`` — the
+    repository's own baseline is one — while future migrations record the
+    live ``BASELINE_FINGERPRINT_VERSION``. The wire model accepts both;
+    empty evidence stays rejected at the runtime boundary.
+    """
+
+    def _payload(to_fingerprint: str) -> bytes:
+        return orjson.dumps(
+            {
+                "kind": "baseline_epoch_transition",
+                "from_schema": "2.1",
+                "from_fingerprint": "2",
+                "to_schema": "3.0",
+                "to_fingerprint": to_fingerprint,
+                "imported_lanes": [],
+                "regenerated_lanes": ["clones.functions"],
+                "source_legacy_digest": {
+                    "domain": "codeclone.baseline.legacy-evidence.v1",
+                    "algorithm": "sha256",
+                    "value": "9" * 64,
+                },
+            }
+        )
+
+    for target in ("2", BASELINE_FINGERPRINT_VERSION):
+        parsed = EpochTransitionEvidenceInput.model_validate_json(_payload(target))
+        runtime = container_mod._transition_from_input(parsed)
+        assert runtime is not None
+        assert runtime.to_fingerprint == target
+
+    empty = EpochTransitionEvidenceInput.model_validate_json(_payload(""))
+    with pytest.raises(ValueError, match="target fingerprint must be non-empty"):
+        container_mod._transition_from_input(empty)
 
 
 def test_reader_handles_transition_and_rejects_format_and_generator(

@@ -2942,7 +2942,11 @@ class EpochTransitionEvidence:
     from_schema: str | None
     from_fingerprint: str | None
     to_schema: Literal["3.0"]
-    to_fingerprint: Literal["2"]
+    # Provenance of what the migration actually wrote, not a version gate:
+    # containers migrated under an earlier epoch honestly carry that epoch's
+    # fingerprint ("2"), while new migrations record the live constant.
+    # Pinning a Literal here re-arms the stale-hardcode trap at every cutover.
+    to_fingerprint: str
     imported_lanes: tuple[str, ...]
     regenerated_lanes: tuple[ObservationLaneName, ...]
     source_legacy_digest: DigestObject | None
@@ -2961,6 +2965,8 @@ class EpochTransitionEvidence:
             raise ValueError("transition source schema must be non-empty")
         if self.from_fingerprint is not None and not self.from_fingerprint:
             raise ValueError("transition source fingerprint must be non-empty")
+        if not self.to_fingerprint:
+            raise ValueError("transition target fingerprint must be non-empty")
         if self.source_legacy_digest is not None and (
             self.source_legacy_digest.domain != "codeclone.baseline.legacy-evidence.v1"
         ):
@@ -3267,7 +3273,10 @@ class EpochTransitionEvidenceInput(BaseModel):
     from_schema: str | None
     from_fingerprint: str | None
     to_schema: Literal["3.0"]
-    to_fingerprint: Literal["2"]
+    # Provenance, not a gate: pre-fix containers carry "2", newer migrations
+    # carry the fingerprint constant that was live when they ran. Both must
+    # stay readable; emptiness is rejected at the runtime boundary.
+    to_fingerprint: str
     imported_lanes: tuple[str, ...]
     regenerated_lanes: tuple[str, ...]
     source_legacy_digest: DigestObjectInput | None

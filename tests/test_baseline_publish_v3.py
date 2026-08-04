@@ -324,6 +324,21 @@ def test_legacy_transition_preserves_exact_backup_and_clone_ids(tmp_path: Path) 
     assert block_payload.items == (_BLOCK_ID,)
 
 
+def test_legacy_transition_targets_the_live_fingerprint_version(
+    tmp_path: Path,
+) -> None:
+    """Migration evidence records the fingerprint the new epoch actually runs.
+
+    The published container's clone lanes carry the live
+    ``BASELINE_FINGERPRINT_VERSION`` as required contract and algorithm
+    revision, so the transition's ``to_fingerprint`` must be that same
+    constant — never a hardcoded historical value.
+    """
+
+    _target, _raw, transition = _write_legacy_target(tmp_path)
+    assert transition.to_fingerprint == BASELINE_FINGERPRINT_VERSION
+
+
 def test_republication_is_exact_byte_noop(tmp_path: Path) -> None:
     target = tmp_path / "baseline.json"
     publish_baseline(
