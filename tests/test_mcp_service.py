@@ -5290,6 +5290,72 @@ def test_mcp_blast_radius_payload_bounds_context_sections() -> None:
     }
 
 
+def test_blast_radius_non_string_path_values_are_not_paths() -> None:
+    """Absent document paths normalize to the empty skip sentinel.
+
+    ``str(None)`` used to leak the truthy literal ``"None"`` into blast
+    radius path logic; only strings can be repository paths.
+    """
+
+    from codeclone.analysis.blast_radius import _opaque_dynamic_load_paths
+
+    assert mcp_blast_radius_mod._normalize_relative_path(None) == ""
+    assert mcp_blast_radius_mod._normalize_relative_path(123) == ""
+    assert mcp_blast_radius_mod._normalize_relative_path("./pkg/mod.py") == (
+        "pkg/mod.py"
+    )
+    assert mcp_blast_radius_mod._item_path({"relative_path": None}) == ""
+    document = {
+        "metrics": {
+            "families": {
+                "dependencies": {
+                    "dynamic_boundaries": [
+                        {"source": {"file": {}}},
+                        {"source": {"file": {"path": "pkg/loader.py"}}},
+                    ],
+                },
+            },
+        },
+    }
+    assert _opaque_dynamic_load_paths(document) == ("pkg/loader.py",)
+
+
+def test_finding_novelty_without_evidence_is_unavailable_not_known() -> None:
+    """Absent novelty evidence surfaces as ``unavailable``, never ``known``."""
+
+    novelty = mcp_finding_mod._MCPSessionFindingMixin._finding_novelty
+    assert novelty({}) == "unavailable"
+    assert novelty({"novelty": "  "}) == "unavailable"
+    assert novelty({"novelty": "new"}) == "new"
+    assert novelty({"novelty": "known"}) == "known"
+    assert novelty({"novelty": "unavailable"}) == "unavailable"
+    assert novelty({"novelty": "untracked"}) == "untracked"
+
+
+def test_why_now_text_does_not_call_unproven_novelty_known_debt() -> None:
+    """``_why_now_text`` keeps tri-state honesty for non-known novelty."""
+
+    def _text(novelty: str) -> str:
+        return mcp_helpers_mod._why_now_text(
+            title="duplicate helper",
+            severity="high",
+            novelty=novelty,
+            count=2,
+            source_kind="production",
+            spread_files=2,
+            spread_functions=3,
+            effort="easy",
+        )
+
+    assert "new regression" in _text("new")
+    assert "known debt" in _text("known")
+    assert "known debt" not in _text("unavailable")
+    assert "novelty unavailable" in _text("unavailable")
+    assert "known debt" not in _text("untracked")
+    assert "novelty untracked" in _text("untracked")
+    assert "novelty unavailable" in _text("")
+
+
 def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
     tmp_path: Path,
 ) -> None:
