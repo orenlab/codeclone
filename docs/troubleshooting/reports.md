@@ -70,4 +70,4 @@ Each flag defaults to `.codeclone/report.<ext>` unless you provide a path argume
 - Read the examples guide for sample JSON structure and interpretation
 - Use the MCP service tools (`get_run_summary`, `get_report_section`, `compare_runs`) to programmatically query reports
 - Check Engineering Memory documentation for structural decisions about cache and baseline versioning
-- If a report fails validation, ensure your CodeClone version matches the baseline schema version (currently `2.1`)
+- If a report fails validation, ensure your CodeClone version matches the baseline schema version (currently `3.0`)

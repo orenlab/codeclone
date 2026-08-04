@@ -27,7 +27,7 @@ Use reports to:
 - **CI gates**: Pipe JSON output to CI for automated threshold checks
 - **Team review**: Share HTML reports for visual code-health assessment
 - **Markdown integration**: Embed findings in pull-request descriptions
-- **Machine parsing**: Consume JSON schema (v2.12) or SARIF for IDE plugins
+- **Machine parsing**: Consume JSON schema (v3.0) or SARIF for IDE plugins
 
 ## Basic workflow
 
@@ -44,7 +44,7 @@ graph LR
 
 | Flag | Output | Default path | Use when |
 |------|--------|--------------|----------|
-| `--json FILE` | Structured report (schema v2.12) | `.codeclone/report.json` | Parsing or CI gates |
+| `--json FILE` | Structured report (schema v3.0) | `.codeclone/report.json` | Parsing or CI gates |
 | `--html FILE` | Interactive dashboard | `.codeclone/report.html` | Team review or drill-down |
 | `--md FILE` | Markdown findings and metrics | `.codeclone/report.md` | PR descriptions or docs |
 | `--sarif FILE` | SARIF v2.1.0 format | `.codeclone/report.sarif` | IDE / SIEM integration |
@@ -82,5 +82,5 @@ codeclone . --sarif findings.sarif
 ## Next steps
 
 - Automate baseline updates in your CI: store `codeclone.baseline.json` per major branch
-- Integrate JSON reports into dashboards (schema v2.12 is stable)
+- Integrate JSON reports into dashboards (schema v3.0 is stable)
 - Use MCP tools (`get_run_summary`, `get_report_section`, `compare_runs`) for programmatic access

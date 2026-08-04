@@ -8,7 +8,7 @@ source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 
 ## What it is
 
-CodeClone produces deterministic, schema-versioned JSON reports via the `--json` flag. The report captures the complete structural analysis state: clone findings, metrics, dependencies, health scores, and baseline-relative deltas. The schema version (`REPORT_SCHEMA_VERSION: 2.12`) is stable within a CodeClone release; breaking changes require a new major version.
+CodeClone produces deterministic, schema-versioned JSON reports via the `--json` flag. The report captures the complete structural analysis state: clone findings, metrics, dependencies, health scores, and baseline-relative deltas. The schema version (`REPORT_SCHEMA_VERSION: 3.0`) is stable within a CodeClone release; breaking changes require a new major version.
 
 JSON output is designed for programmatic consumption—CI gates, metric dashboards, IDE integrations, and cross-repository analysis. Each field is deterministic: the same codebase analyzed twice produces byte-identical JSON (modulo timestamps).
 
@@ -43,7 +43,7 @@ codeclone . --json [FILE]
 ```
 
 If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is valid JSON and contains these top-level keys:
-- `report_schema_version` — schema version string (matches `REPORT_SCHEMA_VERSION`, currently `2.12`)
+- `report_schema_version` — schema version string (matches `REPORT_SCHEMA_VERSION`, currently `3.0`)
 - `meta` — run metadata: `codeclone_version`, `project_name`, `scan_root`, `python_version`, `analysis_mode`, `analysis_thresholds`, `analysis_profile`, `baseline`, `cache`, `runtime`
 - `inventory` — scanned inventory: `files`, `code` counts, and `file_registry`
 - `findings` — object with `summary` and `groups[]`; each group carries type, locations, risk, and `novelty` (`new` / `known`)
