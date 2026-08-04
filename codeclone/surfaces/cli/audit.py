@@ -37,7 +37,8 @@ def render_audit(
         db_path = resolve_audit_path(root_path=root_path, value=audit_path)
         summary = read_audit_summary(db_path=db_path, limit=50)
     except (AuditConfigError, AuditReadError) as exc:
-        console.print(ui.fmt_contract_error(str(exc)))
+        message = ui.AUDIT_ERR_NO_DATA if str(exc) == "no audit data" else str(exc)
+        console.print(ui.fmt_contract_error(message))
         return int(ExitCode.CONTRACT_ERROR)
     except Exception as exc:
         console.print(ui.fmt_internal_error(exc))
@@ -84,7 +85,8 @@ def _render_verbose(*, console: PrinterLike, summary: AuditSummary) -> int:
     if _supports_rich(console):
         return _render_verbose_rich(console=console, summary=summary)
 
-    console.print(f"[bold]╍╍╍ {ui.AUDIT_TITLE} ╍╍╍[/bold]")
+    rule = ui.GLYPH_RULE * 3
+    console.print(f"[bold]{rule} {ui.AUDIT_TITLE} {rule}[/bold]")
     console.print()
     console.print(
         f"  {ui.AUDIT_DATABASE:<13} {summary.db_path} ({summary.total_events} events)"
@@ -157,7 +159,9 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
         ui.AUDIT_VIOLATIONS.rstrip(":"),
         Text(
             str(summary.violation_events),
-            style="red" if summary.violation_events else "green",
+            style=ui.STYLE_VERDICT_FAIL
+            if summary.violation_events
+            else ui.STYLE_VERDICT_PASS,
         ),
     )
     fp = summary.payload_footprint
@@ -169,7 +173,7 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
                 f"({fp.encoding}, {fp.tool_calls} tool calls)"
             ),
         )
-    console.print(Panel(meta, border_style="cyan"))
+    console.print(Panel(meta, border_style=ui.STYLE_FRAME))
 
     table = Table(box=box.SIMPLE_HEAVY)
     table.add_column(ui.AUDIT_COL_TOKENS, justify="right", no_wrap=True)
@@ -279,9 +283,9 @@ def _render_payload_analytics(
     top.add_column(ui.AUDIT_COL_AGENT, no_wrap=True)
     for i, payload in enumerate(fp.top_payloads, 1):
         style = (
-            "bold red"
+            ui.STYLE_VERDICT_FAIL
             if payload.estimated_tokens > _SINGLE_PAYLOAD_WATCH
-            else "yellow"
+            else ui.STYLE_VERDICT_WARN
             if payload.estimated_tokens > _SINGLE_PAYLOAD_OK
             else ""
         )
@@ -326,7 +330,9 @@ def _render_payload_analytics(
 
     # ── Render ──
     console.print()
-    console.print(Panel(stats, title=ui.AUDIT_MCP_FOOTPRINT_PANEL, border_style="cyan"))
+    console.print(
+        Panel(stats, title=ui.AUDIT_MCP_FOOTPRINT_PANEL, border_style=ui.STYLE_FRAME)
+    )
     console.print(Panel(breakdown, title=ui.AUDIT_TOKENS_BY_TYPE, border_style="dim"))
     if fp.top_workflows:
         console.print(
@@ -337,12 +343,12 @@ def _render_payload_analytics(
     if warnings:
         warning_text = Text()
         for w in warnings:
-            warning_text.append(f"  ⚠ {w}\n", style="yellow")
+            warning_text.append(f"  {ui.GLYPH_WARN} {w}\n", style=ui.STYLE_VERDICT_WARN)
         console.print(
             Panel(
                 warning_text,
                 title=ui.AUDIT_PAYLOAD_BUDGET_WARNINGS,
-                border_style="yellow",
+                border_style=ui.STYLE_VERDICT_WARN,
             )
         )
 
@@ -437,10 +443,11 @@ def _format_bytes(value: int) -> str:
 
 
 def _severity_style(value: str) -> str:
-    return {"info": "green", "warn": "yellow", "error": "bold red"}.get(
-        value,
-        "white",
-    )
+    return {
+        "info": ui.STYLE_VERDICT_PASS,
+        "warn": ui.STYLE_VERDICT_WARN,
+        "error": ui.STYLE_VERDICT_FAIL,
+    }.get(value, "")
 
 
 __all__ = ["render_audit"]

@@ -379,30 +379,30 @@ def _workflow_label(workflow: _WorkflowFootprintSnapshot) -> str:
 
 def _health_style(value: str) -> str:
     return {
-        "idle": "dim",
-        "clean": "green",
-        "active": "cyan",
-        "contested": "yellow",
-    }.get(value, "cyan")
+        "idle": ui.STYLE_META,
+        "clean": ui.STYLE_VERDICT_PASS,
+        "active": ui.STYLE_ACCENT,
+        "contested": ui.STYLE_VERDICT_WARN,
+    }.get(value, ui.STYLE_ACCENT)
 
 
 def _ownership_style(value: str) -> str:
     if value.startswith("own"):
-        return "green"
+        return ui.STYLE_VERDICT_PASS
     if value == "foreign_stale":
-        return "yellow"
+        return ui.STYLE_VERDICT_WARN
     if value == "foreign_active":
-        return "cyan"
+        return ui.STYLE_ACCENT
     if value == "recoverable":
-        return "magenta"
-    return "dim"
+        return ui.STYLE_STATE_DRAFT
+    return ui.STYLE_META
 
 
 def _intent_status_style(value: str) -> str:
     return {
-        "active": "cyan",
-        "clean": "green",
-        "expanded": "yellow",
-        "violated": "red",
-        "expired": "dim",
-    }.get(value, "white")
+        "active": ui.STYLE_ACCENT,
+        "clean": ui.STYLE_VERDICT_PASS,
+        "expanded": ui.STYLE_VERDICT_WARN,
+        "violated": ui.STYLE_VERDICT_FAIL,
+        "expired": ui.STYLE_META,
+    }.get(value, "")

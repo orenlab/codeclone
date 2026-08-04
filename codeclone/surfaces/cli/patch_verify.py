@@ -25,9 +25,9 @@ from .post_run import DiffContext
 from .types import CLIArgsLike, PrinterLike
 
 _STATUS_STYLES = {
-    "accepted": "bold green",
-    "violated": "bold red",
-    "unverified": "yellow",
+    "accepted": ui.STYLE_VERDICT_PASS_STRONG,
+    "violated": ui.STYLE_VERDICT_FAIL,
+    "unverified": ui.STYLE_VERDICT_WARN,
 }
 
 
@@ -224,7 +224,9 @@ def render_patch_verify(
     from rich.rule import Rule
 
     console.print()
-    console.print(Rule(ui.PATCH_VERIFY_TITLE))
+    console.print(
+        Rule(title=ui.PATCH_VERIFY_TITLE, style="dim", characters=ui.GLYPH_RULE)
+    )
     console.print()
     console.print(
         f"  [bold]{ui.PATCH_VERIFY_LABEL_STRICTNESS}[/bold] {validated_strictness}"
@@ -235,8 +237,8 @@ def render_patch_verify(
     console.print()
     console.print(
         f"  [bold]{ui.PATCH_VERIFY_LABEL_HEALTH}[/bold] "
-        f"{health_before} -> {health_after} "
-        f"(delta: {health_after - health_before})"
+        f"{health_before} {ui.GLYPH_ARROW} {health_after} "
+        f"({health_after - health_before:+d})"
     )
     console.print()
     console.print(f"  [bold]{ui.PATCH_VERIFY_LABEL_STRUCTURAL_DELTA}[/bold]")
@@ -266,11 +268,14 @@ def render_patch_verify(
     )
     console.print()
     if status == "accepted":
-        console.print(f"  [bold green]{ui.PATCH_VERIFY_ACCEPTED}[/bold green]")
+        verdict_line = ui.styled(ui.PATCH_VERIFY_ACCEPTED, ui.STYLE_VERDICT_PASS_STRONG)
     elif validated_strictness == "relaxed":
-        console.print(f"  [yellow]{ui.PATCH_VERIFY_RELAXED_ADVISORY}[/yellow]")
+        verdict_line = ui.styled(
+            ui.PATCH_VERIFY_RELAXED_ADVISORY, ui.STYLE_VERDICT_WARN
+        )
     else:
-        console.print(f"  [bold red]{ui.PATCH_VERIFY_VIOLATED}[/bold red]")
+        verdict_line = ui.styled(ui.PATCH_VERIFY_VIOLATED, ui.STYLE_VERDICT_FAIL)
+    console.print(f"  {verdict_line}")
     return exit_code
 
 

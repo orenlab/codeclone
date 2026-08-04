@@ -39,6 +39,8 @@ from .runtime import (
     ERR_INVALID_BASELINE_SCOPE_ID,
     ERR_INVALID_OUTPUT_EXT,
     ERR_INVALID_OUTPUT_PATH,
+    ERR_MEMORY_DB_NOT_FOUND,
+    ERR_MEMORY_ROOT_NOT_FOUND,
     ERR_REPORT_WRITE_FAILED,
     ERR_UNREADABLE_SOURCE_IN_GATING,
     INFO_PROCESSING_CHANGED,
@@ -62,10 +64,23 @@ from .runtime import (
 from .styling import (
     _HEALTH_GRADE_STYLE,
     _L,
-    _RICH_MARKUP_TAG_RE,
+    GLYPH_OK,
+    GLYPH_SEP,
+    STYLE_COUNT_ATTENTION,
+    STYLE_COUNT_ATTENTION_SOFT,
+    STYLE_COUNT_CRITICAL,
+    STYLE_COUNT_NEUTRAL,
+    STYLE_EMPHASIS,
+    STYLE_META,
+    STYLE_VERDICT_FAIL,
+    STYLE_VERDICT_PASS,
+    STYLE_VERDICT_WARN,
     _format_permille_pct,
     _v,
-    _vn,
+    esc,
+    n_of,
+    strip_markup,
+    styled,
 )
 
 
@@ -75,21 +90,39 @@ def version_output(version: str) -> str:
 
 def banner_title(version: str) -> str:
     return (
-        f"  [bold white]CodeClone[/bold white] [dim]v{version}[/dim]"
-        f"  [dim]\u00b7[/dim]  [dim]{BANNER_SUBTITLE}[/dim]"
+        f"  {styled('CodeClone', STYLE_EMPHASIS)} [dim]v{version}[/dim]"
+        f"  [dim]{GLYPH_SEP}[/dim]  [dim]{BANNER_SUBTITLE}[/dim]"
     )
+
+
+_REPORT_FLAG_BY_LABEL = {
+    "HTML": "--html",
+    "JSON": "--json",
+    "Markdown": "--md",
+    "SARIF": "--sarif",
+    "text": "--text",
+}
+
+
+def _report_flag(label: str) -> str:
+    return _REPORT_FLAG_BY_LABEL.get(label, "the report flag")
 
 
 def fmt_invalid_output_extension(
     *, label: str, path: Path, expected_suffix: str
 ) -> str:
     return ERR_INVALID_OUTPUT_EXT.format(
-        label=label, path=path, expected_suffix=expected_suffix
+        label=label,
+        path=path,
+        expected_suffix=expected_suffix,
+        flag=_report_flag(label),
     )
 
 
 def fmt_invalid_output_path(*, label: str, path: Path, error: object) -> str:
-    return ERR_INVALID_OUTPUT_PATH.format(label=label, path=path, error=error)
+    return ERR_INVALID_OUTPUT_PATH.format(
+        label=label, path=path, error=error, flag=_report_flag(label)
+    )
 
 
 def fmt_invalid_baseline_path(*, path: Path, error: object) -> str:
@@ -105,7 +138,9 @@ def fmt_invalid_baseline_scope_id(*, path: Path, error: object) -> str:
 
 
 def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
-    return ERR_REPORT_WRITE_FAILED.format(label=label, path=path, error=error)
+    return ERR_REPORT_WRITE_FAILED.format(
+        label=label, path=path, error=error, flag=_report_flag(label)
+    )
 
 
 def fmt_html_report_open_failed(*, path: Path, error: object) -> str:
@@ -201,7 +236,7 @@ def fmt_baseline_gating_requires_trusted(*, ci: bool) -> str:
 
 
 def fmt_cli_runtime_warning(message: object) -> str:
-    source = _RICH_MARKUP_TAG_RE.sub("", str(message)).strip()
+    source = strip_markup(str(message)).strip()
     paragraphs = [
         line.strip() for raw_line in source.splitlines() if (line := raw_line.strip())
     ]
@@ -230,11 +265,11 @@ def fmt_cli_runtime_warning(message: object) -> str:
             details.append(extra.rstrip(".)"))
         details.extend(segment.rstrip(".)") for segment in segments[1:])
 
-        rendered.append(f"  [warning]{label}[/warning] {head}")
+        rendered.append(f"  [warning]{label}[/warning] {esc(head)}")
         for detail in details:
             rendered.extend(
                 [
-                    f"    [dim]{wrapped}[/dim]"
+                    f"    [dim]{esc(wrapped)}[/dim]"
                     for wrapped in textwrap.wrap(
                         detail,
                         width=max(40, CLI_LAYOUT_MAX_WIDTH - 8),
@@ -397,12 +432,12 @@ def fmt_summary_compact_coverage_join(
 
 def fmt_summary_files(*, found: int, analyzed: int, cached: int, skipped: int) -> str:
     parts = [
-        f"{_v(found, 'bold')} found",
-        f"{_v(analyzed, 'bold cyan')} analyzed",
+        f"{_v(found, STYLE_EMPHASIS)} found",
+        f"{_v(analyzed, STYLE_COUNT_NEUTRAL)} analyzed",
         f"{_v(cached)} cached",
         f"{_v(skipped)} skipped",
     ]
-    val = " \u00b7 ".join(parts)
+    val = f" {GLYPH_SEP} ".join(parts)
     return f"  {'Files':<{_L}}{val}"
 
 
@@ -412,12 +447,12 @@ def fmt_summary_parsed(
     if lines == 0 and functions == 0 and methods == 0 and classes == 0:
         return None
     callable_count = functions + methods
-    parts = [f"{_vn(lines, 'bold cyan')} lines"]
+    parts = [styled(n_of(lines, "line"), STYLE_COUNT_NEUTRAL)]
     if callable_count:
-        parts.append(f"{_v(callable_count, 'bold cyan')} callables")
+        parts.append(styled(n_of(callable_count, "callable"), STYLE_COUNT_NEUTRAL))
     if classes:
-        parts.append(f"{_v(classes, 'bold cyan')} classes")
-    val = " \u00b7 ".join(parts)
+        parts.append(styled(n_of(classes, "class", "classes"), STYLE_COUNT_NEUTRAL))
+    val = f" {GLYPH_SEP} ".join(parts)
     return f"  {'Parsed':<{_L}}{val}"
 
 
@@ -431,18 +466,18 @@ def fmt_summary_clones(
     new: int,
 ) -> str:
     clone_parts = [
-        f"{_v(func, 'bold yellow')} func",
-        f"{_v(block, 'bold yellow')} block",
+        f"{_v(func, STYLE_COUNT_ATTENTION)} func",
+        f"{_v(block, STYLE_COUNT_ATTENTION)} block",
     ]
     if segment:
-        clone_parts.append(f"{_v(segment, 'bold yellow')} seg")
-    main = " \u00b7 ".join(clone_parts)
+        clone_parts.append(f"{_v(segment, STYLE_COUNT_ATTENTION)} seg")
+    main = f" {GLYPH_SEP} ".join(clone_parts)
     quals = [
-        f"{_v(suppressed, 'yellow')} suppressed",
+        f"{_v(suppressed, STYLE_COUNT_ATTENTION_SOFT)} suppressed",
     ]
     if fixture_excluded > 0:
-        quals.append(f"{_v(fixture_excluded, 'yellow')} fixtures")
-    quals.append(f"{_v(new, 'bold red')} new")
+        quals.append(f"{_v(fixture_excluded, STYLE_COUNT_ATTENTION_SOFT)} fixtures")
+    quals.append(f"{_v(new, STYLE_COUNT_CRITICAL)} new")
     return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
 
 
@@ -453,11 +488,11 @@ def fmt_metrics_health(total: int, grade: str) -> str:
 
 def fmt_metrics_cc(avg: float, max_val: int, high_risk: int) -> str:
     hr = (
-        f"[bold red]{high_risk} high-risk[/bold red]"
+        styled(f"{high_risk:,} high-risk", STYLE_COUNT_CRITICAL)
         if high_risk
-        else "[dim]0 high-risk[/dim]"
+        else styled("0 high-risk", STYLE_META)
     )
-    return f"  {'CC':<{_L}}avg {avg:.1f} \u00b7 max {max_val} \u00b7 {hr}"
+    return f"  {'CC':<{_L}}avg {avg:.1f} {GLYPH_SEP} max {max_val} {GLYPH_SEP} {hr}"
 
 
 def fmt_metrics_coupling(avg: float, max_val: int) -> str:
@@ -471,9 +506,13 @@ def fmt_metrics_cohesion(avg: float, max_val: int) -> str:
 def fmt_metrics_cycles(count: int) -> str:
     match count:
         case 0:
-            return f"  {'Cycles':<{_L}}[green]\u2714 clean[/green]"
+            return (
+                f"  {'Cycles':<{_L}}{styled(f'{GLYPH_OK} clean', STYLE_VERDICT_PASS)}"
+            )
         case _:
-            return f"  {'Cycles':<{_L}}[bold red]{count} detected[/bold red]"
+            return (
+                f"  {'Cycles':<{_L}}{styled(f'{count:,} detected', STYLE_VERDICT_FAIL)}"
+            )
 
 
 def fmt_metrics_dependencies(
@@ -494,10 +533,10 @@ def fmt_metrics_security_surfaces(
 ) -> str:
     return (
         f"  {'Security':<{_L}}"
-        f"{_v(items, 'bold cyan')} surfaces"
-        f" · {_v(categories, 'bold cyan')} categories"
-        f" · production {_v(production)}"
-        f" · tests {_v(tests)}"
+        f"{_v(items, STYLE_COUNT_NEUTRAL)} surfaces"
+        f" {GLYPH_SEP} {_v(categories, STYLE_COUNT_NEUTRAL)} categories"
+        f" {GLYPH_SEP} production {_v(production)}"
+        f" {GLYPH_SEP} tests {_v(tests)}"
     )
 
 
@@ -508,11 +547,14 @@ def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
     match count:
         case 0:
             return (
-                f"  {'Dead code':<{_L}}[green]\u2714 clean[/green]{suppressed_suffix}"
+                f"  {'Dead code':<{_L}}"
+                f"{styled(f'{GLYPH_OK} clean', STYLE_VERDICT_PASS)}"
+                f"{suppressed_suffix}"
             )
         case _:
             return (
-                f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
+                f"  {'Dead code':<{_L}}"
+                f"{styled(f'{count:,} found', STYLE_VERDICT_FAIL)}"
                 f"{suppressed_suffix}"
             )
 
@@ -530,7 +572,7 @@ def fmt_metrics_adoption(
         f"docstrings {_format_permille_pct(docstring_permille)}",
         f"Any {_v(any_annotation_count)}",
     ]
-    return f"  {'Adoption':<{_L}}{' · '.join(parts)}"
+    return f"  {'Adoption':<{_L}}{f' {GLYPH_SEP} '.join(parts)}"
 
 
 def fmt_metrics_api_surface(
@@ -541,19 +583,19 @@ def fmt_metrics_api_surface(
     breaking: int,
 ) -> str:
     parts = [
-        f"{_v(public_symbols, 'bold cyan')} symbols",
-        f"{_v(modules, 'bold cyan')} modules",
+        f"{_v(public_symbols, STYLE_COUNT_NEUTRAL)} symbols",
+        f"{_v(modules, STYLE_COUNT_NEUTRAL)} modules",
     ]
     if breaking > 0 or added > 0:
         parts.append(
             " / ".join(
                 [
-                    f"{_v(breaking, 'bold red')} breaking",
-                    f"{_v(added, 'bold cyan')} added",
+                    f"{_v(breaking, STYLE_COUNT_CRITICAL)} breaking",
+                    f"{_v(added, STYLE_COUNT_NEUTRAL)} added",
                 ]
             )
         )
-    return f"  {'Public API':<{_L}}{' · '.join(parts)}"
+    return f"  {'Public API':<{_L}}{f' {GLYPH_SEP} '.join(parts)}"
 
 
 def fmt_metrics_coverage_join(
@@ -569,16 +611,20 @@ def fmt_metrics_coverage_join(
         parts = ["join unavailable"]
         if source_label:
             parts.append(source_label)
-        return f"  {'Coverage':<{_L}}[yellow]{' · '.join(parts)}[/yellow]"
+        return (
+            f"  {'Coverage':<{_L}}"
+            f"{styled(f' {GLYPH_SEP} '.join(parts), STYLE_VERDICT_WARN)}"
+        )
     parts = [
         f"{_format_permille_pct(overall_permille)} overall",
-        f"{_v(coverage_hotspots, 'bold red')} hotspots < {threshold_percent}%",
+        f"{_v(coverage_hotspots, STYLE_COUNT_CRITICAL)} hotspots"
+        f" < {threshold_percent}%",
     ]
     if scope_gap_hotspots > 0:
-        parts.append(f"{_v(scope_gap_hotspots, 'bold yellow')} scope gaps")
+        parts.append(f"{_v(scope_gap_hotspots, STYLE_COUNT_ATTENTION)} scope gaps")
     if source_label:
         parts.append(source_label)
-    return f"  {'Coverage':<{_L}}{' · '.join(parts)}"
+    return f"  {'Coverage':<{_L}}{f' {GLYPH_SEP} '.join(parts)}"
 
 
 def fmt_metrics_overloaded_modules(
@@ -588,11 +634,11 @@ def fmt_metrics_overloaded_modules(
     population_status: str,
     top_score: float,
 ) -> str:
-    parts = [f"{_v(candidates, 'bold magenta')} candidates"]
+    parts = [f"{_v(candidates, STYLE_COUNT_NEUTRAL)} candidates"]
     if top_score > 0:
         parts.append(f"max score {top_score:.2f}")
-    parts.append(f"{_vn(total)} ranked")
-    summary = " \u00b7 ".join(parts)
+    parts.append(f"{_v(total)} ranked")
+    summary = f" {GLYPH_SEP} ".join(parts)
     note = "report-only"
     if population_status and population_status != "ok":
         note = f"{note}; {population_status.replace('_', ' ')} population"
@@ -600,16 +646,16 @@ def fmt_metrics_overloaded_modules(
 
 
 def fmt_changed_scope_paths(*, count: int) -> str:
-    return f"  {'Paths':<{_L}}{_v(count, 'bold cyan')} from git diff"
+    return f"  {'Paths':<{_L}}{_v(count, STYLE_COUNT_NEUTRAL)} from git diff"
 
 
 def fmt_changed_scope_findings(*, total: int, new: int, known: int) -> str:
     parts = [
-        f"{_v(total, 'bold')} total",
-        f"{_v(new, 'bold cyan')} new",
+        f"{_v(total, STYLE_EMPHASIS)} total",
+        f"{_v(new, STYLE_COUNT_NEUTRAL)} new",
         f"{_v(known)} known",
     ]
-    separator = " \u00b7 "
+    separator = f" {GLYPH_SEP} "
     return f"  {'Findings':<{_L}}{separator.join(parts)}"
 
 
@@ -668,6 +714,14 @@ def fmt_pipeline_done(elapsed: float) -> str:
 
 def fmt_contract_error(message: str) -> str:
     return f"{MARKER_CONTRACT_ERROR}\n{message}"
+
+
+def fmt_memory_db_not_found(*, error: object) -> str:
+    return ERR_MEMORY_DB_NOT_FOUND.format(error=error)
+
+
+def fmt_memory_root_not_found(*, path: object) -> str:
+    return ERR_MEMORY_ROOT_NOT_FOUND.format(path=path)
 
 
 def fmt_baseline_lock_recovery_failed(*, path: Path, reason: str) -> str:

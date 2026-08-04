@@ -60,6 +60,28 @@ Multiple report flags may be combined in one invocation. If FILE is omitted, Cod
 
 The `--ci` preset is equivalent to `--fail-on-new --no-color --quiet`.
 
+### Design code
+
+Terminal presentation decisions have one owner:
+`codeclone/ui_messages/styling.py`. Renderers import semantics from it and
+never restate them locally.
+
+- Grid: indentation moves in 2-space steps; summary labels pad to a
+  13-column label field.
+- Color is semantic: verdict styles (pass / fail / warn), count roles,
+  accent, and meta. Chromatic color words appear only in the design module.
+- Glyphs: `✔` pass, `✗` fail, `⚠` advisory, `·` in-row separator,
+  `→` before/after transitions, `─` section rules.
+- Counts render with thousands separators; nouns agree in number.
+- Error messages state what failed, why, and an executable next step
+  (a flag, a command, or a config key — never "see docs").
+- Dynamic text is escaped before markup interpolation, so bracketed payload
+  data such as `[Errno 2]` or severity markers survives rendering.
+- `NO_COLOR` or a non-TTY stream yields plain, byte-stable output.
+
+These rules are enforced mechanically by `tests/test_cli_design_system.py`:
+a message added off the grid fails the suite, not review.
+
 ### Audit output
 
 The `--audit` flag (read-only, no analysis required) displays the local Controller audit trail from the configured audit database. The `--audit-json` variant emits audit payload footprint as JSON, useful for cross-repository audits.
@@ -229,6 +251,7 @@ The observability module may flag two legitimately-distinct early-return branche
 
 Tests cover CLI flag combinations, report generation, exit codes, and output routing:
 
+- `tests/test_cli_design_system.py` — Mechanical design-code validator (grid, style ownership, message anatomy, argparse help discipline)
 - `tests/test_cli_smoke.py` — Basic invocation and output presence
 - `tests/test_cli_help_snapshot.py` — Help text consistency
 - `tests/test_cli_config.py` — Configuration and defaults

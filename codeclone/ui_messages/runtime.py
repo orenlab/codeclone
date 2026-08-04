@@ -13,8 +13,8 @@ WARN_SUMMARY_ACCOUNTING_MISMATCH = (
     "files_found != files_analyzed + cache_hits + files_skipped"
 )
 
-STATUS_DISCOVERING = "[bold green]Discovering Python files..."
-STATUS_GROUPING = "[bold green]Grouping clones..."
+STATUS_DISCOVERING = "[success]Discovering Python files...[/success]"
+STATUS_GROUPING = "[success]Grouping clones...[/success]"
 
 INFO_PROCESSING_CHANGED = "[info]Processing {count} changed files...[/info]"
 
@@ -33,25 +33,50 @@ WARN_COVERAGE_JOIN_IGNORED = "[warning]Coverage join ignored: {error}[/warning]"
 
 ERR_INVALID_OUTPUT_EXT = (
     "[error]Invalid {label} output extension: {path} "
-    "(expected {expected_suffix}).[/error]"
+    "(expected {expected_suffix}).[/error]\n"
+    "[dim]Pass a {expected_suffix} path to {flag}, or pass {flag} without "
+    "FILE to use the default report path.[/dim]"
 )
 ERR_INVALID_OUTPUT_PATH = (
-    "[error]Invalid {label} output path: {path} ({error}).[/error]"
+    "[error]Invalid {label} output path: {path} ({error}).[/error]\n"
+    "[dim]Pass a writable path to {flag}, or pass {flag} without FILE to "
+    "use the default report path.[/dim]"
 )
-ERR_ROOT_NOT_FOUND = "[error]Root path does not exist: {path}[/error]"
-ERR_INVALID_ROOT_PATH = "[error]Invalid root path: {error}[/error]"
-ERR_SCAN_FAILED = "[error]Scan failed: {error}[/error]"
-ERR_INVALID_BASELINE_PATH = "[error]Invalid baseline path: {path} ({error}).[/error]"
+ERR_ROOT_NOT_FOUND = (
+    "[error]Root path does not exist: {path}[/error]\n"
+    "[dim]Pass an existing project directory, or omit the root argument "
+    "to scan the current directory: codeclone .[/dim]"
+)
+ERR_INVALID_ROOT_PATH = (
+    "[error]Invalid root path: {error}[/error]\n"
+    "[dim]Pass an existing project directory, or omit the root argument "
+    "to scan the current directory: codeclone .[/dim]"
+)
+ERR_SCAN_FAILED = (
+    "[error]Scan failed: {error}[/error]\n"
+    "[dim]Re-run with --debug to include a traceback.[/dim]"
+)
+ERR_INVALID_BASELINE_PATH = (
+    "[error]Invalid baseline path: {path} ({error}).[/error]\n"
+    "[dim]Pass an existing baseline file via --baseline, or create one "
+    "with --update-baseline.[/dim]"
+)
 ERR_BASELINE_WRITE_FAILED = (
-    "[error]Failed to write baseline file: {path} ({error}).[/error]"
+    "[error]Failed to write baseline file: {path} ({error}).[/error]\n"
+    "[dim]Check that the path is writable, then re-run with "
+    "--update-baseline.[/dim]"
 )
 ERR_BASELINE_SCOPE_ID_REQUIRED = (
     "baseline_scope_id is required for baseline update and gating; set a "
-    "stable canonical UUID under [tool.codeclone]."
+    "stable canonical UUID under \\[tool.codeclone]."
 )
-ERR_INVALID_BASELINE_SCOPE_ID = "Invalid baseline_scope_id for {path}: {error}."
+ERR_INVALID_BASELINE_SCOPE_ID = (
+    "Invalid baseline_scope_id for {path}: {error}.\n"
+    "[dim]Set a stable canonical UUID under \\[tool.codeclone].[/dim]"
+)
 ERR_REPORT_WRITE_FAILED = (
-    "[error]Failed to write {label} report: {path} ({error}).[/error]"
+    "[error]Failed to write {label} report: {path} ({error}).[/error]\n"
+    "[dim]Check that the path is writable, then re-run with {flag}.[/dim]"
 )
 ERR_OPEN_HTML_REPORT_REQUIRES_HTML = (
     "[error]--open-html-report requires --html.[/error]"
@@ -62,7 +87,9 @@ ERR_TIMESTAMPED_REPORT_PATHS_REQUIRES_REPORT = (
 )
 ERR_UNREADABLE_SOURCE_IN_GATING = (
     "One or more source files could not be read in CI/gating mode.\n"
-    "Unreadable source files: {count}."
+    "Unreadable source files: {count}.\n"
+    "[dim]Fix the file permissions or exclude the paths, then re-run "
+    "codeclone with the same gates.[/dim]"
 )
 
 WARN_LEGACY_CACHE = (
@@ -113,7 +140,19 @@ ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
 SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
 SUCCESS_BASELINE_LOCK_RECOVERED = "✔ Baseline publication lock recovered: {path}"
 ERR_BASELINE_LOCK_RECOVERY_FAILED = (
-    "[error]Baseline publication lock recovery failed for {path}: {reason}.[/error]"
+    "[error]Baseline publication lock recovery failed for {path}: "
+    "{reason}.[/error]\n"
+    "[dim]Verify the lock owner is gone, then retry with --force if the "
+    "lock evidence is abandoned.[/dim]"
+)
+
+ERR_MEMORY_DB_NOT_FOUND = (
+    "Engineering memory database not found: {error}\n"
+    "[dim]Run: codeclone memory init --root <root>[/dim]"
+)
+ERR_MEMORY_ROOT_NOT_FOUND = (
+    "Repository root does not exist: {path}\n"
+    "[dim]Pass an existing directory via --root.[/dim]"
 )
 
 FAIL_NEW_TITLE = "[error]FAILED: New code clones detected.[/error]"

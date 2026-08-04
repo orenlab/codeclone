@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from ... import ui_messages as ui
 from ...memory.coverage import ScopeCoverageReport
 from ...memory.display import format_memory_record_line
 from ...memory.models import MemoryRecord
@@ -62,13 +63,13 @@ def render_search_results(
             console=console,
             command="search",
             subtitle=(
-                f"[cyan]{query}[/cyan]  "
+                f"{ui.styled(ui.esc(query), ui.STYLE_ACCENT)}  "
                 f"[dim]{_count_label(len(records), 'result')}[/dim]"
             ),
             records=records,
             columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
-                ("Type", {"style": "cyan", "no_wrap": True}),
+                ("Type", {"style": ui.STYLE_ACCENT, "no_wrap": True}),
                 ("Status", {"no_wrap": True}),
                 ("Record", {}),
             ),
@@ -91,13 +92,13 @@ def render_path_results(
             console=console,
             command="for-path",
             subtitle=(
-                f"[cyan]{rel_path}[/cyan]  "
+                f"{ui.styled(ui.esc(rel_path), ui.STYLE_ACCENT)}  "
                 f"[dim]{_count_label(len(records), 'record')}[/dim]"
             ),
             records=mapped,
             columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
-                ("Type", {"style": "cyan", "no_wrap": True}),
+                ("Type", {"style": ui.STYLE_ACCENT, "no_wrap": True}),
                 ("Status", {"no_wrap": True}),
                 ("Statement", {}),
             ),
@@ -156,7 +157,7 @@ def render_init_result(
 def render_init_note(*, console: PrinterLike, message: str) -> None:
     if supports_rich_console(console):
         _, _, _, _, text_cls = rich_panel_symbols()
-        console.print(text_cls(f"  note: {message}", style="dim italic"))
+        console.print(text_cls(f"  note: {message}", style=ui.STYLE_NOTE))
         return
     console.print(f"  note: {message}")
 
@@ -171,12 +172,12 @@ def render_stale_records(
             console=console,
             command="stale",
             subtitle=f"[dim]{_count_label(len(records), 'record')}[/dim]",
-            border_style="yellow",
+            border_style=ui.STYLE_VERDICT_WARN,
             records=records,
             columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
-                ("Type", {"style": "cyan", "no_wrap": True}),
-                ("Reason", {"style": "yellow", "no_wrap": True}),
+                ("Type", {"style": ui.STYLE_ACCENT, "no_wrap": True}),
+                ("Reason", {"style": ui.STYLE_VERDICT_WARN, "no_wrap": True}),
                 ("Record", {}),
             ),
             row_builder=_stale_row,
@@ -228,12 +229,12 @@ def render_draft_candidates(
             console=console,
             command="review candidates",
             subtitle=f"[dim]{_count_label(len(records), 'draft')}[/dim]",
-            border_style="magenta",
+            border_style=ui.STYLE_STATE_DRAFT,
             records=records,
             columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
                 ("ID", {"style": "dim", "no_wrap": True}),
-                ("Type", {"style": "cyan", "no_wrap": True}),
+                ("Type", {"style": ui.STYLE_ACCENT, "no_wrap": True}),
                 ("Statement", {}),
             ),
             row_builder=_draft_row,
@@ -258,7 +259,7 @@ def render_governance_result(
     message = detail or f"{action} {record_id}"
     if supports_rich_console(console):
         _, panel_cls, _, _, text_cls = rich_panel_symbols()
-        style = "green" if action == "approved" else "yellow"
+        style = ui.STYLE_VERDICT_PASS if action == "approved" else ui.STYLE_VERDICT_WARN
         console.print(
             panel_cls(
                 text_cls(message, style=style),
@@ -278,7 +279,7 @@ def _render_record_table_rich(
     records: Sequence[object],
     columns: Sequence[tuple[str, _ColumnKwargs]],
     row_builder: _MemoryRowBuilder,
-    border_style: str = "blue",
+    border_style: str = ui.STYLE_FRAME,
     empty_message: str = "(no records)",
 ) -> None:
     box, panel_cls, rule_cls, table_cls, text_cls = rich_panel_symbols()
@@ -354,7 +355,7 @@ def _render_status_report_rich(
     console.print(
         panel_cls(
             text_cls.from_markup("[bold]status[/bold]"),
-            border_style="blue",
+            border_style=ui.STYLE_FRAME,
             padding=(0, 1),
         )
     )
@@ -366,7 +367,7 @@ def _render_status_report_rich(
     console.print(meta)
     if report.records_by_type:
         type_table = table_cls(box=box.SIMPLE, show_header=True, header_style="bold")
-        type_table.add_column("Type", style="cyan")
+        type_table.add_column("Type", style=ui.STYLE_ACCENT)
         type_table.add_column("Count", justify="right")
         for key, count in sorted(report.records_by_type.items()):
             type_table.add_row(key, str(count))
@@ -388,8 +389,13 @@ def _render_init_result_rich(
     console.print(rule_cls("Engineering Memory", style="dim", characters="─"))
     console.print(
         panel_cls(
-            text_cls.from_markup(f"[bold]{title}[/bold]  [cyan]{project_id}[/cyan]"),
-            border_style="green" if not dry_run else "yellow",
+            text_cls.from_markup(
+                f"[bold]{title}[/bold]  "
+                f"{ui.styled(ui.esc(project_id), ui.STYLE_ACCENT)}"
+            ),
+            border_style=(
+                ui.STYLE_VERDICT_PASS if not dry_run else ui.STYLE_VERDICT_WARN
+            ),
             padding=(0, 1),
         )
     )
@@ -418,7 +424,9 @@ def _render_vacuum_report_rich(*, console: PrinterLike, report: VacuumReport) ->
                 f"[bold]vacuum complete[/bold]  "
                 f"[dim](deleted {report.total_deleted})[/dim]"
             ),
-            border_style="green" if report.total_deleted else "blue",
+            border_style=(
+                ui.STYLE_VERDICT_PASS if report.total_deleted else ui.STYLE_FRAME
+            ),
             padding=(0, 1),
         )
     )
@@ -443,10 +451,11 @@ def _render_coverage_report_rich(
     console.print(
         panel_cls(
             text_cls.from_markup(
-                f"[bold]coverage[/bold]  [cyan]{covered}/{total}[/cyan] "
+                f"[bold]coverage[/bold]  "
+                f"{ui.styled(f'{covered}/{total}', ui.STYLE_ACCENT)} "
                 f"[dim]({percent}%)[/dim]"
             ),
-            border_style="blue",
+            border_style=ui.STYLE_FRAME,
             padding=(0, 1),
         )
     )
@@ -454,7 +463,7 @@ def _render_coverage_report_rich(
         console.print("  [dim](all scoped paths covered)[/dim]")
         return
     table = table_cls(box=box.SIMPLE, show_header=True, header_style="bold")
-    table.add_column("Uncovered path", style="yellow")
+    table.add_column("Uncovered path", style=ui.STYLE_VERDICT_WARN)
     for path in report.uncovered_paths:
         table.add_row(path)
     console.print(table)
@@ -475,7 +484,7 @@ def _render_count_table(
         show_header=True,
         header_style="bold",
     )
-    table.add_column("Key", style="cyan")
+    table.add_column("Key", style=ui.STYLE_ACCENT)
     table.add_column("Count", justify="right")
     for key, count in sorted(counts.items()):
         table.add_row(key, str(count))
@@ -552,12 +561,12 @@ def _count_label(count: int, noun: str) -> str:
 
 def _status_style(status: str) -> str:
     if status == "active":
-        return "green"
+        return ui.STYLE_VERDICT_PASS
     if status == "stale":
-        return "yellow"
+        return ui.STYLE_VERDICT_WARN
     if status == "draft":
-        return "magenta"
-    return "dim"
+        return ui.STYLE_STATE_DRAFT
+    return ui.STYLE_META
 
 
 __all__ = [

@@ -82,8 +82,9 @@ def test_fmt_summary_parsed_includes_callables_and_classes() -> None:
         classes=1,
     )
     assert text is not None
-    assert "callables" in text
-    assert "classes" in text
+    assert "5 callables" in text
+    assert "1 class" in text
+    assert "1 classes" not in text
 
 
 def test_fmt_summary_compact_coverage_non_ok_status() -> None:

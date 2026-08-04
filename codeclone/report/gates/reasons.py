@@ -13,7 +13,6 @@ from ..messages import gates as gate_msgs
 __all__ = [
     "parse_metric_reason_entry",
     "policy_context",
-    "print_gating_failure_block",
 ]
 
 
@@ -37,10 +36,6 @@ class _GatingArgs(Protocol):
     coverage_min: int
     fail_on_new: bool
     fail_threshold: int
-
-
-class _PrinterLike(Protocol):
-    def print(self, *objects: object, **kwargs: object) -> None: ...
 
 
 def _strip_terminal_period(text: str) -> str:
@@ -206,23 +201,3 @@ def policy_context(*, args: _GatingArgs, gate_kind: str) -> str:
 
     enabled_parts = tuple(part for part in parts if part is not None)
     return ", ".join(enabled_parts) if enabled_parts else "custom"
-
-
-def print_gating_failure_block(
-    *,
-    console: _PrinterLike,
-    code: str,
-    entries: tuple[tuple[str, object], ...] | list[tuple[str, object]],
-    args: _GatingArgs,
-) -> None:
-    console.print(
-        f"\n\u2717 {gate_msgs.GATE_FAILURE_HEADER.format(code=code)}",
-        style="bold red",
-        markup=False,
-    )
-    normalized_entries = [("policy", policy_context(args=args, gate_kind=code))]
-    normalized_entries.extend((key, str(value)) for key, value in entries)
-    width = max(len(key) for key, _ in normalized_entries)
-    console.print()
-    for key, value in normalized_entries:
-        console.print(f"  {key:<{width}}: {value}")
