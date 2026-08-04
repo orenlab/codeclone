@@ -27,6 +27,7 @@ from ..models import (
     DeadCodeCandidateKind,
     DeadCodeColumnarPayload,
     DeadCodeObservation,
+    DeadCodeObservationKind,
     DeadCodeObservationPayload,
     DependencyColumnarPayload,
     DependencyObservationPayload,
@@ -169,7 +170,9 @@ def decode_dead_code_lane(
     """Rebuild the typed dead-code candidates from their columnar wire form."""
 
     reachable = frozenset(payload.reachable_true)
+    abstained = frozenset(payload.abstained)
     markers = {item.row: item for item in payload.markers}
+    live_roots = {item.row: item.reason for item in payload.live_roots}
     return DeadCodeObservationPayload(
         candidates=tuple(
             DeadCodeObservation(
@@ -185,6 +188,13 @@ def decode_dead_code_lane(
                     markers[row].runtime_marker_count if row in markers else 0
                 ),
                 source_markers=(markers[row].source_markers if row in markers else ()),
+                observation_kind=_narrowed(
+                    payload.observation_kinds[payload.observation_kind[row]],
+                    _DEAD_CODE_OBSERVATION_KINDS,
+                    "dead-code observation kind",
+                ),
+                live_root_reason=live_roots.get(row),
+                abstained=row in abstained,
             )
             for row in range(len(payload.prefix))
         )
@@ -257,6 +267,10 @@ _DEAD_CODE_KINDS: Final[tuple[DeadCodeCandidateKind, ...]] = (
     "import",
     "method",
 )
+_DEAD_CODE_OBSERVATION_KINDS: Final[tuple[DeadCodeObservationKind, ...]] = (
+    "symbol",
+    "unreachable_statement",
+)
 _API_SYMBOL_KINDS: Final[tuple[ApiSymbolKind, ...]] = (
     "class",
     "constant",
@@ -318,8 +332,7 @@ def decode_dependency_lane(
                     "dependency resolution",
                 ),
                 candidate_targets=_candidate_targets(
-                    module(payload.resolved_target[row]),
-                    module(payload.requested_module[row]),
+                    module(payload.resolved_target[row])
                 ),
                 resolved_target=module(payload.resolved_target[row]),
                 inventory_expansion=row in expanded,
@@ -330,12 +343,17 @@ def decode_dependency_lane(
     )
 
 
-def _candidate_targets(resolved: str | None, requested: str | None) -> tuple[str, ...]:
-    """Derive the candidate targets the wire no longer stores."""
+def _candidate_targets(resolved: str | None) -> tuple[str, ...]:
+    """Derive the candidate targets the wire no longer stores.
 
-    if resolved is not None:
-        return (resolved,)
-    return () if requested is None else (requested,)
+    Every live construction site obeys one theorem: a resolved import's
+    candidates are exactly its target, and an unresolved import carries
+    none. Deriving from the requested module instead would fabricate a
+    candidate for an unresolved relative import — precisely the state the
+    ``ImportObservation`` constructor forbids.
+    """
+
+    return () if resolved is None else (resolved,)
 
 
 def decode_module_identity_lane(
