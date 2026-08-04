@@ -88,7 +88,16 @@ def _as_int(value: object, default: int = 0) -> int:
 
 
 def _normalize_relative_path(path: object) -> str:
-    text = str(path).replace("\\", "/").strip()
+    """Normalize a document-derived path value; non-strings are not paths.
+
+    ``None`` and other non-string values collapse to the empty skip
+    sentinel every caller already handles — ``str(None)`` would leak the
+    truthy literal ``"None"`` into path logic.
+    """
+
+    if not isinstance(path, str):
+        return ""
+    text = path.replace("\\", "/").strip()
     if text == ".":
         return ""
     if text.startswith("./"):
