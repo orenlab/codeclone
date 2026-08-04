@@ -20,7 +20,12 @@ import pytest
 
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.governance import record_candidate, validate_memory_claims
-from codeclone.memory.models import MemoryProject, MemoryRecord
+from codeclone.memory.models import (
+    MemoryProject,
+    MemoryRecord,
+    MemorySubject,
+    generate_memory_id,
+)
 from codeclone.memory.project import resolve_project_identity
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 
@@ -344,6 +349,228 @@ def test_record_summary_exposes_statement_format(tmp_path: Path) -> None:
             evidence_count=0,
         )
         assert "statement_format" not in plain_summary
+    finally:
+        store.close()
+
+
+def test_resolve_statement_format_owns_the_wire_decision() -> None:
+    """Stamp wins; a leading validated '## ' title derives; plain never marks.
+
+    The derivation arm heals md-authored records whose writer predated the
+    payload stamp (the Enacta field bug: every wave records its memory notes
+    through a server process older than the wave's own code).
+    """
+    from codeclone.memory.statement_markdown import resolve_statement_format
+
+    md = "## Title\nOne durable fact."
+    # 1. Write-time stamp is authorship truth, whatever the statement shape.
+    assert resolve_statement_format("plain", {"statement_format": "md-v1"}) == "md-v1"
+    # 2. Unstamped md-v1 signature derives (field-shape payload).
+    assert resolve_statement_format(md, {"subject_path": "x.py"}) == "md-v1"
+    assert resolve_statement_format(md, None) == "md-v1"
+    # 3. Rejecting reports stay plain: render-surface security bans hold for
+    #    legacy rows (image / raw HTML / masked link / second heading).
+    assert resolve_statement_format("## T\n<img src=x>", None) is None
+    assert resolve_statement_format("## A\n## B", None) is None
+    # 4. No leading title = no unambiguous authorship signal: stays plain
+    #    even when markdown-flavored, so legacy text is never force-rendered.
+    assert resolve_statement_format("uses `code` span only", None) is None
+    assert resolve_statement_format("Legacy plain fact.", {}) is None
+    # 5. Unknown stamp values fall through to derivation, never pass through.
+    assert resolve_statement_format("plain", {"statement_format": "md-v2"}) is None
+
+
+# --- Builder seams: the marker rides every statement-bearing projection -------
+# (r2p altitude; the r4 MCP wire is walked in test_memory_statement_format_wire,
+# whose inventory registry names each test below as the proving driver.)
+
+_TS = "2026-01-01T00:00:00Z"
+
+
+def _strip_stamp(store: SqliteEngineeringMemoryStore, record_id: str) -> None:
+    """Rewrite one payload to the pre-stamp field shape (subject_path only)."""
+    store._conn.execute(
+        "UPDATE memory_records SET payload_json=? WHERE id=?",
+        ('{"subject_path": "pkg/mod.py"}', record_id),
+    )
+    store.commit()
+
+
+def test_experience_surfaces_carry_statement_format(tmp_path: Path) -> None:
+    from codeclone.memory.experience.models import Experience
+    from codeclone.memory.retrieval.service import (
+        get_relevant_memory,
+        query_engineering_memory,
+    )
+
+    def experience(suffix: str, statement: str) -> Experience:
+        return Experience(
+            id="exp-" + suffix * 16,
+            project_id=project.id,
+            repo_root_digest="digest",
+            subject_family="pkg",
+            signal=f"signal_{suffix}",
+            outcome_class="accepted:verified",
+            support=3,
+            quality_min=80,
+            information_value=85,
+            status="active",
+            statement=statement,
+            experience_digest=f"digest-{suffix}",
+            distillation_version="experience-v1",
+            first_observed_at_utc=_TS,
+            last_observed_at_utc=_TS,
+            distilled_at_utc=_TS,
+            updated_at_utc=_TS,
+            facets=(),
+            evidence=(),
+        )
+
+    store, project = _open_store(tmp_path)
+    try:
+        md = experience("ab", "## Distilled pattern\nMarkdown-authored.")
+        plain = experience("cd", "Plain machine-distilled statement.")
+        store.replace_experiences(project_id=project.id, experiences=[md, plain])
+        got = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=tmp_path / "repo",
+            backend="sqlite",
+            db_path=tmp_path / "memory.sqlite3",
+            mode="experience_get",
+            record_id=md.id,
+        )
+        payload = cast("dict[str, object]", got["payload"])
+        node = cast("dict[str, object]", payload["experience"])
+        assert node["statement_format"] == "md-v1"
+        relevant = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/mod.py",),
+            scope_resolved_from="explicit_scope",
+        )
+        lane = cast("list[dict[str, object]]", relevant["experiences"])
+        by_id = {str(item["id"]): item for item in lane}
+        assert by_id[md.id]["statement_format"] == "md-v1"
+        assert "statement_format" not in by_id[plain.id]
+    finally:
+        store.close()
+
+
+def test_memory_candidates_carry_statement_format(tmp_path: Path) -> None:
+    from codeclone.memory.ingest.receipts import propose_memory_from_changed_paths
+
+    store, project = _open_store(tmp_path)
+    try:
+        candidates = propose_memory_from_changed_paths(
+            store,
+            project=project,
+            changed_paths=["pkg/mod.py"],
+            claims_text="## Claims digest\nOne durable md-authored claim.",
+            review_text=None,
+            verification_profile="python_structural",
+            max_candidates=100,
+            max_statement_chars=1000,
+        )
+        assert len(candidates) >= 3, "expected scope + claims + proposal"
+        for node in candidates:
+            if node.get("proposal_only"):
+                # Synthetic in-response proposal: plain machine text.
+                assert "statement_format" not in node
+            else:
+                # record_candidate-backed drafts are stamped md-v1 today.
+                assert node["statement_format"] == "md-v1", node
+    finally:
+        store.close()
+
+
+def test_prepare_governance_echo_carries_statement_format(tmp_path: Path) -> None:
+    from codeclone.memory.ide_governance import (
+        IdeGovernanceSessionState,
+        prepare_governance,
+        register_ide_governance,
+    )
+
+    store, project = _open_store(tmp_path)
+    try:
+        draft = _record(store, project, "## Field fact\nUnstamped md draft.")
+        _strip_stamp(store, draft.id)
+        state = IdeGovernanceSessionState(channel_enabled=True)
+        registered = register_ide_governance(
+            state,
+            ide_governance_key="ab" * 32,
+            client_name="CodeClone VS Code",
+            client_version="0.3.0",
+        )
+        assert registered["status"] == "ok"
+        prepared = prepare_governance(
+            state,
+            store,
+            project_id=project.id,
+            root_path=str(tmp_path / "repo"),
+            record_id=draft.id,
+            decision="approve",
+        )
+        assert prepared["status"] == "ok"
+        record = cast("dict[str, object]", prepared["record"])
+        assert record["statement_format"] == "md-v1"
+    finally:
+        store.close()
+
+
+def test_export_memory_precedents_carry_statement_format(tmp_path: Path) -> None:
+    from codeclone.memory.trajectory import export_context
+    from tests.memory_fixtures import seed_trajectory_audit_workflow
+
+    store, project = _open_store(tmp_path)
+    try:
+        root = tmp_path / "repo"
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+        statements = {
+            "## Precedent fact\nMarkdown-authored active precedent.": True,
+            "Plain precedent without a markdown title.": False,
+        }
+        for statement in statements:
+            record = _record(store, project, statement)
+            _strip_stamp(store, record.id)
+            store._conn.execute(
+                "UPDATE memory_records SET status='active' WHERE id=?",
+                (record.id,),
+            )
+            store.write_subject(
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=record.id,
+                    subject_kind="path",
+                    subject_key="pkg/service.py",
+                    relation="about",
+                )
+            )
+        store.commit()
+        precedents = export_context._memory_precedents(
+            store._conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=("pkg/service.py",),
+        )
+        checked = 0
+        for statement, expected in statements.items():
+            title = statement.split("\n", 1)[0]
+            for node in precedents:
+                if not str(node["statement_preview"]).startswith(title):
+                    continue
+                checked += 1
+                if expected:
+                    assert node["statement_format"] == "md-v1", node
+                else:
+                    assert "statement_format" not in node, node
+        assert checked == 2, f"seeded precedents did not surface: {precedents}"
     finally:
         store.close()
 
