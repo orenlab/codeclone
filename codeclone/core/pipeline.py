@@ -225,6 +225,7 @@ def analyze(
     boot: BootstrapResult,
     discovery: DiscoveryResult,
     processing: ProcessingResult,
+    collect_block_group_facts: bool = True,
 ) -> AnalysisResult:
     golden_fixture_paths = tuple(
         str(pattern).strip()
@@ -327,8 +328,16 @@ def analyze(
             matched_patterns=segment_split.matched_patterns,
         ),
     )
-    block_group_facts = build_block_group_facts(
-        {**block_groups_report, **suppressed_block_groups_report}
+    # Explaining block groups re-parses their source files, and the facts are
+    # observable only through the report document (findings and suggestions
+    # both ride it). The caller that knows whether a report body will exist
+    # gates the build; every other caller keeps the collect-everything default.
+    block_group_facts = (
+        build_block_group_facts(
+            {**block_groups_report, **suppressed_block_groups_report}
+        )
+        if collect_block_group_facts
+        else {}
     )
 
     func_clones_count = len(func_groups)

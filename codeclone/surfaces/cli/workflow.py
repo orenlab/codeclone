@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import sys
 import time
 from pathlib import Path
@@ -313,6 +314,7 @@ def _run_analysis_stages(
     args: CLIArgsLike,
     boot: BootstrapResult,
     cache: Cache,
+    collect_block_group_facts: bool = True,
 ) -> tuple[DiscoveryResult, PipelineProcessingResult, AnalysisResult]:
     _set_console(console)
     return run_analysis_stages(
@@ -321,7 +323,10 @@ def _run_analysis_stages(
         cache=cache,
         discover_fn=discover,
         process_fn=process,
-        analyze_fn=analyze,
+        analyze_fn=functools.partial(
+            analyze,
+            collect_block_group_facts=collect_block_group_facts,
+        ),
         print_failed_files_fn=_print_failed_files,
         cache_update_segment_projection_fn=_cache_update_segment_projection,
         rich_progress_symbols_fn=_rich_progress_symbols,
@@ -505,10 +510,20 @@ def _main_impl() -> None:
                 output_paths=output_paths,
                 cache_path=cache_path,
             )
+        # One owner for "will a report body exist": the same answer gates the
+        # block-group-facts build inside analyze and the body build below, so
+        # the facts can never be paid for and thrown away, nor skipped while a
+        # body still wants them.
+        include_report_document = bool(changed_paths) or _controller_query_mode(args)
+        needs_report_body = report_document_required(
+            boot,
+            include_report_document=include_report_document,
+        ) or bool(getattr(args, "changed_only", False))
         discovery_result, processing_result, analysis_result = _run_analysis_stages(
             args=args,
             boot=boot,
             cache=cache,
+            collect_block_group_facts=needs_report_body,
         )
 
         source_read_contract_failure = (
@@ -601,17 +616,11 @@ def _main_impl() -> None:
             )
 
         with span(name="pipeline.report"):
-            include_report_document = bool(changed_paths) or _controller_query_mode(
-                args
-            )
-            # Build only when something consumes it. `report_document_required`
+            # Build only when something consumes it. `needs_report_body` is
+            # computed once before the analysis stages: `report_document_required`
             # owns the artifact and controller cases; the changed-clone gate is
             # the third consumer and keys off the flag rather than the changed
             # path set, so it has to be asked separately.
-            needs_report_body = report_document_required(
-                boot,
-                include_report_document=include_report_document,
-            ) or bool(getattr(args, "changed_only", False))
             report_body = (
                 build_report_body_for_analysis(
                     discovery=discovery_result,
