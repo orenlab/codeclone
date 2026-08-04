@@ -118,17 +118,25 @@ def flag_option(name: str, *, help_text: str | None = None) -> OptionApplier:
     return apply
 
 
+_JSON_OPTION_DEFAULT_HELP = "Emit machine-readable JSON to stdout."
+
+
 def json_option(*, help_text: str | None = None) -> OptionApplier:
     """Build an applier attaching the standard ``--json`` machine-output flag."""
 
-    return flag_option("--json", help_text=help_text)
+    return flag_option("--json", help_text=help_text or _JSON_OPTION_DEFAULT_HELP)
 
 
 def limit_option(*, default: int) -> OptionApplier:
     """Build an applier attaching the standard bounded-result ``--limit``."""
 
     def apply(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--limit", type=int, default=default)
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=default,
+            help=f"Maximum rows to return. Default: {default}.",
+        )
 
     return apply
 

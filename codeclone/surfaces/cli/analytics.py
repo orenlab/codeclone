@@ -116,13 +116,21 @@ def _add_snapshot_id_option(
 ) -> None:
     """Attach the snapshot selector, required for snapshot-scoped commands."""
 
-    parser.add_argument("--snapshot-id", required=required)
+    parser.add_argument(
+        "--snapshot-id",
+        required=required,
+        help="Snapshot id to operate on.",
+    )
 
 
 def _add_run_id_option(parser: argparse.ArgumentParser) -> None:
     """Attach the required clustering-run selector."""
 
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Clustering run id to operate on.",
+    )
 
 
 def _add_representation_option(parser: argparse.ArgumentParser) -> None:
@@ -132,30 +140,76 @@ def _add_representation_option(parser: argparse.ArgumentParser) -> None:
         "--representation",
         choices=("description", "description_with_frame"),
         default="description",
+        help="Intent text representation used for embeddings. Default: description.",
     )
 
 
-def _add_output_path_option(parser: argparse.ArgumentParser, flag: str) -> None:
+def _add_output_path_option(
+    parser: argparse.ArgumentParser,
+    flag: str,
+    *,
+    help_text: str,
+) -> None:
     """Attach an optional filesystem output path option."""
 
-    parser.add_argument(flag, type=Path, default=None)
+    parser.add_argument(flag, type=Path, default=None, help=help_text)
 
 
 def _add_clustering_controls(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--sweep", action="store_true")
-    parser.add_argument("--profile", default=None)
-    parser.add_argument("--pca-dimensions", type=int, default=None)
-    parser.add_argument("--min-cluster-size", type=int, default=None)
-    parser.add_argument("--min-samples", type=int, default=None)
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Run a parameter sweep instead of a single clustering run.",
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Clustering profile id to apply.",
+    )
+    parser.add_argument(
+        "--pca-dimensions",
+        type=int,
+        default=None,
+        help="PCA dimensionality override.",
+    )
+    parser.add_argument(
+        "--min-cluster-size",
+        type=int,
+        default=None,
+        help="HDBSCAN minimum cluster size override.",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=None,
+        help="HDBSCAN minimum samples override.",
+    )
     parser.add_argument(
         "--cluster-selection-method",
         choices=("eom", "leaf"),
         default=None,
+        help="HDBSCAN cluster selection method.",
     )
-    parser.add_argument("--sweep-pca", default=None)
-    parser.add_argument("--sweep-min-cluster-size", default=None)
-    parser.add_argument("--sweep-min-samples", default=None)
-    parser.add_argument("--sweep-selection-method", default=None)
+    parser.add_argument(
+        "--sweep-pca",
+        default=None,
+        help="Comma-separated PCA dimensions to sweep.",
+    )
+    parser.add_argument(
+        "--sweep-min-cluster-size",
+        default=None,
+        help="Comma-separated minimum cluster sizes to sweep.",
+    )
+    parser.add_argument(
+        "--sweep-min-samples",
+        default=None,
+        help="Comma-separated minimum samples values to sweep.",
+    )
+    parser.add_argument(
+        "--sweep-selection-method",
+        default=None,
+        help="Comma-separated cluster selection methods to sweep.",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -163,71 +217,117 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     snapshot = _command(
-        sub, "snapshot", help_text="Build immutable intent corpus snapshot"
+        sub, "snapshot", help_text="Build an immutable intent corpus snapshot."
     )
     _add_representation_option(snapshot)
-    _add_output_path_option(snapshot, "--output-json")
+    _add_output_path_option(
+        snapshot,
+        "--output-json",
+        help_text="Write the snapshot JSON to this path.",
+    )
 
     embed = _command(
-        sub, "embed", help_text="Generate analytics embeddings for snapshot"
+        sub, "embed", help_text="Generate analytics embeddings for a snapshot."
     )
     _add_snapshot_id_option(embed, required=True)
 
-    cluster = _command(sub, "cluster", help_text="Cluster embedded snapshot")
+    cluster = _command(sub, "cluster", help_text="Cluster an embedded snapshot.")
     _add_snapshot_id_option(cluster, required=False)
-    cluster.add_argument("--embedding-generation-id")
+    cluster.add_argument(
+        "--embedding-generation-id",
+        help="Embedding generation id to cluster.",
+    )
     _add_clustering_controls(cluster)
-    cluster.add_argument("--select-run", dest="select_run", default=None)
-    cluster.add_argument("--selection-rationale", default=None)
+    cluster.add_argument(
+        "--select-run",
+        dest="select_run",
+        default=None,
+        help="Mark an existing clustering run id as selected.",
+    )
+    cluster.add_argument(
+        "--selection-rationale",
+        default=None,
+        help="Rationale recorded with the run selection.",
+    )
     cluster.add_argument(
         "--selected-by",
         default=None,
+        help="Actor recorded for the run selection.",
     )
     cluster.add_argument(
         "--selection-profile",
         default="none",
-        help="Profile batch id, profile id, or none for global selection",
+        help="Profile batch id, profile id, or none for global selection.",
     )
 
-    build = _command(sub, "build", help_text="Snapshot, embed, and cluster end-to-end")
+    build = _command(sub, "build", help_text="Snapshot, embed, and cluster end-to-end.")
     build.add_argument(
         "--lane",
         choices=("intent",),
         default="intent",
+        help="Corpus lane to build. Default: intent.",
     )
     _add_representation_option(build)
     _add_clustering_controls(build)
-    build.add_argument("--use-recommended", action="store_true")
-    _add_output_path_option(build, "--html-out")
-    _add_output_path_option(build, "--json-out")
+    build.add_argument(
+        "--use-recommended",
+        action="store_true",
+        help="Apply the sweep-recommended parameters to the final run.",
+    )
+    _add_output_path_option(
+        build,
+        "--html-out",
+        help_text="Write the analytics HTML report to this path.",
+    )
+    _add_output_path_option(
+        build,
+        "--json-out",
+        help_text="Write the analytics JSON export to this path.",
+    )
 
-    clusters = _command(sub, "clusters", help_text="List clustering runs for snapshot")
+    clusters = _command(
+        sub, "clusters", help_text="List clustering runs for a snapshot."
+    )
     _add_snapshot_id_option(clusters, required=True)
 
     cluster_show = _command(
-        sub, "cluster-show", help_text="Export one clustering run JSON"
+        sub, "cluster-show", help_text="Export one clustering run as JSON."
     )
     _add_snapshot_id_option(cluster_show, required=True)
     _add_run_id_option(cluster_show)
-    _add_output_path_option(cluster_show, "--output")
+    _add_output_path_option(
+        cluster_show,
+        "--output",
+        help_text="Write the clustering run JSON to this path.",
+    )
 
-    outliers = _command(sub, "outliers", help_text="Show noise cluster assignments")
+    outliers = _command(sub, "outliers", help_text="Show noise cluster assignments.")
     _add_snapshot_id_option(outliers, required=True)
     _add_run_id_option(outliers)
 
-    profiles = sub.add_parser("profiles", help="Inspect analytics profile registry")
+    profiles = sub.add_parser(
+        "profiles", help="Inspect the analytics profile registry."
+    )
     profile_sub = profiles.add_subparsers(dest="profile_command", required=True)
-    _command(profile_sub, "list", help_text="List registered profiles")
+    _command(profile_sub, "list", help_text="List registered profiles.")
 
-    profile_show = _command(profile_sub, "show", help_text="Show one profile manifest")
-    profile_show.add_argument("--profile-id", required=True)
+    profile_show = _command(profile_sub, "show", help_text="Show one profile manifest.")
+    profile_show.add_argument(
+        "--profile-id",
+        required=True,
+        help="Profile id to show.",
+    )
 
     profile_validate = _command(
         profile_sub,
         "validate",
-        help_text="Validate one manifest or the resolved registry",
+        help_text="Validate one manifest or the resolved registry.",
     )
-    _add_output_path_option(profile_validate, "--path")
+    _add_output_path_option(
+        profile_validate,
+        "--path",
+        help_text="Manifest path to validate (defaults to the resolved registry).",
+    )
 
     return parser
 
@@ -814,7 +914,11 @@ def analytics_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     if not root.is_dir():
-        print(f"repository root is not a directory: {root}", file=sys.stderr)
+        print(
+            f"Repository root is not a directory: {root}\n"
+            "Pass an existing directory via --root.",
+            file=sys.stderr,
+        )
         return ExitCode.CONTRACT_ERROR
     handler = _COMMAND_HANDLERS[args.command]
     try:

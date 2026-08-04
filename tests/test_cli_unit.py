@@ -1804,7 +1804,7 @@ def test_report_digest_from_document_requires_comparison_tier(
 
 def test_banner_title_without_root_returns_single_line() -> None:
     title = ui.banner_title("2.0.0")
-    assert "[bold white]CodeClone[/bold white]" in title
+    assert "[bold]CodeClone[/bold]" in title
     assert "\n" not in title
 
 
@@ -1917,16 +1917,16 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
 
 
 def test_ui_summary_formatters_cover_optional_branches() -> None:
-    from codeclone.ui_messages.styling import _vn
+    from codeclone.ui_messages.styling import _v
 
-    assert _vn(0) == "[dim]0[/dim]"
-    assert _vn(1200) == "1,200"
+    assert _v(0) == "[dim]0[/dim]"
+    assert _v(1200) == "1,200"
 
     parsed = ui.fmt_summary_parsed(lines=1200, functions=3, methods=2, classes=1)
     assert parsed is not None
     assert "1,200" in parsed
-    assert "[bold cyan]5[/bold cyan] callables" in parsed
-    assert "[bold cyan]1[/bold cyan] classes" in parsed
+    assert "[bold cyan]5 callables[/bold cyan]" in parsed
+    assert "[bold cyan]1 class[/bold cyan]" in parsed
 
     clones = ui.fmt_summary_clones(
         func=1,

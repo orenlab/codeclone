@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypeGuard
 
 from ....ui_messages import setup as setup_ui
+from ....ui_messages.styling import fmt_bool
 from ..console import rich_panel_symbols, supports_rich_console
 from ..types import PrinterLike
 from .engine.capabilities import GROUP_ORDER
@@ -64,17 +65,17 @@ def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
     commit = snapshot.get("head_commit") or "\u2014"
     console.print(
         f"  [dim]Schema:[/dim] {snapshot.get('schema_version')}  "
-        f"[dim]Recomputation:[/dim] {snapshot.get('recomputation')}  "
+        f"[dim]Recomputation:[/dim] {fmt_bool(snapshot.get('recomputation'))}  "
         f"[dim]Commit:[/dim] {commit}"
     )
     maturity = _mapping(snapshot.get("maturity"))
     console.print(
         "  [dim]Maturity:[/dim] "
-        f"connected={maturity.get('connected')}  "
-        f"governed={maturity.get('governed')}  "
-        f"evidence={maturity.get('evidence_backed')}  "
-        f"team={maturity.get('team_ready')}  "
-        f"release={maturity.get('release_ready')}"
+        f"connected={fmt_bool(maturity.get('connected'))}  "
+        f"governed={fmt_bool(maturity.get('governed'))}  "
+        f"evidence={fmt_bool(maturity.get('evidence_backed'))}  "
+        f"team={fmt_bool(maturity.get('team_ready'))}  "
+        f"release={fmt_bool(maturity.get('release_ready'))}"
     )
     console.print()
     for group in GROUP_ORDER:

@@ -3329,7 +3329,8 @@ def test_cli_summary_format_stable(
     assert_contains_none(out, "Metrics")
     assert_contains_none(out, "Adoption")
     assert_contains_none(out, "Overloaded")
-    assert_contains_all(out, "callables")
+    assert_contains_all(out, "1 callable")
+    assert_contains_none(out, "callables")
     assert_contains_none(out, "Files parsed")
     assert_contains_none(out, "Input")
     assert _summary_metric(out, "Files found") >= 0

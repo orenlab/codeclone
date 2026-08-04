@@ -24,14 +24,20 @@ ERR_AUDIT_COMBINED: Final = (
 )
 ERR_BLAST_PATCH_BOTH: Final = "Use --blast-radius or --patch-verify, not both."
 ERR_CONTROLLER_NO_BASELINE_UPDATE: Final = (
-    "Controller query modes cannot update baselines."
+    "Controller query modes cannot update baselines.\n"
+    "[dim]Run the update as a plain analysis instead: codeclone <root> "
+    "--update-baseline.[/dim]"
 )
 ERR_CONTROLLER_NO_CHANGED_SCOPE: Final = (
-    "Controller query modes cannot be combined with changed-scope flags."
+    "Controller query modes cannot be combined with changed-scope flags.\n"
+    "[dim]Drop --changed-only, --diff-against, and --paths-from-git-diff "
+    "for this run.[/dim]"
 )
 ERR_CONTROLLER_TERMINAL_ONLY: Final = (
     "Controller query modes are terminal-only and cannot be combined "
-    "with report output flags."
+    "with report output flags.\n"
+    "[dim]Drop --html, --json, --md, --sarif, and --text for this "
+    "run.[/dim]"
 )
 
 # ── metrics baseline ────────────────────────────────────────────────
@@ -44,7 +50,8 @@ ERR_METRICS_BASELINE_REQUIRED_FOR_GATES: Final = (
     "Run codeclone <root> --update-baseline --baseline <path> first."
 )
 ERR_METRICS_BASELINE_UPDATE_WITHOUT_METRICS: Final = (
-    "Cannot update metrics baseline: metrics were not computed."
+    "Cannot update metrics baseline: metrics were not computed.\n"
+    "[dim]Remove --skip-metrics and re-run the baseline update.[/dim]"
 )
 ERR_METRICS_BASELINE_TYPING_GATES: Final = (
     "Typing/docstring regression gates require a metrics baseline that includes "
@@ -85,7 +92,17 @@ SESSION_STATS_RETENTION_FOOTPRINT_VERBOSE: Final = (
 )
 SESSION_STATS_TOP_WORKFLOWS: Final = "Top payload workflows"
 SESSION_STATS_WORKSPACE_INTENT_RECORDS_TITLE: Final = "Workspace intent records"
-AUDIT_NOT_ENABLED: Final = "audit is not enabled."
+AUDIT_NOT_ENABLED: Final = (
+    "Audit trail is not enabled for this workspace.\n"
+    "[dim]Set audit_enabled = true under \\[tool.codeclone] in "
+    "pyproject.toml.[/dim]"
+)
+AUDIT_ERR_NO_DATA: Final = (
+    "No audit events are recorded for this workspace yet.\n"
+    "[dim]The Controller writes audit events during governed runs and MCP "
+    "sessions. Check workspace status with codeclone <root> "
+    "--session-stats.[/dim]"
+)
 
 # ── audit trail ─────────────────────────────────────────────────────
 

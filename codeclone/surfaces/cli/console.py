@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 import types
 from collections.abc import Mapping, Sequence
@@ -19,6 +18,7 @@ from typing import TYPE_CHECKING, cast
 from ... import __version__
 from ... import ui_messages as ui
 from ...report.gates import reasons as gate_reasons
+from ...ui_messages.styling import RICH_THEME_STYLES, strip_markup
 from .types import CLIArgsLike, PrinterLike
 
 if TYPE_CHECKING:
@@ -33,19 +33,6 @@ if TYPE_CHECKING:
     from rich.table import Table as RichTable
     from rich.text import Text as RichText
     from rich.theme import Theme as RichTheme
-
-_RICH_THEME_STYLES: dict[str, str] = {
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "bold red",
-    "success": "bold green",
-    "dim": "dim",
-    "codeclone.primary": "cyan",
-    "codeclone.muted": "dim",
-    "codeclone.success": "bold green",
-    "codeclone.attention": "yellow",
-}
-_RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
 
 
 class PlainConsole:
@@ -64,7 +51,7 @@ class PlainConsole:
         markup = markup_obj if isinstance(markup_obj, bool) else True
         text = sep.join(str(obj) for obj in objects)
         if markup:
-            text = _RICH_MARKUP_TAG_RE.sub("", text)
+            text = strip_markup(text)
         print(text, end=end)
 
     @staticmethod
@@ -107,7 +94,7 @@ def rich_progress_symbols() -> tuple[
 def make_console(*, no_color: bool, width: int) -> RichConsole:
     console_cls, theme_cls, _ = rich_console_symbols()
     return console_cls(
-        theme=theme_cls(_RICH_THEME_STYLES),
+        theme=theme_cls(RICH_THEME_STYLES),
         no_color=no_color,
         width=width,
     )
@@ -201,12 +188,21 @@ def _print_gating_failure_block(
     entries: Sequence[tuple[str, object]],
     args: CLIArgsLike,
 ) -> None:
-    gate_reasons.print_gating_failure_block(
-        console=console,
-        code=code,
-        entries=list(entries),
-        args=args,
+    from ...report.messages import gates as gate_msgs
+
+    console.print(
+        f"\n{ui.GLYPH_FAIL} {gate_msgs.GATE_FAILURE_HEADER.format(code=code)}",
+        style=ui.STYLE_VERDICT_FAIL,
+        markup=False,
     )
+    normalized_entries = [
+        ("policy", gate_reasons.policy_context(args=args, gate_kind=code))
+    ]
+    normalized_entries.extend((key, str(value)) for key, value in entries)
+    width = max(len(key) for key, _ in normalized_entries)
+    console.print()
+    for key, value in normalized_entries:
+        console.print(f"  {key:<{width}}  {value}", markup=False)
 
 
 def _print_verbose_clone_hashes(

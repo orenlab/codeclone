@@ -202,8 +202,8 @@ def _render_payload_analytics_text(fp: PayloadFootprint) -> str:
 @pytest.mark.parametrize(
     ("audit_enabled", "expected_message"),
     [
-        (False, "audit is not enabled"),
-        (True, "no audit data"),
+        (False, "Audit trail is not enabled for this workspace."),
+        (True, "No audit events are recorded for this workspace yet."),
     ],
 )
 def test_audit_contract_errors(
@@ -753,7 +753,7 @@ class TestSeverityStyle:
     def test_unknown_severity(self) -> None:
         from codeclone.surfaces.cli.audit import _severity_style
 
-        assert _severity_style("debug") == "white"
+        assert _severity_style("debug") == ""
 
 
 # ── workflow.py: _validate_controller_query_flags ──

@@ -46,7 +46,7 @@ class _ArgumentParser(argparse.ArgumentParser):
         self.print_usage(sys.stderr)
         self.exit(
             int(ExitCode.CONTRACT_ERROR),
-            f"CONTRACT ERROR: {message}\n",
+            f"CONTRACT ERROR:\n{message}\n",
         )
 
     def print_help(self, file: _TextWriter | None = None) -> None:

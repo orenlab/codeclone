@@ -463,7 +463,7 @@ def test_patch_verify_with_project_metrics_verbose() -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "85 -> 85" in printer.text
+    assert "85 → 85 (+0)" in printer.text
 
 
 def _diff_context_with_metrics_diff(

@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+from ... import ui_messages as ui
 from ...api.memory import rebuild_semantic_index
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
@@ -132,7 +133,7 @@ def memory_main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     root_path = Path(args.root).expanduser().resolve()
     if not root_path.is_dir():
-        console.print(f"Repository root does not exist: {root_path}")
+        console.print(ui.fmt_memory_root_not_found(path=root_path))
         return int(ExitCode.CONTRACT_ERROR)
     return _run_memory_with_observability(
         root_path=root_path,
@@ -237,7 +238,11 @@ def _include_routine_option(parser: argparse.ArgumentParser) -> None:
 def _by_option(parser: argparse.ArgumentParser) -> None:
     """Attach the actor attribution option for governance transitions."""
 
-    parser.add_argument("--by", default="human")
+    parser.add_argument(
+        "--by",
+        default="human",
+        help="Actor recorded for the governance transition. Default: human.",
+    )
 
 
 def _governance_options(*, with_reason: bool) -> tuple[OptionApplier, ...]:
@@ -249,13 +254,21 @@ def _governance_options(*, with_reason: bool) -> tuple[OptionApplier, ...]:
     """
 
     reason: tuple[OptionApplier, ...] = (
-        (value_option("--reason"),) if with_reason else ()
+        (value_option("--reason", help_text="Reason recorded with the transition."),)
+        if with_reason
+        else ()
     )
     return (
-        positional_option("record_id"),
+        positional_option(
+            "record_id",
+            help_text="Memory record id (short prefixes accepted).",
+        ),
         _by_option,
         *reason,
-        flag_option(_CLI_GOVERNANCE_BREAK_GLASS_FLAG),
+        flag_option(
+            _CLI_GOVERNANCE_BREAK_GLASS_FLAG,
+            help_text="Explicit human break-glass override for CLI governance.",
+        ),
     )
 
 
@@ -264,11 +277,30 @@ _MEMORY_COMMANDS: tuple[CommandDeclaration, ...] = (
         "init",
         "Initialize engineering memory.",
         (
-            flag_option("--dry-run"),
-            flag_option("--refresh"),
-            value_option("--from-report", metavar="PATH"),
-            flag_option("--no-docs"),
-            flag_option("--no-tests"),
+            flag_option(
+                "--dry-run",
+                help_text="Preview memory writes without modifying the store.",
+            ),
+            flag_option(
+                "--refresh",
+                help_text=(
+                    "Refresh mode: re-ingest and mark records absent from "
+                    "the new run as stale."
+                ),
+            ),
+            value_option(
+                "--from-report",
+                metavar="PATH",
+                help_text="Derive records from this analysis report JSON.",
+            ),
+            flag_option(
+                "--no-docs",
+                help_text="Skip documentation-derived records.",
+            ),
+            flag_option(
+                "--no-tests",
+                help_text="Skip test-derived records.",
+            ),
         ),
     ),
     ("status", "Show engineering memory status.", ()),
@@ -384,7 +416,12 @@ _TRAJECTORY_COMMANDS: tuple[CommandDeclaration, ...] = (
     (
         "show",
         "Show one stored trajectory.",
-        (positional_option("trajectory_id"),),
+        (
+            positional_option(
+                "trajectory_id",
+                help_text="Trajectory id (short prefixes accepted).",
+            ),
+        ),
     ),
     (
         "agents",
@@ -603,7 +640,7 @@ def _run_for_path(
     try:
         store, _config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         records = query_records_for_repo_path(
@@ -625,7 +662,7 @@ def _run_search(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         context = MemoryApplicationContext(
@@ -698,7 +735,7 @@ def _run_stale(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         result = query_engineering_memory(
@@ -723,7 +760,7 @@ def _run_vacuum(*, console: PrinterLike, root_path: Path) -> int:
     try:
         store, config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         report = run_memory_vacuum(store, config)
@@ -741,7 +778,7 @@ def _run_coverage(
     try:
         store, _config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         report = compute_scope_coverage(
@@ -763,7 +800,7 @@ def _run_review_candidates(
     try:
         store, _config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         records = store.query_records(
@@ -787,7 +824,7 @@ def _run_approve(
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         record = approve_record(
@@ -817,7 +854,7 @@ def _run_reject(
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         record = reject_record(
@@ -848,7 +885,7 @@ def _run_archive(
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         record = archive_record(
@@ -901,7 +938,7 @@ def _run_trajectory_status(*, console: PrinterLike, root_path: Path) -> int:
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         count = store.count_trajectories(project_id=project.id)
@@ -921,7 +958,7 @@ def _run_trajectory_rebuild(*, console: PrinterLike, root_path: Path) -> int:
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     if not config.trajectories_enabled:
         store.close()
@@ -949,7 +986,7 @@ def _run_trajectory_list(
     try:
         store, _config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         items = store.list_trajectories(
@@ -968,7 +1005,7 @@ def _run_trajectory_search(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         result = query_engineering_memory(
@@ -1007,7 +1044,7 @@ def _run_trajectory_agents(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         result = query_engineering_memory(
@@ -1038,7 +1075,7 @@ def _run_trajectory_anomalies(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         result = query_engineering_memory(
@@ -1070,7 +1107,7 @@ def _run_trajectory_dashboard(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         result = query_engineering_memory(
@@ -1124,7 +1161,7 @@ def _run_trajectory_show(
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         trajectory = store.find_trajectory(str(args.trajectory_id))
@@ -1143,7 +1180,7 @@ def _run_trajectory_export(
     try:
         store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
-        console.print(f"Engineering memory database not found: {exc}")
+        console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         output_path = resolve_export_output_path(

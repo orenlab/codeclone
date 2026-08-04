@@ -19,10 +19,10 @@ from ...utils.mapping_paths import section
 from .types import PrinterLike
 
 _RISK_STYLES = {
-    "low": "green",
-    "medium": "yellow",
-    "high": "bold red",
-    "critical": "bold white on red",
+    "low": ui.STYLE_VERDICT_PASS,
+    "medium": ui.STYLE_VERDICT_WARN,
+    "high": ui.STYLE_VERDICT_FAIL,
+    "critical": ui.STYLE_VERDICT_FAIL,
 }
 _MAX_RENDERED_ITEMS = 20
 
@@ -141,7 +141,7 @@ def _print_entries(
         reason = str(entry.get("reason", "")).strip()
         severity = str(entry.get("severity", "")).strip()
         suffix = f" [{severity}]" if severity else ""
-        console.print(f"    {path}  [dim]{reason}{suffix}[/dim]")
+        console.print(f"    {ui.esc(path)}  [dim]{ui.esc(reason + suffix)}[/dim]")
     if len(entries) > _MAX_RENDERED_ITEMS:
         more = ui.BLAST_RADIUS_MORE.format(count=len(entries) - _MAX_RENDERED_ITEMS)
         console.print(f"    [dim]{more}[/dim]")
@@ -195,8 +195,12 @@ def render_blast_radius(
     if quiet:
         return _render_quiet_result(console=console, result=result)
 
+    from rich.rule import Rule
+
     console.print()
-    console.print(f"[bold]{ui.BLAST_RADIUS_TITLE}[/bold]")
+    console.print(
+        Rule(title=ui.BLAST_RADIUS_TITLE, style="dim", characters=ui.GLYPH_RULE)
+    )
     console.print()
     console.print(f"  [bold]{ui.BLAST_RADIUS_FILES}[/bold] {', '.join(result.origin)}")
     console.print(
