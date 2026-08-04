@@ -810,6 +810,16 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "refresh_from_run for explicit ingest."
             ),
             (
+                "Store location: linked git worktrees share the main "
+                "checkout store (.codeclone/memory/ at the main root, "
+                "resolved lexically from the git common dir), so drafts "
+                "recorded in a worktree survive its removal; explicit "
+                "memory.db_path or CODECLONE_MEMORY_DB_PATH stays "
+                "per-checkout. Responses carry store_provenance: "
+                "approved_records_total=0 means a hollow fresh bootstrap, "
+                "and per_root_git_unresolvable adds resolution_warning."
+            ),
+            (
                 "Query: for_path, for_symbol, search (filters.match_mode), get, "
                 "status, stale; trajectory_status|trajectory_search|"
                 "trajectory_get|trajectory_anomalies|trajectory_agents|"

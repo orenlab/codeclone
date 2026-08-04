@@ -363,6 +363,24 @@ class SqliteEngineeringMemoryStore:
 
         return find_experience(self._conn, experience_id=experience_id)
 
+    def count_approved_records(self, *, project_id: str) -> int:
+        """Count active human-approved records visible for *project_id*.
+
+        Same predicate as the retrieval ``approved`` field
+        (``approved_by IS NOT NULL``). A freshly bootstrapped store always
+        returns 0 here, which makes a hollow store self-declaring in
+        store-provenance witnesses.
+        """
+
+        row = self._conn.execute(
+            """
+            SELECT COUNT(*) FROM memory_records
+            WHERE project_id=? AND status='active' AND approved_by IS NOT NULL
+            """,
+            (project_id,),
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
     @property
     def connection(self) -> sqlite3.Connection:
         return self._conn

@@ -13,6 +13,11 @@ from typing import TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from ..utils.repo_identity import (
+    RepoIdentityResolution,
+    classify_repository_checkout,
+    resolve_repository_anchor_root,
+)
 from ..utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -49,6 +54,7 @@ from .memory_defaults import (
     MemoryBackend,
     MemoryMcpSyncPolicy,
     MemoryProjectionRebuildPolicy,
+    MemoryStoreResolution,
     SemanticBackend,
     SemanticEmbeddingProvider,
     SemanticProjectionTokenEstimator,
@@ -198,6 +204,23 @@ class MemoryConfig:
     trajectory_export_max_file_bytes: int
     semantic: SemanticConfig = field(default_factory=SemanticConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
+    # Why db_path landed where it did (see MemoryStoreResolution). Set by
+    # resolve_memory_config; the dataclass default only serves direct
+    # constructions that never ran resolution.
+    store_resolution: MemoryStoreResolution = "per_root_no_git"
+
+
+# Store resolution witness per repository identity. Linked worktrees share
+# the main checkout store; "per_root_git_unresolvable" is degraded (git
+# state present, main checkout unreachable) and warn-worthy in responses.
+_STORE_RESOLUTION_BY_REPO_IDENTITY: dict[
+    RepoIdentityResolution, MemoryStoreResolution
+] = {
+    "main_checkout": "main_checkout",
+    "linked_worktree": "shared_main_checkout",
+    "no_git": "per_root_no_git",
+    "git_unresolvable": "per_root_git_unresolvable",
+}
 
 
 def _memory_int(value: object, *, key: str) -> int:
@@ -307,7 +330,12 @@ def _resolve_ingest_config(raw: object) -> IngestConfig:
         ) from exc
 
 
-def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
+def _resolve_semantic_config(
+    raw: object,
+    *,
+    root_path: Path,
+    default_state_root: Path,
+) -> SemanticConfig:
     data = (
         copy_str_key_table(raw, key="tool.codeclone.memory.semantic")
         if isinstance(raw, dict)
@@ -317,6 +345,11 @@ def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
         env_value = os.environ.get(env_var)
         if env_value is not None:
             data[field_name] = env_value
+    # Explicit values (pyproject or env) keep resolving under the analyzed
+    # root; only DEFAULT paths ride the shared repository anchor so that
+    # linked worktrees converge on the main checkout `.codeclone/memory/`.
+    explicit_index_path = "index_path" in data
+    explicit_cache_dir = "embedding_cache_dir" in data
     try:
         config = SemanticConfig.model_validate(data)
     except ValidationError as exc:
@@ -326,12 +359,12 @@ def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
     index_path = _resolve_memory_state_path(
         key="memory.semantic.index_path",
         value=config.index_path,
-        root_path=root_path,
+        root_path=root_path if explicit_index_path else default_state_root,
     )
     cache_dir = _resolve_memory_state_path(
         key="memory.semantic.embedding_cache_dir",
         value=config.embedding_cache_dir,
-        root_path=root_path,
+        root_path=root_path if explicit_cache_dir else default_state_root,
     )
     return config.model_copy(
         update={"index_path": str(index_path), "embedding_cache_dir": str(cache_dir)}
@@ -364,9 +397,13 @@ def resolve_memory_config(
         else pyproject_config
     )
     memory_obj = loaded.get("memory")
+    memory_table: dict[str, object] = (
+        copy_str_key_table(memory_obj, key="tool.codeclone.memory")
+        if isinstance(memory_obj, dict)
+        else {}
+    )
     merged: dict[str, object] = dict(MEMORY_CONFIG_DEFAULTS)
-    if isinstance(memory_obj, dict):
-        merged.update(copy_str_key_table(memory_obj, key="tool.codeclone.memory"))
+    merged.update(memory_table)
 
     backend = _memory_backend(merged["backend"])
     mcp_sync_policy = _memory_mcp_sync_policy(merged["mcp_sync_policy"])
@@ -380,12 +417,31 @@ def resolve_memory_config(
         projection_policy_value
     )
 
+    # Default repository state anchors at the git common directory's main
+    # checkout: every linked worktree of one repository resolves the same
+    # store. Explicit config and env overrides keep per-checkout resolution.
+    default_state_root = resolve_repository_anchor_root(root_path)
+
     env_db_path = os.environ.get(MEMORY_ENV_DB_PATH)
-    db_path_raw: object = env_db_path if env_db_path is not None else merged["db_path"]
+    store_resolution: MemoryStoreResolution
+    if env_db_path is not None:
+        db_path_raw: object = env_db_path
+        db_path_root = root_path
+        store_resolution = "explicit_env"
+    elif "db_path" in memory_table:
+        db_path_raw = merged["db_path"]
+        db_path_root = root_path
+        store_resolution = "explicit_config"
+    else:
+        db_path_raw = merged["db_path"]
+        db_path_root = default_state_root
+        store_resolution = _STORE_RESOLUTION_BY_REPO_IDENTITY[
+            classify_repository_checkout(root_path)
+        ]
     db_path_value = _resolve_memory_state_path(
         key="memory.db_path",
         value=db_path_raw,
-        root_path=root_path,
+        root_path=db_path_root,
     )
 
     return MemoryConfig(
@@ -471,8 +527,10 @@ def resolve_memory_config(
         semantic=_resolve_semantic_config(
             merged.get(SEMANTIC_NESTED_TABLE_KEY),
             root_path=root_path,
+            default_state_root=default_state_root,
         ),
         ingest=_resolve_ingest_config(merged.get(INGEST_NESTED_TABLE_KEY)),
+        store_resolution=store_resolution,
     )
 
 

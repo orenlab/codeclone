@@ -16,6 +16,7 @@ from ..config.memory import MemoryConfig, resolve_memory_config
 from ..report.meta import current_report_timestamp_utc
 from ..utils.coerce import as_mapping
 from ..utils.mapping_paths import section
+from ..utils.repo_identity import resolve_repository_anchor_root
 from ..utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -39,14 +40,27 @@ def resolve_memory_db_path(root_path: Path, config: MemoryConfig | None = None) 
     return resolved.db_path
 
 
+def repository_identity_root(root_path: Path) -> Path:
+    """Root that owns durable repository state for *root_path*.
+
+    Linked git worktrees anchor at the main checkout (resolved lexically
+    from the git common directory), so every worktree of one repository
+    shares one project identity and one memory store. All other layouts —
+    main checkout, non-git directory, submodule, unresolvable git state —
+    anchor at the resolved root itself.
+    """
+
+    return resolve_repository_anchor_root(root_path)
+
+
 def resolve_project_identity(root_path: Path) -> MemoryProject:
-    resolved_root = root_path.resolve()
-    git = read_git_provenance(resolved_root)
+    identity_root = repository_identity_root(root_path)
+    git = read_git_provenance(identity_root)
     now = current_report_timestamp_utc()
-    project_id = compute_project_id(resolved_root)
+    project_id = compute_project_id(identity_root)
     return MemoryProject(
         id=project_id,
-        root=str(resolved_root),
+        root=str(identity_root),
         git_remote=git.remote,
         git_branch=git.branch,
         git_head=git.head,
@@ -57,7 +71,8 @@ def resolve_project_identity(root_path: Path) -> MemoryProject:
 
 
 def compute_project_id(root_path: Path) -> str:
-    digest = hashlib.sha256(str(root_path.resolve()).encode("utf-8")).hexdigest()
+    identity_root = repository_identity_root(root_path)
+    digest = hashlib.sha256(str(identity_root).encode("utf-8")).hexdigest()
     return f"proj-{digest[:8]}"
 
 
@@ -196,6 +211,7 @@ __all__ = [
     "module_repo_path",
     "read_git_provenance",
     "report_digest_from_report",
+    "repository_identity_root",
     "resolve_memory_db_path",
     "resolve_project_identity",
     "subject_fingerprint_for_subject",

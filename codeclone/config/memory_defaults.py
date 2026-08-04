@@ -14,6 +14,19 @@ MemoryProjectionRebuildPolicy = Literal["off", "enqueue_when_stale"]
 SemanticBackend = Literal["lancedb"]
 SemanticEmbeddingProvider = Literal["diagnostic", "fastembed", "local_model", "api"]
 SemanticProjectionTokenEstimator = Literal["chars_approx", "tiktoken"]
+# Why the default memory store landed where it did. The four per-repository
+# values mirror utils.repo_identity resolution: linked worktrees share the
+# main checkout store; "per_root_git_unresolvable" is the degraded class
+# (git state present, main checkout unreachable) and is warn-worthy in
+# responses, never neutral.
+MemoryStoreResolution = Literal[
+    "shared_main_checkout",
+    "main_checkout",
+    "per_root_no_git",
+    "per_root_git_unresolvable",
+    "explicit_config",
+    "explicit_env",
+]
 
 DEFAULT_MEMORY_BACKEND: Final[MemoryBackend] = "sqlite"
 DEFAULT_MEMORY_DB_PATH: Final = ".codeclone/memory/engineering_memory.sqlite3"
@@ -159,6 +172,7 @@ __all__ = [
     "MemoryBackend",
     "MemoryMcpSyncPolicy",
     "MemoryProjectionRebuildPolicy",
+    "MemoryStoreResolution",
     "SemanticBackend",
     "SemanticEmbeddingProvider",
     "SemanticProjectionTokenEstimator",

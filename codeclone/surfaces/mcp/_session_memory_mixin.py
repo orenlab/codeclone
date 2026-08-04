@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 from ...api.memory import rebuild_semantic_index
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
@@ -65,6 +65,38 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
+
+_STORE_RESOLUTION_WARNING: Final = (
+    "git state present but the main checkout could not be resolved; "
+    "falling back to a per-root store — shared repository knowledge "
+    "may be invisible from this root"
+)
+
+
+def _store_provenance_payload(
+    *,
+    config: MemoryConfig,
+    store: SqliteEngineeringMemoryStore,
+    project_id: str,
+) -> dict[str, object]:
+    """Result-derived witness of which store this response actually read.
+
+    ``approved_records_total`` distinguishes a hollow fresh bootstrap
+    (always 0) from a knowledge-bearing store in the response itself.
+    ``per_root_git_unresolvable`` is degraded, never neutral: it always
+    carries ``resolution_warning``. Deliberately compact (no db_path —
+    ``memory_sync`` and ``mode=status`` already expose it) so scoped
+    retrieval stays inside its response budget.
+    """
+
+    payload: dict[str, object] = {
+        "store_resolution": config.store_resolution,
+        "approved_records_total": store.count_approved_records(project_id=project_id),
+    }
+    if config.store_resolution == "per_root_git_unresolvable":
+        payload["resolution_warning"] = _STORE_RESOLUTION_WARNING
+    return payload
+
 
 _MEMORY_RESPONSE_LANES: tuple[tuple[str, str], ...] = (
     ("records", "record_count"),
@@ -128,7 +160,7 @@ class _MCPSessionMemoryMixin:
         else:
             scope_paths, scope_resolved_from = (), "symbols"
         effective_include_drafts = include_drafts or bool(scope_paths)
-        store, _db_path, _config, project = self._open_memory_store(root_path)
+        store, _db_path, config, project = self._open_memory_store(root_path)
         try:
             blast_dependents = self._memory_blast_dependents(root_path, scope_paths)
             result = get_relevant_memory(
@@ -144,8 +176,13 @@ class _MCPSessionMemoryMixin:
                 include_routine=include_routine,
                 detail_level=detail_level,
             )
+            result = dict(result)
+            result["store_provenance"] = _store_provenance_payload(
+                config=config,
+                store=store,
+                project_id=project.id,
+            )
             if memory_sync is not None:
-                result = dict(result)
                 result["memory_sync"] = memory_sync
             result = self._publish_memory_continuation_request(result)
             return _attach_budgeted_memory_retrieval_context(
@@ -183,7 +220,7 @@ class _MCPSessionMemoryMixin:
             else None
         )
         try:
-            return execute_memory_query(
+            payload = execute_memory_query(
                 store,
                 context=MemoryApplicationContext(
                     config=config,
@@ -209,6 +246,13 @@ class _MCPSessionMemoryMixin:
                 embedding_provider_resolver=resolve_embedding_provider,
                 semantic_index_closer=close_semantic_index,
             )
+            payload = dict(payload)
+            payload["store_provenance"] = _store_provenance_payload(
+                config=config,
+                store=store,
+                project_id=project.id,
+            )
+            return payload
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
