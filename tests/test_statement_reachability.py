@@ -394,11 +394,12 @@ def test_production_source_unreachable_statements_are_only_the_known_one() -> No
     this test rather than hiding behind it.
     """
 
-    # A genuine dead statement, reported as a 39Y landing-prep item: the
-    # ``while True`` loop it follows has no ``break``, so the trailing return
-    # cannot run. Its owner is outside this slice's scope, so it is recorded
-    # rather than silently fixed or excused.
-    known = {"governance.py:189 _contains_unnegated_phrase() literal_condition"}
+    # The single 39Y-recorded offender (governance.py
+    # _contains_unnegated_phrase() literal_condition) was retired in the
+    # memory-markdown slice, whose scope owned governance.py: the scan loop
+    # now has a real condition with identical semantics. The ratchet holds
+    # at zero — any unreachable production statement fails this test.
+    known: set[str] = set()
 
     package_root = Path(__file__).resolve().parent.parent / "codeclone"
     offenders: set[str] = set()

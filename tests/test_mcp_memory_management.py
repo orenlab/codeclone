@@ -692,3 +692,77 @@ def test_mcp_manage_memory_propose_scope_check_variants(tmp_path: Path) -> None:
         candidates = cast("list[dict[str, object]]", scoped["memory_candidates"])
         statements = [str(item["statement"]) for item in candidates]
         assert any("scope includes pkg/mod.py" in statement for statement in statements)
+
+
+def test_mcp_record_candidate_markdown_security_reject_is_typed(
+    tmp_path: Path,
+) -> None:
+    """Security-class markdown rejects surface as typed contract errors with
+    the in-band procedure (next_step + help mention) intact."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        with pytest.raises(MCPServiceContractError, match="memory_md_image") as excinfo:
+            service.manage_engineering_memory(
+                root=str(root.resolve()),
+                action="record_candidate",
+                record_type="risk_note",
+                statement="Probe ![shot](https://evil.example/x.png) captured.",
+                subject_path="pkg/mod.py",
+            )
+        message = str(excinfo.value)
+        assert "next_step" in message
+        assert 'help(topic="engineering_memory")' in message
+
+
+def test_mcp_record_candidate_surfaces_markdown_warnings(tmp_path: Path) -> None:
+    """Discipline-class issues warn in the response instead of rejecting."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        recorded = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="record_candidate",
+            record_type="risk_note",
+            statement="# Wrong level title\nbody of the durable fact",
+            subject_path="pkg/mod.py",
+        )
+        assert recorded["status"] == "draft"
+        warnings = cast("list[str]", recorded.get("warnings", []))
+        assert any("memory_md_heading_level" in item for item in warnings)
+
+
+def test_mcp_propose_from_receipt_warns_on_batch_mean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The average-size gate rides propose batches: mean > limit warns."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        oversized = "x" * 260
+
+        def fake_propose(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": "a",
+                    "type": "risk_note",
+                    "status": "draft",
+                    "statement": oversized,
+                },
+                {
+                    "id": "b",
+                    "type": "risk_note",
+                    "status": "draft",
+                    "statement": oversized,
+                },
+            ]
+
+        monkeypatch.setattr(
+            "codeclone.memory.ingest.receipts.propose_memory_from_finish_payload",
+            fake_propose,
+        )
+        proposed = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="propose_from_receipt",
+            text="claims text",
+        )
+        warnings = cast("list[str]", proposed.get("warnings", []))
+        assert any("batch mean" in item.lower() for item in warnings)

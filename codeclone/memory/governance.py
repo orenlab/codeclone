@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
 from ..config.memory_defaults import (
+    DEFAULT_MEMORY_BATCH_MEAN_STATEMENT_CHARS,
     DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
     DEFAULT_MEMORY_SOFT_STATEMENT_CHARS,
     DEFAULT_MEMORY_TARGET_STATEMENT_CHARS,
@@ -36,6 +38,12 @@ from .project import (
     read_git_provenance,
 )
 from .sqlite_store import SqliteEngineeringMemoryStore
+from .statement_markdown import (
+    STATEMENT_FORMAT_MD,
+    STATEMENT_FORMAT_PAYLOAD_KEY,
+    markdown_reject_error,
+    validate_statement_markdown,
+)
 
 _NEGATION_WINDOW = re.compile(
     r"(?:cannot|can't|can not|does not|doesn't|do not|don't|never|not)\s+"
@@ -176,17 +184,16 @@ def _pattern_matches_unnegated(text: str, pattern: re.Pattern[str]) -> bool:
 
 
 def _contains_unnegated_phrase(text: str, phrase: str) -> bool:
+    # Declarative scan (the 39Y-recorded ``while True`` literal_condition
+    # dead statement was retired here, in scope): non-overlapping
+    # occurrences left to right, first unnegated occurrence wins — the
+    # exact semantics of the previous find-loop.
     lowered = text.lower()
     needle = phrase.lower()
-    start = 0
-    while True:
-        index = lowered.find(needle, start)
-        if index < 0:
-            return False
-        if not _phrase_is_negated(lowered, needle, start=index):
-            return True
-        start = index + len(needle)
-    return False
+    return any(
+        not _phrase_is_negated(lowered, needle, start=match.start())
+        for match in re.finditer(re.escape(needle), lowered)
+    )
 
 
 def _permission_claim_error(description: str) -> str:
@@ -418,6 +425,51 @@ def _statement_length_warnings(
     return ()
 
 
+def statement_markdown_warnings(statement: str) -> tuple[str, ...]:
+    """Advisory markdown-subset warnings for a candidate statement.
+
+    Governance owns statement hygiene; surfaces call this instead of
+    reaching into the markdown validator directly.
+    """
+    return validate_statement_markdown(statement.strip()).warnings
+
+
+_BATCH_UNIT_SPLIT = re.compile(r"\n[ \t]*\n")
+
+
+def _batch_unit_lengths(text: str) -> tuple[int, ...]:
+    """Blank-line-separated note units — the validate_claims batch shape."""
+    return tuple(
+        len(unit)
+        for unit in (chunk.strip() for chunk in _BATCH_UNIT_SPLIT.split(text))
+        if unit
+    )
+
+
+def batch_statement_length_warnings(
+    lengths: Sequence[int],
+    *,
+    mean_limit: int = DEFAULT_MEMORY_BATCH_MEAN_STATEMENT_CHARS,
+) -> tuple[str, ...]:
+    """Average-size gate over a statement batch. Warn-level, never a reject.
+
+    Fires only for real batches (two or more statements): a single note is
+    governed by the per-record target/soft/hard gates. The threshold sits
+    above the live-store mean (147 chars) plus measured markdown overhead
+    (~+11%) so compliant notes stay comfortable while essay drift warns.
+    """
+    if len(lengths) < 2:
+        return ()
+    mean = sum(lengths) / len(lengths)
+    if mean <= mean_limit:
+        return ()
+    return (
+        f"Batch mean statement length {round(mean)} exceeds {mean_limit} chars "
+        f"across {len(lengths)} statements; compress each note to one durable "
+        "fact (live-store mean is ~150 chars).",
+    )
+
+
 def _new_draft_record(
     *,
     project: MemoryProject,
@@ -482,6 +534,9 @@ def record_candidate(
         raise MemoryContractError("Candidate statement must not be empty.")
     if len(stripped) > max_statement_chars:
         raise MemoryContractError(MEMORY_STATEMENT_TOO_LONG_ERROR)
+    markdown_report = validate_statement_markdown(stripped)
+    if markdown_report.rejects:
+        raise MemoryContractError(markdown_reject_error(markdown_report))
     if subject_path is None or not subject_path.strip():
         raise MemoryContractError(
             "record_candidate requires subject_path linking the observation to a "
@@ -521,7 +576,10 @@ def record_candidate(
         record_type=record_type,
         identity=identity,
         statement=stripped,
-        payload={"subject_path": normalized_path},
+        payload={
+            "subject_path": normalized_path,
+            STATEMENT_FORMAT_PAYLOAD_KEY: STATEMENT_FORMAT_MD,
+        },
         now=now,
         created_by=created_by,
         code_fingerprint=code_fingerprint,
@@ -643,8 +701,12 @@ def validate_memory_claims(
     text: str,
 ) -> ClaimValidationResult:
     warnings: list[str] = list(_statement_length_warnings(len(text.strip())))
+    markdown_report = validate_statement_markdown(text)
+    warnings.extend(markdown_report.warnings)
+    warnings.extend(batch_statement_length_warnings(_batch_unit_lengths(text)))
     lowered = text.lower()
     errors = list(_forbidden_claim_errors(text))
+    errors.extend(issue.message for issue in markdown_report.rejects)
     if "inferred" in lowered and "established fact" in lowered:
         warnings.append("Treat inferred memory as hypothesis, not established fact.")
     stale_hits = store.query_records(
@@ -668,8 +730,10 @@ __all__ = [
     "ClaimValidationResult",
     "approve_record",
     "archive_record",
+    "batch_statement_length_warnings",
     "promote_experience",
     "record_candidate",
     "reject_record",
+    "statement_markdown_warnings",
     "validate_memory_claims",
 ]

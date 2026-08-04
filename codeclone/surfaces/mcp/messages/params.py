@@ -777,11 +777,25 @@ MemoryRecordTypeParam = Annotated[
 ]
 MemoryStatementParam = Annotated[
     str | None,
-    Field(description="Candidate statement for record_candidate."),
+    Field(
+        description=(
+            "Candidate statement for record_candidate. Accepts a safe "
+            "Markdown subset (one leading '## ' title, `code spans`, "
+            "bold/italic, depth-1 lists, compact tables, blockquotes, bare "
+            "URLs); images, raw HTML, and [text](url) links are rejected "
+            "with typed memory_md_* errors."
+        ),
+    ),
 ]
 MemoryClaimsTextParam = Annotated[
     str | None,
-    Field(description="Claims text for validate_claims."),
+    Field(
+        description=(
+            "Claims text for validate_claims. Markdown-subset rules apply "
+            "advisorily; blank-line-separated notes form a batch whose mean "
+            "length above 200 chars warns."
+        ),
+    ),
 ]
 ProposeMemoryParam = Annotated[
     bool,

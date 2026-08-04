@@ -852,6 +852,37 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "Never use project root as scope; one fact per record_candidate "
                 "(target <=300 chars). detail_level=full or mode=get for full text."
             ),
+            (
+                "Statements accept a safe Markdown subset: one optional "
+                "'## ' title as the first line (H2 is the enforced level), "
+                "`code spans` for paths/symbols/digests, **bold**/*italic*, "
+                "lists nested at most once, compact tables, '> ' blockquotes "
+                "for quoted rulings, bare URLs. Security bans (typed rejects "
+                "memory_md_image/memory_md_html/memory_md_link): images, raw "
+                "HTML tags, and [text](url) links — put literal markup in a "
+                "backtick code span instead. memory_md_heading_structure "
+                "rejects a second heading or a non-leading heading; "
+                "memory_md_heading_level and memory_md_list_nesting warn. "
+                "New records carry statement_format=md-v1; records without "
+                "the marker are plain text and must not be markdown-rendered."
+            ),
+            (
+                "Size gates: target 300 / warn over 500 / hard-reject over "
+                "1000 chars per statement; batches (validate_claims "
+                "blank-line-separated notes, propose_memory candidates) warn "
+                "when mean length exceeds 200 chars."
+            ),
+            (
+                "Statement template (copy and adapt, <=300 chars):\n"
+                "## Cache keys normalize once\n"
+                "`resolve_cache_path()` lowercases keys; **eviction compares "
+                "raw paths** (miss on case-variant paths).\n"
+                "| probe | result |\n"
+                "| --- | --- |\n"
+                "| `Foo.py` | miss |\n"
+                "> Ruling: normalize at write, never at compare.\n"
+                "Why: prevents double entries per path casing."
+            ),
         ),
         recommended_tools=(
             "get_relevant_memory",

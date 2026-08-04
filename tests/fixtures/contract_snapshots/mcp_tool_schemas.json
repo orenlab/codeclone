@@ -2958,7 +2958,7 @@
             }
           ],
           "default": null,
-          "description": "Candidate statement for record_candidate.",
+          "description": "Candidate statement for record_candidate. Accepts a safe Markdown subset (one leading '## ' title, `code spans`, bold/italic, depth-1 lists, compact tables, blockquotes, bare URLs); images, raw HTML, and [text](url) links are rejected with typed memory_md_* errors.",
           "title": "Statement"
         },
         "subject_path": {
@@ -2984,7 +2984,7 @@
             }
           ],
           "default": null,
-          "description": "Claims text for validate_claims.",
+          "description": "Claims text for validate_claims. Markdown-subset rules apply advisorily; blank-line-separated notes form a batch whose mean length above 200 chars warns.",
           "title": "Text"
         }
       },

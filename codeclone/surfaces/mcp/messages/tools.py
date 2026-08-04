@@ -115,7 +115,11 @@ MANAGE_ENGINEERING_MEMORY: Final = (
     "rebuild_semantic_index, rebuild_trajectories, enqueue_projection_rebuild, "
     "projection_rebuild_status, run_projection_jobs_once. "
     "promote_experience(experience_id) turns a distilled experience into a "
-    "human-approvable draft. "
+    "human-approvable draft. Statements accept a safe Markdown subset (one "
+    "leading '## ' title, `code spans`, bold/italic, depth-1 lists, compact "
+    "tables, blockquotes, bare URLs); images, raw HTML, and [text](url) links "
+    "are rejected with typed memory_md_* errors — see "
+    'help(topic="engineering_memory") for the statement template. '
     "approve/reject/archive are not available to agents — use VS Code Memory view."
 )
 

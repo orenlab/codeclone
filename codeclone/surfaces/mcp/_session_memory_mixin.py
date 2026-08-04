@@ -82,6 +82,17 @@ def _blast_session(session: _MCPSessionMemoryMixin) -> _MCPSessionBlastRadiusMix
     return cast(_MCPSessionBlastRadiusMixin, session)
 
 
+def _candidate_batch_warnings(
+    candidates: Sequence[Mapping[str, object]],
+) -> tuple[str, ...]:
+    """Average-size gate over a propose batch of candidate statements."""
+    from ...memory.governance import batch_statement_length_warnings
+
+    return batch_statement_length_warnings(
+        [len(str(item.get("statement", ""))) for item in candidates]
+    )
+
+
 class _MCPSessionMemoryMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
@@ -464,12 +475,18 @@ class _MCPSessionMemoryMixin:
             max_candidates=config.max_candidates,
             max_statement_chars=config.max_statement_chars,
         )
-        return {
+        payload: dict[str, object] = {
             "action": "record_candidate",
             "record_id": record.id,
             "status": record.status,
             "type": record.type,
         }
+        from ...memory.governance import statement_markdown_warnings
+
+        markdown_warnings = statement_markdown_warnings(statement)
+        if markdown_warnings:
+            payload["warnings"] = list(markdown_warnings)
+        return payload
 
     def _manage_memory_promote_experience(
         self,
@@ -548,7 +565,14 @@ class _MCPSessionMemoryMixin:
             max_candidates=config.max_candidates,
             max_statement_chars=config.max_statement_chars,
         )
-        return {"action": "propose_from_receipt", "memory_candidates": candidates}
+        result: dict[str, object] = {
+            "action": "propose_from_receipt",
+            "memory_candidates": candidates,
+        }
+        batch_warnings = _candidate_batch_warnings(candidates)
+        if batch_warnings:
+            result["warnings"] = list(batch_warnings)
+        return result
 
     def _manage_memory_refresh_from_run(
         self,
@@ -637,7 +661,7 @@ class _MCPSessionMemoryMixin:
                 max_candidates=config.max_candidates,
                 max_statement_chars=config.max_statement_chars,
             )
-            return {
+            hook_payload: dict[str, object] = {
                 "memory_candidates": workflow.candidates,
                 "memory_staleness": {
                     "records_marked_stale": workflow.staleness.records_marked_stale,
@@ -645,6 +669,10 @@ class _MCPSessionMemoryMixin:
                 },
                 "memory_coverage_delta": workflow.coverage_delta,
             }
+            batch_warnings = _candidate_batch_warnings(workflow.candidates)
+            if batch_warnings:
+                hook_payload["memory_candidate_warnings"] = list(batch_warnings)
+            return hook_payload
         finally:
             store.close()
 

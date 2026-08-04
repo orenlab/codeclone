@@ -41,6 +41,10 @@ from ..semantic.chunking import (
     trajectory_parent_id,
 )
 from ..sqlite_store import SqliteEngineeringMemoryStore
+from ..statement_markdown import (
+    STATEMENT_FORMAT_MD,
+    STATEMENT_FORMAT_PAYLOAD_KEY,
+)
 from ..status_report import build_memory_status_report
 from ..trajectory.analytics import (
     build_trajectory_agent_stats_payload,
@@ -492,6 +496,14 @@ def _serialize_record_summary(
         payload["subjects_truncated"] = len(serialized_subjects) < len(subjects)
         if statement_length > len(statement_value):
             payload["statement_truncated"] = True
+    record_payload = record.payload
+    if (
+        isinstance(record_payload, dict)
+        and record_payload.get(STATEMENT_FORMAT_PAYLOAD_KEY) == STATEMENT_FORMAT_MD
+    ):
+        # Authored under the validated markdown subset. Absent marker means
+        # plain text: renderers must not markdown-render legacy statements.
+        payload[STATEMENT_FORMAT_PAYLOAD_KEY] = STATEMENT_FORMAT_MD
     if record.stale_reason:
         payload["stale_reason"] = record.stale_reason
     payload.update(_retrieval_lane_payload(record))

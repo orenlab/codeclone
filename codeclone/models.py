@@ -3501,3 +3501,28 @@ class StructuralFindingGroup:
     finding_key: str
     signature: dict[str, str]
     items: tuple[StructuralFindingOccurrence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class StatementMarkdownIssue:
+    """One classified markdown-subset violation in a memory statement."""
+
+    code: str
+    severity: str  # "reject" | "warn"
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class StatementMarkdownReport:
+    """Deterministic classification of one memory statement against the
+    allowed markdown subset (see codeclone.memory.statement_markdown)."""
+
+    issues: tuple[StatementMarkdownIssue, ...]
+
+    @property
+    def rejects(self) -> tuple[StatementMarkdownIssue, ...]:
+        return tuple(issue for issue in self.issues if issue.severity == "reject")
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        return tuple(issue.message for issue in self.issues if issue.severity == "warn")
