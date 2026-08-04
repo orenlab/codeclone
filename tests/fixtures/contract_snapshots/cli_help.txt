@@ -87,7 +87,7 @@ Analysis:
                         Prefer --cache-path in new configurations.
   --max-cache-size-mb MB
                         Maximum cache file size in MB.
-                        Default: 50.
+                        Default: 256.
 
 Baselines and CI:
   --baseline [FILE]     Path to the clone baseline.
