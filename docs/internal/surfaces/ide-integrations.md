@@ -51,6 +51,7 @@ graph LR
 | VS Code `analyze_repository` fails with "path not found" | Coverage XML path is absolute workspace path; core expects repo-relative | runtime.js must normalize coverage.xml to repo-relative; use `allow_repo_absolute=true` only when caller explicitly permits |
 | Memory bulk-governance shows no stale records in UI | MCP status payload includes `records_by_status.stale`, but memoryController only dispatches `memoryDraft` | memoryController.js must handle all keys in `records_by_status`: `active`, `draft`, `stale` |
 | Extension crashes when memory DB is missing | `.codeclone/memory/engineering_memory.sqlite3` not initialized | Bootstrap memory with `manage_engineering_memory(action="refresh_from_run")` on first connect or on missing-DB error |
+| Memory view opened in a linked git worktree shows the same records as the main checkout | Expected: default memory store resolution anchors at the main checkout via the git common dir, so all worktrees share one store | Not a bug; open the main checkout's store for approvals. Explicit `memory.db_path` keeps a per-checkout store |
 | Race condition on concurrent IDE analysis | Two IDE instances spawn overlapping `analyze_repository` calls | Defer second IDE to same CodeClone server process via IPC coordination or implement intent-conflict queuing |
 
 ## Verification

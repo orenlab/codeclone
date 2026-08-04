@@ -216,13 +216,24 @@ governed contract. See [Semantic authority governance](../concepts/semantic-auth
 ### Engineering Memory (nested tables)
 
 `[tool.codeclone.memory]` configures Engineering Memory. All keys are
-optional; unknown keys are a contract error. Path values resolve against the
-repository root and must stay under it.
+optional; unknown keys are a contract error. Explicitly configured path
+values resolve against the analyzed repository root and must stay under it.
+
+Default store paths (`memory.db_path`, `memory.semantic.index_path`,
+`memory.semantic.embedding_cache_dir`) anchor at the repository's **main
+checkout**: in a linked `git worktree`, the git common directory is resolved
+lexically (gitfile → `commondir`) and every worktree of one repository shares
+the main checkout's `.codeclone/memory/` store, so drafts recorded from a
+worktree survive its removal. Non-git roots, submodule checkouts, and
+unresolvable git states keep per-root resolution; an explicitly configured
+`memory.db_path` (or `CODECLONE_MEMORY_DB_PATH`) always resolves against the
+analyzed root itself. MCP memory responses report the branch taken in
+`store_provenance.store_resolution`.
 
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
 | `memory.backend` | str | `sqlite` | Memory store backend (`sqlite` or `postgres`) |
-| `memory.db_path` | str | `.codeclone/memory/engineering_memory.sqlite3` | Memory database path |
+| `memory.db_path` | str | `.codeclone/memory/engineering_memory.sqlite3` | Memory database path; the default is shared across git worktrees (anchored at the main checkout), an explicit value stays per-checkout |
 | `memory.mcp_sync_policy` | str | `bootstrap_if_missing` | MCP store sync: `off`, `bootstrap_if_missing`, or `refresh_when_stale` |
 | `memory.active_retention_days` | int | `-1` (keep forever) | Retain active records (days) |
 | `memory.stale_retention_days` | int | `180` | Retain stale records (days) |
@@ -317,7 +328,7 @@ pyproject key, the environment value overrides the pyproject value.
 | `CODECLONE_DEBUG` | `1` enables debug diagnostics, same as `--debug` |
 | `NO_COLOR` | Any non-empty value disables ANSI colors |
 | `CODECLONE_STRICT_FINISH` | Truthy (`1`, `true`, `yes`, `on`) makes MCP finish hygiene block on unattributed out-of-scope changes instead of reporting them as advisory |
-| `CODECLONE_MEMORY_DB_PATH` | Overrides `memory.db_path` |
+| `CODECLONE_MEMORY_DB_PATH` | Overrides `memory.db_path`; resolves against the analyzed root (per-checkout, never worktree-shared) |
 | `CODECLONE_PROJECTION_REBUILD_POLICY` | Overrides `memory.projection_rebuild_policy` |
 | `CODECLONE_MEMORY_SEMANTIC_ENABLED` | Overrides `memory.semantic.enabled` |
 | `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | Overrides `memory.semantic.embedding_provider` |
@@ -352,7 +363,7 @@ Configuration is validated when CodeClone initializes:
 
 - **Unknown keys**: any key outside the documented set is a contract error
 - **Type mismatch**: key value does not match declared type → error
-- **Path validation**: `baseline`, `audit_path`, `intent_registry_path` must be writable or creatable; memory and analytics state paths must stay under the repository root
+- **Path validation**: `baseline`, `audit_path`, `intent_registry_path` must be writable or creatable; memory and analytics state paths must stay under the repository root (for default memory store paths in a linked worktree, that root is the main checkout)
 - **Range validation**: `fail_health` must be 0–100; retention days must be positive
 - **Retention policy**: audit and intent records respect `*_retention_days` settings; records older than the configured age are automatically purged on cleanup
 - **Setup safety**: `codeclone setup apply` refuses filesystem writes without explicit `--yes` confirmation or `--dry-run` preview; `--plan-id` binding prevents stale plans from applying

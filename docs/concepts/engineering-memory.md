@@ -10,6 +10,8 @@ source_commit: "582228177b2f57d9b9823ff1da9b6a0620f1297f"
 
 Engineering Memory is CodeClone's durable knowledge store for repository insights and workflow decisions. It persists evidence-linked facts across analysis runs, AI agent sessions, and developer workflows in a local SQLite database, and survives process exits and restarts.
 
+The store is **per repository, not per checkout**: all linked `git worktree` checkouts of one repository resolve the same store at the main checkout's `.codeclone/memory/`, discovered lexically from the git common directory. An agent working in a sandbox worktree reads the repository's shared approved knowledge, its draft writes land in the durable store the human Memory view opens, and removing the worktree loses nothing. Non-git roots and submodules keep a per-root store; an explicit `memory.db_path` always wins. MCP memory responses carry a `store_provenance` witness (`store_resolution`, `approved_records_total`) so a freshly bootstrapped hollow store is distinguishable from a knowledge-bearing one — `approved_records_total: 0` is a red flag, and an unresolvable git state adds an explicit `resolution_warning` instead of falling back silently.
+
 It holds four kinds of evidence: **records** (architecture decisions, change rationales, contract notes, risk notes), **experiences** (episodic patterns distilled from past workflow trajectories), **trajectories** (timestamped audit trails of agent actions), and a **semantic index** over records and experiences for retrieval.
 
 ## Why it exists

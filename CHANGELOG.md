@@ -40,8 +40,20 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   lists, compact tables, blockquotes, bare URLs) that memory UIs render and plain text preserves. Images, raw HTML, and
   `[text](url)` links are rejected at write time as render-surface security risks, and new records carry a
   `statement_format: "md-v1"` marker so legacy plain-text notes are never markdown-rendered.
+- MCP memory responses (`get_relevant_memory`, `query_engineering_memory`) carry a `store_provenance` witness —
+  which resolution branch produced the store and the count of approved records visible — so a freshly
+  bootstrapped hollow store is distinguishable from a knowledge-bearing one, and an unresolvable git state carries an
+  explicit `resolution_warning` instead of a silent per-root fallback.
 
 ### Changed
+
+- **The Engineering Memory store is now shared across git worktrees of a repository.** Default store paths
+  (`memory.db_path` and the semantic sidecar) anchor at the main checkout, resolved lexically from the git common
+  directory, so an agent in a linked worktree reads the repository's approved knowledge and its drafts survive
+  worktree removal. Project identity anchors the same way (same repository → same `project_id` from any worktree).
+  Non-git roots and submodules keep per-root stores; explicit `memory.db_path` or `CODECLONE_MEMORY_DB_PATH` keeps
+  per-checkout resolution unchanged. Concurrent worktree writers are safe: the store opens in WAL journal mode with a
+  busy timeout. Audit journal, workspace intents, analysis cache, and reports remain per-checkout by design.
 
 - Terminal output follows one design system across every command: consistent number formatting and pluralization,
   one color and glyph vocabulary, and error messages that always name an executable next step. Bracketed details in

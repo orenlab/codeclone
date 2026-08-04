@@ -11,6 +11,8 @@ source_packet: codeclone_mcp_module_map
 
 Engineering Memory is a persistent SQLite store for evidence-linked repository facts, decisions, and workflow trajectories. Agents modify Memory through `manage_engineering_memory` (for writes) and `query_engineering_memory` (for inspection). This guide covers the MCP contract, common patterns, failure modes, and verification steps for Memory changes.
 
+The store is per repository, not per checkout: default resolution anchors at the main checkout via the git common directory (`codeclone/utils/repo_identity.py`), so every linked `git worktree` shares `.codeclone/memory/engineering_memory.sqlite3` at the main root and worktree-recorded drafts survive worktree removal. Explicit `memory.db_path`/`CODECLONE_MEMORY_DB_PATH` stay per-checkout. Memory responses expose the branch taken plus `approved_records_total` in `store_provenance`; treat `approved_records_total: 0` as a hollow-bootstrap red flag. Audit journal, workspace intents, analysis cache, and reports remain per-checkout coordination state by design.
+
 ## Contracts
 
 The Memory surface exposes four MCP tools:
