@@ -33,6 +33,9 @@ error.
 | `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES` | Record payload sizes (numeric only) |
 | `CODECLONE_OBSERVABILITY_FORCE` | Lift the CI gate below; does not enable capture on its own |
 | `CODECLONE_OBSERVABILITY_CORRELATION_ID` / `CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID` | Correlate spans across a chain |
+| `CODECLONE_OBSERVABILITY_RETENTION_DAYS` | Retain persisted telemetry (days, default `7`) |
+| `CODECLONE_OBSERVABILITY_MAX_OPERATIONS_PER_PROCESS` | Cap captured operations per process (default `2000`) |
+| `CODECLONE_OBSERVABILITY_MAX_SPANS_PER_OPERATION` | Cap spans per operation (default `100`) |
 
 !!! important "Memory columns need `CODECLONE_OBSERVABILITY_PROFILE`"
     `CODECLONE_OBSERVABILITY_ENABLED=1` on its own records spans with **NULL**

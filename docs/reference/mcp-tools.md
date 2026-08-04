@@ -12,6 +12,9 @@ CodeClone exposes structural analysis and change control through MCP (Model Cont
 
 All MCP tools require an absolute repository root path. Relative paths like `'.'` are rejected. MCP respects cache policy settings (`reuse` or `off`); analysis runs are registered as the latest session-local run when complete.
 
+The server is started with the `codeclone-mcp` launcher — see the
+[CLI reference](cli.md) for its transports and options.
+
 ```mermaid
 graph LR
     A["analyze_repository"] --> B["Inspection: get_run_summary,<br/>get_report_section, list_findings"]
@@ -30,7 +33,7 @@ graph LR
 | **Inspection** | Retrieve analysis results, implementation context, and summaries | `get_run_summary`, `get_report_section`, `get_implementation_context` |
 | **Change Control** | Declare intent, compute blast radius, verify patches, and close edits | `start_controlled_change`, `finish_controlled_change`, `manage_change_intent`, `check_patch_contract`, `get_blast_radius` |
 | **Triage** | Production-first review and finding discovery | `get_production_triage`, `list_findings`, `list_hotspots` |
-| **Focused checks** | Narrower alternatives to `list_findings` for one finding family | `check_clones`, `check_cohesion`, `check_complexity`, `check_coupling`, `check_dead_code`, `get_finding`, `get_remediation` |
+| **Focused checks** | Narrower alternatives to `list_findings` for one finding family | `check_clones`, `check_cohesion`, `check_complexity`, `check_coupling`, `check_dead_code`, `check_authority`, `get_finding`, `get_remediation` |
 | **Engineering Memory** | Retrieve, govern, and inspect evidence-linked repository knowledge | `get_relevant_memory`, `manage_engineering_memory`, `query_engineering_memory`, `get_memory_projection_page` |
 | **Audit and receipts** | Durable, replayable evidence from the audit trail | `create_review_receipt`, `get_review_receipt`, `get_patch_trail`, `get_blast_artifact`, `validate_review_claims` |
 | **Navigation** | Drill into facets, compare runs, and manage session state | `get_implementation_context_page`, `compare_runs`, `clear_session_runs` |
@@ -94,6 +97,9 @@ Narrower alternatives to `list_findings` when only one finding family is needed,
 
 **`check_clones`**, **`check_cohesion`**, **`check_complexity`**, **`check_coupling`**, **`check_dead_code`**
 Return clone / cohesion / complexity / coupling / dead-code findings respectively.
+
+**`check_authority`**
+Return active canonical semantic-authority violation findings for one run, with deterministic ordering and bounded detail. See [Semantic authority governance](../concepts/semantic-authority.md).
 
 **`get_finding(finding_id, detail)`**
 Return a single canonical finding group by short or full id. Unknown ids return a structured `status="not_found"` response instead of an error.

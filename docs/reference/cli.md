@@ -160,6 +160,33 @@ Manage and query code analytics.
 
 Observe CodeClone runtime behavior (maintainer only).
 
+## `codeclone-mcp` (MCP server launcher)
+
+Installing `codeclone[mcp]` adds a second console script, `codeclone-mcp`,
+which runs the [MCP server](mcp-tools.md). The default transport is stdio,
+which is what IDE and agent integrations spawn; no options are required:
+
+```bash
+codeclone-mcp
+```
+
+| Option | Description |
+|--------|-------------|
+| `--transport {stdio,streamable-http}` | MCP transport. Default: `stdio` |
+| `--host HOST` | Bind host for `streamable-http`. Default: `127.0.0.1` |
+| `--port PORT` | Bind port for `streamable-http`. Default: `8000` |
+| `--allow-remote` | Allow binding `streamable-http` to a non-loopback host. HTTP always requires `CODECLONE_MCP_AUTH_TOKEN` |
+| `--history-limit N` | In-memory analysis runs retained by the server (1–10). Default: `4` |
+| `--json-response` | JSON responses for `streamable-http`. Default: enabled |
+| `--stateless-http` | Stateless Streamable HTTP mode. Default: enabled |
+| `--debug` | FastMCP debug mode. Default: disabled |
+| `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` | Server log level. Default: `INFO` |
+| `--ide-governance-channel` | Enable the IDE governance channel for human approve/reject/archive via `manage_engineering_memory`. Agent launchers must not pass this flag |
+
+The `streamable-http` transport requires the `CODECLONE_MCP_AUTH_TOKEN`
+environment variable to hold a bearer token of at least 32 characters; the
+server refuses HTTP without it.
+
 ## Machine-readable output
 
 Reports are written to `.codeclone/report.<ext>` by default unless FILE is specified.
