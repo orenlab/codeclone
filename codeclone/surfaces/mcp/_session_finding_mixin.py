@@ -842,8 +842,9 @@ class _MCPSessionFindingMixin:
 
     @staticmethod
     def _finding_novelty(finding: Mapping[str, object]) -> str:
-        novelty = str(finding.get("novelty", "")).strip()
-        return novelty or "known"
+        """Return the finding's novelty; absent evidence is ``unavailable``."""
+
+        return _helpers._finding_novelty_value(finding)
 
     def _locations_for_finding(
         self,

@@ -11,6 +11,9 @@ import os
 from ...cache.store import Cache
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...domain.findings import (
+    CLONE_NOVELTY_KNOWN,
+    CLONE_NOVELTY_NEW,
+    CLONE_NOVELTY_UNAVAILABLE,
     FAMILY_CLONE,
     FAMILY_DEAD_CODE,
 )
@@ -412,6 +415,18 @@ def _risk_level_for_effort(effort: str) -> str:
     }.get(effort, "medium")
 
 
+def _finding_novelty_value(finding: Mapping[str, object]) -> str:
+    """Return the finding's novelty; absent evidence is ``unavailable``.
+
+    A finding the baseline never compared is neither new nor known —
+    defaulting to ``known`` would assert a comparison that never happened
+    (same rule as the report document layer).
+    """
+
+    novelty = str(finding.get("novelty", "")).strip()
+    return novelty or CLONE_NOVELTY_UNAVAILABLE
+
+
 def _why_now_text(
     *,
     title: str,
@@ -423,7 +438,12 @@ def _why_now_text(
     spread_functions: int,
     effort: str,
 ) -> str:
-    novelty_text = "new regression" if novelty == "new" else "known debt"
+    # Tri-state honesty: only a baseline comparison can call something
+    # "known debt"; unavailable/untracked novelty is stated as-is.
+    novelty_text = {
+        CLONE_NOVELTY_NEW: "new regression",
+        CLONE_NOVELTY_KNOWN: "known debt",
+    }.get(novelty, f"novelty {novelty or CLONE_NOVELTY_UNAVAILABLE}")
     context = (
         "production code"
         if source_kind == "production"
