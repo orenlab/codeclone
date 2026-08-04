@@ -58,6 +58,7 @@ from codeclone.core.entrypoints import collect_project_entrypoint_qualnames
 from codeclone.core.pipeline import analyze
 from codeclone.findings.clones.grouping import build_segment_groups
 from codeclone.models import (
+    BlockGroupItem,
     CacheDependentPayload,
     CacheEntryV3,
     CacheLaneVerdict,
@@ -861,6 +862,93 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         "unresolved_external_override": 0,
         "live_roots": 0,
     }
+
+
+def test_pipeline_analyze_gates_block_group_facts_on_report_consumers() -> None:
+    """Perf-ledger #3: block-group facts are built only for report consumers.
+
+    The facts re-parse every clone-carrying source file, yet they are
+    observable only through the report document. The gated call must skip the
+    build entirely while leaving the block clone groups themselves untouched;
+    the default keeps collect-everything behavior for every other caller.
+    """
+
+    boot = BootstrapResult(
+        root=Path("."),
+        config=NormalizationConfig(),
+        args=Namespace(
+            skip_metrics=True,
+            skip_dependencies=True,
+            skip_dead_code=True,
+            min_loc=1,
+            min_stmt=1,
+            processes=1,
+        ),
+        output_paths=OutputPaths(),
+        cache_path=Path("cache.json"),
+    )
+    block_hash = "|".join(("ab" * 32,) * 4)
+    blocks = tuple(
+        BlockGroupItem(
+            block_hash=block_hash,
+            filepath="pkg/mod.py",
+            qualname=qualname,
+            start_line=start_line,
+            end_line=start_line + 24,
+            size=25,
+        )
+        for qualname, start_line in (("pkg.mod:f", 1), ("pkg.mod:g", 40))
+    )
+    discovery = DiscoveryResult(
+        files_found=1,
+        cache_hits=0,
+        files_skipped=0,
+        all_file_paths=("pkg/mod.py",),
+        cached_units=(),
+        cached_blocks=(),
+        cached_segments=(),
+        cached_class_metrics=(),
+        cached_module_deps=(),
+        cached_dead_candidates=(),
+        cached_referenced_names=frozenset(),
+        files_to_process=(),
+        skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="pkg/mod.py",
+            module_name="pkg.mod",
+        )[1],
+    )
+    processing = ProcessingResult(
+        units=(),
+        blocks=cast("tuple[dict[str, object], ...]", blocks),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        files_analyzed=1,
+        files_skipped=0,
+        analyzed_lines=1,
+        analyzed_functions=1,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+
+    default = analyze(boot=boot, discovery=discovery, processing=processing)
+    gated = analyze(
+        boot=boot,
+        discovery=discovery,
+        processing=processing,
+        collect_block_group_facts=False,
+    )
+
+    assert set(default.block_group_facts) == {block_hash}
+    assert gated.block_group_facts == {}
+    # The gate touches only the explain lane: group identity is unchanged.
+    assert set(default.block_groups) == set(gated.block_groups) == {block_hash}
+    assert default.block_clones_count == gated.block_clones_count == 1
 
 
 def test_project_entrypoints_mark_exact_and_unique_layout_symbols_live(
