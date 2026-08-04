@@ -76,6 +76,7 @@ from codeclone.contracts import CACHE_VERSION
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
 from codeclone.core.discovery import _decode_cached_function_relationship_facts
+from codeclone.core.parallelism import process
 from codeclone.models import (
     ApiParamSpec,
     BlockUnit,
@@ -113,6 +114,7 @@ from tests._ast_metrics_helpers import (
     build_test_module_registry,
     module_registry_context,
 )
+from tests._pipeline_fixtures import analysis_boot
 
 _SOURCE_CONTENT_DIGEST = DigestObject(
     domain="codeclone.source-content.v1",
@@ -1635,6 +1637,52 @@ def test_file_stat_signature(tmp_path: Path) -> None:
     stat = file_stat_signature(str(file_path))
     assert stat["size"] == file_path.stat().st_size
     assert isinstance(stat["mtime_ns"], int)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "perf-ledger #1 save/load cap asymmetry: save() ignores max_size_bytes, "
+        "so it writes cache files that load() under the same configuration "
+        "rejects as TOO_LARGE; every repository whose cache outgrows the cap "
+        "silently loses the warm path on every subsequent run"
+    ),
+)
+def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
+    """Pinned maintainer predicate: cache larger than cap => second run must
+    still get cached > 0.
+
+    Today ``save()`` never enforces ``max_size_bytes`` while ``load()`` hard
+    rejects any file above it, so the tool writes caches it then refuses to
+    read (Django 5.2 shape: 73 MB written vs the 50 MB default load cap =>
+    permanently cold at defaults). This strict xfail keeps the defect pinned:
+    it starts erroring the moment save/load symmetry is restored, and any fix
+    that only suppresses the write without giving the second run its cache
+    hits back keeps failing the ``cache_hits`` assertion by design.
+    """
+    (tmp_path / "mod.py").write_text(
+        "def alpha(left, right):\n    total = left + right\n    return total\n",
+        "utf-8",
+    )
+    boot = analysis_boot(tmp_path, min_loc=1, min_stmt=1, skip_metrics=True)
+    cache_path = tmp_path / "cache.json"
+    # Any saved single-entry cache is larger than this cap; the unit-scale
+    # mirror of a >50 MB real-repo cache meeting the 50 MB default.
+    cap_bytes = 256
+
+    cold_cache = Cache(cache_path, root=tmp_path, max_size_bytes=cap_bytes)
+    cold_discovery = core_discovery.discover(boot=boot, cache=cold_cache)
+    process(boot=boot, discovery=cold_discovery, cache=cold_cache)
+    cold_cache.save()
+
+    # Defect premise, true today: save() itself wrote a file above its own
+    # configured cap without shrinking, splitting, or refusing.
+    assert cache_path.stat().st_size > cap_bytes
+
+    warm_cache = Cache(cache_path, root=tmp_path, max_size_bytes=cap_bytes)
+    warm_cache.load()
+    warm_discovery = core_discovery.discover(boot=boot, cache=warm_cache)
+    assert warm_discovery.cache_hits > 0
 
 
 def test_cache_load_corrupted_json(tmp_path: Path) -> None:
