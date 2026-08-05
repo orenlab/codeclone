@@ -357,6 +357,12 @@ def _comprehension_elements(
     node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
 ) -> tuple[ast.expr, ...]:
     if isinstance(node, ast.DictComp):
+        if node.value is None:
+            # PEP 798 (Python 3.15) dict-unpacking comprehension
+            # ``{**mapping for ...}``: the unpacked expression rides ``key``
+            # and ``value`` is None, mirroring the dict literal ``{**mapping}``
+            # whose unpacking marker is a None *key*.
+            return (node.key,)
         return (node.key, node.value)
     return (node.elt,)
 

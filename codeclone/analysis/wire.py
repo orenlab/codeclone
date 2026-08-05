@@ -70,8 +70,11 @@ _WIRE_FIELD_SPECS: Final[dict[str, tuple[str, ...]]] = {
     "Try": ("body", "handlers", "orelse", "finalbody"),
     "TryStar": ("body", "handlers", "orelse", "finalbody"),
     "Assert": ("test", "msg"),
-    "Import": ("names",),
-    "ImportFrom": ("module", "names", "level"),
+    # ``is_lazy`` is the PEP 810 laziness field (Python 3.15). Interpreters
+    # without the field simply never populate it; see ``_emit_import`` for the
+    # default-omission normalization that keeps the wire cross-version stable.
+    "Import": ("names", "is_lazy"),
+    "ImportFrom": ("module", "names", "level", "is_lazy"),
     "Global": ("names",),
     "Nonlocal": ("names",),
     "Expr": ("value",),
@@ -213,7 +216,9 @@ def _build_wire_field_check() -> dict[type[ast.AST], _WireContract]:
 _WIRE_FIELD_CHECK: Final[dict[type[ast.AST], _WireContract]] = _build_wire_field_check()
 
 _IDENTIFIER: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
-_STRUCTURAL_INT_FIELDS: Final = frozenset({"conversion", "is_async", "level", "simple"})
+_STRUCTURAL_INT_FIELDS: Final = frozenset(
+    {"conversion", "is_async", "is_lazy", "level", "simple"}
+)
 _COMPREHENSION_TYPES: Final = (
     ast.ListComp,
     ast.SetComp,
@@ -267,6 +272,8 @@ def _emit_node(
         return _emit_name(node, cfg, bindings)
     if isinstance(node, ast.Attribute):
         return _emit_attribute(node, cfg, bindings)
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return _emit_import(node, node_type, fields, cfg, bindings)
 
     parts: list[str] = [node_type.__name__, "("]
     for index, field in enumerate(fields):
@@ -301,6 +308,37 @@ def _wire_contract(node: ast.AST) -> tuple[type[ast.AST], tuple[str, ...]]:
             f"unsupported fields on {node_type.__name__}: {joined}"
         )
     return node_type, fields
+
+
+def _emit_import(
+    node: ast.Import | ast.ImportFrom,
+    node_type: type[ast.AST],
+    fields: tuple[str, ...],
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    """Emit an import statement, omitting the default-valued laziness field.
+
+    PEP 810 (Python 3.15) puts ``is_lazy`` on every ``Import``/``ImportFrom``:
+    ``0`` for the eager spelling, ``1`` for ``lazy import``. The eager default
+    is omitted from the wire, so output stays byte-identical across
+    interpreters with and without the field; ``is_lazy=1`` is genuinely new
+    lexicon and emits as an explicit marker. ``ast.parse`` accepts the lazy
+    spelling even in function scope (only ``compile`` rejects it there), so
+    both values are reachable wire inputs.
+    """
+
+    parts: list[str] = [node_type.__name__, "("]
+    first = True
+    for field in fields:
+        if field == "is_lazy" and not vars(node).get("is_lazy"):
+            continue
+        if not first:
+            parts.append(",")
+        first = False
+        parts.extend((field, "=", _emit_field(node, field, cfg, bindings)))
+    parts.append(")")
+    return "".join(parts)
 
 
 def _emit_field(
