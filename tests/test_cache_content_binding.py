@@ -108,9 +108,18 @@ def _entry(
     )
 
 
-def test_dependency_observation_revision_misses_only_dependent_lane(
+def _assert_profile_input_misses_only_dependent_lane(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    profile_input: str,
+    legacy_value: str,
+    current_value: str,
 ) -> None:
+    """Prove one versioned dependent-profile input misses only its own lane.
+
+    A profile built under the input's previous value must miss the dependent
+    lane while the neutral fingerprint lane still hits.
+    """
     neutral_profile = cache_reuse.build_module_neutral_profile(
         fingerprint_version="2",
         min_loc=1,
@@ -125,13 +134,13 @@ def test_dependency_observation_revision_misses_only_dependent_lane(
         algorithm="sha256",
         value="3" * 64,
     )
-    monkeypatch.setattr(cache_reuse, "_DEPENDENCY_OBSERVATION_REVISION", "1")
+    monkeypatch.setattr(cache_reuse, profile_input, legacy_value)
     legacy_dependent_profile = cache_reuse.build_module_dependent_profile(
         neutral_profile=neutral_profile,
         module_manifest_digest=manifest_digest,
         collect_api_surface=False,
     )
-    monkeypatch.setattr(cache_reuse, "_DEPENDENCY_OBSERVATION_REVISION", "2")
+    monkeypatch.setattr(cache_reuse, profile_input, current_value)
     current_dependent_profile = cache_reuse.build_module_dependent_profile(
         neutral_profile=neutral_profile,
         module_manifest_digest=manifest_digest,
@@ -160,6 +169,36 @@ def test_dependency_observation_revision_misses_only_dependent_lane(
     assert legacy_dependent_profile != current_dependent_profile
     assert decision.neutral.reason == "hit"
     assert decision.dependent.reason == "dependent_profile_mismatch"
+
+
+def test_dependency_observation_revision_misses_only_dependent_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_profile_input_misses_only_dependent_lane(
+        monkeypatch,
+        profile_input="_DEPENDENCY_OBSERVATION_REVISION",
+        legacy_value="1",
+        current_value="2",
+    )
+
+
+def test_liveness_policy_version_misses_only_dependent_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A liveness policy bump discards exactly the lane it changed.
+
+    ``referenced_qualnames``, dead candidates and live-root reasons ride the
+    module-dependent cache lane, and LIVENESS_POLICY_VERSION is an input of
+    the dependent reuse profile. A profile built under the previous policy
+    must therefore miss the dependent lane while the neutral fingerprint
+    lane still hits - a warm cache can never serve a stale liveness verdict.
+    """
+    _assert_profile_input_misses_only_dependent_lane(
+        monkeypatch,
+        profile_input="LIVENESS_POLICY_VERSION",
+        legacy_value="1",
+        current_value="2",
+    )
 
 
 def _write_source_with_stat(root: Path, raw_source: bytes) -> tuple[Path, FileStat]:

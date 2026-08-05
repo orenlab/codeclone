@@ -48,6 +48,17 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- **Dead-code liveness policy advanced to version 2** with two new life proofs, closing two classes of
+  false dead-code findings. A PEP 484 explicit re-export — `from x import y as y`, the `as`-same-name
+  spelling — now keeps `y` live on its own, independently of `__all__`; a renaming import
+  (`from x import y as z`) does not, a `TYPE_CHECKING`-guarded import never does, and a dynamically
+  built `__all__` still proves nothing — only static membership counts. Functions and methods decorated
+  with pluggy hook markers are now live when the marker is proven: `hookspec = pluggy.HookspecMarker(...)`
+  followed by `@hookspec` marks a live extension declaration, `@hookimpl` a live implementation — each on
+  its own, spec and impl never required to pair up. A decorator that merely shares the `hookspec` name
+  does not count. Cached analyses re-derive liveness automatically after upgrade; symbols these proofs
+  cover disappear from the dead-code lane on the next run.
+
 - **The Engineering Memory store is now shared across git worktrees of a repository.** Default store paths
   (`memory.db_path` and the semantic sidecar) anchor at the main checkout, resolved lexically from the git common
   directory, so an agent in a linked worktree reads the repository's approved knowledge and its drafts survive

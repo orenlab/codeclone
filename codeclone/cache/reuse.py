@@ -16,7 +16,7 @@ from typing import Literal
 import orjson
 
 from ..baseline.trust import current_python_tag
-from ..contracts import API_SURFACE_SIGNATURE_VERSION
+from ..contracts import API_SURFACE_SIGNATURE_VERSION, LIVENESS_POLICY_VERSION
 from ..models import (
     CacheEntryV3,
     CacheLaneReuseReason,
@@ -100,6 +100,11 @@ def build_module_dependent_profile(
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
             "dependency_observation_revision": _DEPENDENCY_OBSERVATION_REVISION,
+            # The dependent lane carries referenced_qualnames, dead candidates
+            # and live-root reasons - everything the liveness verdict reads -
+            # so a liveness policy bump must miss exactly this lane, never the
+            # neutral fingerprint lane.
+            "liveness_policy_version": LIVENESS_POLICY_VERSION,
             "module_manifest_digest": module_manifest_digest.value,
             "neutral_profile": neutral_profile.value,
             "resolver_version": "2",

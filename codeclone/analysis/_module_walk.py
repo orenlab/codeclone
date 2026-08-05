@@ -50,6 +50,18 @@ if TYPE_CHECKING:
 
 _NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef
 _LocalLivenessRootReason = Literal["external_decorator"]
+_MarkerAssignmentKind = Literal["call", "copy"]
+# Canonical identities of the pluggy hook markers (liveness policy v2). A
+# resolved ``@hookspec`` roots a declaration and a resolved ``@hookimpl``
+# roots an implementation - two INDEPENDENT decorator roots, never a pair:
+# a spec without an impl is a public extension contract, and an impl
+# without a spec implements an external host's contract. The root fires
+# only on the PROVEN marker binding - a module-scope assignment whose call
+# resolves to one of these identities through the module's import bindings.
+# The decorator NAME alone is never evidence.
+_HOOK_MARKER_CANONICAL_SYMBOLS = frozenset(
+    {"pluggy:HookimplMarker", "pluggy:HookspecMarker"}
+)
 _PROTOCOL_MODULE_NAMES = frozenset({"typing", "typing_extensions"})
 _NON_RUNTIME_DECORATOR_SYMBOLS = frozenset({"overload", "abstractmethod"})
 _PYDANTIC_MODULE_NAMES = frozenset(
@@ -226,6 +238,18 @@ class _ModuleWalkState:
     )
     name_nodes: list[ast.Name] = field(default_factory=list)
     attr_nodes: list[ast.Attribute] = field(default_factory=list)
+    # Resolved ``module:symbol`` targets of PEP 484 explicit re-exports
+    # (``from x import y as y``) found at module scope in a runtime-reachable
+    # branch of a production file. One of the two independent life proofs for
+    # an imported symbol under liveness policy v2; static ``__all__``
+    # membership remains the other, stronger explicit contract.
+    explicit_reexport_qualnames: set[str] = field(default_factory=set)
+    # Module-scope ``name = <call>`` / ``name = other_name`` assignments,
+    # recorded raw during the walk and resolved after it, so a marker bound
+    # before its import statement is judged against the complete binding maps.
+    hook_marker_assignments: list[tuple[str, _MarkerAssignmentKind, str]] = field(
+        default_factory=list
+    )
     exported_names: set[str] = field(default_factory=set)
     lazy_export_bindings: dict[str, set[str]] = field(default_factory=dict)
     has_module_getattr: bool = False
@@ -570,6 +594,8 @@ def _collect_import_from_node(
     registry: ModuleRegistryHandle,
     state: _ModuleWalkState,
     collect_referenced_names: bool,
+    runtime_reachable: bool = True,
+    module_scope: bool = True,
 ) -> None:
     observations = _import_from_observations(source, node, registry)
     primary_observation = observations[0]
@@ -633,6 +659,97 @@ def _collect_import_from_node(
         state.imported_symbol_bindings.setdefault(alias_name, set()).add(
             f"{primary_target}:{alias.name}"
         )
+        # PEP 484 explicit re-export: the ``as``-SAME-name spelling is a life
+        # proof for the resolved target on its own. A renaming import is not;
+        # a ``TYPE_CHECKING``-guarded or non-module-scope import never fires
+        # this proof. Relative imports are already resolved to exact identity
+        # by ``resolve_import_observation`` or ``primary_target`` is None and
+        # the early return above kept this proof out of reach.
+        if runtime_reachable and module_scope and alias.asname == alias.name:
+            state.explicit_reexport_qualnames.add(f"{primary_target}:{alias.name}")
+
+
+def _collect_hook_marker_assignment_node(
+    node: ast.Assign | ast.AnnAssign,
+    state: _ModuleWalkState,
+) -> None:
+    """Record a module-scope assignment that may bind a hook marker.
+
+    Raw collection only: ``name = <dotted>(...)`` and ``name = other_name``
+    shapes are stored with their dotted value names, and
+    ``_resolve_hook_marker_aliases`` judges them against the complete import
+    binding maps once the walk is done.
+    """
+    match node:
+        case ast.Assign(targets=targets, value=ast.Call(func=func)):
+            bound_names = [
+                target.id for target in targets if isinstance(target, ast.Name)
+            ]
+            assignment_kind: _MarkerAssignmentKind = "call"
+            dotted_name = _dotted_expr_name(func)
+        case ast.AnnAssign(target=ast.Name(id=name), value=ast.Call(func=func)):
+            bound_names = [name]
+            assignment_kind = "call"
+            dotted_name = _dotted_expr_name(func)
+        case ast.Assign(targets=targets, value=ast.Name(id=source_name)):
+            bound_names = [
+                target.id for target in targets if isinstance(target, ast.Name)
+            ]
+            assignment_kind = "copy"
+            dotted_name = source_name
+        case ast.AnnAssign(target=ast.Name(id=name), value=ast.Name(id=source_name)):
+            bound_names = [name]
+            assignment_kind = "copy"
+            dotted_name = source_name
+        case _:
+            return
+    if dotted_name is None:
+        return
+    for bound_name in bound_names:
+        state.hook_marker_assignments.append((bound_name, assignment_kind, dotted_name))
+
+
+def _binding_symbol_identity(
+    dotted_name: str,
+    state: _ModuleWalkState,
+) -> str | None:
+    """Canonical ``module:symbol`` identity a module-level name resolves to."""
+    if "." not in dotted_name:
+        return state.binding_symbol_targets.get(dotted_name)
+    root_name, _, attribute_path = dotted_name.partition(".")
+    module_target = state.binding_module_targets.get(root_name)
+    if module_target is None:
+        return None
+    return f"{module_target}:{attribute_path}"
+
+
+def _resolve_hook_marker_aliases(state: _ModuleWalkState) -> frozenset[str]:
+    """Module-level names PROVEN to bind a pluggy hook marker.
+
+    A name is proven by a recorded call-assignment whose callee resolves to a
+    canonical marker identity, or by a plain name-copy of an already-proven
+    alias (bounded fixpoint, order-independent). A user's own decorator that
+    merely SHARES the ``hookspec`` / ``hookimpl`` name never resolves here.
+    """
+    aliases: set[str] = set()
+    copies: list[tuple[str, str]] = []
+    for bound_name, assignment_kind, dotted_name in state.hook_marker_assignments:
+        if assignment_kind == "call":
+            if _binding_symbol_identity(dotted_name, state) in (
+                _HOOK_MARKER_CANONICAL_SYMBOLS
+            ):
+                aliases.add(bound_name)
+        else:
+            copies.append((bound_name, dotted_name))
+    for _round in range(len(copies)):
+        changed = False
+        for bound_name, source_name in copies:
+            if source_name in aliases and bound_name not in aliases:
+                aliases.add(bound_name)
+                changed = True
+        if not changed:
+            break
+    return frozenset(aliases)
 
 
 def _collect_load_reference_node(
@@ -1354,6 +1471,11 @@ def _resolve_referenced_qualnames(
             for module_path in state.lazy_export_bindings.get(exported_name, ()):
                 resolved.add(f"{module_path}:{exported_name}")
 
+    # Liveness policy v2: the PEP 484 explicit re-export proof, independent
+    # of ``__all__``. Targets were resolved to exact identity at collection
+    # time, so this is a plain union like the export chain above.
+    resolved.update(state.explicit_reexport_qualnames)
+
     local_top_level_names = frozenset(
         {
             *top_level_function_by_name,
@@ -1379,6 +1501,7 @@ def _collect_external_decorator_root_reasons(
     state: _ModuleWalkState,
     local_top_level_names: frozenset[str],
 ) -> dict[str, _LocalLivenessRootReason]:
+    hook_marker_aliases = _resolve_hook_marker_aliases(state)
     return {
         f"{module_name}:{local_name}": "external_decorator"
         for local_name, function_node in collector.units
@@ -1388,6 +1511,7 @@ def _collect_external_decorator_root_reasons(
             external_module_aliases=state.external_module_aliases,
             local_top_level_names=local_top_level_names,
         )
+        or _has_hook_marker_decorator(function_node, hook_marker_aliases)
     }
 
 
@@ -1479,6 +1603,25 @@ def _decorator_evidence_marker(decorator: ast.expr) -> str | None:
     return None
 
 
+def _has_hook_marker_decorator(
+    node: _qualnames.FunctionNode,
+    hook_marker_aliases: frozenset[str],
+) -> bool:
+    """Whether a decorator expression IS a proven hook marker alias.
+
+    Exact-name equality after unwrapping a decorator call, so ``@hookspec``
+    and ``@hookimpl(tryfirst=True)`` both fire while an attribute path rooted
+    at a marker alias does not - the proof covers the marker object itself,
+    nothing reached through it.
+    """
+    if not hook_marker_aliases:
+        return False
+    return any(
+        _decorator_expr_name(decorator) in hook_marker_aliases
+        for decorator in node.decorator_list
+    )
+
+
 def _has_external_decorator(
     node: _qualnames.FunctionNode,
     *,
@@ -1528,6 +1671,8 @@ def _collect_module_walk_node(
     registry: ModuleRegistryHandle,
     state: _ModuleWalkState,
     collect_referenced_names: bool,
+    runtime_reachable: bool = True,
+    module_scope: bool = True,
 ) -> None:
     if isinstance(node, ast.Import):
         _collect_import_node(
@@ -1544,8 +1689,16 @@ def _collect_module_walk_node(
             registry=registry,
             state=state,
             collect_referenced_names=collect_referenced_names,
+            runtime_reachable=runtime_reachable,
+            module_scope=module_scope,
         )
     elif collect_referenced_names:
+        if (
+            runtime_reachable
+            and module_scope
+            and isinstance(node, ast.Assign | ast.AnnAssign)
+        ):
+            _collect_hook_marker_assignment_node(node, state)
         _collect_load_reference_node(node=node, state=state)
 
 
@@ -1569,6 +1722,8 @@ def _walk_module_tree(
         registry=registry,
         state=state,
         collect_referenced_names=collect_referenced_names,
+        runtime_reachable=runtime_enabled,
+        module_scope=callable_depth == 0 and class_depth == 0,
     )
     if runtime_enabled:
         event_collector.observe(

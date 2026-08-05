@@ -51,7 +51,27 @@ REPORT_ENVELOPE_DIGEST_DOMAIN: Final = "codeclone.report.envelope.v1\0"
 GATE_LANE_MATRIX_VERSION: Final = "2"
 HEALTH_INPUT_MANIFEST_VERSION: Final = "1"
 OBSERVER_VOCABULARY_VERSION: Final = "3"
-LIVENESS_POLICY_VERSION: Final = "1"
+# Version "2" adds two life proofs, and nothing else moves. (1) A PEP 484
+# explicit re-export - ``from x import y as y``, the ``as``-SAME-name
+# spelling - livens its resolved target on its own; static ``__all__``
+# membership remains the second, independent, stronger explicit contract.
+# The proof fires only at module scope in a runtime-reachable branch of a
+# production file: a renaming import is not a re-export, a
+# ``TYPE_CHECKING``-guarded import livens nothing, and a dynamically built
+# ``__all__`` stays UNRESOLVED rather than degrading into a heuristic.
+# (2) A resolved pluggy hook marker decorator roots its function: a proven
+# ``@hookspec`` livens a declaration and a proven ``@hookimpl`` livens an
+# implementation - two INDEPENDENT roots, never a pair. "Resolved" means the
+# decorator expression resolves to the canonical ``pluggy.HookspecMarker`` /
+# ``pluggy.HookimplMarker`` identity through module-scope assignments and
+# import aliases; the decorator NAME alone is never evidence. Bump this
+# constant whenever what counts as LIVE changes; verdicts across versions
+# are not comparable. Cached liveness inputs move with it by construction:
+# the constant is an input of the module-dependent cache reuse profile
+# (codeclone/cache/reuse.py), so a bump misses exactly the lane that
+# carries ``referenced_qualnames``, dead candidates and live-root reasons,
+# and never touches the neutral fingerprint lane.
+LIVENESS_POLICY_VERSION: Final = "2"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
 # Statement-level unreachability (39Y Y9). Version "1" is ONE predicate over
 # ONE graph: a statement cannot run exactly when its block is not reachable

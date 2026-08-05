@@ -1924,7 +1924,7 @@ def test_dead_code_distinguishes_test_only_reference_from_unreferenced() -> None
     )
     assert dead_by_symbol["unused_private"].test_reference_sources == ()
     assert dead_by_symbol["run"].test_reference_sources == ()
-    assert contracts.LIVENESS_POLICY_VERSION == "1"
+    assert contracts.LIVENESS_POLICY_VERSION == "2"
 
 
 def test_extraction_uses_module_identity_for_test_named_package_trees() -> None:
@@ -2092,6 +2092,173 @@ def test_external_decorators_define_liveness_roots() -> None:
             assert (symbol not in dead_symbols) is expected["live"]
             if expected["reason"] == "external_decorator":
                 assert evidence_by_symbol[symbol] == expected["reason"]
+
+
+def test_explicit_reexport_is_a_life_proof_without_all() -> None:
+    """Policy v2: `from x import y as y` alone livens its exact target.
+
+    Two INDEPENDENT proofs exist for an imported symbol - the PEP 484
+    explicit re-export spelling and static ``__all__`` membership - and
+    either suffices. This pins the first proof standing alone: the package
+    carries no ``__all__`` and the ``as``-same-name import in the package
+    ``__init__`` is the only reference to ``fetch_snapshot``. Negative twins
+    pin the boundaries: a renaming import (``as manifest_alias``) is NOT an
+    explicit re-export by itself, and a ``TYPE_CHECKING``-guarded
+    ``as``-same-name import must not liven a runtime symbol.
+    """
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    registry = build_test_module_registry(root=fixture_root)
+    referenced_names: set[str] = set()
+    referenced_qualnames: set[str] = set()
+    dead_candidates: list[DeadCandidate] = []
+    for relative_path, module_name in (
+        ("reexports/__init__.py", "reexports"),
+        ("reexports/impl.py", "reexports.impl"),
+    ):
+        _, _, _, _, metrics, _ = _extract_source(
+            source=(fixture_root / relative_path).read_text(),
+            filepath=relative_path,
+            module_name=module_name,
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            module_registry=registry,
+        )
+        referenced_names |= set(metrics.referenced_names)
+        referenced_qualnames |= set(metrics.referenced_qualnames)
+        dead_candidates.extend(metrics.dead_candidates)
+
+    dead = {
+        item.qualname
+        for item in find_unused(
+            definitions=tuple(dead_candidates),
+            referenced_names=frozenset(referenced_names),
+            referenced_qualnames=frozenset(referenced_qualnames),
+        )
+    }
+    # The explicit re-export livens its exact resolved target.
+    assert "reexports.impl:fetch_snapshot" in referenced_qualnames
+    assert "reexports.impl:fetch_snapshot" not in dead
+    # A renaming import alone is not an explicit re-export.
+    assert "reexports.impl:parse_manifest" in dead
+    # A TYPE_CHECKING-guarded re-export must not liven a runtime symbol.
+    assert "reexports.impl:annotate_frame" in dead
+    # The never-imported sibling stays dead.
+    assert "reexports.impl:orphan_helper" in dead
+
+
+def test_dynamic_all_is_unresolved_not_a_heuristic() -> None:
+    """A computed ``__all__`` proves nothing and never degrades to a guess.
+
+    Static membership is the only ``__all__`` proof. A dynamically built
+    ``__all__`` (here a call expression) stays UNRESOLVED: its would-be
+    member gains no liveness from it. There is no abstention idiom for
+    export chains - the symbol simply remains dead-eligible under the
+    ordinary evidence rules.
+    """
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    registry = build_test_module_registry(root=fixture_root)
+    relative_path = "reexports/dynamic_registry.py"
+    module_name = "reexports.dynamic_registry"
+    _, _, _, _, metrics, _ = _extract_source(
+        source=(fixture_root / relative_path).read_text(),
+        filepath=relative_path,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+        module_registry=registry,
+    )
+    dead = {
+        item.qualname
+        for item in find_unused(
+            definitions=metrics.dead_candidates,
+            referenced_names=metrics.referenced_names,
+            referenced_qualnames=metrics.referenced_qualnames,
+        )
+    }
+    assert f"{module_name}:would_be_member" not in metrics.referenced_qualnames
+    assert f"{module_name}:would_be_member" in dead
+
+
+def test_resolved_hook_markers_are_independent_liveness_roots() -> None:
+    """Policy v2: a resolved pluggy marker decorator roots its function.
+
+    ``resolved @hookspec`` livens a declaration and ``resolved @hookimpl``
+    livens an implementation - two INDEPENDENT roots, never a pair: the spec
+    module has no impl and the impl module has no spec. The root fires on
+    the PROVEN marker binding (the decorator expression resolves to
+    ``pluggy.HookspecMarker`` / ``pluggy.HookimplMarker`` through module
+    -level assignments and import aliases), covering the bare, call-wrapped
+    and assignment-chain alias forms. Negative twins: a user's own decorator
+    NAMED ``hookspec`` is not magic, and a same-shape marker built from a
+    non-pluggy factory does not root.
+    """
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    registry = build_test_module_registry(root=fixture_root)
+    marker_rooted = {
+        "plugin_hooks/contract.py": (
+            "plugin_hooks.contract",
+            {"demo_setting_loaded": True, "demo_resolve_backend": True},
+        ),
+        "plugin_hooks/integration.py": (
+            "plugin_hooks.integration",
+            {
+                "demo_render_panel": True,
+                "demo_flush_cache": True,
+                "demo_publish_summary": True,
+            },
+        ),
+        "plugin_hooks/lookalike.py": (
+            "plugin_hooks.lookalike",
+            {"tracked_report": False},
+        ),
+        "plugin_hooks/vendor_masquerade.py": (
+            "plugin_hooks.vendor_masquerade",
+            {"shadow_contract": False},
+        ),
+    }
+    for relative_path, (module_name, expected_by_symbol) in marker_rooted.items():
+        source = (fixture_root / relative_path).read_text()
+        _, _, _, _, metrics, _ = _extract_source(
+            source=source,
+            filepath=relative_path,
+            module_name=module_name,
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            module_registry=registry,
+        )
+        dead = find_unused(
+            definitions=metrics.dead_candidates,
+            referenced_names=metrics.referenced_names,
+            referenced_qualnames=metrics.referenced_qualnames,
+            runtime_reachability=metrics.runtime_reachability,
+        )
+        dead_symbols = {item.qualname.removeprefix(f"{module_name}:") for item in dead}
+        for symbol, live in expected_by_symbol.items():
+            assert (symbol not in dead_symbols) is live, (relative_path, symbol)
+
+        tree, collector = _parse_tree_and_collector(source)
+        walk = module_walk_mod._collect_module_walk_data(
+            tree=tree,
+            source=registry.entries_by_path[relative_path].identity,
+            registry=registry,
+            collector=collector,
+            collect_referenced_names=True,
+        )
+        evidence_by_symbol = {
+            qualname.removeprefix(f"{module_name}:"): reason
+            for qualname, reason in walk.liveness_root_reasons
+        }
+        for symbol, live in expected_by_symbol.items():
+            if live:
+                assert evidence_by_symbol[symbol] == "external_decorator", (
+                    relative_path,
+                    symbol,
+                )
+            else:
+                assert symbol not in evidence_by_symbol, (relative_path, symbol)
 
 
 def test_tri_state_liveness_abstains_on_unresolved_external_bases() -> None:
