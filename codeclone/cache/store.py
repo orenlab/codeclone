@@ -746,6 +746,7 @@ class Cache:
                         try_finally_profile=unit.try_finally_profile,
                         side_effect_order_profile=unit.side_effect_order_profile,
                         statement_sequence=unit.statement_sequence,
+                        renamed_fingerprint=unit.renamed_fingerprint,
                         unreachable_statements=unit.unreachable_statements,
                     )
                     for unit in units

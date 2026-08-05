@@ -252,6 +252,7 @@ golden_fixture_paths = [
     "tests/fixtures/fingerprint_binding",
     "tests/fixtures/liveness_policy",
     "tests/fixtures/near_miss_witness",
+    "tests/fixtures/renamed_structure",
     "tests/fixtures/source_kind",
     "tests/fixtures/statement_reachability",
 ]

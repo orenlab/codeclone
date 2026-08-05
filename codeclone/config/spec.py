@@ -294,6 +294,17 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         help_text=ui.HELP_NEAR_MISS,
         pyproject_type=bool,
     ),
+    # Wave C: the sole owner of the renamed-structure tier's opt-in, on the
+    # same terms as near_miss above.
+    _option(
+        dest="renamed_structure",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--renamed-structure",),
+        default=False,
+        help_text=ui.HELP_RENAMED_STRUCTURE,
+        pyproject_type=bool,
+    ),
     _option(
         dest="audit_enabled",
         group=None,

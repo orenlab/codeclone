@@ -102,6 +102,17 @@ NEAR_MISS_MAX_EDIT_STATEMENTS: Final = 1
 # lane: BASELINE_FINGERPRINT_VERSION and the statement-token wire are
 # unchanged, and the tier still reaches no baseline lane and no gate.
 NEAR_MISS_ALGORITHM_REVISION: Final = "2"
+# The renamed-structure lane's own algorithm identity (Wave C). Revision "1"
+# is ordinal canonicalization: LOCAL and ATTRIBUTE ordinals in separate
+# numbering spaces, binding identity scope-qualified before assignment,
+# first-occurrence ordering with parameters seeded by declaration position,
+# imported identities and unprovable names rigid, terminal callees literal
+# across the whole unit, and the equality pattern preserved. The tier is an
+# exact match in its own digest domain — O(n), no pairwise matcher, no
+# similarity score. Bumping this never touches the exact lane:
+# BASELINE_FINGERPRINT_VERSION is unchanged, and the tier reaches no baseline
+# lane and no gate.
+RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 
 # 3.2 adds the two rule-3 fact families: per-class base resolution and
 # per-method decorator evidence. Both gate the tri-state liveness verdict,
@@ -111,7 +122,12 @@ NEAR_MISS_ALGORITHM_REVISION: Final = "2"
 # straight off the wire, so a sequence that did not ride the cache would make a
 # warm run report zero near-miss pairs. Everything this phase sanctions rides
 # this one bump instead of adding a second.
-CACHE_VERSION: Final = "3.2"
+#
+# 3.3 carries the per-unit renamed-structure digest (Wave C) on the same
+# reasoning: the digest is computed from the AST, a warm run never re-parses,
+# and a unit served off a wire without it would make a warm run silently
+# report zero renamed-structure groups.
+CACHE_VERSION: Final = "3.3"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
@@ -404,6 +420,7 @@ __all__ = [
     "PATCH_TRAIL_SCHEMA_VERSION",
     "PLATFORM_OBSERVABILITY_SCHEMA_VERSION",
     "PORTABLE_PATH_PROFILE_VERSION",
+    "RENAMED_STRUCTURE_ALGORITHM_REVISION",
     "REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN",
     "REPORT_COMPARISON_DIGEST_DOMAIN",
     "REPORT_ENVELOPE_DIGEST_DOMAIN",
