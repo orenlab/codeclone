@@ -27,6 +27,7 @@ from ..findings.structural.detectors import scan_function_structure
 from ..metrics.adoption import collect_module_adoption
 from ..metrics.api_surface import collect_module_api_surface
 from ..metrics.complexity import risk_level
+from ..metrics.source_decisions import source_decision_complexity
 from ..models import (
     BlockUnit,
     ClassMetrics,
@@ -385,13 +386,18 @@ def extract_units_and_stats_from_source(
                 structural_findings.extend(structure_facts.structural_findings)
             continue
         unit_bindings = module_bindings.enter(node)
-        graph, fingerprint, complexity = _cfg_fingerprint_and_complexity(
+        graph, fingerprint, cfg_complexity = _cfg_fingerprint_and_complexity(
             node,
             cfg,
             qualname,
             unit_bindings,
             phase_ledger=phase_ledger,
         )
+        # Public metric: authored source decisions, single-owned by
+        # codeclone.metrics.source_decisions. The CFG value above stays a
+        # separate diagnostic (Wave D two-metric doctrine); neither is ever
+        # derived from the other.
+        complexity = source_decision_complexity(node)
         if not _is_typing_overload_stub(
             node,
             overload_aliases=frozenset(non_runtime_decorator_aliases),
@@ -445,6 +451,7 @@ def extract_units_and_stats_from_source(
                 fingerprint=fingerprint,
                 loc_bucket=bucket_loc(loc),
                 cyclomatic_complexity=complexity,
+                cfg_cyclomatic_complexity=cfg_complexity,
                 nesting_depth=depth,
                 risk=risk,
                 raw_hash=raw_hash,

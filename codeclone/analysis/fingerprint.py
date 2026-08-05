@@ -11,7 +11,7 @@ import hashlib
 from typing import Final
 
 from .. import qualnames as _qualnames
-from ..metrics.complexity import cyclomatic_complexity
+from ..metrics.complexity import cfg_cyclomatic_complexity
 from ..models import NearMissElement
 from .binding import BindingContext
 from .cfg import CFG, CFGBuilder
@@ -84,7 +84,8 @@ def _cfg_fingerprint_and_complexity(
 
     Returns:
         The built CFG, its 64-character hex SHA-256 fingerprint, and its
-        cyclomatic complexity. The graph is returned so downstream analysis
+        diagnostic CFG cyclomatic complexity (E-N+2P; never the public
+        source-decision metric). The graph is returned so downstream analysis
         can reuse the exact structure that produced the fingerprint.
     """
     builder = CFGBuilder()
@@ -102,7 +103,7 @@ def _cfg_fingerprint_and_complexity(
     return (
         graph,
         sha256_hex(_FN_DOMAIN, "|".join(parts)),
-        cyclomatic_complexity(graph),
+        cfg_cyclomatic_complexity(graph),
     )
 
 

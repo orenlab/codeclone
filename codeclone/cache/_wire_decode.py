@@ -521,6 +521,7 @@ def _neutral_unit_from_wire(unit: UnitDict) -> CacheNeutralUnit:
         fingerprint=unit["fingerprint"],
         loc_bucket=unit["loc_bucket"],
         cyclomatic_complexity=unit.get("cyclomatic_complexity", 1),
+        cfg_cyclomatic_complexity=unit.get("cfg_cyclomatic_complexity", 1),
         nesting_depth=unit.get("nesting_depth", 0),
         risk=unit.get("risk", "low"),
         raw_hash=unit.get("raw_hash", ""),
@@ -1442,7 +1443,9 @@ def _decode_wire_structural_occurrence(
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
-    decoded = _decode_wire_named_span(value, valid_lengths={11, 17})
+    # 18 columns since CACHE_VERSION 3.3 (Wave D): the version bump makes
+    # every shorter generation unloadable, so no legacy length is tolerated.
+    decoded = _decode_wire_named_span(value, valid_lengths={18})
     if decoded is None:
         return None
     row, qualname, start_line, end_line = decoded
@@ -1456,6 +1459,7 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
         fingerprint,
         loc_bucket,
         cyclomatic_complexity,
+        cfg_cyclomatic_complexity,
         nesting_depth,
         risk,
         raw_hash,
@@ -1478,6 +1482,7 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
         fingerprint=fingerprint,
         loc_bucket=loc_bucket,
         cyclomatic_complexity=cyclomatic_complexity,
+        cfg_cyclomatic_complexity=cfg_cyclomatic_complexity,
         nesting_depth=nesting_depth,
         risk=risk,
         raw_hash=raw_hash,

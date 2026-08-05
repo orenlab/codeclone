@@ -274,13 +274,25 @@ def _decode_wire_str_fields(
 
 def _decode_wire_unit_core_fields(
     row: list[object],
-) -> tuple[int, int, str, str, int, int, Literal["low", "medium", "high"], str] | None:
-    int_fields = _decode_wire_int_fields(row, 3, 4, 7, 8)
+) -> (
+    tuple[int, int, str, str, int, int, int, Literal["low", "medium", "high"], str]
+    | None
+):
+    # Index 7 is the public source-decision metric; index 17 is the
+    # diagnostic CFG E-N+2P. Both decode strictly: a row that lost either is
+    # rejected and the file is re-analysed (the 39Y Y8 absence-rejects rule).
+    int_fields = _decode_wire_int_fields(row, 3, 4, 7, 8, 17)
     str_fields = _decode_wire_str_fields(row, 5, 6, 10)
     risk = _as_risk_literal(row[9])
     if int_fields is None or str_fields is None or risk is None:
         return None
-    loc, stmt_count, cyclomatic_complexity, nesting_depth = int_fields
+    (
+        loc,
+        stmt_count,
+        cyclomatic_complexity,
+        nesting_depth,
+        cfg_cyclomatic_complexity,
+    ) = int_fields
     fingerprint, loc_bucket, raw_hash = str_fields
     return (
         loc,
@@ -288,6 +300,7 @@ def _decode_wire_unit_core_fields(
         fingerprint,
         loc_bucket,
         cyclomatic_complexity,
+        cfg_cyclomatic_complexity,
         nesting_depth,
         risk,
         raw_hash,
@@ -297,7 +310,7 @@ def _decode_wire_unit_core_fields(
 def _decode_wire_unit_flow_profiles(
     row: list[object],
 ) -> tuple[int, str, bool, str, str, str] | None:
-    if len(row) != 17:
+    if len(row) != 18:
         return _DEFAULT_WIRE_UNIT_FLOW_PROFILES
 
     parsed_entry_guard_count = _as_int(row[11])

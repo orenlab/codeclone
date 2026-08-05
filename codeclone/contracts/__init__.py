@@ -29,17 +29,35 @@ CONTRACT_IR_VERSION: Final = "1"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"
-# Algorithm revision of the two lanes that carry per-entity design metrics
-# (``risk_observations``, ``coupling_cohesion_observations``). Separate from
-# OBSERVATION_DIGEST_VERSION so a change in how these metrics are *computed*
-# invalidates only the lanes whose values moved. Revision "2" covers the 39Y
-# changes: every defined function now carries a complexity fact (clone-lane
-# floors no longer gate the population), CBO counts the imported-domain and
-# resolved-instantiation edge lanes, and the coupling risk bands were
-# re-derived from the measured distribution. Values from revision "1" are not
-# comparable with revision "2" values, so a baseline carrying the old revision
-# is untrusted rather than diffed.
+# Algorithm revision of the ``coupling_cohesion_observations`` design-metric
+# lane. Separate from OBSERVATION_DIGEST_VERSION so a change in how these
+# metrics are *computed* invalidates only the lanes whose values moved.
+# Revision "2" covers the 39Y changes: every defined function now carries a
+# complexity fact (clone-lane floors no longer gate the population), CBO
+# counts the imported-domain and resolved-instantiation edge lanes, and the
+# coupling risk bands were re-derived from the measured distribution. Values
+# from revision "1" are not comparable with revision "2" values, so a baseline
+# carrying the old revision is untrusted rather than diffed. Until Wave D this
+# revision also governed ``risk_observations``; that lane now moves with
+# COMPLEXITY_ALGORITHM_REVISION below, so a complexity recount never
+# invalidates coupling observations and vice versa.
 DESIGN_METRICS_ALGORITHM_REVISION: Final = "2"
+# Algorithm revision of the ``risk_observations`` lane — the lane carrying the
+# per-unit complexity dimension. Revisions "1" and "2" (shared history with
+# DESIGN_METRICS_ALGORITHM_REVISION above) computed ``cyclomatic_complexity``
+# from the CFG; under revision "2" that meant full McCabe E-N+2P over the
+# complete Y9 graph. Revision "3" is the Wave D split: the public
+# ``cyclomatic_complexity`` is a deterministic source-level decision count
+# over AST constructs (single owner:
+# ``codeclone.metrics.source_decisions.SourceDecisionCounter``), and the CFG
+# value survives only as the diagnostic ``cfg_cyclomatic_complexity``, which
+# reaches no baseline lane and no gate. Bump discipline: move this revision
+# whenever any cell of the ratified decision table changes — a construct's
+# contribution, the match wildcard rule, the BoolOp arity rule, the nested
+# scope boundary — or when the lane's population rule moves. Values across
+# revisions are not comparable; a baseline carrying an older revision is
+# untrusted for this lane rather than diffed.
+COMPLEXITY_ALGORITHM_REVISION: Final = "3"
 BASELINE_LANE_DESCRIPTOR_VERSION: Final = "1"
 BASELINE_LANE_DIGEST_DOMAIN: Final = "codeclone.baseline.lane.v1\0"
 BASELINE_ROOT_DIGEST_DOMAIN: Final = "codeclone.baseline.root.v1\0"
@@ -111,7 +129,12 @@ NEAR_MISS_ALGORITHM_REVISION: Final = "2"
 # straight off the wire, so a sequence that did not ride the cache would make a
 # warm run report zero near-miss pairs. Everything this phase sanctions rides
 # this one bump instead of adding a second.
-CACHE_VERSION: Final = "3.2"
+# 3.3 (Wave D) widens the positional unit row to 18 columns: index 7 becomes
+# the public source-decision ``cyclomatic_complexity`` and index 17 carries
+# the diagnostic ``cfg_cyclomatic_complexity``. Cached units also hold values
+# computed by the pre-split algorithm, so the bump is what forces every unit
+# through the new counter instead of serving stale semantics off the wire.
+CACHE_VERSION: Final = "3.3"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
@@ -326,6 +349,7 @@ __all__ = [
     "BASELINE_SCHEMA_VERSION",
     "CACHE_VERSION",
     "COHESION_RISK_MEDIUM_MAX",
+    "COMPLEXITY_ALGORITHM_REVISION",
     "COMPLEXITY_RISK_LOW_MAX",
     "COMPLEXITY_RISK_MEDIUM_MAX",
     "CONTRACT_IR_VERSION",

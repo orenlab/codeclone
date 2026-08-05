@@ -269,6 +269,7 @@ def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
         fingerprint=unit.fingerprint,
         loc_bucket=unit.loc_bucket,
         cyclomatic_complexity=unit.cyclomatic_complexity,
+        cfg_cyclomatic_complexity=unit.cfg_cyclomatic_complexity,
         nesting_depth=unit.nesting_depth,
         risk=unit.risk,
         raw_hash=unit.raw_hash,
