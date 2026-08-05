@@ -10,6 +10,7 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 from ...contracts import (
+    NEAR_MISS_ALGORITHM_REVISION,
     NEAR_MISS_MAX_EDIT_STATEMENTS,
     STATEMENT_REACHABILITY_POLICY_VERSION,
 )
@@ -520,6 +521,7 @@ def build_near_miss_payload(
     return {
         "tier": "near_miss",
         "max_edit_statements": NEAR_MISS_MAX_EDIT_STATEMENTS,
+        "algorithm_revision": NEAR_MISS_ALGORITHM_REVISION,
         "gate_relevant": False,
         "novelty": "untracked",
         "count": len(rendered),

@@ -28,6 +28,10 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   with `--fail-on-authority-violation`, and triage ranked candidates in a new report tab or through `check_authority`.
 - `--near-miss` reports function pairs whose normalized statement sequences differ by exactly one statement. Advisory
   only; it never enters clone gates or the baseline.
+- Near-miss clone detection now counts statement edits accurately — one true insertion, deletion, or replacement each
+  cost exactly one edit (sequence edit distance), the reported differing statement is chosen by one documented
+  deterministic law even when identical statements repeat, and the near-miss algorithm revision (`2`) is published in
+  the report payload.
 - Dead-code analysis reports unreachable statements, and `--fail-on-unresolved-dead-code` gates on public methods
   inheriting from a base outside the analysis root — abstentions that are never counted as dead code.
 - Files are classified as production, tests, fixtures, or other, so golden fixtures are suppressed on a named channel

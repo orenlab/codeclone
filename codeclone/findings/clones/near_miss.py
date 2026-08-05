@@ -23,6 +23,16 @@ Confinement: this channel never enters ``func_groups``, so it reaches no
 observation lane, no baseline novelty and no gate. It is advisory by
 construction rather than by a flag that could be flipped.
 
+The distance is sequence Levenshtein over the normalized statement tokens:
+an inserted, deleted or replaced statement costs exactly one edit and an
+equal statement costs zero. Not LCS distance, which would price a replace as
+delete-plus-insert at two; not a positional diff, which would cascade one
+insertion into a difference at every later position. The contract is
+two-layer: the VERDICT is the scalar minimum distance and is unique, while
+the WITNESS — which statements are reported as the edit — is not unique once
+a sequence repeats a fingerprint, so ``_edit_script`` fixes one canonical
+optimal script by a documented total order over the DP backtrace.
+
 Cost. Pairwise scanning would be quadratic in functions. Instead the tier
 indexes deletion variants: for ``K = 1``, ``distance(a, b) <= 1`` implies
 ``del(a)`` and ``del(b)`` intersect, where ``del(x)`` is ``x`` plus its ``L``
@@ -33,9 +43,10 @@ O(total statements) overall.
 
 The index is only a superset filter: ``[X, Y]`` and ``[Y, X]`` share the
 variants ``[X]`` and ``[Y]`` yet sit at distance two. Every candidate therefore
-goes through an exact bounded confirmation before it can be reported, and
-confirmation runs once per distinct sequence pair rather than once per unit
-pair.
+goes through the exact bounded confirmation before it can be reported, and
+confirmation runs once per distinct sequence pair — an O(n*m) dynamic program
+over two function-sized sequences the index has already certified as
+near-identical, so the quadratic bound is confined.
 """
 
 from __future__ import annotations
@@ -57,10 +68,11 @@ if TYPE_CHECKING:
 __all__ = ["build_near_miss_pairs"]
 
 # The single edit distance this module is CONSTRUCTED for, as opposed to the
-# contract value it enforces. Two constructions below assume it: the deletion
-# index (one one-statement deletion per sequence) and the bounded confirmation
-# (one divergence, distance reported as 1). Kept separate from the contract
-# constant so the two can be compared and the mismatch refused loudly.
+# contract value it enforces. The deletion index assumes it: one one-statement
+# deletion per sequence, so candidates beyond distance one are never even
+# collected. The Levenshtein confirmation itself is general — the index is
+# what pins the module to K = 1. Kept separate from the contract constant so
+# the two can be compared and the mismatch refused loudly.
 _SUPPORTED_MAX_EDIT_STATEMENTS: Final = 1
 
 _VARIANT_DOMAIN: Final = b"ccnm:variant\x00"
@@ -75,17 +87,22 @@ _Tokens = tuple[str, ...]
 # (filepath, qualname, start_line, end_line) — the sort key is the tuple order.
 _Location = tuple[str, str, int, int]
 _EditKind = Literal["insert", "delete", "replace"]
+# One canonical-script operation: (kind, left index, right index), ``-1``
+# where that side contributes no element.
+_ScriptOp = tuple[Literal["equal", "insert", "delete", "replace"], int, int]
 # Units grouped by their exact normalized statement sequence.
 _Cohort = dict[_Tokens, list[tuple[_Location, tuple[NearMissElement, ...]]]]
-# Keyed by sign(len(left) - len(right)).
-_EDIT_SHAPES: Final[dict[int, tuple[_EditKind, int, int]]] = {
-    0: ("replace", 1, 1),
-    1: ("delete", 1, 0),
-    -1: ("insert", 0, 1),
-}
 _FLIPPED_KIND: Final[dict[str, _EditKind]] = {
     "insert": "delete",
     "delete": "insert",
+    "replace": "replace",
+}
+# Narrows a script op kind to the reportable edit kinds; ``"equal"`` is
+# filtered before this table is consulted, and a leak fails loudly as a
+# KeyError instead of a silently wrong finding.
+_SCRIPT_EDIT_KIND: Final[dict[str, _EditKind]] = {
+    "insert": "insert",
+    "delete": "delete",
     "replace": "replace",
 }
 
@@ -138,43 +155,102 @@ def _deletion_variant_keys(tokens: _Tokens) -> tuple[tuple[int, int], ...]:
     return tuple(keys)
 
 
-def _confirm(left: _Tokens, right: _Tokens) -> tuple[_EditKind, int, int, int] | None:
-    """Exact bounded check: edit kind, each side's edit index, and the distance.
+def _edit_script(left: _Tokens, right: _Tokens) -> tuple[_ScriptOp, ...]:
+    """Return THE canonical optimal edit script between two token sequences.
 
-    O(L) and honest about direction — the returned indexes point at the element
-    that differs on each side, or ``-1`` where that side has none. ``None``
-    means the pair is outside the declared bound, which is the answer for every
-    candidate the deletion index over-collects.
+    The verdict layer needs no tie-break — the minimum edit distance is
+    unique. The witness layer does: once a sequence repeats a fingerprint,
+    several equally cheap scripts exist, and evidence must not depend on
+    implementation accident. Canonicality is one total order over the DP
+    backtrace: at every cell exactly the first applicable rule below is
+    taken, so every equal-cost fork resolves identically on every run.
+
+    Backtrace decision table. ``D`` is the Levenshtein matrix (insert,
+    delete and replace cost one; equal costs zero). The walk starts at
+    ``(len(left), len(right))``, ends at ``(0, 0)``, and the emitted
+    operations are reversed into left-to-right sequence order::
+
+        | # | taken when (first match wins)                            | emits   |
+        |---|----------------------------------------------------------|---------|
+        | 1 | i>0, j>0, left[i-1] == right[j-1], D[i][j] == D[i-1][j-1]     | equal   |
+        | 2 | i>0, j>0, left[i-1] != right[j-1], D[i][j] == D[i-1][j-1] + 1 | replace |
+        | 3 | i>0, D[i][j] == D[i-1][j] + 1                                 | delete  |
+        | 4 | j>0, D[i][j] == D[i][j-1] + 1                                 | insert  |
+
+    Exactly one rule fires at every cell because they are tried in this
+    fixed order, and every rule strictly decreases ``i + j``, so the walk
+    terminates with a complete script. Two consequences are the law's
+    observable contract, both pinned by tests: the single edit of a
+    within-budget pair lands on the LEFTMOST position of a repeated-
+    fingerprint run, and the equal-cost fork between a replace and a
+    delete-plus-insert decomposition resolves so the delete or insert
+    precedes the replace in left-to-right reading.
+
+    O(len(left) * len(right)) time and space — two function-sized sequences
+    that the deletion index has already certified as near-identical.
     """
 
     left_length, right_length = len(left), len(right)
-    if abs(left_length - right_length) > NEAR_MISS_MAX_EDIT_STATEMENTS:
-        return None
+    distance = [[0] * (right_length + 1) for _ in range(left_length + 1)]
+    for i in range(left_length + 1):
+        distance[i][0] = i
+    for j in range(right_length + 1):
+        distance[0][j] = j
+    for i in range(1, left_length + 1):
+        for j in range(1, right_length + 1):
+            distance[i][j] = min(
+                distance[i - 1][j] + 1,
+                distance[i][j - 1] + 1,
+                distance[i - 1][j - 1] + (left[i - 1] != right[j - 1]),
+            )
 
-    head = 0
-    shortest = min(left_length, right_length)
-    while head < shortest and left[head] == right[head]:
-        head += 1
+    ops: list[_ScriptOp] = []
+    i, j = left_length, right_length
+    while i > 0 or j > 0:
+        if (
+            i > 0
+            and j > 0
+            and left[i - 1] == right[j - 1]
+            and distance[i][j] == distance[i - 1][j - 1]
+        ):
+            ops.append(("equal", i - 1, j - 1))
+            i, j = i - 1, j - 1
+        elif (
+            i > 0
+            and j > 0
+            and left[i - 1] != right[j - 1]
+            and distance[i][j] == distance[i - 1][j - 1] + 1
+        ):
+            ops.append(("replace", i - 1, j - 1))
+            i, j = i - 1, j - 1
+        elif i > 0 and distance[i][j] == distance[i - 1][j] + 1:
+            ops.append(("delete", i - 1, -1))
+            i -= 1
+        else:
+            ops.append(("insert", -1, j - 1))
+            j -= 1
+    return tuple(reversed(ops))
 
-    if left_length == right_length and head == shortest:
-        # Identical sequences: the exact tier owns this pair.
-        return None
 
-    # One edit sits at `head`. Which side steps over it is the whole
-    # difference between the three kinds, so it is a table rather than three
-    # near-identical branches: equal lengths step over it on both sides, and
-    # otherwise only the longer side does.
-    edit_kind, left_step, right_step = _EDIT_SHAPES[
-        (left_length > right_length) - (left_length < right_length)
-    ]
-    if left[head + left_step :] != right[head + right_step :]:
+def _confirm(left: _Tokens, right: _Tokens) -> tuple[_EditKind, int, int, int] | None:
+    """Exact bounded check: edit kind, each side's edit index, and the distance.
+
+    The distance is sequence Levenshtein, so one inserted statement is one
+    edit — never a cascade of positional differences, and a replace is never
+    priced as delete-plus-insert. ``None`` means distance zero (the exact
+    tier's business) or beyond ``NEAR_MISS_MAX_EDIT_STATEMENTS``, which is
+    the answer for every candidate the deletion index over-collects. The
+    returned indexes point at the canonical witness fixed by
+    ``_edit_script``, or ``-1`` where that side has no edited element.
+    """
+
+    if abs(len(left) - len(right)) > NEAR_MISS_MAX_EDIT_STATEMENTS:
         return None
-    return (
-        edit_kind,
-        head if left_step else -1,
-        head if right_step else -1,
-        1,
-    )
+    edits = [op for op in _edit_script(left, right) if op[0] != "equal"]
+    if not edits or len(edits) > NEAR_MISS_MAX_EDIT_STATEMENTS:
+        return None
+    kind, left_index, right_index = edits[0]
+    return (_SCRIPT_EDIT_KIND[kind], left_index, right_index, len(edits))
 
 
 def _elements(unit: GroupItemLike) -> tuple[NearMissElement, ...]:
@@ -303,10 +379,10 @@ def build_near_miss_pairs(units: GroupItemsLike) -> tuple[NearMissPair, ...]:
             "near_miss supports NEAR_MISS_MAX_EDIT_STATEMENTS == "
             f"{_SUPPORTED_MAX_EDIT_STATEMENTS}, got "
             f"{NEAR_MISS_MAX_EDIT_STATEMENTS}. The deletion index emits one "
-            "one-statement deletion per sequence and the bounded confirmation "
-            "locates a single divergence, so a larger bound would keep "
+            "one-statement deletion per sequence, so candidates beyond "
+            "distance one are never collected: a larger bound would keep "
             "reporting only distance-1 pairs while claiming a wider tier. "
-            "Widening the tier requires widening both constructions."
+            "Widening the tier requires widening the index construction."
         )
 
     sequences = _sequences_by_tokens(units)
