@@ -901,6 +901,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                     "cached",
                     "skipped",
                     "source_io_skipped",
+                    "unsupported_construct_skipped",
                 ),
             ),
             proj.TEXT_INVENTORY_CODE

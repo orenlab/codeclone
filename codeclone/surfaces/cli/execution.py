@@ -217,6 +217,21 @@ def run_analysis_stages(
     print_failed_files_fn(tuple(processing_result.failed_files))
     if not processing_result.failed_files and processing_result.source_read_failures:
         print_failed_files_fn(tuple(processing_result.source_read_failures))
+    if processing_result.unsupported_construct_skips:
+        # The attributed loss line (Python 3.15 probe, G1b): name the count and
+        # the refused constructs so a run that skipped files over unsupported
+        # syntax is never mistaken for a clean full pass.
+        printer.print(
+            ui.fmt_unsupported_construct_summary(
+                count=len(processing_result.unsupported_construct_skips),
+                constructs=sorted(
+                    {
+                        skip.construct
+                        for skip in processing_result.unsupported_construct_skips
+                    }
+                ),
+            )
+        )
 
     if use_status:
         with printer.status(ui.STATUS_GROUPING, spinner="dots"):

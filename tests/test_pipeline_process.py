@@ -1523,3 +1523,79 @@ def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
     warm_cache.load()
     warm_discovery = core_discovery.discover(boot=boot, cache=warm_cache)
     assert warm_discovery.cache_hits > 0
+
+
+def test_worker_types_unsupported_construct_refusals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wire refusal is a typed, attributable outcome, not an unexpected error.
+
+    Python 3.15 probe, G1b: a file whose (parsed) syntax the wire whitelist
+    refuses must surface as ``unsupported_construct`` with a witness naming the
+    construct, so the loss is visible instead of a silent skip.
+    """
+
+    from codeclone.analysis.wire import WireUnsupportedNode
+
+    source = tmp_path / "module.py"
+    source.write_text("def example():\n    return 1\n", "utf-8")
+    core_worker._install_module_registry(build_module_registry(root=tmp_path))
+
+    def _refuse(**_kwargs: object) -> object:
+        raise WireUnsupportedNode("unsupported fields on Import: is_lazy")
+
+    monkeypatch.setattr(core_worker, "extract_units_and_stats_from_source", _refuse)
+    result = core_worker.process_file(
+        str(source),
+        str(tmp_path),
+        NormalizationConfig(),
+        1,
+        1,
+        collect_structural_findings=False,
+        collect_api_surface=False,
+        api_include_private_modules=False,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+    )
+
+    assert result.success is False
+    assert result.error_kind == "unsupported_construct"
+    assert result.error == (
+        "Unsupported construct: unsupported fields on Import: is_lazy"
+    )
+
+
+def test_process_collects_unsupported_construct_witnesses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wire-refused files are counted as skipped and carry a per-file witness."""
+
+    from codeclone.analysis.wire import WireUnsupportedNode
+    from codeclone.models import UnsupportedConstructSkip
+
+    filepath, boot, discovery = _build_single_file_process_case(tmp_path)
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.bind_module_registry(discovery.module_registry)
+
+    def _refuse(**_kwargs: object) -> object:
+        raise WireUnsupportedNode("unsupported fields on Import: is_lazy")
+
+    monkeypatch.setattr(core_worker, "extract_units_and_stats_from_source", _refuse)
+    result = process(boot=boot, discovery=discovery, cache=cache)
+
+    assert result.files_analyzed == 0
+    assert result.files_skipped == 1
+    assert result.failed_files == (
+        f"{filepath}: Unsupported construct: unsupported fields on Import: is_lazy",
+    )
+    assert result.source_read_failures == ()
+    assert result.unsupported_construct_skips == (
+        UnsupportedConstructSkip(
+            filepath=filepath,
+            construct="unsupported fields on Import: is_lazy",
+        ),
+    )
