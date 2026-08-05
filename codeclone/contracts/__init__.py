@@ -92,6 +92,16 @@ STATEMENT_REACHABILITY_POLICY_VERSION: Final = "1"
 # by contract: the tier carries no similarity score and no tunable floor. A
 # distance of zero is the exact tier's business and never enters near_miss.
 NEAR_MISS_MAX_EDIT_STATEMENTS: Final = 1
+# The near-miss lane's own algorithm identity. Revision "1" was the 39Y Y8
+# single-divergence head-scan construction and was never published as a
+# constant; "2" is the sequence Levenshtein verdict (insert, delete and
+# replace each cost exactly one edit; equal costs zero) together with the
+# canonical DP-backtrace witness law — one documented total order over
+# equal-cost forks, so which statement is reported as the edit is as
+# deterministic as the distance itself. Bumping this never touches the exact
+# lane: BASELINE_FINGERPRINT_VERSION and the statement-token wire are
+# unchanged, and the tier still reaches no baseline lane and no gate.
+NEAR_MISS_ALGORITHM_REVISION: Final = "2"
 
 # 3.2 adds the two rule-3 fact families: per-class base resolution and
 # per-method decorator evidence. Both gate the tri-state liveness verdict,
@@ -387,6 +397,7 @@ __all__ = [
     "MEMORY_PROJECTION_VERSION",
     "METRICS_BASELINE_SCHEMA_VERSION",
     "MODULE_IDENTITY_VERSION",
+    "NEAR_MISS_ALGORITHM_REVISION",
     "NEAR_MISS_MAX_EDIT_STATEMENTS",
     "OBSERVATION_DIGEST_VERSION",
     "OBSERVER_VOCABULARY_VERSION",
