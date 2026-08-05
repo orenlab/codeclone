@@ -280,7 +280,7 @@ doc.** Current central values (verified at write time):
 |------------------------------------------|-----------------|
 | `BASELINE_SCHEMA_VERSION`                | `3.0`           |
 | `BASELINE_FINGERPRINT_VERSION`           | `3`             |
-| `CACHE_VERSION`                          | `3.3`           |
+| `CACHE_VERSION`                          | `3.4`           |
 | `REPORT_SCHEMA_VERSION`                  | `3.0`           |
 | `METRICS_BASELINE_SCHEMA_VERSION`        | `1.3`           |
 | `ENGINEERING_MEMORY_SCHEMA_VERSION`      | `1.7`           |
