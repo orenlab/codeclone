@@ -44,19 +44,22 @@ deterministic, explainable, and conservative — a shadowed name falls toward
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from itertools import count
 from typing import Final, Literal
+
+from ..models import BindingSite, SymbolRole
 
 __all__ = [
     "EMPTY_BINDINGS",
     "Binding",
     "BindingContext",
+    "BindingSite",
     "FromImportTargetResolver",
+    "SymbolRole",
     "build_module_bindings",
 ]
-
-SymbolRole = Literal["self", "cls", "local", "import", "global_literal"]
 
 _ScopeKind = Literal["module", "function", "lambda", "class", "comprehension"]
 
@@ -104,6 +107,10 @@ class _Scope:
     module: _Scope | None
     global_names: frozenset[str]
     nonlocal_names: frozenset[str]
+    # Deterministic per-module scope number, assigned in depth-first
+    # resolution order. Purely additive identity metadata: nothing in wire
+    # emission reads it, so fp3 digests cannot depend on it.
+    token: int = 0
 
     def _module_scope(self) -> _Scope:
         return self.module if self.module is not None else self
@@ -111,17 +118,43 @@ class _Scope:
     def lookup(self, name: str) -> Binding | None:
         """Resolve ``name`` through the enclosing-scope chain."""
 
+        hit = self._lookup_with_scope(name)
+        return hit[0] if hit is not None else None
+
+    def lookup_site(self, name: str) -> BindingSite | None:
+        """Resolve ``name`` and report which scope answered.
+
+        One resolution algorithm for both questions: ``lookup`` and this
+        method share ``_lookup_with_scope``, so "what does this name denote"
+        and "where is it bound" can never drift apart.
+        """
+
+        hit = self._lookup_with_scope(name)
+        if hit is None:
+            return None
+        binding, scope = hit
+        return BindingSite(
+            role=binding.role,
+            identity=binding.identity,
+            scope_token=scope.token,
+        )
+
+    def _lookup_with_scope(self, name: str) -> tuple[Binding, _Scope] | None:
         if name in self.global_names:
             # A `global` declaration resolves against module scope, never
             # against an enclosing function.
-            return self._module_scope().bindings.get(name)
+            module_scope = self._module_scope()
+            binding = module_scope.bindings.get(name)
+            if binding is None:
+                return None
+            return binding, module_scope
         scope: _Scope | None = self
         if name in self.nonlocal_names:
             scope = self.parent
         while scope is not None:
             binding = scope.bindings.get(name)
             if binding is not None:
-                return binding
+                return binding, scope
             scope = scope.parent
         return None
 
@@ -135,6 +168,9 @@ class BindingContext:
 
     def lookup(self, name: str) -> Binding | None:
         return self._scope.lookup(name)
+
+    def lookup_site(self, name: str) -> BindingSite | None:
+        return self._scope.lookup_site(name)
 
     def enter(self, node: ast.AST) -> BindingContext:
         """Return the context for a scope-introducing node's own body.
@@ -251,7 +287,13 @@ def build_module_bindings(
     _collect(tree.body, root, resolve_from_import)
     _propagate_global_writes(root)
     scopes: dict[ast.AST, _Scope] = {}
-    module_scope = _resolve_draft(root, parent=None, module=None, scopes=scopes)
+    module_scope = _resolve_draft(
+        root,
+        parent=None,
+        module=None,
+        scopes=scopes,
+        tokens=count(),
+    )
     return BindingContext(_scope=module_scope, _scopes=scopes)
 
 
@@ -450,6 +492,7 @@ def _resolve_draft(
     parent: _Scope | None,
     module: _Scope | None,
     scopes: dict[ast.AST, _Scope],
+    tokens: Iterator[int],
 ) -> _Scope:
     resolution_parent = _resolution_parent(parent)
     _classify_receiver(draft, class_scope=parent)
@@ -461,12 +504,21 @@ def _resolve_draft(
         module=module,
         global_names=frozenset(draft.bindings.global_names),
         nonlocal_names=frozenset(draft.bindings.nonlocal_names),
+        # Depth-first resolution order is a pure function of the parsed tree,
+        # so the token is as deterministic as the scope graph itself.
+        token=next(tokens),
     )
     if draft.node is not None:
         scopes[draft.node] = scope
     module_scope = module if module is not None else scope
     for child in draft.children:
-        _resolve_draft(child, parent=scope, module=module_scope, scopes=scopes)
+        _resolve_draft(
+            child,
+            parent=scope,
+            module=module_scope,
+            scopes=scopes,
+            tokens=tokens,
+        )
     return scope
 
 

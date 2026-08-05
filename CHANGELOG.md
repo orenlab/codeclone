@@ -46,6 +46,11 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   cost exactly one edit (sequence edit distance), the reported differing statement is chosen by one documented
   deterministic law even when identical statements repeat, and the near-miss algorithm revision (`2`) is published in
   the report payload.
+- `--renamed-structure` reports a new advisory clone tier: functions identical up to a bijective, consistent renaming
+  of local bindings and receiver attributes, detected as an exact match in the tier's own canonical digest domain — no
+  similarity score. Imported identities, proven globals, terminal callees, and attribute-chain structure stay rigid.
+  Advisory only; it never enters clone gates or the baseline, and its algorithm revision (`1`) is published in the
+  report payload.
 - Dead-code analysis reports unreachable statements, and `--fail-on-unresolved-dead-code` gates on public methods
   inheriting from a base outside the analysis root — abstentions that are never counted as dead code.
 - Files are classified as production, tests, fixtures, or other, so golden fixtures are suppressed on a named channel
@@ -106,6 +111,8 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- Controlled-change verification resolves runs at the intent's own workspace, so parallel same-commit worktrees no
+  longer fail `start_controlled_change` or `finish_controlled_change` with a multi-root run-id ambiguity.
 - The report file registry is deduplicated by path, so it no longer lists more files than the run found.
 - The review queue no longer reports a finding as known without baseline evidence.
 - The error for a missing `baseline_scope_id` names the configuration table correctly.

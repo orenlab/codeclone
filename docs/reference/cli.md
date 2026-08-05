@@ -32,6 +32,7 @@ Specialized subcommands manage setup, engineering memory, and analytics. Exit co
 | `--diff-against REF` | Use `git diff --name-only <REF>` to determine changed files |
 | `--paths-from-git-diff REF` | Shorthand for `--changed-only --diff-against REF` |
 | `--near-miss` | Report near-miss clone pairs. Advisory; never gates or enters the baseline |
+| `--renamed-structure` | Report renamed-structure clone groups (consistent renaming of locals and receiver attributes). Advisory; never gates or enters the baseline |
 
 ### Baseline and cache
 

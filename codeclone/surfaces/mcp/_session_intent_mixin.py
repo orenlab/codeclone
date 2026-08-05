@@ -799,10 +799,14 @@ class _MCPSessionIntentMixin:
             )
         record = self._runs.resolve_any_root(run_id)
         with self._state_lock:
+            # Same-commit worktrees share a run id; an intent qualifies only
+            # when it was declared for this record's own root, or a sibling
+            # checkout's intent would silently capture the resolution.
             matching = [
                 intent
                 for intent in self._active_intents.values()
                 if intent.run_id == record.run_id
+                and intent.root.resolve() == record.root.resolve()
             ]
         if not matching:
             raise MCPServiceContractError("No active change intent is available.")

@@ -39,6 +39,7 @@ from ..models import (
     ObservationBundle,
     ProjectMetrics,
     RehydratedCacheNeutral,
+    RenamedStructureGroup,
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentGroupItem,
@@ -210,6 +211,9 @@ class AnalysisResult:
     # Report-only advisory channel: near-miss pairs never enter func_groups,
     # so they reach no observation lane, no baseline novelty and no gate.
     near_miss_pairs: tuple[NearMissPair, ...] = ()
+    # Same confinement, Wave C: renamed-structure groups are a sibling of the
+    # clone lane, never a member of it.
+    renamed_structure_groups: tuple[RenamedStructureGroup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +374,8 @@ def _unit_to_group_item(unit: Unit) -> GroupItem:
         # facts by explicit key, so carrying it here reaches no lane, no
         # baseline and no report payload (39Y Y8 confinement).
         "statement_sequence": unit.statement_sequence,
+        # Read only by the renamed-structure tier, on the same confinement.
+        "renamed_fingerprint": unit.renamed_fingerprint,
         # Read by the dead_code family, which projects it by explicit key.
         "unreachable_statements": unit.unreachable_statements,
     }

@@ -50,10 +50,36 @@ class _MCPSessionClaimGuardMixin:
         patch_health_delta: int | None = None,
     ) -> dict[str, object]:
         try:
-            validated_text = validate_text_input(text)
+            validate_text_input(text)
         except ValueError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         record = self._runs.resolve_any_root(run_id)
+        return self._validate_review_claims_for_record(
+            record=record,
+            text=text,
+            require_citations=require_citations,
+            patch_health_delta=patch_health_delta,
+        )
+
+    def _validate_review_claims_for_record(
+        self,
+        *,
+        record: MCPRunRecord,
+        text: str,
+        require_citations: bool = True,
+        patch_health_delta: int | None = None,
+    ) -> dict[str, object]:
+        """Validate claims against an already-resolved run record.
+
+        Root-bound callers (the finish claims lane) pass the intent's own
+        record; re-resolving its id would fall back to global resolution and
+        fail on content-addressed ids shared by same-commit worktrees.
+        """
+
+        try:
+            validated_text = validate_text_input(text)
+        except ValueError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
         context = self._claim_guard_context(
             record,
             patch_health_delta=patch_health_delta,

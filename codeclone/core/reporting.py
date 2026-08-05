@@ -315,6 +315,7 @@ def build_report_body_for_analysis(
             ),
             baseline_trust=baseline_trust,
             near_miss_pairs=analysis.near_miss_pairs,
+            renamed_structure_groups=analysis.renamed_structure_groups,
         )
 
 

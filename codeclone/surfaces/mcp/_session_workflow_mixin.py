@@ -204,9 +204,13 @@ class _MCPSessionWorkflowMixin:
         if replay_payload is not None:
             return replay_payload
 
-        # 3. Declare intent
+        # 3. Declare intent — at the root this start was given. The record was
+        # resolved root-safely above; declare must not re-resolve its id
+        # globally, or a same-commit sibling worktree turns a fully rooted
+        # start into a multi-root ambiguity failure.
         declare_payload = intent_session._declare_change_intent(
             run_id=record.run_id,
+            root=str(root_path),
             scope=scope,
             intent=intent,
             expected_effects=expected_effects,
@@ -968,9 +972,11 @@ class _MCPSessionWorkflowMixin:
             health_delta = structural_delta.get("health_delta")
             if isinstance(health_delta, int):
                 patch_health_delta = health_delta
-        return _claim_session(self).validate_review_claims(
+        # The record in hand is the intent's own; re-resolving its id would
+        # fall back to global resolution and fail on same-commit siblings.
+        return _claim_session(self)._validate_review_claims_for_record(
+            record=record,
             text=claims_text,
-            run_id=record.run_id,
             patch_health_delta=patch_health_delta,
         )
 

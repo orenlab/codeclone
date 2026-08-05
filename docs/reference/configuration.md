@@ -72,6 +72,7 @@ not the current working directory.
 | `segment_min_stmt` | int | `10` | — | Minimum statement floor for statement-segment clone artifacts |
 | `processes` | int | `4` | `--processes` | Parallel worker processes |
 | `near_miss` | bool | `false` | `--near-miss` | Produce the advisory near-miss clone channel |
+| `renamed_structure` | bool | `false` | `--renamed-structure` | Produce the advisory renamed-structure clone channel |
 | `golden_fixture_paths` | list[str] | `[]` | — | Repo-relative `tests/` or `tests/fixtures/` paths whose clone groups are suppressed with a visible count |
 | `source_roots` | list[str] | auto-detected | — | Explicit repo-relative import roots for module identity; unset auto-detects an unambiguous `src` layout, otherwise the repository root |
 | `baseline_scope_id` | str | unset | — | Stable canonical UUID naming the baseline scope. Required for baseline update and baseline-relative gating |
