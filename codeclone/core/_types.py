@@ -369,6 +369,9 @@ def _unit_to_group_item(unit: Unit) -> GroupItem:
         "statement_sequence": unit.statement_sequence,
         # Read only by the renamed-structure tier, on the same confinement.
         "renamed_fingerprint": unit.renamed_fingerprint,
+        # Read only by the near-miss tier's renamed token domain, on the same
+        # confinement.
+        "renamed_statement_sequence": unit.renamed_statement_sequence,
         # Read by the dead_code family, which projects it by explicit key.
         "unreachable_statements": unit.unreachable_statements,
     }

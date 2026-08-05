@@ -784,6 +784,9 @@ def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
         # Wave C: the renamed-structure tier reads its digest off the unit
         # fact, on the same clone-lane population rule.
         "renamed_fingerprint": "",
+        # The CxB composition: the near-miss renamed token domain reads its
+        # canonical sequence off the unit fact, same population rule again.
+        "renamed_statement_sequence": (),
         # 39Y Y9: reachability, unlike the sequence above, is computed for every
         # unit regardless of the clone floors. Empty here because this unit has
         # no unreachable statement, not because it was skipped.
@@ -1543,7 +1546,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.3"
+    assert Cache._CACHE_VERSION == "3.4"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1559,7 +1562,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.3"
+    assert old_document["v"] == "3.4"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -3412,7 +3415,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.3"
+    assert CACHE_VERSION == "3.4"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

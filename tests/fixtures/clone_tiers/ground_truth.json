@@ -129,10 +129,12 @@
         "active_supplier_value"
       ],
       "expected": {
-        "tier": "unmatched",
-        "minimum_edit_statements": 2
+        "tier": "near_miss",
+        "token_domain": "renamed",
+        "edit_kind": "insert",
+        "edit_statements": 1
       },
-      "rationale": "39Y-FP row 7: attribute names are symbols and are preserved, so an identity difference now costs an edit. Erasing it (the pre-fingerprint-3 wire) made this pair a 1-edit near-miss; it is a 2-edit pair now, and the identity difference is exactly what carries it out of the tier."
+      "rationale": "39Y-FP row 7 still holds in the y8 domain: attribute names are symbols and are preserved, so the identity difference costs an edit and the pair sits at y8 distance 2, out of budget by rule. Near-miss algorithm revision 3 adds the renamed token domain, where the consistent attribute renaming canonicalizes away and the true inserted clamp is the only edit - so the pair is found at distance 1, in the renamed domain, exactly as the empirical corpus PAIR-T3-01 demanded."
     },
     {
       "id": "R-PAIR-T3-IDENTITY-NEG",
@@ -142,10 +144,12 @@
         "enabled_vendor_score"
       ],
       "expected": {
-        "tier": "unmatched",
-        "minimum_edit_statements": 2
+        "tier": "near_miss",
+        "token_domain": "renamed",
+        "edit_kind": "insert",
+        "edit_statements": 1
       },
-      "rationale": "39Y-FP row 7: attribute names are symbols and are preserved, so an identity difference now costs an edit. Erasing it (the pre-fingerprint-3 wire) made this pair a 1-edit near-miss; it is a 2-edit pair now, and the identity difference is exactly what carries it out of the tier."
+      "rationale": "39Y-FP row 7 still holds in the y8 domain: attribute names are symbols and are preserved, so the identity difference costs an edit and the pair sits at y8 distance 2, out of budget by rule. Near-miss algorithm revision 3 adds the renamed token domain, where the consistent attribute renaming canonicalizes away and the true inserted clamp is the only edit - so the rename twin flips together with its origin, keeping the rename-invariance law intact."
     },
     {
       "id": "PAIR-INT-IDENTITY-NEG",

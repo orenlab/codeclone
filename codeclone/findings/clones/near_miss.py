@@ -47,6 +47,22 @@ goes through the exact bounded confirmation before it can be reported, and
 confirmation runs once per distinct sequence pair — an O(n*m) dynamic program
 over two function-sized sequences the index has already certified as
 near-identical, so the quadratic bound is confined.
+
+Token domains (the CxB composition, algorithm revision 3). The construction
+above runs once per DECLARED token domain: ``y8`` reads the normalized
+statement sequence the tier has always read, and ``renamed`` reads the same
+statements re-tokenized through the ``renamed_structure`` ordinal
+canonicalization, so a pair whose only differences are a consistent renaming
+plus one true edit confirms within the unchanged budget. Each domain builds
+its own deletion index — the two token spaces are never comparable — while
+the budget, the confirmation and the witness law transfer verbatim. Dedup
+law: a pair confirmable in both domains is reported exactly once, in the
+``y8`` domain. ``y8`` wins because it is the token space closest to source
+and predates the sub-mode, so every fact the tier reported before revision 3
+stays byte-identical; the renamed domain only ADDS pairs y8 cannot see.
+Distance zero in the renamed domain is the ``renamed_structure`` tier's
+business and never enters this channel, exactly as y8 distance zero belongs
+to the exact tier.
 """
 
 from __future__ import annotations
@@ -87,6 +103,14 @@ _Tokens = tuple[str, ...]
 # (filepath, qualname, start_line, end_line) — the sort key is the tuple order.
 _Location = tuple[str, str, int, int]
 _EditKind = Literal["insert", "delete", "replace"]
+_TokenDomain = Literal["y8", "renamed"]
+# Which unit fact carries each domain's tokens. Both facts are produced by
+# the same analysis pass over the same statements, so their spans point at
+# the same real source lines; only the token spelling differs.
+_DOMAIN_SEQUENCE_KEYS: Final[dict[_TokenDomain, str]] = {
+    "y8": "statement_sequence",
+    "renamed": "renamed_statement_sequence",
+}
 # One canonical-script operation: (kind, left index, right index), ``-1``
 # where that side contributes no element.
 _ScriptOp = tuple[Literal["equal", "insert", "delete", "replace"], int, int]
@@ -253,8 +277,11 @@ def _confirm(left: _Tokens, right: _Tokens) -> tuple[_EditKind, int, int, int] |
     return (_SCRIPT_EDIT_KIND[kind], left_index, right_index, len(edits))
 
 
-def _elements(unit: GroupItemLike) -> tuple[NearMissElement, ...]:
-    raw = unit.get("statement_sequence", ())
+def _elements(
+    unit: GroupItemLike,
+    sequence_key: str = "statement_sequence",
+) -> tuple[NearMissElement, ...]:
+    raw = unit.get(sequence_key, ())
     if not isinstance(raw, (tuple, list)):
         return ()
     elements: list[NearMissElement] = []
@@ -272,17 +299,19 @@ def _span(elements: Sequence[NearMissElement], index: int) -> tuple[int, int]:
     return (start, end)
 
 
-def _sequences_by_tokens(units: GroupItemsLike) -> _Cohort:
-    """Group unit facts by their normalized statement sequence.
+def _sequences_by_tokens(units: GroupItemsLike, sequence_key: str) -> _Cohort:
+    """Group unit facts by their statement sequence in one token domain.
 
-    Units that share a sequence exactly are one cohort: they are the exact
-    tier's business, and collapsing them here means confirmation runs once per
-    distinct sequence pair rather than once per unit pair.
+    Units that share a sequence exactly are one cohort: they are an exact
+    match in that domain's own terms (the exact tier's business for y8, the
+    renamed_structure tier's for the canonical tokens), and collapsing them
+    here means confirmation runs once per distinct sequence pair rather than
+    once per unit pair.
     """
 
     sequences: _Cohort = {}
     for unit in units:
-        elements = _elements(unit)
+        elements = _elements(unit, sequence_key)
         if elements:
             location: _Location = (
                 str(unit.get("filepath", "")),
@@ -347,6 +376,7 @@ def _cohort_pairs(
     left_tokens: _Tokens,
     right_tokens: _Tokens,
     confirmed: tuple[_EditKind, int, int, int],
+    token_domain: _TokenDomain,
 ) -> list[NearMissPair]:
     """Expand one confirmed sequence pair over every unit that carries it."""
 
@@ -357,10 +387,46 @@ def _cohort_pairs(
             right=(right_location, _span(right_elements, right_index)),
             edit_kind=edit_kind,
             edit_statements=distance,
+            token_domain=token_domain,
         )
         for left_location, left_elements in sorted(sequences[left_tokens])
         for right_location, right_elements in sorted(sequences[right_tokens])
     ]
+
+
+def _token_domain_pairs(
+    units: GroupItemsLike,
+    token_domain: _TokenDomain,
+) -> list[NearMissPair]:
+    """Confirm pairs in ONE declared token domain.
+
+    The whole construction — deletion index, exact bounded confirmation,
+    anchor filter, canonical witness — runs unchanged over the domain's own
+    sequence fact; only the tokens differ. Domains never share an index:
+    a y8 token and a renamed token are never comparable, so each domain
+    builds its own.
+    """
+
+    sequences = _sequences_by_tokens(units, _DOMAIN_SEQUENCE_KEYS[token_domain])
+    pairs: list[NearMissPair] = []
+    for left_tokens, right_tokens in _candidate_sequence_pairs(sequences):
+        confirmed = _confirm(left_tokens, right_tokens)
+        if confirmed is not None and _edit_is_on_statements(
+            left_tokens,
+            right_tokens,
+            left_index=confirmed[1],
+            right_index=confirmed[2],
+        ):
+            pairs.extend(
+                _cohort_pairs(
+                    sequences,
+                    left_tokens=left_tokens,
+                    right_tokens=right_tokens,
+                    confirmed=confirmed,
+                    token_domain=token_domain,
+                )
+            )
+    return pairs
 
 
 def build_near_miss_pairs(units: GroupItemsLike) -> tuple[NearMissPair, ...]:
@@ -368,6 +434,13 @@ def build_near_miss_pairs(units: GroupItemsLike) -> tuple[NearMissPair, ...]:
 
     ``units`` must already be the clone lane's population: the tier inherits
     the lane's floors instead of re-deciding eligibility.
+
+    Runs the construction once per declared token domain and applies the
+    dedup law: a pair confirmable in both domains is reported exactly once,
+    in the ``y8`` domain, so every fact the tier reported before the renamed
+    domain existed stays byte-identical. ``pair_key`` is location-based and
+    therefore domain-independent, which is what makes it the dedup key; after
+    dedup every key is unique, so the sort is total.
 
     Raises:
         ValidationError: if ``NEAR_MISS_MAX_EDIT_STATEMENTS`` has moved off the
@@ -385,25 +458,14 @@ def build_near_miss_pairs(units: GroupItemsLike) -> tuple[NearMissPair, ...]:
             "Widening the tier requires widening the index construction."
         )
 
-    sequences = _sequences_by_tokens(units)
-    pairs: list[NearMissPair] = []
-    for left_tokens, right_tokens in _candidate_sequence_pairs(sequences):
-        confirmed = _confirm(left_tokens, right_tokens)
-        if confirmed is not None and _edit_is_on_statements(
-            left_tokens,
-            right_tokens,
-            left_index=confirmed[1],
-            right_index=confirmed[2],
-        ):
-            pairs.extend(
-                _cohort_pairs(
-                    sequences,
-                    left_tokens=left_tokens,
-                    right_tokens=right_tokens,
-                    confirmed=confirmed,
-                )
-            )
-    return tuple(sorted(pairs, key=lambda pair: pair.pair_key))
+    y8_pairs = _token_domain_pairs(units, "y8")
+    y8_keys = {pair.pair_key for pair in y8_pairs}
+    renamed_pairs = [
+        pair
+        for pair in _token_domain_pairs(units, "renamed")
+        if pair.pair_key not in y8_keys
+    ]
+    return tuple(sorted((*y8_pairs, *renamed_pairs), key=lambda pair: pair.pair_key))
 
 
 def _member_key(location: _Location) -> str:
@@ -417,6 +479,7 @@ def _pair(
     right: tuple[_Location, tuple[int, int]],
     edit_kind: _EditKind,
     edit_statements: int,
+    token_domain: _TokenDomain,
 ) -> NearMissPair:
     ordered = sorted((left, right), key=lambda side: side[0])
     if ordered[0] is not left:
@@ -437,4 +500,5 @@ def _pair(
         members=(members[0], members[1]),
         edit_statements=edit_statements,
         edit_kind=edit_kind,
+        token_domain=token_domain,
     )

@@ -1207,6 +1207,7 @@ class CacheNeutralUnit:
     side_effect_order_profile: str
     statement_sequence: tuple[NearMissElement, ...] = ()
     renamed_fingerprint: str = ""
+    renamed_statement_sequence: tuple[NearMissElement, ...] = ()
     unreachable_statements: tuple[UnreachableStatementItem, ...] = ()
 
 
@@ -1567,6 +1568,12 @@ class Unit:
     # population rule as the sequence above: empty for units the clone floors
     # reject. Its own domain, never comparable with ``fingerprint``.
     renamed_fingerprint: str = ""
+    # The CxB composition: ``statement_sequence`` re-tokenized through the
+    # renamed_structure ordinal canonicalization, on the same population
+    # rule. Tokens are canonical, spans are real source lines — evidence
+    # shows the user their actual code. Read only by the near-miss tier's
+    # renamed token domain.
+    renamed_statement_sequence: tuple[NearMissElement, ...] = ()
     # Populated for EVERY unit, eligible or not: reachability is a fact about
     # the function, and letting a clone floor decide what it sees would repeat
     # the eligibility leak Y5 removed.
@@ -1611,6 +1618,12 @@ class NearMissPair:
     members: tuple[NearMissMember, NearMissMember]
     edit_statements: int
     edit_kind: Literal["insert", "delete", "replace"]
+    # Which token space certified the distance: ``y8`` is the normalized
+    # statement token space the tier has always used; ``renamed`` re-tokenizes
+    # the same statements through the renamed_structure ordinal
+    # canonicalization. A pair confirmable in both domains carries ``y8`` —
+    # the declared dedup precedence — so every pre-sub-mode fact is stable.
+    token_domain: Literal["y8", "renamed"] = "y8"
 
 
 # What one name denotes in one scope — the six-answer contract documented in
@@ -3492,6 +3505,7 @@ class FunctionGroupItem(FunctionGroupItemBase, total=False):
     side_effect_order_profile: str
     statement_sequence: tuple[NearMissElement, ...]
     renamed_fingerprint: str
+    renamed_statement_sequence: tuple[NearMissElement, ...]
     unreachable_statements: tuple[UnreachableStatementItem, ...]
 
 

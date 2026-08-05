@@ -95,6 +95,22 @@ def _encode_units(entry: CacheFactsDict, wire: dict[str, object]) -> None:
             ]
             for unit in units
         ]
+        # The renamed-canonical statement sequence (the CxB composition,
+        # CACHE_VERSION 3.4): same row shape as "us", same own-key law. A
+        # stale entry without this key must reject rather than decode into
+        # units whose warm run would silently report only y8-domain pairs.
+        wire["urs"] = [
+            [
+                unit["qualname"],
+                unit["start_line"],
+                [
+                    field
+                    for element in unit.get("renamed_statement_sequence", ())
+                    for field in (element[0], element[1], element[2])
+                ],
+            ]
+            for unit in units
+        ]
         # Same reasoning one lane over (39Y Y9): the CFG is built only on the
         # analysed path, so a warm run cannot recompute reachability. Carried
         # as its own key, an entry written before the fact existed is rejected
@@ -609,6 +625,7 @@ def _neutral_facts(entry: CacheEntryV3) -> CacheFactsDict:
                 side_effect_order_profile=item.side_effect_order_profile,
                 statement_sequence=item.statement_sequence,
                 renamed_fingerprint=item.renamed_fingerprint,
+                renamed_statement_sequence=item.renamed_statement_sequence,
                 unreachable_statements=item.unreachable_statements,
             )
             for item in neutral.units

@@ -534,6 +534,7 @@ def _neutral_unit_from_wire(unit: UnitDict) -> CacheNeutralUnit:
         side_effect_order_profile=unit.get("side_effect_order_profile", "none"),
         statement_sequence=unit.get("statement_sequence", ()),
         renamed_fingerprint=unit.get("renamed_fingerprint", ""),
+        renamed_statement_sequence=unit.get("renamed_statement_sequence", ()),
         unreachable_statements=unit.get("unreachable_statements", ()),
     )
 
@@ -765,6 +766,13 @@ def _assign_renamed_fingerprint(unit: UnitDict, facts: tuple[object, ...]) -> No
     unit["renamed_fingerprint"] = str(facts[0]) if facts else ""
 
 
+def _assign_renamed_statement_sequence(
+    unit: UnitDict,
+    facts: tuple[object, ...],
+) -> None:
+    unit["renamed_statement_sequence"] = cast("tuple[NearMissElement, ...]", facts)
+
+
 def _assign_unreachable_statements(unit: UnitDict, facts: tuple[object, ...]) -> None:
     unit["unreachable_statements"] = cast("tuple[UnreachableStatementItem, ...]", facts)
 
@@ -839,6 +847,9 @@ def _decode_wire_units_with_sequences(
     families = (
         ("us", _decode_wire_unit_sequence_row, _assign_statement_sequence),
         ("uc", _decode_wire_unit_renamed_row, _assign_renamed_fingerprint),
+        # The renamed-canonical sequence rides the SAME row shape as "us",
+        # so the decoder is shared and only the assignment differs.
+        ("urs", _decode_wire_unit_sequence_row, _assign_renamed_statement_sequence),
         ("ur", _decode_wire_unit_unreachable_row, _assign_unreachable_statements),
     )
     for key, decode_row, assign in families:

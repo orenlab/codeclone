@@ -98,10 +98,15 @@ NEAR_MISS_MAX_EDIT_STATEMENTS: Final = 1
 # replace each cost exactly one edit; equal costs zero) together with the
 # canonical DP-backtrace witness law — one documented total order over
 # equal-cost forks, so which statement is reported as the edit is as
-# deterministic as the distance itself. Bumping this never touches the exact
-# lane: BASELINE_FINGERPRINT_VERSION and the statement-token wire are
-# unchanged, and the tier still reaches no baseline lane and no gate.
-NEAR_MISS_ALGORITHM_REVISION: Final = "2"
+# deterministic as the distance itself. "3" adds the declared renamed token
+# domain (the CxB composition): the same Levenshtein verdict and witness law
+# run a second time over statement tokens canonicalized by the
+# renamed_structure ordinal rules, each domain on its own deletion index,
+# with a pair confirmable in both domains reported once in the y8 domain.
+# Bumping this never touches the exact lane: BASELINE_FINGERPRINT_VERSION
+# and the statement-token wire are unchanged, and the tier still reaches no
+# baseline lane and no gate.
+NEAR_MISS_ALGORITHM_REVISION: Final = "3"
 # The renamed-structure lane's own algorithm identity (Wave C). Revision "1"
 # is ordinal canonicalization: LOCAL and ATTRIBUTE ordinals in separate
 # numbering spaces, binding identity scope-qualified before assignment,
@@ -127,7 +132,13 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # reasoning: the digest is computed from the AST, a warm run never re-parses,
 # and a unit served off a wire without it would make a warm run silently
 # report zero renamed-structure groups.
-CACHE_VERSION: Final = "3.3"
+#
+# 3.4 carries the per-unit renamed-canonical statement sequence (the CxB
+# composition), closing the same trap one lane over: the near-miss renamed
+# token domain reads this sequence off the unit fact, so a warm run served
+# off a 3.3 wire would silently report only y8-domain pairs. Its own key,
+# absence rejects the entry, rejection just re-analyses the file.
+CACHE_VERSION: Final = "3.4"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not

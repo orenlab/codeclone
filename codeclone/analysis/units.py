@@ -72,7 +72,7 @@ from .phase_ledger import (
     PhaseLedger,
 )
 from .reachability import collect_runtime_reachability
-from .renamed_structure import renamed_structure_fingerprint
+from .renamed_structure import renamed_structure_artifacts
 from .security_surfaces import project_security_surfaces
 from .statement_reachability import unreachable_statements
 
@@ -432,11 +432,15 @@ def extract_units_and_stats_from_source(
         )
         # Same population rule as the sequence (Wave C): the renamed-structure
         # tier is a clone lane, so only clone-eligible units pay for the
-        # ordinal-canonical digest, and it rides the cache wire with them.
-        renamed_fingerprint = (
-            renamed_structure_fingerprint(graph, node, cfg, unit_bindings)
+        # ordinal-canonical walk, and its artifacts ride the cache wire with
+        # them. One walk produces both the digest and the renamed-canonical
+        # statement sequence (the CxB composition) — ordinal assignment is
+        # walk-global, so splitting them would repeat the deep-copy cost to
+        # reach identical tokens.
+        renamed_fingerprint, renamed_statement_seq = (
+            renamed_structure_artifacts(graph, node, cfg, unit_bindings)
             if clone_eligible
-            else ""
+            else ("", ())
         )
         # Unconditional, unlike the sequence above: a statement that cannot run
         # is a defect whether or not its function is large enough to be a clone
@@ -469,6 +473,7 @@ def extract_units_and_stats_from_source(
                 side_effect_order_profile=structure_facts.side_effect_order_profile,
                 statement_sequence=statement_sequence,
                 renamed_fingerprint=renamed_fingerprint,
+                renamed_statement_sequence=renamed_statement_seq,
                 unreachable_statements=unreachable,
             )
         )
