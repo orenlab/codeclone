@@ -7072,7 +7072,11 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
             "verdict": "regressed",
         }
 
-    monkeypatch.setattr(partition_service, "compare_runs", unknown_regression_compare)
+    monkeypatch.setattr(
+        partition_service,
+        "_compare_run_records",
+        unknown_regression_compare,
+    )
     partitioned = partition_service.check_patch_contract(
         mode="verify",
         before_run_id="resolver",
@@ -7136,21 +7140,16 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
         after_digest="after-edge",
     )
 
-    def incomparable_compare(
-        *,
-        before_run_id: str,
-        after_run_id: str | None = None,
-        focus: str = "all",
-    ) -> dict[str, object]:
+    def incomparable_compare(**kwargs: object) -> dict[str, object]:
         return {
             "comparable": False,
             "regressions": [],
             "improvements": [],
             "health_delta": None,
-            "verdict": f"{before_run_id}:{after_run_id}:{focus}",
+            "verdict": "incomparable",
         }
 
-    monkeypatch.setattr(service, "compare_runs", incomparable_compare)
+    monkeypatch.setattr(service, "_compare_run_records", incomparable_compare)
     incomparable = service.check_patch_contract(
         mode="verify",
         before_run_id="beforeedge",
@@ -7171,7 +7170,7 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
     def always_expired(**kwargs: object) -> bool:
         return True
 
-    monkeypatch.setattr(service, "compare_runs", stable_compare)
+    monkeypatch.setattr(service, "_compare_run_records", stable_compare)
     declared = service.manage_change_intent(
         action="declare",
         run_id="beforeedge",
@@ -8313,7 +8312,13 @@ def test_mcp_service_review_receipt_edge_helpers(tmp_path: Path) -> None:
     service._runs.register(
         _blast_radius_run_record(other_root, run_id="otherroot123456789")
     )
-    with pytest.raises(MCPServiceContractError, match="same root"):
+    # With an intent in hand the run resolves at the intent's own root, so a
+    # run id only another checkout holds is refused as a typed root mismatch
+    # (previously a post-hoc "same root" contract error after resolving it).
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootMismatchError,
+        match="belongs to a different repository root",
+    ):
         service.create_review_receipt(run_id="otherroot", intent_id=intent_id)
 
 
@@ -11861,7 +11866,7 @@ def test_mcp_workflow_finish_python_structural_and_receipt_edges(
     )
     monkeypatch.setattr(
         docs_service,
-        "validate_review_claims",
+        "_validate_review_claims_for_record",
         lambda **_: {"valid": True, "citations_found": 1, "violations": []},
     )
     claims_run = docs_service.finish_controlled_change(
@@ -11881,7 +11886,7 @@ def test_mcp_workflow_finish_python_structural_and_receipt_edges(
 
     monkeypatch.setattr(
         docs_service,
-        "validate_review_claims",
+        "_validate_review_claims_for_record",
         fail_validate_review_claims,
     )
     note_only_run = docs_service.finish_controlled_change(
@@ -12587,7 +12592,7 @@ def test_mcp_intent_renew_and_workflow_helper_edges(tmp_path: Path) -> None:
     )
     with patch.object(
         service,
-        "validate_review_claims",
+        "_validate_review_claims_for_record",
         return_value={"valid": True},
     ) as validate:
         claims = workflow_mod._MCPSessionWorkflowMixin._conditional_claim_validation(
@@ -16298,6 +16303,275 @@ def test_declaring_in_one_worktree_keeps_the_other_worktrees_intent(
     assert intent_a in service._active_intents
     assert (root_a.resolve(), shared_run_id) in service._runs._pinned_run_ids
     assert service._runs.get_for_root(shared_run_id, root=root_a).root == root_a
+
+
+def test_finish_resolves_a_collided_before_run_at_the_intents_own_root(
+    tmp_path: Path,
+) -> None:
+    """The parallel-worktree incident, end to end on the real registration path.
+
+    Byte-identical checkouts analyze to one content-addressed run id.  With
+    both registered, the whole start → edit → after-run → finish pipeline must
+    resolve every run at the intent's own root and accept, instead of failing
+    closed with multi-root ambiguity on an id the intent already binds.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    _write_clone_fixture(root_a)
+    _write_clone_fixture(root_b)
+    service = CodeCloneMCPService(history_limit=8)
+    before_a = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root_a),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    before_b = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root_b),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    assert before_a["run_id"] == before_b["run_id"], (
+        "identical trees must mint one content-addressed run id"
+    )
+
+    started = service.start_controlled_change(
+        root=str(root_a),
+        scope={"allowed_files": ["pkg/dup.py"]},
+        intent="deduplicate beta in worktree a",
+    )
+    assert started["status"] == "active"
+    assert started["edit_allowed"] is True
+
+    # Break the alpha/beta clone pair: a strict structural improvement, so the
+    # only thing standing between this finish and acceptance is run
+    # resolution.
+    root_a.joinpath("pkg", "dup.py").write_text(
+        (
+            "def alpha(value: int) -> int:\n"
+            "    total = value + 1\n"
+            "    total += 2\n"
+            "    total += 3\n"
+            "    total += 4\n"
+            "    total += 5\n"
+            "    total += 6\n"
+            "    total += 7\n"
+            "    total += 8\n"
+            "    return total\n\n"
+            "def beta(value: int) -> int:\n"
+            "    return alpha(value) * 2\n"
+        ),
+        "utf-8",
+    )
+    after = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root_a),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    assert str(after["run_id"]) != str(before_a["run_id"])
+
+    finished = service.finish_controlled_change(
+        intent_id=str(started["intent_id"]),
+        changed_files=["pkg/dup.py"],
+        after_run_id=str(after["run_id"]),
+    )
+    assert finished["status"] in {"accepted", "accepted_with_external_changes"}
+    assert finished["intent_cleared"] is True
+
+
+def test_verify_and_finish_survive_sibling_worktrees_sharing_the_before_run_id(
+    tmp_path: Path,
+) -> None:
+    """Intent-bound verification must compare this root's own record pair.
+
+    Re-resolving the before id globally used to raise multi-root ambiguity the
+    moment a same-commit sibling registered the identical id — the resolver
+    supported root selection, the verify path just never passed one.
+    """
+
+    service, root_a, _root_b, intent_id, _run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["pkg/a.py"],
+    )
+    service._runs.register(
+        _patch_contract_run_record(
+            root_a,
+            run_id="after1234567890",
+            digest="shared-digest",
+            include_regression=False,
+            complexity=6,
+        )
+    )
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        intent_id=intent_id,
+        after_run_id="after1234567890",
+        changed_files=["pkg/a.py"],
+    )
+    assert verified["status"] in {"accepted", "accepted_with_external_changes"}
+
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+        after_run_id="after1234567890",
+        claims_text="Edited pkg/a.py within the declared scope.",
+    )
+    assert finished["status"] in {"accepted", "accepted_with_external_changes"}
+    assert finished["intent_cleared"] is True
+    assert finished["claims"] is not None, "claims lane must run, not crash"
+    assert finished["receipt"] is not None
+
+
+def test_docs_only_finish_receipt_binds_to_the_intents_root_under_collision(
+    tmp_path: Path,
+) -> None:
+    """Docs-only finish has no after-run: its receipt cites the before id.
+
+    That id answers under every same-commit sibling, so the receipt lookup
+    must bind to the intent's root instead of resolving the id globally.
+    """
+
+    service, _root_a, _root_b, intent_id, _run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["docs/guide.md"],
+    )
+
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["docs/guide.md"],
+    )
+    assert finished["status"] == "accepted"
+    assert finished["receipt"] is not None
+    assert finished["intent_cleared"] is True
+
+
+def test_start_controlled_change_threads_its_root_through_declare_resolution(
+    tmp_path: Path,
+) -> None:
+    """start_controlled_change(root=...) must declare at exactly that root.
+
+    The workflow resolved its record root-safely and then dropped the root on
+    the way into declare, which re-resolved the id globally — so a start that
+    was told the root still failed with 'pass root to select one'.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_same_commit_record(root_a, "before1234567890"))
+    service._runs.register(_same_commit_record(root_b, "before1234567890"))
+
+    started = service.start_controlled_change(
+        root=str(root_a),
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="edit pkg.a inside worktree a",
+    )
+    assert started["status"] == "active"
+    assert started["edit_allowed"] is True
+    intent = service._active_intents[str(started["intent_id"])]
+    assert intent.root == root_a
+
+
+def test_declare_refuses_a_run_id_only_a_sibling_root_holds(
+    tmp_path: Path,
+) -> None:
+    """The negative stays typed: no run at this root is a miss, not a borrow.
+
+    A same-id run under another checkout is not this root's evidence, so the
+    declared root gets the root-mismatch refusal even though the id resolves
+    perfectly well elsewhere.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_same_commit_record(root_b, "before1234567890"))
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootMismatchError,
+        match="belongs to a different repository root",
+    ):
+        service.manage_change_intent(
+            action="declare",
+            run_id="before1234567890",
+            root=str(root_a),
+            scope={"allowed_files": ["pkg/a.py"]},
+            intent="edit pkg.a inside worktree a",
+        )
+
+
+def test_rootless_surfaces_keep_refusing_collided_run_ids(
+    tmp_path: Path,
+) -> None:
+    """Surfaces with no root in hand keep the fail-closed ambiguity error.
+
+    Root-automatic resolution is an intent-bound privilege; a caller that
+    cannot name a checkout must still be refused rather than guessed for.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_same_commit_record(root_a, "before1234567890"))
+    service._runs.register(_same_commit_record(root_b, "before1234567890"))
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootAmbiguityError,
+        match="several repository roots",
+    ):
+        service.compare_runs(before_run_id="before1234567890")
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootAmbiguityError,
+        match="several repository roots",
+    ):
+        service.check_patch_contract(
+            mode="verify",
+            before_run_id="before1234567890",
+            changed_files=["pkg/a.py"],
+        )
+
+
+def test_intent_attachment_is_root_scoped_across_worktrees(
+    tmp_path: Path,
+) -> None:
+    """Implicit intent matching must never attach a sibling root's intent.
+
+    Matching on run id alone let whichever worktree declared last capture
+    another checkout's record — the same silent substitution the run store
+    exists to prevent, one layer up.
+    """
+
+    service, root_a, root_b, intent_a, run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["pkg/a.py"],
+    )
+    intent_b = str(
+        service.manage_change_intent(
+            action="declare",
+            run_id=run_id,
+            root=str(root_b),
+            scope={"allowed_files": ["pkg/b.py"]},
+            intent="edit pkg.b inside worktree b",
+        )["intent_id"]
+    )
+
+    record_a = service._runs.get_for_root(run_id, root=root_a)
+    attached_a = service._optional_intent(record=record_a, intent_id=None)
+    assert attached_a is not None
+    assert attached_a.intent_id == intent_a
+
+    record_b = service._runs.get_for_root(run_id, root=root_b)
+    attached_b = service._optional_intent(record=record_b, intent_id=None)
+    assert attached_b is not None
+    assert attached_b.intent_id == intent_b
+
+    _drop_records_for_root(service, root_b)
+    _record, resolved = service._resolve_intent(run_id=run_id, intent_id=None)
+    assert resolved.intent_id == intent_a
 
 
 def test_workspace_actions_refuse_to_infer_the_last_analyzed_root(

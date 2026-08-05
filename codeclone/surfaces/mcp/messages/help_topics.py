@@ -554,6 +554,13 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "collide between same-commit worktrees."
             ),
             (
+                "Root-bound calls resolve those collisions automatically: "
+                "start, and intent-bound verify/finish/receipt, always pick "
+                "the run at the declared or intent root. The multi-root "
+                "'pass root to select one' refusal remains only for calls "
+                "that name no root and no intent."
+            ),
+            (
                 "incomparable_runs: the two runs used different analysis "
                 "settings. Re-run analyze_repository with identical thresholds "
                 "and profile, then finish again."

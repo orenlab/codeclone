@@ -434,10 +434,15 @@ class _MCPSessionPatchContractMixin:
             assert isinstance(intent, IntentRecord)
             return intent
         with self._state_lock:
+            # Same-commit worktrees share a run id; only an intent declared
+            # for this record's own root is a match. Matching on the id alone
+            # let whichever checkout declared last capture another root's
+            # record.
             matching = [
                 intent
                 for intent in self._active_intents.values()
                 if intent.run_id == record.run_id
+                and intent.root.resolve() == record.root.resolve()
             ]
         return matching[-1] if matching else None
 
@@ -1020,9 +1025,13 @@ class _MCPSessionPatchContractMixin:
         actual_changed_files: tuple[str, ...],
     ) -> dict[str, object]:
         """Full structural verification path (before + after runs)."""
-        compare_payload = _state_session(self).compare_runs(
-            before_run_id=before.run_id,
-            after_run_id=after.run_id,
+        # Both records are already root-bound (the before-run at the intent's
+        # root); compare them directly. Re-resolving the ids globally raised
+        # multi-root ambiguity once a same-commit sibling registered the same
+        # content-addressed id.
+        compare_payload = _state_session(self)._compare_run_records(
+            before=before,
+            after=after,
             focus="all",
         )
         if not bool(compare_payload.get("comparable")):

@@ -87,7 +87,16 @@ class _MCPSessionReviewReceiptMixin:
         verification_accepted: bool | None = None,
     ) -> dict[str, object]:
         output_format = self._validated_receipt_format(format)
-        record = self._runs.resolve_any_root(run_id)
+        # A known intent names the checkout this receipt attests; resolve the
+        # run there. Content-addressed ids collide between same-commit
+        # worktrees, and a finish-time receipt for a docs-only patch cites the
+        # before-run id every sibling answers to.
+        known_intent = _patch_session(self)._known_intent(intent_id)
+        record = (
+            self._runs.get_for_root(run_id, root=known_intent.root)
+            if known_intent is not None
+            else self._runs.resolve_any_root(run_id)
+        )
         intent = self._receipt_intent(record=record, intent_id=intent_id)
         changed_paths = self._receipt_changed_paths(record=record, intent=intent)
         changed_findings = self._receipt_changed_findings(
@@ -460,9 +469,12 @@ class _MCPSessionReviewReceiptMixin:
                 "health_delta": None,
                 "verdict": "not_available",
             }
-        compare_payload = _state_session(self).compare_runs(
-            before_run_id=previous.run_id,
-            after_run_id=record.run_id,
+        # Both records are already root-bound (the attested before-run at the
+        # intent's own root); compare them directly instead of re-resolving
+        # ids that same-commit sibling worktrees share.
+        compare_payload = _state_session(self)._compare_run_records(
+            before=previous,
+            after=record,
             focus="all",
         )
         if not bool(compare_payload.get("comparable")):
