@@ -17,10 +17,15 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   baseline-relative gating. It is what stops one project's baseline being compared against another's.
 - Upgrade every machine that runs CodeClone **before** adding the new configuration keys. 2.1.0a1 treats an unknown key
   as a contract error, so a stale CI runner exits `2` before it analyzes anything.
-- Complexity is now full McCabe over the normalized control-flow graph: exception dispatch, `finally` routing, and
-  context-manager suppression are real paths and are counted, and every function is measured rather than only
-  clone-sized ones. Values rise and health scores may fall — lower but truer. Re-tune `--fail-health` once after
-  regenerating the baseline.
+- Complexity is now two explicitly distinct metrics. The public `cyclomatic_complexity` — the one health, risk bands
+  and gates use — counts authored decisions in the source over AST constructs (`if`/`elif`, loops, comprehension
+  generators and filters, short-circuit boundaries in any expression position, `except` clauses, `match` cases and
+  guards, `assert`), independent of control-flow normalization and reachability. A separate diagnostic
+  `cfg_cyclomatic_complexity` reports full McCabe `E − N + 2P` over the complete normalized control-flow graph —
+  exception dispatch, `finally` routing and suppression included — and never enters health or gates. Every function is
+  measured rather than only clone-sized ones. Values move against older CodeClone releases; stored complexity
+  observations from older baselines are reported untrusted for that lane (`COMPLEXITY_ALGORITHM_REVISION`) rather than
+  silently diffed. Re-tune `--fail-health` once after regenerating the baseline.
 
 ### Added
 
