@@ -34,7 +34,7 @@
   },
   "metrics": {
     "cohesion_max": 2,
-    "complexity_max": 4,
+    "complexity_max": 5,
     "coupling_max": 1,
     "dead_items": [],
     "dependency_cycles": [

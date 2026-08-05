@@ -14,6 +14,7 @@ import orjson
 import pytest
 
 from codeclone.contracts import (
+    COMPLEXITY_ALGORITHM_REVISION,
     DESIGN_METRICS_ALGORITHM_REVISION,
     GATE_LANE_MATRIX_VERSION,
     HEALTH_INPUT_MANIFEST_VERSION,
@@ -120,11 +121,18 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     "module_identity": (
         "6550f3624d9644ab0626b26928a6d1f5fbbaf7c672e04a7128dc6706798206c7"
     ),
-    # SANCTIONED golden change, 39Y item 3 — the second half of the same
-    # design-metric revision bump. Pre-bump digest was
-    # 536593990a541fda3126bfb8a44863e9fb7b586a63d996a3ea2eb7032c62f992.
+    # SANCTIONED golden change, Wave D (maintainer-ratified two-metric split).
+    # The lane's algorithm_revision left the shared design-metric revision for
+    # COMPLEXITY_ALGORITHM_REVISION "3": the public cyclomatic_complexity is
+    # now the source-level decision count, so stored revision-"2" (CFG-McCabe)
+    # values must stop comparing as trusted. Payload SHAPE did not move, so
+    # this is an algorithm_revision bump and not a payload_schema bump.
+    # Confinement proven before repinning: exactly this one descriptor digest
+    # moves and the other nine stay byte-identical to the values pinned here.
+    # Pre-bump digest was
+    # 7c5d29aa39c03fb2c3b7d18b0b48dfff387f36f349224d7ea734d0689d6553c6.
     "risk_observations": (
-        "7c5d29aa39c03fb2c3b7d18b0b48dfff387f36f349224d7ea734d0689d6553c6"
+        "31d043fb8d49bad2a956fa786255769caf99e7eff843e8284ddab5b3ae70ed86"
     ),
 }
 
@@ -226,12 +234,15 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
 
 
 def test_design_metric_lanes_carry_their_own_algorithm_revision() -> None:
-    """Exactly the two design-metric lanes ride DESIGN_METRICS_ALGORITHM_REVISION.
+    """Each design-metric lane rides its own algorithm revision (Wave D).
 
-    The revision is separate from OBSERVATION_DIGEST_VERSION so that changing
-    how a metric is computed invalidates only the lanes whose values moved. If
-    it were shared, this bump would also have invalidated adoption_counts and
-    dead_code, whose values did not change at all.
+    The revisions are separate from OBSERVATION_DIGEST_VERSION so that
+    changing how a metric is computed invalidates only the lanes whose values
+    moved. Since Wave D the two design-metric lanes are also separate from
+    each other: a complexity recount (COMPLEXITY_ALGORITHM_REVISION on
+    ``risk_observations``) must never invalidate coupling observations
+    (DESIGN_METRICS_ALGORITHM_REVISION on ``coupling_cohesion_observations``)
+    and vice versa.
     """
 
     contract = build_observation_contract(
@@ -247,21 +258,32 @@ def test_design_metric_lanes_carry_their_own_algorithm_revision() -> None:
             descriptor.name
         )
 
-    # Both revisions must be live and distinct in the contract the runtime
-    # actually built. Comparing the two constants directly is a tautology the
-    # type checker settles statically (both are Literals), so it could never
-    # fail at runtime; reading the descriptors makes the guard real. If a
-    # revision vanished, or the two collapsed onto one value, the lane
-    # assertions below would pass vacuously.
+    # All three revisions must be live and pairwise distinct in the contract
+    # the runtime actually built. Comparing the constants directly is a
+    # tautology the type checker settles statically (they are Literals), so it
+    # could never fail at runtime; reading the descriptors makes the guard
+    # real. If a revision vanished, or any two collapsed onto one value, the
+    # lane assertions below would pass vacuously.
     design_revision_lanes = by_revision.get(DESIGN_METRICS_ALGORITHM_REVISION, set())
+    complexity_revision_lanes = by_revision.get(COMPLEXITY_ALGORITHM_REVISION, set())
     plain_revision_lanes = by_revision.get(OBSERVATION_DIGEST_VERSION, set())
-    assert design_revision_lanes and plain_revision_lanes
+    assert design_revision_lanes and complexity_revision_lanes
+    assert plain_revision_lanes
+    assert design_revision_lanes.isdisjoint(complexity_revision_lanes)
     assert design_revision_lanes.isdisjoint(plain_revision_lanes)
-    assert {
-        descriptor.name
+    assert complexity_revision_lanes.isdisjoint(plain_revision_lanes)
+    # Revision STRINGS collide across independent axes (module_identity is
+    # also "2", the clone lanes are also "3"), so the buckets above prove
+    # liveness and separation while the per-lane facts are asserted by name.
+    revision_by_name = {
+        descriptor.name: descriptor.algorithm_revision
         for descriptor in contract.descriptors
-        if descriptor.algorithm_revision == DESIGN_METRICS_ALGORITHM_REVISION
-    } >= {"coupling_cohesion_observations", "risk_observations"}
+    }
+    assert (
+        revision_by_name["coupling_cohesion_observations"]
+        == DESIGN_METRICS_ALGORITHM_REVISION
+    )
+    assert revision_by_name["risk_observations"] == COMPLEXITY_ALGORITHM_REVISION
     # The lanes that kept the plain observation revision must not have moved.
     assert by_revision[OBSERVATION_DIGEST_VERSION] == {
         "adoption_counts",

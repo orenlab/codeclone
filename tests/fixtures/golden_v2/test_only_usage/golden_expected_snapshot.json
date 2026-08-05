@@ -21,7 +21,7 @@
   },
   "metrics": {
     "cohesion_max": 0,
-    "complexity_max": 1,
+    "complexity_max": 2,
     "coupling_max": 0,
     "dead_items": [
       {

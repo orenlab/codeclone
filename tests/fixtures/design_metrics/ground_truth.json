@@ -16,7 +16,7 @@
       "path": "original/acme/complexity_cases.py",
       "symbol": "branchy",
       "expected": {
-        "complexity": 8
+        "complexity": 7
       }
     },
     {
@@ -80,7 +80,7 @@
       "path": "renamed/acme_renamed/complexity_cases.py",
       "symbol": "decision_scale",
       "expected": {
-        "complexity": 8
+        "complexity": 7
       }
     },
     {

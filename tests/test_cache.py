@@ -768,6 +768,7 @@ def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
         "fingerprint": "abc",
         "loc_bucket": "0-19",
         "cyclomatic_complexity": 1,
+        "cfg_cyclomatic_complexity": 1,
         "nesting_depth": 0,
         "risk": "low",
         "raw_hash": "",
@@ -1540,7 +1541,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.2"
+    assert Cache._CACHE_VERSION == "3.3"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1556,7 +1557,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.2"
+    assert old_document["v"] == "3.3"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -2226,8 +2227,30 @@ def test_cache_v3_wire_helpers_reject_malformed_rows_without_partial_decode() ->
 
 
 def test_cache_v3_type_guards_validate_both_lane_payload_shapes() -> None:
+    # 18 columns since CACHE_VERSION 3.3: index 7 is the public
+    # source-decision metric, index 17 the diagnostic CFG E-N+2P.
     unit = _decode_wire_unit(
-        ["q", 1, 2, 3, 4, "fp", "0-19", 1, 0, "low", "raw"], "x.py"
+        [
+            "q",
+            1,
+            2,
+            3,
+            4,
+            "fp",
+            "0-19",
+            1,
+            0,
+            "low",
+            "raw",
+            0,
+            "none",
+            0,
+            "fallthrough",
+            "none",
+            "none",
+            1,
+        ],
+        "x.py",
     )
     block = _decode_wire_block(["q", 1, 2, 3, "hash"], "x.py")
     segment = _decode_wire_segment(["q", 1, 2, 3, "hash", "sig"], "x.py")
@@ -2850,6 +2873,51 @@ def test_cache_v3_entry_projection_and_content_miss_are_typed() -> None:
     assert decision.dependent.reason == "content_miss"
 
 
+def test_neutral_facts_preserve_both_complexity_metrics() -> None:
+    """Save-time entry->dict conversion must carry BOTH complexity fields.
+
+    Wave D regression pin: ``_neutral_facts`` rebuilds the unit dict
+    field-by-field, and a field omitted there silently encodes as its wire
+    default — the warm path then serves ``cfg_cyclomatic_complexity == 1``
+    for every cached unit while cold runs report real values. Distinct values
+    on the two fields also make a swap fail.
+    """
+    from codeclone.cache._wire_encode import _neutral_facts
+
+    entry = replace(
+        _empty_v3_entry(),
+        module_neutral=replace(
+            _empty_v3_entry().module_neutral,
+            units=(
+                CacheNeutralUnit(
+                    local_name="f",
+                    start_line=1,
+                    end_line=2,
+                    loc=2,
+                    stmt_count=1,
+                    fingerprint="fp",
+                    loc_bucket="0-19",
+                    cyclomatic_complexity=5,
+                    cfg_cyclomatic_complexity=7,
+                    nesting_depth=0,
+                    risk="low",
+                    raw_hash="raw",
+                    entry_guard_count=0,
+                    entry_guard_terminal_profile="none",
+                    entry_guard_has_side_effect_before=False,
+                    terminal_kind="fallthrough",
+                    try_finally_profile="none",
+                    side_effect_order_profile="none",
+                ),
+            ),
+        ),
+    )
+    facts = _neutral_facts(entry)
+    unit = facts["units"][0]
+    assert unit["cyclomatic_complexity"] == 5
+    assert unit["cfg_cyclomatic_complexity"] == 7
+
+
 def test_cache_v3_neutral_qualnames_are_owned_by_current_registry() -> None:
     payload = replace(
         _empty_v3_entry().module_neutral,
@@ -2863,6 +2931,7 @@ def test_cache_v3_neutral_qualnames_are_owned_by_current_registry() -> None:
                 fingerprint="fp",
                 loc_bucket="0-19",
                 cyclomatic_complexity=1,
+                cfg_cyclomatic_complexity=1,
                 nesting_depth=0,
                 risk="low",
                 raw_hash="raw",
@@ -3409,7 +3478,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.2"
+    assert CACHE_VERSION == "3.3"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:
