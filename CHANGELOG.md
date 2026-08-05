@@ -92,6 +92,8 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- Controlled-change verification resolves runs at the intent's own workspace, so parallel same-commit worktrees no
+  longer fail `start_controlled_change` or `finish_controlled_change` with a multi-root run-id ambiguity.
 - The report file registry is deduplicated by path, so it no longer lists more files than the run found.
 - The review queue no longer reports a finding as known without baseline evidence.
 - The error for a missing `baseline_scope_id` names the configuration table correctly.
