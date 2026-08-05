@@ -20,8 +20,14 @@ from __future__ import annotations
 
 import pytest
 
-from codeclone.findings.clones.near_miss import _confirm, _elements
+from codeclone.findings.clones.near_miss import _confirm, _edit_script, _elements
 from codeclone.models import GroupItemLike
+
+
+def _edits(
+    left: tuple[str, ...], right: tuple[str, ...]
+) -> tuple[tuple[str, int, int], ...]:
+    return tuple(op for op in _edit_script(left, right) if op[0] != "equal")
 
 
 @pytest.mark.parametrize(
@@ -86,6 +92,87 @@ def test_confirm_names_the_edit_kind_and_the_index_on_each_side(
     """The result is honest about direction: ``-1`` where a side has no edit."""
 
     assert _confirm(left, right) == expected
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        # Run of repeated fingerprints at the tail: positions 1..3 of the
+        # right side are equally cheap insertion witnesses; the canonical
+        # law fixes the leftmost, index 1.
+        (("a", "t", "t"), ("a", "t", "t", "t"), (("insert", -1, 1),)),
+        # The same run at the head: leftmost is index 0.
+        (("t", "t", "a"), ("t", "t", "t", "a"), (("insert", -1, 0),)),
+        # Deletion mirror of the head run: leftmost surviving witness is
+        # left index 0.
+        (("t", "t", "t", "a"), ("t", "t", "a"), (("delete", 0, -1),)),
+        # A replace inside a repeated run has exactly one valid position;
+        # the script must land on it, not on a cheaper-looking run edge.
+        (("t", "t"), ("t", "s"), (("replace", 1, 1),)),
+    ],
+)
+def test_edit_script_places_run_edits_on_the_leftmost_equivalent_position(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+    expected: tuple[tuple[str, int, int], ...],
+) -> None:
+    """The ambiguity class: repeated identical fingerprints at either end.
+
+    The verdict (distance one) is unique for every case here; which run
+    statement is reported is not. These pins are the canonical witness law's
+    contract at the sequence level — evidence bytes, not just the distance.
+    """
+
+    assert _edits(left, right) == expected
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        # Distance two admits two equally cheap scripts:
+        #   replace a->c then delete b   |   delete a then replace b->c.
+        # The decision table (equal > replace > delete > insert, scanned from
+        # the sequence tails) refuses the first and fixes the second, so in
+        # left-to-right reading the delete precedes the replace.
+        (("a", "b"), ("c",), (("delete", 0, -1), ("replace", 1, 0))),
+        # The insertion mirror of the same fork.
+        (("c",), ("a", "b"), (("insert", -1, 0), ("replace", 0, 1))),
+    ],
+)
+def test_edit_script_resolves_the_replace_versus_delete_insert_fork(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+    expected: tuple[tuple[str, int, int], ...],
+) -> None:
+    """Equal-cost fork between a replace and a delete+insert decomposition.
+
+    These sequences sit beyond the reporting budget, but the script function
+    is total and its tie-break law must be pinned where the fork actually
+    exists — within budget one, the only ambiguity left is run position.
+    """
+
+    assert _edits(left, right) == expected
+
+
+def test_edit_script_of_identical_sequences_carries_no_edit() -> None:
+    """All-equal script: distance zero stays the exact tier's business."""
+
+    assert _edits(("a", "b"), ("a", "b")) == ()
+
+
+def test_edit_script_is_deterministic_across_calls() -> None:
+    """Two invocations agree byte for byte — no hidden state, no ordering."""
+
+    left = ("t", "t", "a", "t")
+    right = ("t", "a", "t", "t")
+    assert _edit_script(left, right) == _edit_script(left, right)
+
+
+def test_confirm_refuses_the_fork_pair_beyond_the_budget() -> None:
+    """The fork pair is distance two: a canonical script exists, yet the
+    tier must still refuse it — the script never widens the declared bound."""
+
+    assert _confirm(("a", "b"), ("c",)) is None
 
 
 @pytest.mark.parametrize(

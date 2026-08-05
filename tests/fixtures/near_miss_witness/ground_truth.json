@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "domain": "near_miss_witness",
+  "golden": true,
+  "witness_law": "Verdict is the scalar minimum edit distance (unique). Evidence is the canonical optimal edit script: backtrace of the Levenshtein DP matrix from the terminal cell toward the origin, taking at every cell the first applicable rule in the fixed kind order equal, replace, delete, insert. Consequence pinned here: the single edit of a within-budget pair lands on the leftmost position of a repeated-fingerprint run.",
+  "cases": [
+    {
+      "id": "PAIR-NM-INSERT",
+      "path": "pairs.py",
+      "members": [
+        "order_total_value",
+        "order_total_value_clamped"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_kind": "insert",
+        "edit_statements": 1,
+        "witness": {
+          "order_total_value": [0, 0],
+          "order_total_value_clamped": [86, 86]
+        },
+        "witness_text": {
+          "order_total_value_clamped": "acc = max(acc, 0)"
+        }
+      },
+      "rationale": "The empirical PAIR-T3-01 shape: identical bodies apart from local and parameter renames plus one true inserted statement. One insertion costs exactly one edit; the pair is within the declared budget."
+    },
+    {
+      "id": "PAIR-NM-CHAIN",
+      "path": "pairs.py",
+      "members": [
+        "order_total_value_clamped",
+        "order_total_value_clamped_sorted"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_kind": "insert",
+        "edit_statements": 1,
+        "witness": {
+          "order_total_value_clamped": [0, 0],
+          "order_total_value_clamped_sorted": [102, 102]
+        },
+        "witness_text": {
+          "order_total_value_clamped_sorted": "taken.sort()"
+        }
+      },
+      "rationale": "The double-insert negative twin is itself one insertion away from the single-insert member. Declaring the pair keeps the fixture's pair inventory complete instead of leaving a surprise finding."
+    },
+    {
+      "id": "PAIR-NM-DOUBLE-NEG",
+      "path": "pairs.py",
+      "members": [
+        "order_total_value",
+        "order_total_value_clamped_sorted"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      },
+      "rationale": "Two true insertions cost two edits. The budget is one; the pair stays out. This is the negative twin proving the rule is the declared predicate, not a fixture key."
+    },
+    {
+      "id": "PAIR-NM-REPLACE",
+      "path": "pairs.py",
+      "members": [
+        "shipment_mass_total",
+        "shipment_span_total"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_kind": "replace",
+        "edit_statements": 1,
+        "witness": {
+          "shipment_mass_total": [110, 110],
+          "shipment_span_total": [121, 121]
+        },
+        "witness_text": {
+          "shipment_mass_total": "mass += parcel.grams",
+          "shipment_span_total": "size += parcel.height"
+        }
+      },
+      "rationale": "One substituted unequal statement (a different attribute read) costs exactly one edit under the declared contract, never delete-plus-insert at cost two."
+    },
+    {
+      "id": "PAIR-NM-RENAME-EXACT",
+      "path": "pairs.py",
+      "members": [
+        "discount_ratio",
+        "rebate_ratio"
+      ],
+      "expected": {
+        "tier": "exact"
+      },
+      "rationale": "Pure local and parameter renames normalize to identical statement sequences: distance zero, the exact tier's business. Identical sequences form one cohort and never become a near-miss candidate pair, so the tiers cannot double-report."
+    },
+    {
+      "id": "PAIR-NM-RUN-TAIL",
+      "path": "pairs.py",
+      "members": [
+        "repeated_tail_pings",
+        "repeated_tail_pings_extra"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_kind": "insert",
+        "edit_statements": 1,
+        "witness": {
+          "repeated_tail_pings": [0, 0],
+          "repeated_tail_pings_extra": [167, 167]
+        },
+        "witness_text": {
+          "repeated_tail_pings_extra": "total += 1"
+        }
+      },
+      "rationale": "The ambiguity class at the sequence tail: the insertion lands in a run of repeated identical statement fingerprints (lines 167-169), so every run position is an equally cheap witness. The canonical law fixes the leftmost run statement, line 167. The line number is the evidence: all three lines carry identical text."
+    },
+    {
+      "id": "PAIR-NM-RUN-HEAD",
+      "path": "pairs.py",
+      "members": [
+        "repeated_head_audit",
+        "repeated_head_audit_extra"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_kind": "insert",
+        "edit_statements": 1,
+        "witness": {
+          "repeated_head_audit": [0, 0],
+          "repeated_head_audit_extra": [185, 185]
+        },
+        "witness_text": {
+          "repeated_head_audit_extra": "marks += 1"
+        }
+      },
+      "rationale": "The ambiguity class at the sequence head: the run of repeated identical statement fingerprints sits at lines 185-187 and the canonical law fixes the leftmost run statement, line 185. The line number is the evidence: all three lines carry identical text."
+    }
+  ]
+}
