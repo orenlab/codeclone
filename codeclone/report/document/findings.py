@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from ...models import (
         GroupMapLike,
         NearMissPair,
+        RenamedStructureGroup,
         StructuralFindingGroup,
         SuppressedCloneGroup,
     )
@@ -56,6 +57,7 @@ from ._findings_groups import (
     _build_structural_groups,
     _build_suppressed_clone_groups,
     build_near_miss_payload,
+    build_renamed_structure_payload,
 )
 
 _SEMANTIC_AUTHORITY_METRICS_FAMILY = "semantic_authority"
@@ -271,6 +273,7 @@ def _build_findings_payload(
     design_thresholds: Mapping[str, object] | None,
     scan_root: str,
     near_miss_pairs: Sequence[NearMissPair] | None = None,
+    renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
 ) -> dict[str, object]:
     clone_functions = _build_clone_groups(
         groups=func_groups,
@@ -368,6 +371,12 @@ def _build_findings_payload(
             # baseline lane, novelty and the gates (39Y Y8).
             "near_miss": build_near_miss_payload(
                 near_miss_pairs,
+                scan_root=scan_root,
+            ),
+            # Wave C rides beside near_miss with the same confinement: an
+            # advisory channel outside every baseline lane and every gate.
+            "renamed_structure": build_renamed_structure_payload(
+                renamed_structure_groups,
                 scan_root=scan_root,
             ),
         },

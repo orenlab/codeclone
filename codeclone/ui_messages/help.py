@@ -77,6 +77,11 @@ HELP_NEAR_MISS = (
     "sequences differ by exactly one statement.\n"
     "Advisory only; never enters clone gates or the baseline."
 )
+HELP_RENAMED_STRUCTURE = (
+    "Report renamed-structure clone groups: functions identical up to a\n"
+    "bijective, consistent renaming of locals and receiver attributes.\n"
+    "Advisory only; never enters clone gates or the baseline."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\nIf FILE is omitted, uses <root>/.codeclone/cache.json."
 )

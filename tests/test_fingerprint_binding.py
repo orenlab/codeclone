@@ -22,6 +22,7 @@ import hashlib
 import importlib.util
 import json
 from collections.abc import Mapping, Sequence
+from itertools import count
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -321,7 +322,13 @@ def test_binding_context_enter_is_total_for_unregistered_nodes() -> None:
     # A nodeless draft resolves without registering any scope.
     draft = binding_mod._ScopeDraft(kind="module", node=None, parent=None)
     scopes: dict[ast.AST, object] = {}
-    binding_mod._resolve_draft(draft, parent=None, module=None, scopes=scopes)  # type: ignore[arg-type]
+    binding_mod._resolve_draft(
+        draft,
+        parent=None,
+        module=None,
+        scopes=scopes,  # type: ignore[arg-type]
+        tokens=count(),
+    )
     assert scopes == {}
 
 

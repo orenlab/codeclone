@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         GroupMapLike,
         NearMissPair,
         ObservationBundle,
+        RenamedStructureGroup,
         StructuralFindingGroup,
         Suggestion,
         SuppressedCloneGroup,
@@ -78,6 +79,7 @@ def build_report_body(
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
     baseline_trust: TrustVector | None = None,
     near_miss_pairs: Sequence[NearMissPair] | None = None,
+    renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
 ) -> dict[str, object]:
     """Build canonical report facts before evaluation and integrity sealing."""
 
@@ -125,6 +127,7 @@ def build_report_body(
         design_thresholds=design_thresholds,
         scan_root=scan_root,
         near_miss_pairs=near_miss_pairs,
+        renamed_structure_groups=renamed_structure_groups,
     )
     overview_payload, hotlists_payload = _build_derived_overview(
         findings=findings_payload,
@@ -358,6 +361,7 @@ def build_report_document(
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
     near_miss_pairs: Sequence[NearMissPair] | None = None,
+    renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
 ) -> dict[str, object]:
     body = build_report_body(
         func_groups=func_groups,
@@ -375,6 +379,7 @@ def build_report_document(
         structural_findings=structural_findings,
         baseline_trust=baseline_trust,
         near_miss_pairs=near_miss_pairs,
+        renamed_structure_groups=renamed_structure_groups,
     )
     return finalize_report_document(
         body=body,
