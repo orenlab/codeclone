@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ..baseline.trust import current_python_tag
 from ..config.memory import MemoryConfig, resolve_memory_config
+from ..paths.module_identity.projection import module_path_under_root
 from ..report.meta import current_report_timestamp_utc
 from ..utils.coerce import as_mapping
 from ..utils.mapping_paths import section
@@ -130,8 +131,16 @@ def report_digest_from_report(report_document: dict[str, object]) -> str | None:
     return str(comparison.get("value", "")).strip() or None
 
 
-def module_repo_path(module_key: str) -> str:
-    return module_key.replace(".", "/") + ".py"
+def module_repo_path(module_key: str, root_path: Path) -> str | None:
+    """Project a module subject onto its repository file, or None.
+
+    Routed through the module-identity projection owner: ``<pkg>/__init__.py``
+    when it exists, else ``<pkg>.py`` when it exists, else UNRESOLVED — a
+    package module used to fingerprint a phantom ``<pkg>.py`` and silently
+    lose its code fingerprint.
+    """
+
+    return module_path_under_root(module_key, root_path)
 
 
 def subject_path_fingerprint(root_path: Path, rel_path: str) -> str | None:
@@ -159,9 +168,10 @@ def subject_fingerprint_for_subject(
     if subject.subject_kind in ("path", "test", "doc"):
         return subject_path_fingerprint(root_path, subject.subject_key)
     if subject.subject_kind == "module":
-        return subject_path_fingerprint(
-            root_path, module_repo_path(subject.subject_key)
-        )
+        module_path = module_repo_path(subject.subject_key, root_path)
+        if module_path is None:
+            return None
+        return subject_path_fingerprint(root_path, module_path)
     return None
 
 
@@ -177,12 +187,11 @@ def code_fingerprint_for_memory_subject(
         if file_fingerprint is not None:
             return file_fingerprint
     if module_key is not None:
-        file_fingerprint = subject_path_fingerprint(
-            root_path,
-            module_repo_path(module_key),
-        )
-        if file_fingerprint is not None:
-            return file_fingerprint
+        module_path = module_repo_path(module_key, root_path)
+        if module_path is not None:
+            file_fingerprint = subject_path_fingerprint(root_path, module_path)
+            if file_fingerprint is not None:
+                return file_fingerprint
     return analysis_fingerprint
 
 

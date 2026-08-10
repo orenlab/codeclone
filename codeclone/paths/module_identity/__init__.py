@@ -14,6 +14,13 @@ from .manifest import (
     manifest_json,
 )
 from .portable import normalize_identity_path, validate_portable_paths
+from .projection import (
+    module_path_candidates,
+    module_path_from_files,
+    module_path_from_registry,
+    module_path_under_root,
+    project_module_path,
+)
 from .resolver import (
     normalize_import_mounts,
     repository_relative_path,
@@ -26,8 +33,13 @@ __all__ = [
     "build_module_identity_manifest",
     "manifest_digest",
     "manifest_json",
+    "module_path_candidates",
+    "module_path_from_files",
+    "module_path_from_registry",
+    "module_path_under_root",
     "normalize_identity_path",
     "normalize_import_mounts",
+    "project_module_path",
     "repository_relative_path",
     "resolve_source_identity",
     "validate_portable_paths",

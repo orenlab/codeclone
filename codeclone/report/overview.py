@@ -196,11 +196,15 @@ def _directory_kind_breakdown_key(group: Mapping[str, object]) -> str | None:
 
 
 def _directory_relative_path(item: Mapping[str, object]) -> str | None:
+    """The item's honest path, or None — a module name is never spelled as one.
+
+    Cycle members carry their registry-resolved ``relative_path``; a member
+    without one is genuinely unresolved and contributes no file to the
+    directory rollup (path honesty: inventing ``<module>.py`` here was the
+    phantom-path bug).
+    """
+
     relative_path = str(item.get("relative_path", "")).replace("\\", "/").strip()
-    if not relative_path:
-        module = str(item.get("module", "")).strip()
-        if module:
-            relative_path = module.replace(".", "/") + ".py"
     return relative_path or None
 
 

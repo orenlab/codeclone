@@ -759,7 +759,9 @@ def _overloaded_modules_section(ctx: ReportContext) -> str:
         score = _as_float(row.get("score"))
         relative_path = str(row.get("relative_path", "")).strip()
         if not relative_path:
-            relative_path = str(row.get("module", "")).replace(".", "/") + ".py"
+            # Path honesty: a row without a resolved path shows its module
+            # identity verbatim — a dotted name is never spelled as a file.
+            relative_path = str(row.get("module", "")).strip()
         fan_summary = f"{_as_int(row.get('fan_in'))}/{_as_int(row.get('fan_out'))}"
         rows_html.append(
             '<div class="overloaded-module-entry">'

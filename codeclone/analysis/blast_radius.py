@@ -117,8 +117,11 @@ def _path_to_module(path: str) -> str:
     return without_suffix.replace("/", ".").strip(".")
 
 
-def _module_to_candidate_path(module: str) -> str:
-    return f"{module.replace('.', '/')}.py" if module else ""
+# Path honesty: there is deliberately no module-to-candidate-path helper
+# here. A module the document's path index cannot place keeps its dotted
+# identity; ``module.replace(".", "/") + ".py"`` was the phantom-path bug
+# (a package module projected to a file that does not exist). The single
+# projection owner is ``codeclone.paths.module_identity.projection``.
 
 
 def _dedupe_sorted(values: Sequence[str] | set[str]) -> tuple[str, ...]:
@@ -165,7 +168,7 @@ def _module_path_index(report_document: Mapping[str, object]) -> dict[str, str]:
 
 
 def _module_to_output(module: str, module_paths: Mapping[str, str]) -> str:
-    return module_paths.get(module, _module_to_candidate_path(module) or module)
+    return module_paths.get(module, module)
 
 
 def _build_reverse_import_graph(
