@@ -43,9 +43,10 @@ n≈11700): 559 functions > 10 and 97 > 20. The `322` figure cited when the debt
 was opened was a preliminary raw-AST walk that counted nested local `def`s as
 units; the collector-based production figure above (321) supersedes it.
 
-The machine-readable form of this snapshot is regenerable from
-`complexity_calibration.debt_distribution_snapshot()` and the pinned
-`COMPLEXITY_REFERENCE_DISTRIBUTION` histogram; the histogram is digest-pinned by
+The machine-readable form of this snapshot is regenerable from the calibration
+procedure (`tests/_complexity_calibration.py`:
+`debt_distribution_snapshot()`) and its pinned `COMPLEXITY_REFERENCE_DISTRIBUTION`
+histogram; the histogram is digest-pinned by
 `tests/test_complexity_calibration.py`.
 
 ## Named worst offenders (decomposition entry points)

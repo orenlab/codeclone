@@ -54,8 +54,8 @@ from codeclone.contracts import (
     HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE,
     HEALTH_COUPLING_TYPICAL_WEIGHT,
 )
-from codeclone.metrics import complexity_calibration as calibration
 from codeclone.metrics.health import HealthInputs, compute_health
+from tests import _complexity_calibration as calibration
 
 # Reference distribution: CBO of every class of this repository, measured with
 # the resolution-gated edge contract that 39Y item 2 landed.

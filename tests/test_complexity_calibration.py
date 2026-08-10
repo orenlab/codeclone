@@ -26,7 +26,7 @@ from codeclone.contracts import (
     HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE,
     HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE,
 )
-from codeclone.metrics import complexity_calibration as calibration
+from tests import _complexity_calibration as calibration
 
 # Pinned digest of the reference distribution captured at the Wave D landing.
 # A silent edit to the histogram, the population or the revision moves this.

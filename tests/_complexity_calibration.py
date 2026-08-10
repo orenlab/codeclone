@@ -11,6 +11,13 @@ requires: the health complexity tail references are a *generated calibration
 artifact*, computed from a pinned reference distribution — never hand-chosen
 numbers tuned until self-health looks nice.
 
+It lives in the test tree, beside the pins that consume it: the shipping
+package needs only the *materialized* permilles (in ``codeclone.contracts``,
+read by ``codeclone.metrics.health``), so a package module carrying this
+procedure would be production-dead by construction. Keeping the derivation
+here — as the retired Y9-CFG calibration did — is the source of truth without
+dead runtime code.
+
 Measurement contract (fix every degree of freedom so the same input yields the
 same calibration and the same digest):
 
@@ -54,7 +61,7 @@ import hashlib
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
 
-from ..contracts import (
+from codeclone.contracts import (
     COMPLEXITY_ALGORITHM_REVISION,
     COMPLEXITY_RISK_LOW_MAX,
     COMPLEXITY_RISK_MEDIUM_MAX,
