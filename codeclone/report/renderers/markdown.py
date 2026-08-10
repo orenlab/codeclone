@@ -369,6 +369,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                         "cached",
                         "skipped",
                         "source_io_skipped",
+                        "unsupported_construct_skipped",
                     )
                 ),
             ),

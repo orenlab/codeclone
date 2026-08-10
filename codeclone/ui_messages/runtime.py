@@ -25,6 +25,9 @@ WARN_PARALLEL_FALLBACK = (
     "falling back to sequential: {error}[/warning]"
 )
 WARN_FAILED_FILES_HEADER = "\n[warning]{count} files failed to process:[/warning]"
+WARN_UNSUPPORTED_CONSTRUCT_SUMMARY = (
+    "[warning]{count} files not analyzed: unsupported syntax ({constructs})[/warning]"
+)
 WARN_CACHE_SAVE_FAILED = "[warning]Failed to save cache: {error}[/warning]"
 WARN_HTML_REPORT_OPEN_FAILED = (
     "[warning]Failed to open HTML report in browser: {path} ({error}).[/warning]"

@@ -416,3 +416,96 @@ def test_interpolation_source_text_is_masked_in_template_strings() -> None:
     spaced = _source_wire('x = t"{ name + tail }"')
     tight = _source_wire('x = t"{name+tail}"')
     assert spaced == tight
+
+
+def _synthetic_lazy_import_wire(source: str, is_lazy: int) -> str:
+    """Wire of ``source`` with the PEP 810 field present, on any interpreter.
+
+    Python 3.15 parses ``is_lazy`` onto every ``Import``/``ImportFrom`` and
+    extends the class field tuple. Older interpreters never produce the field,
+    so the test constructs the same shape: the value in the instance dict and
+    an instance-level ``_fields`` shadow that triggers the wire's rescan path.
+    """
+
+    tree = ast.parse(source)
+    statement = tree.body[0]
+    assert isinstance(statement, (ast.Import, ast.ImportFrom))
+    object.__setattr__(statement, "is_lazy", is_lazy)
+    if "is_lazy" not in statement._fields:
+        object.__setattr__(statement, "_fields", (*statement._fields, "is_lazy"))
+    return emit_wire_seq(tree.body, _DEFAULT_CONFIG, bindings_for_tree(tree))
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["import json", "from json import dumps"],
+    ids=["import", "from_import"],
+)
+def test_eager_import_with_is_lazy_zero_shares_the_wire(source: str) -> None:
+    """PEP 810 ``is_lazy=0`` is the eager default and must not move the wire."""
+
+    baseline = _source_wire(source)
+    assert "is_lazy" not in baseline
+    assert _synthetic_lazy_import_wire(source, 0) == baseline
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["import json", "from json import dumps"],
+    ids=["import", "from_import"],
+)
+def test_lazy_import_emits_an_explicit_marker(source: str) -> None:
+    """PEP 810 ``is_lazy=1`` is new lexicon: emitted, and distinct from eager."""
+
+    lazy = _synthetic_lazy_import_wire(source, 1)
+    assert "is_lazy=1" in lazy
+    assert lazy != _source_wire(source)
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 15), reason="PEP 810 lazy imports require Python 3.15"
+)
+def test_lazy_import_live_parse_matches_the_synthetic_wire() -> None:
+    assert _source_wire("lazy import json") == _synthetic_lazy_import_wire(
+        "import json", 1
+    )
+    assert _source_wire("lazy from json import dumps") == _synthetic_lazy_import_wire(
+        "from json import dumps", 1
+    )
+
+
+def _dict_unpacking_comprehension_wire() -> str:
+    """Wire of the PEP 798 ``{**mapping for mapping in mappings}`` shape.
+
+    Python 3.15 parses it as ``DictComp`` with ``value=None`` (mirroring the
+    dict literal ``{**mapping}``, whose unpacking marker is a ``None`` key).
+    Older interpreters cannot parse the source, so the shape is constructed.
+    """
+
+    tree = ast.parse("{mapping: mapping for mapping in mappings}")
+    statement = tree.body[0]
+    assert isinstance(statement, ast.Expr)
+    comprehension = statement.value
+    assert isinstance(comprehension, ast.DictComp)
+    object.__setattr__(comprehension, "value", None)
+    return emit_wire_seq(tree.body, _DEFAULT_CONFIG, bindings_for_tree(tree))
+
+
+def test_dict_unpacking_comprehension_value_none_binds_and_emits() -> None:
+    """The PEP 798 ``value=None`` shape must emit a wire, never crash raw."""
+
+    wire = _dict_unpacking_comprehension_wire()
+    assert wire.startswith("Expr(value=DictComp(")
+    assert "value=None" in wire
+    assert wire != _source_wire("{mapping: mapping for mapping in mappings}")
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 15),
+    reason="PEP 798 dict-unpacking comprehensions require Python 3.15",
+)
+def test_dict_unpacking_comprehension_live_parse_matches_the_synthetic_wire() -> None:
+    assert (
+        _source_wire("{**mapping for mapping in mappings}")
+        == _dict_unpacking_comprehension_wire()
+    )
