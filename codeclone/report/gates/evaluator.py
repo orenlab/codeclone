@@ -69,6 +69,10 @@ class GateState:
     cohesion_max: int = 0
     dependency_cycles: int = 0
     dead_high_confidence: int = 0
+    #: Proven-dead statements inside live symbols. A second lane of the same
+    #: family, kept separate because the two count different objects, and read
+    #: by the same predicate because they answer the same question.
+    dead_unreachable_statements: int = 0
     unresolved_external_override: int = 0
     health_score: int = 0
     typing_param_permille: int = 0
@@ -266,6 +270,10 @@ def gate_state_from_project_metrics(
             for item in project_metrics.dead_code
             if str(getattr(item, "confidence", "")).strip().lower() == "high"
         ),
+        # The statement lane rides the same object and is confidence-free by
+        # contract: a region either cannot be entered or is not reported, so
+        # every item here is the high-confidence kind the flag asks about.
+        dead_unreachable_statements=len(tuple(project_metrics.unreachable_statements)),
         # The CLI gate path reads project metrics, not the report document, so
         # without this the opt-in --fail-on-unresolved-dead-code flag could
         # never fire outside the MCP surface.
@@ -432,9 +440,15 @@ def _dead_code_high_confidence_reason(
     state: GateState,
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
+    # Both proven lanes, one predicate. An unreferenced symbol and a statement
+    # that cannot run are both high-confidence dead code in the same family and
+    # both are already published as findings, so a gate reading only the first
+    # passed builds that carried the second. The abstention lane stays out: it
+    # is neither dead nor live and owns a separate opt-in flag.
+    detected = state.dead_high_confidence + state.dead_unreachable_statements
     return _reason_if(
-        config.fail_dead_code and state.dead_high_confidence > 0,
-        f"{gate_msgs.GATE_REASON_DEAD_CODE_DETECTED}{state.dead_high_confidence}{gate_msgs.GATE_SUFFIX_ITEMS}.",
+        config.fail_dead_code and detected > 0,
+        f"{gate_msgs.GATE_REASON_DEAD_CODE_DETECTED}{detected}{gate_msgs.GATE_SUFFIX_ITEMS}.",
     )
 
 
@@ -797,9 +811,8 @@ def _gate_state_from_report_document(
     dependencies_summary = _as_mapping(
         _as_mapping(families.get("dependencies")).get("summary")
     )
-    dead_code_summary = _as_mapping(
-        _as_mapping(families.get("dead_code")).get("summary")
-    )
+    dead_code_family = _as_mapping(families.get("dead_code"))
+    dead_code_summary = _as_mapping(dead_code_family.get("summary"))
     health_summary = _as_mapping(_as_mapping(families.get("health")).get("summary"))
     coverage_adoption_summary = _as_mapping(
         _as_mapping(families.get("coverage_adoption")).get("summary")
@@ -831,6 +844,14 @@ def _gate_state_from_report_document(
         cohesion_max=_as_int(cohesion_summary.get("max"), 0),
         dependency_cycles=_as_int(dependencies_summary.get("cycles"), 0),
         dead_high_confidence=_as_int(dead_code_summary.get("high_confidence"), 0),
+        # Counted from the list the document already carries rather than from
+        # a summary field, because that list is the fact: it rode this very
+        # payload to the findings builder, which published ten findings while
+        # the summary beside it — the only thing this gate used to read — said
+        # zero. No new published counter, just the evidence consulted.
+        dead_unreachable_statements=len(
+            _as_sequence(dead_code_family.get("unreachable_statements"))
+        ),
         unresolved_external_override=_as_int(
             dead_code_summary.get("unresolved_external_override"), 0
         ),
