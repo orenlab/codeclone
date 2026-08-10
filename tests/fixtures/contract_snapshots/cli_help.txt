@@ -8,9 +8,10 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
                  [--blast-radius FILE [FILE ...]] [--patch-verify]
                  [--strictness LEVEL] [--session-stats] [--audit]
-                 [--audit-json] [--near-miss] [--cache-path [FILE]]
-                 [--cache-dir [FILE]] [--max-cache-size-mb MB]
-                 [--baseline [FILE]] [--max-baseline-size-mb MB]
+                 [--audit-json] [--near-miss] [--renamed-structure]
+                 [--cache-path [FILE]] [--cache-dir [FILE]]
+                 [--max-cache-size-mb MB] [--baseline [FILE]]
+                 [--max-baseline-size-mb MB]
                  [--update-baseline | --no-update-baseline]
                  [--semantic-authority | --no-semantic-authority]
                  [--ci | --no-ci] [--api-surface | --no-api-surface]
@@ -80,6 +81,9 @@ Analysis:
                         Implies --audit. Useful for cross-repository comparison.
   --near-miss           Report near-miss clone pairs: functions whose normalized statement
                         sequences differ by exactly one statement.
+                        Advisory only; never enters clone gates or the baseline.
+  --renamed-structure   Report renamed-structure clone groups: functions identical up to a
+                        bijective, consistent renaming of locals and receiver attributes.
                         Advisory only; never enters clone gates or the baseline.
   --cache-path [FILE]   Path to the cache file.
                         If FILE is omitted, uses <root>/.codeclone/cache.json.

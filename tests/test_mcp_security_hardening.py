@@ -15,6 +15,7 @@ from codeclone.surfaces.mcp._session_runtime import (
     _external_artifact_roots,
     resolve_artifact_path,
 )
+from codeclone.surfaces.mcp._session_shared import MCPRunRootMismatchError
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
@@ -56,7 +57,13 @@ def test_mcp_granular_run_id_rejects_mismatched_root(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     service._runs.register(_run_record(first_root))
 
-    with pytest.raises(MCPServiceContractError, match="does not belong"):
+    # Root-bound resolution refuses before any record leaves the store: the
+    # typed root mismatch (with its analyze-here remedy) supersedes the old
+    # post-resolution "does not belong" contract error.
+    with pytest.raises(
+        MCPRunRootMismatchError,
+        match="belongs to a different repository root",
+    ):
         service.check_clones(
             run_id="security-run-1234",
             root=str(second_root),

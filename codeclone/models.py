@@ -1010,6 +1010,22 @@ class FileStat(TypedDict):
     size: int
 
 
+@dataclass(frozen=True, slots=True)
+class UnsupportedConstructSkip:
+    """Witness for one file skipped because the wire refused a construct.
+
+    ``construct`` is the wire's refusal message and names the AST node kind
+    (for example ``unsupported fields on Import: is_lazy``), so a run's
+    inventory can attribute the loss without diffing file lists. Introduced by
+    the Python 3.15 viability probe (G1b): before this witness, a file whose
+    syntax outgrew the wire whitelist was skipped with exit 0 and only an
+    untyped "unexpected error" line to show for it.
+    """
+
+    filepath: str
+    construct: str
+
+
 class SourceStatsDict(TypedDict):
     lines: int
     functions: int
@@ -1208,6 +1224,8 @@ class CacheNeutralUnit:
     try_finally_profile: str
     side_effect_order_profile: str
     statement_sequence: tuple[NearMissElement, ...] = ()
+    renamed_fingerprint: str = ""
+    renamed_statement_sequence: tuple[NearMissElement, ...] = ()
     unreachable_statements: tuple[UnreachableStatementItem, ...] = ()
 
 
@@ -1569,6 +1587,16 @@ class Unit:
     # Empty for units the clone floors reject: the near-miss tier is a clone
     # lane, so ineligible units neither carry nor cache a sequence.
     statement_sequence: tuple[NearMissElement, ...] = ()
+    # The renamed_structure tier's ordinal-canonical digest (Wave C). Same
+    # population rule as the sequence above: empty for units the clone floors
+    # reject. Its own domain, never comparable with ``fingerprint``.
+    renamed_fingerprint: str = ""
+    # The CxB composition: ``statement_sequence`` re-tokenized through the
+    # renamed_structure ordinal canonicalization, on the same population
+    # rule. Tokens are canonical, spans are real source lines — evidence
+    # shows the user their actual code. Read only by the near-miss tier's
+    # renamed token domain.
+    renamed_statement_sequence: tuple[NearMissElement, ...] = ()
     # Populated for EVERY unit, eligible or not: reachability is a fact about
     # the function, and letting a clone floor decide what it sees would repeat
     # the eligibility leak Y5 removed.
@@ -1613,6 +1641,67 @@ class NearMissPair:
     members: tuple[NearMissMember, NearMissMember]
     edit_statements: int
     edit_kind: Literal["insert", "delete", "replace"]
+    # Which token space certified the distance: ``y8`` is the normalized
+    # statement token space the tier has always used; ``renamed`` re-tokenizes
+    # the same statements through the renamed_structure ordinal
+    # canonicalization. A pair confirmable in both domains carries ``y8`` —
+    # the declared dedup precedence — so every pre-sub-mode fact is stable.
+    token_domain: Literal["y8", "renamed"] = "y8"
+
+
+# What one name denotes in one scope — the six-answer contract documented in
+# ``analysis.binding``, whose classes predate the model store and stay put
+# under the shrink-only boundary ratchet. The role literal lives here so the
+# store's own models can speak it without importing the scope graph.
+SymbolRole = Literal["self", "cls", "local", "import", "global_literal"]
+
+
+@dataclass(frozen=True, slots=True)
+class BindingSite:
+    """One resolved name together with the identity of the scope binding it.
+
+    A flattened projection of ``analysis.binding``'s resolution answer:
+    ``role`` and ``identity`` restate what the name denotes, and
+    ``scope_token`` is the owning scope's deterministic per-module number
+    (depth-first resolution order). Two bindings that share a name in two
+    different scopes carry two tokens, which is exactly the fact ordinal
+    canonicalization needs to scope-qualify binding identity.
+    """
+
+    role: SymbolRole
+    identity: str
+    scope_token: int
+
+
+@dataclass(frozen=True, slots=True)
+class RenamedStructureMember:
+    """One member of a renamed-structure group.
+
+    ``fingerprint`` is the member's strict-exact identity, carried so a reader
+    can see how the group splits under fp3 — the tier itself never compares
+    the two domains.
+    """
+
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class RenamedStructureGroup:
+    """Units equal in the renamed-structure digest domain (Wave C).
+
+    A group, not a pair: digest equality is transitive, so the tier's natural
+    shape is the equivalence class. Groups whose members all share one
+    strict-exact fingerprint are never constructed — those are the exact
+    tier's business.
+    """
+
+    group_key: str
+    members: tuple[RenamedStructureMember, ...]
+    distinct_exact_fingerprints: int
 
 
 RelationshipKind = Literal["call", "reference"]
@@ -3439,6 +3528,8 @@ class FunctionGroupItem(FunctionGroupItemBase, total=False):
     try_finally_profile: str
     side_effect_order_profile: str
     statement_sequence: tuple[NearMissElement, ...]
+    renamed_fingerprint: str
+    renamed_statement_sequence: tuple[NearMissElement, ...]
     unreachable_statements: tuple[UnreachableStatementItem, ...]
 
 

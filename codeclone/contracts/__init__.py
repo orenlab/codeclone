@@ -116,10 +116,26 @@ NEAR_MISS_MAX_EDIT_STATEMENTS: Final = 1
 # replace each cost exactly one edit; equal costs zero) together with the
 # canonical DP-backtrace witness law — one documented total order over
 # equal-cost forks, so which statement is reported as the edit is as
-# deterministic as the distance itself. Bumping this never touches the exact
-# lane: BASELINE_FINGERPRINT_VERSION and the statement-token wire are
-# unchanged, and the tier still reaches no baseline lane and no gate.
-NEAR_MISS_ALGORITHM_REVISION: Final = "2"
+# deterministic as the distance itself. "3" adds the declared renamed token
+# domain (the CxB composition): the same Levenshtein verdict and witness law
+# run a second time over statement tokens canonicalized by the
+# renamed_structure ordinal rules, each domain on its own deletion index,
+# with a pair confirmable in both domains reported once in the y8 domain.
+# Bumping this never touches the exact lane: BASELINE_FINGERPRINT_VERSION
+# and the statement-token wire are unchanged, and the tier still reaches no
+# baseline lane and no gate.
+NEAR_MISS_ALGORITHM_REVISION: Final = "3"
+# The renamed-structure lane's own algorithm identity (Wave C). Revision "1"
+# is ordinal canonicalization: LOCAL and ATTRIBUTE ordinals in separate
+# numbering spaces, binding identity scope-qualified before assignment,
+# first-occurrence ordering with parameters seeded by declaration position,
+# imported identities and unprovable names rigid, terminal callees literal
+# across the whole unit, and the equality pattern preserved. The tier is an
+# exact match in its own digest domain — O(n), no pairwise matcher, no
+# similarity score. Bumping this never touches the exact lane:
+# BASELINE_FINGERPRINT_VERSION is unchanged, and the tier reaches no baseline
+# lane and no gate.
+RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 
 # 3.2 adds the two rule-3 fact families: per-class base resolution and
 # per-method decorator evidence. Both gate the tri-state liveness verdict,
@@ -129,12 +145,25 @@ NEAR_MISS_ALGORITHM_REVISION: Final = "2"
 # straight off the wire, so a sequence that did not ride the cache would make a
 # warm run report zero near-miss pairs. Everything this phase sanctions rides
 # this one bump instead of adding a second.
-# 3.3 (Wave D) widens the positional unit row to 18 columns: index 7 becomes
-# the public source-decision ``cyclomatic_complexity`` and index 17 carries
-# the diagnostic ``cfg_cyclomatic_complexity``. Cached units also hold values
-# computed by the pre-split algorithm, so the bump is what forces every unit
-# through the new counter instead of serving stale semantics off the wire.
-CACHE_VERSION: Final = "3.3"
+#
+# 3.3 carries the per-unit renamed-structure digest (Wave C) on the same
+# reasoning: the digest is computed from the AST, a warm run never re-parses,
+# and a unit served off a wire without it would make a warm run silently
+# report zero renamed-structure groups.
+#
+# 3.4 carries the per-unit renamed-canonical statement sequence (the CxB
+# composition), closing the same trap one lane over: the near-miss renamed
+# token domain reads this sequence off the unit fact, so a warm run served
+# off a 3.3 wire would silently report only y8-domain pairs. Its own key,
+# absence rejects the entry, rejection just re-analyses the file.
+#
+# 3.5 (Wave D) widens the positional unit row by one column: index 7 stays the
+# public ``cyclomatic_complexity`` (now the source-decision count) and a new
+# trailing column carries the diagnostic ``cfg_cyclomatic_complexity``. Cached
+# units also hold complexity computed by the pre-split CFG algorithm, so the
+# bump is what forces every unit through the new counter instead of serving
+# stale semantics off the wire.
+CACHE_VERSION: Final = "3.5"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
@@ -428,6 +457,7 @@ __all__ = [
     "PATCH_TRAIL_SCHEMA_VERSION",
     "PLATFORM_OBSERVABILITY_SCHEMA_VERSION",
     "PORTABLE_PATH_PROFILE_VERSION",
+    "RENAMED_STRUCTURE_ALGORITHM_REVISION",
     "REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN",
     "REPORT_COMPARISON_DIGEST_DOMAIN",
     "REPORT_ENVELOPE_DIGEST_DOMAIN",

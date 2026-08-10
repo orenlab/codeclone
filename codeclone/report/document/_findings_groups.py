@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal
 from ...contracts import (
     NEAR_MISS_ALGORITHM_REVISION,
     NEAR_MISS_MAX_EDIT_STATEMENTS,
+    RENAMED_STRUCTURE_ALGORITHM_REVISION,
     STATEMENT_REACHABILITY_POLICY_VERSION,
 )
 from ...domain.findings import (
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
         GroupItemLike,
         GroupMapLike,
         NearMissPair,
+        RenamedStructureGroup,
         StructuralFindingGroup,
         SuppressedCloneGroup,
     )
@@ -493,7 +495,10 @@ def build_near_miss_payload(
     it. ``gate_relevant`` is false because these pairs never become clone-lane
     keys, and ``novelty`` is ``untracked`` because a fact that reaches no
     baseline lane can be neither ``new`` nor ``known`` — reporting either would
-    be a claim the baseline cannot support (39Y Y8).
+    be a claim the baseline cannot support (39Y Y8). Every pair declares its
+    ``token_domain`` — which token space certified the distance — because the
+    container states what it holds: a reader must never infer the domain from
+    list position or absence.
     """
 
     rendered = [
@@ -501,6 +506,7 @@ def build_near_miss_payload(
             "pair_key": pair.pair_key,
             "edit_statements": pair.edit_statements,
             "edit_kind": pair.edit_kind,
+            "token_domain": pair.token_domain,
             "members": [
                 {
                     "relative_path": _contract_report_location_path(
@@ -526,6 +532,52 @@ def build_near_miss_payload(
         "novelty": "untracked",
         "count": len(rendered),
         "pairs": rendered,
+    }
+
+
+def build_renamed_structure_payload(
+    groups: Sequence[RenamedStructureGroup] | None,
+    *,
+    scan_root: str,
+) -> dict[str, object]:
+    """Render the renamed-structure channel: groups, membership, honest standing.
+
+    Same standing as the near-miss channel one lane over: ``gate_relevant`` is
+    false because these groups never become clone-lane keys, and ``novelty``
+    is ``untracked`` because a fact that reaches no baseline lane can be
+    neither ``new`` nor ``known``. Each member carries its strict-exact
+    fingerprint so a reader can see how the group splits under fp3; there is
+    no similarity score of any kind.
+    """
+
+    rendered = [
+        {
+            "group_key": group.group_key,
+            "member_count": len(group.members),
+            "distinct_exact_fingerprints": group.distinct_exact_fingerprints,
+            "members": [
+                {
+                    "relative_path": _contract_report_location_path(
+                        member.filepath,
+                        scan_root=scan_root,
+                    ),
+                    "qualname": member.qualname,
+                    "start_line": member.start_line,
+                    "end_line": member.end_line,
+                    "fingerprint": member.fingerprint,
+                }
+                for member in group.members
+            ],
+        }
+        for group in sorted(groups or (), key=lambda group: group.group_key)
+    ]
+    return {
+        "tier": "renamed_structure",
+        "algorithm_revision": RENAMED_STRUCTURE_ALGORITHM_REVISION,
+        "gate_relevant": False,
+        "novelty": "untracked",
+        "count": len(rendered),
+        "groups": rendered,
     }
 
 

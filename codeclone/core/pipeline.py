@@ -21,6 +21,7 @@ from ..findings.clones.grouping import (
     clone_eligible_units,
 )
 from ..findings.clones.near_miss import build_near_miss_pairs
+from ..findings.clones.renamed_structure import build_renamed_structure_groups
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
@@ -248,6 +249,15 @@ def analyze(
     near_miss_pairs = (
         build_near_miss_pairs(clone_lane_units)
         if bool(getattr(boot.args, "near_miss", False))
+        else ()
+    )
+    # Wave C mirrors that confinement exactly: renamed-structure groups keep
+    # their own channel beside the clone lane, and the opt-in below decides
+    # whether the channel is produced at all. The flag has exactly one owner:
+    # the ``renamed_structure`` OptionSpec in ``config/spec.py``.
+    renamed_structure_groups = (
+        build_renamed_structure_groups(clone_lane_units)
+        if bool(getattr(boot.args, "renamed_structure", False))
         else ()
     )
     func_split = split_clone_groups_for_golden_fixtures(
@@ -563,4 +573,5 @@ def analyze(
         suppressed_dead_code_items=len(suppressed_dead_items),
         structural_findings=combined_structural_findings,
         near_miss_pairs=near_miss_pairs,
+        renamed_structure_groups=renamed_structure_groups,
     )

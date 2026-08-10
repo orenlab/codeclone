@@ -274,6 +274,13 @@ def build_report_body_for_analysis(
             "cached": discovery.cache_hits,
             "skipped": processing.files_skipped,
             "source_io_skipped": len(processing.source_read_failures),
+            "unsupported_construct_skipped": len(
+                processing.unsupported_construct_skips
+            ),
+            "unsupported_constructs": [
+                {"path": skip.filepath, "construct": skip.construct}
+                for skip in processing.unsupported_construct_skips
+            ],
         },
         "code": {
             "parsed_lines": processing.analyzed_lines + discovery.cached_lines,
@@ -308,6 +315,7 @@ def build_report_body_for_analysis(
             ),
             baseline_trust=baseline_trust,
             near_miss_pairs=analysis.near_miss_pairs,
+            renamed_structure_groups=analysis.renamed_structure_groups,
         )
 
 

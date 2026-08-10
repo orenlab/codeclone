@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "domain": "renamed_structure",
+  "golden": true,
+  "cases": [
+    {
+      "id": "RS-PAIR-T2-01",
+      "path": "pairs.py",
+      "members": ["total_customer_value", "total_vendor_value"],
+      "expected": {
+        "tier": "renamed_structure",
+        "clause": "consistent local and receiver-attribute renames, identical structure"
+      }
+    },
+    {
+      "id": "RS-PAIR-T2-02",
+      "path": "pairs.py",
+      "members": ["RollingTotal.add_sample", "RollingGain.add_reading"],
+      "expected": {
+        "tier": "renamed_structure",
+        "clause": "self-attribute renames are receiver-attribute renames"
+      }
+    },
+    {
+      "id": "RS-PAIR-CHAIN-01",
+      "path": "pairs.py",
+      "members": ["relay_through_channel", "relay_through_pipe"],
+      "expected": {
+        "tier": "renamed_structure",
+        "clause": "intermediate receiver attributes rename; terminal callee stays literal"
+      }
+    },
+    {
+      "id": "RS-NEG-INCONSISTENT",
+      "path": "pairs.py",
+      "members": ["blended_rate_uniform", "blended_rate_shifted"],
+      "expected": {
+        "tier": "unmatched",
+        "clause": "inconsistent mapping: rate maps to fee in two positions and tax in one"
+      }
+    },
+    {
+      "id": "RS-NEG-NONBIJECTIVE",
+      "path": "pairs.py",
+      "members": ["account_spread", "account_drift"],
+      "expected": {
+        "tier": "unmatched",
+        "clause": "non-bijective collapse: debit and credit both onto balance"
+      }
+    },
+    {
+      "id": "RS-NEG-IMPORT-RENAMED",
+      "path": "pairs.py",
+      "members": ["floor_average", "trunc_average"],
+      "expected": {
+        "tier": "unmatched",
+        "clause": "imported identity renamed: math.floor is rigid"
+      }
+    },
+    {
+      "id": "RS-NEG-CALLEE-RENAMED",
+      "path": "pairs.py",
+      "members": ["fetch_all", "push_all"],
+      "expected": {
+        "tier": "unmatched",
+        "clause": "terminal callee renamed: get is not a renaming of post"
+      }
+    },
+    {
+      "id": "RS-NEG-EQUALITY-PATTERN",
+      "path": "pairs.py",
+      "members": ["paired_weight", "paired_load"],
+      "expected": {
+        "tier": "unmatched",
+        "clause": "equality pattern break: a.x + b.x is not a.x + b.y"
+      }
+    },
+    {
+      "id": "RS-NEG-CHAIN-LENGTH",
+      "path": "pairs.py",
+      "members": ["relay_through_channel", "relay_direct"],
+      "expected": {
+        "tier": "unmatched",
+        "clause": "attribute-chain length is structural and preserved"
+      }
+    },
+    {
+      "id": "RS-EXACT-01",
+      "path": "pairs.py",
+      "members": ["echo_report", "echo_report_twin"],
+      "expected": {
+        "tier": "exact",
+        "clause": "strict-exact twins stay the exact tier's business"
+      }
+    },
+    {
+      "id": "RS-OUT-INT-01",
+      "path": "pairs.py",
+      "members": ["snapshot_customer", "snapshot_supplier"],
+      "expected": {
+        "tier": "eligibility_out",
+        "clause": "single-statement dict-return pair never clears the min_stmt floor",
+        "cross_reference": "wave-E-eligibility"
+      }
+    }
+  ]
+}

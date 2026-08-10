@@ -1471,3 +1471,32 @@ def test_tri_state_liveness_is_stable_and_the_bypass_stays_narrow() -> None:
     # LocalOnly.handle is neither dead nor abstaining: the shared bare name
     # still revives it, because the bypass touches only opaque-base methods.
     assert dead == ()
+
+
+def test_builtin_name_registry_is_interpreter_pinned() -> None:
+    """CBO's builtin exclusion is a pinned fact source, not ``dir(builtins)``.
+
+    The same repository must yield the same coupling facts on every supported
+    interpreter (G5, Python 3.15 probe). The registry therefore pins the union
+    of builtin names across CPython 3.10-3.15; names that become builtins only
+    on newer interpreters are excluded everywhere, not just where they exist.
+    """
+
+    import builtins
+
+    from codeclone.metrics.coupling import _BUILTIN_NAMES
+
+    # 3.15-only builtins are excluded on every interpreter.
+    assert {
+        "ImportCycleError",
+        "__lazy_import__",
+        "frozendict",
+        "sentinel",
+    } <= _BUILTIN_NAMES
+    # 3.11+/3.13+ additions stay covered on the 3.10 leg.
+    assert {"BaseExceptionGroup", "ExceptionGroup", "PythonFinalizationError"} <= (
+        _BUILTIN_NAMES
+    )
+    # Bump tripwire: a running interpreter whose builtins outgrow the pinned
+    # registry means a new CPython joined the matrix without a registry review.
+    assert set(dir(builtins)) <= _BUILTIN_NAMES

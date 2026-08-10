@@ -1464,6 +1464,7 @@ def test_run_analysis_stages_prints_source_read_failures_when_failed_files_are_e
         lambda **_kwargs: SimpleNamespace(
             failed_files=(),
             source_read_failures=("pkg/mod.py: unreadable",),
+            unsupported_construct_skips=(),
         ),
     )
     monkeypatch.setattr(cli, "analyze", lambda **_kwargs: SimpleNamespace())

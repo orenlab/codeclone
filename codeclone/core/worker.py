@@ -16,6 +16,7 @@ from ..analysis.phase_ledger import (
     PhaseLedger,
 )
 from ..analysis.units import extract_units_and_stats_from_source
+from ..analysis.wire import WireUnsupportedNode
 from ..cache.reuse import source_content_digest
 from ..contracts import (
     DEFAULT_BLOCK_MIN_LOC,
@@ -30,7 +31,11 @@ from ..models import (
     ResolvedSourceIdentity,
 )
 from ..scanner import resolved_path_under_root
-from ._types import MAX_FILE_SIZE, FileProcessResult
+from ._types import (
+    MAX_FILE_SIZE,
+    UNSUPPORTED_CONSTRUCT_ERROR_PREFIX,
+    FileProcessResult,
+)
 
 _WORKER_MODULE_REGISTRY: ModuleRegistryHandle | None = None
 
@@ -134,8 +139,8 @@ def process_file(
             root=root,
             resolved_path=resolved,
         )
-        units, blocks, segments, source_stats, file_metrics, structural_findings = (
-            extract_units_and_stats_from_source(
+        try:
+            extracted = extract_units_and_stats_from_source(
                 source=source,
                 filepath=filepath,
                 identity=identity,
@@ -153,6 +158,20 @@ def process_file(
                 phase_ledger=phase_ledger,
                 neutral_reuse=neutral_reuse,
             )
+        except WireUnsupportedNode as exc:
+            # A construct outside the reviewed wire whitelist — typically
+            # syntax newer than this engine (PEP 810 ``is_lazy`` was the class
+            # incident). A typed outcome keeps the loss visible: counted as
+            # skipped, attributed in the report, and summarized on the console.
+            return FileProcessResult(
+                filepath=filepath,
+                success=False,
+                source_content_digest=parsed_source_digest,
+                error=f"{UNSUPPORTED_CONSTRUCT_ERROR_PREFIX}{exc}",
+                error_kind="unsupported_construct",
+            )
+        units, blocks, segments, source_stats, file_metrics, structural_findings = (
+            extracted
         )
         phase_snapshot = None
         if phase_ledger.active:

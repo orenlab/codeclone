@@ -29,14 +29,38 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Added
 
+- **Analysis no longer silently skips files with unsupported syntax.** A file whose parsed syntax the canonical wire
+  refuses (for example, syntax newer than the engine) is now a typed, attributed outcome instead of an untyped
+  "unexpected error": the console summarizes «N files not analyzed: unsupported syntax (…)» naming the construct, the
+  run summary counts the file under `skipped`, and the JSON report carries a per-file witness
+  (`inventory.files.unsupported_constructs`, with `unsupported_construct_skipped` also shown by the text and Markdown
+  renderers). Exit-code semantics are unchanged.
+- **Forward-compatible parsing of Python 3.15 lazy imports (PEP 810).** The wire contract understands the new
+  `is_lazy` field on `import` and `from … import`: the eager default is normalized away, so wires and fingerprints
+  stay byte-identical with every earlier interpreter, while `lazy import` emits an explicit marker and fingerprints
+  distinctly. Python 3.15's dict-unpacking comprehensions `{**d for d in ds}` (PEP 798) are also represented instead
+  of crashing the analyzer. This is forward-compatible parsing only; 2.1.0a2 does not claim Python 3.15 support.
+- Coupling facts are now interpreter-independent: the builtin-name exclusion used by CBO is a pinned registry covering
+  CPython 3.10–3.15 rather than `dir(builtins)` of the running interpreter, so the same repository yields the same
+  coupling facts on every supported Python.
 - **Semantic authority governance** — declare reviewed contracts in `[[tool.codeclone.authority]]`, gate violations
   with `--fail-on-authority-violation`, and triage ranked candidates in a new report tab or through `check_authority`.
 - `--near-miss` reports function pairs whose normalized statement sequences differ by exactly one statement. Advisory
   only; it never enters clone gates or the baseline.
 - Near-miss clone detection now counts statement edits accurately — one true insertion, deletion, or replacement each
   cost exactly one edit (sequence edit distance), the reported differing statement is chosen by one documented
-  deterministic law even when identical statements repeat, and the near-miss algorithm revision (`2`) is published in
+  deterministic law even when identical statements repeat, and the near-miss algorithm revision (`3`) is published in
   the report payload.
+- `--renamed-structure` reports a new advisory clone tier: functions identical up to a bijective, consistent renaming
+  of local bindings and receiver attributes, detected as an exact match in the tier's own canonical digest domain — no
+  similarity score. Imported identities, proven globals, terminal callees, and attribute-chain structure stay rigid.
+  Advisory only; it never enters clone gates or the baseline, and its algorithm revision (`1`) is published in the
+  report payload.
+- Near-miss clones are now also detected across consistently renamed structure: the same one-statement budget and
+  witness law run a second time over statement tokens canonicalized by the renamed-structure rules, so a copy that
+  renames locals and receiver attributes consistently and adds one true statement is found. Each reported pair names
+  the token space that certified it (`token_domain: "y8" | "renamed"`), a pair confirmable in both spaces is reported
+  once as `y8`, and everything the tier reported before is unchanged. Advisory confinement is inherited unchanged.
 - Dead-code analysis reports unreachable statements, and `--fail-on-unresolved-dead-code` gates on public methods
   inheriting from a base outside the analysis root — abstentions that are never counted as dead code.
 - Files are classified as production, tests, fixtures, or other, so golden fixtures are suppressed on a named channel
@@ -97,6 +121,8 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- Controlled-change verification resolves runs at the intent's own workspace, so parallel same-commit worktrees no
+  longer fail `start_controlled_change` or `finish_controlled_change` with a multi-root run-id ambiguity.
 - The report file registry is deduplicated by path, so it no longer lists more files than the run found.
 - The review queue no longer reports a finding as known without baseline evidence.
 - The error for a missing `baseline_scope_id` names the configuration table correctly.

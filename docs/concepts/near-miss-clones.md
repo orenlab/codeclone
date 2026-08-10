@@ -25,6 +25,27 @@ tunable floor:
 - a divergence landing on a control-flow anchor rather than a statement is not a
   statement edit, so it does not qualify.
 
+## Token domains
+
+The tier confirms distance in two declared token spaces, and every reported
+pair names the one that certified it (`token_domain` in the report payload):
+
+- **`y8`** — the normalized statement tokens the tier has always used. Local
+  names normalize; attribute names stay literal.
+- **`renamed`** — the same statements re-tokenized through the
+  [renamed-structure](renamed-structure-clones.md) ordinal canonicalization, so
+  a pair whose only differences are a consistent renaming (locals and receiver
+  attributes) plus one true edit is found within the same `K = 1` budget. Under
+  y8 tokens the attribute renames alone would price the pair out.
+
+The budget, the confirmation algorithm and the deterministic witness law are
+identical in both domains; the token spaces are never mixed. A pair confirmable
+in both domains is reported exactly once, in the `y8` domain, so everything the
+tier reported before the renamed domain existed is unchanged. Distance 0 in the
+renamed domain is the renamed-structure tier's business and never appears here.
+Witness lines always point at the real source statements — canonical spellings
+exist only for comparison.
+
 ## Opt-in and confinement
 
 The channel is produced only with `--near-miss` (or `near_miss = true` in

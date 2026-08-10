@@ -825,13 +825,30 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         after_run_id: str | None = None,
         focus: ComparisonFocus = "all",
     ) -> dict[str, object]:
+        before = self._runs.resolve_any_root(before_run_id)
+        after = self._runs.resolve_any_root(after_run_id)
+        return self._compare_run_records(before=before, after=after, focus=focus)
+
+    def _compare_run_records(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        focus: ComparisonFocus = "all",
+    ) -> dict[str, object]:
+        """Compare two already-resolved run records.
+
+        Root-bound callers (intent-bound verification) pass their records
+        directly; re-resolving the ids here would fall back to global
+        resolution and reintroduce multi-root ambiguity for content-addressed
+        ids that same-commit sibling worktrees share.
+        """
+
         validated_focus = _helpers._validate_choice(
             "focus",
             focus,
             _VALID_COMPARISON_FOCUS,
         )
-        before = self._runs.resolve_any_root(before_run_id)
-        after = self._runs.resolve_any_root(after_run_id)
         before_findings = self._comparison_index(before, focus=validated_focus)
         after_findings = self._comparison_index(after, focus=validated_focus)
         before_ids = set(before_findings)
@@ -1278,9 +1295,12 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         previous = self._previous_run_for_root(record)
         resolved: list[dict[str, object]] = []
         if previous is not None:
-            compare_payload = self.compare_runs(
-                before_run_id=previous.run_id,
-                after_run_id=record.run_id,
+            # Both records are this root's own; compare them directly. The
+            # previous id may also live under a same-commit sibling checkout,
+            # and re-resolving it globally failed with multi-root ambiguity.
+            compare_payload = self._compare_run_records(
+                before=previous,
+                after=record,
                 focus="all",
             )
             resolved = _helpers._dict_rows(compare_payload.get("improvements"))

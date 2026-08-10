@@ -534,6 +534,8 @@ def _neutral_unit_from_wire(unit: UnitDict) -> CacheNeutralUnit:
         try_finally_profile=unit.get("try_finally_profile", "none"),
         side_effect_order_profile=unit.get("side_effect_order_profile", "none"),
         statement_sequence=unit.get("statement_sequence", ()),
+        renamed_fingerprint=unit.get("renamed_fingerprint", ""),
+        renamed_statement_sequence=unit.get("renamed_statement_sequence", ()),
         unreachable_statements=unit.get("unreachable_statements", ()),
     )
 
@@ -740,6 +742,38 @@ def _assign_statement_sequence(unit: UnitDict, facts: tuple[object, ...]) -> Non
     unit["statement_sequence"] = cast("tuple[NearMissElement, ...]", facts)
 
 
+def _decode_wire_unit_renamed_row(
+    value: object,
+) -> tuple[tuple[str, int], tuple[object, ...]] | None:
+    """Decode one ``[qualname, start_line, digest]`` row (Wave C).
+
+    The digest is a single string — empty for units the clone floors reject —
+    so the row carries it as a scalar rather than a fact list.
+    """
+
+    row = _as_list(value)
+    if row is None or len(row) != 3:
+        return None
+    qualname, raw_start, digest = row
+    if not isinstance(qualname, str) or not isinstance(digest, str):
+        return None
+    start = _as_int(raw_start)
+    if start is None:
+        return None
+    return (qualname, start), (digest,)
+
+
+def _assign_renamed_fingerprint(unit: UnitDict, facts: tuple[object, ...]) -> None:
+    unit["renamed_fingerprint"] = str(facts[0]) if facts else ""
+
+
+def _assign_renamed_statement_sequence(
+    unit: UnitDict,
+    facts: tuple[object, ...],
+) -> None:
+    unit["renamed_statement_sequence"] = cast("tuple[NearMissElement, ...]", facts)
+
+
 def _assign_unreachable_statements(unit: UnitDict, facts: tuple[object, ...]) -> None:
     unit["unreachable_statements"] = cast("tuple[UnreachableStatementItem, ...]", facts)
 
@@ -813,6 +847,10 @@ def _decode_wire_units_with_sequences(
         return None
     families = (
         ("us", _decode_wire_unit_sequence_row, _assign_statement_sequence),
+        ("uc", _decode_wire_unit_renamed_row, _assign_renamed_fingerprint),
+        # The renamed-canonical sequence rides the SAME row shape as "us",
+        # so the decoder is shared and only the assignment differs.
+        ("urs", _decode_wire_unit_sequence_row, _assign_renamed_statement_sequence),
         ("ur", _decode_wire_unit_unreachable_row, _assign_unreachable_statements),
     )
     for key, decode_row, assign in families:
