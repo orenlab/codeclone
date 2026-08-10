@@ -65,7 +65,7 @@
     },
     {
       "name": "finish_propose_memory",
-      "signature": "(self, *, root_path: 'Path', changed_files: 'Sequence[str]', claims_text: 'str | None', review_text: 'str | None', verification_profile: 'str | None') -> 'dict[str, object]'"
+      "signature": "(self, *, root_path: 'Path', changed_files: 'Sequence[str]', claims_text: 'str | None', review_text: 'str | None', verification_profile: 'str | None', attested_evidence: 'Mapping[str, object] | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "generate_pr_summary",

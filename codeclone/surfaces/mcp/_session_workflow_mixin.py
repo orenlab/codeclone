@@ -115,6 +115,32 @@ def _memory_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionMemoryMixin
     return cast(_MCPSessionMemoryMixin, session)
 
 
+def _attested_evidence_bundle(
+    *,
+    receipt_payload: Mapping[str, object] | None,
+    patch_trail_payload: object,
+    run_id: str,
+) -> dict[str, str]:
+    """Assemble the finished change's attested identifiers for memory.
+
+    The receipt and patch-trail digests are the durable truth; run_id is the
+    context that rides the evidence locator. Commit and branch are added
+    downstream where the project's git head is resolved.
+    """
+    bundle: dict[str, str] = {"run_id": run_id}
+    if receipt_payload is not None:
+        receipt_digest = _receipt_digest_value(receipt_payload)
+        if receipt_digest:
+            bundle["receipt_digest"] = receipt_digest
+    if isinstance(patch_trail_payload, Mapping):
+        patch_trail_digest = str(
+            patch_trail_payload.get("patch_trail_digest", "")
+        ).strip()
+        if patch_trail_digest:
+            bundle["patch_trail_digest"] = patch_trail_digest
+    return bundle
+
+
 class _MCPSessionWorkflowMixin:
     """Workflow orchestration over atomic change-control primitives."""
 
@@ -806,6 +832,11 @@ class _MCPSessionWorkflowMixin:
                 claims_text=claims_text,
                 review_text=review_text,
                 verification_profile=(str(profile) if profile is not None else None),
+                attested_evidence=_attested_evidence_bundle(
+                    receipt_payload=receipt_payload,
+                    patch_trail_payload=patch_trail_payload,
+                    run_id=record.run_id,
+                ),
             )
             if memory_hook:
                 result.update(memory_hook)
