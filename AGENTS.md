@@ -83,6 +83,26 @@ auditable receipt.
     - Part of the standing evidence law: "I fixed it" without a mutation that reds the pin does not exist. Named
       hollow-test classes, precedents, and the fix-report requirement live in §17 "Mutation evidence (mandatory law)".
 
+10. **Score-change independent benchmark (mandatory law).**
+    - Any change to a parameter that moves a **user-facing score or verdict** — the health score and its dimensions
+      (complexity, coupling, cohesion, dead_code, coverage, dependencies, clones), reference permilles / bands, health
+      weights, gate thresholds (`fail_*`), severity mappings, outlier terms — is accepted **only** via an independent
+      benchmark run *after* the recalibration. **Self-repo validation alone is NOT acceptance.**
+    - **Independent = blind, frozen, adversarial.** A **blind** agent is given the measurement protocol, not the goal —
+      a lab technician, not an advocate for the change. It runs on **≥5 frozen external repositories** spanning orders of
+      magnitude and Python styles, each pinned to a commit SHA recorded before the first run; the **same** pinned
+      measurement; thresholds **unchanged**; raw distributions reported first. The external projects must try to
+      **refute** the calibration, not re-fit it.
+    - A self-calibrated scale measures the morphology of the object that produced it — "a very precise micrometer for
+      exactly one part". "It looks fine on our own repo" is not proof of general fitness.
+    - **If external validity fails, that is a new fact, not a tuning signal.** "Pinned self-calibration failed external
+      validity" requires a reference-population redesign as a separate task — never a silent re-fit of thresholds against
+      the benchmark repos (the same grinding-to-the-scale, just external). A floor or policy threshold is revised only
+      from an independent policy basis, never from the current self-score.
+    - Purely factual, categorical facts without an evaluative scale (identity; tri-state novelty as a fact) are not
+      covered; the interpretation of a fact into a score is. The full statement lives in §17 "Score-change independent
+      benchmark (mandatory law)".
+
 ---
 
 ## 2) Quick orientation
@@ -1052,6 +1072,31 @@ probes covering the defect class. A full mutation runner (mutmut / cosmic-ray) a
 targeted mutation is mandatory now, for agents and for the controller's merge audit. A fix delivery report carries a
 **mutation evidence** section for its load-bearing pins.
 
+### Score-change independent benchmark (mandatory law)
+
+A recalibrated scale that "looks fine on our own repo" has been validated only on the object that produced it — a very
+precise micrometer for exactly one part. This is a binding project law (see §1.10), a sibling to "Mutation evidence"
+above: it governs **acceptance** of any change that moves a number or verdict CodeClone reports to a user.
+
+- **What it covers.** Any parameter whose movement changes a user-facing score or verdict: the health score and its
+  dimensions (complexity, coupling, cohesion, dead_code, coverage, dependencies, clones), reference permilles / bands,
+  health weights, gate thresholds (`fail_*`), severity mappings, and outlier terms. Purely factual, categorical facts
+  without an evaluative scale (identity; tri-state novelty as a fact) are NOT covered — but the interpretation of a fact
+  into a score IS.
+- **Acceptance is an independent benchmark AFTER the recalibration — mandatory, not "nice to have".** A **blind** agent
+  is given the measurement protocol, not the goal — a lab technician, not an advocate for the change. The benchmark runs
+  on **≥5 frozen external repositories** spanning orders of magnitude (tiny → very large) and Python styles, each pinned
+  to a commit SHA recorded before the first run. The **same** pinned measurement is used, thresholds are left
+  **unchanged**, and raw distributions (percentiles, bands, outliers, determinism) are reported first. The external
+  projects must try to **refute** the calibration, not re-fit it.
+- **Self-repo validation alone is not acceptance.** A scale calibrated on the self repo measures the self repo's
+  morphology; general fitness is an external-validity claim and requires external evidence.
+- **If external validity fails, that is a new fact — never a tuning signal.** "Pinned self-calibration failed external
+  validity" is a finding that requires a reference-population redesign as a **separate** task (for example a fixed
+  multi-project corpus). Re-fitting thresholds against the benchmark repositories is the same grinding-to-the-scale, just
+  external, and is forbidden. A floor or policy threshold is revised only from an **independent policy basis** (a
+  historical contract or reference process), never from the current self-score.
+
 ## 18) Public vs internal surfaces
 
 ### Public / contract-sensitive surfaces
@@ -1248,6 +1293,12 @@ These rules exist because of real incidents in this repo. They are non-negotiabl
   exact behavior it guards (revert-the-behavior probe; both error directions where a value or classification was
   corrected). A pin that stays green when its behavior is reverted is not evidence. See §1.9 and §17 "Mutation evidence
   (mandatory law)".
+- A change that moves a user-facing score or verdict (health or a dimension, reference permilles/bands, health weights,
+  a `fail_*` gate threshold, a severity mapping, an outlier term) is not complete until an independent benchmark accepted
+  it after the recalibration: a blind agent, ≥5 frozen external repositories pinned to commit SHAs, the same pinned
+  measurement, thresholds unchanged, raw distributions first. Self-repo validation alone is not acceptance; if external
+  validity fails, redesign the reference population — do not re-fit thresholds. See §1.10 and §17 "Score-change
+  independent benchmark (mandatory law)".
 
 ---
 
@@ -1265,6 +1316,10 @@ These rules exist because of real incidents in this repo. They are non-negotiabl
 - [ ] If any golden snapshot changed, the corresponding contract change is intentional, documented, and approved.
 - [ ] Each load-bearing pin was shown to die under a targeted mutation of the behavior it guards; surviving mutants were
       eliminated (both error directions where a value or classification was corrected). See §17 "Mutation evidence".
+- [ ] Any change that moves a user-facing score or verdict was accepted by an independent post-recalibration benchmark
+      (blind agent, ≥5 frozen external repositories pinned to commit SHAs, same measurement, thresholds unchanged, raw
+      distributions first); self-repo validation alone was not treated as acceptance. See §17 "Score-change independent
+      benchmark".
 - [ ] Material agent assistance is disclosed.
 - [ ] A human reviewed and understood the complete diff before merge.
 
