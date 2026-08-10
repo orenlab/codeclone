@@ -1480,6 +1480,14 @@ def _decode_wire_structural_occurrence(
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
+    # Load-bearing in concert with the signed cache gate, not redundant
+    # strictness. This {11, 17} row-length tolerance is unreachable for
+    # foreign-generation wire ONLY while store._load_and_validate refuses any
+    # cache whose "v" != CACHE_VERSION and whose payload signature fails
+    # verify_cache_payload_signature (integrity.sign_cache_payload). The
+    # tolerance and that signed-"v"/CACHE_VERSION gate are two halves of one
+    # cross-defect: remove either half and a foreign-shape unit row reaches
+    # here and is silently decoded, reassembling the defect from its product.
     decoded = _decode_wire_named_span(value, valid_lengths={11, 17})
     if decoded is None:
         return None
