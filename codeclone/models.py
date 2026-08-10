@@ -1258,6 +1258,8 @@ class CacheNeutralUnit:
     fingerprint: str
     loc_bucket: str
     cyclomatic_complexity: int
+    #: Diagnostic E-N+2P over the complete Y9 CFG; never health/policy input.
+    cfg_cyclomatic_complexity: int
     nesting_depth: int
     risk: Literal["low", "medium", "high"]
     raw_hash: str
@@ -1613,7 +1615,12 @@ class Unit:
     stmt_count: int
     fingerprint: str
     loc_bucket: str
+    # Public metric: authored source decisions (Wave D), used by health and
+    # policy. Single owner: codeclone.metrics.source_decisions.
     cyclomatic_complexity: int = 1
+    # Diagnostic only: E-N+2P over the complete Y9 CFG. Never health input,
+    # never derived from — and never deriving — the public metric.
+    cfg_cyclomatic_complexity: int = 1
     nesting_depth: int = 0
     risk: Literal["low", "medium", "high"] = "low"
     raw_hash: str = ""
@@ -3592,6 +3599,7 @@ class FunctionGroupItemBase(TypedDict):
 
 class FunctionGroupItem(FunctionGroupItemBase, total=False):
     cyclomatic_complexity: int
+    cfg_cyclomatic_complexity: int
     nesting_depth: int
     risk: Literal["low", "medium", "high"]
     raw_hash: str

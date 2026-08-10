@@ -63,7 +63,11 @@ from codeclone.cache.entries import (
     _as_security_surface_location_scope,
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
-from codeclone.cache.integrity import canonical_json, sign_cache_payload
+from codeclone.cache.integrity import (
+    cache_envelope_checksum,
+    cache_payload_checksum,
+    canonical_json,
+)
 from codeclone.cache.projection import (
     rehydrate_cache_neutral,
     runtime_filepath_from_wire,
@@ -768,6 +772,7 @@ def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
         "fingerprint": "abc",
         "loc_bucket": "0-19",
         "cyclomatic_complexity": 1,
+        "cfg_cyclomatic_complexity": 1,
         "nesting_depth": 0,
         "risk": "low",
         "raw_hash": "",
@@ -1459,7 +1464,7 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     assert str(target) not in files
 
 
-def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> None:
+def test_cache_checksum_validation_ignores_json_whitespace(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
@@ -1472,7 +1477,7 @@ def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> N
     assert loaded.get_file_entry("x.py") is not None
 
 
-def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> None:
+def test_cache_checksum_matches_legacy_string_digest_for_unicode_payload() -> None:
     cache = Cache(Path("cache.json"))
     payload = _analysis_payload(
         cache,
@@ -1485,39 +1490,51 @@ def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> N
     )
     legacy_digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
-    assert sign_cache_payload(payload) == legacy_digest
+    assert cache_payload_checksum(payload) == legacy_digest
 
 
-def test_cache_load_accepts_legacy_string_signed_unicode_payload(
+def test_cache_load_binds_version_into_unicode_payload_signature(
     tmp_path: Path,
 ) -> None:
+    # Candidate 1: the signed scope is {v, payload}. The pre-fix payload-only
+    # string digest is therefore no longer accepted, and the envelope digest is.
+    # Unicode canonicalization still round-trips cleanly through the signer.
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path, filepath="unicodé.py")
 
-    raw = json.loads(cache_path.read_text("utf-8"))
+    raw = cast(dict[str, object], json.loads(cache_path.read_text("utf-8")))
     payload = cast(dict[str, object], raw["payload"])
-    raw["sig"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+    # The old payload-only string digest is now refused as an integrity failure.
+    raw["checksum"] = hashlib.sha256(
+        canonical_json(payload).encode("utf-8")
+    ).hexdigest()
     cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+    rejected = Cache(cache_path)
+    rejected.load()
+    assert rejected.load_status is CacheStatus.INTEGRITY_FAILED
 
-    loaded = Cache(cache_path)
-    loaded.load()
+    # The envelope digest over {v, payload} is accepted, unicode payload intact.
+    raw["checksum"] = cache_envelope_checksum(cast(str, raw["v"]), payload)
+    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+    accepted = Cache(cache_path)
+    accepted.load()
+    assert accepted.load_warning is None
+    assert accepted.get_file_entry("unicodé.py") is not None
 
-    assert loaded.load_warning is None
-    assert loaded.get_file_entry("unicodé.py") is not None
 
-
-def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
+def test_cache_checksum_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
     data = json.loads(cache_path.read_text("utf-8"))
-    data["sig"] = "bad"
+    data["checksum"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
     loaded = Cache(cache_path)
     loaded.load()
     assert loaded.load_warning is not None
-    assert "signature" in loaded.load_warning
+    assert "checksum" in loaded.load_warning
     assert loaded.data["version"] == Cache._CACHE_VERSION
     assert loaded.data["files"] == {}
     assert loaded.load_status == CacheStatus.INTEGRITY_FAILED
@@ -1527,7 +1544,7 @@ def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     data = {"version": "0.0", "files": {}}
-    signature = sign_cache_payload(data)
+    signature = cache_payload_checksum(data)
     cache_path.write_text(
         json.dumps({**data, "_signature": signature}, ensure_ascii=False, indent=2),
         "utf-8",
@@ -1546,7 +1563,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.5"
+    assert Cache._CACHE_VERSION == "3.7"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1562,7 +1579,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.5"
+    assert old_document["v"] == "3.7"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -1598,9 +1615,9 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> N
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    signature = sign_cache_payload(payload)
+    signature = cache_payload_checksum(payload)
     cache_path.write_text(
-        json.dumps({"v": version, "payload": payload, "sig": signature}), "utf-8"
+        json.dumps({"v": version, "payload": payload, "checksum": signature}), "utf-8"
     )
 
     loaded = Cache(cache_path)
@@ -1719,9 +1736,13 @@ def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files=[])
-    signature = sign_cache_payload(payload)
+    # Re-mint over the {v, payload} pre-image so the envelope sig passes and the
+    # invalid-files gate is what this test still exercises (candidate 1).
+    signature = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
+        json.dumps(
+            {"v": cache._CACHE_VERSION, "payload": payload, "checksum": signature}
+        ),
         "utf-8",
     )
     cache.load()
@@ -1818,8 +1839,8 @@ def test_cache_load_missing_v_field(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    sig = sign_cache_payload(payload)
-    cache_path.write_text(json.dumps({"payload": payload, "sig": sig}), "utf-8")
+    sig = cache_payload_checksum(payload)
+    cache_path.write_text(json.dumps({"payload": payload, "checksum": sig}), "utf-8")
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
@@ -1851,9 +1872,10 @@ def test_cache_load_rejects_missing_required_payload_fields(
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = payload_factory(cache)
-    sig = sign_cache_payload(payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -1868,9 +1890,10 @@ def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
         "fp": cache.data["fingerprint_version"],
         "files": {},
     }
-    sig = sign_cache_payload(payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -1885,9 +1908,10 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
         "fp": "old",
         "files": {},
     }
-    sig = sign_cache_payload(payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -1934,9 +1958,10 @@ def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
-    sig = sign_cache_payload(payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -2232,8 +2257,30 @@ def test_cache_v3_wire_helpers_reject_malformed_rows_without_partial_decode() ->
 
 
 def test_cache_v3_type_guards_validate_both_lane_payload_shapes() -> None:
+    # 18 columns since CACHE_VERSION 3.3: index 7 is the public
+    # source-decision metric, index 17 the diagnostic CFG E-N+2P.
     unit = _decode_wire_unit(
-        ["q", 1, 2, 3, 4, "fp", "0-19", 1, 0, "low", "raw"], "x.py"
+        [
+            "q",
+            1,
+            2,
+            3,
+            4,
+            "fp",
+            "0-19",
+            1,
+            0,
+            "low",
+            "raw",
+            0,
+            "none",
+            0,
+            "fallthrough",
+            "none",
+            "none",
+            1,
+        ],
+        "x.py",
     )
     block = _decode_wire_block(["q", 1, 2, 3, "hash"], "x.py")
     segment = _decode_wire_segment(["q", 1, 2, 3, "hash", "sig"], "x.py")
@@ -2856,6 +2903,51 @@ def test_cache_v3_entry_projection_and_content_miss_are_typed() -> None:
     assert decision.dependent.reason == "content_miss"
 
 
+def test_neutral_facts_preserve_both_complexity_metrics() -> None:
+    """Save-time entry->dict conversion must carry BOTH complexity fields.
+
+    Wave D regression pin: ``_neutral_facts`` rebuilds the unit dict
+    field-by-field, and a field omitted there silently encodes as its wire
+    default — the warm path then serves ``cfg_cyclomatic_complexity == 1``
+    for every cached unit while cold runs report real values. Distinct values
+    on the two fields also make a swap fail.
+    """
+    from codeclone.cache._wire_encode import _neutral_facts
+
+    entry = replace(
+        _empty_v3_entry(),
+        module_neutral=replace(
+            _empty_v3_entry().module_neutral,
+            units=(
+                CacheNeutralUnit(
+                    local_name="f",
+                    start_line=1,
+                    end_line=2,
+                    loc=2,
+                    stmt_count=1,
+                    fingerprint="fp",
+                    loc_bucket="0-19",
+                    cyclomatic_complexity=5,
+                    cfg_cyclomatic_complexity=7,
+                    nesting_depth=0,
+                    risk="low",
+                    raw_hash="raw",
+                    entry_guard_count=0,
+                    entry_guard_terminal_profile="none",
+                    entry_guard_has_side_effect_before=False,
+                    terminal_kind="fallthrough",
+                    try_finally_profile="none",
+                    side_effect_order_profile="none",
+                ),
+            ),
+        ),
+    )
+    facts = _neutral_facts(entry)
+    unit = facts["units"][0]
+    assert unit["cyclomatic_complexity"] == 5
+    assert unit["cfg_cyclomatic_complexity"] == 7
+
+
 def test_cache_v3_neutral_qualnames_are_owned_by_current_registry() -> None:
     payload = replace(
         _empty_v3_entry().module_neutral,
@@ -2869,6 +2961,7 @@ def test_cache_v3_neutral_qualnames_are_owned_by_current_registry() -> None:
                 fingerprint="fp",
                 loc_bucket="0-19",
                 cyclomatic_complexity=1,
+                cfg_cyclomatic_complexity=1,
                 nesting_depth=0,
                 risk="low",
                 raw_hash="raw",
@@ -3415,7 +3508,20 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.5"
+    # Candidate 2: class_metrics ride the dependent lane; the design-metrics
+    # algorithm revision must gate this profile so a revision bump cannot serve
+    # stale cbo/lcom4/risk off a warm hit.
+    assert (
+        '"design_metrics_algorithm_revision": DESIGN_METRICS_ALGORITHM_REVISION'
+        in source
+    )
+    # Candidate 2 (follow-up): the closed detector catalogs that ride the
+    # dependent lane must each version this profile, or a catalog expansion
+    # serves a stale dependent-lane fact off a warm hit.
+    assert "SECURITY_SURFACE_CATALOG_VERSION" in source
+    assert "RUNTIME_REACHABILITY_CATALOG_VERSION" in source
+    assert "STRUCTURAL_FINDINGS_CATALOG_VERSION" in source
+    assert CACHE_VERSION == "3.7"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

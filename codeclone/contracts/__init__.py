@@ -29,17 +29,35 @@ CONTRACT_IR_VERSION: Final = "1"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"
-# Algorithm revision of the two lanes that carry per-entity design metrics
-# (``risk_observations``, ``coupling_cohesion_observations``). Separate from
-# OBSERVATION_DIGEST_VERSION so a change in how these metrics are *computed*
-# invalidates only the lanes whose values moved. Revision "2" covers the 39Y
-# changes: every defined function now carries a complexity fact (clone-lane
-# floors no longer gate the population), CBO counts the imported-domain and
-# resolved-instantiation edge lanes, and the coupling risk bands were
-# re-derived from the measured distribution. Values from revision "1" are not
-# comparable with revision "2" values, so a baseline carrying the old revision
-# is untrusted rather than diffed.
+# Algorithm revision of the ``coupling_cohesion_observations`` design-metric
+# lane. Separate from OBSERVATION_DIGEST_VERSION so a change in how these
+# metrics are *computed* invalidates only the lanes whose values moved.
+# Revision "2" covers the 39Y changes: every defined function now carries a
+# complexity fact (clone-lane floors no longer gate the population), CBO
+# counts the imported-domain and resolved-instantiation edge lanes, and the
+# coupling risk bands were re-derived from the measured distribution. Values
+# from revision "1" are not comparable with revision "2" values, so a baseline
+# carrying the old revision is untrusted rather than diffed. Until Wave D this
+# revision also governed ``risk_observations``; that lane now moves with
+# COMPLEXITY_ALGORITHM_REVISION below, so a complexity recount never
+# invalidates coupling observations and vice versa.
 DESIGN_METRICS_ALGORITHM_REVISION: Final = "2"
+# Algorithm revision of the ``risk_observations`` lane — the lane carrying the
+# per-unit complexity dimension. Revisions "1" and "2" (shared history with
+# DESIGN_METRICS_ALGORITHM_REVISION above) computed ``cyclomatic_complexity``
+# from the CFG; under revision "2" that meant full McCabe E-N+2P over the
+# complete Y9 graph. Revision "3" is the Wave D split: the public
+# ``cyclomatic_complexity`` is a deterministic source-level decision count
+# over AST constructs (single owner:
+# ``codeclone.metrics.source_decisions.SourceDecisionCounter``), and the CFG
+# value survives only as the diagnostic ``cfg_cyclomatic_complexity``, which
+# reaches no baseline lane and no gate. Bump discipline: move this revision
+# whenever any cell of the ratified decision table changes — a construct's
+# contribution, the match wildcard rule, the BoolOp arity rule, the nested
+# scope boundary — or when the lane's population rule moves. Values across
+# revisions are not comparable; a baseline carrying an older revision is
+# untrusted for this lane rather than diffed.
+COMPLEXITY_ALGORITHM_REVISION: Final = "3"
 BASELINE_LANE_DESCRIPTOR_VERSION: Final = "1"
 BASELINE_LANE_DIGEST_DOMAIN: Final = "codeclone.baseline.lane.v1\0"
 BASELINE_ROOT_DIGEST_DOMAIN: Final = "codeclone.baseline.root.v1\0"
@@ -73,6 +91,22 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # and never touches the neutral fingerprint lane.
 LIVENESS_POLICY_VERSION: Final = "2"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
+# Closed detector catalogs that ride the module-dependent cache-reuse lane.
+# Each is a mutable enumeration whose EXPANSION changes an emitted dependent
+# fact for unchanged source, so a warm cache hit would otherwise serve the
+# pre-expansion result as an honest-absence false negative (a narrowing
+# self-rejects). Each is an input of the module-dependent reuse profile
+# (codeclone/cache/reuse.py), so a catalog change misses exactly that lane and
+# never the neutral fingerprint lane. Bump the matching constant whenever its
+# catalog gains or drops a member; verdicts across versions are not comparable.
+# The security-surface category / location-scope / classification-mode /
+# evidence-kind catalogs (codeclone/analysis/security_surfaces.py).
+SECURITY_SURFACE_CATALOG_VERSION: Final = "1"
+# The runtime-reachability framework / edge-kind / route-method / marker-symbol
+# catalogs (codeclone/analysis/reachability.py).
+RUNTIME_REACHABILITY_CATALOG_VERSION: Final = "1"
+# The structural finding-kind catalog (codeclone/domain/findings.py).
+STRUCTURAL_FINDINGS_CATALOG_VERSION: Final = "1"
 # Statement-level unreachability (39Y Y9). Version "1" is ONE predicate over
 # ONE graph: a statement cannot run exactly when its block is not reachable
 # from ``CFG.entry`` by directed traversal of ``Block.successors``. There is no
@@ -139,13 +173,44 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # off a 3.3 wire would silently report only y8-domain pairs. Its own key,
 # absence rejects the entry, rejection just re-analyses the file.
 #
-# 3.5 carries binding time and the PEP 810 laziness marker on every module
-# dependency row (cycle-honesty wave, dependencies payload_schema "6"). A
-# warm run served off a 3.4 wire would decode every edge as eager
-# import_time and silently report a deferred cycle as critical — the exact
-# lie the wave removes — so pre-3.5 rows are rejected, and rejection just
-# re-analyses the file.
-CACHE_VERSION: Final = "3.5"
+# 3.7 combines three independently-authored cache-format changes that each
+# reached "3.5"/"3.6" on their own branch; the merge carries all of them, so the
+# digit advances once more to name the single combined generation. Three
+# reasons, one truth:
+#
+# (a) Wave D widens the positional unit row by one column: index 7 stays the
+# public ``cyclomatic_complexity`` (now the source-decision count) and a new
+# trailing column carries the diagnostic ``cfg_cyclomatic_complexity``. Cached
+# units also hold complexity computed by the pre-split CFG algorithm, so the
+# bump forces every unit through the new counter instead of serving stale
+# semantics off the wire; the widened row decodes strictly at ``{18}`` -- no
+# legacy length is tolerated, a shorter generation is unloadable at this gate.
+#
+# (b) The cache trust envelope: the integrity checksum now covers the versioned
+# pre-image ``{v, payload}`` instead of ``payload`` alone, so the generation
+# gate ``v`` is inside the checksummed scope -- a migration/backup/edit-in-place
+# that rewrites ``v`` without re-checksumming is refused (``INTEGRITY_FAILED``)
+# rather than trusted as a payload it never covered under that mark. The on-disk
+# envelope key was renamed ``sig`` -> ``checksum`` and the keyless "signature"
+# vocabulary retired to checksum/integrity names, telling the truth that this is
+# a corruption/desync integrity check and not authentication. The
+# module-dependent reuse profile now versions the design-metrics algorithm
+# revision and the security-surface / runtime-reachability / structural-findings
+# detector catalogs directly, so a policy change in any of those lanes that does
+# not coincide with a neutral-lane change can no longer serve a stale
+# dependent-lane fact off a warm hit.
+#
+# (c) The cycle-honesty wave carries binding time and the PEP 810 laziness
+# marker on every module dependency row (dependencies ``payload_schema`` "6").
+# A warm run served off a pre-cycle wire would decode every edge as eager
+# import_time and silently report a deferred cycle as critical -- the exact lie
+# the wave removes -- so those rows are rejected and the file re-analysed.
+#
+# Every 3.4/3.5/3.6 cache is rejected at the version gate and re-analysed; there
+# is no byte-stable path for the widened row, the checksummed scope, the
+# key-name change, or the dependency-row schema, so the bump IS the
+# compatibility guarantee.
+CACHE_VERSION: Final = "3.7"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
@@ -260,11 +325,22 @@ COHESION_RISK_MEDIUM_MAX: Final = 3
 # function: on the measured post-norm distribution of this repository one
 # 34-complexity function alone spent 40.8 points and five high-risk functions
 # spent 40, pinning the dimension at 12 while the typical function sits at
-# complexity 3. Its reference shares are MEASURED, not chosen - production
-# functions under the Y9 norm CFG (n=5194, avg 2.9692, p90/p95/p99 = 6/8/15,
-# max 34) put 146 above COMPLEXITY_RISK_LOW_MAX (28.11 per mille) and 5 above
-# COMPLEXITY_RISK_MEDIUM_MAX (0.96, rounded to 1). The complexity BANDS are
-# unchanged: 10 and 20 were reviewed and kept.
+# complexity 3. Its reference shares are MEASURED, not chosen.
+#
+# Wave D re-measured them for the source-decision metric
+# (COMPLEXITY_ALGORITHM_REVISION): the same population (production functions
+# outside tests/ and benchmarks/) now measures n=5438, avg 3.90,
+# p90/p95/p99 = 8/11/21, max 98, with 321 above COMPLEXITY_RISK_LOW_MAX
+# (59.03 per mille) and 56 above COMPLEXITY_RISK_MEDIUM_MAX (10.30 per mille).
+# The two permilles below are a GENERATED calibration artifact, not hand
+# numbers: they are the output of the calibration procedure
+# (``tests/_complexity_calibration.py``) over its pinned reference
+# distribution, and ``tests/test_complexity_calibration.py`` reds if either
+# constant stops equalling that output. The retired Y9-CFG values were 28 and
+# 1 (from n=5194, 146 above 10, 5 above 20). The complexity BANDS are
+# unchanged: 10 and 20 were reviewed and kept, and the recalibration touched
+# only these two permilles — never fail_health, never the bands, never the
+# outlier term.
 #
 # Bounding is the point. The previous coupling formula
 # (100 - avg*7 - max*2 - high*8) let one 27-collaborator class cost 54 points
@@ -280,8 +356,12 @@ HEALTH_COMPLEXITY_TYPICAL_WEIGHT: Final = 30
 HEALTH_COMPLEXITY_ELEVATED_WEIGHT: Final = 30
 HEALTH_COMPLEXITY_EXTREME_WEIGHT: Final = 30
 HEALTH_COMPLEXITY_OUTLIER_WEIGHT: Final = 10
-HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE: Final = 28
-HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE: Final = 1
+# Generated by the calibration procedure (tests/_complexity_calibration.py:
+# reference_permilles()); pinned by tests/test_complexity_calibration.py. Do
+# not hand-edit — recalibrate through the procedure with a fresh measurement
+# and maintainer ratification.
+HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE: Final = 59
+HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE: Final = 10
 HEALTH_COMPLEXITY_TAIL_SATURATION_MULTIPLE: Final = 4
 HEALTH_COMPLEXITY_OUTLIER_SATURATION_MULTIPLE: Final = 3
 HEALTH_COUPLING_TYPICAL_WEIGHT: Final = 30
@@ -360,6 +440,7 @@ __all__ = [
     "BASELINE_SCHEMA_VERSION",
     "CACHE_VERSION",
     "COHESION_RISK_MEDIUM_MAX",
+    "COMPLEXITY_ALGORITHM_REVISION",
     "COMPLEXITY_RISK_LOW_MAX",
     "COMPLEXITY_RISK_MEDIUM_MAX",
     "CONTRACT_IR_VERSION",
@@ -445,11 +526,14 @@ __all__ = [
     "REPORT_EVALUATION_DIGEST_DOMAIN",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
+    "RUNTIME_REACHABILITY_CATALOG_VERSION",
+    "SECURITY_SURFACE_CATALOG_VERSION",
     "SEMANTIC_EVENT_VERSION",
     "SEMANTIC_INDEX_FORMAT_VERSION",
     "SEMANTIC_PROJECTION_REVISION_VERSION",
     "SOURCE_KIND_POLICY_VERSION",
     "STATEMENT_REACHABILITY_POLICY_VERSION",
+    "STRUCTURAL_FINDINGS_CATALOG_VERSION",
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",

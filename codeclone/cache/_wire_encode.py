@@ -62,6 +62,8 @@ def _encode_units(entry: CacheFactsDict, wire: dict[str, object]) -> None:
                 unit.get("terminal_kind", "fallthrough"),
                 unit.get("try_finally_profile", "none"),
                 unit.get("side_effect_order_profile", "none"),
+                # Diagnostic CFG E-N+2P; the public metric rides index 7.
+                unit.get("cfg_cyclomatic_complexity", 1),
             ]
             for unit in units
         ]
@@ -620,6 +622,7 @@ def _neutral_facts(entry: CacheEntryV3) -> CacheFactsDict:
                 fingerprint=item.fingerprint,
                 loc_bucket=item.loc_bucket,
                 cyclomatic_complexity=item.cyclomatic_complexity,
+                cfg_cyclomatic_complexity=item.cfg_cyclomatic_complexity,
                 nesting_depth=item.nesting_depth,
                 risk=item.risk,
                 raw_hash=item.raw_hash,

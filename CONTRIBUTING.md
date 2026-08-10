@@ -184,6 +184,85 @@ Golden tests are contract sentinels. Do not update snapshots merely to make a
 failure disappear. A golden update is acceptable only when the contract change
 is intentional, reviewed, documented, and versioned where required.
 
+### Mutation evidence (mandatory law)
+
+Red-first proves a test was red once; **mutation** proves the test dies when the
+exact behavior it pins breaks. A green test alone proves nothing. This is a
+binding project law: every load-bearing fix or claim must ship *mutation
+evidence*, and it applies to contributors and to the controller's merge audit
+alike.
+
+- **Every load-bearing pin ships mutation evidence.** Revert or corrupt the
+  exact production behavior a test pins; that test must turn red, verbatim, on
+  the mutation. A mutant that survives (the test stays green) is a hollow test —
+  strengthen it until it dies.
+- **Comprehensive means both boundaries.** Where a fix corrects a value or
+  classification, mutate in both directions; each opposite error must red under
+  a different test. A suite that catches only one side of an error is
+  incomplete.
+
+Named hollow-test classes to mutate against — "what does the test actually
+hold?":
+
+- **Relative-invariant hole — mutate the constant itself.** A set of
+  relative-invariant tests (`prose <= its measure`, `A > B`) stays green for any
+  value of the underlying constant, so the constant's justification can silently
+  drift. Where a number is derived from a stated rule but the derivation lives
+  only in a comment, that comment is an unexecuted engineering claim that will
+  rot. Pin the *derivation rule* — re-derive or re-measure the number from its
+  stated basis — not a literal `assert x == 780`, which merely moves the magic
+  number into the test. Mutating the literal constant must red the rule-pin.
+- **Guard unreachable in every configuration.** The most extreme hollow test is
+  not "returns empty" but a guard whose protected path cannot fire in any
+  configuration — structurally dead, not merely misplaced. Mutation reveals it:
+  if reverting the guarded behavior changes nothing observable, the guard never
+  ran, in no configuration. When you add a guard, prove by mutation that some
+  input reaches and trips it. A guard no input can reach is theater.
+- **Success masked by a sibling.** A run can look green not because the thing
+  under test worked, but because a parallel or sibling mechanism did the work.
+  Isolate and probe the mechanism alone. A passing set that exercises two or
+  more mechanisms must isolate each; "the batch was green" is not "this rule
+  fired".
+
+"Informal" means targeted manual mutations — revert-the-behavior probes covering
+the defect class — not, necessarily, a mutation-testing framework. A full
+mutation runner (for example mutmut or cosmic-ray) as a gate is a later
+candidate; the manual targeted mutation is mandatory now. A pull request that
+fixes a defect carries a *mutation evidence* note for its load-bearing pins.
+
+### Score-change independent benchmark (mandatory law)
+
+A recalibrated scale that "looks fine on our own repo" has been validated only
+on the object that produced it — a very precise micrometer for exactly one part.
+This is a binding project law, a sibling to *Mutation evidence* above: any change
+that moves a user-facing score or verdict is accepted only via an independent
+benchmark run *after* the recalibration, and it applies to contributors and to
+the controller's merge audit alike.
+
+- **What it covers.** Any parameter whose movement changes the number or verdict
+  CodeClone reports to a user: the health score and its dimensions (complexity,
+  coupling, cohesion, dead_code, coverage, dependencies, clones), reference
+  permilles or bands, health weights, gate thresholds (`fail_*`), severity
+  mappings, and outlier terms. A purely factual, categorical fact without an
+  evaluative scale — identity, or tri-state novelty as a fact — is not covered;
+  the interpretation of a fact into a score is.
+- **Acceptance is an independent benchmark after the recalibration.** A blind
+  agent is given the measurement protocol, not the goal — a lab technician, not
+  an advocate for the change. Run it on at least five frozen external
+  repositories spanning orders of magnitude and Python styles, each pinned to a
+  commit SHA recorded before the first run; use the same pinned measurement, keep
+  thresholds unchanged, and report raw distributions first. The external projects
+  must try to refute the calibration, not re-fit it.
+- **Self-repo validation alone is not acceptance.** A scale calibrated on the
+  self repo measures the self repo's morphology; general fitness is an
+  external-validity claim and needs external evidence.
+- **If external validity fails, that is a new fact, not a tuning signal.**
+  "Pinned self-calibration failed external validity" requires a
+  reference-population redesign as a separate task — for example a fixed
+  multi-project corpus — never a silent re-fit of thresholds against the
+  benchmark repositories. A floor or policy threshold is revised only from an
+  independent policy basis, never from the current self-score.
+
 ### Security and safety
 
 - Preserve path validation and repository-root containment.
@@ -608,6 +687,17 @@ change spans more than one contract or integration.
   tests that merely execute lines without asserting behavior.
 - A bug fix should normally include a regression test that fails before the
   fix and passes after it.
+- Every load-bearing pin must ship mutation evidence: it must be shown to red
+  when the exact behavior it pins is reverted, and both error directions must
+  red where a value or classification was corrected. See "Mutation evidence
+  (mandatory law)" above. A surviving mutant is a hollow test, not a pass.
+- A change that moves a user-facing score or verdict (health or a dimension,
+  reference permilles or bands, health weights, a `fail_*` gate threshold, a
+  severity mapping, an outlier term) must be accepted by an independent benchmark
+  after the recalibration — a blind agent, at least five frozen external
+  repositories pinned to commit SHAs, the same measurement, thresholds unchanged,
+  raw distributions first. Self-repo validation alone is not acceptance. See
+  "Score-change independent benchmark (mandatory law)" above.
 
 ## Pull Requests
 

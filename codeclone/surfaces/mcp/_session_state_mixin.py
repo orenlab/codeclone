@@ -536,6 +536,10 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         findings = _helpers._as_mapping(report_document.get("findings"))
         metrics = _helpers._as_mapping(report_document.get("metrics"))
         metrics_summary = _helpers._as_mapping(metrics.get("summary"))
+        metrics_families = _helpers._as_mapping(metrics.get("families"))
+        dead_code_summary = _helpers._as_mapping(
+            _helpers._as_mapping(metrics_families.get("dead_code")).get("summary")
+        )
         summary = _helpers._as_mapping(findings.get("summary"))
         analysis_profile = _helpers._summary_analysis_profile_payload(meta)
         payload = {
@@ -599,6 +603,16 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             payload["analysis_profile"] = analysis_profile
         payload["cache"] = _helpers._summary_cache_payload(payload)
         payload["health"] = _helpers._summary_health_payload(payload)
+        # Carry the dead-code tri-state (incl. the unresolved_external_override
+        # abstention counter) only when metrics actually ran. A clones-only run
+        # still emits an all-zero dead_code family block, so gate on the same
+        # metrics-skipped signal health uses: surfacing those zeros would be the
+        # false "no abstentions" claim this fix exists to refuse -- the honest
+        # opposite of the dropped-counter hollow truncation.
+        if dead_code_summary and not _helpers._metrics_skipped_for_summary(payload):
+            payload["dead_code"] = _helpers._summary_dead_code_payload(
+                dead_code_summary
+            )
         return payload
 
 
@@ -653,6 +667,9 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
         analysis_profile = _helpers._summary_analysis_profile_payload(summary)
         if analysis_profile:
             payload["analysis_profile"] = analysis_profile
+        stored_dead_code = _helpers._as_mapping(summary.get("dead_code"))
+        if stored_dead_code:
+            payload["dead_code"] = _helpers._summary_dead_code_payload(stored_dead_code)
         if record is not None:
             coverage_join = _helpers._summary_coverage_join_payload(record)
             if coverage_join:
@@ -737,6 +754,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
         path: str | None,
         offset: int,
         limit: int,
+        metrics_skipped: bool = False,
     ) -> dict[str, object]:
         summary = dict(_helpers._as_mapping(metrics.get("summary")))
         families = _helpers._as_mapping(metrics.get("families"))
@@ -771,7 +789,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
                 )
             )
         page = paginate(items, offset=offset, limit=limit, max_limit=200)
-        return {
+        payload: dict[str, object] = {
             "family": family,
             "path": normalized_path or None,
             "offset": page.offset,
@@ -781,6 +799,56 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             "has_more": page.next_offset is not None,
             "items": page.items,
         }
+        if family is None:
+            return payload
+        # A targeted single-family query must not be hollower than the
+        # all-families view. The family branch used to return only ``items``, so
+        # ``metrics_detail(family="dead_code")`` dropped the family ``summary``
+        # and hid both the ``unresolved_external_override`` tri-state counter and
+        # the ``unresolved_overrides`` abstention list -- passing ``family`` was
+        # exactly the argument that made them invisible (sibling of the
+        # get_run_summary tri-state fix). Attach both additively, and only for
+        # real presence. ``metrics_skipped`` gates the false all-zero
+        # "no abstentions" reading a clones-only run would otherwise emit,
+        # mirroring the get_run_summary gate.
+        if metrics_skipped:
+            return payload
+        family_payload = _helpers._as_mapping(families.get(family))
+        if "summary" in family_payload:
+            payload["summary"] = dict(
+                _helpers._as_mapping(family_payload.get("summary"))
+            )
+        if "unresolved_overrides" in family_payload:
+            override_rows = [
+                dict(_helpers._as_mapping(row))
+                for row in _helpers._as_sequence(
+                    family_payload.get("unresolved_overrides")
+                )
+                if not normalized_path
+                or _helpers._metric_item_matches_path(
+                    _helpers._as_mapping(row),
+                    normalized_path,
+                )
+            ]
+            # The abstention list rides the SAME (offset, limit) cursor as
+            # ``items`` but is surfaced as its own paginated sibling block, so
+            # neither list's bound is conflated with the other's and the list is
+            # never an unbounded dump.
+            override_page = paginate(
+                override_rows,
+                offset=offset,
+                limit=limit,
+                max_limit=200,
+            )
+            payload["unresolved_overrides"] = {
+                "offset": override_page.offset,
+                "limit": override_page.limit,
+                "returned": len(override_page.items),
+                "total": override_page.total,
+                "has_more": override_page.next_offset is not None,
+                "items": override_page.items,
+            }
+        return payload
 
     def _derived_section_payload(self, record: MCPRunRecord) -> dict[str, object]:
         derived = _helpers._as_mapping(record.report_document.get("derived"))
@@ -1087,6 +1155,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 path=path,
                 offset=offset,
                 limit=limit,
+                metrics_skipped=_helpers._metrics_skipped_for_summary(record.summary),
             )
         if validated_section == "derived":
             return self._derived_section_payload(record)

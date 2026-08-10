@@ -17,10 +17,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   baseline-relative gating. It is what stops one project's baseline being compared against another's.
 - Upgrade every machine that runs CodeClone **before** adding the new configuration keys. 2.1.0a1 treats an unknown key
   as a contract error, so a stale CI runner exits `2` before it analyzes anything.
-- Complexity is now full McCabe over the normalized control-flow graph: exception dispatch, `finally` routing, and
-  context-manager suppression are real paths and are counted, and every function is measured rather than only
-  clone-sized ones. Values rise and health scores may fall — lower but truer. Re-tune `--fail-health` once after
-  regenerating the baseline.
+- Complexity is now two explicitly distinct metrics. The public `cyclomatic_complexity` — the one health, risk bands
+  and gates use — counts authored decisions in the source over AST constructs (`if`/`elif`, loops, comprehension
+  generators and filters, short-circuit boundaries in any expression position, `except` clauses, `match` cases and
+  guards, `assert`), independent of control-flow normalization and reachability. A separate diagnostic
+  `cfg_cyclomatic_complexity` reports full McCabe `E − N + 2P` over the complete normalized control-flow graph —
+  exception dispatch, `finally` routing and suppression included — and never enters health or gates. Every function is
+  measured rather than only clone-sized ones. Values move against older CodeClone releases; stored complexity
+  observations from older baselines are reported untrusted for that lane (`COMPLEXITY_ALGORITHM_REVISION`) rather than
+  silently diffed. Re-tune `--fail-health` once after regenerating the baseline.
+- The health complexity dimension's elevated/extreme reference shares were re-measured for the source-decision metric.
+  They are a generated calibration artifact — computed by a reproducible procedure over a pinned reference distribution,
+  not hand-picked — so the health scale reads the new metric honestly. Only these two reference shares moved; the risk
+  bands (10 / 20) and the complexity gate are unchanged. Health scores shift accordingly.
 
 ### Added
 
@@ -76,6 +85,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- **Cache trust envelope hardened; `CACHE_VERSION` → 3.7.** Three cache-integrity changes land together under one
+  version bump (the same combined generation also carries Wave D's widened 18-column unit row — see the complexity entry
+  above — and cycle-honesty's dependency-row binding-time and PEP 810 laziness schema, `payload_schema` 6). (1) The
+  integrity checksum now covers the versioned pre-image `{v, payload}` instead of `payload` alone,
+  bringing the generation gate `v` inside the checksummed scope: a migration, backup, or edit-in-place that rewrites the
+  top-level `v` without re-checksumming is now refused as an integrity failure instead of being trusted as a payload it
+  never covered under that mark. (2) The keyless "signature" vocabulary is retired to checksum/integrity names and the
+  on-disk envelope key `sig` is renamed `checksum`, telling the truth that this is a corruption/desync integrity check —
+  not authentication against a local adversary who already controls the analyzed source. (3) The module-dependent
+  cache-reuse profile now versions the design-metrics algorithm revision and the security-surface, runtime-reachability,
+  and structural-findings detector catalogs, so expanding any of those closed catalogs can no longer serve a stale
+  dependent-lane fact — a security or reachability false negative — from a warm cache hit. Every earlier cache is refused
+  at the version gate and re-analysed once; no user action is required.
 - **Dead-code liveness policy advanced to version 2** with two new life proofs, closing two classes of
   false dead-code findings. A PEP 484 explicit re-export — `from x import y as y`, the `as`-same-name
   spelling — now keeps `y` live on its own, independently of `__all__`; a renaming import
@@ -135,6 +157,23 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 - The review queue no longer reports a finding as known without baseline evidence.
 - The error for a missing `baseline_scope_id` names the configuration table correctly.
 - Warm runs count cached files in health denominators, so a cached run no longer scores differently from a cold one.
+- Memory candidates proposed from a finished change now carry that change's attested evidence — the review receipt
+  digest, the audit patch-trail digest, and the commit — as durable `memory_evidence` rows, instead of being approved
+  with only a bare `human_approval` warrant that recorded no digest. Records approved before this fix are left as they
+  are; their digests were never captured and are not invented after the fact. Existing memory stores load and behave
+  unchanged (additive rows only, no schema change).
+- `get_run_summary` now reports the dead-code tri-state in a new additive `dead_code` block — the count of
+  unresolved-external-override abstentions, alongside the dead total and live roots — read from the same
+  `metrics.families.dead_code.summary` block the gates treat as authority. Previously the run summary carried only the
+  top-level findings totals, so a public method that abstains (neither dead nor live, because it inherits from a base
+  outside the analysis root) was invisible to every consumer, its absence indistinguishable from zero. The block
+  appears only when metrics ran; a clones-only run omits it rather than reporting misleading zeros.
+- `get_report_section(section="metrics_detail", family="dead_code")` now surfaces that family's `summary` — carrying the
+  `unresolved_external_override` tri-state counter — and its `unresolved_overrides` abstention list, paginated. The
+  family branch previously returned only `items`, so a targeted family query dropped the summary entirely: passing
+  `family` was exactly the argument that hid the counter, its surfaced absence indistinguishable from zero. Additive and
+  gated on real presence — a family that carries no summary/overrides shows the honest zero rather than a fabricated
+  block, and a clones-only (metrics-skipped) run omits the summary rather than reporting a misleading zero.
 
 ## [2.1.0a1] - 2026-07-09
 

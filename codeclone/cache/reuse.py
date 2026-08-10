@@ -16,7 +16,14 @@ from typing import Literal
 import orjson
 
 from ..baseline.trust import current_python_tag
-from ..contracts import API_SURFACE_SIGNATURE_VERSION, LIVENESS_POLICY_VERSION
+from ..contracts import (
+    API_SURFACE_SIGNATURE_VERSION,
+    DESIGN_METRICS_ALGORITHM_REVISION,
+    LIVENESS_POLICY_VERSION,
+    RUNTIME_REACHABILITY_CATALOG_VERSION,
+    SECURITY_SURFACE_CATALOG_VERSION,
+    STRUCTURAL_FINDINGS_CATALOG_VERSION,
+)
 from ..models import (
     CacheEntryV3,
     CacheLaneReuseReason,
@@ -100,6 +107,14 @@ def build_module_dependent_profile(
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
             "dependency_observation_revision": _DEPENDENCY_OBSERVATION_REVISION,
+            # class_metrics (cbo, lcom4, coupling/cohesion risk) ride the
+            # dependent lane, and their values are a function of the
+            # design-metrics algorithm revision. That revision only reaches this
+            # digest transitively today, through the embedded neutral_profile;
+            # binding it directly means a design-metrics revision that does NOT
+            # coincide with a neutral-lane change still misses exactly this lane
+            # instead of serving stale cbo/lcom4/risk off a warm hit.
+            "design_metrics_algorithm_revision": DESIGN_METRICS_ALGORITHM_REVISION,
             # The dependent lane carries referenced_qualnames, dead candidates
             # and live-root reasons - everything the liveness verdict reads -
             # so a liveness policy bump must miss exactly this lane, never the
@@ -108,6 +123,19 @@ def build_module_dependent_profile(
             "module_manifest_digest": module_manifest_digest.value,
             "neutral_profile": neutral_profile.value,
             "resolver_version": "2",
+            # Closed detector catalogs whose EXPANSION changes an emitted
+            # dependent-lane fact for unchanged source (a new security-surface
+            # sink, a new reachability framework, a new structural finding kind).
+            # Each rides this lane only, so its catalog version must move the
+            # digest or a warm hit serves the pre-expansion result as an
+            # honest-absence false negative.
+            "runtime_reachability_catalog_version": (
+                RUNTIME_REACHABILITY_CATALOG_VERSION
+            ),
+            "security_surface_catalog_version": SECURITY_SURFACE_CATALOG_VERSION,
+            "structural_findings_catalog_version": (
+                STRUCTURAL_FINDINGS_CATALOG_VERSION
+            ),
         },
     )
 

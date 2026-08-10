@@ -16,6 +16,7 @@ from ..contracts import (
     AUTHORITY_ANALYSIS_REVISION,
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_LANE_DESCRIPTOR_VERSION,
+    COMPLEXITY_ALGORITHM_REVISION,
     DESIGN_METRICS_ALGORITHM_REVISION,
     MODULE_IDENTITY_VERSION,
     OBSERVATION_DIGEST_VERSION,
@@ -43,11 +44,14 @@ _METRICS_ENABLED: tuple[ObservationLaneName, ...] = (
     "coupling_cohesion_observations",
     "risk_observations",
 )
-#: The lanes carrying per-entity design metrics. They share one algorithm
-#: revision because they moved together in 39Y: the same population change and
-#: the same recalibration decide what both of them observe.
+#: The lanes carrying per-entity design metrics. They shared one algorithm
+#: revision through 39Y because they moved together; Wave D split them so a
+#: complexity recount never invalidates coupling observations: the
+#: ``risk_observations`` lane (the complexity dimension's carrier) moves with
+#: COMPLEXITY_ALGORITHM_REVISION, and this set keeps only the coupling lane on
+#: DESIGN_METRICS_ALGORITHM_REVISION.
 _DESIGN_METRIC_LANES: frozenset[ObservationLaneName] = frozenset(
-    {"coupling_cohesion_observations", "risk_observations"}
+    {"coupling_cohesion_observations"}
 )
 # The seven columnar lanes; anything absent stays on the record wire ("1").
 # The identity table gained the mount dimension (mount_exc exception rows) so
@@ -102,6 +106,8 @@ def _algorithm_revision(name: ObservationLaneName) -> str:
         return API_SURFACE_SIGNATURE_VERSION
     if name == "semantic_authority":
         return AUTHORITY_ANALYSIS_REVISION
+    if name == "risk_observations":
+        return COMPLEXITY_ALGORITHM_REVISION
     if name in _DESIGN_METRIC_LANES:
         return DESIGN_METRICS_ALGORITHM_REVISION
     return OBSERVATION_DIGEST_VERSION

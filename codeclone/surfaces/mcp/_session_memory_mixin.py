@@ -126,6 +126,26 @@ def _candidate_batch_warnings(
     )
 
 
+def _enrich_attested_evidence(
+    attested_evidence: Mapping[str, object] | None,
+    project: MemoryProject,
+) -> Mapping[str, object] | None:
+    """Add the project's git head/branch to an attested-evidence bundle.
+
+    The finish flow supplies the receipt/patch-trail digests and run id; commit
+    and branch are the project's git provenance, resolved where the store is
+    opened. Returns ``None`` when no bundle was supplied so the propose flow
+    stays evidence-free for callers without a finished change.
+    """
+    if not attested_evidence:
+        return None
+    return {
+        **attested_evidence,
+        "commit": project.git_head or "",
+        "branch": project.git_branch or "",
+    }
+
+
 class _MCPSessionMemoryMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
@@ -690,7 +710,16 @@ class _MCPSessionMemoryMixin:
         claims_text: str | None,
         review_text: str | None,
         verification_profile: str | None,
+        attested_evidence: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
+        """Propose draft memory candidates on an accepted finish.
+
+        ``attested_evidence`` carries the finished change's receipt/patch-trail
+        digests and run id; the controller's finish path supplies it so proposed
+        candidates carry durable evidence. Commit and branch are enriched here
+        from the project's git head. Callers without a finished change omit it and
+        propose evidence-free.
+        """
         from ...memory.finish_workflow import execute_finish_memory_workflow
 
         try:
@@ -707,6 +736,7 @@ class _MCPSessionMemoryMixin:
                 verification_profile=verification_profile,
                 max_candidates=config.max_candidates,
                 max_statement_chars=config.max_statement_chars,
+                attested_evidence=_enrich_attested_evidence(attested_evidence, project),
             )
             hook_payload: dict[str, object] = {
                 "memory_candidates": workflow.candidates,

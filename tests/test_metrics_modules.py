@@ -30,7 +30,7 @@ from codeclone.metrics import health as health_mod
 from codeclone.metrics.class_facts import collect_class_walk_facts
 from codeclone.metrics.cohesion import _resolve_lcom4, cohesion_risk
 from codeclone.metrics.complexity import (
-    cyclomatic_complexity,
+    cfg_cyclomatic_complexity,
     nesting_depth,
     risk_level,
 )
@@ -117,25 +117,25 @@ def test_dependency_registry_membership_and_target_guards() -> None:
     assert _is_internal_target("ext.b", registry=registry) is False
 
 
-def test_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:
+def test_cfg_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:
     # 39Y Y9 ruling A: V(G) = E - N + 2P, so P is counted rather than assumed
     # to be 1. A bare CFG is two blocks with no edge between them — genuinely
     # two components — and the formula says 2. Every graph a builder actually
     # produces links its entry to its exit, which is the single-component case
     # below; this one is only reachable by constructing a CFG by hand.
     disconnected = CFG("pkg.mod:f")
-    assert cyclomatic_complexity(disconnected) == 2
+    assert cfg_cyclomatic_complexity(disconnected) == 2
 
     connected = CFG("pkg.mod:trivial")
     connected.entry.add_successor(connected.exit)
-    assert cyclomatic_complexity(connected) == 1
+    assert cfg_cyclomatic_complexity(connected) == 1
 
     cfg = CFG("pkg.mod:g")
     mid = cfg.create_block()
     cfg.entry.add_successor(mid)
     cfg.entry.add_successor(cfg.exit)
     mid.add_successor(cfg.exit)
-    assert cyclomatic_complexity(cfg) == 2
+    assert cfg_cyclomatic_complexity(cfg) == 2
 
 
 @pytest.mark.parametrize(

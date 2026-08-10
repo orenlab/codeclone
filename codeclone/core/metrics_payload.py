@@ -355,6 +355,11 @@ def build_metrics_report_payload(
             "start_line": as_int(item.get("start_line"), 0),
             "end_line": as_int(item.get("end_line"), 0),
             "cyclomatic_complexity": as_int(item.get("cyclomatic_complexity"), 1),
+            # Diagnostic E-N+2P over the complete Y9 CFG; reaches no gate and
+            # no health input (Wave D two-metric doctrine).
+            "cfg_cyclomatic_complexity": as_int(
+                item.get("cfg_cyclomatic_complexity"), 1
+            ),
             "nesting_depth": as_int(item.get("nesting_depth"), 0),
             "risk": as_str(item.get("risk"), RISK_LOW),
         }

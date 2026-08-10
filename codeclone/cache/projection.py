@@ -166,6 +166,7 @@ def rehydrate_cache_neutral(
                 fingerprint=item.fingerprint,
                 loc_bucket=item.loc_bucket,
                 cyclomatic_complexity=item.cyclomatic_complexity,
+                cfg_cyclomatic_complexity=item.cfg_cyclomatic_complexity,
                 nesting_depth=item.nesting_depth,
                 risk=item.risk,
                 raw_hash=item.raw_hash,

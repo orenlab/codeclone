@@ -53,15 +53,20 @@ def _weakly_connected_components(cfg: CFG) -> int:
     return len({find(block.id) for block in cfg.blocks})
 
 
-def cyclomatic_complexity(cfg: CFG) -> int:
-    """Full McCabe over the whole graph: ``V(G) = E - N + 2P``.
+def cfg_cyclomatic_complexity(cfg: CFG) -> int:
+    """Full McCabe over the whole graph: ``V(G) = E - N + 2P``. Diagnostic.
 
     Every edge counts. Exception dispatch, ``finally`` routing and
     context-manager suppression are real control flow, so dropping them — or
     filtering by an edge's kind to reproduce the numbers this metric gave
     before those edges existed — would reintroduce the second truth the norm
-    CFG removed (39Y Y9, maintainer ruling A). Values move corpus-wide as a
-    result, and the new ones are the true ones.
+    CFG removed (39Y Y9, maintainer ruling A). The graph is never filtered
+    and no second graph exists.
+
+    Since Wave D this value is published as ``cfg_cyclomatic_complexity`` and
+    is diagnostic only: the public ``cyclomatic_complexity`` used by health
+    and policy is the source-level decision count owned by
+    ``codeclone.metrics.source_decisions`` and is computed without this graph.
     """
 
     node_count = len(cfg.blocks)

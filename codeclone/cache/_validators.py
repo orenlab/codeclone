@@ -82,11 +82,13 @@ def _is_unit_dict(value: object) -> TypeGuard[UnitDict]:
     if not _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys):
         return False
     cyclomatic_complexity = value.get("cyclomatic_complexity", 1)
+    cfg_cyclomatic_complexity = value.get("cfg_cyclomatic_complexity", 1)
     nesting_depth = value.get("nesting_depth", 0)
     risk = value.get("risk", "low")
     raw_hash = value.get("raw_hash", "")
     return (
         isinstance(cyclomatic_complexity, int)
+        and isinstance(cfg_cyclomatic_complexity, int)
         and isinstance(nesting_depth, int)
         and isinstance(risk, str)
         and risk in {"low", "medium", "high"}

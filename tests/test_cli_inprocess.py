@@ -1003,7 +1003,7 @@ def test_cli_cache_not_shared_between_projects(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root2), "--no-progress"])
     out = capsys.readouterr().out
-    assert_contains_none(out, "Cache signature mismatch")
+    assert_contains_none(out, "Cache checksum mismatch")
 
 
 def test_cli_warns_on_legacy_cache(
@@ -1977,8 +1977,8 @@ def test_cli_too_large_baseline_fails_in_ci(
     ("mutator", "expected_message", "expected_status", "expected_schema_version"),
     [
         (
-            lambda data: data.__setitem__("sig", "bad"),
-            "signature",
+            lambda data: data.__setitem__("checksum", "bad"),
+            "checksum",
             "integrity_failed",
             CACHE_VERSION,
         ),
@@ -2878,7 +2878,7 @@ def test_cli_cache_warning(
     )
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
-    data["sig"] = "bad"
+    data["checksum"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
     _run_parallel_main(
@@ -2891,7 +2891,7 @@ def test_cli_cache_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Cache signature mismatch")
+    assert_contains_all(out, "Cache checksum mismatch")
 
 
 def test_cli_cache_save_warning(

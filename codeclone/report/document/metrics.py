@@ -101,6 +101,11 @@ def _normalize_metrics_families(
                     item_map.get("cyclomatic_complexity"),
                     1,
                 ),
+                # Diagnostic companion; never the sort key and never a gate.
+                "cfg_cyclomatic_complexity": _as_int(
+                    item_map.get("cfg_cyclomatic_complexity"),
+                    1,
+                ),
                 "nesting_depth": _as_int(item_map.get("nesting_depth")),
                 "risk": str(item_map.get("risk", RISK_LOW)),
             }

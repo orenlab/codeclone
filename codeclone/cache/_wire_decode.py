@@ -532,6 +532,7 @@ def _neutral_unit_from_wire(unit: UnitDict) -> CacheNeutralUnit:
         fingerprint=unit["fingerprint"],
         loc_bucket=unit["loc_bucket"],
         cyclomatic_complexity=unit.get("cyclomatic_complexity", 1),
+        cfg_cyclomatic_complexity=unit.get("cfg_cyclomatic_complexity", 1),
         nesting_depth=unit.get("nesting_depth", 0),
         risk=unit.get("risk", "low"),
         raw_hash=unit.get("raw_hash", ""),
@@ -1491,11 +1492,18 @@ def _decode_wire_structural_occurrence(
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
-    # Load-bearing in concert with the signed-`v` cache gate
-    # (integrity.sign_cache_envelope): the {11, 17} tolerance is unreachable
-    # ONLY while that gate holds — removing either half reopens the
-    # cross-defect. Not redundant strictness.
-    decoded = _decode_wire_named_span(value, valid_lengths={11, 17})
+    # The positional unit row is exactly 18 columns since the Wave-D split
+    # (index 7 is the public source-decision cyclomatic_complexity; the trailing
+    # column is the diagnostic CFG E-N+2P). It decodes strictly -- no legacy
+    # {11, 17} length is tolerated. That strictness is load-bearing in concert
+    # with the cache trust envelope, not redundant: store._load_and_validate
+    # refuses any cache whose "v" != CACHE_VERSION and whose envelope fails
+    # integrity.verify_cache_envelope_checksum -- a keyless checksum over the
+    # versioned pre-image {v, payload} (cache_envelope_checksum) -- so a
+    # foreign-generation row can neither match "v" nor survive the checksum to
+    # reach this decoder. A short or wide row that somehow arrives is rejected
+    # here rather than silently decoded; rejection just re-analyses the file.
+    decoded = _decode_wire_named_span(value, valid_lengths={18})
     if decoded is None:
         return None
     row, qualname, start_line, end_line = decoded
@@ -1509,6 +1517,7 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
         fingerprint,
         loc_bucket,
         cyclomatic_complexity,
+        cfg_cyclomatic_complexity,
         nesting_depth,
         risk,
         raw_hash,
@@ -1531,6 +1540,7 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
         fingerprint=fingerprint,
         loc_bucket=loc_bucket,
         cyclomatic_complexity=cyclomatic_complexity,
+        cfg_cyclomatic_complexity=cfg_cyclomatic_complexity,
         nesting_depth=nesting_depth,
         risk=risk,
         raw_hash=raw_hash,
