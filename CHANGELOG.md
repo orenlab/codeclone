@@ -133,6 +133,11 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 - The review queue no longer reports a finding as known without baseline evidence.
 - The error for a missing `baseline_scope_id` names the configuration table correctly.
 - Warm runs count cached files in health denominators, so a cached run no longer scores differently from a cold one.
+- Memory candidates proposed from a finished change now carry that change's attested evidence — the review receipt
+  digest, the audit patch-trail digest, and the commit — as durable `memory_evidence` rows, instead of being approved
+  with only a bare `human_approval` warrant that recorded no digest. Records approved before this fix are left as they
+  are; their digests were never captured and are not invented after the fact. Existing memory stores load and behave
+  unchanged (additive rows only, no schema change).
 
 ## [2.1.0a1] - 2026-07-09
 

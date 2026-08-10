@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from .coverage import ScopeCoverageReport, compute_scope_coverage, coverage_delta
@@ -35,8 +35,15 @@ def execute_finish_memory_workflow(
     verification_profile: str | None,
     max_candidates: int,
     max_statement_chars: int,
+    attested_evidence: Mapping[str, object] | None = None,
 ) -> FinishMemoryWorkflowResult:
-    """Run the transport-neutral propose-on-finish memory workflow."""
+    """Run the transport-neutral propose-on-finish memory workflow.
+
+    ``attested_evidence`` carries the finished change's attested identifiers
+    (receipt digest, patch-trail digest, commit sha, run id). When provided it is
+    threaded down so proposed candidates carry durable evidence rows instead of a
+    bare stub. The controller populates it from the finish result.
+    """
     before = compute_scope_coverage(
         store,
         project_id=project.id,
@@ -51,6 +58,7 @@ def execute_finish_memory_workflow(
         verification_profile=verification_profile,
         max_candidates=max_candidates,
         max_statement_chars=max_statement_chars,
+        attested_evidence=attested_evidence,
     )
     staleness = apply_scope_staleness(
         store,
