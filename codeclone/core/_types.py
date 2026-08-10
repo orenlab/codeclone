@@ -50,6 +50,7 @@ from ..models import (
     Suggestion,
     SuppressedCloneGroup,
     Unit,
+    UnsupportedConstructSkip,
 )
 from ..utils.coerce import as_int, as_mapping, as_str
 
@@ -57,6 +58,11 @@ if TYPE_CHECKING:
     from ..analysis.phase_ledger import PhaseSnapshot
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
+
+#: Display prefix for a wire-refused file's error string. The machine-readable
+#: discriminator is ``FileProcessResult.error_kind == "unsupported_construct"``;
+#: this prefix only keeps the human-facing failure lines self-explanatory.
+UNSUPPORTED_CONSTRUCT_ERROR_PREFIX = "Unsupported construct: "
 DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
@@ -161,6 +167,7 @@ class ProcessingResult:
     analyzed_classes: int
     failed_files: tuple[str, ...]
     source_read_failures: tuple[str, ...]
+    unsupported_construct_skips: tuple[UnsupportedConstructSkip, ...] = ()
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     semantic_events: tuple[SemanticEvent, ...] = ()

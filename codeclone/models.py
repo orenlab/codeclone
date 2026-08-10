@@ -1051,6 +1051,22 @@ class FileStat(TypedDict):
     size: int
 
 
+@dataclass(frozen=True, slots=True)
+class UnsupportedConstructSkip:
+    """Witness for one file skipped because the wire refused a construct.
+
+    ``construct`` is the wire's refusal message and names the AST node kind
+    (for example ``unsupported fields on Import: is_lazy``), so a run's
+    inventory can attribute the loss without diffing file lists. Introduced by
+    the Python 3.15 viability probe (G1b): before this witness, a file whose
+    syntax outgrew the wire whitelist was skipped with exit 0 and only an
+    untyped "unexpected error" line to show for it.
+    """
+
+    filepath: str
+    construct: str
+
+
 class SourceStatsDict(TypedDict):
     lines: int
     functions: int

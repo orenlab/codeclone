@@ -1295,9 +1295,12 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         previous = self._previous_run_for_root(record)
         resolved: list[dict[str, object]] = []
         if previous is not None:
-            compare_payload = self.compare_runs(
-                before_run_id=previous.run_id,
-                after_run_id=record.run_id,
+            # Both records are this root's own; compare them directly. The
+            # previous id may also live under a same-commit sibling checkout,
+            # and re-resolving it globally failed with multi-root ambiguity.
+            compare_payload = self._compare_run_records(
+                before=previous,
+                after=record,
                 focus="all",
             )
             resolved = _helpers._dict_rows(compare_payload.get("improvements"))

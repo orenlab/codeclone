@@ -83,6 +83,10 @@ def _build_catalog() -> dict[str, str]:
         "fmt_batch_item_failed": ui.fmt_batch_item_failed("bad item"),
         "fmt_parallel_fallback": ui.fmt_parallel_fallback("no semaphore"),
         "fmt_failed_files_header": ui.fmt_failed_files_header(2),
+        "fmt_unsupported_construct_summary": ui.fmt_unsupported_construct_summary(
+            count=2,
+            constructs=["unsupported fields on Import: is_lazy"],
+        ),
         "fmt_cache_save_failed": ui.fmt_cache_save_failed("read-only fs"),
         "fmt_vscode_extension_tip": ui.fmt_vscode_extension_tip(
             url="https://example.invalid/ext"
@@ -341,6 +345,7 @@ _WARNING_CLASS_ENTRIES = frozenset(
         "fmt_cache_save_failed",
         "fmt_failed_files_header",
         "fmt_html_report_open_failed",
+        "fmt_unsupported_construct_summary",
     }
 )
 

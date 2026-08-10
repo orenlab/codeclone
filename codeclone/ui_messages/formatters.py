@@ -59,6 +59,7 @@ from .runtime import (
     WARN_LEGACY_CACHE,
     WARN_LEGACY_REPO_WORKSPACE,
     WARN_PARALLEL_FALLBACK,
+    WARN_UNSUPPORTED_CONSTRUCT_SUMMARY,
     WARN_WORKER_FAILED,
 )
 from .styling import (
@@ -173,6 +174,17 @@ def fmt_parallel_fallback(error: object) -> str:
 
 def fmt_failed_files_header(count: int) -> str:
     return WARN_FAILED_FILES_HEADER.format(count=count)
+
+
+def fmt_unsupported_construct_summary(
+    *,
+    count: int,
+    constructs: Iterable[str],
+) -> str:
+    return WARN_UNSUPPORTED_CONSTRUCT_SUMMARY.format(
+        count=count,
+        constructs="; ".join(constructs),
+    )
 
 
 def fmt_cache_save_failed(error: object) -> str:

@@ -3887,3 +3887,87 @@ def test_json_renderer_emits_bytes_without_a_string_round_trip() -> None:
 
     assert isinstance(rendered, bytes)
     assert rendered == orjson.dumps(payload, option=orjson.OPT_INDENT_2)
+
+
+def test_report_json_inventory_carries_unsupported_construct_witnesses() -> None:
+    """The report attributes wire-refused skips: count plus per-file witness.
+
+    Python 3.15 probe, G1b: «N files not analyzed: unsupported syntax X» must
+    be readable from the report itself, naming the construct and the file,
+    without diffing inventories.
+    """
+
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0"},
+            inventory={
+                "files": {
+                    "total_found": 2,
+                    "analyzed": 1,
+                    "cached": 0,
+                    "skipped": 1,
+                    "source_io_skipped": 0,
+                    "unsupported_construct_skipped": 1,
+                    "unsupported_constructs": [
+                        {
+                            "path": "pkg/module.py",
+                            "construct": "unsupported fields on Import: is_lazy",
+                        }
+                    ],
+                },
+                "code": {
+                    "functions": 0,
+                    "methods": 0,
+                    "classes": 0,
+                    "parsed_lines": 12,
+                },
+            },
+        )
+    )
+
+    files = payload["inventory"]["files"]
+    assert files["skipped"] == 1
+    assert files["unsupported_construct_skipped"] == 1
+    assert files["unsupported_constructs"] == [
+        {
+            "path": "pkg/module.py",
+            "construct": "unsupported fields on Import: is_lazy",
+        }
+    ]
+
+
+def test_text_and_markdown_inventory_carry_the_unsupported_construct_count() -> None:
+    inventory = {
+        "files": {
+            "total_found": 3,
+            "analyzed": 2,
+            "cached": 0,
+            "skipped": 1,
+            "source_io_skipped": 0,
+            "unsupported_construct_skipped": 1,
+            "unsupported_constructs": [
+                {
+                    "path": "pkg/module.py",
+                    "construct": "unsupported fields on Import: is_lazy",
+                }
+            ],
+        },
+        "code": {"functions": 0, "methods": 0, "classes": 0, "parsed_lines": 9},
+    }
+    text_out = to_text_report(
+        meta={"codeclone_version": "1.4.0"},
+        inventory=inventory,
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    assert "unsupported_construct_skipped=1" in text_out
+
+    document = json.loads(
+        to_json_report({}, {}, {}, {"codeclone_version": "1.4.0"}, inventory=inventory)
+    )
+    markdown_out = render_markdown_report_document(document)
+    assert "unsupported_construct_skipped=1" in markdown_out

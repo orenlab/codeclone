@@ -24,6 +24,20 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Added
 
+- **Analysis no longer silently skips files with unsupported syntax.** A file whose parsed syntax the canonical wire
+  refuses (for example, syntax newer than the engine) is now a typed, attributed outcome instead of an untyped
+  "unexpected error": the console summarizes «N files not analyzed: unsupported syntax (…)» naming the construct, the
+  run summary counts the file under `skipped`, and the JSON report carries a per-file witness
+  (`inventory.files.unsupported_constructs`, with `unsupported_construct_skipped` also shown by the text and Markdown
+  renderers). Exit-code semantics are unchanged.
+- **Forward-compatible parsing of Python 3.15 lazy imports (PEP 810).** The wire contract understands the new
+  `is_lazy` field on `import` and `from … import`: the eager default is normalized away, so wires and fingerprints
+  stay byte-identical with every earlier interpreter, while `lazy import` emits an explicit marker and fingerprints
+  distinctly. Python 3.15's dict-unpacking comprehensions `{**d for d in ds}` (PEP 798) are also represented instead
+  of crashing the analyzer. This is forward-compatible parsing only; 2.1.0a2 does not claim Python 3.15 support.
+- Coupling facts are now interpreter-independent: the builtin-name exclusion used by CBO is a pinned registry covering
+  CPython 3.10–3.15 rather than `dir(builtins)` of the running interpreter, so the same repository yields the same
+  coupling facts on every supported Python.
 - **Semantic authority governance** — declare reviewed contracts in `[[tool.codeclone.authority]]`, gate violations
   with `--fail-on-authority-violation`, and triage ranked candidates in a new report tab or through `check_authority`.
 - `--near-miss` reports function pairs whose normalized statement sequences differ by exactly one statement. Advisory
