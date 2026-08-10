@@ -50,10 +50,14 @@ Scope boundaries: nested ``def``/``class`` bodies do not count toward the
 outer unit — their decorators, argument defaults and annotations do, because
 those expressions evaluate when the enclosing ``def``/``class`` statement
 runs. Lambda is not a metric unit under the existing contract
-(``codeclone.qualnames.FunctionNode`` is ``FunctionDef | AsyncFunctionDef``),
-so it never counts separately: its authored decisions belong to the unit
-whose source authored them. A unit's own decorators and parameter defaults
-evaluate in the *enclosing* scope's flow and never count toward the unit.
+(``codeclone.qualnames.FunctionNode`` is ``FunctionDef | AsyncFunctionDef``,
+checked), so it never counts separately; and being a deferred-execution
+nested scope like a nested ``def``, its body runs when the lambda is called,
+not on the enclosing unit's own paths, so its body decisions count nowhere.
+A lambda's *defaults* do count toward the enclosing unit, because they
+evaluate when the lambda expression is evaluated — on the enclosing path.
+A unit's own decorators and parameter defaults evaluate in the *enclosing*
+scope's flow and never count toward the unit.
 """
 
 from __future__ import annotations
@@ -170,6 +174,16 @@ class SourceDecisionCounter(ast.NodeVisitor):
             self.visit(base)
         for keyword in node.keywords:
             self.visit(keyword)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        # A lambda is a deferred-execution nested scope, like a nested def: its
+        # body runs when the lambda is CALLED, not on the enclosing unit's own
+        # paths, and lambda is not a metric unit under the existing contract
+        # (qualnames.FunctionNode excludes it), so its body decisions count
+        # nowhere. Its defaults, however, evaluate when the lambda expression
+        # is evaluated — on the enclosing unit's path — so they count, exactly
+        # like a nested def's defaults.
+        self.visit(node.args)
 
     def _visit_nested_function(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef

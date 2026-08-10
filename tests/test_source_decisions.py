@@ -386,14 +386,44 @@ def test_nested_def_decorator_evaluates_in_outer_flow() -> None:
     assert _cc(source) == 2
 
 
-def test_lambda_decisions_count_toward_enclosing_unit() -> None:
-    # Lambda is not a metric unit under the existing contract
-    # (qualnames.FunctionNode is FunctionDef | AsyncFunctionDef), so it does
-    # not count separately; its authored decisions belong to the unit whose
-    # source authored them.
+def test_lambda_body_decisions_count_nowhere() -> None:
+    # Ratified rule (verbatim): nested def/class bodies do NOT count toward the
+    # outer function; lambda counts SEPARATELY only if it is a metric unit.
+    # Lambda is not a metric unit (qualnames.FunctionNode is
+    # FunctionDef | AsyncFunctionDef, checked), so it never counts separately —
+    # and being a deferred-execution nested scope like a nested def, its body
+    # runs when the lambda is CALLED, not on the enclosing unit's own paths.
+    # So a lambda body's authored decisions count NOWHERE.
     source = """
     def f(xs, p):
         return sorted(xs, key=lambda v: v.a if p else v.b)
+    """
+    assert _cc(source) == 1
+
+
+def test_lambda_body_is_excluded_regardless_of_decision_count() -> None:
+    # Mutation pin: piling authored decisions into a lambda body must not move
+    # the enclosing unit's metric — the body is excluded structurally, not by a
+    # small-count coincidence.
+    source = """
+    def f(xs, p, q, r):
+        return sorted(
+            xs,
+            key=lambda v: (v.a if p else v.b) or (q and r) or [w for w in v],
+        )
+    """
+    assert _cc(source) == 1
+
+
+def test_lambda_default_counts_toward_enclosing_unit() -> None:
+    # A lambda DEFAULT evaluates when the lambda expression is evaluated, which
+    # is on the enclosing unit's own path (exactly like a nested def's default),
+    # so its BoolOp counts toward the enclosing unit — while the lambda body
+    # still does not.
+    source = """
+    def f(a, b):
+        g = lambda x=(a or b): x if x else 0
+        return g
     """
     assert _cc(source) == 2
 
