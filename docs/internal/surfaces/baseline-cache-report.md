@@ -27,7 +27,7 @@ This page documents the contracts, mapping, failure modes, and verification requ
 |----------|-------|-----------------|
 | `BASELINE_SCHEMA_VERSION` | 3.0 | Baseline JSON structure (fingerprints, metadata, metrics) |
 | `BASELINE_FINGERPRINT_VERSION` | 3 | Fingerprint stability; changes block historical comparison |
-| `CACHE_VERSION` | 3.5 | Cache file serialization and projection format |
+| `CACHE_VERSION` | 3.6 | Cache file serialization and projection format |
 | `REPORT_SCHEMA_VERSION` | 3.0 | Report JSON sections: meta, metrics, findings, derived, integrity, inventory |
 | `AUDIT_PROJECTION_VERSION` | audit-v1 | Audit trail projection into report integrity section |
 | `METRICS_BASELINE_SCHEMA_VERSION` | 1.3 | Metrics baseline metrics formatting for `compare_runs` |
@@ -215,6 +215,6 @@ git commit -m "chore: update baseline"
 | Security hardening (path validation, config symlink rejection) | supported | `codeclone/cache/projection.py`; memory mem-bc26f97ebb0944a9986de756b857c9d3 |
 | Report schema version 3.0 current | supported | context.reports.schema_version |
 | Baseline schema version 3.0 current | supported | BASELINE_SCHEMA_VERSION contract |
-| Cache version 3.5 current | supported | CACHE_VERSION contract |
+| Cache version 3.6 current | supported | CACHE_VERSION contract |
 | MCP tool surface (get_run_summary, get_report_section, compare_runs) | supported | context.mcp_tools.tools |
 | Default paths and size limits | supported | contracts (DEFAULT_BASELINE_PATH, DEFAULT_MAX_CACHE_SIZE_MB, etc.) |

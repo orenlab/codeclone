@@ -100,6 +100,30 @@ def _metrics_skipped_payload(*, scope: str | None = None) -> dict[str, object]:
     return payload
 
 
+def _summary_dead_code_payload(block: Mapping[str, object]) -> dict[str, object]:
+    """Project the dead-code tri-state from the canonical report block.
+
+    ``block`` is ``metrics.families.dead_code.summary`` -- the same block the
+    gate authority reads (report/gates/evaluator.py). Surfacing
+    ``unresolved_external_override`` here is what lets a get_run_summary
+    consumer tell "no abstentions" apart from "the counter was never carried":
+    the top-level ``findings_summary`` never carried it, so abstentions were
+    indistinguishable from zero (the hollow-truncation class). Values are read,
+    never recomputed. This is the single seam that surfaces the counter, so
+    zeroing it here is what the value-pin test is written to catch.
+    """
+
+    return {
+        "total": _as_int(block.get("total", 0), 0),
+        "high_confidence": _as_int(block.get("high_confidence", 0), 0),
+        "suppressed": _as_int(block.get("suppressed", 0), 0),
+        "unresolved_external_override": _as_int(
+            block.get("unresolved_external_override", 0), 0
+        ),
+        "live_roots": _as_int(block.get("live_roots", 0), 0),
+    }
+
+
 def _summary_health_payload(summary: Mapping[str, object]) -> dict[str, object]:
     if _metrics_skipped_for_summary(summary):
         return _metrics_skipped_payload()

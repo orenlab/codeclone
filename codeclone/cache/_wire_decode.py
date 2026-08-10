@@ -1481,8 +1481,17 @@ def _decode_wire_structural_occurrence(
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
-    # 18 columns since CACHE_VERSION 3.3 (Wave D): the version bump makes
-    # every shorter generation unloadable, so no legacy length is tolerated.
+    # The positional unit row is exactly 18 columns since the Wave-D split
+    # (index 7 is the public source-decision cyclomatic_complexity; the trailing
+    # column is the diagnostic CFG E-N+2P). It decodes strictly -- no legacy
+    # {11, 17} length is tolerated. That strictness is load-bearing in concert
+    # with the cache trust envelope, not redundant: store._load_and_validate
+    # refuses any cache whose "v" != CACHE_VERSION and whose envelope fails
+    # integrity.verify_cache_envelope_checksum -- a keyless checksum over the
+    # versioned pre-image {v, payload} (cache_envelope_checksum) -- so a
+    # foreign-generation row can neither match "v" nor survive the checksum to
+    # reach this decoder. A short or wide row that somehow arrives is rejected
+    # here rather than silently decoded; rejection just re-analyses the file.
     decoded = _decode_wire_named_span(value, valid_lengths={18})
     if decoded is None:
         return None

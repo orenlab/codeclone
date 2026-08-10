@@ -62,8 +62,30 @@ The MCP surface (when installed) provides additional workflow commands through y
 | Using stale structural data | Missed regressions | Re-analyze after code changes before finishing |
 | Mixing edit paths for Python files | Incomplete verification | Use workflow tools (not atomic) for Python structural changes |
 | Hardcoding tool/contract counts | Version lockstep failures | Derive from source of truth (test fixtures, contract imports) |
+| Trusting a green test as proof | Hollow tests that never fail on the defect they claim to guard | Mutate the pinned behavior and confirm the test reds (see Mutation evidence below) |
+| Self-calibrating a score against this repo | A scale that fits only the object that produced it; false confidence in general fitness | Accept score/verdict changes only via an independent benchmark on frozen external repos (see Score-change acceptance below) |
 
 The MCP surface fails closed: if not installed, edit-cycle tools are unavailable (the base CLI continues working). Do not assume MCP tools are present.
+
+## Mutation evidence
+
+Writing a test that passes is not the same as proving the test would fail if the code broke. Red-first shows a test was red once; **mutation** shows it dies when the exact behavior it pins breaks. In this project, every load-bearing fix or claim must ship *mutation evidence*: revert or corrupt the exact production behavior the test pins, and confirm the test turns red. A test that stays green when its behavior is reverted is a hollow test — strengthen it until it dies. Where a fix corrects a value or classification, mutate in both directions; each opposite error must red under a different test.
+
+Three hollow-test classes are worth naming, because a passing suite hides all three:
+
+- **Relative-invariant hole.** Tests that only assert relationships (`prose <= its measure`, `A > B`) stay green for any value of the underlying constant. Pin the rule that *derives* the number — re-derive or re-measure it — so that changing the literal constant reds the test, instead of writing `assert x == 780`, which just moves the magic number into the test.
+- **Guard unreachable in every configuration.** A guard whose protected path can never fire in any configuration is structurally dead. If reverting the guarded behavior changes nothing observable, the guard never ran. When you add a guard, prove by mutation that some input reaches and trips it.
+- **Success masked by a sibling.** A run can look green because a parallel mechanism did the work, not the one under test. Isolate and probe each mechanism alone; "the batch was green" is not "this rule fired".
+
+"Informal" here means targeted manual mutations — revert-the-behavior probes covering the defect class — not necessarily a mutation-testing framework. For the full normative statement, see [Mutation evidence in the contribution guide](https://github.com/orenlab/codeclone/blob/main/CONTRIBUTING.md).
+
+## Score-change acceptance
+
+Changing a parameter that moves a user-facing score or verdict — the health score or one of its dimensions (complexity, coupling, cohesion, dead_code, coverage, dependencies, clones), reference permilles or bands, health weights, a gate threshold (`fail_*`), a severity mapping, an outlier term — is accepted only via an *independent benchmark* run after the recalibration. Self-repo validation alone is not acceptance: a scale calibrated on this repository measures this repository's morphology — a very precise micrometer for exactly one part — and "it looks fine on our own repo" is not proof of general fitness.
+
+An independent benchmark is blind, frozen, and adversarial: a blind agent is given the measurement protocol, not the goal; it runs on at least five frozen external repositories spanning orders of magnitude and Python styles, each pinned to a commit SHA recorded before the first run; the same pinned measurement is used, thresholds are left unchanged, and raw distributions are reported first. The external projects should try to refute the calibration, not re-fit it. If external validity fails, that is a new fact — "pinned self-calibration failed external validity" — and it calls for a reference-population redesign as a separate task, never a silent re-fit of thresholds against the benchmark repositories. For the full normative statement, see the [contribution guide](https://github.com/orenlab/codeclone/blob/main/CONTRIBUTING.md).
+
+Purely factual, categorical facts without an evaluative scale (identity, or tri-state novelty as a fact) are not covered by this law; the interpretation of a fact into a score is.
 
 ## Next steps
 

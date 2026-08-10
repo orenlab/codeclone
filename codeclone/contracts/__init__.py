@@ -91,6 +91,22 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # and never touches the neutral fingerprint lane.
 LIVENESS_POLICY_VERSION: Final = "2"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
+# Closed detector catalogs that ride the module-dependent cache-reuse lane.
+# Each is a mutable enumeration whose EXPANSION changes an emitted dependent
+# fact for unchanged source, so a warm cache hit would otherwise serve the
+# pre-expansion result as an honest-absence false negative (a narrowing
+# self-rejects). Each is an input of the module-dependent reuse profile
+# (codeclone/cache/reuse.py), so a catalog change misses exactly that lane and
+# never the neutral fingerprint lane. Bump the matching constant whenever its
+# catalog gains or drops a member; verdicts across versions are not comparable.
+# The security-surface category / location-scope / classification-mode /
+# evidence-kind catalogs (codeclone/analysis/security_surfaces.py).
+SECURITY_SURFACE_CATALOG_VERSION: Final = "1"
+# The runtime-reachability framework / edge-kind / route-method / marker-symbol
+# catalogs (codeclone/analysis/reachability.py).
+RUNTIME_REACHABILITY_CATALOG_VERSION: Final = "1"
+# The structural finding-kind catalog (codeclone/domain/findings.py).
+STRUCTURAL_FINDINGS_CATALOG_VERSION: Final = "1"
 # Statement-level unreachability (39Y Y9). Version "1" is ONE predicate over
 # ONE graph: a statement cannot run exactly when its block is not reachable
 # from ``CFG.entry`` by directed traversal of ``Block.successors``. There is no
@@ -157,13 +173,37 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # off a 3.3 wire would silently report only y8-domain pairs. Its own key,
 # absence rejects the entry, rejection just re-analyses the file.
 #
-# 3.5 (Wave D) widens the positional unit row by one column: index 7 stays the
+# 3.6 combines two independently-authored cache-format changes that each
+# reached "3.5" on their own branch; the merge carries both, so the digit
+# advances once more to name the single combined generation. Two reasons, one
+# truth:
+#
+# (a) Wave D widens the positional unit row by one column: index 7 stays the
 # public ``cyclomatic_complexity`` (now the source-decision count) and a new
 # trailing column carries the diagnostic ``cfg_cyclomatic_complexity``. Cached
 # units also hold complexity computed by the pre-split CFG algorithm, so the
-# bump is what forces every unit through the new counter instead of serving
-# stale semantics off the wire.
-CACHE_VERSION: Final = "3.5"
+# bump forces every unit through the new counter instead of serving stale
+# semantics off the wire; the widened row decodes strictly at ``{18}`` -- no
+# legacy length is tolerated, a shorter generation is unloadable at this gate.
+#
+# (b) The cache trust envelope: the integrity checksum now covers the versioned
+# pre-image ``{v, payload}`` instead of ``payload`` alone, so the generation
+# gate ``v`` is inside the checksummed scope -- a migration/backup/edit-in-place
+# that rewrites ``v`` without re-checksumming is refused (``INTEGRITY_FAILED``)
+# rather than trusted as a payload it never covered under that mark. The on-disk
+# envelope key was renamed ``sig`` -> ``checksum`` and the keyless "signature"
+# vocabulary retired to checksum/integrity names, telling the truth that this is
+# a corruption/desync integrity check and not authentication. The
+# module-dependent reuse profile now versions the design-metrics algorithm
+# revision and the security-surface / runtime-reachability / structural-findings
+# detector catalogs directly, so a policy change in any of those lanes that does
+# not coincide with a neutral-lane change can no longer serve a stale
+# dependent-lane fact off a warm hit.
+#
+# Every 3.4/3.5 cache is rejected at the version gate and re-analysed; there is
+# no byte-stable path for the widened row, the checksummed scope, or the
+# key-name change, so the bump IS the compatibility guarantee.
+CACHE_VERSION: Final = "3.6"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
@@ -479,11 +519,14 @@ __all__ = [
     "REPORT_EVALUATION_DIGEST_DOMAIN",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
+    "RUNTIME_REACHABILITY_CATALOG_VERSION",
+    "SECURITY_SURFACE_CATALOG_VERSION",
     "SEMANTIC_EVENT_VERSION",
     "SEMANTIC_INDEX_FORMAT_VERSION",
     "SEMANTIC_PROJECTION_REVISION_VERSION",
     "SOURCE_KIND_POLICY_VERSION",
     "STATEMENT_REACHABILITY_POLICY_VERSION",
+    "STRUCTURAL_FINDINGS_CATALOG_VERSION",
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",
