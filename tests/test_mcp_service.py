@@ -9912,6 +9912,128 @@ def _assert_optional_summary_metric(
     return metric_payload
 
 
+def _write_unresolved_external_override_repo(root: Path) -> None:
+    """Write a repo whose dead-code analysis abstains on two public methods.
+
+    ``ForeignAdapter`` extends a base imported from a package that is not in
+    the analysis root, so the base is an unresolved external. Its two public
+    methods are referenced nowhere, so rule-3 liveness neither claims them dead
+    nor proves them live: both abstain into ``unresolved_external_override``.
+    """
+
+    pkg = root / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "adapter.py").write_text(
+        "from thirdparty.unknown import RemoteBase\n\n\n"
+        "class ForeignAdapter(RemoteBase):\n"
+        "    def process(self):\n"
+        "        return 1\n\n"
+        "    def collect(self):\n"
+        "        return 2\n"
+    )
+
+
+def test_get_run_summary_surfaces_dead_code_unresolved_external_override(
+    tmp_path: Path,
+) -> None:
+    """get_run_summary must carry the tri-state abstention counter verbatim.
+
+    The dead-code ``unresolved_external_override`` count lives in the canonical
+    ``metrics.families.dead_code.summary`` block that the gate authority reads
+    (report/gates/evaluator.py). Before this fix ``_build_run_summary_payload``
+    exposed only the top-level ``findings_summary`` and dropped the abstention
+    counter, so every get_run_summary consumer saw abstentions as absent --
+    indistinguishable from zero (the hollow-truncation class, mem-783c3b18).
+
+    Driven end to end through the real analyze pipeline: the fixture abstains on
+    two methods, so the canonical report block carries two, and this pins the
+    ACTUAL VALUE flowing through -- not merely that a ``dead_code`` key exists.
+    A relative-only "the key is present" pin would survive the number being
+    zeroed; this one reds if the surfaced counter is hard-coded to zero.
+    """
+
+    _write_unresolved_external_override_repo(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+
+    run_summary = service.analyze_repository(
+        MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    )
+
+    # The canonical block the gate authority reads is the source of truth.
+    record = service._runs.resolve_any_root()
+    report_block = _dict_at(
+        record.report_document,
+        "metrics",
+        "families",
+        "dead_code",
+        "summary",
+    )
+    assert report_block["unresolved_external_override"] == 2
+
+    dead_code = cast("dict[str, object]", run_summary["dead_code"])
+    # get_run_summary must report exactly what the canonical block says, not a
+    # zeroed placeholder -- pinned against the report block, not a bare literal.
+    assert (
+        dead_code["unresolved_external_override"]
+        == report_block["unresolved_external_override"]
+        == 2
+    )
+    assert dead_code["total"] == report_block["total"]
+    assert dead_code["live_roots"] == report_block["live_roots"]
+    assert dead_code["high_confidence"] == report_block["high_confidence"]
+    assert dead_code["suppressed"] == report_block["suppressed"]
+
+    # Additive only: the pre-existing top-level findings summary still stands.
+    assert "findings" in run_summary
+
+
+def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
+    tmp_path: Path,
+) -> None:
+    """A clones-only run never computed dead code, so the block must be absent.
+
+    Omission here is honest, not the hollow-truncation the fix targets: the
+    metrics surface is skipped (health reports ``metrics_skipped``), and the
+    report still emits an all-zero dead_code family block. Surfacing those
+    zeros would itself be a false "no abstentions" claim, so the block is gated
+    on the same metrics-skipped signal health uses.
+    """
+
+    _write_unresolved_external_override_repo(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+
+    run_summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            analysis_mode="clones_only",
+        )
+    )
+
+    # The report DOES carry an all-zero dead_code block in clones-only mode ...
+    record = service._runs.resolve_any_root()
+    assert _dict_at(
+        record.report_document, "metrics", "families", "dead_code", "summary"
+    ) == {
+        "baseline_diff_available": False,
+        "high_confidence": 0,
+        "live_roots": 0,
+        "new_items": 0,
+        "suppressed": 0,
+        "total": 0,
+        "unresolved_external_override": 0,
+    }
+    # ... but neither the stored summary nor get_run_summary surfaces it, the
+    # same way health reports metrics as skipped rather than a real score.
+    assert cast("dict[str, object]", run_summary["health"]) == {
+        "available": False,
+        "reason": "metrics_skipped",
+    }
+    assert "dead_code" not in record.summary
+    assert "dead_code" not in run_summary
+
+
 def test_mcp_service_summary_and_gate_contract_for_coverage_join(
     tmp_path: Path,
 ) -> None:
