@@ -536,6 +536,10 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         findings = _helpers._as_mapping(report_document.get("findings"))
         metrics = _helpers._as_mapping(report_document.get("metrics"))
         metrics_summary = _helpers._as_mapping(metrics.get("summary"))
+        metrics_families = _helpers._as_mapping(metrics.get("families"))
+        dead_code_summary = _helpers._as_mapping(
+            _helpers._as_mapping(metrics_families.get("dead_code")).get("summary")
+        )
         summary = _helpers._as_mapping(findings.get("summary"))
         analysis_profile = _helpers._summary_analysis_profile_payload(meta)
         payload = {
@@ -599,6 +603,16 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             payload["analysis_profile"] = analysis_profile
         payload["cache"] = _helpers._summary_cache_payload(payload)
         payload["health"] = _helpers._summary_health_payload(payload)
+        # Carry the dead-code tri-state (incl. the unresolved_external_override
+        # abstention counter) only when metrics actually ran. A clones-only run
+        # still emits an all-zero dead_code family block, so gate on the same
+        # metrics-skipped signal health uses: surfacing those zeros would be the
+        # false "no abstentions" claim this fix exists to refuse -- the honest
+        # opposite of the dropped-counter hollow truncation.
+        if dead_code_summary and not _helpers._metrics_skipped_for_summary(payload):
+            payload["dead_code"] = _helpers._summary_dead_code_payload(
+                dead_code_summary
+            )
         return payload
 
 
@@ -653,6 +667,9 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
         analysis_profile = _helpers._summary_analysis_profile_payload(summary)
         if analysis_profile:
             payload["analysis_profile"] = analysis_profile
+        stored_dead_code = _helpers._as_mapping(summary.get("dead_code"))
+        if stored_dead_code:
+            payload["dead_code"] = _helpers._summary_dead_code_payload(stored_dead_code)
         if record is not None:
             coverage_join = _helpers._summary_coverage_join_payload(record)
             if coverage_join:

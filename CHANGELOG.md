@@ -127,6 +127,12 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   with only a bare `human_approval` warrant that recorded no digest. Records approved before this fix are left as they
   are; their digests were never captured and are not invented after the fact. Existing memory stores load and behave
   unchanged (additive rows only, no schema change).
+- `get_run_summary` now reports the dead-code tri-state in a new additive `dead_code` block — the count of
+  unresolved-external-override abstentions, alongside the dead total and live roots — read from the same
+  `metrics.families.dead_code.summary` block the gates treat as authority. Previously the run summary carried only the
+  top-level findings totals, so a public method that abstains (neither dead nor live, because it inherits from a base
+  outside the analysis root) was invisible to every consumer, its absence indistinguishable from zero. The block
+  appears only when metrics ran; a clones-only run omits it rather than reporting misleading zeros.
 
 ## [2.1.0a1] - 2026-07-09
 
