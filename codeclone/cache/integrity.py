@@ -59,50 +59,64 @@ def canonical_json_bytes(data: object) -> bytes:
     return _canonical_json_bytes(data)
 
 
-def sign_cache_payload(data: Mapping[str, object]) -> str:
+def cache_payload_checksum(data: Mapping[str, object]) -> str:
+    """Integrity checksum of a canonical cache payload - NOT a signature.
+
+    Threat model (owner ruling). Cache trust equals source trust: the cache
+    lives beside the analyzed source under the same permissions, so anyone who
+    can forge the cache can simply edit the source instead. A keyed/secret
+    signature would buy nothing against a local adversary who already controls
+    the input. This is a keyless SHA-256 checksum whose only job is INTEGRITY -
+    catching accidental desync (migration, backup, partial write, cross-version
+    skew) - and it makes no authenticity claim. Do NOT re-introduce a keyed
+    signature here as a security control: it is not authentication and must not
+    be described, named, or relied on as one.
+    """
+
     return hashlib.sha256(_canonical_json_bytes(data)).hexdigest()
 
 
-def verify_cache_payload_signature(
+def verify_cache_payload_checksum(
     payload: Mapping[str, object],
-    signature: str,
+    checksum: str,
 ) -> bool:
-    return hmac.compare_digest(signature, sign_cache_payload(payload))
+    return hmac.compare_digest(checksum, cache_payload_checksum(payload))
 
 
-def sign_cache_envelope(version: str, payload: Mapping[str, object]) -> str:
-    """Sign the full trust envelope, binding the generation gate into scope.
+def cache_envelope_checksum(version: str, payload: Mapping[str, object]) -> str:
+    """Integrity checksum over the full trust envelope, binding the gate.
 
     ``version`` is the top-level ``v`` mark the loader compares before it decodes
     anything. Folding it into an explicit two-key pre-image ``{v, payload}``
-    means the digest changes when ``v`` changes: a migration, backup or
-    edit-in-place that rewrites ``v`` without re-signing is refused
-    (``INTEGRITY_FAILED``) instead of trusted as a payload it never signed under
-    that mark. ``py``/``fp`` already live inside ``payload``; this closes the
-    one remaining asymmetry, ``v`` itself.
+    means the checksum changes when ``v`` changes: a migration, backup or
+    edit-in-place that rewrites ``v`` without re-checksumming is refused
+    (``INTEGRITY_FAILED``) instead of trusted as a payload it never covered under
+    that mark. ``py``/``fp`` already live inside ``payload``; this closes the one
+    remaining asymmetry, ``v`` itself. Like ``cache_payload_checksum`` this is an
+    integrity check, not authentication - see its threat-model note.
 
     Cross-defect witness (Enacta review). This is ONE half of a coupled pair.
     The other half is the ``{11, 17}`` unit-row length tolerance in
     ``_wire_decode._decode_wire_unit`` (dead-by-gate; owned elsewhere, do not
-    edit). The envelope-``v`` defect existed only as their product: an unsigned
+    edit). The envelope-``v`` defect existed only as their product: an unchecked
     ``v`` lets a migration retag a stale-format payload to the running
     generation, and that tolerant decoder then silently accepts its old rows.
-    Signing ``v`` is therefore NOT redundant strictness over the
+    Binding ``v`` is therefore NOT redundant strictness over the
     ``v == CACHE_VERSION`` gate in ``_load_and_validate``: the gate rejects a
-    *wrong* ``v``; only this signature rejects a ``v`` *rewritten to match* while
-    the payload stays old-format. Do not drop ``v`` from the signed scope while
-    that decode tolerance survives, or the cross-defect reassembles.
+    *wrong* ``v``; only this checksum rejects a ``v`` *rewritten to match* while
+    the payload stays old-format. Do not drop ``v`` from the checksummed scope
+    while that decode tolerance survives, or the cross-defect reassembles.
     """
 
-    return sign_cache_payload({"v": version, "payload": payload})
+    return cache_payload_checksum({"v": version, "payload": payload})
 
 
-def verify_cache_envelope_signature(
+def verify_cache_envelope_checksum(
     version: str,
     payload: Mapping[str, object],
-    signature: str,
+    checksum: str,
 ) -> bool:
-    return hmac.compare_digest(signature, sign_cache_envelope(version, payload))
+    return hmac.compare_digest(checksum, cache_envelope_checksum(version, payload))
 
 
 def _canonical_json_bytes(data: object) -> bytes:
@@ -124,12 +138,12 @@ __all__ = [
     "as_object_list",
     "as_str_dict",
     "as_str_or_none",
+    "cache_envelope_checksum",
+    "cache_payload_checksum",
     "canonical_json",
     "canonical_json_bytes",
     "read_json_document",
-    "sign_cache_envelope",
-    "sign_cache_payload",
-    "verify_cache_envelope_signature",
-    "verify_cache_payload_signature",
+    "verify_cache_envelope_checksum",
+    "verify_cache_payload_checksum",
     "write_json_document_atomically",
 ]

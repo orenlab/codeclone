@@ -33,7 +33,7 @@ from typing import cast
 import pytest
 
 import codeclone.cache.reuse as cache_reuse
-from codeclone.cache.integrity import sign_cache_envelope
+from codeclone.cache.integrity import cache_envelope_checksum
 from codeclone.cache.reuse import build_module_dependent_profile
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
@@ -135,7 +135,7 @@ def test_cache_envelope_v_is_inside_signed_scope(
     assert loaded.load_status is CacheStatus.INTEGRITY_FAILED
 
 
-def test_sign_cache_envelope_binds_the_generation_gate() -> None:
+def test_cache_envelope_checksum_binds_the_generation_gate() -> None:
     """The narrow form: the signed digest must change when ``v`` changes.
 
     Two envelopes differing only in ``v`` must not share a signature. Pre-fix
@@ -144,7 +144,9 @@ def test_sign_cache_envelope_binds_the_generation_gate() -> None:
     """
 
     payload = {"py": "cp314", "fp": "3", "files": {}}
-    assert sign_cache_envelope("3.4", payload) != sign_cache_envelope("3.5", payload)
+    assert cache_envelope_checksum("3.4", payload) != cache_envelope_checksum(
+        "3.5", payload
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -169,63 +171,69 @@ def test_dependent_profile_versions_design_metrics_algorithm_revision(
     assert baseline != shifted
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "CONFIRMED-OPEN candidate 2 gap: the security_surfaces catalog "
-        "(closed enum, entries.py) rides the dependent lane, but the dependent "
-        "profile carries no version for it. Closing it needs an owner-created "
-        "SECURITY_SURFACE_CATALOG_VERSION in contracts (fenced this wave). "
-        "Remove this xfail when the constant is wired."
-    ),
-)
 def test_dependent_profile_versions_security_surface_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The security_surfaces category/scope/mode/evidence catalogs
+    (analysis/security_surfaces.py) are closed, mutable and ride the dependent
+    lane. Expanding one (a new sink category) with a warm hit would serve stale
+    security facts as an honest-absence false negative. The catalog version must
+    move the digest."""
+
     baseline, shifted = _dependent_profile_digest_under(
         monkeypatch, "SECURITY_SURFACE_CATALOG_VERSION"
     )
     assert baseline != shifted
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "CONFIRMED-OPEN candidate 2 gap: the runtime_reachability catalog "
-        "(closed framework/edge enums, entries.py) rides the dependent lane, "
-        "but the dependent profile carries no version for it. Needs an "
-        "owner-created RUNTIME_REACHABILITY_CATALOG_VERSION in contracts "
-        "(fenced this wave). Remove this xfail when the constant is wired."
-    ),
-)
 def test_dependent_profile_versions_runtime_reachability_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The runtime_reachability framework/edge/method catalogs
+    (analysis/reachability.py) are closed, mutable and ride the dependent lane.
+    Adding a framework with a warm hit would serve stale liveness roots. The
+    catalog version must move the digest."""
+
     baseline, shifted = _dependent_profile_digest_under(
         monkeypatch, "RUNTIME_REACHABILITY_CATALOG_VERSION"
     )
     assert baseline != shifted
 
 
+def test_dependent_profile_versions_structural_findings_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The structural finding-kind catalog (domain/findings.py) is closed,
+    mutable and rides the dependent lane. Adding a detector kind with a warm hit
+    would serve stale structural findings. The catalog version must move the
+    digest."""
+
+    baseline, shifted = _dependent_profile_digest_under(
+        monkeypatch, "STRUCTURAL_FINDINGS_CATALOG_VERSION"
+    )
+    assert baseline != shifted
+
+
 # --------------------------------------------------------------------------- #
-# Candidate 3 - the "signature" is a keyless checksum (owner decision, no fix).
+# Candidate 3 - the cache checksum is keyless: integrity, not authentication
+# (owner ruling option a - the vocabulary now tells that truth).
 # --------------------------------------------------------------------------- #
 
 
-def test_cache_signature_is_keyless_checksum_not_authentication(
+def test_cache_checksum_is_keyless_not_authentication(
     tmp_path: Path,
 ) -> None:
     """Pin the CURRENT behavior: a hand-forged valid checksum is accepted.
 
     An actor with only the public payload and the public algorithm - no secret
-    material of any kind - injects a cached fact and re-mints a "signature" that
-    the loader accepts. This proves the mechanism is a checksum (catches
-    accidental corruption) and not authentication (nothing an attacker cannot
-    reproduce). It stays keyless after candidate 1: binding ``v`` into the
-    signed scope changes WHAT is summed, not that the sum needs a secret; the
-    forgery here re-mints over the current public envelope algorithm. Whether
-    that guarantee is enough is the owner's fork; this test only records that
-    today it is keyless.
+    material of any kind - injects a cached fact and re-mints a checksum that the
+    loader accepts. This proves the mechanism is a checksum (catches accidental
+    corruption) and not authentication (nothing an attacker cannot reproduce),
+    which is exactly why the owner ruling renames the vocabulary rather than
+    adding a key: cache trust equals source trust, so a key would buy nothing.
+    It stays keyless after candidate 1: binding ``v`` into the checksummed scope
+    changes WHAT is summed, not that the sum needs a secret; the forgery here
+    re-mints over the current public envelope algorithm.
     """
 
     cache_path = tmp_path / "cache.json"
@@ -237,10 +245,38 @@ def test_cache_signature_is_keyless_checksum_not_authentication(
         (genuine_key,) = tuple(files)
         # Inject a cached fact with no key, no secret - just the public payload.
         files["forged.py"] = copy.deepcopy(files[genuine_key])
-        # Re-mint the "signature" from the public algorithm alone (keyless).
-        raw["sig"] = sign_cache_envelope(cast(str, raw["v"]), payload)
+        # Re-mint the checksum from the public algorithm alone (keyless).
+        raw["checksum"] = cache_envelope_checksum(cast(str, raw["v"]), payload)
 
     loaded = _reload_with_forged_envelope(cache_path, forge)
 
     assert loaded.load_status is CacheStatus.OK
     assert loaded.get_file_entry("forged.py") is not None
+
+
+def test_cache_integrity_vocabulary_is_checksum_not_signature() -> None:
+    """Owner ruling (option a): the cache dir carries the SAME trust as the
+    analyzed source, so a keyed signature buys nothing against a local adversary
+    who already controls the source; the real guarantee is integrity against
+    accidental desync. The vocabulary must tell that truth - checksum names, no
+    signature names, and a durable threat-model note forbidding a re-introduced
+    keyed signature."""
+
+    import codeclone.cache.integrity as integ
+
+    assert hasattr(integ, "cache_payload_checksum")
+    assert hasattr(integ, "cache_envelope_checksum")
+    assert hasattr(integ, "verify_cache_payload_checksum")
+    assert hasattr(integ, "verify_cache_envelope_checksum")
+    # The misleading signature vocabulary is gone (it claimed no authenticity).
+    for retired in (
+        "sign_cache_payload",
+        "sign_cache_envelope",
+        "verify_cache_payload_signature",
+        "verify_cache_envelope_signature",
+    ):
+        assert not hasattr(integ, retired), retired
+    # The threat-model note is durable in source.
+    source = Path(integ.__file__).read_text("utf-8").lower()
+    assert "cache trust equals source trust" in source
+    assert "not authentication" in source

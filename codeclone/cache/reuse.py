@@ -20,6 +20,9 @@ from ..contracts import (
     API_SURFACE_SIGNATURE_VERSION,
     DESIGN_METRICS_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
+    RUNTIME_REACHABILITY_CATALOG_VERSION,
+    SECURITY_SURFACE_CATALOG_VERSION,
+    STRUCTURAL_FINDINGS_CATALOG_VERSION,
 )
 from ..models import (
     CacheEntryV3,
@@ -120,6 +123,19 @@ def build_module_dependent_profile(
             "module_manifest_digest": module_manifest_digest.value,
             "neutral_profile": neutral_profile.value,
             "resolver_version": "2",
+            # Closed detector catalogs whose EXPANSION changes an emitted
+            # dependent-lane fact for unchanged source (a new security-surface
+            # sink, a new reachability framework, a new structural finding kind).
+            # Each rides this lane only, so its catalog version must move the
+            # digest or a warm hit serves the pre-expansion result as an
+            # honest-absence false negative.
+            "runtime_reachability_catalog_version": (
+                RUNTIME_REACHABILITY_CATALOG_VERSION
+            ),
+            "security_surface_catalog_version": SECURITY_SURFACE_CATALOG_VERSION,
+            "structural_findings_catalog_version": (
+                STRUCTURAL_FINDINGS_CATALOG_VERSION
+            ),
         },
     )
 

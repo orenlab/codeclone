@@ -76,13 +76,17 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
-- **Cache trust envelope binds the generation gate; `CACHE_VERSION` → 3.5.** The cache signature now covers the
-  versioned pre-image `{v, payload}` instead of `payload` alone, bringing the generation gate `v` inside the signed
-  scope. A migration, backup, or edit-in-place that rewrites the top-level `v` without re-signing is now refused as an
-  integrity failure instead of being trusted as a payload it never signed under that mark. The same bump binds the
-  design-metrics algorithm revision into the module-dependent cache-reuse profile, so a design-metrics revision that does
-  not coincide with a neutral-lane change can no longer serve stale coupling/cohesion class metrics from a warm cache
-  hit. Every 3.4 cache is refused at the version gate and re-analysed once; no user action is required.
+- **Cache trust envelope hardened; `CACHE_VERSION` → 3.5.** Three cache-integrity changes land together under one
+  version bump. (1) The integrity checksum now covers the versioned pre-image `{v, payload}` instead of `payload` alone,
+  bringing the generation gate `v` inside the checksummed scope: a migration, backup, or edit-in-place that rewrites the
+  top-level `v` without re-checksumming is now refused as an integrity failure instead of being trusted as a payload it
+  never covered under that mark. (2) The keyless "signature" vocabulary is retired to checksum/integrity names and the
+  on-disk envelope key `sig` is renamed `checksum`, telling the truth that this is a corruption/desync integrity check —
+  not authentication against a local adversary who already controls the analyzed source. (3) The module-dependent
+  cache-reuse profile now versions the design-metrics algorithm revision and the security-surface, runtime-reachability,
+  and structural-findings detector catalogs, so expanding any of those closed catalogs can no longer serve a stale
+  dependent-lane fact — a security or reachability false negative — from a warm cache hit. Every 3.4 cache is refused at
+  the version gate and re-analysed once; no user action is required.
 - **Dead-code liveness policy advanced to version 2** with two new life proofs, closing two classes of
   false dead-code findings. A PEP 484 explicit re-export — `from x import y as y`, the `as`-same-name
   spelling — now keeps `y` live on its own, independently of `__all__`; a renaming import

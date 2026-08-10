@@ -23,8 +23,8 @@ from codeclone.analysis.suppressions import (
 )
 from codeclone.audit.validation import AuditConfigError, resolve_audit_path
 from codeclone.cache.integrity import (
-    sign_cache_payload,
-    verify_cache_payload_signature,
+    cache_payload_checksum,
+    verify_cache_payload_checksum,
 )
 from codeclone.contracts.errors import ValidationError
 from codeclone.report.html.primitives.escape import _escape_html
@@ -292,17 +292,17 @@ def test_html_report_js_avoids_dataset_innerhtml_regression() -> None:
 # ── cache integrity (checksum contract; not secret-keyed) ────────────
 
 
-def test_cache_signature_verification_uses_constant_time_compare() -> None:
+def test_cache_checksum_verification_uses_constant_time_compare() -> None:
     payload: dict[str, object] = {"version": "test", "files": {}}
-    signature = sign_cache_payload(payload)
-    assert verify_cache_payload_signature(payload, signature) is True
-    assert verify_cache_payload_signature(payload, "0" * len(signature)) is False
+    signature = cache_payload_checksum(payload)
+    assert verify_cache_payload_checksum(payload, signature) is True
+    assert verify_cache_payload_checksum(payload, "0" * len(signature)) is False
 
 
-def test_cache_signature_is_stable_for_canonical_payload() -> None:
+def test_cache_checksum_is_stable_for_canonical_payload() -> None:
     payload: dict[str, object] = {"b": 2, "a": 1, "files": {}}
-    first = sign_cache_payload(payload)
-    second = sign_cache_payload({"a": 1, "b": 2, "files": {}})
+    first = cache_payload_checksum(payload)
+    second = cache_payload_checksum({"a": 1, "b": 2, "files": {}})
     assert first == second
 
 

@@ -64,9 +64,9 @@ from codeclone.cache.entries import (
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
 from codeclone.cache.integrity import (
+    cache_envelope_checksum,
+    cache_payload_checksum,
     canonical_json,
-    sign_cache_envelope,
-    sign_cache_payload,
 )
 from codeclone.cache.projection import (
     rehydrate_cache_neutral,
@@ -1463,7 +1463,7 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     assert str(target) not in files
 
 
-def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> None:
+def test_cache_checksum_validation_ignores_json_whitespace(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
@@ -1476,7 +1476,7 @@ def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> N
     assert loaded.get_file_entry("x.py") is not None
 
 
-def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> None:
+def test_cache_checksum_matches_legacy_string_digest_for_unicode_payload() -> None:
     cache = Cache(Path("cache.json"))
     payload = _analysis_payload(
         cache,
@@ -1489,7 +1489,7 @@ def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> N
     )
     legacy_digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
-    assert sign_cache_payload(payload) == legacy_digest
+    assert cache_payload_checksum(payload) == legacy_digest
 
 
 def test_cache_load_binds_version_into_unicode_payload_signature(
@@ -1505,14 +1505,16 @@ def test_cache_load_binds_version_into_unicode_payload_signature(
     payload = cast(dict[str, object], raw["payload"])
 
     # The old payload-only string digest is now refused as an integrity failure.
-    raw["sig"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    raw["checksum"] = hashlib.sha256(
+        canonical_json(payload).encode("utf-8")
+    ).hexdigest()
     cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
     rejected = Cache(cache_path)
     rejected.load()
     assert rejected.load_status is CacheStatus.INTEGRITY_FAILED
 
     # The envelope digest over {v, payload} is accepted, unicode payload intact.
-    raw["sig"] = sign_cache_envelope(cast(str, raw["v"]), payload)
+    raw["checksum"] = cache_envelope_checksum(cast(str, raw["v"]), payload)
     cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
     accepted = Cache(cache_path)
     accepted.load()
@@ -1520,18 +1522,18 @@ def test_cache_load_binds_version_into_unicode_payload_signature(
     assert accepted.get_file_entry("unicodé.py") is not None
 
 
-def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
+def test_cache_checksum_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
     data = json.loads(cache_path.read_text("utf-8"))
-    data["sig"] = "bad"
+    data["checksum"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
     loaded = Cache(cache_path)
     loaded.load()
     assert loaded.load_warning is not None
-    assert "signature" in loaded.load_warning
+    assert "checksum" in loaded.load_warning
     assert loaded.data["version"] == Cache._CACHE_VERSION
     assert loaded.data["files"] == {}
     assert loaded.load_status == CacheStatus.INTEGRITY_FAILED
@@ -1541,7 +1543,7 @@ def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     data = {"version": "0.0", "files": {}}
-    signature = sign_cache_payload(data)
+    signature = cache_payload_checksum(data)
     cache_path.write_text(
         json.dumps({**data, "_signature": signature}, ensure_ascii=False, indent=2),
         "utf-8",
@@ -1612,9 +1614,9 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> N
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    signature = sign_cache_payload(payload)
+    signature = cache_payload_checksum(payload)
     cache_path.write_text(
-        json.dumps({"v": version, "payload": payload, "sig": signature}), "utf-8"
+        json.dumps({"v": version, "payload": payload, "checksum": signature}), "utf-8"
     )
 
     loaded = Cache(cache_path)
@@ -1735,9 +1737,11 @@ def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     payload = _analysis_payload(cache, files=[])
     # Re-mint over the {v, payload} pre-image so the envelope sig passes and the
     # invalid-files gate is what this test still exercises (candidate 1).
-    signature = sign_cache_envelope(cache._CACHE_VERSION, payload)
+    signature = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
+        json.dumps(
+            {"v": cache._CACHE_VERSION, "payload": payload, "checksum": signature}
+        ),
         "utf-8",
     )
     cache.load()
@@ -1834,8 +1838,8 @@ def test_cache_load_missing_v_field(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    sig = sign_cache_payload(payload)
-    cache_path.write_text(json.dumps({"payload": payload, "sig": sig}), "utf-8")
+    sig = cache_payload_checksum(payload)
+    cache_path.write_text(json.dumps({"payload": payload, "checksum": sig}), "utf-8")
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
@@ -1867,9 +1871,10 @@ def test_cache_load_rejects_missing_required_payload_fields(
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = payload_factory(cache)
-    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -1884,9 +1889,10 @@ def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
         "fp": cache.data["fingerprint_version"],
         "files": {},
     }
-    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -1901,9 +1907,10 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
         "fp": "old",
         "files": {},
     }
-    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -1950,9 +1957,10 @@ def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
-    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
+    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
     cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
+        "utf-8",
     )
     cache.load()
     assert cache.load_warning is not None
@@ -3438,6 +3446,12 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
         '"design_metrics_algorithm_revision": DESIGN_METRICS_ALGORITHM_REVISION'
         in source
     )
+    # Candidate 2 (follow-up): the closed detector catalogs that ride the
+    # dependent lane must each version this profile, or a catalog expansion
+    # serves a stale dependent-lane fact off a warm hit.
+    assert "SECURITY_SURFACE_CATALOG_VERSION" in source
+    assert "RUNTIME_REACHABILITY_CATALOG_VERSION" in source
+    assert "STRUCTURAL_FINDINGS_CATALOG_VERSION" in source
     assert CACHE_VERSION == "3.5"
 
 
