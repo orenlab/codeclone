@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
+import sys
 from collections.abc import Mapping
 from dataclasses import replace
 from math import ceil
@@ -1482,8 +1484,6 @@ def test_builtin_name_registry_is_interpreter_pinned() -> None:
     on newer interpreters are excluded everywhere, not just where they exist.
     """
 
-    import builtins
-
     from codeclone.metrics.coupling import _BUILTIN_NAMES
 
     # 3.15-only builtins are excluded on every interpreter.
@@ -1497,6 +1497,22 @@ def test_builtin_name_registry_is_interpreter_pinned() -> None:
     assert {"BaseExceptionGroup", "ExceptionGroup", "PythonFinalizationError"} <= (
         _BUILTIN_NAMES
     )
-    # Bump tripwire: a running interpreter whose builtins outgrow the pinned
-    # registry means a new CPython joined the matrix without a registry review.
-    assert set(dir(builtins)) <= _BUILTIN_NAMES
+    # Bump tripwire: an interpreter whose builtins outgrow the pinned registry
+    # means a new CPython joined the matrix without a registry review.
+    #
+    # The oracle is a pristine subprocess, never this process's dir(builtins).
+    # The live builtins module is mutable process state that any imported
+    # native extension can inject into: pybind11 parks its internals there as
+    # __pybind11_internals_v*__, and such a wheel on the 3.10 CI leg made this
+    # tripwire read third-party pollution as a new CPython builtin. -S skips
+    # site, so no .pth hook or site-packages import can contribute names and
+    # what remains is what the language defines -- which is what the registry
+    # pins.
+    probe = "import builtins; print(' '.join(dir(builtins)))"
+    completed = subprocess.run(
+        (sys.executable, "-S", "-c", probe),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert set(completed.stdout.split()) <= _BUILTIN_NAMES
