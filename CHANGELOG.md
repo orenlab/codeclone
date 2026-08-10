@@ -102,6 +102,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **Dependency cycles are classified by import binding time instead of being uniformly critical.** Every import edge
+  now carries when it binds — `import_time` (top level, class body, module-scope dynamic load), `deferred_function`
+  (function or method body), `deferred_getattr` (module-level PEP 562 `__getattr__`), `type_checking`
+  (`TYPE_CHECKING` guard), or `lazy_syntax` (PEP 810 `lazy import`, Python 3.15) — statically derived from the AST.
+  A cycle is `import_cycle` (critical) exactly when the subgraph of import-time edges still cycles; otherwise it is
+  `deferred_cycle` (warning) — real, but unable to crash at import. Typing-only edges no longer create runtime
+  cycles at all, while staying visible in the edge list with their kinds. Finding copy states what was measured.
+  The dependencies lane advances to payload schema `6` and the analysis cache to `3.5`; pre-upgrade cache entries
+  re-analyze on the next run.
+- **Cycle findings no longer invent file paths for package modules.** A cycle member resolves through the
+  module-identity inventory — a package reports `pkg/__init__.py`, never the phantom `pkg.py` whose link 404s —
+  and a member without a resolvable file keeps its module identity with no path claim. The same law now governs
+  every module-to-path projection surface (report, HTML overview, blast radius, memory fingerprints).
 - Controlled-change verification resolves runs at the intent's own workspace, so parallel same-commit worktrees no
   longer fail `start_controlled_change` or `finish_controlled_change` with a multi-root run-id ambiguity.
 - The report file registry is deduplicated by path, so it no longer lists more files than the run found.

@@ -45,3 +45,4 @@ Thresholds (what counts as "too complex" or "too coupled") are configurable per 
 - [Run the first analysis](../guides/first-analysis.md) — the concrete commands and workflow
 - [Health score](health-score.md) — how these metrics become one number
 - [Reports and baselines](reports.md) — how a run's findings are stored and compared over time
+- [Dependency cycles](dependency-cycles.md) — how import cycles are detected and classified by binding time
