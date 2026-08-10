@@ -144,6 +144,12 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   top-level findings totals, so a public method that abstains (neither dead nor live, because it inherits from a base
   outside the analysis root) was invisible to every consumer, its absence indistinguishable from zero. The block
   appears only when metrics ran; a clones-only run omits it rather than reporting misleading zeros.
+- `get_report_section(section="metrics_detail", family="dead_code")` now surfaces that family's `summary` — carrying the
+  `unresolved_external_override` tri-state counter — and its `unresolved_overrides` abstention list, paginated. The
+  family branch previously returned only `items`, so a targeted family query dropped the summary entirely: passing
+  `family` was exactly the argument that hid the counter, its surfaced absence indistinguishable from zero. Additive and
+  gated on real presence — a family that carries no summary/overrides shows the honest zero rather than a fabricated
+  block, and a clones-only (metrics-skipped) run omits the summary rather than reporting a misleading zero.
 
 ## [2.1.0a1] - 2026-07-09
 

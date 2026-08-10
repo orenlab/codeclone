@@ -754,6 +754,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
         path: str | None,
         offset: int,
         limit: int,
+        metrics_skipped: bool = False,
     ) -> dict[str, object]:
         summary = dict(_helpers._as_mapping(metrics.get("summary")))
         families = _helpers._as_mapping(metrics.get("families"))
@@ -788,7 +789,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
                 )
             )
         page = paginate(items, offset=offset, limit=limit, max_limit=200)
-        return {
+        payload: dict[str, object] = {
             "family": family,
             "path": normalized_path or None,
             "offset": page.offset,
@@ -798,6 +799,56 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             "has_more": page.next_offset is not None,
             "items": page.items,
         }
+        if family is None:
+            return payload
+        # A targeted single-family query must not be hollower than the
+        # all-families view. The family branch used to return only ``items``, so
+        # ``metrics_detail(family="dead_code")`` dropped the family ``summary``
+        # and hid both the ``unresolved_external_override`` tri-state counter and
+        # the ``unresolved_overrides`` abstention list -- passing ``family`` was
+        # exactly the argument that made them invisible (sibling of the
+        # get_run_summary tri-state fix). Attach both additively, and only for
+        # real presence. ``metrics_skipped`` gates the false all-zero
+        # "no abstentions" reading a clones-only run would otherwise emit,
+        # mirroring the get_run_summary gate.
+        if metrics_skipped:
+            return payload
+        family_payload = _helpers._as_mapping(families.get(family))
+        if "summary" in family_payload:
+            payload["summary"] = dict(
+                _helpers._as_mapping(family_payload.get("summary"))
+            )
+        if "unresolved_overrides" in family_payload:
+            override_rows = [
+                dict(_helpers._as_mapping(row))
+                for row in _helpers._as_sequence(
+                    family_payload.get("unresolved_overrides")
+                )
+                if not normalized_path
+                or _helpers._metric_item_matches_path(
+                    _helpers._as_mapping(row),
+                    normalized_path,
+                )
+            ]
+            # The abstention list rides the SAME (offset, limit) cursor as
+            # ``items`` but is surfaced as its own paginated sibling block, so
+            # neither list's bound is conflated with the other's and the list is
+            # never an unbounded dump.
+            override_page = paginate(
+                override_rows,
+                offset=offset,
+                limit=limit,
+                max_limit=200,
+            )
+            payload["unresolved_overrides"] = {
+                "offset": override_page.offset,
+                "limit": override_page.limit,
+                "returned": len(override_page.items),
+                "total": override_page.total,
+                "has_more": override_page.next_offset is not None,
+                "items": override_page.items,
+            }
+        return payload
 
     def _derived_section_payload(self, record: MCPRunRecord) -> dict[str, object]:
         derived = _helpers._as_mapping(record.report_document.get("derived"))
@@ -1104,6 +1155,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 path=path,
                 offset=offset,
                 limit=limit,
+                metrics_skipped=_helpers._metrics_skipped_for_summary(record.summary),
             )
         if validated_section == "derived":
             return self._derived_section_payload(record)
