@@ -645,7 +645,10 @@ def test_report_document_rich_invariants_and_renderers() -> None:
         "finding_groups": 9,
         "affected_items": 11,
         "files": 3,
-        "share_pct": 68.8,
+        # Cycle-honesty wave: cycle members without a resolved file no longer
+        # invent phantom "<module>.py" contributions, so the real directories'
+        # share of the rollup rises.
+        "share_pct": 78.6,
     }
     assert cast("dict[str, int]", all_rows[0]["kind_breakdown"]) == {
         "clones": 3,
@@ -960,7 +963,9 @@ def test_directory_hotspot_helpers_cover_fallback_paths() -> None:
         )
         is None
     )
-    assert overview_mod._directory_relative_path({"module": "pkg.mod"}) == "pkg/mod.py"
+    # Path honesty: a module-only item is never spelled as a file; the
+    # pre-wave fallback invented the phantom "pkg/mod.py" here.
+    assert overview_mod._directory_relative_path({"module": "pkg.mod"}) is None
     assert overview_mod._directory_scope_root_label(".", source_kind="tests") is None
     assert (
         overview_mod._directory_scope_root_label(

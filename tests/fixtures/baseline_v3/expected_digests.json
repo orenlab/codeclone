@@ -6,9 +6,9 @@
     "clones.functions": "aa95ee01f5db4619c58082c5fb3f668935ca8114e1ad7e91ea56b0c1509bbae8",
     "coupling_cohesion_observations": "e06f021207cf831fbd5cc964f30906427c8bf3fcf94d81ca5e761c87d6fbcf53",
     "dead_code": "5da354ee8ec35697ffc5087bc45758a06af84516a89364fac0f9bab0b21257cc",
-    "dependencies": "9ee93c2e61d2f30a23c9ad3b997882d9b4d7f86c7723cc58d073655453bccfb4",
+    "dependencies": "ce5f8c00eb193d263f698fc60f54027b45578e3e7fda6ce9423cf52f7d96bdaf",
     "module_identity": "8ceeb5acc2cc27d49efed33e5cafacb4ae39876dc1493b591cfbd6d3c1904b46",
     "risk_observations": "8c66e29749a2c7553a2aa1e25a806cf2b97e1278034b088bc13d02ac871e0816"
   },
-  "root": "09bb142cfca334b351102da34df10d747abe5da481b5f73321b568751043902d"
+  "root": "26965df64bbb55710b13f8c3e71868215248bca7fe2c7611d62fa8f7a7bf832b"
 }

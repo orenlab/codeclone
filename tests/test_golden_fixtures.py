@@ -155,6 +155,7 @@ _DELIBERATE_TWIN_FIXTURE_TREES = (
     "tests/fixtures/design_metrics",
     "tests/fixtures/fingerprint_binding",
     "tests/fixtures/liveness_policy",
+    "tests/fixtures/near_miss_witness",
     "tests/fixtures/source_kind",
     "tests/fixtures/statement_reachability",
 )

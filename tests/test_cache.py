@@ -1546,7 +1546,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.4"
+    assert Cache._CACHE_VERSION == "3.5"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1562,7 +1562,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.4"
+    assert old_document["v"] == "3.5"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -3415,7 +3415,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.4"
+    assert CACHE_VERSION == "3.5"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

@@ -114,8 +114,13 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # Pre-bump digest was
     # 4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9.
     "dead_code": ("2cce4c84f810d1268df814702938b38c9652a27a2f72c15cf164b1e83be8a0cf"),
+    # SANCTIONED golden change, cycle-honesty wave. Dependency rows gained
+    # binding time and the PEP 810 ``is_lazy`` marker under ONE coordinated
+    # payload_schema bump ("5" -> "6") together with the G4 observation
+    # projection. Pre-bump digest was
+    # 9487ff03b6974056e1857cfe32e4860ea0fb3596bbe3290560671b03d32b4ef8.
     "dependencies": (
-        "9487ff03b6974056e1857cfe32e4860ea0fb3596bbe3290560671b03d32b4ef8"
+        "2c533080e26a676bbf099998b23fb129b9a7c8731e9f31df6375eb5f14f2fd2c"
     ),
     "module_identity": (
         "6550f3624d9644ab0626b26928a6d1f5fbbaf7c672e04a7128dc6706798206c7"
@@ -171,7 +176,9 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         "coupling_cohesion_observations": "4",
         # 39Y cycle 2b: the single consolidated bump this phase owes.
         "dead_code": "3",
-        "dependencies": "5",
+        # Cycle-honesty wave: edge binding time + PEP 810 laziness ride the
+        # dependency rows — one coordinated bump with the G4 observation field.
+        "dependencies": "6",
         "module_identity": "4",
         "risk_observations": "4",
         "semantic_authority": "2",

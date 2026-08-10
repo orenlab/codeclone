@@ -2003,7 +2003,9 @@ def test_html_report_overloaded_modules_fallback_module_path_in_overview() -> No
 
     html = _render_metrics_html(payload)
 
-    _assert_html_contains(html, "pkg/hub.py", "Overloaded Modules")
+    # Path honesty: a row without a resolved path shows its module identity
+    # verbatim; the pre-wave fallback invented the phantom "pkg/hub.py".
+    _assert_html_contains(html, "pkg.hub", "Overloaded Modules")
 
 
 def test_html_report_overview_helper_branches() -> None:

@@ -218,9 +218,11 @@ def test_overview_optional_canonical_families_cover_single_family_rows() -> None
     )
 
     assert "Public API surface" in _adoption_and_api_section(cast(Any, api_only))
-    assert "pkg/mod.py" in _overloaded_modules_section(
-        cast(Any, overloaded_without_path)
-    )
+    # Path honesty: a row without a resolved path shows its module identity
+    # verbatim; the pre-wave fallback invented the phantom "pkg/mod.py".
+    section_html = _overloaded_modules_section(cast(Any, overloaded_without_path))
+    assert "pkg.mod" in section_html
+    assert "pkg/mod.py" not in section_html
 
 
 def test_dependency_sampler_cap_and_hub_threshold_empty() -> None:
