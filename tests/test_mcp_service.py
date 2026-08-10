@@ -11215,6 +11215,225 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
     ) == {"qualname": "pkg.mod:run", "score": 10}
 
 
+def _dead_code_family_with_abstentions() -> dict[str, object]:
+    """A dead_code family block mirroring the real report shape with 2 abstentions.
+
+    Matches ``report/document/metrics.py`` for the dead_code family: the
+    ``summary`` carries the ``unresolved_external_override`` tri-state counter,
+    and ``unresolved_overrides`` is the sorted abstention symbol list.
+    """
+
+    return {
+        "summary": {
+            "total": 3,
+            "high_confidence": 1,
+            "suppressed": 0,
+            "baseline_diff_available": True,
+            "new_items": 0,
+            "unresolved_external_override": 2,
+            "live_roots": 4,
+        },
+        "items": [
+            {
+                "relative_path": "pkg/a.py",
+                "qualname": "pkg.a:dead_one",
+                "reason": "unreferenced",
+            },
+            {
+                "relative_path": "pkg/b.py",
+                "qualname": "pkg.b:dead_two",
+                "reason": "unreferenced",
+            },
+            {
+                "relative_path": "pkg/c.py",
+                "qualname": "pkg.c:dead_three",
+                "reason": "unreferenced",
+            },
+        ],
+        "unresolved_overrides": [
+            {
+                "qualname": "pkg.a:Widget.render",
+                "relative_path": "pkg/a.py",
+                "start_line": 10,
+                "end_line": 12,
+                "kind": "method",
+                "class_qualname": "pkg.a:Widget",
+                "base_names": ["external.Base"],
+                "reason": "unresolved_external_base",
+            },
+            {
+                "qualname": "pkg.b:Panel.paint",
+                "relative_path": "pkg/b.py",
+                "start_line": 20,
+                "end_line": 24,
+                "kind": "method",
+                "class_qualname": "pkg.b:Panel",
+                "base_names": ["external.Widget"],
+                "reason": "unresolved_external_base",
+            },
+        ],
+    }
+
+
+def _dead_code_metrics_detail(
+    *,
+    offset: int,
+    limit: int,
+    family: dict[str, object] | None = None,
+    metrics_skipped: bool = False,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Run metrics_detail(family="dead_code") and return (payload, family_block).
+
+    Shared so the per-behaviour tests below carry only their distinct assertions
+    instead of a duplicated setup+call sequence.
+    """
+    service = CodeCloneMCPService(history_limit=4)
+    dead_code_family = (
+        family if family is not None else _dead_code_family_with_abstentions()
+    )
+    metrics = {
+        "summary": {
+            "dead_code": len(cast("list[object]", dead_code_family.get("items", [])))
+        },
+        "families": {"dead_code": dead_code_family},
+    }
+    payload = service._metrics_detail_payload(
+        metrics=metrics,
+        family="dead_code",
+        path=None,
+        offset=offset,
+        limit=limit,
+        metrics_skipped=metrics_skipped,
+    )
+    return payload, dead_code_family
+
+
+def _assert_override_page(
+    page: object,
+    *,
+    total: int,
+    returned: int,
+    has_more: bool,
+    first_qualname: str,
+    offset: int = 0,
+) -> list[dict[str, object]]:
+    """Assert one bounded ``unresolved_overrides`` page and return its items."""
+    override_page = cast("dict[str, object]", page)
+    assert override_page["offset"] == offset
+    assert override_page["total"] == total
+    assert override_page["returned"] == returned
+    assert override_page["has_more"] is has_more
+    items = cast("list[dict[str, object]]", override_page["items"])
+    assert items[0]["qualname"] == first_qualname
+    return items
+
+
+def test_mcp_service_metrics_detail_family_surfaces_dead_code_tristate() -> None:
+    """metrics_detail(family="dead_code") must surface the abstention summary.
+
+    Regression (sibling of the get_run_summary tri-state fix, mem-2c333868):
+    the family branch returned only ``items``, so a targeted dead-code query
+    dropped ``summary.unresolved_external_override`` (the tri-state counter) and
+    the ``unresolved_overrides`` abstention list entirely. A counter that exists
+    in the report block but is not surfaced is indistinguishable from zero --
+    hollow truncation, "the more precisely you ask, the less you get".
+
+    The value is pinned against the report block (== 2), not mere key presence,
+    so zeroing the counter at the seam reds this pin.
+    """
+    payload, dead_code_family = _dead_code_metrics_detail(offset=0, limit=50)
+
+    # Value-pin: the surfaced counter equals the report block's counter (== 2),
+    # not merely that a summary key exists. Zeroing the counter reds this.
+    summary = cast("dict[str, object]", payload["summary"])
+    assert summary["unresolved_external_override"] == 2
+    assert summary == dead_code_family["summary"]
+    # The abstention symbol list is surfaced through a bounded paginated sibling
+    # block -- never an unbounded dump.
+    override_items = _assert_override_page(
+        payload["unresolved_overrides"],
+        total=2,
+        returned=2,
+        has_more=False,
+        first_qualname="pkg.a:Widget.render",
+    )
+    assert [row["qualname"] for row in override_items] == [
+        "pkg.a:Widget.render",
+        "pkg.b:Panel.paint",
+    ]
+    assert override_items == dead_code_family["unresolved_overrides"]
+    # Existing item transport is unchanged (additive fix).
+    assert payload["family"] == "dead_code"
+    assert payload["total"] == 3
+    assert len(cast("list[dict[str, object]]", payload["items"])) == 3
+
+    # Determinism: two independent builds -> byte-identical payload.
+    repeat, _ = _dead_code_metrics_detail(offset=0, limit=50)
+    assert json.dumps(payload, sort_keys=True) == json.dumps(repeat, sort_keys=True)
+
+
+def test_mcp_service_metrics_detail_family_override_list_paginates() -> None:
+    """The abstention list is bounded by the same (offset, limit) cursor.
+
+    It rides the items page cursor but reports its own independent
+    total/returned/has_more, so neither list's bound is conflated with the
+    other's.
+    """
+    first, _ = _dead_code_metrics_detail(offset=0, limit=1)
+    _assert_override_page(
+        first["unresolved_overrides"],
+        total=2,
+        returned=1,
+        has_more=True,
+        first_qualname="pkg.a:Widget.render",
+    )
+
+    second, _ = _dead_code_metrics_detail(offset=1, limit=1)
+    _assert_override_page(
+        second["unresolved_overrides"],
+        total=2,
+        returned=1,
+        has_more=False,
+        first_qualname="pkg.b:Panel.paint",
+        offset=1,
+    )
+
+
+def test_mcp_service_metrics_detail_family_refuses_false_zero_when_skipped() -> None:
+    """A metrics-skipped (clones_only) run must not surface a false zero counter.
+
+    ``_normalize_metrics_families`` builds an all-zero dead_code summary even
+    for a clones_only run, so block-presence alone is not enough: surfacing
+    ``unresolved_external_override: 0`` there is the false "no abstentions" claim
+    in reverse. Mirror the get_run_summary gate (mem-2c333868) -- omit the
+    summary/overrides entirely when metrics were skipped.
+    """
+    all_zero_family: dict[str, object] = {
+        "summary": {
+            "total": 0,
+            "high_confidence": 0,
+            "suppressed": 0,
+            "baseline_diff_available": False,
+            "new_items": 0,
+            "unresolved_external_override": 0,
+            "live_roots": 0,
+        },
+        "items": [],
+        "unresolved_overrides": [],
+    }
+    payload, _ = _dead_code_metrics_detail(
+        offset=0,
+        limit=50,
+        family=all_zero_family,
+        metrics_skipped=True,
+    )
+
+    assert "summary" not in payload
+    assert "unresolved_overrides" not in payload
+    assert payload["family"] == "dead_code"
+    assert payload["items"] == []
+
+
 def test_mcp_service_clone_only_short_id_fallback_branch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
