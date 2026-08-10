@@ -17820,7 +17820,8 @@ def test_mcp_start_refuses_eviction_that_orphans_unfinished_scope(
     assert [item["intent_id"] for item in unfinished] == [first_id]
     assert unfinished[0]["orphaned_dirty_paths"] == ["pkg/a.py"]
     assert second["user_action_required"] is True
-    assert second["next_step"]
+    # A typed refusal is only actionable if it names the way out.
+    assert "orphaned_dirty_paths" in str(second["next_step"])
 
     # The first intent still exists: its edit permission was not revoked
     # behind the agent's back.
@@ -17878,6 +17879,10 @@ def test_mcp_finish_blocks_undeclared_python_outside_scope(tmp_path: Path) -> No
     hygiene_after = cast("dict[str, object]", finished["workspace_hygiene_after"])
     assert hygiene_after["finish_block_reason"] == "unverified_python_outside_scope"
     assert hygiene_after["unverified_python_unscoped_dirty"] == ["pkg/a.py"]
+    # The block is typed, so its message and next_step must be too — the
+    # generic hygiene text would leave the agent guessing which rule fired.
+    assert "Python files" in str(finished["message"])
+    assert "unverified_python_unscoped_dirty" in str(finished["next_step"])
 
 
 def test_mcp_finish_external_changes_reach_summary_and_message(
