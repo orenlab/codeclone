@@ -93,6 +93,11 @@ Metrics baselines record it per lane: stored complexity observations from an
 older revision are reported as untrusted for that lane rather than silently
 diffed against current values.
 
+Because the metric changed, the health complexity dimension's elevated/extreme
+reference shares were re-measured for the source-decision distribution — a
+reproducible calibration over a pinned reference population, not a re-tuning of
+the gate. The risk bands above (10 / 20) are unchanged.
+
 ## Related pages
 
 - [Health explainability](health-explainability.md) — how complexity spends its 20 points

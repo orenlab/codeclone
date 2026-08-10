@@ -26,6 +26,11 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   measured rather than only clone-sized ones. Values move against older CodeClone releases; stored complexity
   observations from older baselines are reported untrusted for that lane (`COMPLEXITY_ALGORITHM_REVISION`) rather than
   silently diffed. Re-tune `--fail-health` once after regenerating the baseline.
+- The health complexity dimension's elevated/extreme reference shares were re-measured for the source-decision metric.
+  They are a generated calibration artifact — computed by a reproducible procedure over a pinned reference distribution
+  (`codeclone.metrics.complexity_calibration`), not hand-picked — so the health scale reads the new metric honestly.
+  Only these two reference shares moved; the risk bands (10 / 20) and the complexity gate are unchanged. Health scores
+  shift accordingly.
 
 ### Added
 
