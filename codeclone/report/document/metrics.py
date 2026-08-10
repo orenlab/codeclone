@@ -79,6 +79,25 @@ def _producer_source_kind(producers: Sequence[str]) -> str:
     )
 
 
+def _cycle_kind_count(
+    cycle_details: Sequence[Mapping[str, object]],
+    *,
+    kind: str,
+    cycles_total: int,
+) -> int:
+    """Count cycles of one kind, defaulting an unclassified run to import.
+
+    Mirrors the metrics-layer fallback deliberately: when details do not align
+    with the cycle list the classification was never recorded, and the only
+    safe reading of an unclassified cycle is the critical one. Returning zero
+    import cycles there would hand the gate a clean verdict it never earned.
+    """
+
+    if len(cycle_details) != cycles_total:
+        return cycles_total if kind == "import_cycle" else 0
+    return sum(1 for detail in cycle_details if detail.get("kind") == kind)
+
+
 def _normalize_metrics_families(
     metrics: Mapping[str, object] | None,
     *,
@@ -811,6 +830,19 @@ def _normalize_metrics_families(
                 "modules": _as_int(dependencies.get("modules")),
                 "edges": _as_int(dependencies.get("edges")),
                 "cycles": len(dependency_cycles),
+                # The kind split rides beside the total so every consumer of
+                # this document — the gate evaluator above all — can apply
+                # cycle policy without re-deriving the classification.
+                "import_cycles": _cycle_kind_count(
+                    dependency_cycle_details,
+                    kind="import_cycle",
+                    cycles_total=len(dependency_cycles),
+                ),
+                "deferred_cycles": _cycle_kind_count(
+                    dependency_cycle_details,
+                    kind="deferred_cycle",
+                    cycles_total=len(dependency_cycles),
+                ),
                 "max_depth": _as_int(dependencies.get("max_depth")),
                 "avg_depth": round(_as_float(dependencies.get("avg_depth")), 2),
                 "p95_depth": _as_int(dependencies.get("p95_depth")),
@@ -818,6 +850,12 @@ def _normalize_metrics_families(
                     dependencies_comparison.get("baseline_diff_available")
                 ),
                 "new_cycles": _as_int(dependencies_comparison.get("new_cycles")),
+                "new_import_cycles": _as_int(
+                    dependencies_comparison.get("new_import_cycles")
+                ),
+                "new_deferred_cycles": _as_int(
+                    dependencies_comparison.get("new_deferred_cycles")
+                ),
             },
             "items": dependency_edges,
             "cycles": dependency_cycles,

@@ -132,6 +132,8 @@ def _build_catalog() -> dict[str, str]:
             lcom_avg=1.1,
             lcom_max=3,
             cycles=0,
+            import_cycles=0,
+            deferred_cycles=0,
             dead=0,
             health=92,
             grade="A",
@@ -180,8 +182,13 @@ def _build_catalog() -> dict[str, str]:
         "fmt_metrics_cc": ui.fmt_metrics_cc(2.2, 34, 6),
         "fmt_metrics_coupling": ui.fmt_metrics_coupling(1.4, 27),
         "fmt_metrics_cohesion": ui.fmt_metrics_cohesion(1.1, 3),
-        "fmt_metrics_cycles": ui.fmt_metrics_cycles(0),
-        "fmt_metrics_cycles_detected": ui.fmt_metrics_cycles(2),
+        "fmt_metrics_cycles": ui.fmt_metrics_cycles(0, import_cycles=0, deferred=0),
+        "fmt_metrics_cycles_detected": ui.fmt_metrics_cycles(
+            2, import_cycles=1, deferred=1
+        ),
+        "fmt_metrics_cycles_deferred_only": ui.fmt_metrics_cycles(
+            2, import_cycles=0, deferred=2
+        ),
         "fmt_metrics_dependencies": ui.fmt_metrics_dependencies(
             avg_depth=7.6, p95_depth=25, max_depth=31
         ),
@@ -271,6 +278,7 @@ _CATALOG = _build_catalog()
 _ALIASED_ENTRIES = {
     "fmt_summary_parsed_singular",
     "fmt_metrics_cycles_detected",
+    "fmt_metrics_cycles_deferred_only",
     "fmt_metrics_dead_code_found",
     "fmt_metrics_coverage_join_unavailable",
     "fmt_audit_no_data",

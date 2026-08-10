@@ -11,7 +11,7 @@ from typing import Protocol
 
 from ... import ui_messages as ui
 from ...core._types import AnalysisResult, DiscoveryResult, ProcessingResult
-from ...models import MetricsDiff
+from ...models import MetricsDiff, cycle_kind_counts
 from ...utils import coerce as _coerce
 
 _as_int = _coerce.as_int
@@ -31,6 +31,12 @@ class MetricsSnapshot:
     dead_code_count: int
     health_total: int
     health_grade: str
+    #: The kind split behind ``cycles_count``. Shown next to the total because
+    #: the total alone no longer predicts the exit code: only import cycles
+    #: fail --fail-cycles, so a user seeing "2 cycles" and exit 0 needs the
+    #: breakdown to understand why.
+    import_cycles_count: int = 0
+    deferred_cycles_count: int = 0
     dependency_avg_depth: float = 0.0
     dependency_p95_depth: int = 0
     dependency_max_depth: int = 0
@@ -115,6 +121,10 @@ def build_metrics_snapshot(
         _as_mapping(metrics_payload_map.get("security_surfaces")).get("summary")
     )
     coverage_join_source = str(coverage_join_summary.get("source", "")).strip()
+    cycle_counts = cycle_kind_counts(
+        cycles=tuple(project_metrics.dependency_cycles),
+        details=project_metrics.dependency_cycle_details,
+    )
     return MetricsSnapshot(
         complexity_avg=project_metrics.complexity_avg,
         complexity_max=project_metrics.complexity_max,
@@ -124,6 +134,8 @@ def build_metrics_snapshot(
         cohesion_avg=project_metrics.cohesion_avg,
         cohesion_max=project_metrics.cohesion_max,
         cycles_count=len(project_metrics.dependency_cycles),
+        import_cycles_count=cycle_counts.import_cycles,
+        deferred_cycles_count=cycle_counts.deferred_cycles,
         dependency_avg_depth=_coerce.as_float(
             _as_mapping(metrics_payload_map.get("dependencies")).get("avg_depth")
         ),
@@ -295,6 +307,8 @@ def _print_metrics(
                 lcom_avg=metrics.cohesion_avg,
                 lcom_max=metrics.cohesion_max,
                 cycles=metrics.cycles_count,
+                import_cycles=metrics.import_cycles_count,
+                deferred_cycles=metrics.deferred_cycles_count,
                 dead=metrics.dead_code_count,
                 health=metrics.health_total,
                 grade=metrics.health_grade,
@@ -368,7 +382,13 @@ def _print_metrics(
         console.print(
             ui.fmt_metrics_cohesion(metrics.cohesion_avg, metrics.cohesion_max)
         )
-        console.print(ui.fmt_metrics_cycles(metrics.cycles_count))
+        console.print(
+            ui.fmt_metrics_cycles(
+                metrics.cycles_count,
+                import_cycles=metrics.import_cycles_count,
+                deferred=metrics.deferred_cycles_count,
+            )
+        )
         console.print(
             ui.fmt_metrics_dependencies(
                 avg_depth=metrics.dependency_avg_depth,

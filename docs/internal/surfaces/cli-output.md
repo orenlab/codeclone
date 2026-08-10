@@ -225,7 +225,7 @@ A metric regression occurs when the current run reports a violation (e.g., cyclo
 | `--fail-complexity` | Any function CC > threshold | 20 | 3 |
 | `--fail-coupling` | Any class CBO > threshold | 10 | 3 |
 | `--fail-cohesion` | Any class LCOM4 > threshold | 4 | 3 |
-| `--fail-cycles` | Circular module dependencies exist | N/A | 3 |
+| `--fail-cycles` | An **import-time** module cycle exists (`import_cycle`). A `deferred_cycle` is reported and does not gate | N/A | 3 |
 | `--fail-dead-code` | High-confidence dead code found | N/A | 3 |
 | `--fail-health` | Overall health score < threshold | 60 | 3 |
 | `--fail-on-typing-regression` | Typing coverage regresses | N/A | 3 |

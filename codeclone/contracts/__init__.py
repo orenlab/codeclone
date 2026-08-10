@@ -67,7 +67,12 @@ REPORT_COMPARISON_DIGEST_DOMAIN: Final = "codeclone.report.comparison.v1\0"
 REPORT_EVALUATION_DIGEST_DOMAIN: Final = "codeclone.report.evaluation.v1\0"
 REPORT_ENVELOPE_DIGEST_DOMAIN: Final = "codeclone.report.envelope.v1\0"
 GATE_LANE_MATRIX_VERSION: Final = "2"
-HEALTH_INPUT_MANIFEST_VERSION: Final = "1"
+# Version "2" (cycle-policy split): the dependency-cycle input stopped being one
+# kind-agnostic count and became two — import cycles and deferred cycles, each
+# with its own penalty constant. The manifest names the inputs health consumes,
+# so a health score computed under "1" and one computed under "2" are not
+# derived from the same input set even when they carry the same number.
+HEALTH_INPUT_MANIFEST_VERSION: Final = "2"
 OBSERVER_VOCABULARY_VERSION: Final = "3"
 # Version "2" adds two life proofs, and nothing else moves. (1) A PEP 484
 # explicit re-export - ``from x import y as y``, the ``as``-SAME-name
@@ -381,7 +386,23 @@ HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE: Final = 4
 # responding to one class's magnitude, which is exactly the defect this
 # replaces.
 HEALTH_COUPLING_OUTLIER_SATURATION_MULTIPLE: Final = 3
+# Per-cycle penalty for an ``import_cycle`` — a cycle whose import-time edge
+# subgraph still cycles, so it can crash the interpreter at import. Unchanged
+# since the dimension was written; the cycle-policy split narrowed WHICH cycles
+# it counts (import ones) without moving its value.
 HEALTH_DEPENDENCY_CYCLE_PENALTY: Final = 25
+# Per-cycle penalty for a ``deferred_cycle`` — real, but unable to crash at
+# import because only deferred, lazy, or typing edges close it.
+#
+# CANDIDATE VALUE, DELIBERATELY EQUAL TO THE IMPORT PENALTY. The cycle-policy
+# split exists to create this seam, not to move the score: at 25 the dependency
+# dimension is identical to the pre-split behaviour for every repository.
+# Lowering it is a user-facing score change and is therefore governed by the
+# project's score-change law — it may only be revised by a separate calibration
+# task carrying an independent BLIND benchmark over at least five frozen
+# external repositories pinned to commit SHAs. Do not tune it here, and never
+# from CodeClone's own self-score.
+HEALTH_DEPENDENCY_DEFERRED_CYCLE_PENALTY: Final = 25
 HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY: Final = 4
 HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER: Final = 2.0
 HEALTH_DEPENDENCY_DEPTH_P95_MARGIN: Final = 1
@@ -501,6 +522,7 @@ __all__ = [
     "HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE",
     "HEALTH_COUPLING_TYPICAL_WEIGHT",
     "HEALTH_DEPENDENCY_CYCLE_PENALTY",
+    "HEALTH_DEPENDENCY_DEFERRED_CYCLE_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER",
     "HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_P95_MARGIN",

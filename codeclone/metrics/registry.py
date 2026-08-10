@@ -30,6 +30,7 @@ from ..models import (
     UnreachableStatementFinding,
     UnreachableStatementItem,
     UnresolvedOverrideItem,
+    cycle_kind_counts,
 )
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_str as _as_str
@@ -88,7 +89,8 @@ _EMPTY_HEALTH_SCORE = compute_health(
         coupling_class_population=0,
         cohesion_avg=0.0,
         low_cohesion_classes=0,
-        dependency_cycles=0,
+        import_dependency_cycles=0,
+        deferred_dependency_cycles=0,
         dependency_max_depth=0,
         dependency_avg_depth=0.0,
         dependency_p95_depth=0,
@@ -748,6 +750,10 @@ def _build_health_result(context: MetricProjectContext) -> MetricResult:
     cohesion = _compute_cohesion_family(context)
     dependencies = _compute_dependencies_family(context)
     dead_code = _compute_dead_code_family(context)
+    cycle_counts = cycle_kind_counts(
+        cycles=_result_nested_tuple_str(dependencies, "dependency_cycles"),
+        details=_result_cycle_details(dependencies, "dependency_cycle_details"),
+    )
     health = compute_health(
         HealthInputs(
             files_found=context.files_found,
@@ -782,9 +788,8 @@ def _build_health_result(context: MetricProjectContext) -> MetricResult:
             low_cohesion_classes=len(
                 _result_tuple_str(cohesion, "low_cohesion_classes")
             ),
-            dependency_cycles=len(
-                _result_nested_tuple_str(dependencies, "dependency_cycles")
-            ),
+            import_dependency_cycles=cycle_counts.import_cycles,
+            deferred_dependency_cycles=cycle_counts.deferred_cycles,
             dependency_max_depth=_result_int(dependencies, "dependency_max_depth"),
             dependency_avg_depth=_result_float(dependencies, "dependency_avg_depth"),
             dependency_p95_depth=_result_int(dependencies, "dependency_p95_depth"),

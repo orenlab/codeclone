@@ -181,6 +181,11 @@ def test_summarize_metrics_diff_accepts_mapping_payload() -> None:
         "new_high_risk_functions": 2,
         "new_high_coupling_classes": 3,
         "new_cycles": 4,
+        # A payload predating the kind split carries no import count, so the
+        # summarizer falls back to the undifferentiated total rather than
+        # reporting zero gating cycles for a legacy caller.
+        "new_import_cycles": 4,
+        "new_deferred_cycles": 0,
         "new_dead_code": 5,
         "health_delta": -2,
         "typing_param_permille_delta": -100,
