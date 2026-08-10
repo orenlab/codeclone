@@ -384,6 +384,143 @@ def test_conservative_edges_do_not_swallow_the_declared_positives() -> None:
     assert findings[0].start_line == 7
 
 
+_RETRY_ONE_FINALLY = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        try:\n"
+    "            break\n"
+    "        finally:\n"
+    "            cleanup()\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+_RETRY_NESTED_FINALLYS = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        try:\n"
+    "            try:\n"
+    "                break\n"
+    "            finally:\n"
+    "                inner_cleanup()\n"
+    "        finally:\n"
+    "            outer_cleanup()\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+_POLL_CONTINUE_AND_BREAK = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        try:\n"
+    "            if flag:\n"
+    "                break\n"
+    "            continue\n"
+    "        finally:\n"
+    "            cleanup()\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+_LOOP_NOTHING_LEAVES = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        try:\n"
+    "            work()\n"
+    "        finally:\n"
+    "            cleanup()\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+_FINALLY_RETURNS = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        try:\n"
+    "            break\n"
+    "        finally:\n"
+    "            return 'early'\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+_SWALLOWED_THEN_SIBLING_FINALLY = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        if flag:\n"
+    "            try:\n"
+    "                break\n"
+    "            finally:\n"
+    "                return 'early'\n"
+    "        else:\n"
+    "            try:\n"
+    "                work()\n"
+    "            finally:\n"
+    "                cleanup()\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+_CONTINUE_ONLY = (
+    "def guarded(flag: bool) -> str:\n"
+    "    while True:\n"
+    "        try:\n"
+    "            continue\n"
+    "        finally:\n"
+    "            cleanup()\n"
+    "    after_loop()\n"
+    "    return 'done'\n"
+)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(_RETRY_ONE_FINALLY, id="break_through_one_finally"),
+        pytest.param(_RETRY_NESTED_FINALLYS, id="break_through_nested_finallys"),
+        pytest.param(_POLL_CONTINUE_AND_BREAK, id="continue_beside_a_guarded_break"),
+    ],
+)
+def test_a_loop_left_through_a_finally_fabricates_no_dead_code(source: str) -> None:
+    """The retry idiom is live code and must not be reported.
+
+    ``while True`` with a ``break`` inside a protected region is the ordinary
+    shape of a retry loop with cleanup, nested cleanups included. CPython runs
+    everything after the loop; the graph said otherwise because the terminator
+    was handed to the finally and the target it named was dropped there.
+    """
+
+    assert not _findings_for_source(source, "guarded")
+
+
+@pytest.mark.parametrize(
+    ("source", "start_line"),
+    [
+        pytest.param(_LOOP_NOTHING_LEAVES, 7, id="nothing_ever_leaves_the_loop"),
+        pytest.param(_FINALLY_RETURNS, 7, id="finally_returns_and_swallows_it"),
+        pytest.param(_SWALLOWED_THEN_SIBLING_FINALLY, 13, id="sibling_finally_after"),
+        pytest.param(_CONTINUE_ONLY, 7, id="continue_is_not_an_exit"),
+    ],
+)
+def test_a_tail_no_terminator_reaches_is_still_reported(
+    source: str,
+    start_line: int,
+) -> None:
+    """The opposite boundary: carrying targets must not amnesty everything.
+
+    Each case ends a ``while True`` body with a protected region, and in none
+    of them does anything actually leave the loop: nothing breaks, the break
+    dies inside ``finally: return``, or the only terminator is a ``continue``.
+    A fix that edged every finally to the loop exit — or that left a swallowed
+    exit parked for the next cleanup to deliver — would make these tails
+    silently disappear, which is the reported defect facing the other way.
+    """
+
+    findings = _findings_for_source(source, "guarded")
+    assert [finding.reason for finding in findings] == ["literal_condition"]
+    assert findings[0].start_line == start_line
+
+
 def test_production_source_unreachable_statements_are_only_the_known_one() -> None:
     """Acceptance 9 as a ratchet: no NEW unreachable statement in production.
 

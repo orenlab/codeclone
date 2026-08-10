@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, TypeVar
 
 from ..meta_markers import CFG_META_PREFIX
@@ -33,6 +33,12 @@ class _LoopContext:
     #: routes through a ``finally`` that sits between it and the loop, which is
     #: exactly a finally pushed after this frame (39Y Y9, decision row F5).
     finally_depth: int = 0
+    #: ``(finally depth that must deliver it, target block)`` for every
+    #: ``break``/``continue`` of this loop currently parked in a ``finally``.
+    #: Routing the terminator into the cleanup (F5) is only where it goes
+    #: *next*, never where it was going, so the target it named waits here
+    #: until that cleanup finishes instead of being dropped there.
+    deferred_exits: list[tuple[int, Block]] = field(default_factory=list)
 
 
 def _meta_expr(value: str) -> ast.Expr:
@@ -427,17 +433,50 @@ class CFGBuilder:
                 self.current.add_successor(final_block)
 
         if has_finally:
+            depth = len(self._finally_stack)
             self._finally_stack.pop()
             self.current = final_block
             self._visit_statements(finalbody)
             # F6: the finally continues normally into the join, and also
             # carries the abrupt paths routed into it — a return, or an
             # exception no handler matched — out of the function.
-            if not self.current.is_terminated:
+            terminated = self.current.is_terminated
+            if not terminated:
                 self.current.add_successor(join_block)
                 self.current.add_successor(self.cfg.exit)
+            self._resume_deferred_exits(depth, deliver=not terminated)
 
         self.current = join_block
+
+    def _resume_deferred_exits(self, depth: int, *, deliver: bool) -> None:
+        """Hand every exit parked against this finally to whatever runs next.
+
+        The finally at ``depth`` has just completed, so each target it held is
+        asked the question F5 asked: if another protected region still stands
+        between here and the loop that owns the target, that region runs first
+        and inherits the pending exit; otherwise the loop is next and gets the
+        edge. That is what unwinds one level at a time instead of letting an
+        inner cleanup jump straight past an outer one.
+
+        A finally that ends abruptly itself swallows what was routed into it —
+        ``finally: return`` really does discard the pending ``break`` — so with
+        ``deliver=False`` the targets are dropped rather than delivered. They
+        are drained either way: leaving them parked would let a later sibling
+        ``finally`` at the same depth deliver an exit that never survived.
+        """
+
+        for loop_frame in self._loop_stack:
+            remaining: list[tuple[int, Block]] = []
+            for parked_depth, target in loop_frame.deferred_exits:
+                if parked_depth != depth:
+                    remaining.append((parked_depth, target))
+                elif not deliver:
+                    continue
+                elif depth - 1 > loop_frame.finally_depth:
+                    remaining.append((depth - 1, target))
+                else:
+                    self.current.add_successor(target)
+            loop_frame.deferred_exits = remaining
 
     def _visit_match(self, stmt: ast.Match) -> None:
         self.current.statements.append(ast.Expr(value=stmt.subject))
@@ -550,16 +589,19 @@ class CFGBuilder:
         self.current.is_terminated = True
         if self._loop_stack:
             loop_frame = self._loop_stack[-1]
-            if len(self._finally_stack) > loop_frame.finally_depth:
-                # A finally was entered inside this loop, so leaving the loop
-                # runs it first (decision row F5).
-                self.current.add_successor(self._finally_stack[-1])
-                return
             target = (
                 loop_frame.break_target
                 if target_kind == "break"
                 else loop_frame.continue_target
             )
+            if len(self._finally_stack) > loop_frame.finally_depth:
+                # A finally was entered inside this loop, so leaving the loop
+                # runs it first (decision row F5). Where the terminator was
+                # headed is parked against that finally rather than dropped: it
+                # is still going there, just not yet.
+                self.current.add_successor(self._finally_stack[-1])
+                loop_frame.deferred_exits.append((len(self._finally_stack), target))
+                return
             self.current.add_successor(target)
             return
         self.current.add_successor(self._abrupt_target())
