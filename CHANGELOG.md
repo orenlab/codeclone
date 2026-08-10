@@ -30,6 +30,10 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   They are a generated calibration artifact — computed by a reproducible procedure over a pinned reference distribution,
   not hand-picked — so the health scale reads the new metric honestly. Only these two reference shares moved; the risk
   bands (10 / 20) and the complexity gate are unchanged. Health scores shift accordingly.
+- The design dependency-cycle finding kind `cycle` is replaced by `import_cycle` and `deferred_cycle`, classified by
+  import binding time — see the Fixed entry below. A consumer matching `kind == "cycle"` on a `design` finding now
+  matches nothing instead of failing loudly, so update automation, CI scripts, and agent workflows to the new kinds.
+  The `metrics.families.dependencies.summary.cycles` metric is unchanged.
 
 ### Added
 
@@ -145,7 +149,7 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   A cycle is `import_cycle` (critical) exactly when the subgraph of import-time edges still cycles; otherwise it is
   `deferred_cycle` (warning) — real, but unable to crash at import. Typing-only edges no longer create runtime
   cycles at all, while staying visible in the edge list with their kinds. Finding copy states what was measured.
-  The dependencies lane advances to payload schema `6` and the analysis cache to `3.5`; pre-upgrade cache entries
+  The dependencies lane advances to payload schema `6` and the analysis cache to `3.7`; pre-upgrade cache entries
   re-analyze on the next run.
 - **Cycle findings no longer invent file paths for package modules.** A cycle member resolves through the
   module-identity inventory — a package reports `pkg/__init__.py`, never the phantom `pkg.py` whose link 404s —
