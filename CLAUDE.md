@@ -334,6 +334,8 @@ When validating implementation against a spec:
 6. Report `conformant` / `improved` / `divergent` / `missing` with evidence.
 7. For every load-bearing pin, carry **mutation evidence** (see "Mutation discipline" below): a green test is not proof
    until it has been shown to red when the exact behavior it pins is reverted.
+8. Any change that moves a **user-facing score or verdict** carries an **independent benchmark** (see "Score-change
+   discipline" below): self-repo validation alone is not acceptance.
 
 ## Mutation discipline (mandatory law)
 
@@ -373,6 +375,29 @@ and it applies to every load-bearing fix or claim, for agents and for the contro
    manual targeted mutation is mandatory **now**.
 5. This is part of the red-first discipline and the standing evidence law ("я починил" / "I fixed it" without receipts
    does not exist). A fix delivery report carries a **mutation evidence** section for its load-bearing pins.
+
+## Score-change discipline (mandatory law)
+
+A self-calibrated scale measures the morphology of the object that produced it — "a very precise micrometer for exactly
+one part". **A change that moves a user-facing CodeClone score or verdict is accepted ONLY via an independent benchmark
+run AFTER the recalibration.** This is a binding project law — a sibling to the mutation-evidence law above — for agents
+and for the controller's merge audit.
+
+1. **What it covers.** Any parameter whose movement changes the number or verdict CodeClone reports to a user: the health
+   score and its dimensions (complexity, coupling, cohesion, dead_code, coverage, dependencies, clones), reference
+   permilles / bands, health weights, gate thresholds (`fail_*`), severity mappings, outlier terms. A purely factual,
+   categorical fact without an evaluative scale (identity; tri-state novelty as a fact) is NOT covered; the
+   interpretation of a fact into a score IS.
+2. **Acceptance is an independent benchmark, and it is mandatory — not "nice to have".** A **blind** agent is given the
+   measurement protocol, not the goal — a lab technician, not an advocate for the change. Run it on **≥5 frozen external
+   repositories** across orders of magnitude and Python styles, each pinned to a commit SHA recorded before the first
+   run; use the **same** pinned measurement, keep thresholds **unchanged**, and report raw distributions first. The
+   external projects must try to **refute** the calibration, not re-fit it.
+3. **Self-repo validation alone is not acceptance.** "It looks fine on our own repo" is not proof of general fitness.
+4. **If external validity fails, that is a new fact, not a tuning signal.** "Pinned self-calibration failed external
+   validity" requires a reference-population redesign as a separate task — never a silent re-fit of thresholds against
+   the benchmark repos (the same grinding-to-the-scale, just external). A floor or policy threshold is revised only from
+   an independent policy basis, never from the current self-score.
 
 ## Verification commands
 
