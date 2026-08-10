@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from codeclone.models import (
     ClassMetrics,
     DeadItem,
+    DependencyCycleDetail,
     HealthScore,
     ProjectMetrics,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
+    Suggestion,
 )
 from codeclone.report import suggestions as suggestions_mod
 from codeclone.report.suggestions import classify_clone_type, generate_suggestions
@@ -448,3 +452,87 @@ def test_structural_info_hints_stay_in_findings_without_separate_suggestion() ->
         scan_root="/repo",
     )
     assert suggestions == []
+
+
+def _cycle_metrics() -> ProjectMetrics:
+    """Project metrics carrying one deferred and one import (eager) cycle.
+
+    Both cycles ship aligned ``DependencyCycleDetail`` entries so the report
+    builder takes the wave's binding-law branch (details length == cycles
+    length) rather than the pre-wave import-only fallback.
+    """
+    deferred_cycle = ("pkg.def_a", "pkg.def_b")
+    import_cycle = ("pkg.eag_a", "pkg.eag_b")
+    return replace(
+        _project_metrics(),
+        dependency_cycles=(deferred_cycle, import_cycle),
+        dependency_cycle_details=(
+            DependencyCycleDetail(
+                modules=deferred_cycle,
+                kind="deferred_cycle",
+                member_paths=(None, None),
+            ),
+            DependencyCycleDetail(
+                modules=import_cycle,
+                kind="import_cycle",
+                member_paths=(None, None),
+            ),
+        ),
+    )
+
+
+def _dependency_suggestion(location: str) -> Suggestion:
+    suggestions = generate_suggestions(
+        project_metrics=_cycle_metrics(),
+        units=(),
+        class_metrics=(),
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    matches = [
+        item
+        for item in suggestions
+        if item.category == "dependency" and item.location == location
+    ]
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+def test_dependency_suggestion_deferred_cycle_is_warning() -> None:
+    """Deferred cycle -> WARNING severity (one boundary of the seam).
+
+    Pins the report-layer binding-law seam
+    ``deferred = detail.kind == "deferred_cycle"`` in suggestions.py -- the
+    suggestion path that ``test_cycle_findings_split_by_binding_law`` (the
+    dependency-GROUP sibling) does not touch. Mutating the seam to a constant
+    ``deferred = False`` reds this assertion verbatim while the eager pin stays
+    green (closes hollow spot mem-c2305c8f).
+    """
+    assert _dependency_suggestion("pkg.def_a -> pkg.def_b").severity == "warning"
+
+
+def test_dependency_suggestion_import_cycle_is_critical() -> None:
+    """Import (eager) cycle -> CRITICAL severity (the opposite boundary).
+
+    Mutating the same seam to a constant ``deferred = True`` reds this
+    assertion verbatim while the deferred pin stays green.
+    """
+    assert _dependency_suggestion("pkg.eag_a -> pkg.eag_b").severity == "critical"
+
+
+def test_dependency_suggestion_title_and_message_differ_by_binding_law() -> None:
+    """Deferred and eager cycles get DISTINCT title and measured message.
+
+    Pins the title/message split by its distinction rather than by importing
+    the report-message constants (``codeclone.report.messages`` is ring r4;
+    importing it from this r2 test file crosses the architecture boundary
+    ratchet in ``tests/test_architecture.py``). Under either seam mutation
+    both cycles collapse to the same branch, so the deferred and eager
+    suggestions share one title and one fact_summary and these inequalities
+    red -- killing both boundaries of the title/message mapping.
+    """
+    deferred = _dependency_suggestion("pkg.def_a -> pkg.def_b")
+    eager = _dependency_suggestion("pkg.eag_a -> pkg.eag_b")
+    assert deferred.title != eager.title
+    assert deferred.fact_summary != eager.fact_summary
