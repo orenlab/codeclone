@@ -42,6 +42,7 @@ from ._session_shared import (
     MCPGateRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
+    MCPRunRootAmbiguityError,
     MCPRunRootMismatchError,
     MCPServiceContractError,
 )
@@ -400,7 +401,19 @@ class _MCPSessionPatchContractMixin:
         try:
             return self._runs.get_for_root(after_run_id, root=before.root)
         except MCPRunRootMismatchError:
-            return self._runs.resolve_any_root(after_run_id)
+            try:
+                return self._runs.resolve_any_root(after_run_id)
+            except MCPRunRootAmbiguityError as exc:
+                # Several sibling checkouts hold the id, none of them ours:
+                # there is no single diagnostic pair to report incomparable,
+                # and a sibling's run is not this root's evidence. Surface the
+                # typed missing-after miss whose remedy the agent can execute.
+                raise MCPRunNotFoundError(
+                    f"After-run '{after_run_id}' is not registered under "
+                    f"{before.root}; same-id runs under sibling checkouts are "
+                    "not this root's evidence. Run analyze_repository on the "
+                    "intent's root and pass the run_id it returns."
+                ) from exc
 
     @staticmethod
     def _next_step_hint(reason: str) -> str | None:
