@@ -248,6 +248,17 @@ class _MCPSessionWorkflowMixin:
         intent_id = str(declare_payload.get("intent_id", ""))
         declare_status = str(declare_payload.get("status", ""))
 
+        # Declare refused: no intent was created and nothing was evicted. The
+        # refusal payload passes through unchanged so start cannot drop the
+        # fields the caller needs in order to act.
+        if declare_status == "blocked":
+            return _start_governed_response(
+                _helpers.attach_workspace_hygiene_tips(
+                    dict(declare_payload),
+                    root=root_path,
+                )
+            )
+
         # Queued: no blast radius or budget
         if declare_status == IntentStatus.QUEUED.value:
             workspace_after = intent_session._list_workspace_intents(
@@ -267,9 +278,7 @@ class _MCPSessionWorkflowMixin:
                 ),
                 "message": workflow_msgs.START_QUEUED,
             }
-            dirty_snapshot = declare_payload.get("dirty_snapshot")
-            if isinstance(dirty_snapshot, dict):
-                queued_payload["dirty_snapshot"] = dirty_snapshot
+            _carry_declare_context(queued_payload, declare_payload)
             return _start_governed_response(
                 _helpers.attach_workspace_hygiene_tips(
                     queued_payload,
@@ -404,9 +413,7 @@ class _MCPSessionWorkflowMixin:
                 continuing_own_wip=continuing_own_wip,
             ),
         }
-        dirty_snapshot = declare_payload.get("dirty_snapshot")
-        if isinstance(dirty_snapshot, dict):
-            payload["dirty_snapshot"] = dirty_snapshot
+        _carry_declare_context(payload, declare_payload)
         if hygiene.git_available or hygiene.blocks_edit:
             hygiene_payload = hygiene.to_payload()
             if continuing_own_wip:
@@ -602,13 +609,22 @@ class _MCPSessionWorkflowMixin:
         }
         if finish_hygiene.blocks_finish:
             block_reason = finish_hygiene.finish_block_reason or ""
-            # Only proven patch/scope conflicts block finish: in-scope dirt
-            # missing from evidence, or a live foreign intent overlapping the
-            # declared scope. Out-of-scope unattributed dirt is advisory.
+            # Proven patch/scope conflicts block finish: in-scope dirt missing
+            # from evidence, a live foreign intent overlapping the declared
+            # scope, or unverified Python changed outside scope inside this
+            # intent's window. Other out-of-scope dirt is advisory.
             detail_message = {
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
+                "unverified_python_outside_scope": (
+                    workflow_msgs.FINISH_HYGIENE_UNVERIFIED_PYTHON
+                ),
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
+            next_step = {
+                "unverified_python_outside_scope": (
+                    workflow_msgs.FINISH_HYGIENE_UNVERIFIED_PYTHON_NEXT
+                ),
+            }.get(block_reason, workflow_msgs.FINISH_HYGIENE_NEXT)
             return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
@@ -620,7 +636,7 @@ class _MCPSessionWorkflowMixin:
                     "receipt": None,
                     "intent_cleared": False,
                     "user_action_required": True,
-                    "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
+                    "next_step": next_step,
                     "workspace_hygiene_after": workspace_hygiene_after,
                     "message": detail_message,
                 }
@@ -725,7 +741,7 @@ class _MCPSessionWorkflowMixin:
                     "intent_cleared": False,
                     "workspace_hygiene_after": workspace_hygiene_after,
                     "summary": _finish_summary(
-                        verify_status=verify_status,
+                        status=verify_status,
                         intent_cleared=False,
                         check_payload=check_payload,
                         verify_payload=verify_payload,
@@ -786,7 +802,10 @@ class _MCPSessionWorkflowMixin:
             finish_hygiene.dirty_paths_outside_scope,
         )
 
-        # 10. Compose response
+        # 10. Compose response. Every status-derived field answers for
+        # effective_status: summary, message and user_action_required are what
+        # an agent reads first, and answering there for the pre-elevation
+        # verify_status is how an elevated verdict reads as fully clean.
         result: dict[str, object] = {
             "intent_id": intent_id,
             "status": effective_status,
@@ -799,7 +818,7 @@ class _MCPSessionWorkflowMixin:
             "intent_cleared": intent_cleared,
             "workspace_hygiene_after": workspace_hygiene_after,
             "summary": _finish_summary(
-                verify_status=verify_status,
+                status=effective_status,
                 intent_cleared=intent_cleared,
                 check_payload=check_payload,
                 verify_payload=verify_payload,
@@ -810,9 +829,9 @@ class _MCPSessionWorkflowMixin:
                 review_text_present=bool(review_text),
                 claims_text_present=bool(claims_text),
             ),
-            "user_action_required": False,
+            "user_action_required": external_advisory is not None,
             "message": self._finish_message(
-                verify_status=verify_status,
+                status=effective_status,
                 intent_cleared=intent_cleared,
                 receipt_error=receipt_error,
             ),
@@ -821,6 +840,7 @@ class _MCPSessionWorkflowMixin:
             result["receipt_error"] = receipt_error
         if external_advisory is not None:
             result["external_changes"] = external_advisory
+            result["next_step"] = workflow_msgs.FINISH_EXTERNAL_NEXT
         if isinstance(health_regression_advisory, dict):
             result["health_regression_advisory"] = health_regression_advisory
         if propose_memory and verify_status in _ACCEPTED_STATUSES:
@@ -1037,14 +1057,21 @@ class _MCPSessionWorkflowMixin:
     @staticmethod
     def _finish_message(
         *,
-        verify_status: str,
+        status: str,
         intent_cleared: bool,
         receipt_error: str | None,
     ) -> str:
+        """Message for the EFFECTIVE finish status, elevation included.
+
+        The elevation flag is derived here, from the same status the response
+        reports, so message and status cannot answer for different verdicts.
+        """
+
         return workflow_msgs.finish_controlled_change_message(
-            verify_status=verify_status,
+            status=status,
             intent_cleared=intent_cleared,
             receipt_error=receipt_error,
+            external_changes=status == PatchContractStatus.ACCEPTED_EXTERNAL.value,
         )
 
 
@@ -1271,7 +1298,7 @@ def _external_change_advisory(
 
 def _finish_summary(
     *,
-    verify_status: str,
+    status: str,
     intent_cleared: bool,
     check_payload: dict[str, object],
     verify_payload: dict[str, object],
@@ -1287,7 +1314,7 @@ def _finish_summary(
         workspace_hygiene_after.get("workspace_dirty_summary")
     )
     return {
-        "status": verify_status,
+        "status": status,
         "scope_status": str(check_payload.get("status", "")),
         "verification_profile": verify_payload.get("verification_profile"),
         "structural_verdict": structural_delta.get("verdict"),
@@ -1764,6 +1791,25 @@ def _budget_summary(budget_payload: dict[str, object]) -> dict[str, object]:
         "gate_preview": budget_payload.get("gate_preview"),
         "message": budget_payload.get("message"),
     }
+
+
+def _carry_declare_context(
+    payload: dict[str, object],
+    declare_payload: Mapping[str, object],
+) -> None:
+    """Carry declare-side context the start response must not swallow.
+
+    ``replaced_intents`` in particular: a permitted replacement still killed
+    the caller's previous intent_id, and start builds its own payload rather
+    than passing the declare payload through.
+    """
+
+    dirty_snapshot = declare_payload.get("dirty_snapshot")
+    if isinstance(dirty_snapshot, dict):
+        payload["dirty_snapshot"] = dirty_snapshot
+    replaced_intents = declare_payload.get("replaced_intents")
+    if isinstance(replaced_intents, list) and replaced_intents:
+        payload["replaced_intents"] = replaced_intents
 
 
 def _start_replay_request_key(

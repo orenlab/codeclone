@@ -130,6 +130,40 @@ FINISH_HYGIENE_UNACKNOWLEDGED_DIRTY: Final = (
 
 FINISH_HYGIENE_FOREIGN_DIRTY: Final = "Foreign dirty overlap remains in declared scope."
 
+FINISH_HYGIENE_UNVERIFIED_PYTHON: Final = (
+    "Git shows Python files changed outside the declared scope since intent "
+    "start, claimed by no intent. Accepting would attest them without any "
+    "structural check."
+)
+
+FINISH_HYGIENE_UNVERIFIED_PYTHON_NEXT: Final = (
+    "Declare those Python paths in scope with start_controlled_change and "
+    "verify them with an after-run, or revert them. The blocking paths are "
+    "listed in workspace_hygiene_after.unverified_python_unscoped_dirty."
+)
+
+FINISH_DONE_EXTERNAL: Final = (
+    "Done. Intent cleared. Workspace changes outside the declared scope were "
+    "NOT verified by this patch — report the external-change advisory instead "
+    "of presenting the patch as fully clean."
+)
+
+FINISH_EXTERNAL_NEXT: Final = (
+    "Report external_changes: this verification covers the declared scope "
+    "only. workspace_hygiene_after.dirty_paths_outside_scope lists the "
+    "unverified paths."
+)
+
+START_REPLACES_UNFINISHED_INTENT: Final = (
+    "Refusing to replace an unfinished intent: it has uncommitted changes in "
+    "its own scope that the new scope does not cover."
+)
+
+START_REPLACES_UNFINISHED_INTENT_NEXT: Final = (
+    "Finish or clear the listed intent first, or declare a scope that also "
+    "covers its orphaned_dirty_paths."
+)
+
 
 def start_controlled_change_message(
     *,
@@ -152,12 +186,24 @@ def start_controlled_change_message(
 
 def finish_controlled_change_message(
     *,
-    verify_status: str,
+    status: str,
     intent_cleared: bool,
     receipt_error: str | None,
+    external_changes: bool = False,
 ) -> str:
+    """Message for the EFFECTIVE finish status.
+
+    ``status`` is the status the response reports and ``external_changes``
+    says whether that status was elevated by unverified changes outside the
+    declared scope; both are derived by the caller from one decision. Saying
+    "Done." for an elevated verdict is how a finish that itself found
+    unverified external changes reads as fully clean.
+    """
+
     if receipt_error is not None:
         return FINISH_RECEIPT_FAILED
+    if external_changes and intent_cleared:
+        return FINISH_DONE_EXTERNAL
     if intent_cleared:
         return FINISH_DONE
-    return f"Verified ({verify_status}). Intent still active."
+    return f"Verified ({status}). Intent still active."

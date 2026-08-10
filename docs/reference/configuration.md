@@ -328,7 +328,7 @@ pyproject key, the environment value overrides the pyproject value.
 |----------|---------|
 | `CODECLONE_DEBUG` | `1` enables debug diagnostics, same as `--debug` |
 | `NO_COLOR` | Any non-empty value disables ANSI colors |
-| `CODECLONE_STRICT_FINISH` | Truthy (`1`, `true`, `yes`, `on`) makes MCP finish hygiene block on unattributed out-of-scope changes instead of reporting them as advisory |
+| `CODECLONE_STRICT_FINISH` | Truthy (`1`, `true`, `yes`, `on`) widens the MCP finish hygiene block from unattributed out-of-scope **Python** changes (blocked by default) to unattributed out-of-scope changes of **any** file type, including those whose start-time state is unknown |
 | `CODECLONE_MEMORY_DB_PATH` | Overrides `memory.db_path`; resolves against the analyzed root (per-checkout, never worktree-shared) |
 | `CODECLONE_PROJECTION_REBUILD_POLICY` | Overrides `memory.projection_rebuild_policy` |
 | `CODECLONE_MEMORY_SEMANTIC_ENABLED` | Overrides `memory.semantic.enabled` |

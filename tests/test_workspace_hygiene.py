@@ -364,11 +364,14 @@ def test_finish_hygiene_check_allows_preexisting_unscoped_dirty(
     assert hygiene.blocks_finish is False
 
 
-def test_finish_hygiene_check_treats_new_unattributed_as_advisory(
+def test_finish_hygiene_check_treats_new_unattributed_non_python_as_advisory(
     tmp_path: Path,
 ) -> None:
-    # Scope-aware finish hygiene: out-of-scope dirt with no foreign-intent
-    # attribution is classified for diagnostics but does NOT block finish.
+    # Scope-aware finish hygiene: out-of-scope NON-PYTHON dirt with no
+    # foreign-intent attribution is classified for diagnostics but does NOT
+    # block finish — a peer's concurrent note-taking must not fail an innocent
+    # finisher. Python is the exception, because only Python carries the
+    # structural verification this finish would otherwise skip in silence.
     store = get_workspace_intent_store(tmp_path)
     start_snapshot = DirtySnapshot(
         git_available=True,
@@ -382,7 +385,7 @@ def test_finish_hygiene_check_treats_new_unattributed_as_advisory(
             ),
         ),
     )
-    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+    with _mock_git_porcelain(" M pkg/a.py\n M notes/extra.txt\n"):
         hygiene = finish_hygiene_check(
             root=tmp_path,
             allowed_files=["pkg/a.py"],
@@ -394,8 +397,9 @@ def test_finish_hygiene_check_treats_new_unattributed_as_advisory(
             own_intent_id="intent-own-001",
             start_dirty_snapshot=start_snapshot,
         )
-    assert hygiene.new_unattributed_unscoped_dirty == ("pkg/extra.py",)
-    assert hygiene.dirty_paths_outside_scope == ("pkg/extra.py",)
+    assert hygiene.new_unattributed_unscoped_dirty == ("notes/extra.txt",)
+    assert hygiene.dirty_paths_outside_scope == ("notes/extra.txt",)
+    assert hygiene.unverified_python_unscoped_dirty == ()
     assert hygiene.blocks_finish is False
     assert hygiene.finish_block_reason is None
 
@@ -479,26 +483,26 @@ def test_finish_hygiene_check_strict_finish_env_blocks_unknown_unattributed(
     assert hygiene.finish_block_reason == "own_unscoped_dirty"
 
 
-def test_finish_hygiene_check_treats_modified_unattributed_as_advisory(
+def test_finish_hygiene_check_treats_modified_unattributed_non_python_as_advisory(
     tmp_path: Path,
 ) -> None:
-    # An out-of-scope path that changed since start, with no foreign-intent
-    # attribution, is advisory — a peer's concurrent edit must not block the
-    # innocent finisher whose own declared scope is clean.
+    # An out-of-scope NON-PYTHON path that changed since start, with no
+    # foreign-intent attribution, is advisory — a peer's concurrent edit must
+    # not block the innocent finisher whose own declared scope is clean.
     store = get_workspace_intent_store(tmp_path)
     start_snapshot = DirtySnapshot(
         git_available=True,
         captured_at_utc="2026-01-01T00:00:00Z",
         entries=(
             DirtySnapshotEntry(
-                path="pkg/extra.py",
+                path="notes/extra.txt",
                 status_xy=" M",
                 digest="old-digest",
                 digest_status="ok",
             ),
         ),
     )
-    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+    with _mock_git_porcelain(" M pkg/a.py\n M notes/extra.txt\n"):
         hygiene = finish_hygiene_check(
             root=tmp_path,
             allowed_files=["pkg/a.py"],
@@ -510,7 +514,8 @@ def test_finish_hygiene_check_treats_modified_unattributed_as_advisory(
             own_intent_id="intent-own-001",
             start_dirty_snapshot=start_snapshot,
         )
-    assert hygiene.modified_unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.modified_unattributed_unscoped_dirty == ("notes/extra.txt",)
+    assert hygiene.unverified_python_unscoped_dirty == ()
     assert hygiene.blocks_finish is False
     assert hygiene.finish_block_reason is None
 
@@ -868,3 +873,109 @@ def test_continue_own_wip_policy_allows_own_dirty_without_foreign() -> None:
         )
         is False
     )
+
+
+def test_finish_hygiene_check_blocks_new_unattributed_python(
+    tmp_path: Path,
+) -> None:
+    # A Python file that appeared dirty AFTER intent start, outside the
+    # declared scope and unclaimed by any intent, is exactly the class finish
+    # would otherwise attest with zero structural verification: the profile is
+    # derived from declared evidence only, so this file is never classified,
+    # never compared, never gated. Blocking is the default; strict finish
+    # widens the same block to every file type.
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/a.py",
+                status_xy=" M",
+                digest="start-a",
+                digest_status="ok",
+            ),
+        ),
+    )
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/undeclared.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.new_unattributed_unscoped_dirty == ("pkg/undeclared.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "unverified_python_outside_scope"
+
+
+def test_finish_hygiene_check_blocks_modified_unattributed_python(
+    tmp_path: Path,
+) -> None:
+    # Same class, other proof of authorship-in-window: the path was already
+    # dirty at start but its content changed while the intent was open.
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/undeclared.py",
+                status_xy=" M",
+                digest="old-digest",
+                digest_status="ok",
+            ),
+        ),
+    )
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/undeclared.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.modified_unattributed_unscoped_dirty == ("pkg/undeclared.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "unverified_python_outside_scope"
+
+
+def test_finish_hygiene_check_python_block_reports_only_python_paths(
+    tmp_path: Path,
+) -> None:
+    # Opposite boundary of the same rule: a non-Python sibling in the very same
+    # unattributed set must not be dragged into the default block, and the
+    # blocked set names the Python paths only.
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(),
+    )
+    with _mock_git_porcelain(" M notes/scratch.txt\n M pkg/undeclared.pyi\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.new_unattributed_unscoped_dirty == (
+        "notes/scratch.txt",
+        "pkg/undeclared.pyi",
+    )
+    assert hygiene.unverified_python_unscoped_dirty == ("pkg/undeclared.pyi",)
+    assert hygiene.finish_block_reason == "unverified_python_outside_scope"

@@ -12295,7 +12295,7 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
     assert (
         "receipt creation failed"
         in workflow_mod._MCPSessionWorkflowMixin._finish_message(
-            verify_status="accepted",
+            status="accepted",
             intent_cleared=False,
             receipt_error="boom",
         ).lower()
@@ -12350,7 +12350,7 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
     assert isinstance(advisory_nonaccepted, dict)
 
     summary = workflow_mod._finish_summary(
-        verify_status="accepted",
+        status="accepted",
         intent_cleared=True,
         check_payload={"status": "clean"},
         verify_payload={"structural_delta": {"verdict": "stable", "health_delta": 0}},
@@ -17715,3 +17715,192 @@ def test_get_run_summary_without_analysis_profile(tmp_path: Path) -> None:
     summary = service.get_run_summary(record.run_id)
     assert summary["run_id"] == record.run_id[:8]
     assert "analysis_profile" not in summary
+
+
+_CHANGE_CONTROL_MODULE = (
+    "def total(values):\n"
+    "    result = 0\n"
+    "    for value in values:\n"
+    "        result += value\n"
+    "    return result\n"
+)
+
+
+def _change_control_repo(root: Path) -> None:
+    """A committed repo with one doc and two python modules."""
+    package = root / "pkg"
+    package.mkdir(parents=True, exist_ok=True)
+    package.joinpath("__init__.py").write_text("", encoding="utf-8")
+    package.joinpath("a.py").write_text(_CHANGE_CONTROL_MODULE, encoding="utf-8")
+    package.joinpath("b.py").write_text(_CHANGE_CONTROL_MODULE, encoding="utf-8")
+    root.joinpath("README.md").write_text("# repo\n", encoding="utf-8")
+    root.joinpath("notes.txt").write_text("scratch\n", encoding="utf-8")
+    root.joinpath(".gitignore").write_text(
+        ".codeclone/\ncodeclone.baseline.json\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    _git_commit_all(root, "init")
+
+
+def _change_control_start(
+    root: Path,
+    *,
+    allowed_files: list[str],
+    intent: str,
+) -> tuple[CodeCloneMCPService, dict[str, object]]:
+    """Committed repo, one registered run, one active intent on it."""
+    _change_control_repo(root)
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, root)
+    started = service.start_controlled_change(
+        root=str(root),
+        scope={"allowed_files": allowed_files},
+        intent=intent,
+    )
+    assert started["status"] == "active"
+    return service, started
+
+
+def _finish_after_undeclared_edit(
+    root: Path,
+    *,
+    undeclared_path: str,
+    undeclared_body: str,
+) -> dict[str, object]:
+    """Finish a README-scoped intent that also left one undeclared edit.
+
+    The undeclared file never reaches ``changed_files``, so nothing about it
+    enters the verification profile — the shared shape of both undeclared-work
+    scenarios; only the file type and the expected outcome differ.
+    """
+    service, started = _change_control_start(
+        root, allowed_files=["README.md"], intent="docs patch"
+    )
+    root.joinpath("README.md").write_text("# repo\n\nmore\n", encoding="utf-8")
+    root.joinpath(undeclared_path).write_text(undeclared_body, encoding="utf-8")
+    return service.finish_controlled_change(
+        intent_id=str(started["intent_id"]),
+        changed_files=["README.md"],
+        create_receipt=False,
+        detail_level="full",
+    )
+
+
+def test_mcp_start_refuses_eviction_that_orphans_unfinished_scope(
+    tmp_path: Path,
+) -> None:
+    """A repeated start must not destroy an unfinished intent's permission.
+
+    Replacement is keyed on (root, run_id) alone. When the replaced intent has
+    uncommitted work in its own scope that the new scope does not cover, that
+    work silently loses every trace of ever having been declared — and at the
+    next finish it resurfaces as unattributed out-of-scope dirt.
+    """
+    service, first = _change_control_start(
+        tmp_path, allowed_files=["pkg/a.py"], intent="edit a"
+    )
+    first_id = str(first["intent_id"])
+
+    # Real work under the first intent, inside its declared scope.
+    (tmp_path / "pkg" / "a.py").write_text(
+        _CHANGE_CONTROL_MODULE + "\n\ndef added():\n    return 1\n",
+        encoding="utf-8",
+    )
+
+    second = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/b.py"]},
+        intent="pivot to b without finishing a",
+    )
+    assert second["status"] == "blocked"
+    assert second["edit_allowed"] is False
+    assert second["intent_id"] is None
+    assert second["reason"] == "replaces_unfinished_intent"
+    unfinished = cast("list[dict[str, object]]", second["unfinished_intents"])
+    assert [item["intent_id"] for item in unfinished] == [first_id]
+    assert unfinished[0]["orphaned_dirty_paths"] == ["pkg/a.py"]
+    assert second["user_action_required"] is True
+    assert second["next_step"]
+
+    # The first intent still exists: its edit permission was not revoked
+    # behind the agent's back.
+    still_active = service.manage_change_intent(action="get", intent_id=first_id)
+    assert still_active["status"] == "active"
+
+
+def test_mcp_start_reports_replaced_intent(tmp_path: Path) -> None:
+    """A permitted replacement is still an eviction — it must be announced."""
+    service, first = _change_control_start(
+        tmp_path, allowed_files=["pkg/a.py"], intent="edit a"
+    )
+    first_id = str(first["intent_id"])
+    assert "replaced_intents" not in first
+
+    # Nothing was edited under the first intent, so replacing it orphans no
+    # work — but the caller must still learn that its intent_id died.
+    second = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/b.py"]},
+        intent="pivot to b",
+    )
+    assert second["status"] == "active"
+    replaced = cast("list[dict[str, object]]", second["replaced_intents"])
+    assert [item["intent_id"] for item in replaced] == [first_id]
+    assert replaced[0]["orphaned_dirty_paths"] == []
+    with pytest.raises(MCPServiceContractError, match="Unknown change intent"):
+        service.manage_change_intent(action="get", intent_id=first_id)
+
+
+def test_mcp_finish_blocks_undeclared_python_outside_scope(tmp_path: Path) -> None:
+    """Undeclared Python must not be attested by a docs-profile finish.
+
+    The verification profile is derived from the agent's declared evidence, so
+    a python file left out of changed_files is classified by nothing, compared
+    against nothing, and gated by nothing — while the outcome still accepts.
+    """
+    finished = _finish_after_undeclared_edit(
+        tmp_path,
+        undeclared_path="pkg/a.py",
+        undeclared_body=_CHANGE_CONTROL_MODULE
+        + "\n\ndef undeclared():\n    return 2\n",
+    )
+    assert {
+        key: finished[key]
+        for key in ("status", "reason", "intent_cleared", "verification")
+    } == {
+        "status": "unverified",
+        "reason": "workspace_hygiene",
+        "intent_cleared": False,
+        # Structural verification never ran, so it is not reported as done.
+        "verification": None,
+    }
+    assert finished["user_action_required"] is True
+    hygiene_after = cast("dict[str, object]", finished["workspace_hygiene_after"])
+    assert hygiene_after["finish_block_reason"] == "unverified_python_outside_scope"
+    assert hygiene_after["unverified_python_unscoped_dirty"] == ["pkg/a.py"]
+
+
+def test_mcp_finish_external_changes_reach_summary_and_message(
+    tmp_path: Path,
+) -> None:
+    """The advisory elevation must survive into the fields agents read first.
+
+    ``status`` is raised to accepted_with_external_changes while summary,
+    message and user_action_required keep answering for the plain accepted
+    verdict — the response contradicts itself in the fields meant for quick
+    reading.
+    """
+    finished = _finish_after_undeclared_edit(
+        tmp_path,
+        undeclared_path="notes.txt",
+        undeclared_body="scratch edited\n",
+    )
+    assert finished["status"] == "accepted_with_external_changes"
+    assert cast("dict[str, object]", finished["external_changes"])["count"] == 1
+    summary = cast("dict[str, object]", finished["summary"])
+    assert summary["status"] == "accepted_with_external_changes"
+    assert finished["user_action_required"] is True
+    assert finished["next_step"]
+    message = str(finished["message"])
+    assert "external" in message.lower()
+    assert message != "Done. Intent cleared."
