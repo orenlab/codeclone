@@ -54,6 +54,7 @@ from codeclone.contracts import (
     HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE,
     HEALTH_COUPLING_TYPICAL_WEIGHT,
 )
+from codeclone.metrics import complexity_calibration as calibration
 from codeclone.metrics.health import HealthInputs, compute_health
 
 # Reference distribution: CBO of every class of this repository, measured with
@@ -348,40 +349,18 @@ def test_empty_population_scores_full_marks() -> None:
 # The complexity dimension (39Y Addition 1)
 # ---------------------------------------------------------------------------
 
-# Reference distribution: cyclomatic complexity of every PRODUCTION function of
-# this repository under the Y9 norm CFG, measured in-process against the
-# current source (tests/_pipeline_fixtures.extract_units at min_loc=1/min_stmt=1,
-# excluding tests/ and benchmarks/):
+# Reference distribution: source-decision complexity of every PRODUCTION
+# function of this repository (files outside tests/ and benchmarks/), the same
+# population the retired Y9-CFG calibration used, re-measured for the
+# source-decision metric at Wave D option A:
 #
-#   n=5194, avg 2.9692, p90/p95/p99 = 6/8/15, max 34
+#   n=5438, avg 3.8957, p90/p95/p99 = 8/11/21, max 98
 #
-# Measured in-process on purpose: a long-lived MCP server reports PRE-NORM
-# complexity, so its numbers are not evidence for this calibration.
-COMPLEXITY_REFERENCE_HISTOGRAM: tuple[tuple[int, int], ...] = (
-    (1, 2149),
-    (2, 898),
-    (3, 673),
-    (4, 471),
-    (5, 326),
-    (6, 197),
-    (7, 139),
-    (8, 92),
-    (9, 62),
-    (10, 41),
-    (11, 33),
-    (12, 30),
-    (13, 13),
-    (14, 17),
-    (15, 10),
-    (16, 9),
-    (17, 11),
-    (18, 4),
-    (19, 6),
-    (20, 8),
-    (21, 3),
-    (31, 1),
-    (34, 1),
-)
+# It lives beside the procedure that consumes it, in
+# ``codeclone.metrics.complexity_calibration``, so the histogram, the generated
+# permilles and their digest have one source of truth. The retired Y9-CFG
+# reference was n=5194, avg 2.9692, p90/p95/p99 = 6/8/15, max 34.
+COMPLEXITY_REFERENCE_HISTOGRAM = calibration.COMPLEXITY_REFERENCE_DISTRIBUTION
 
 
 def _complexity_reference() -> tuple[int, ...]:
@@ -430,12 +409,12 @@ def _complexity_dimension(distribution: Sequence[int]) -> int:
 def test_complexity_reference_histogram_matches_its_recorded_summary() -> None:
     distribution = _complexity_reference()
 
-    assert len(distribution) == 5194
-    assert round(sum(distribution) / len(distribution), 4) == 2.9692
-    assert max(distribution) == 34
-    assert _percentile(distribution, 90) == 6
-    assert _percentile(distribution, 95) == 8
-    assert _percentile(distribution, 99) == 15
+    assert len(distribution) == 5438
+    assert round(sum(distribution) / len(distribution), 4) == 3.8957
+    assert max(distribution) == 98
+    assert _percentile(distribution, 90) == 8
+    assert _percentile(distribution, 95) == 11
+    assert _percentile(distribution, 99) == 21
 
 
 def test_complexity_bands_are_unchanged_by_the_recalibration() -> None:
@@ -455,18 +434,18 @@ def test_complexity_tail_references_are_the_measured_shares() -> None:
     """The two reference shares are read off the measurement, not chosen."""
 
     distribution = _complexity_reference()
-    population = len(distribution)
     elevated = sum(1 for value in distribution if value > COMPLEXITY_RISK_LOW_MAX)
     extreme = sum(1 for value in distribution if value > COMPLEXITY_RISK_MEDIUM_MAX)
 
-    assert elevated == 146
-    assert extreme == 5
-    assert round(elevated * 1000 / population) == (
-        HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE
+    assert elevated == 321
+    assert extreme == 56
+    # The materialized shares equal the procedure's generated permilles.
+    assert calibration.reference_permilles() == (
+        HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE,
+        HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE,
     )
-    assert round(extreme * 1000 / population) == (
-        HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE
-    )
+    assert HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE == 59
+    assert HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE == 10
 
 
 def test_complexity_term_weights_are_a_complete_budget() -> None:
@@ -481,13 +460,12 @@ def test_complexity_term_weights_are_a_complete_budget() -> None:
 def test_complexity_reference_distribution_does_not_saturate_the_dimension() -> None:
     """The defect this replaces, pinned as a permanent fence.
 
-    Under the previous formula (100 - avg*2.5 - max*1.2 - high*8) this exact
-    distribution scored 12: one 34-complexity function alone spent 40.8 points
-    and the five high-risk functions spent 40, so the dimension reported a
-    single outlier rather than a codebase whose typical function has
-    complexity 3. Bounded terms put it in the seventies with room to move in
-    both directions, which is the whole point - a score that cannot improve
-    when the code improves is not a measurement.
+    Bounded terms keep the reference distribution in the sixties-to-seventies
+    with room to move in both directions, which is the whole point - a score
+    that cannot improve when the code improves is not a measurement. Under the
+    source-decision metric the reference outlier (max 98) alone spends the
+    whole 10-point outlier term, which is a property of the max/band ratio, not
+    of the tail-reference recalibration this cycle performed.
     """
 
     score = _complexity_dimension(_complexity_reference())
@@ -495,7 +473,7 @@ def test_complexity_reference_distribution_does_not_saturate_the_dimension() -> 
     assert 60 <= score <= 90
     # Every single term is bounded by its own weight, so no one function and no
     # one term can consume the dimension.
-    assert _complexity_dimension([1] * 5194) > score
+    assert _complexity_dimension([1] * calibration.reference_population()) > score
     assert _complexity_dimension([]) == 100
 
 
