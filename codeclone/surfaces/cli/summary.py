@@ -139,7 +139,15 @@ def build_metrics_snapshot(
             security_surfaces_summary.get("production")
         ),
         security_surfaces_tests=_as_int(security_surfaces_summary.get("tests")),
-        dead_code_count=len(project_metrics.dead_code),
+        # Both proven lanes of the dead_code family, the same two the gate
+        # counts. Counting only unreferenced symbols here printed "Dead code
+        # ✔ clean" directly above a --fail-dead-code failure citing ten items:
+        # one run, two surfaces, opposite answers. The summary stays the wider
+        # number -- it shows medium-confidence candidates the gate does not act
+        # on -- but it can no longer read lower than the gate.
+        dead_code_count=(
+            len(project_metrics.dead_code) + len(project_metrics.unreachable_statements)
+        ),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,
         suppressed_dead_code_count=analysis_result.suppressed_dead_code_items,

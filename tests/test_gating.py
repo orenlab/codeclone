@@ -8,6 +8,9 @@ from __future__ import annotations
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
+
+import pytest
 
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.core._types import AnalysisResult, BootstrapResult, OutputPaths
@@ -33,12 +36,14 @@ from codeclone.report.gates.evaluator import (
     gate_lane_contract_versions,
     gate_state_from_project_metrics,
 )
+from codeclone.surfaces.cli.summary import build_metrics_snapshot
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
     MCPGateRequest,
     MCPRunRecord,
 )
+from codeclone.ui_messages import fmt_metrics_dead_code
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
@@ -129,20 +134,10 @@ def _assert_gate(
     assert (result.exit_code, result.reasons) == (exit_code, reasons)
 
 
-def _cli_gate_result(
-    *,
-    tmp_path: Path,
-    project_metrics: ProjectMetrics,
-    args: Namespace,
-) -> GateResult:
-    boot = BootstrapResult(
-        root=tmp_path,
-        config=NormalizationConfig(),
-        args=args,
-        output_paths=OutputPaths(),
-        cache_path=tmp_path / "cache.json",
-    )
-    analysis = AnalysisResult(
+def _analysis_result(project_metrics: ProjectMetrics) -> AnalysisResult:
+    """One analysis result, so the gate and the summary read the same run."""
+
+    return AnalysisResult(
         func_groups={},
         block_groups={},
         block_groups_report={},
@@ -159,6 +154,22 @@ def _cli_gate_result(
         segment_groups_raw_digest="",
         observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
+
+
+def _cli_gate_result(
+    *,
+    tmp_path: Path,
+    project_metrics: ProjectMetrics,
+    args: Namespace,
+) -> GateResult:
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=args,
+        output_paths=OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    analysis = _analysis_result(project_metrics)
     return cli_gate(
         boot=boot,
         analysis=analysis,
@@ -608,6 +619,135 @@ def test_report_document_gate_reads_the_statement_lane_it_already_carries() -> N
         result,
         exit_code=3,
         reasons=("metric:Dead code detected (high confidence): 4 item(s).",),
+    )
+
+
+def _dead_items(
+    count: int,
+    *,
+    confidence: Literal["high", "medium"] = "high",
+) -> tuple[DeadItem, ...]:
+    return tuple(
+        DeadItem(
+            qualname=f"pkg.mod:unused{index}",
+            filepath="pkg/mod.py",
+            start_line=index + 1,
+            end_line=index + 2,
+            kind="function",
+            confidence=confidence,
+        )
+        for index in range(count)
+    )
+
+
+def _unreachable(count: int) -> tuple[UnreachableStatementFinding, ...]:
+    return tuple(
+        UnreachableStatementFinding(
+            qualname=f"pkg.mod:looping{index}",
+            filepath="pkg/mod.py",
+            reason="after_terminator",
+            start_line=10 + index,
+            end_line=11 + index,
+            statement_count=2,
+        )
+        for index in range(count)
+    )
+
+
+def _gate_cited_dead_code_count(result: GateResult) -> int:
+    """The number the operator reads in the gate reason, parsed back out."""
+
+    prefix = "metric:Dead code detected (high confidence): "
+    cited = [reason for reason in result.reasons if reason.startswith(prefix)]
+    assert len(cited) == 1, f"expected exactly one dead-code reason, got {cited}"
+    return int(cited[0].removeprefix(prefix).split(" ", 1)[0])
+
+
+@pytest.mark.parametrize(
+    ("classic", "unreachable", "expected"),
+    [
+        pytest.param(0, 3, 3, id="statement_lane_only"),
+        pytest.param(2, 3, 5, id="both_lanes"),
+        pytest.param(2, 0, 2, id="classic_lane_only"),
+    ],
+)
+def test_cli_dead_code_summary_shows_the_number_the_gate_cites(
+    tmp_path: Path,
+    classic: int,
+    unreachable: int,
+    expected: int,
+) -> None:
+    """One run, one number: the summary line and the gate reason must agree.
+
+    The gate learned to count the statement lane while the summary line still
+    counted only unreferenced symbols, so a scan could print "Dead code
+    ✔ clean" directly above "dead_code_items 10". Pinning each surface against
+    its own literal would let them drift apart again; this pins them against
+    each other, on one analysis result, in both directions -- a summary that
+    forgets either lane stops matching the reason.
+
+    Every classic item here is high confidence, which is the case the gate
+    speaks about; the medium-confidence boundary is pinned separately below.
+    """
+
+    metrics = replace(
+        _project_metrics(),
+        dead_code=_dead_items(classic),
+        unreachable_statements=_unreachable(unreachable),
+    )
+    snapshot = build_metrics_snapshot(
+        analysis_result=_analysis_result(metrics),
+        metrics_diff=None,
+        api_surface_diff_available=False,
+    )
+    gate = _cli_gate_result(
+        tmp_path=tmp_path,
+        project_metrics=metrics,
+        args=_gating_args(fail_dead_code=True),
+    )
+
+    assert snapshot.dead_code_count == expected
+    assert gate.exit_code == 3
+    assert _gate_cited_dead_code_count(gate) == snapshot.dead_code_count
+    assert "clean" not in fmt_metrics_dead_code(snapshot.dead_code_count)
+
+
+def test_cli_dead_code_summary_never_understates_the_gate(tmp_path: Path) -> None:
+    """The one place the two numbers may differ, and the direction they may differ in.
+
+    A medium-confidence unreferenced symbol is shown as a candidate but does
+    not trip ``--fail-dead-code``, so the summary is deliberately the wider
+    number. That is safe -- the operator sees more than the gate acts on --
+    and it is the reason the invariant above is stated for high-confidence
+    items rather than as blanket equality. What must never happen is the
+    reverse: the summary reading lower than the gate.
+    """
+
+    metrics = replace(
+        _project_metrics(),
+        dead_code=_dead_items(1, confidence="medium"),
+        unreachable_statements=(),
+    )
+    snapshot = build_metrics_snapshot(
+        analysis_result=_analysis_result(metrics),
+        metrics_diff=None,
+        api_surface_diff_available=False,
+    )
+    gate = _cli_gate_result(
+        tmp_path=tmp_path,
+        project_metrics=metrics,
+        args=_gating_args(fail_dead_code=True),
+    )
+    state = gate_state_from_project_metrics(
+        project_metrics=metrics,
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert snapshot.dead_code_count == 1
+    assert gate.exit_code == 0, "a medium-confidence candidate must not gate"
+    assert snapshot.dead_code_count >= (
+        state.dead_high_confidence + state.dead_unreachable_statements
     )
 
 
