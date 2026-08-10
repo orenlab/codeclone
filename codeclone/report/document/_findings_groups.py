@@ -495,7 +495,10 @@ def build_near_miss_payload(
     it. ``gate_relevant`` is false because these pairs never become clone-lane
     keys, and ``novelty`` is ``untracked`` because a fact that reaches no
     baseline lane can be neither ``new`` nor ``known`` — reporting either would
-    be a claim the baseline cannot support (39Y Y8).
+    be a claim the baseline cannot support (39Y Y8). Every pair declares its
+    ``token_domain`` — which token space certified the distance — because the
+    container states what it holds: a reader must never infer the domain from
+    list position or absence.
     """
 
     rendered = [
@@ -503,6 +506,7 @@ def build_near_miss_payload(
             "pair_key": pair.pair_key,
             "edit_statements": pair.edit_statements,
             "edit_kind": pair.edit_kind,
+            "token_domain": pair.token_domain,
             "members": [
                 {
                     "relative_path": _contract_report_location_path(

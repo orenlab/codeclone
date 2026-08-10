@@ -47,6 +47,7 @@ from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
     MCPRunRecord,
+    MCPRunRootMismatchError,
     MCPServiceContractError,
 )
 from ._workspace_hygiene import collect_dirty_snapshot
@@ -587,8 +588,24 @@ class _MCPSessionContextMixin:
                 }
             )
         if run_id is not None:
+            # Bound to the supplied root: a same-id run under a sibling
+            # checkout is a typed root_mismatch, never a global re-resolution.
             try:
-                requested_run_id = self._runs.resolve_any_root(run_id).run_id
+                requested_run_id = self._runs.get_for_root(
+                    run_id,
+                    root=root_path,
+                ).run_id
+            except MCPRunRootMismatchError:
+                return _implementation_context_page_response(
+                    {
+                        "status": "root_mismatch",
+                        "run_id": run_id,
+                        "context_projection_digest": context_projection_digest,
+                        "facet": facet,
+                        "source": "mcp_session_context_projection",
+                        "retention": "mcp_session_run_history",
+                    }
+                )
             except MCPRunNotFoundError:
                 return _implementation_context_page_response(
                     {
@@ -653,13 +670,16 @@ class _MCPSessionContextMixin:
         if run_id is None:
             session = cast("_ContextSessionDependencies", self)
             return session._latest_run_for_root(root_path)
-        record = self._runs.resolve_any_root(run_id)
-        if record.root.resolve() != root_path.resolve():
+        # The supplied root binds the lookup. Resolving globally and only then
+        # comparing roots leaked multi-root ambiguity for ids the supplied
+        # root holds perfectly well (same-commit sibling checkouts).
+        try:
+            return self._runs.get_for_root(run_id, root=root_path)
+        except MCPRunRootMismatchError as exc:
             raise MCPServiceContractError(
                 "Selected MCP run does not belong to the supplied root. "
-                f"Run root: {record.root}; requested root: {root_path}."
-            )
-        return record
+                f"Requested root: {root_path}."
+            ) from exc
 
     def _context_intent(self, intent_id: str | None) -> IntentRecord | None:
         if intent_id is None:

@@ -59,26 +59,41 @@ global spelled ``_SELF_`` already can inside fp3.
 from __future__ import annotations
 
 import ast
+import hashlib
 from copy import deepcopy
 from typing import TYPE_CHECKING, Final, TypeVar, cast
 
 from ..contracts import RENAMED_STRUCTURE_ALGORITHM_REVISION
 from ..meta_markers import CFG_META_PREFIX
 from .binding import EMPTY_BINDINGS, BindingContext
-from .fingerprint import _signature_token, sha256_hex
+from .fingerprint import (
+    _NEAR_MISS_BOUNDARY_PREFIX,
+    _NEAR_MISS_TOKEN_HEX,
+    _signature_token,
+    sha256_hex,
+)
 from .normalizer import NormalizationConfig
 from .wire import emit_wire
 
 if TYPE_CHECKING:
-    from ..models import BindingSite
+    from ..models import BindingSite, NearMissElement
     from .cfg import CFG
 
-__all__ = ["renamed_structure_fingerprint"]
+__all__ = ["renamed_structure_artifacts", "renamed_structure_fingerprint"]
 
 # The domain moves with the tier's algorithm revision for the same reason the
 # fp3 domain moves with the fingerprint version: a digest must not keep its
 # bytes across two incompatible generations of its own meaning.
 _DOMAIN: Final = f"ccrs{RENAMED_STRUCTURE_ALGORITHM_REVISION}:fn\x00".encode()
+# The statement-token domain of the near-miss renamed token domain (the CxB
+# composition). It moves with the CANONICALIZATION revision, not the near-miss
+# one: a token's bytes mean "this canonical spelling", so they must change
+# exactly when the canonicalization rules do, while the near-miss algorithm
+# revision governs what is computed over the tokens. Never comparable with
+# the y8 statement tokens — the two domains never share an index.
+_SEQUENCE_DOMAIN: Final = (
+    f"ccnmrs{RENAMED_STRUCTURE_ALGORITHM_REVISION}:stmt\x00".encode()
+)
 
 _RENAMEABLE_RECEIVER_ROLES: Final = frozenset({"local", "self", "cls"})
 
@@ -92,19 +107,31 @@ _COMPREHENSION_TYPES: Final = (
 _TNode = TypeVar("_TNode", bound=ast.AST)
 
 
-def renamed_structure_fingerprint(
+def renamed_structure_artifacts(
     graph: CFG,
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     cfg: NormalizationConfig,
     bindings: BindingContext,
-) -> str:
-    """Return the unit's ordinal-canonical digest in the tier's own domain.
+) -> tuple[str, tuple[NearMissElement, ...]]:
+    """Return the unit's ordinal-canonical digest and statement sequence.
 
-    The walk is the one the exact fingerprint already performs — the signature
-    token, then blocks in sorted id order with their successor ids — so CFG
-    structure is preserved identically. Only the statement wire differs: each
-    statement is canonicalized as described in the module docstring before it
-    meets the emitter. Nothing here feeds fp3, the baseline, or any gate.
+    One canonicalization walk, two projections. The walk is the one the exact
+    fingerprint already performs — the signature token, then blocks in sorted
+    id order with their successor ids — so CFG structure is preserved
+    identically. Only the statement wire differs: each statement is
+    canonicalized as described in the module docstring before it meets the
+    emitter. Nothing here feeds fp3, the baseline, or any gate.
+
+    The digest is the ``renamed_structure`` tier's exact-match identity. The
+    sequence is the near-miss tier's renamed token domain (the CxB
+    composition): a ``near_miss_statement_sequence`` twin whose tokens hash
+    the CANONICAL wire in ``_SEQUENCE_DOMAIN``, with one control-flow anchor
+    per block exactly like the y8 twin, so the near-miss deletion index,
+    budget and witness law run over it unchanged. Both projections come from
+    the same walker because ordinal assignment is walk-global: computing them
+    in separate walks would only repeat the deep-copy cost to reach identical
+    tokens. Spans are the ORIGINAL statements' source lines — canonical
+    spellings exist for comparison; evidence shows the user their real code.
     """
 
     walker = _Canonicalizer(rigid_attributes=_rigid_attribute_callees(node))
@@ -120,20 +147,41 @@ def renamed_structure_fingerprint(
         normalize_names=False,
     )
     parts: list[str] = [_signature_token(node)]
+    sequence: list[NearMissElement] = []
     for block in sorted(graph.blocks, key=lambda b: b.id):
         succ_ids = ",".join(
             str(s.id) for s in sorted(block.successors, key=lambda s: s.id)
         )
-        wires = ";".join(
+        wires = [
             emit_wire(
                 walker.canonical_copy(statement, bindings),
                 wire_cfg,
                 EMPTY_BINDINGS,
             )
             for statement in block.statements
-        )
-        parts.append(f"BLOCK[{block.id}]:{wires}|SUCCESSORS:{succ_ids}")
-    return sha256_hex(_DOMAIN, "|".join(parts))
+        ]
+        parts.append(f"BLOCK[{block.id}]:{';'.join(wires)}|SUCCESSORS:{succ_ids}")
+        sequence.append((f"{_NEAR_MISS_BOUNDARY_PREFIX}{block.id}>{succ_ids}", 0, 0))
+        for statement, wire in zip(block.statements, wires, strict=True):
+            token = hashlib.sha256(_SEQUENCE_DOMAIN + wire.encode("utf-8")).hexdigest()[
+                :_NEAR_MISS_TOKEN_HEX
+            ]
+            start = int(getattr(statement, "lineno", 0) or 0)
+            end = int(getattr(statement, "end_lineno", 0) or 0) or start
+            sequence.append((token, start, end))
+    return sha256_hex(_DOMAIN, "|".join(parts)), tuple(sequence)
+
+
+def renamed_structure_fingerprint(
+    graph: CFG,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    """Return only the ordinal-canonical digest — see the artifacts producer."""
+
+    digest, _sequence = renamed_structure_artifacts(graph, node, cfg, bindings)
+    return digest
 
 
 def _rigid_attribute_callees(node: ast.AST) -> frozenset[str]:

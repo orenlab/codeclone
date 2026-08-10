@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "domain": "near_miss_token_domains",
+  "golden": true,
+  "token_domain_law": "The near-miss tier confirms distance in two declared token domains: y8 (the normalized statement tokens the tier has always used) and renamed (the same statements re-tokenized through the renamed_structure ordinal canonicalization). Both domains share one deletion index construction, one K=1 budget and one canonical witness law. A pair confirmable in both domains is reported exactly once, in the y8 domain: y8 is the token space closest to source and predates the sub-mode, so every fact the tier reported before the sub-mode existed stays byte-identical. Distance zero in the renamed domain is the renamed_structure tier's business and never enters near_miss.",
+  "cases": [
+    {
+      "id": "PAIR-TD-RENAMED-INSERT",
+      "path": "pairs.py",
+      "members": [
+        "open_invoice_exposure",
+        "open_lease_exposure"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "token_domain": "renamed",
+        "edit_kind": "insert",
+        "edit_statements": 1,
+        "witness_text": {
+          "open_lease_exposure": "exposure = max(exposure, 0)"
+        }
+      },
+      "rationale": "The empirical corpus PAIR-T3-01 shape: consistent local renames plus consistent receiver-attribute renames plus ONE true inserted clamp. Under y8 tokens the attribute renames price one statement as a replace, so the distance is 2 and the pair is out of budget by rule; under renamed-canonical tokens the renamed statements are equal and the insertion is the only edit."
+    },
+    {
+      "id": "PAIR-TD-BOTH-DOMAINS",
+      "path": "pairs.py",
+      "members": [
+        "routed_parcel_count",
+        "routed_wagon_count"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "token_domain": "y8",
+        "edit_kind": "insert",
+        "edit_statements": 1
+      },
+      "rationale": "Local renames only, plus one true inserted clamp: y8 tokens already absorb local renames, so both domains confirm distance 1. The dedup law reports the pair exactly once, in the y8 domain."
+    },
+    {
+      "id": "PAIR-TD-BUDGET-NEG",
+      "path": "pairs.py",
+      "members": [
+        "pending_dock_backlog",
+        "pending_yard_backlog"
+      ],
+      "expected": {
+        "tier": "unmatched"
+      },
+      "rationale": "Consistent attribute renames plus TWO true inserted statements: renamed-canonical distance is 2, so the pair is out of budget in the renamed domain exactly as a two-edit pair always was in y8. The budget is the declared predicate, not a fixture key."
+    },
+    {
+      "id": "PAIR-TD-ZERO-NEG",
+      "path": "pairs.py",
+      "members": [
+        "archived_route_flags",
+        "filed_track_flags"
+      ],
+      "expected": {
+        "tier": "renamed_structure"
+      },
+      "rationale": "A pure consistent renaming with no true edit: renamed-canonical distance is 0, which is the renamed_structure tier's business. The near-miss channel must not poach it in either domain."
+    }
+  ]
+}

@@ -25,12 +25,39 @@ from codeclone.memory.ide_governance import (
 )
 from codeclone.memory.staleness import StalenessReport
 from codeclone.surfaces.mcp._session_shared import (
+    MCPAnalysisRequest,
     MCPRunNotFoundError,
+    MCPRunRecord,
     MCPServiceContractError,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
 from .memory_fixtures import cli_memory_repo
+
+
+def _memory_test_run_record(root: Path, run_id: str) -> MCPRunRecord:
+    """A minimal stored run for root-binding tests on the memory surface."""
+
+    return MCPRunRecord(
+        run_id=run_id,
+        root=root,
+        request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
+        comparison_settings=(),
+        report_document={},
+        summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
 
 
 def test_mcp_manage_memory_record_candidate_and_validate(
@@ -272,20 +299,15 @@ def test_mcp_memory_run_record_rejects_foreign_root(
         foreign_root = tmp_path / "foreign"
         foreign_root.mkdir()
         service = CodeCloneMCPService(history_limit=2)
-
-        def _fake_get(_run_id: str | None = None) -> Any:
-            return SimpleNamespace(root=root)
-
-        monkeypatch.setattr(
-            service._runs,
-            "resolve_any_root",
-            _fake_get,
-        )
+        # Real store, real key: the run is held only under `root`, so a lookup
+        # bound to `foreign_root` refuses with the typed rejection instead of
+        # resolving globally and post-checking the root.
+        service._runs.register(_memory_test_run_record(root, "memoryrun1234567"))
         with pytest.raises(
             MCPServiceContractError,
             match="different repository root",
         ):
-            service._memory_run_record(foreign_root)
+            service._memory_run_record(foreign_root, "memoryrun1234567")
 
 
 def test_mcp_memory_auto_sync_policy_off_returns_none(
