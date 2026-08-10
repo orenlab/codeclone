@@ -227,12 +227,14 @@ fail_dead_code = true
 # landing. It moves only with a maintainer ratification that follows a fresh
 # measurement, never ahead of one, and a semantic recalibration supersedes the
 # older measurement rather than being weighed against it -- which is why
-# 80 -> 73 (honest findings made visible) and 73 -> 91 (a stale record
-# corrected and the complexity dimension recalibrated) are both the same rule
-# applied twice, not the gate opening backwards. The ratchet is on the honesty
-# of the measure, not on the number. Owning assertion:
+# 80 -> 73 (honest findings made visible), 73 -> 91 (a stale record corrected
+# and the complexity dimension recalibrated) and 91 -> 89 (the source-decision
+# complexity split -- full McCabe over the norm CFG supersedes the
+# clone-sized-only measure, externally validated on five frozen repos) are the
+# same rule applied, not the gate opening backwards. The ratchet is on the
+# honesty of the measure, not on the number. Owning assertion:
 # tests/test_self_gate_thresholds.py.
-fail_health = 91
+fail_health = 89
 fail_on_new_metrics = true
 semantic_authority = true
 fail_on_authority_violation = true

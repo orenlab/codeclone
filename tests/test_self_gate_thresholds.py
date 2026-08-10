@@ -29,36 +29,41 @@ from codeclone.config.pyproject_loader import load_pyproject_config
 
 REPO_ROOT = Path(__file__).parent.parent
 
-# Cold self-measure of the landed 39Y tree, worktree CLI:
+# Cold self-measure of the landed 2.1.0a2 tree, worktree CLI:
 #   ./.venv/bin/codeclone . --cache-path <fresh>
-#   -> Health 91/100 (A)
-#      963 files analyzed · 10737 callables · 930 classes
-#      CC       avg 2.2 · max 34 · 6 high-risk
+#   -> Health 89/100 (B)
+#      1046 files analyzed · 11956 callables · 966 classes
+#      CC       avg 3.8 · max 103 (full McCabe over the norm CFG)
 #      Coupling avg 1.4 · max 27
 #      Cohesion avg 1.1 · max 3 · cycles clean · dead code clean
 #
-# Measured IN-PROCESS against this source tree. A long-lived MCP server reports
-# PRE-NORM complexity (it still says max 20 and zero high-risk), so its numbers
-# are not evidence for this constant.
+# Measured with a fresh cache against this source tree. Re-measure with the
+# command above -- never a long-lived MCP server, which can lag the landed
+# code -- before changing this constant.
 #
-# The record moved 73 -> 92 -> 91 across the phase, and no step is new work:
+# The record moved 73 -> 92 -> 91 -> 89 across the phases, and no step is new
+# work:
 #   * 73 was stale on its own terms — it recorded coupling avg 2.5 / max 61 and
 #     10352 callables, none of which this tree measures;
 #   * 92 was measured before main was merged in. Under the old unbounded
 #     formula the post-norm distribution scored 12 because one 34-complexity
 #     function spent 40.8 points; the bounded terms score it in the eighties,
 #     which is the same codebase measured honestly rather than an improved one;
-#   * 91 is that same measurement on the tree actually being landed. The single
-#     point came from integrating main — the warm-cache health denominator fix,
-#     the src-layout import mounts and per-lane baseline trust bring 34 more
-#     files and 167 more callables into the measurement — not from a regression
-#     in this phase.
+#   * 91 is that same measurement on the earlier landed tree. The single point
+#     came from integrating main — the warm-cache health denominator fix, the
+#     src-layout import mounts and per-lane baseline trust bring 34 more files
+#     and 167 more callables into the measurement — not from a regression;
+#   * 89 is the 2.1.0a2 source-decision complexity recalibration (Wave D):
+#     complexity is now full McCabe over the normalized CFG (max 34 -> 103), so
+#     the health complexity dimension fell as a pure unit effect — lower but
+#     truer, validated on five frozen external repos — superseding the 91
+#     measured under the clone-sized-only complexity, not a regression.
 #
 # Re-measure with that command and update this constant *together with* any
 # increase of fail_health. Raising the gate without a fresh measurement is the
 # failure this test exists to catch. The fail_health VALUE itself is the
 # maintainer's landing decision and is not set from here.
-MEASURED_SELF_HEALTH = 91
+MEASURED_SELF_HEALTH = 89
 
 
 def _self_fail_health() -> int:
