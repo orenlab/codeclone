@@ -71,8 +71,8 @@ from .integrity import (
 )
 from .integrity import (
     read_json_document,
-    sign_cache_payload,
-    verify_cache_payload_signature,
+    sign_cache_envelope,
+    verify_cache_envelope_signature,
     write_json_document_atomically,
 )
 from .projection import (
@@ -436,7 +436,12 @@ class Cache:
             if sig is None or payload is None:
                 return self._reject_invalid_cache_format(schema_version=version)
 
-            if not verify_cache_payload_signature(payload, sig):
+            # Verify over {version, payload}: the on-disk ``v`` is inside the
+            # signed scope, so a generation retagged by migration is refused
+            # here even though it passed the ``v == _CACHE_VERSION`` gate above.
+            # This is NOT redundant with that gate - see sign_cache_envelope for
+            # the {11,17} decode-tolerance cross-defect witness.
+            if not verify_cache_envelope_signature(version, payload, sig):
                 return self._reject_cache_load(
                     "Cache signature mismatch; ignoring cache.",
                     status=CacheStatus.INTEGRITY_FAILED,
@@ -534,7 +539,7 @@ class Cache:
             signed_doc = {
                 "v": self._CACHE_VERSION,
                 "payload": payload,
-                "sig": sign_cache_payload(payload),
+                "sig": sign_cache_envelope(self._CACHE_VERSION, payload),
             }
             write_json_document_atomically(self.path, signed_doc)
             self._dirty = False

@@ -63,7 +63,11 @@ from codeclone.cache.entries import (
     _as_security_surface_location_scope,
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
-from codeclone.cache.integrity import canonical_json, sign_cache_payload
+from codeclone.cache.integrity import (
+    canonical_json,
+    sign_cache_envelope,
+    sign_cache_payload,
+)
 from codeclone.cache.projection import (
     rehydrate_cache_neutral,
     runtime_filepath_from_wire,
@@ -1488,22 +1492,32 @@ def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> N
     assert sign_cache_payload(payload) == legacy_digest
 
 
-def test_cache_load_accepts_legacy_string_signed_unicode_payload(
+def test_cache_load_binds_version_into_unicode_payload_signature(
     tmp_path: Path,
 ) -> None:
+    # Candidate 1: the signed scope is {v, payload}. The pre-fix payload-only
+    # string digest is therefore no longer accepted, and the envelope digest is.
+    # Unicode canonicalization still round-trips cleanly through the signer.
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path, filepath="unicodé.py")
 
-    raw = json.loads(cache_path.read_text("utf-8"))
+    raw = cast(dict[str, object], json.loads(cache_path.read_text("utf-8")))
     payload = cast(dict[str, object], raw["payload"])
+
+    # The old payload-only string digest is now refused as an integrity failure.
     raw["sig"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
     cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+    rejected = Cache(cache_path)
+    rejected.load()
+    assert rejected.load_status is CacheStatus.INTEGRITY_FAILED
 
-    loaded = Cache(cache_path)
-    loaded.load()
-
-    assert loaded.load_warning is None
-    assert loaded.get_file_entry("unicodé.py") is not None
+    # The envelope digest over {v, payload} is accepted, unicode payload intact.
+    raw["sig"] = sign_cache_envelope(cast(str, raw["v"]), payload)
+    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+    accepted = Cache(cache_path)
+    accepted.load()
+    assert accepted.load_warning is None
+    assert accepted.get_file_entry("unicodé.py") is not None
 
 
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
@@ -1546,7 +1560,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.4"
+    assert Cache._CACHE_VERSION == "3.5"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1562,7 +1576,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.4"
+    assert old_document["v"] == "3.5"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -1719,7 +1733,9 @@ def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files=[])
-    signature = sign_cache_payload(payload)
+    # Re-mint over the {v, payload} pre-image so the envelope sig passes and the
+    # invalid-files gate is what this test still exercises (candidate 1).
+    signature = sign_cache_envelope(cache._CACHE_VERSION, payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -1851,7 +1867,7 @@ def test_cache_load_rejects_missing_required_payload_fields(
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = payload_factory(cache)
-    sig = sign_cache_payload(payload)
+    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -1868,7 +1884,7 @@ def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
         "fp": cache.data["fingerprint_version"],
         "files": {},
     }
-    sig = sign_cache_payload(payload)
+    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -1885,7 +1901,7 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
         "fp": "old",
         "files": {},
     }
-    sig = sign_cache_payload(payload)
+    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -1934,7 +1950,7 @@ def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
-    sig = sign_cache_payload(payload)
+    sig = sign_cache_envelope(cache._CACHE_VERSION, payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -3415,7 +3431,14 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.4"
+    # Candidate 2: class_metrics ride the dependent lane; the design-metrics
+    # algorithm revision must gate this profile so a revision bump cannot serve
+    # stale cbo/lcom4/risk off a warm hit.
+    assert (
+        '"design_metrics_algorithm_revision": DESIGN_METRICS_ALGORITHM_REVISION'
+        in source
+    )
+    assert CACHE_VERSION == "3.5"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

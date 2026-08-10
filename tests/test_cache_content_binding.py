@@ -17,7 +17,7 @@ import pytest
 import codeclone.cache.reuse as cache_reuse
 import codeclone.paths.git_snapshot as git_snapshot_mod
 from codeclone.cache._wire_decode import _decode_wire_file_entry
-from codeclone.cache.integrity import sign_cache_payload
+from codeclone.cache.integrity import sign_cache_envelope
 from codeclone.cache.reuse import (
     binding_context_digest,
     git_blob_identity_for_parsed_source,
@@ -836,7 +836,9 @@ def test_signed_envelope_without_content_binding_cannot_authorize_hit(
             {
                 "v": Cache._CACHE_VERSION,
                 "payload": payload,
-                "sig": sign_cache_payload(payload),
+                # Envelope sig over {v, payload} so the sig gate passes and the
+                # missing-content-binding gate is what this still exercises.
+                "sig": sign_cache_envelope(Cache._CACHE_VERSION, payload),
             }
         ),
         "utf-8",

@@ -62,6 +62,13 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- **Cache trust envelope binds the generation gate; `CACHE_VERSION` → 3.5.** The cache signature now covers the
+  versioned pre-image `{v, payload}` instead of `payload` alone, bringing the generation gate `v` inside the signed
+  scope. A migration, backup, or edit-in-place that rewrites the top-level `v` without re-signing is now refused as an
+  integrity failure instead of being trusted as a payload it never signed under that mark. The same bump binds the
+  design-metrics algorithm revision into the module-dependent cache-reuse profile, so a design-metrics revision that does
+  not coincide with a neutral-lane change can no longer serve stale coupling/cohesion class metrics from a warm cache
+  hit. Every 3.4 cache is refused at the version gate and re-analysed once; no user action is required.
 - **Dead-code liveness policy advanced to version 2** with two new life proofs, closing two classes of
   false dead-code findings. A PEP 484 explicit re-export — `from x import y as y`, the `as`-same-name
   spelling — now keeps `y` live on its own, independently of `__all__`; a renaming import

@@ -138,7 +138,22 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # token domain reads this sequence off the unit fact, so a warm run served
 # off a 3.3 wire would silently report only y8-domain pairs. Its own key,
 # absence rejects the entry, rejection just re-analyses the file.
-CACHE_VERSION: Final = "3.4"
+#
+# 3.5 is a trust-envelope change that lands two things together. (1) The cache
+# signature now covers the versioned pre-image ``{v, payload}`` instead of
+# ``payload`` alone, so the generation gate ``v`` is inside the signed scope: a
+# migration/backup/edit-in-place that rewrites ``v`` without re-signing is
+# refused (``INTEGRITY_FAILED``) rather than trusted as a payload it never
+# signed under that mark, and the ``{11,17}`` unit-decode tolerance stays
+# unreachable by construction. (2) The module-dependent reuse profile now
+# versions the design-metrics algorithm revision directly, so a design-metrics
+# revision that does not coincide with a neutral-lane change can no longer
+# serve stale cbo/lcom4/risk off a warm hit. Every 3.4 cache is rejected at the
+# version gate and re-analysed; there is no byte-stable path for a signed-scope
+# change, so the bump IS the compatibility guarantee. Parallel-wave note: this
+# wave sets "3.5"; the controller reconciles the final number across concurrent
+# waves at merge - "3.5" is the reason, not the authority on the digit.
+CACHE_VERSION: Final = "3.5"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not

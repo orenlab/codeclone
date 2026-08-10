@@ -16,7 +16,11 @@ from typing import Literal
 import orjson
 
 from ..baseline.trust import current_python_tag
-from ..contracts import API_SURFACE_SIGNATURE_VERSION, LIVENESS_POLICY_VERSION
+from ..contracts import (
+    API_SURFACE_SIGNATURE_VERSION,
+    DESIGN_METRICS_ALGORITHM_REVISION,
+    LIVENESS_POLICY_VERSION,
+)
 from ..models import (
     CacheEntryV3,
     CacheLaneReuseReason,
@@ -100,6 +104,14 @@ def build_module_dependent_profile(
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
             "dependency_observation_revision": _DEPENDENCY_OBSERVATION_REVISION,
+            # class_metrics (cbo, lcom4, coupling/cohesion risk) ride the
+            # dependent lane, and their values are a function of the
+            # design-metrics algorithm revision. That revision only reaches this
+            # digest transitively today, through the embedded neutral_profile;
+            # binding it directly means a design-metrics revision that does NOT
+            # coincide with a neutral-lane change still misses exactly this lane
+            # instead of serving stale cbo/lcom4/risk off a warm hit.
+            "design_metrics_algorithm_revision": DESIGN_METRICS_ALGORITHM_REVISION,
             # The dependent lane carries referenced_qualnames, dead candidates
             # and live-root reasons - everything the liveness verdict reads -
             # so a liveness policy bump must miss exactly this lane, never the
