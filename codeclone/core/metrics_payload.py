@@ -237,6 +237,9 @@ def _dependency_observation_rows(
             "resolution": dep.resolution,
             "candidate_targets": list(dep.candidate_targets),
             "resolved_target": dep.target or None,
+            # G4's observation projection plus the classified binding time.
+            "binding": dep.binding,
+            "is_lazy": dep.is_lazy,
         }
         for dep in deps
     ]
@@ -496,6 +499,16 @@ def build_metrics_report_payload(
             ),
             "p95_depth": dep_graph.p95_depth if dep_graph is not None else 0,
             "cycles": [list(cycle) for cycle in project_metrics.dependency_cycles],
+            # Aligned with "cycles": the binding-law classification and the
+            # registry-resolved member paths (null = honestly unresolved).
+            "cycle_details": [
+                {
+                    "modules": list(detail.modules),
+                    "kind": detail.kind,
+                    "member_paths": list(detail.member_paths),
+                }
+                for detail in project_metrics.dependency_cycle_details
+            ],
             "longest_chains": [
                 list(chain) for chain in project_metrics.dependency_longest_chains
             ],
@@ -505,6 +518,8 @@ def build_metrics_report_payload(
                     "target": edge.target,
                     "import_type": edge.import_type,
                     "line": edge.line,
+                    "binding": edge.binding,
+                    "is_lazy": edge.is_lazy,
                 }
                 for edge in project_metrics.dependency_edge_list
             ],

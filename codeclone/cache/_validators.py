@@ -233,6 +233,20 @@ def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
         "requested_names",
         "candidate_targets",
     }
+    # Payload_schema "6" pair: written together or not at all. A "5" row has
+    # neither and stays valid; a row carrying only half the pair is corrupt.
+    binding_pair_present = ("binding" in value) or ("is_lazy" in value)
+    if binding_pair_present:
+        if ("binding" not in value) or ("is_lazy" not in value):
+            return False
+        if value.get("binding") not in {
+            "import_time",
+            "deferred_function",
+            "deferred_getattr",
+            "type_checking",
+            "lazy_syntax",
+        } or not isinstance(value.get("is_lazy"), bool):
+            return False
     present_detail_keys = detail_keys.intersection(value)
     if not present_detail_keys:
         return True

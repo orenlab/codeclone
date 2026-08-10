@@ -38,6 +38,7 @@ from ..domain.quality import (
 from ..findings.structural.detectors import normalize_structural_findings
 from ..models import (
     ClassMetrics,
+    DependencyCycleDetail,
     GroupItemLike,
     ProjectMetrics,
     ReportLocation,
@@ -484,35 +485,77 @@ def _dead_code_suggestions(
     return suggestions
 
 
-def _module_source_kind(modules: Sequence[str]) -> SourceKind:
-    pseudo_paths = tuple(module.replace(".", "/") + ".py" for module in modules)
+def _module_source_kind(
+    modules: Sequence[str],
+    member_paths: Sequence[str | None] = (),
+) -> SourceKind:
+    """Source kind over the cycle members' honest paths.
+
+    A resolved member classifies by its registry path; an unresolved member
+    classifies by its dotted segments spelled as a directory — a segment
+    sequence for classification only, never a reported file.
+    """
+
+    classification_paths: list[str] = []
+    for index, module in enumerate(modules):
+        member_path = member_paths[index] if index < len(member_paths) else None
+        classification_paths.append(
+            member_path if member_path else module.replace(".", "/")
+        )
     return combine_source_kinds(
-        source_kind for source_kind, _count in source_kind_breakdown(pseudo_paths)
+        source_kind
+        for source_kind, _count in source_kind_breakdown(tuple(classification_paths))
     )
 
 
 def _dependency_suggestions(project_metrics: ProjectMetrics) -> list[Suggestion]:
     suggestions: list[Suggestion] = []
-    for cycle in project_metrics.dependency_cycles:
+    details = project_metrics.dependency_cycle_details
+    if len(details) != len(project_metrics.dependency_cycles):
+        # A caller that built metrics without details keeps the pre-wave
+        # reading: every cycle presented as import-time, no path claims.
+        details = tuple(
+            DependencyCycleDetail(
+                modules=cycle,
+                kind="import_cycle",
+                member_paths=(None,) * len(cycle),
+            )
+            for cycle in project_metrics.dependency_cycles
+        )
+    for detail in details:
+        cycle = detail.modules
         location = " -> ".join(cycle)
-        source_kind = _module_source_kind(list(cycle))
+        source_kind = _module_source_kind(list(cycle), detail.member_paths)
+        deferred = detail.kind == "deferred_cycle"
+        severity: Severity = SEVERITY_WARNING if deferred else SEVERITY_CRITICAL
+        measured = (
+            sugg_msgs.DEPENDENCY_CYCLE_MEASURED_DEFERRED
+            if deferred
+            else sugg_msgs.DEPENDENCY_CYCLE_MEASURED_IMPORT
+        )
         suggestions.append(
             Suggestion(
-                severity=SEVERITY_CRITICAL,
+                severity=severity,
                 category=CATEGORY_DEPENDENCY,
-                title=sugg_msgs.SUGGESTION_TITLE_BREAK_CYCLE,
+                title=(
+                    sugg_msgs.SUGGESTION_TITLE_BREAK_DEFERRED_CYCLE
+                    if deferred
+                    else sugg_msgs.SUGGESTION_TITLE_BREAK_CYCLE
+                ),
                 location=location,
                 steps=(
                     sugg_msgs.DEPENDENCY_STEP_1,
                     sugg_msgs.DEPENDENCY_STEP_2,
                 ),
                 effort=EFFORT_HARD,
-                priority=_priority(SEVERITY_CRITICAL, EFFORT_HARD),
+                priority=_priority(severity, EFFORT_HARD),
                 finding_family=FAMILY_METRICS,
-                finding_kind="cycle",
+                finding_kind=detail.kind,
                 subject_key=location,
                 fact_kind=sugg_msgs.FACT_KIND_DEPENDENCY_CYCLE,
-                fact_summary=f"{len(cycle)} modules participate in this cycle",
+                fact_summary=(
+                    f"{len(cycle)} modules participate in this cycle ({measured})"
+                ),
                 fact_count=len(cycle),
                 spread_files=len(cycle),
                 spread_functions=0,

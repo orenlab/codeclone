@@ -126,6 +126,10 @@ def _dependency_observations(
             ),
             inventory_expansion=dependency.inventory_expansion,
             mechanism=dependency.mechanism,
+            # Payload_schema "6": binding time plus the PEP 810 marker ride
+            # every dependency observation row (the G4 projection).
+            binding=dependency.binding,
+            is_lazy=dependency.is_lazy,
         )
         for dependency in dependencies
     )

@@ -341,6 +341,8 @@ def _encode_dependency_lane(
             item.resolution,
             _null_first(item.resolved_target),
             item.inventory_expansion,
+            item.binding,
+            item.is_lazy,
         ),
     )
     return DependencyColumnarPayload(
@@ -373,6 +375,28 @@ def _encode_dependency_lane(
             for position, item in enumerate(rows)
             if item.mechanism == "dynamic"
         ),
+        # Payload_schema "6": sparse binding/laziness columns, eager omitted.
+        binding_deferred_function=tuple(
+            position
+            for position, item in enumerate(rows)
+            if item.binding == "deferred_function"
+        ),
+        binding_deferred_getattr=tuple(
+            position
+            for position, item in enumerate(rows)
+            if item.binding == "deferred_getattr"
+        ),
+        binding_type_checking=tuple(
+            position
+            for position, item in enumerate(rows)
+            if item.binding == "type_checking"
+        ),
+        binding_lazy_syntax=tuple(
+            position
+            for position, item in enumerate(rows)
+            if item.binding == "lazy_syntax"
+        ),
+        is_lazy=tuple(position for position, item in enumerate(rows) if item.is_lazy),
     )
 
 

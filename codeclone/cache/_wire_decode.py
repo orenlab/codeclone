@@ -20,6 +20,7 @@ from ..models import (
     CacheNeutralUnit,
     ClassMetricsDict,
     DeadCandidateDict,
+    DependencyBinding,
     DependencyMechanism,
     DependencyResolution,
     DigestObject,
@@ -142,6 +143,16 @@ def _is_dependency_resolution(value: object) -> TypeGuard[DependencyResolution]:
 
 def _is_dependency_mechanism(value: object) -> TypeGuard[DependencyMechanism]:
     return isinstance(value, str) and value in {"static", "dynamic"}
+
+
+def _is_dependency_binding(value: object) -> TypeGuard[DependencyBinding]:
+    return isinstance(value, str) and value in {
+        "import_time",
+        "deferred_function",
+        "deferred_getattr",
+        "type_checking",
+        "lazy_syntax",
+    }
 
 
 def _is_module_dep_import_type(
@@ -1480,6 +1491,10 @@ def _decode_wire_structural_occurrence(
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
+    # Load-bearing in concert with the signed-`v` cache gate
+    # (integrity.sign_cache_envelope): the {11, 17} tolerance is unreachable
+    # ONLY while that gate holds — removing either half reopens the
+    # cross-defect. Not redundant strictness.
     decoded = _decode_wire_named_span(value, valid_lengths={11, 17})
     if decoded is None:
         return None
@@ -1598,7 +1613,9 @@ def _decode_wire_class_metric(
 
 def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     row = _as_list(value)
-    if row is None or len(row) not in {4, 11}:
+    # 4 = neutral base row, 11 = payload_schema "5" detail row, 13 = "6"
+    # detail row carrying binding time and the PEP 810 marker.
+    if row is None or len(row) not in {4, 11, 13}:
         return None
     source = _as_str(row[0])
     target = _as_str(row[1])
@@ -1651,7 +1668,7 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
         or any(item is None for item in candidate_targets)
     ):
         return None
-    return ModuleDepDict(
+    decoded = ModuleDepDict(
         **base,
         resolution=resolution,
         inventory_expansion=inventory_expansion,
@@ -1661,6 +1678,15 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
         candidate_targets=[item for item in candidate_targets if item is not None],
         mechanism=mechanism,
     )
+    if len(row) == 11:
+        return decoded
+    binding = row[11]
+    is_lazy = row[12]
+    if not _is_dependency_binding(binding) or not isinstance(is_lazy, bool):
+        return None
+    decoded["binding"] = binding
+    decoded["is_lazy"] = is_lazy
+    return decoded
 
 
 _LIVE_ROOT_REASONS: Final = frozenset({"external_decorator", "export_root"})

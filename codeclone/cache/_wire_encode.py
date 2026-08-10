@@ -326,6 +326,8 @@ def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
             tuple(dep.get("candidate_targets", ())),
             dep.get("inventory_expansion", False),
             dep.get("mechanism", ""),
+            dep.get("binding", ""),
+            dep.get("is_lazy", False),
         ),
     )
     if module_deps:
@@ -338,6 +340,8 @@ def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
                 dep["line"],
             ]
             try:
+                # Payload_schema "6": binding time and the PEP 810 marker ride
+                # as columns 11-12; the detail block stays all-or-nothing.
                 detail_row: tuple[object, ...] = (
                     dep["resolution"],
                     dep["inventory_expansion"],
@@ -346,6 +350,8 @@ def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
                     dep["requested_names"],
                     dep["candidate_targets"],
                     dep["mechanism"],
+                    dep["binding"],
+                    dep["is_lazy"],
                 )
             except KeyError:
                 # A pre-revision row is retained only so its neutral lane can

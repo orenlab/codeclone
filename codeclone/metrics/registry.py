@@ -15,6 +15,7 @@ from ..domain.quality import RISK_HIGH, RISK_LOW
 from ..models import (
     ApiSurfaceSnapshot,
     DeadItem,
+    DependencyCycleDetail,
     DepGraph,
     GroupItemLike,
     HealthScore,
@@ -116,6 +117,14 @@ def _is_tuple_of_module_deps(value: object) -> TypeGuard[tuple[ModuleDep, ...]]:
     )
 
 
+def _is_tuple_of_cycle_details(
+    value: object,
+) -> TypeGuard[tuple[DependencyCycleDetail, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, DependencyCycleDetail) for item in value
+    )
+
+
 def _is_tuple_of_runtime_reachability(
     value: object,
 ) -> TypeGuard[tuple[RuntimeReachabilityFact, ...]]:
@@ -155,6 +164,7 @@ def project_metrics_defaults() -> dict[str, object]:
         "dependency_edges": 0,
         "dependency_edge_list": (),
         "dependency_cycles": (),
+        "dependency_cycle_details": (),
         "dependency_max_depth": 0,
         "dependency_longest_chains": (),
         "dead_code": (),
@@ -197,6 +207,10 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
         dependency_cycles=_result_nested_tuple_str(
             project_fields,
             "dependency_cycles",
+        ),
+        dependency_cycle_details=_result_cycle_details(
+            project_fields,
+            "dependency_cycle_details",
         ),
         dependency_max_depth=_result_int(project_fields, "dependency_max_depth"),
         dependency_longest_chains=_result_nested_tuple_str(
@@ -335,6 +349,14 @@ def _result_module_deps(
 ) -> tuple[ModuleDep, ...]:
     value = result.get(key, ())
     return value if _is_tuple_of_module_deps(value) else ()
+
+
+def _result_cycle_details(
+    result: dict[str, object],
+    key: str,
+) -> tuple[DependencyCycleDetail, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_cycle_details(value) else ()
 
 
 def _result_runtime_reachability(
@@ -559,6 +581,7 @@ def _build_dependencies_result(context: MetricProjectContext) -> MetricResult:
         "dependency_edges": len(dep_graph.edges),
         "dependency_edge_list": dep_graph.edges,
         "dependency_cycles": dep_graph.cycles,
+        "dependency_cycle_details": dep_graph.cycle_details,
         "dependency_max_depth": dep_graph.max_depth,
         "dependency_avg_depth": dep_graph.avg_depth,
         "dependency_p95_depth": dep_graph.p95_depth,
@@ -584,6 +607,10 @@ def _aggregate_dependencies_family(results: list[MetricResult]) -> MetricAggrega
             "dependency_edges": _result_int(result, "dependency_edges"),
             "dependency_edge_list": _result_module_deps(result, "dependency_edge_list"),
             "dependency_cycles": _result_nested_tuple_str(result, "dependency_cycles"),
+            "dependency_cycle_details": _result_cycle_details(
+                result,
+                "dependency_cycle_details",
+            ),
             "dependency_max_depth": _result_int(result, "dependency_max_depth"),
             "dependency_longest_chains": _result_nested_tuple_str(
                 result,

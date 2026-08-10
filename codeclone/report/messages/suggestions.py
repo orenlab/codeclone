@@ -70,7 +70,8 @@ SUGGESTION_TITLE_REDUCE_COMPLEXITY: Final = "Reduce function complexity"
 SUGGESTION_TITLE_REDUCE_COUPLING: Final = "Reduce class coupling"
 SUGGESTION_TITLE_SPLIT_COHESION: Final = "Split low-cohesion class"
 SUGGESTION_TITLE_DEAD_CODE: Final = "Remove or explicitly keep unused code"
-SUGGESTION_TITLE_BREAK_CYCLE: Final = "Break circular dependency"
+SUGGESTION_TITLE_BREAK_CYCLE: Final = "Break import-time circular dependency"
+SUGGESTION_TITLE_BREAK_DEFERRED_CYCLE: Final = "Untangle deferred circular dependency"
 
 COMPLEXITY_STEP_1: Final = "Split the function into smaller deterministic stages."
 COMPLEXITY_STEP_2: Final = "Extract helper functions for nested branches."
@@ -92,6 +93,12 @@ FACT_KIND_COUPLING_HOTSPOT: Final = "Class coupling hotspot"
 FACT_KIND_LOW_COHESION: Final = "Low cohesion class"
 FACT_KIND_DEAD_CODE: Final = "Dead code item"
 FACT_KIND_DEPENDENCY_CYCLE: Final = "Dependency cycle"
+# What each cycle kind actually measures — the finding copy must say it.
+DEPENDENCY_CYCLE_MEASURED_IMPORT: Final = "cycle over import-time edges"
+DEPENDENCY_CYCLE_MEASURED_DEFERRED: Final = (
+    "cycle only over deferred edges (function-scope, module __getattr__, "
+    "or lazy imports)"
+)
 FACT_KIND_STRUCTURAL: Final = "Structural finding"
 
 STRUCTURAL_TITLE_GUARD_EXIT_DIVERGENCE: Final = "Clone guard/exit divergence"

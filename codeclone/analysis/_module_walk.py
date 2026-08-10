@@ -16,6 +16,7 @@ from .. import qualnames as _qualnames
 from ..models import (
     METHOD_DECORATOR_EVIDENCE_MARKERS,
     DeadCandidate,
+    DependencyBinding,
     FunctionRelationshipFacts,
     ImportObservation,
     ModuleDep,
@@ -100,6 +101,49 @@ def _source_module_key(source: ResolvedSourceIdentity) -> str:
     return module.module if module is not None else source.file.path
 
 
+def _node_is_lazy(node: ast.AST) -> bool:
+    """Read the PEP 810 laziness marker exactly as the AST presents it.
+
+    Interpreters below 3.15 never set the field; the wire decoder and a 3.15
+    parser both surface it as a node attribute, so one read covers all three
+    producers without version branching.
+    """
+
+    return bool(vars(node).get("is_lazy"))
+
+
+def _edge_binding(
+    *,
+    runtime_reachable: bool,
+    in_module_getattr: bool,
+    in_callable: bool,
+    is_lazy: bool,
+) -> DependencyBinding:
+    """Binding time by AST position — a closed decision table, no heuristics.
+
+    | runtime | module ``__getattr__`` | callable body | lazy | binding           |
+    |---------|------------------------|---------------|------|-------------------|
+    | no      | *                      | *             | *    | type_checking     |
+    | yes     | yes                    | *             | *    | deferred_getattr  |
+    | yes     | no                     | yes           | *    | deferred_function |
+    | yes     | no                     | no            | yes  | lazy_syntax       |
+    | yes     | no                     | no            | no   | import_time       |
+
+    Class bodies are deliberately NOT deferred: a class statement executes
+    while the module is being imported, so its imports fire at import time.
+    """
+
+    if not runtime_reachable:
+        return "type_checking"
+    if in_module_getattr:
+        return "deferred_getattr"
+    if in_callable:
+        return "deferred_function"
+    if is_lazy:
+        return "lazy_syntax"
+    return "import_time"
+
+
 def _classify_import_target(
     target: str,
     registry: ModuleRegistryHandle,
@@ -125,9 +169,12 @@ def resolve_import_observation(
     source: ResolvedSourceIdentity,
     node: ast.ImportFrom,
     registry: ModuleRegistryHandle,
+    *,
+    binding: DependencyBinding = "import_time",
 ) -> ImportObservation:
     requested_names = tuple(sorted(alias.name for alias in node.names))
     requested_module = node.module
+    is_lazy = _node_is_lazy(node)
     if node.level <= 0:
         target = requested_module or ""
         return ImportObservation(
@@ -139,6 +186,8 @@ def resolve_import_observation(
             resolution=_classify_import_target(target, registry),
             candidate_targets=(target,),
             resolved_target=target,
+            binding=binding,
+            is_lazy=is_lazy,
         )
 
     module = source.python_module
@@ -156,6 +205,8 @@ def resolve_import_observation(
             resolution="unresolved_relative",
             candidate_targets=(),
             resolved_target=None,
+            binding=binding,
+            is_lazy=is_lazy,
         )
 
     base_parts = package_parts[: len(package_parts) - parents_to_strip]
@@ -173,6 +224,8 @@ def resolve_import_observation(
         resolution=_classify_import_target(target, registry),
         candidate_targets=(target,),
         resolved_target=target,
+        binding=binding,
+        is_lazy=is_lazy,
     )
 
 
@@ -180,8 +233,10 @@ def _import_from_observations(
     source: ResolvedSourceIdentity,
     node: ast.ImportFrom,
     registry: ModuleRegistryHandle,
+    *,
+    binding: DependencyBinding = "import_time",
 ) -> tuple[ImportObservation, ...]:
-    primary = resolve_import_observation(source, node, registry)
+    primary = resolve_import_observation(source, node, registry, binding=binding)
     target = primary.resolved_target
     if target is None or node.module is not None:
         return (primary,)
@@ -204,6 +259,8 @@ def _import_from_observations(
                 candidate_targets=(candidate,),
                 resolved_target=candidate,
                 inventory_expansion=True,
+                binding=primary.binding,
+                is_lazy=primary.is_lazy,
             )
         )
     return (primary, *expansions)
@@ -285,8 +342,25 @@ def _append_module_dep(
             requested_names=observation.requested_names,
             candidate_targets=observation.candidate_targets,
             mechanism=observation.mechanism,
+            binding=observation.binding,
+            is_lazy=observation.is_lazy,
         )
     )
+
+
+def _dynamic_event_binding(event: SemanticEvent) -> DependencyBinding:
+    """Binding time of a dynamic load, read from the event's recorded scope.
+
+    The event layer already stamped ``security.location_scope=`` as a const
+    input at detection time. A load in a callable body binds when that
+    callable is called; module- and class-scope loads execute while the
+    module is being imported. Consumed, never re-derived.
+    """
+
+    for fact in event.inputs:
+        if fact.ref == "security.location_scope=callable":
+            return "deferred_function"
+    return "import_time"
 
 
 def _append_dynamic_load_deps(
@@ -323,6 +397,7 @@ def _append_dynamic_load_deps(
                 candidate_targets=() if target is None else (target,),
                 resolved_target=target,
                 mechanism="dynamic",
+                binding=_dynamic_event_binding(event),
             ),
             line=event.location[1],
             state=state,
@@ -336,8 +411,10 @@ def _collect_import_node(
     registry: ModuleRegistryHandle,
     state: _ModuleWalkState,
     collect_referenced_names: bool,
+    binding: DependencyBinding = "import_time",
 ) -> None:
     line = int(getattr(node, "lineno", 0))
+    is_lazy = _node_is_lazy(node)
     for alias in node.names:
         alias_name = alias.asname or alias.name.split(".", 1)[0]
         state.import_names.add(alias_name)
@@ -356,6 +433,8 @@ def _collect_import_node(
             resolution=_classify_import_target(alias.name, registry),
             candidate_targets=(alias.name,),
             resolved_target=alias.name,
+            binding=binding,
+            is_lazy=is_lazy,
         )
         _append_module_dep(
             observation=observation,
@@ -596,8 +675,9 @@ def _collect_import_from_node(
     collect_referenced_names: bool,
     runtime_reachable: bool = True,
     module_scope: bool = True,
+    binding: DependencyBinding = "import_time",
 ) -> None:
-    observations = _import_from_observations(source, node, registry)
+    observations = _import_from_observations(source, node, registry, binding=binding)
     primary_observation = observations[0]
     primary_target = primary_observation.resolved_target
     # Unconditional: a `from` import binds its alias names whether or not the
@@ -1673,7 +1753,16 @@ def _collect_module_walk_node(
     collect_referenced_names: bool,
     runtime_reachable: bool = True,
     module_scope: bool = True,
+    in_module_getattr: bool = False,
+    in_callable: bool = False,
 ) -> None:
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        binding = _edge_binding(
+            runtime_reachable=runtime_reachable,
+            in_module_getattr=in_module_getattr,
+            in_callable=in_callable,
+            is_lazy=_node_is_lazy(node),
+        )
     if isinstance(node, ast.Import):
         _collect_import_node(
             node=node,
@@ -1681,6 +1770,7 @@ def _collect_module_walk_node(
             registry=registry,
             state=state,
             collect_referenced_names=collect_referenced_names,
+            binding=binding,
         )
     elif isinstance(node, ast.ImportFrom):
         _collect_import_from_node(
@@ -1691,6 +1781,7 @@ def _collect_module_walk_node(
             collect_referenced_names=collect_referenced_names,
             runtime_reachable=runtime_reachable,
             module_scope=module_scope,
+            binding=binding,
         )
     elif collect_referenced_names:
         if (
@@ -1715,6 +1806,7 @@ def _walk_module_tree(
     class_depth: int = 0,
     runtime_enabled: bool = True,
     guards: tuple[str, ...] = (),
+    in_module_getattr: bool = False,
 ) -> None:
     _collect_module_walk_node(
         node=node,
@@ -1724,6 +1816,8 @@ def _walk_module_tree(
         collect_referenced_names=collect_referenced_names,
         runtime_reachable=runtime_enabled,
         module_scope=callable_depth == 0 and class_depth == 0,
+        in_module_getattr=in_module_getattr,
+        in_callable=callable_depth > 0,
     )
     if runtime_enabled:
         event_collector.observe(
@@ -1737,8 +1831,14 @@ def _walk_module_tree(
     child_scope = scope
     child_callable_depth = callable_depth
     child_class_depth = class_depth
+    child_in_module_getattr = in_module_getattr
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         child_scope = (*scope, node.name)
+        # The PEP 562 hook is exactly the module-scope function named
+        # ``__getattr__``: its body binds on attribute miss. An instance
+        # ``__getattr__`` inside a class is an ordinary deferred callable.
+        if callable_depth == 0 and class_depth == 0 and node.name == "__getattr__":
+            child_in_module_getattr = True
         child_callable_depth += 1
     elif isinstance(node, ast.ClassDef):
         child_scope = (*scope, node.name)
@@ -1759,6 +1859,7 @@ def _walk_module_tree(
             if is_type_checking_guard(node.test)
             else runtime_enabled,
             guards=guards,
+            in_module_getattr=child_in_module_getattr,
         )
         type_checking_only = is_type_checking_guard(node.test)
         branch_guard = f"if@{int(getattr(node, 'lineno', 0))}"
@@ -1775,6 +1876,7 @@ def _walk_module_tree(
                 class_depth=child_class_depth,
                 runtime_enabled=runtime_enabled and not type_checking_only,
                 guards=(*guards, f"{branch_guard}:true"),
+                in_module_getattr=child_in_module_getattr,
             )
         for child in node.orelse:
             _walk_module_tree(
@@ -1789,6 +1891,7 @@ def _walk_module_tree(
                 class_depth=child_class_depth,
                 runtime_enabled=runtime_enabled,
                 guards=(*guards, f"{branch_guard}:false"),
+                in_module_getattr=child_in_module_getattr,
             )
         return
 
@@ -1805,6 +1908,7 @@ def _walk_module_tree(
             class_depth=child_class_depth,
             runtime_enabled=runtime_enabled,
             guards=guards,
+            in_module_getattr=child_in_module_getattr,
         )
 
 

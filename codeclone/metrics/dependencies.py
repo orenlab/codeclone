@@ -9,7 +9,14 @@ from __future__ import annotations
 from math import ceil
 from typing import TYPE_CHECKING
 
-from ..models import DepGraph, ModuleDep, ModuleRegistryHandle
+from ..models import (
+    DependencyCycleDetail,
+    DependencyCycleKind,
+    DepGraph,
+    ModuleDep,
+    ModuleRegistryHandle,
+)
+from ..paths.module_identity.projection import module_path_from_registry
 from ..utils import coerce
 
 if TYPE_CHECKING:
@@ -107,6 +114,47 @@ def find_cycles(graph: DepAdjacency) -> tuple[tuple[str, ...], ...]:
         sorted(
             tuple(component) for component in _tarjan_scc(graph) if len(component) > 1
         )
+    )
+
+
+def _classify_cycle(
+    cycle: tuple[str, ...],
+    *,
+    import_time_edges: Sequence[ModuleDep],
+) -> DependencyCycleKind:
+    """The cycle law, by construction: critical iff import-time edges still cycle.
+
+    The subgraph is restricted to the cycle's own members AND to edges whose
+    binding is ``import_time``; if any strongly connected component survives
+    there, the crash-at-import risk is real and the cycle stays critical.
+    Deferred, lazy, and typing edges cannot rescue or demote anything here —
+    only genuine import-time structure decides.
+    """
+
+    members = set(cycle)
+    subgraph: DepAdjacency = {module: set() for module in cycle}
+    for dep in import_time_edges:
+        if dep.source in members and dep.target in members:
+            subgraph[dep.source].add(dep.target)
+    return "import_cycle" if find_cycles(subgraph) else "deferred_cycle"
+
+
+def _cycle_details(
+    cycles: tuple[tuple[str, ...], ...],
+    *,
+    edges: Sequence[ModuleDep],
+    registry: ModuleRegistryHandle,
+) -> tuple[DependencyCycleDetail, ...]:
+    import_time_edges = tuple(dep for dep in edges if dep.binding == "import_time")
+    return tuple(
+        DependencyCycleDetail(
+            modules=cycle,
+            kind=_classify_cycle(cycle, import_time_edges=import_time_edges),
+            member_paths=tuple(
+                module_path_from_registry(module, registry) for module in cycle
+            ),
+        )
+        for cycle in cycles
     )
 
 
@@ -249,7 +297,15 @@ def build_dep_graph(
         )
     )
     graph = build_import_graph(modules=graph_modules, deps=internal_edges)
-    cycles = find_cycles(graph)
+    # Runtime cycles only: TYPE_CHECKING edges never execute, so a cycle they
+    # close is not a runtime fact. They stay visible in ``edges`` untouched;
+    # depth and chain metrics keep reading the full graph because layering is
+    # a design question, not an import-order one.
+    runtime_graph = build_import_graph(
+        modules=graph_modules,
+        deps=tuple(dep for dep in internal_edges if dep.binding != "type_checking"),
+    )
+    cycles = find_cycles(runtime_graph)
     depth = max_depth(graph)
     avg_depth, p95_depth = depth_profile(graph)
     chains = longest_chains(graph)
@@ -261,6 +317,7 @@ def build_dep_graph(
         avg_depth=avg_depth,
         p95_depth=p95_depth,
         longest_chains=chains,
+        cycle_details=_cycle_details(cycles, edges=internal_edges, registry=registry),
     )
 
 

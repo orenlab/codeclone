@@ -29,6 +29,7 @@ from ..models import (
     DeadCodeObservation,
     DeadCodeObservationKind,
     DeadCodeObservationPayload,
+    DependencyBinding,
     DependencyColumnarPayload,
     DependencyObservationPayload,
     DependencyResolution,
@@ -308,6 +309,16 @@ def decode_dependency_lane(
 
     expanded = frozenset(payload.inventory_expansion)
     dynamic = frozenset(payload.mechanism_dynamic)
+    lazy_rows = frozenset(payload.is_lazy)
+    binding_by_row: dict[int, DependencyBinding] = {}
+    for kind, rows in (
+        ("deferred_function", payload.binding_deferred_function),
+        ("deferred_getattr", payload.binding_deferred_getattr),
+        ("type_checking", payload.binding_type_checking),
+        ("lazy_syntax", payload.binding_lazy_syntax),
+    ):
+        for row in rows:
+            binding_by_row[row] = kind  # type: ignore[assignment]
 
     def module(reference: int | None) -> str | None:
         return None if reference is None else payload.modules[reference]
@@ -337,6 +348,8 @@ def decode_dependency_lane(
                 resolved_target=module(payload.resolved_target[row]),
                 inventory_expansion=row in expanded,
                 mechanism="dynamic" if row in dynamic else "static",
+                binding=binding_by_row.get(row, "import_time"),
+                is_lazy=row in lazy_rows,
             )
             for row in range(len(payload.source))
         )

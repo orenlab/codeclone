@@ -572,6 +572,10 @@ def _module_dep_from_cache_row(dep_row: ModuleDepDict) -> ModuleDep | None:
         requested_names=tuple(requested_names),
         candidate_targets=tuple(candidate_targets),
         mechanism=mechanism,
+        # "5"-era rows carry neither key; the model defaults mean eager,
+        # which is exactly what those rows asserted when they were written.
+        binding=dep_row.get("binding", "import_time"),
+        is_lazy=dep_row.get("is_lazy", False),
     )
 
 

@@ -138,7 +138,14 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # token domain reads this sequence off the unit fact, so a warm run served
 # off a 3.3 wire would silently report only y8-domain pairs. Its own key,
 # absence rejects the entry, rejection just re-analyses the file.
-CACHE_VERSION: Final = "3.4"
+#
+# 3.5 carries binding time and the PEP 810 laziness marker on every module
+# dependency row (cycle-honesty wave, dependencies payload_schema "6"). A
+# warm run served off a 3.4 wire would decode every edge as eager
+# import_time and silently report a deferred cycle as critical — the exact
+# lie the wave removes — so pre-3.5 rows are rejected, and rejection just
+# re-analyses the file.
+CACHE_VERSION: Final = "3.5"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not

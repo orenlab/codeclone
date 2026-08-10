@@ -172,6 +172,8 @@ def _normalize_metrics_families(
                 "target": str(item_map.get("target", "")),
                 "import_type": str(item_map.get("import_type", "")),
                 "line": _as_int(item_map.get("line")),
+                "binding": str(item_map.get("binding", "import_time")),
+                "is_lazy": bool(item_map.get("is_lazy", False)),
             }
             for item in _as_sequence(dependencies.get("edge_list"))
             for item_map in (_as_mapping(item),)
@@ -204,6 +206,20 @@ def _normalize_metrics_families(
         ),
     )
     dependency_cycles = _normalize_nested_string_rows(dependencies.get("cycles"))
+    dependency_cycle_details = [
+        {
+            "modules": [
+                str(module) for module in _as_sequence(detail_map.get("modules"))
+            ],
+            "kind": str(detail_map.get("kind", "import_cycle")),
+            "member_paths": [
+                str(path) if path is not None else None
+                for path in _as_sequence(detail_map.get("member_paths"))
+            ],
+        }
+        for detail in _as_sequence(dependencies.get("cycle_details"))
+        for detail_map in (_as_mapping(detail),)
+    ]
     longest_chains = _normalize_nested_string_rows(dependencies.get("longest_chains"))
 
     dead_code = _as_mapping(metrics_map.get(FAMILY_DEAD_CODE))
@@ -800,6 +816,7 @@ def _normalize_metrics_families(
             },
             "items": dependency_edges,
             "cycles": dependency_cycles,
+            "cycle_details": dependency_cycle_details,
             "longest_chains": longest_chains,
             "dynamic_boundaries": dynamic_boundaries,
             "items_truncated": False,

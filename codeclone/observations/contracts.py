@@ -66,7 +66,13 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     # discriminator Y9 extends. Independent of the mount-dimension bump above,
     # which this lane does not embed.
     "dead_code": "3",
-    "dependencies": "5",
+    # Cycle-honesty wave: dependency rows now carry binding time
+    # (import_time / deferred_function / deferred_getattr / type_checking /
+    # lazy_syntax) plus the PEP 810 ``is_lazy`` marker — the G4 observation
+    # projection and the edge classification ride ONE coordinated bump, per
+    # the Y8/Y9 discipline. "5" rows read as eager import_time, which is
+    # what they asserted; the bump exists so they are re-extracted instead.
+    "dependencies": "6",
     "module_identity": "4",
     "risk_observations": "4",
     "semantic_authority": "2",

@@ -69,6 +69,24 @@ DependencyResolution = Literal[
 # How the import edge is expressed in source: a static statement, or a dynamic
 # load call captured by the sole dynamic-loading detector.
 DependencyMechanism = Literal["static", "dynamic"]
+# WHEN the import edge binds — statically derived from the AST, never guessed:
+# ``import_time`` executes while the module is being imported (top level,
+# class body, module-scope dynamic load); ``deferred_function`` binds only
+# when an enclosing function or method is called; ``deferred_getattr`` binds
+# on attribute miss through the module-level PEP 562 ``__getattr__`` hook;
+# ``type_checking`` never executes at runtime (TYPE_CHECKING guard);
+# ``lazy_syntax`` is the PEP 810 ``lazy import`` marker (Python 3.15).
+DependencyBinding = Literal[
+    "import_time",
+    "deferred_function",
+    "deferred_getattr",
+    "type_checking",
+    "lazy_syntax",
+]
+# The cycle law, by construction: a cycle is an ``import_cycle`` iff the
+# subgraph restricted to import_time edges still contains a cycle; otherwise
+# it is a ``deferred_cycle`` — real, but unable to crash at import time.
+DependencyCycleKind = Literal["import_cycle", "deferred_cycle"]
 PackagePrefixNodeKind = Literal["namespace_package", "synthetic_prefix"]
 AnalysisMountOrigin = Literal["analysis_only"]
 PortablePathIssueKind = Literal[
@@ -734,6 +752,15 @@ class DependencyColumnarPayload:
     level: tuple[int, ...]
     inventory_expansion: tuple[int, ...] = ()
     mechanism_dynamic: tuple[int, ...] = ()
+    # Payload_schema "6" columns (cycle-honesty wave): sparse row-position
+    # lists in the established style, ``import_time`` being the omitted
+    # default binding and eagerness the omitted laziness. Exactly one binding
+    # list may claim a row.
+    binding_deferred_function: tuple[int, ...] = ()
+    binding_deferred_getattr: tuple[int, ...] = ()
+    binding_type_checking: tuple[int, ...] = ()
+    binding_lazy_syntax: tuple[int, ...] = ()
+    is_lazy: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_sorted_table(self.modules, "modules")
@@ -774,6 +801,20 @@ class DependencyColumnarPayload:
             self.inventory_expansion, rows, "inventory_expansion"
         )
         _validate_ascending_indices(self.mechanism_dynamic, rows, "mechanism_dynamic")
+        binding_columns = (
+            ("binding_deferred_function", self.binding_deferred_function),
+            ("binding_deferred_getattr", self.binding_deferred_getattr),
+            ("binding_type_checking", self.binding_type_checking),
+            ("binding_lazy_syntax", self.binding_lazy_syntax),
+        )
+        for label, column in (*binding_columns, ("is_lazy", self.is_lazy)):
+            _validate_ascending_indices(column, rows, label)
+        claimed: set[int] = set()
+        for _label, column in binding_columns:
+            overlap = claimed.intersection(column)
+            if overlap:
+                raise ValueError("a dependency row carries exactly one binding")
+            claimed.update(column)
         dynamic = frozenset(self.mechanism_dynamic)
         order = tuple(
             (
@@ -1075,6 +1116,11 @@ class ModuleDepDict(ModuleDepDictBase, total=False):
     requested_module: str | None
     requested_names: list[str]
     candidate_targets: list[str]
+    # Dependencies payload_schema "6" (cycle-honesty wave): binding time and
+    # the PEP 810 marker. Optional: a "5" row decodes to the dataclass
+    # defaults — eager import_time — which is exactly what it asserted.
+    binding: DependencyBinding
+    is_lazy: bool
 
 
 class DeadCandidateDictBase(TypedDict):
@@ -1806,6 +1852,13 @@ class ModuleDep:
     requested_names: tuple[str, ...] = ()
     candidate_targets: tuple[str, ...] = ()
     mechanism: DependencyMechanism = "static"
+    # Binding-time truth for the cycle law; the default is the eager reading,
+    # which is exactly what every pre-classification row meant.
+    binding: DependencyBinding = "import_time"
+    # Raw PEP 810 syntax fact, recorded verbatim from the AST marker. Kept
+    # beside ``binding`` because a lazy import inside a TYPE_CHECKING guard
+    # classifies as ``type_checking`` while the marker itself remains true.
+    is_lazy: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1820,6 +1873,10 @@ class ImportObservation:
     resolved_target: str | None
     inventory_expansion: bool = False
     mechanism: DependencyMechanism = "static"
+    # Same two facts as on ModuleDep: the classified binding time and the raw
+    # PEP 810 marker (G4's observation projection).
+    binding: DependencyBinding = "import_time"
+    is_lazy: bool = False
 
     def __post_init__(self) -> None:
         if self.candidate_targets != tuple(sorted(set(self.candidate_targets))):
@@ -1838,6 +1895,24 @@ class ImportObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class DependencyCycleDetail:
+    """One runtime dependency cycle with its classification and honest paths.
+
+    ``member_paths`` aligns with ``modules``; ``None`` means the module has no
+    resolvable repository file (never invented). Paths come from the module
+    registry's identity inventory — the projection owner's truth source.
+    """
+
+    modules: tuple[str, ...]
+    kind: DependencyCycleKind
+    member_paths: tuple[str | None, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.member_paths) != len(self.modules):
+            raise ValueError("cycle member paths must align with modules")
+
+
+@dataclass(frozen=True, slots=True)
 class DepGraph:
     modules: frozenset[str]
     edges: tuple[ModuleDep, ...]
@@ -1846,6 +1921,10 @@ class DepGraph:
     avg_depth: float
     p95_depth: int
     longest_chains: tuple[tuple[str, ...], ...]
+    # Classification and path projection for each entry of ``cycles``, aligned
+    # by index. ``cycles`` keeps its shape because baseline snapshots, gates,
+    # and diffs consume it as bare module tuples.
+    cycle_details: tuple[DependencyCycleDetail, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -2449,6 +2528,9 @@ class ProjectMetrics:
     dependency_longest_chains: tuple[tuple[str, ...], ...]
     dead_code: tuple[DeadItem, ...]
     health: HealthScore
+    # Aligned with dependency_cycles; carries the binding-law classification
+    # and registry-resolved member paths for every finding projection.
+    dependency_cycle_details: tuple[DependencyCycleDetail, ...] = ()
     typing_param_total: int = 0
     typing_param_annotated: int = 0
     typing_return_total: int = 0

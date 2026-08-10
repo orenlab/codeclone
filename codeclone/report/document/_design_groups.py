@@ -195,46 +195,87 @@ def _cohesion_design_group(
     )
 
 
+def _module_classification_path(module: str, member_path: str | None) -> str:
+    """Path used ONLY for source-kind classification, never reported.
+
+    A resolved member classifies by its real file. An unresolved member
+    classifies by its dotted segments spelled as a directory — a segment
+    sequence, not a file claim; no ``.py`` is ever invented for it.
+    """
+
+    return member_path if member_path else module.replace(".", "/")
+
+
 def _dependency_design_group(
-    cycle: object,
+    detail: Mapping[str, object],
     *,
     scan_root: str,
 ) -> dict[str, object] | None:
-    modules = [str(module) for module in _as_sequence(cycle) if str(module).strip()]
+    modules = [
+        str(module)
+        for module in _as_sequence(detail.get("modules"))
+        if str(module).strip()
+    ]
     if not modules:
         return None
+    raw_paths = list(_as_sequence(detail.get("member_paths")))
+    member_paths: list[str | None] = [
+        str(raw_paths[index]).strip() or None
+        if index < len(raw_paths) and raw_paths[index] is not None
+        else None
+        for index in range(len(modules))
+    ]
+    # The binding law decided the kind upstream; this projection only styles
+    # it. A deferred cycle is real but cannot crash at import time, so it is
+    # a warning; an import-time cycle keeps the critical tier.
+    kind = str(detail.get("kind", "import_cycle"))
+    severity = SEVERITY_CRITICAL if kind == "import_cycle" else SEVERITY_WARNING
+    measured = (
+        "cycle over import-time edges"
+        if kind == "import_cycle"
+        else "cycle only over deferred edges (function-scope, module "
+        "__getattr__, or lazy imports)"
+    )
     cycle_key = " -> ".join(modules)
+    items: list[dict[str, object]] = []
+    for module, member_path in zip(modules, member_paths, strict=True):
+        item: dict[str, object] = {
+            "module": module,
+            "source_kind": report_location_from_group_item(
+                {
+                    "filepath": _module_classification_path(module, member_path),
+                    "qualname": "",
+                    "start_line": 0,
+                    "end_line": 0,
+                }
+            ).source_kind,
+        }
+        # Path honesty: only a registry-resolved file is ever reported; an
+        # unresolved member keeps its module identity and claims no path.
+        if member_path:
+            item["relative_path"] = member_path
+        items.append(item)
     return {
         "id": design_group_id(CATEGORY_DEPENDENCY, cycle_key),
         "family": FAMILY_DESIGN,
         "category": CATEGORY_DEPENDENCY,
-        "kind": "cycle",
-        "severity": SEVERITY_CRITICAL,
+        "kind": kind,
+        "severity": severity,
         "confidence": CONFIDENCE_HIGH,
-        "priority": _priority(SEVERITY_CRITICAL, EFFORT_HARD),
+        "priority": _priority(severity, EFFORT_HARD),
         "count": len(modules),
         "source_scope": _source_scope_from_filepaths(
-            (module.replace(".", "/") + ".py" for module in modules),
+            (
+                _module_classification_path(module, member_path)
+                for module, member_path in zip(modules, member_paths, strict=True)
+            ),
             scan_root=scan_root,
         ),
         "spread": {"files": len(modules), "functions": 0},
-        "items": [
-            {
-                "module": module,
-                "relative_path": module.replace(".", "/") + ".py",
-                "source_kind": report_location_from_group_item(
-                    {
-                        "filepath": module.replace(".", "/") + ".py",
-                        "qualname": "",
-                        "start_line": 0,
-                        "end_line": 0,
-                    }
-                ).source_kind,
-            }
-            for module in modules
-        ],
+        "items": items,
         "facts": {
             "cycle_length": len(modules),
+            "measured": measured,
         },
     }
 
@@ -371,8 +412,20 @@ def _build_design_groups(
             groups.append(group)
 
     dependencies = _as_mapping(families.get("dependencies"))
-    for cycle in _as_sequence(dependencies.get("cycles")):
-        group = _dependency_design_group(cycle, scan_root=scan_root)
+    cycle_details = list(_as_sequence(dependencies.get("cycle_details")))
+    if not cycle_details:
+        # A document without details (older payload) still surfaces its
+        # cycles under the pre-wave reading: import_cycle, no path claims.
+        cycle_details = [
+            {
+                "modules": [str(module) for module in _as_sequence(cycle)],
+                "kind": "import_cycle",
+                "member_paths": [],
+            }
+            for cycle in _as_sequence(dependencies.get("cycles"))
+        ]
+    for detail in cycle_details:
+        group = _dependency_design_group(_as_mapping(detail), scan_root=scan_root)
         if group is not None:
             groups.append(group)
 
