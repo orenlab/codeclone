@@ -42,8 +42,12 @@ def cfg_to_str(cfg: CFG) -> str:
         lines.append(f"Block {block.id} -> [{', '.join(map(str, succ))}]")
         for stmt in block.statements:
             dumped = ast.dump(stmt)
-            # Normalize across Python versions (empty Call keywords may be shown)
+            # Normalize across Python versions (empty Call keywords may be
+            # shown). Python 3.15 ``ast.dump`` omits default-valued fields, so
+            # the default ``ctx=Load()`` is stripped everywhere; Store/Del
+            # contexts are never defaults and stay pinned.
             dumped = dumped.replace(", keywords=[]", "")
+            dumped = dumped.replace(", ctx=Load())", ")")
             lines.append(f"  {dumped}")
     return "\n".join(lines)
 
@@ -136,7 +140,7 @@ def test_cfg_if_else() -> None:
     expected = "\n".join(
         [
             "Block 0 -> [2, 3]",
-            "  Expr(value=Compare(left=Name(id='a', ctx=Load()), ops=[Gt()], "
+            "  Expr(value=Compare(left=Name(id='a'), ops=[Gt()], "
             "comparators=[Constant(value=0)]))",
             "Block 1 -> []",
             "Block 2 -> [4]",
@@ -161,7 +165,7 @@ def test_cfg_if_with_boolop_and() -> None:
     cfg_str = cfg_to_str(build_cfg_from_source(source))
     expected = """
 Block 0 -> [3, 5]
-  Expr(value=Name(id='a', ctx=Load()))
+  Expr(value=Name(id='a'))
 Block 1 -> []
 Block 2 -> [4]
   Assign(targets=[Name(id='x', ctx=Store())], value=Constant(value=1))
@@ -169,7 +173,7 @@ Block 3 -> [4]
   Assign(targets=[Name(id='x', ctx=Store())], value=Constant(value=2))
 Block 4 -> [1]
 Block 5 -> [2, 3]
-  Expr(value=Name(id='b', ctx=Load()))
+  Expr(value=Name(id='b'))
 """
     assert cfg_str.strip() == dedent(expected).strip()
 
@@ -187,12 +191,12 @@ Block 5 -> [2, 3]
 Block 0 -> [2]
 Block 1 -> []
 Block 2 -> [3, 5]
-  Expr(value=Name(id='a', ctx=Load()))
+  Expr(value=Name(id='a'))
 Block 3 -> [2]
   Assign(targets=[Name(id='x', ctx=Store())], value=Constant(value=1))
 Block 4 -> [1]
 Block 5 -> [3, 4]
-  Expr(value=Name(id='b', ctx=Load()))
+  Expr(value=Name(id='b'))
 """,
             id="while_boolop_or",
         ),
@@ -227,7 +231,7 @@ Block 4 -> [1]
 Block 0 -> [2]
 Block 1 -> []
 Block 2 -> [3, 4]
-  Expr(value=Call(func=Name(id='range', ctx=Load()), args=[Constant(value=10)]))
+  Expr(value=Call(func=Name(id='range'), args=[Constant(value=10)]))
 Block 3 -> [2]
   Assign(targets=[Name(id='a', ctx=Store())], value=Constant(value=1))
 Block 4 -> [1]

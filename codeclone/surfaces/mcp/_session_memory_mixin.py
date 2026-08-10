@@ -63,6 +63,7 @@ from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
     MCPRunRecord,
+    MCPRunRootMismatchError,
     MCPServiceContractError,
 )
 
@@ -666,18 +667,20 @@ class _MCPSessionMemoryMixin:
         root_path: Path,
         run_id: str | None = None,
     ) -> MCPRunRecord:
+        # The memory action names its root; bind the lookup to it. Resolving
+        # globally and post-checking the root leaked multi-root ambiguity for
+        # ids shared with same-commit sibling checkouts.
         try:
-            record = self._runs.resolve_any_root(run_id)
+            return self._runs.get_for_root(run_id, root=root_path)
+        except MCPRunRootMismatchError as exc:
+            raise MCPServiceContractError(
+                "The selected MCP run belongs to a different repository root."
+            ) from exc
         except MCPRunNotFoundError as exc:
             raise MCPServiceContractError(
                 "No MCP analysis run available for this repository. "
                 "Call analyze_repository first."
             ) from exc
-        if record.root.resolve() != root_path.resolve():
-            raise MCPServiceContractError(
-                "The selected MCP run belongs to a different repository root."
-            )
-        return record
 
     def finish_propose_memory(
         self,
@@ -795,11 +798,12 @@ class _MCPSessionMemoryMixin:
     ) -> frozenset[str]:
         if not scope_paths:
             return frozenset()
+        # This root's own latest run, not the store-wide latest: bailing on a
+        # root mismatch silently dropped dependents whenever another checkout
+        # analyzed more recently.
         try:
-            record = self._runs.resolve_any_root()
+            record = self._runs.get_for_root(None, root=root_path)
         except MCPRunNotFoundError:
-            return frozenset()
-        if record.root.resolve() != root_path.resolve():
             return frozenset()
         try:
             result = _blast_session(self)._blast_radius_result(

@@ -16141,6 +16141,21 @@ def _same_commit_record(root: Path, run_id: str) -> MCPRunRecord:
     )
 
 
+def _collision_service(
+    tmp_path: Path,
+    *,
+    run_id: str = "before1234567890",
+    history_limit: int = 4,
+) -> tuple[CodeCloneMCPService, Path, Path]:
+    """One content-addressed run id registered under both sibling roots."""
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=history_limit)
+    service._runs.register(_same_commit_record(root_a, run_id))
+    service._runs.register(_same_commit_record(root_b, run_id))
+    return service, root_a, root_b
+
+
 def _collided_worktrees(
     tmp_path: Path,
     *,
@@ -16461,10 +16476,7 @@ def test_start_controlled_change_threads_its_root_through_declare_resolution(
     was told the root still failed with 'pass root to select one'.
     """
 
-    root_a, root_b = _paired_repo_roots(tmp_path)
-    service = CodeCloneMCPService(history_limit=4)
-    service._runs.register(_same_commit_record(root_a, "before1234567890"))
-    service._runs.register(_same_commit_record(root_b, "before1234567890"))
+    service, root_a, _root_b = _collision_service(tmp_path)
 
     started = service.start_controlled_change(
         root=str(root_a),
@@ -16513,10 +16525,7 @@ def test_rootless_surfaces_keep_refusing_collided_run_ids(
     cannot name a checkout must still be refused rather than guessed for.
     """
 
-    root_a, root_b = _paired_repo_roots(tmp_path)
-    service = CodeCloneMCPService(history_limit=4)
-    service._runs.register(_same_commit_record(root_a, "before1234567890"))
-    service._runs.register(_same_commit_record(root_b, "before1234567890"))
+    service, _root_a, _root_b = _collision_service(tmp_path)
 
     with pytest.raises(
         mcp_shared_mod.MCPRunRootAmbiguityError,
@@ -16572,6 +16581,204 @@ def test_intent_attachment_is_root_scoped_across_worktrees(
     _drop_records_for_root(service, root_b)
     _record, resolved = service._resolve_intent(run_id=run_id, intent_id=None)
     assert resolved.intent_id == intent_a
+
+
+def test_pr_summary_compares_this_roots_own_run_pair_under_collision(
+    tmp_path: Path,
+) -> None:
+    """The resolved lane of a PR summary already holds both records.
+
+    Its previous-run comparison re-resolved the previous id globally, so a
+    same-commit sibling registering the identical id broke a summary whose
+    run pair was entirely this root's own.
+    """
+
+    service, root_a, _root_b = _collision_service(tmp_path, history_limit=8)
+    service._runs.register(
+        _patch_contract_run_record(
+            root_a,
+            run_id="after1234567890",
+            digest="shared-digest",
+            include_regression=False,
+            complexity=6,
+        )
+    )
+
+    payload = service.generate_pr_summary(run_id="after1234567890", format="json")
+    assert "resolved" in payload
+    assert payload["verdict"] in {"stable", "improved", "regressed"}
+
+
+def test_manage_change_intent_honors_root_for_get_and_check_under_collision(
+    tmp_path: Path,
+) -> None:
+    """manage_change_intent accepts root; get/check must actually use it.
+
+    Both actions dropped the argument on the way into intent resolution and
+    re-resolved the run id globally — the same root drop start had.
+    """
+
+    service, root_a, _root_b, intent_a, run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["pkg/a.py"],
+    )
+
+    got = service.manage_change_intent(
+        action="get",
+        run_id=run_id,
+        root=str(root_a),
+    )
+    assert got["intent_id"] == intent_a
+
+    checked = service.manage_change_intent(
+        action="check",
+        run_id=run_id,
+        root=str(root_a),
+        changed_files=["pkg/a.py"],
+    )
+    assert checked["status"] == "clean"
+
+
+def test_memory_run_record_resolves_at_the_supplied_root_under_collision(
+    tmp_path: Path,
+) -> None:
+    """Memory actions carry an explicit root; resolution must bind to it.
+
+    Resolving globally and only then comparing roots leaked the multi-root
+    ambiguity before the check could answer, despite the root in hand.
+    """
+
+    service, root_a, root_b = _collision_service(tmp_path)
+
+    record = service._memory_run_record(root_a, "before1234567890")
+    assert record.root == root_a
+
+    lonely = CodeCloneMCPService(history_limit=4)
+    lonely._runs.register(_same_commit_record(root_b, "before1234567890"))
+    with pytest.raises(
+        MCPServiceContractError,
+        match="different repository root",
+    ):
+        lonely._memory_run_record(root_a, "before1234567890")
+
+
+def test_memory_blast_dependents_consult_the_supplied_roots_latest_run(
+    tmp_path: Path,
+) -> None:
+    """Blast context for a root must come from that root's own latest run.
+
+    Taking the store-wide latest and bailing on a root mismatch silently
+    returned no dependents whenever another checkout analyzed more recently —
+    dependents exist, the lookup just asked the wrong checkout.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    for suffix, sibling_root in enumerate((root_a, root_b)):
+        service._runs.register(
+            _same_commit_record(sibling_root, f"runroot{suffix}23456789")
+        )
+
+    consulted: list[Path] = []
+
+    def spy_blast_radius_result(*, record: MCPRunRecord, **kwargs: object) -> object:
+        consulted.append(record.root)
+        raise MCPServiceContractError("stop after recording the consulted root")
+
+    with patch.object(service, "_blast_radius_result", spy_blast_radius_result):
+        dependents = service._memory_blast_dependents(root_a, ("pkg/a.py",))
+
+    assert dependents == frozenset()
+    assert consulted == [root_a], (
+        "blast context must consult the supplied root's latest run, "
+        f"consulted: {consulted}"
+    )
+
+
+def test_implementation_context_resolves_run_at_the_supplied_root_under_collision(
+    tmp_path: Path,
+) -> None:
+    """get_implementation_context binds run selection to its root argument.
+
+    Global resolution followed by a root equality check leaked the multi-root
+    ambiguity for ids the supplied root holds perfectly well.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_blast_radius_run_record(root_a, run_id="ctx1234567890abc"))
+    service._runs.register(_blast_radius_run_record(root_b, run_id="ctx1234567890abc"))
+
+    # Pre-fix this raised the multi-root ambiguity; the typed no-subject
+    # answer for the supplied root is the proof resolution bound correctly.
+    payload = service.get_implementation_context(
+        root=str(root_a),
+        run_id="ctx1234567890abc",
+    )
+    assert str(payload.get("root", "")) == str(root_a)
+
+    lonely = CodeCloneMCPService(history_limit=4)
+    lonely._runs.register(_blast_radius_run_record(root_b, run_id="ctx1234567890abc"))
+    with pytest.raises(
+        MCPServiceContractError,
+        match="does not belong to the supplied root",
+    ):
+        lonely.get_implementation_context(
+            root=str(root_a),
+            run_id="ctx1234567890abc",
+        )
+
+
+def test_after_run_held_only_by_sibling_roots_is_a_typed_miss(
+    tmp_path: Path,
+) -> None:
+    """An after id that only sibling checkouts hold is missing evidence here.
+
+    With one foreign holder the pair still resolves and reports incomparable;
+    with several there is no single diagnostic pair, and the old global
+    fallback raised the multi-root ambiguity as a dead end instead of the
+    typed no_after_run miss whose remedy the agent can execute.
+    """
+
+    service, _root_a, root_b, intent_id, _run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["pkg/a.py"],
+    )
+    root_c = tmp_path / "repo-c"
+    root_c.mkdir()
+    for foreign_root in (root_b, root_c):
+        service._runs.register(
+            _patch_contract_run_record(
+                foreign_root,
+                run_id="after1234567890",
+                digest="shared-digest",
+                include_regression=False,
+                complexity=6,
+            )
+        )
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        intent_id=intent_id,
+        after_run_id="after1234567890",
+        changed_files=["pkg/a.py"],
+    )
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "no_after_run"
+
+
+def test_granular_checks_resolve_at_the_supplied_root_under_collision(
+    tmp_path: Path,
+) -> None:
+    """check_* tools accept root; their run resolution must bind to it."""
+
+    service, root_a, _root_b = _collision_service(tmp_path)
+
+    payload = service.check_complexity(
+        run_id="before1234567890",
+        root=str(root_a),
+    )
+    assert payload["check"] == "complexity"
 
 
 def test_workspace_actions_refuse_to_infer_the_last_analyzed_root(

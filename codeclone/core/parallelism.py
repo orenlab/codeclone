@@ -29,6 +29,7 @@ from ..models import (
     SemanticAuthorityResult,
     SemanticEvent,
     StructuralFindingGroup,
+    UnsupportedConstructSkip,
 )
 from ..observability import record_counter, span
 from ..semantics.authority import build_semantic_authority
@@ -39,6 +40,7 @@ from ._types import (
     DEFAULT_RUNTIME_PROCESSES,
     PARALLEL_MIN_FILES_FLOOR,
     PARALLEL_MIN_FILES_PER_WORKER,
+    UNSUPPORTED_CONSTRUCT_ERROR_PREFIX,
     BootstrapResult,
     DiscoveryResult,
     FileProcessResult,
@@ -231,6 +233,7 @@ def process(
     neutral_reuse_by_file = dict(discovery.neutral_reuse_by_file)
     failed_files: list[str] = []
     source_read_failures: list[str] = []
+    unsupported_construct_skips: list[UnsupportedConstructSkip] = []
     root_str = str(boot.root)
     processes = _resolve_process_count(boot.args.processes)
     min_loc = int(boot.args.min_loc)
@@ -339,6 +342,15 @@ def process(
         failed_files.append(failure)
         if result.error_kind == "source_read_error":
             source_read_failures.append(failure)
+        elif result.error_kind == "unsupported_construct":
+            unsupported_construct_skips.append(
+                UnsupportedConstructSkip(
+                    filepath=result.filepath,
+                    construct=(result.error or "").removeprefix(
+                        UNSUPPORTED_CONSTRUCT_ERROR_PREFIX
+                    ),
+                )
+            )
 
     def _run_sequential(files: Sequence[str]) -> None:
         _install_module_registry(registry)
@@ -604,6 +616,12 @@ def process(
         analyzed_classes=analyzed_classes,
         failed_files=tuple(sorted(failed_files)),
         source_read_failures=tuple(sorted(source_read_failures)),
+        unsupported_construct_skips=tuple(
+            sorted(
+                unsupported_construct_skips,
+                key=lambda skip: (skip.filepath, skip.construct),
+            )
+        ),
         structural_findings=tuple(all_structural_findings),
         function_relationship_facts=tuple(
             sorted(

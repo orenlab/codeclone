@@ -250,8 +250,15 @@ class _MCPSessionFindingMixin:
         analysis_mode: AnalysisMode,
     ) -> MCPRunRecord:
         if run_id is not None:
-            record = self._runs.resolve_any_root(run_id)
-            _validate_run_root(record, self._resolve_optional_root(root))
+            # A supplied root binds the lookup; without one, resolution still
+            # fails closed when same-commit sibling checkouts share the id.
+            resolved_root = self._resolve_optional_root(root)
+            record = (
+                self._runs.get_for_root(run_id, root=resolved_root)
+                if resolved_root is not None
+                else self._runs.resolve_any_root(run_id)
+            )
+            _validate_run_root(record, resolved_root)
             if _helpers._record_supports_analysis_mode(
                 record,
                 analysis_mode=analysis_mode,

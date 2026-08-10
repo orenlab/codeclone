@@ -815,6 +815,44 @@ def _source_read_error_result(filepath: str) -> CliFileProcessResult:
     )
 
 
+def _unsupported_construct_result(filepath: str) -> CliFileProcessResult:
+    return CliFileProcessResult(
+        filepath=filepath,
+        success=False,
+        source_content_digest=None,
+        error="Unsupported construct: unsupported fields on Import: is_lazy",
+        error_kind="unsupported_construct",
+    )
+
+
+def _run_json_report_with_failing_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    result_factory: Callable[[str], CliFileProcessResult],
+) -> Path:
+    """Analyze one default source whose worker fails typed; return report path."""
+
+    _write_default_source(tmp_path)
+    json_out = tmp_path / "report.json"
+
+    def _fail(fp: str, *_args: object, **_kwargs: object) -> CliFileProcessResult:
+        return result_factory(fp)
+
+    monkeypatch.setattr(core_worker, "process_file", _fail)
+    _run_parallel_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--cache-path",
+            str(tmp_path / "cache.json"),
+            "--json",
+            str(json_out),
+        ],
+    )
+    return json_out
+
+
 def _failed_process_result(filepath: str) -> CliFileProcessResult:
     return CliFileProcessResult(
         filepath=filepath,
@@ -3041,26 +3079,8 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _write_default_source(tmp_path)
-    cache_path = tmp_path / "cache.json"
-    json_out = tmp_path / "report.json"
-
-    def _source_read_error(
-        fp: str, *_args: object, **_kwargs: object
-    ) -> CliFileProcessResult:
-        return _source_read_error_result(fp)
-
-    monkeypatch.setattr(core_worker, "process_file", _source_read_error)
-    _run_parallel_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--no-progress",
-            "--cache-path",
-            str(cache_path),
-            "--json",
-            str(json_out),
-        ],
+    json_out = _run_json_report_with_failing_worker(
+        monkeypatch, tmp_path, _source_read_error_result
     )
     captured = capsys.readouterr()
     combined = captured.out + captured.err
@@ -4659,3 +4679,35 @@ def test_artifact_run_still_builds_exactly_one_report_document(
         [str(tmp_path), "--json", str(tmp_path / "r.json"), "--no-progress"],
     )
     assert report_body_builds() == 1
+
+
+def test_cli_unsupported_construct_is_visibly_attributed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A wire-refused file is a visible, attributed loss, not a silent skip.
+
+    Python 3.15 probe, G1b: the console names the count and the construct, the
+    summary counts the file as skipped, and the report carries the witness.
+    """
+
+    json_out = _run_json_report_with_failing_worker(
+        monkeypatch, tmp_path, _unsupported_construct_result
+    )
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert_contains_none(combined, "CONTRACT ERROR:")
+    assert (
+        "1 files not analyzed: unsupported syntax "
+        "(unsupported fields on Import: is_lazy)"
+    ) in combined
+    assert _summary_metric(captured.out, "Files skipped") == 1
+    inventory_files = _report_inventory_files(json.loads(json_out.read_text("utf-8")))
+    assert inventory_files["unsupported_construct_skipped"] == 1
+    assert inventory_files["unsupported_constructs"] == [
+        {
+            "path": "a.py",
+            "construct": "unsupported fields on Import: is_lazy",
+        }
+    ]

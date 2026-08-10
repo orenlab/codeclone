@@ -76,6 +76,32 @@ def _derive_inventory_code_counts(
     }
 
 
+def _unsupported_construct_witnesses(
+    files_map: Mapping[str, object],
+    *,
+    scan_root: str,
+) -> list[dict[str, str]]:
+    """Project the per-file unsupported-construct witnesses, paths contracted.
+
+    Each witness names the file and the wire's refusal (node kind included), so
+    «N files not analyzed: unsupported syntax X» is readable from the report
+    itself (Python 3.15 probe, G1b).
+    """
+
+    witnesses: list[dict[str, str]] = []
+    for row in _as_sequence(files_map.get("unsupported_constructs")):
+        row_map = _as_mapping(row)
+        path, _scope, _absolute = _contract_path(
+            row_map.get("path"), scan_root=scan_root
+        )
+        construct = _optional_str(row_map.get("construct"))
+        if path is None or construct is None:
+            continue
+        witnesses.append({"path": path, "construct": construct})
+    witnesses.sort(key=lambda row: (row["path"], row["construct"]))
+    return witnesses
+
+
 def _build_inventory_payload(
     *,
     inventory: Mapping[str, object] | None,
@@ -101,6 +127,12 @@ def _build_inventory_payload(
             "cached": cached_files,
             "skipped": _as_int(files_map.get("skipped")),
             "source_io_skipped": _as_int(files_map.get("source_io_skipped")),
+            "unsupported_construct_skipped": _as_int(
+                files_map.get("unsupported_construct_skipped")
+            ),
+            "unsupported_constructs": _unsupported_construct_witnesses(
+                files_map, scan_root=scan_root
+            ),
         },
         "code": _derive_inventory_code_counts(
             metrics_payload=metrics_payload,

@@ -187,6 +187,7 @@ class _MCPSessionIntentMixin:
                 record, active_intent = self._resolve_intent(
                     run_id=run_id,
                     intent_id=intent_id,
+                    root=root,
                 )
                 return self._intent_payload_with_expiry(
                     record=record,
@@ -196,6 +197,7 @@ class _MCPSessionIntentMixin:
                 return self._check_change_intent(
                     run_id=run_id,
                     intent_id=intent_id,
+                    root=root,
                     diff_ref=diff_ref,
                     changed_files=changed_files,
                 )
@@ -644,6 +646,7 @@ class _MCPSessionIntentMixin:
         intent_id: str | None,
         diff_ref: str | None,
         changed_files: Sequence[str] | None,
+        root: str | None = None,
     ) -> dict[str, object]:
         if diff_ref is None and not changed_files:
             raise MCPServiceContractError(
@@ -652,6 +655,7 @@ class _MCPSessionIntentMixin:
         record, active_intent = self._resolve_intent(
             run_id=run_id,
             intent_id=intent_id,
+            root=root,
         )
         self._renew_lease_if_active(record=record, intent=active_intent)
         if self._is_intent_expired(record=record, intent=active_intent):
@@ -784,6 +788,7 @@ class _MCPSessionIntentMixin:
         *,
         run_id: str | None,
         intent_id: str | None,
+        root: str | None = None,
     ) -> tuple[MCPRunRecord, IntentRecord]:
         if intent_id is not None:
             with self._state_lock:
@@ -797,7 +802,13 @@ class _MCPSessionIntentMixin:
                 ),
                 active_intent,
             )
-        record = self._runs.resolve_any_root(run_id)
+        # A caller-supplied root binds the lookup; without one, resolution
+        # still fails closed if the id is held under several checkouts.
+        record = (
+            self._runs.get_for_root(run_id, root=_helpers._resolve_root(root))
+            if root is not None
+            else self._runs.resolve_any_root(run_id)
+        )
         with self._state_lock:
             # Same-commit worktrees share a run id; an intent qualifies only
             # when it was declared for this record's own root, or a sibling
