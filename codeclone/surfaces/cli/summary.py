@@ -220,7 +220,9 @@ def _print_summary(
     segment_clones_count: int,
     suppressed_golden_fixture_groups: int,
     suppressed_segment_groups: int,
-    new_clones_count: int,
+    #: ``None`` when no clone lane was compared against the baseline. The
+    #: summary then says so instead of printing a zero it did not measure.
+    new_clones_count: int | None,
 ) -> None:
     invariant_ok = files_found == (files_analyzed + cache_hits + files_skipped)
 

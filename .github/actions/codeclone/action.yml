@@ -100,11 +100,6 @@ inputs:
     required: false
     default: "codeclone.baseline.json"
 
-  metrics-baseline-path:
-    description: "Metrics baseline path passed to CodeClone"
-    required: false
-    default: "codeclone.baseline.json"
-
   extra-args:
     description: "Additional CodeClone CLI arguments"
     required: false
@@ -217,7 +212,6 @@ runs:
         INPUT_FAIL_DEAD_CODE: ${{ inputs.fail-dead-code }}
         INPUT_FAIL_HEALTH: ${{ inputs.fail-health }}
         INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
-        INPUT_METRICS_BASELINE_PATH: ${{ inputs.metrics-baseline-path }}
         INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
         INPUT_NO_PROGRESS: ${{ inputs.no-progress }}
       run: |

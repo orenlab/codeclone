@@ -308,7 +308,6 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
             design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
             update_metrics_baseline=False,
-            metrics_baseline=DEFAULT_BASELINE_PATH,
             skip_metrics=False,
             skip_dead_code=False,
             skip_dependencies=False,
@@ -396,15 +395,6 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                     allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
-        if request.metrics_baseline_path is not None:
-            args.metrics_baseline = str(
-                _helpers._resolve_optional_path(
-                    request.metrics_baseline_path,
-                    root_path,
-                    kind="metrics_baseline",
-                    allow_external_artifacts=request.allow_external_artifacts,
-                )
-            )
         if request.cache_path is not None:
             args.cache_path = str(
                 _helpers._resolve_optional_path(
@@ -443,20 +433,14 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         )
         baseline_exists = baseline_path.exists()
 
-        metrics_baseline_arg_path = _helpers._resolve_optional_path(
-            str(args.metrics_baseline),
-            root_path,
-            kind="metrics_baseline",
-            allow_external_artifacts=allow_external_artifacts,
-            allow_repo_absolute=True,
-        )
-        metrics_baseline_exists = metrics_baseline_arg_path.exists()
-
+        # One container, one path. 2.1.0a2 unified the clone and metrics lanes
+        # and dropped --metrics-baseline; an independent metrics path here let
+        # a redirected baseline leave the metrics lane on the old default.
         return (
             baseline_path,
             baseline_exists,
-            metrics_baseline_arg_path,
-            metrics_baseline_exists,
+            baseline_path,
+            baseline_exists,
         )
 
 
@@ -524,6 +508,9 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         cache_status: CacheStatus,
         new_func: Sequence[str] | set[str],
         new_block: Sequence[str] | set[str],
+        #: False when the caller never ran a clone comparison, so ``new_func``
+        #: and ``new_block`` are "not measured" rather than "measured empty".
+        clone_novelty_available: bool,
         metrics_diff: MetricsDiff | None,
         warnings: Sequence[str],
         failures: Sequence[str],
@@ -590,10 +577,19 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "inventory": dict(inventory),
             "findings_summary": dict(summary),
             "health": dict(_helpers._as_mapping(metrics_summary.get("health"))),
+            # Null, not zero, when no clone lane was compared: the canonical
+            # report document already reports that novelty as "unavailable",
+            # and a count here would contradict it inside one payload.
             "baseline_diff": {
-                "new_function_clone_groups": len(new_func),
-                "new_block_clone_groups": len(new_block),
-                "new_clone_groups_total": len(new_func) + len(new_block),
+                "new_function_clone_groups": (
+                    len(new_func) if clone_novelty_available else None
+                ),
+                "new_block_clone_groups": (
+                    len(new_block) if clone_novelty_available else None
+                ),
+                "new_clone_groups_total": (
+                    len(new_func) + len(new_block) if clone_novelty_available else None
+                ),
             },
             "metrics_diff": _helpers._metrics_diff_payload(metrics_diff),
             "warnings": list(warnings),

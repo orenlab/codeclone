@@ -17,6 +17,7 @@ import pytest
 import codeclone.config.pyproject_loader as loader_mod
 import codeclone.config.resolver as resolver_mod
 import codeclone.config.spec as spec_mod
+from codeclone.config.argparse_builder import build_parser
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.models import AuthorityRegistry, ConfigKeySpec
 
@@ -63,6 +64,58 @@ def test_collect_explicit_cli_dests_stops_on_double_dash() -> None:
         argv=("--min-loc=10", "--quiet", "--", "--json", "report.json"),
     )
     assert explicit == {"min_loc", "quiet"}
+
+
+#: ``[tool.codeclone]`` values that compete with the command line in the
+#: priority tests below. Both differ from the code defaults, so a resolved
+#: value identifies its own source without any extra bookkeeping.
+_PRIORITY_PYPROJECT_VALUES: dict[str, object] = {"min_loc": 6, "api_surface": True}
+
+
+def _resolved_priority_values(argv: tuple[str, ...]) -> dict[str, object]:
+    """Resolve ``argv`` against pyproject values through the real CLI parser."""
+
+    parser = build_parser("2.0.0")
+    args = parser.parse_args(list(argv))
+    resolved = resolver_mod.resolve_config(
+        args=args,
+        config_values=dict(_PRIORITY_PYPROJECT_VALUES),
+        explicit_cli_dests=resolver_mod.collect_explicit_cli_dests(
+            parser,
+            argv=argv,
+        ),
+    )
+    return dict(resolved.values)
+
+
+@pytest.mark.parametrize(
+    ("argv", "dest", "expected"),
+    [
+        (("--min-loc", "999"), "min_loc", 999),
+        (("--min-loc=999",), "min_loc", 999),
+        (("--no-api-surface",), "api_surface", False),
+        # argparse accepts unambiguous prefixes (allow_abbrev defaults to True),
+        # so an abbreviation is a flag the user did pass. Deciding "was this
+        # passed?" by matching argv strings against full option names loses
+        # exactly these, and pyproject then overwrites a parsed CLI value.
+        (("--min-l", "999"), "min_loc", 999),
+        (("--min-l=999",), "min_loc", 999),
+        (("--no-api-s",), "api_surface", False),
+    ],
+)
+def test_explicit_cli_flag_outranks_pyproject(
+    argv: tuple[str, ...],
+    dest: str,
+    expected: object,
+) -> None:
+    assert _resolved_priority_values(argv)[dest] == expected
+
+
+def test_unpassed_flag_yields_to_pyproject() -> None:
+    resolved = _resolved_priority_values(())
+
+    assert resolved["min_loc"] == _PRIORITY_PYPROJECT_VALUES["min_loc"]
+    assert resolved["api_surface"] == _PRIORITY_PYPROJECT_VALUES["api_surface"]
 
 
 def test_load_pyproject_config_missing_file_returns_empty(tmp_path: Path) -> None:

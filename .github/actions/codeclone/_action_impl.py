@@ -46,7 +46,6 @@ class ActionInputs:
     fail_dead_code: bool
     fail_health: int | None
     baseline_path: str
-    metrics_baseline_path: str
     extra_args: str
     no_progress: bool
 
@@ -290,7 +289,6 @@ def build_inputs_from_env(env: dict[str, str]) -> ActionInputs:
         fail_dead_code=parse_bool(env["INPUT_FAIL_DEAD_CODE"]),
         fail_health=parse_optional_int(env["INPUT_FAIL_HEALTH"]),
         baseline_path=env["INPUT_BASELINE_PATH"],
-        metrics_baseline_path=env["INPUT_METRICS_BASELINE_PATH"],
         extra_args=env["INPUT_EXTRA_ARGS"],
         no_progress=parse_bool(env["INPUT_NO_PROGRESS"]),
     )
@@ -308,8 +306,10 @@ def _valued_codeclone_options(
         (inputs.fail_coupling, "--fail-coupling"),
         (inputs.fail_cohesion, "--fail-cohesion"),
         (inputs.fail_health, "--fail-health"),
+        # 2.1.0a2 unified the clone and metrics lanes into one baseline
+        # container and removed --metrics-baseline from the CLI. There is no
+        # second baseline path to pass.
         (inputs.baseline_path.strip() or None, "--baseline"),
-        (inputs.metrics_baseline_path.strip() or None, "--metrics-baseline"),
     )
 
 

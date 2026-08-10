@@ -803,8 +803,15 @@ def _summary_inventory_payload(inventory: Mapping[str, object]) -> dict[str, obj
 def _summary_diff_payload(summary: Mapping[str, object]) -> dict[str, object]:
     baseline_diff = _as_mapping(summary.get("baseline_diff"))
     metrics_diff = _as_mapping(summary.get("metrics_diff"))
+    new_clone_groups_total = baseline_diff.get("new_clone_groups_total", 0)
     return {
-        "new_clones": _as_int(baseline_diff.get("new_clone_groups_total", 0), 0),
+        # Carry the "not compared" state through rather than coercing it to a
+        # zero the run never measured.
+        "new_clones": (
+            None
+            if new_clone_groups_total is None
+            else _as_int(new_clone_groups_total, 0)
+        ),
         "health_delta": (
             _as_int(metrics_diff.get("health_delta", 0), 0)
             if (

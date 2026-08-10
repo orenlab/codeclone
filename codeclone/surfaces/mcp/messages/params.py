@@ -197,8 +197,8 @@ AllowExternalArtifactsParam = Annotated[
     bool,
     Field(
         description=(
-            "Allow optional artifact paths (baseline_path, metrics_baseline_path, "
-            "cache_path, coverage_xml) to be absolute or outside the repository."
+            "Allow optional artifact paths (baseline_path, cache_path, "
+            "coverage_xml) to be absolute or outside the repository."
         )
     ),
 ]

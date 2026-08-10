@@ -134,6 +134,62 @@ def test_diff_context_respects_independent_clone_lane_trust(
     assert diff.new_block == expected_block
 
 
+def _diff_context_for_trust(*, trusted_for_diff: bool, tmp_path: Path) -> Any:
+    baseline_state = SimpleNamespace(
+        trusted_for_diff=trusted_for_diff,
+        baseline=SimpleNamespace(
+            diff=lambda _func_groups, _block_groups: (set(), set()),
+        ),
+    )
+    return cli_post_run.build_diff_context(
+        analysis=cast(
+            Any,
+            SimpleNamespace(func_groups={}, block_groups={}, project_metrics=None),
+        ),
+        baseline_path=tmp_path / "baseline.json",
+        baseline_state=cast(Any, baseline_state),
+        metrics_baseline_state=cast(
+            Any,
+            SimpleNamespace(trusted_for_diff=False, baseline=SimpleNamespace()),
+        ),
+    )
+
+
+@pytest.mark.parametrize("trusted_for_diff", [True, False])
+def test_diff_context_reports_whether_clone_novelty_was_computed(
+    trusted_for_diff: bool,
+    tmp_path: Path,
+) -> None:
+    # An untrusted or missing baseline means the comparison never ran. The
+    # empty new-clone sets that follow are "not compared", not "zero new" --
+    # WARN_BASELINE_LANES_OPAQUE already states that rule for opaque lanes.
+    diff = _diff_context_for_trust(
+        trusted_for_diff=trusted_for_diff,
+        tmp_path=tmp_path,
+    )
+
+    assert diff.clone_novelty_available is trusted_for_diff
+
+
+def _clone_summary_lines(new: int | None) -> tuple[str, str]:
+    counts: dict[str, int] = {"segment": 0, "suppressed": 0, "fixture_excluded": 0}
+    return (
+        ui.fmt_summary_clones(func=1, block=0, new=new, **counts),
+        ui.fmt_summary_compact_clones(function=1, block=0, new=new, **counts),
+    )
+
+
+def test_summary_clone_line_separates_unavailable_novelty_from_zero() -> None:
+    counted, compact_counted = _clone_summary_lines(0)
+    uncompared, compact_uncompared = _clone_summary_lines(None)
+
+    assert "new" in counted
+    assert "unavailable" not in counted
+    assert "unavailable" in uncompared
+    assert "new=0" in compact_counted
+    assert "new=unavailable" in compact_uncompared
+
+
 def test_report_baseline_trust_rejects_invalid_scope_id() -> None:
     assert (
         resolve_report_baseline_trust(
