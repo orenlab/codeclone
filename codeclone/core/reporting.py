@@ -316,6 +316,10 @@ def build_report_body_for_analysis(
             baseline_trust=baseline_trust,
             near_miss_pairs=analysis.near_miss_pairs,
             renamed_structure_groups=analysis.renamed_structure_groups,
+            # The per-entity baseline differences are computed once and routed
+            # to the gates; they reach the findings that were compared here.
+            project_metrics=analysis.project_metrics,
+            metrics_diff=_coerce_metrics_diff(metrics_diff),
         )
 
 

@@ -451,6 +451,38 @@ def _finding_novelty_value(finding: Mapping[str, object]) -> str:
     return novelty or CLONE_NOVELTY_UNAVAILABLE
 
 
+def _is_new_finding(finding: Mapping[str, object]) -> bool:
+    """Whether the baseline comparison called this finding a regression."""
+
+    return _finding_novelty_value(finding) == CLONE_NOVELTY_NEW
+
+
+def _novelty_bucket_counts(
+    findings: Iterable[Mapping[str, object]],
+) -> dict[str, int]:
+    """Three independent novelty counters over one rule.
+
+    Folding "not compared" into ``known`` asserts a comparison that never
+    happened; folding it into ``new`` invents a regression. Anything that is
+    not a baseline verdict joins the uncompared bucket, so the three counters
+    always sum to the number of findings.
+    """
+
+    counts = dict.fromkeys(
+        (CLONE_NOVELTY_NEW, CLONE_NOVELTY_KNOWN, CLONE_NOVELTY_UNAVAILABLE),
+        0,
+    )
+    for finding in findings:
+        novelty = _finding_novelty_value(finding)
+        if novelty == CLONE_NOVELTY_NEW:
+            counts[CLONE_NOVELTY_NEW] += 1
+        elif novelty == CLONE_NOVELTY_KNOWN:
+            counts[CLONE_NOVELTY_KNOWN] += 1
+        else:
+            counts[CLONE_NOVELTY_UNAVAILABLE] += 1
+    return counts
+
+
 def _why_now_text(
     *,
     title: str,
@@ -970,12 +1002,20 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
             f"Verdict: {payload.get('verdict', 'stable')}"
         )
     )
+    # The heading is published into someone else's pull request, so it may
+    # claim only what the run established: a changed-file scope exists only
+    # when changed paths were supplied.
+    scope_suffix = (
+        " in changed files"
+        if str(payload.get("findings_scope", "")) == "changed_files"
+        else " across the analyzed repository (no changed-file scope supplied)"
+    )
     lines = [
         "## CodeClone Summary",
         "",
         health_line,
         "",
-        f"### New findings in changed files ({len(changed_items)})",
+        f"### New findings{scope_suffix} ({len(changed_items)})",
     ]
     if not changed_items:
         lines.append("- None")

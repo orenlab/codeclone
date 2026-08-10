@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 from argparse import Namespace
 from collections import OrderedDict, UserDict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -10772,6 +10772,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "total": 7,
         "new": 0,
         "known": 0,
+        "unavailable": 0,
         "by_family": {},
         "production": 0,
         "new_by_source_kind": {
@@ -10848,6 +10849,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "total": 1,
         "new": 1,
         "known": 0,
+        "unavailable": 0,
         "by_family": {"clones": 1},
         "production": 1,
         "new_by_source_kind": {
@@ -10872,11 +10874,16 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
             }
         ],
     )
+    # The breakdown is built from the families actually present, so a family
+    # outside the historical four-bucket literal is counted instead of being
+    # silently dropped: the old pin froze ``by_family: {}`` at ``total: 1``,
+    # i.e. it froze a lost counter as expected behaviour.
     assert service._summary_findings_payload({}, record=record) == {
         "total": 1,
         "new": 0,
         "known": 1,
-        "by_family": {},
+        "unavailable": 0,
+        "by_family": {"custom": 1},
         "production": 0,
         "new_by_source_kind": {
             "production": 0,
@@ -17715,3 +17722,219 @@ def test_get_run_summary_without_analysis_profile(tmp_path: Path) -> None:
     summary = service.get_run_summary(record.run_id)
     assert summary["run_id"] == record.run_id[:8]
     assert "analysis_profile" not in summary
+
+
+# ---------------------------------------------------------------------------
+# Novelty honesty in the MCP projections. ``list_findings`` already answers
+# through the one rule; the run summary and the PR summary must not contradict
+# it about the same run.
+# ---------------------------------------------------------------------------
+
+
+def _novelty_finding(
+    finding_id: str,
+    *,
+    family: str,
+    novelty: str | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": finding_id,
+        "family": family,
+        "category": "duplicated_branches",
+        "kind": "duplicated_branches",
+        "severity": "warning",
+        "confidence": "high",
+        "priority": 1.0,
+        "count": 1,
+        "source_scope": {"dominant_kind": "production", "impact_scope": "runtime"},
+        "spread": {"files": 1, "functions": 1},
+        "items": [
+            {
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:fn",
+                "start_line": 1,
+                "end_line": 2,
+            }
+        ],
+        "facts": {},
+    }
+    if novelty is not None:
+        payload["novelty"] = novelty
+    return payload
+
+
+def _mixed_novelty_groups() -> dict[str, object]:
+    """Two findings the baseline never compared, one new, one known."""
+
+    return {
+        "clones": {"functions": [], "blocks": [], "segments": []},
+        "structural": {
+            "groups": [
+                _novelty_finding(
+                    "struct:uncompared:1", family="structural", novelty=None
+                ),
+                _novelty_finding(
+                    "struct:uncompared:2", family="structural", novelty=None
+                ),
+            ]
+        },
+        "dead_code": {"groups": []},
+        "design": {
+            "groups": [
+                _novelty_finding("design:regression:1", family="design", novelty="new"),
+                _novelty_finding("design:debt:1", family="design", novelty="known"),
+            ]
+        },
+        "authority": {"groups": []},
+    }
+
+
+def _novelty_record(root: Path, run_id: str, groups: dict[str, object]) -> MCPRunRecord:
+    return replace(
+        _dummy_run_record(root, run_id),
+        report_document={"findings": {"groups": groups}},
+        summary={"run_id": run_id, "health": {"score": 80, "grade": "B"}},
+    )
+
+
+def _novelty_service(record: MCPRunRecord) -> CodeCloneMCPService:
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(record)
+    return service
+
+
+@pytest.mark.parametrize("compared_bucket", ["known", "new"])
+def test_run_summary_never_folds_uncompared_findings_into_a_compared_bucket(
+    tmp_path: Path,
+    compared_bucket: str,
+) -> None:
+    """Both directions, each on its own case.
+
+    Two of the four findings carry no ``novelty`` at all. Folding them into
+    ``known`` asserts a comparison that never happened; folding them into
+    ``new`` invents a regression. Only the one finding that really carries
+    each verdict may be counted under it.
+    """
+
+    record = _novelty_record(
+        tmp_path,
+        f"summary-{compared_bucket}",
+        _mixed_novelty_groups(),
+    )
+    service = _novelty_service(record)
+
+    payload = service._summary_findings_payload({}, record=record)
+
+    assert payload[compared_bucket] == 1
+
+
+def test_run_summary_reports_uncompared_findings_as_unavailable(
+    tmp_path: Path,
+) -> None:
+    record = _novelty_record(tmp_path, "summary-unavail", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service._summary_findings_payload({}, record=record)
+
+    assert payload["unavailable"] == 2
+    buckets = ("new", "known", "unavailable")
+    assert sum(cast(int, payload[key]) for key in buckets) == payload["total"]
+
+
+def test_run_summary_by_family_never_drops_a_family(tmp_path: Path) -> None:
+    groups = _mixed_novelty_groups()
+    groups["authority"] = {
+        "groups": [
+            _novelty_finding(
+                "authority:v1:1", family="authority", novelty="unavailable"
+            )
+        ]
+    }
+    record = _novelty_record(tmp_path, "summary-family", groups)
+    service = _novelty_service(record)
+
+    payload = service._summary_findings_payload({}, record=record)
+    by_family = dict(cast(Mapping[str, int], payload["by_family"]))
+
+    assert by_family == {"authority": 1, "design": 2, "structural": 2}
+    assert sum(by_family.values()) == payload["total"]
+
+
+def test_pr_summary_json_lists_only_genuinely_new_findings(tmp_path: Path) -> None:
+    record = _novelty_record(tmp_path, "pr-json-only-new", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(run_id="pr-json-only-new", format="json")
+    listed = [
+        str(cast(Mapping[str, object], item).get("id"))
+        for item in cast(Sequence[object], payload["new_findings_in_changed_files"])
+    ]
+
+    assert listed == ["design:regression:1"]
+
+
+def test_pr_summary_json_keeps_the_new_finding(tmp_path: Path) -> None:
+    """Guard against over-filtering: a real regression must still be published."""
+
+    record = _novelty_record(tmp_path, "pr-json-keeps-new", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(run_id="pr-json-keeps-new", format="json")
+    listed = [
+        str(cast(Mapping[str, object], item).get("id"))
+        for item in cast(Sequence[object], payload["new_findings_in_changed_files"])
+    ]
+
+    assert "design:regression:1" in listed
+
+
+def test_pr_summary_markdown_counts_only_new_findings(tmp_path: Path) -> None:
+    record = _novelty_record(tmp_path, "pr-md-count", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    content = str(
+        service.generate_pr_summary(run_id="pr-md-count", format="markdown")["content"]
+    )
+
+    assert "### New findings" in content
+    assert "(1)" in content.split("### New findings")[1].split("\n")[0]
+
+
+def test_pr_summary_without_changed_scope_does_not_claim_changed_files(
+    tmp_path: Path,
+) -> None:
+    record = _novelty_record(tmp_path, "pr-no-scope", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(run_id="pr-no-scope", format="json")
+    content = str(
+        service.generate_pr_summary(run_id="pr-no-scope", format="markdown")["content"]
+    )
+
+    assert payload["changed_files"] == 0
+    assert payload["findings_scope"] == "repository"
+    assert "in changed files" not in content
+
+
+def test_pr_summary_with_changed_scope_claims_changed_files(tmp_path: Path) -> None:
+    """The scope guard has a reachable input in the other direction too."""
+
+    record = _novelty_record(tmp_path, "pr-with-scope", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(
+        run_id="pr-with-scope",
+        changed_paths=("pkg/mod.py",),
+        format="json",
+    )
+    content = str(
+        service.generate_pr_summary(
+            run_id="pr-with-scope",
+            changed_paths=("pkg/mod.py",),
+            format="markdown",
+        )["content"]
+    )
+
+    assert payload["changed_files"] == 1
+    assert payload["findings_scope"] == "changed_files"
+    assert "### New findings in changed files (1)" in content
