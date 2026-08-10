@@ -69,6 +69,20 @@ auditable receipt.
       automated approval, or green CI does not satisfy this requirement.
     - Material agent assistance must be disclosed in the pull request.
 
+9. **Mutation-proven pins (mandatory law).**
+    - Red-first proves a test was red once; **mutation** proves it dies when the exact behavior it pins breaks. A green
+      test alone proves nothing.
+    - Every load-bearing fix or claim ships **mutation evidence**: revert or corrupt the exact production behavior a
+      test pins, and that test **MUST** turn red, verbatim, on that mutation. A surviving mutant (the test stays green)
+      is a hollow test — strengthen it until it dies.
+    - **Comprehensive = both boundaries.** Where a fix corrects a value or classification, mutate in BOTH directions;
+      each opposite error MUST red under a different test. Catching only one side of an error is incomplete.
+    - **"Informal" = targeted manual mutations**, not (necessarily) a mutation-testing framework: revert-the-behavior
+      probes covering the defect class. A full mutation runner (mutmut / cosmic-ray) as a gate is a later candidate; the
+      manual targeted mutation is mandatory **now** — for agents and for the controller's merge audit.
+    - Part of the standing evidence law: "I fixed it" without a mutation that reds the pin does not exist. Named
+      hollow-test classes, precedents, and the fix-report requirement live in §17 "Mutation evidence (mandatory law)".
+
 ---
 
 ## 2) Quick orientation
@@ -280,7 +294,7 @@ doc.** Current central values (verified at write time):
 |------------------------------------------|-----------------|
 | `BASELINE_SCHEMA_VERSION`                | `3.0`           |
 | `BASELINE_FINGERPRINT_VERSION`           | `3`             |
-| `CACHE_VERSION`                          | `3.4`           |
+| `CACHE_VERSION`                          | `3.5`           |
 | `REPORT_SCHEMA_VERSION`                  | `3.0`           |
 | `METRICS_BASELINE_SCHEMA_VERSION`        | `1.3`           |
 | `ENGINEERING_MEMORY_SCHEMA_VERSION`      | `1.7`           |
@@ -998,6 +1012,46 @@ Policy:
 - Coverage is a guardrail, not a reason to execute lines without asserting
   behavior.
 
+### Mutation evidence (mandatory law)
+
+Red-first proves a test was red once; **mutation** proves the test dies when the exact behavior it pins breaks. This is a
+binding project law (see §1.9), part of the red-first / standing evidence discipline. For every load-bearing fix or
+claim:
+
+- **Every load-bearing pin ships mutation evidence.** Revert or corrupt the exact production behavior the test pins →
+  the pinning test MUST turn red, verbatim, on that mutation. A mutant that survives (the test stays green) is a hollow
+  test; strengthen it until it dies.
+- **Comprehensive = both boundaries.** Where a fix corrects a value or classification, mutate in BOTH directions — each
+  opposite error reds under a different test. A suite that catches only one side of an error is incomplete.
+
+**What does the test actually hold?** Named hollow-test classes to mutate against:
+
+- **Relative-invariant hole — mutate the CONSTANT itself.** A set of relative-invariant tests (`prose ≤ its measure`,
+  `A > B`) stays green for ANY value of the underlying constant, so the constant's justification can silently drift.
+  Where a number is derived from a stated rule but the derivation lives only in a comment, that comment is an unexecuted
+  engineering claim that will rot. Pin the **derivation rule** (re-derive / re-measure the number from its stated basis)
+  — not a literal `assert x == 780`, which merely moves the magic number into the test. Mutating the literal constant
+  MUST red the rule-pin. Precedents: a measure constant changed to a wrong value that survived 1000+ green tests; a cache
+  decode tolerance; a silently dropped run-summary counter.
+- **Guard unreachable in every configuration.** The most extreme hollow test is not "returns empty" but a guard whose
+  protected path CANNOT fire in ANY configuration — structurally dead, not merely misplaced. Mutation reveals it: if
+  reverting the guarded behavior changes nothing observable, the guard never ran, in no configuration. Example: a
+  secret-tier deny rule that could only match a secret INSIDE the working grant, while the gate inspects only calls
+  OUTSIDE the grant — so it could never fire, once, in any setup. Analogues here: a decode tolerance dead-by-gate; an
+  under-guarded lane whose version input was never wired. Duty: when you add a guard, prove by mutation that SOME input
+  reaches and trips it — a guard no input can reach is theater.
+- **Success masked by a sibling.** A run looks green not because the thing under test worked, but because a
+  parallel/sibling mechanism did the work. Isolate and probe the mechanism ALONE. Example: a `Write`-class rule silently
+  ignored while an `Edit`-class rule rode alongside and did the actual work — the aggregate passed; probing `Edit` alone
+  exposed it. Analogue here: a contaminated benchmark series where an orphaned first run mutated the same target as the
+  second, so a "surviving mutant" may have been reverted by its sibling before the build — re-run solo. Duty: a passing
+  set that exercises ≥2 mechanisms MUST isolate each; "the batch was green" is not "this rule fired".
+
+**"Informal" scope.** Targeted manual mutations, not (necessarily) a mutation-testing framework — revert-the-behavior
+probes covering the defect class. A full mutation runner (mutmut / cosmic-ray) as a gate is a later candidate; manual
+targeted mutation is mandatory now, for agents and for the controller's merge audit. A fix delivery report carries a
+**mutation evidence** section for its load-bearing pins.
+
 ## 18) Public vs internal surfaces
 
 ### Public / contract-sensitive surfaces
@@ -1190,6 +1244,10 @@ These rules exist because of real incidents in this repo. They are non-negotiabl
   file for *all* version-shaped strings and verified each against `codeclone/contracts/__init__.py`.
   During the docs migration, defer broken `docs/book/**` and `docs/guide/**` paths unless a
   maintainer assigns a replacement page (**TBD**).
+- A load-bearing fix is not complete until each pin it relies on has been shown to die under a targeted mutation of the
+  exact behavior it guards (revert-the-behavior probe; both error directions where a value or classification was
+  corrected). A pin that stays green when its behavior is reverted is not evidence. See §1.9 and §17 "Mutation evidence
+  (mandatory law)".
 
 ---
 
@@ -1205,6 +1263,8 @@ These rules exist because of real incidents in this repo. They are non-negotiabl
 - [ ] Reports contain provenance fields and reflect trust model correctly.
 - [ ] Golden snapshots were **not** updated just to satisfy failing tests.
 - [ ] If any golden snapshot changed, the corresponding contract change is intentional, documented, and approved.
+- [ ] Each load-bearing pin was shown to die under a targeted mutation of the behavior it guards; surviving mutants were
+      eliminated (both error directions where a value or classification was corrected). See §17 "Mutation evidence".
 - [ ] Material agent assistance is disclosed.
 - [ ] A human reviewed and understood the complete diff before merge.
 

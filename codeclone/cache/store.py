@@ -70,9 +70,9 @@ from .integrity import (
     as_str_or_none as _as_str,
 )
 from .integrity import (
+    cache_envelope_checksum,
     read_json_document,
-    sign_cache_payload,
-    verify_cache_payload_signature,
+    verify_cache_envelope_checksum,
     write_json_document_atomically,
 )
 from .projection import (
@@ -431,14 +431,20 @@ class Cache:
             if version != self._CACHE_VERSION:
                 return self._reject_version_mismatch(version)
 
-            sig = _as_str(raw.get("sig"))
+            checksum = _as_str(raw.get("checksum"))
             payload = _as_str_dict(raw.get("payload"))
-            if sig is None or payload is None:
+            if checksum is None or payload is None:
                 return self._reject_invalid_cache_format(schema_version=version)
 
-            if not verify_cache_payload_signature(payload, sig):
+            # Verify over {version, payload}: the on-disk ``v`` is inside the
+            # checksummed scope, so a generation retagged by migration is refused
+            # here even though it passed the ``v == _CACHE_VERSION`` gate above.
+            # This is NOT redundant with that gate - see cache_envelope_checksum
+            # for the {11,17} decode-tolerance cross-defect witness. The checksum
+            # is an integrity check, NOT authentication (see its threat model).
+            if not verify_cache_envelope_checksum(version, payload, checksum):
                 return self._reject_cache_load(
-                    "Cache signature mismatch; ignoring cache.",
+                    "Cache checksum mismatch; ignoring cache.",
                     status=CacheStatus.INTEGRITY_FAILED,
                     schema_version=version,
                 )
@@ -531,12 +537,12 @@ class Cache:
             )
             if segment_projection is not None:
                 payload["sr"] = segment_projection
-            signed_doc = {
+            envelope = {
                 "v": self._CACHE_VERSION,
                 "payload": payload,
-                "sig": sign_cache_payload(payload),
+                "checksum": cache_envelope_checksum(self._CACHE_VERSION, payload),
             }
-            write_json_document_atomically(self.path, signed_doc)
+            write_json_document_atomically(self.path, envelope)
             self._dirty = False
 
             self.data["version"] = self._CACHE_VERSION

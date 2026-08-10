@@ -332,6 +332,47 @@ When validating implementation against a spec:
 4. Run `uv run pre-commit run --all-files` if the user asks to commit.
 5. Check MCP tool visibility if a new tool was added.
 6. Report `conformant` / `improved` / `divergent` / `missing` with evidence.
+7. For every load-bearing pin, carry **mutation evidence** (see "Mutation discipline" below): a green test is not proof
+   until it has been shown to red when the exact behavior it pins is reverted.
+
+## Mutation discipline (mandatory law)
+
+Red-first proves a test was red once. MUTATION proves the test dies when the exact behavior it pins breaks. **A green
+test alone proves nothing.** This is a binding project law — part of the same red-first / standing evidence discipline —
+and it applies to every load-bearing fix or claim, for agents and for the controller's merge audit.
+
+1. **Every load-bearing pin ships mutation evidence.** Revert or corrupt the exact production behavior the test pins →
+   the pinning test MUST turn red, verbatim, on that mutation. A mutant that survives (the test stays green) is a hollow
+   test; strengthen it until it dies.
+2. **Comprehensive = both boundaries.** Where a fix corrects a value or classification, mutate in BOTH directions; each
+   opposite error MUST red under a different test. A test set that catches only one side of an error is incomplete.
+3. **What does the test actually hold?** Named hollow-test classes to mutate against:
+    - **Relative-invariant hole — mutate the CONSTANT itself.** A set of relative-invariant tests (`prose ≤ its
+      measure`, `A > B`) stays green for ANY value of the underlying constant, so its justification can silently drift.
+      Where a number is derived from a stated rule but the derivation lives only as a comment, that comment is an
+      unexecuted engineering claim that will rot. Pin the **derivation rule** (re-derive / re-measure the number from its
+      stated basis), NOT a literal `assert x == 780` (which merely moves the magic number into the test). Mutating the
+      literal constant MUST red the rule-pin. Precedents: a measure constant that survived being changed to a wrong value
+      on 1000+ green tests; a cache decode tolerance; a silently dropped run-summary counter.
+    - **Guard unreachable in every configuration.** The most extreme hollow test is not "returns empty" but a guard whose
+      protected path CANNOT fire in ANY configuration — structurally dead, not merely misplaced. Mutation reveals it: if
+      reverting the guarded behavior changes nothing observable, the guard never ran, in no configuration. Example: a
+      secret-tier deny rule that could only match a secret INSIDE the working grant, while the gate inspects only calls
+      OUTSIDE the grant — so it could never fire, once, in any setup. Analogues here: a decode tolerance dead-by-gate; an
+      under-guarded lane whose version input was never wired. Duty: when you add a guard, prove by mutation that SOME
+      input reaches and trips it — a guard no input can reach is theater.
+    - **Success masked by a sibling.** A run looks green not because the thing under test worked, but because a
+      parallel/sibling mechanism did the work. Isolate and probe the mechanism ALONE. Example: a `Write`-class rule
+      silently ignored while an `Edit`-class rule rode alongside and did the actual work — the aggregate passed; probing
+      `Edit` alone exposed it. Analogue here: a contaminated benchmark series where an orphaned first run mutated the
+      same target as the second, so a "surviving mutant" may have been reverted by its sibling before the build — re-run
+      solo. Duty: a passing set that exercises ≥2 mechanisms MUST isolate each; "the batch was green" is not "this rule
+      fired".
+4. **"Informal" = targeted manual mutations**, not (necessarily) a mutation-testing framework: revert-the-behavior
+   probes covering the defect class. A full mutation runner (mutmut / cosmic-ray) as a gate is a later candidate; the
+   manual targeted mutation is mandatory **now**.
+5. This is part of the red-first discipline and the standing evidence law ("я починил" / "I fixed it" without receipts
+   does not exist). A fix delivery report carries a **mutation evidence** section for its load-bearing pins.
 
 ## Verification commands
 

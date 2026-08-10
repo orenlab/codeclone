@@ -28,9 +28,9 @@ import orjson
 from codeclone.baseline.trust import current_python_tag
 from codeclone.cache.integrity import (
     as_str_dict,
+    cache_payload_checksum,
     read_json_document,
-    sign_cache_payload,
-    verify_cache_payload_signature,
+    verify_cache_payload_checksum,
 )
 from codeclone.contracts import BASELINE_FINGERPRINT_VERSION, CACHE_VERSION
 
@@ -378,9 +378,9 @@ def _load_source_cache(path: Path) -> WireCorpus:
             f"source cache version {version!r} is not current {CACHE_VERSION!r}"
         )
     payload = _object_dict(document.get("payload"), label="cache payload")
-    signature = _string(document.get("sig"), label="cache signature")
-    if not verify_cache_payload_signature(payload, signature):
-        raise CorruptStorage("source cache signature mismatch")
+    checksum = _string(document.get("checksum"), label="cache checksum")
+    if not verify_cache_payload_checksum(payload, checksum):
+        raise CorruptStorage("source cache checksum mismatch")
     files = _object_dict(payload.get("files"), label="cache files")
     result: WireCorpus = {}
     for path_key in sorted(files):
@@ -1175,7 +1175,7 @@ class MonolithReference:
             {
                 "v": CACHE_VERSION,
                 "payload": payload,
-                "sig": sign_cache_payload(payload),
+                "checksum": cache_payload_checksum(payload),
             }
         )
 
@@ -1196,9 +1196,9 @@ class MonolithReference:
         if _string(document.get("v"), label="monolith version") != CACHE_VERSION:
             raise CorruptStorage("monolith version mismatch")
         payload = _object_dict(document.get("payload"), label="monolith payload")
-        signature = _string(document.get("sig"), label="monolith signature")
-        if not verify_cache_payload_signature(payload, signature):
-            raise CorruptStorage("monolith signature mismatch")
+        checksum = _string(document.get("checksum"), label="monolith checksum")
+        if not verify_cache_payload_checksum(payload, checksum):
+            raise CorruptStorage("monolith checksum mismatch")
         if (
             _string(payload.get("py"), label="monolith python tag")
             != current_python_tag()
