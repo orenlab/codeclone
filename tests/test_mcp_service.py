@@ -10022,6 +10022,7 @@ def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
         "new_items": 0,
         "suppressed": 0,
         "total": 0,
+        "unreachable_statements": 0,
         "unresolved_external_override": 0,
     }
     # ... but neither the stored summary nor get_run_summary surfaces it, the
@@ -11231,6 +11232,7 @@ def _dead_code_family_with_abstentions() -> dict[str, object]:
             "baseline_diff_available": True,
             "new_items": 0,
             "unresolved_external_override": 2,
+            "unreachable_statements": 0,
             "live_roots": 4,
         },
         "items": [
@@ -11416,6 +11418,7 @@ def test_mcp_service_metrics_detail_family_refuses_false_zero_when_skipped() -> 
             "baseline_diff_available": False,
             "new_items": 0,
             "unresolved_external_override": 0,
+            "unreachable_statements": 0,
             "live_roots": 0,
         },
         "items": [],

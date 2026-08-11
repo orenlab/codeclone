@@ -108,6 +108,9 @@ def build_metrics_snapshot(
     api_surface_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
     )
+    dead_code_summary = _as_mapping(
+        _as_mapping(metrics_payload_map.get("dead_code")).get("summary")
+    )
     coverage_join_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("coverage_join")).get("summary")
     )
@@ -139,14 +142,15 @@ def build_metrics_snapshot(
             security_surfaces_summary.get("production")
         ),
         security_surfaces_tests=_as_int(security_surfaces_summary.get("tests")),
-        # Both proven lanes of the dead_code family, the same two the gate
-        # counts. Counting only unreferenced symbols here printed "Dead code
-        # ✔ clean" directly above a --fail-dead-code failure citing ten items:
-        # one run, two surfaces, opposite answers. The summary stays the wider
-        # number -- it shows medium-confidence candidates the gate does not act
-        # on -- but it can no longer read lower than the gate.
+        # Both proven lanes of the dead_code family, read from the counts the
+        # metrics payload publishes rather than measured again here. Counting
+        # only unreferenced symbols printed "Dead code clean" directly above a
+        # --fail-dead-code failure citing ten items; re-measuring the lists
+        # locally would fix that number while quietly becoming a second
+        # counter, free to drift from the one the gate and the report read.
         dead_code_count=(
-            len(project_metrics.dead_code) + len(project_metrics.unreachable_statements)
+            _as_int(dead_code_summary.get("total"))
+            + _as_int(dead_code_summary.get("unreachable_statements"))
         ),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,

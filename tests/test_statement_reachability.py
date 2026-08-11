@@ -664,11 +664,13 @@ def test_findings_join_the_dead_code_family_with_the_new_kind(
     for row in rows:
         assert row["confidence"] == "high"
         assert int(row["start_line"]) > 0
-    # A dead symbol and an unreachable statement are different defects; the
-    # statement lane must never be folded into the symbol total, and it adds no
-    # summary counter of its own — the list is the authority.
+    # A dead symbol and an unreachable statement are different defects, so the
+    # statement lane is still never folded into the symbol total. It does now
+    # publish its own counter beside that total: the surfaces that show the
+    # number (text, markdown, HTML, the gate) read the summary, and letting
+    # each of them measure the list instead created four drifting counters.
     assert family["summary"]["total"] == len(list(family["items"]))
-    assert "unreachable_statements" not in family["summary"]
+    assert family["summary"]["unreachable_statements"] == len(rows)
 
     lane_rows = [
         row
@@ -713,6 +715,11 @@ def test_findings_survive_the_report_document_projection(tmp_path: Path) -> None
         payload_mapping(payload_mapping(body["metrics"])["families"])["dead_code"]
     )
     assert len(payload_sequence(projected["unreachable_statements"])) == expected
+    # ... and the one published count beside it, on real cold-run data. Every
+    # surface that shows this number reads this field, so a producer that
+    # stops counting or a projection that stops carrying it is caught here
+    # rather than in whichever renderer someone happens to open.
+    assert payload_mapping(projected["summary"])["unreachable_statements"] == expected
     for row in payload_sequence(projected["unreachable_statements"]):
         row_map = payload_mapping(row)
         assert not str(row_map["relative_path"]).startswith("/")

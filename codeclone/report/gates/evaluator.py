@@ -844,13 +844,11 @@ def _gate_state_from_report_document(
         cohesion_max=_as_int(cohesion_summary.get("max"), 0),
         dependency_cycles=_as_int(dependencies_summary.get("cycles"), 0),
         dead_high_confidence=_as_int(dead_code_summary.get("high_confidence"), 0),
-        # Counted from the list the document already carries rather than from
-        # a summary field, because that list is the fact: it rode this very
-        # payload to the findings builder, which published ten findings while
-        # the summary beside it — the only thing this gate used to read — said
-        # zero. No new published counter, just the evidence consulted.
-        dead_unreachable_statements=len(
-            _as_sequence(dead_code_family.get("unreachable_statements"))
+        # The published count, not a local measurement: one field feeds this
+        # gate and the text/markdown/HTML surfaces, so the number an operator
+        # reads and the number that fails the build cannot come apart.
+        dead_unreachable_statements=_as_int(
+            dead_code_summary.get("unreachable_statements"), 0
         ),
         unresolved_external_override=_as_int(
             dead_code_summary.get("unresolved_external_override"), 0

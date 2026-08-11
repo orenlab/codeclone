@@ -1841,7 +1841,8 @@ def test_html_report_metrics_risk_branches() -> None:
         "insight-risk",
         'stroke="var(--error)"',
         "Cycles: 1; avg depth: 2.5; p95 depth: 3; max dependency depth: 4.",
-        "5 candidates total; 2 high-confidence items; 0 suppressed.",
+        "5 candidates total; 2 high-confidence items; "
+        "0 unreachable statement region(s); 0 suppressed.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',
         '<span class="main-tab-label">Dead Code</span>'
@@ -3232,7 +3233,10 @@ def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:
         ),
     )
     assert "Health 0/100 (n/a);" in html
-    assert "0 candidates total; 0 high-confidence items; 0 suppressed." in html
+    assert (
+        "0 candidates total; 0 high-confidence items; "
+        "0 unreachable statement region(s); 0 suppressed."
+    ) in html
     assert "insight-ok" in html
 
 
@@ -3291,7 +3295,10 @@ def test_html_report_renders_dead_code_split_with_suppressed_layer() -> None:
     )
     _assert_html_contains(
         html,
-        "0 candidates total; 0 high-confidence items; 9 suppressed.",
+        (
+            "0 candidates total; 0 high-confidence items; "
+            "0 unreachable statement region(s); 9 suppressed."
+        ),
         'data-subtab-group="dead-code"',
         'data-clone-tab="active" data-subtab-group="dead-code"',
         'data-clone-tab="suppressed" data-subtab-group="dead-code"',

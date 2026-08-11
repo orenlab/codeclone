@@ -4456,6 +4456,7 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
         "suppressed": suppressed_count,
         "baseline_diff_available": False,
         "new_items": 0,
+        "unreachable_statements": 0,
         "unresolved_external_override": 0,
         "live_roots": 0,
     }

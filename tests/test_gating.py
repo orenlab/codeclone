@@ -135,8 +135,26 @@ def _assert_gate(
 
 
 def _analysis_result(project_metrics: ProjectMetrics) -> AnalysisResult:
-    """One analysis result, so the gate and the summary read the same run."""
+    """One analysis result, so the gate and the summary read the same run.
 
+    Carries the dead-code counts in the shape the metrics payload publishes
+    them, because that published summary is what both the CLI line and the
+    gate now read. ``codeclone.core.metrics_payload`` owns producing it and is
+    pinned where it is produced; here the contract shape is what matters.
+    """
+
+    published_dead_code = {
+        "summary": {
+            "total": len(project_metrics.dead_code),
+            "high_confidence": sum(
+                1
+                for item in project_metrics.dead_code
+                if str(item.confidence).strip().lower() == "high"
+            ),
+            "unreachable_statements": len(project_metrics.unreachable_statements),
+            "unresolved_external_override": len(project_metrics.unresolved_overrides),
+        }
+    }
     return AnalysisResult(
         func_groups={},
         block_groups={},
@@ -149,7 +167,7 @@ def _analysis_result(project_metrics: ProjectMetrics) -> AnalysisResult:
         segment_clones_count=0,
         files_analyzed_or_cached=1,
         project_metrics=project_metrics,
-        metrics_payload=None,
+        metrics_payload={"dead_code": published_dead_code},
         suggestions=(),
         segment_groups_raw_digest="",
         observation_bundle=TEST_OBSERVATION_BUNDLE,
@@ -578,17 +596,22 @@ def test_cli_gate_state_carries_the_unreachable_statement_lane() -> None:
 def test_report_document_gate_reads_the_statement_lane_it_already_carries() -> None:
     """Regression barrier for a gate that consulted one lane out of two.
 
-    The document carries ``unreachable_statements`` right beside ``items`` and
-    handed both to the findings builder, which published ten findings — while
-    the dead-code gate read only the summary counter built from ``items`` and
-    exited 0. This fails the moment the gate goes back to a single lane, and
-    it deliberately supplies no summary counter: the list is the evidence.
+    The document carries both lanes and handed both to the findings builder,
+    which published ten findings while the dead-code gate read only the
+    counter built from ``items`` and exited 0. The gate now reads the same
+    published ``unreachable_statements`` count that text, markdown and HTML
+    read, so this fails the moment it goes back to one lane — or starts
+    measuring the list beside the field for itself.
     """
     document = {
         "metrics": {
             "families": {
                 "dead_code": {
-                    "summary": {"total": 0, "high_confidence": 0},
+                    "summary": {
+                        "total": 0,
+                        "high_confidence": 0,
+                        "unreachable_statements": 4,
+                    },
                     "items": [],
                     "unreachable_statements": [
                         {
