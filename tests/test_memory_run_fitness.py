@@ -50,12 +50,10 @@ from codeclone.memory.application import execute_memory_query
 from codeclone.memory.enums import EVIDENCE_KIND_VALUES
 from codeclone.memory.exceptions import UnfitAnalysisRunError
 from codeclone.memory.ingest import InitOptions
-from codeclone.memory.ingest import run_fitness as run_fitness_mod
 from codeclone.memory.ingest.mcp_sync import execute_mcp_memory_sync
 from codeclone.memory.ingest.run_fitness import (
     RUN_FITNESS_EVIDENCE_KIND,
     read_run_fitness,
-    unmeasured_refusal_message,
 )
 from codeclone.memory.ingest.runner import run_memory_init
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
@@ -67,15 +65,12 @@ from codeclone.models import (
     ObservationLaneName,
     TrustVector,
 )
-from tests._report_fixtures import (
-    build_test_report_document,
-    health_family_for_population,
-    single_module_baseline_container,
-)
+from tests._report_fixtures import single_module_baseline_container
 from tests.memory_fixtures import (
     git_repo_with_cached_report,
     memory_application_context,
     memory_project_db_paths,
+    report_document_for_counters,
 )
 
 _SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
@@ -181,24 +176,14 @@ def _run_document(
     """
 
     found, analyzed = _COUNTERS_FOR_POPULATION[population]
-    document = build_test_report_document(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        meta={"scan_root": str(root.resolve())},
-        inventory={
-            # A scope with nothing to find lists nothing: an inventory that
-            # contradicted its own counters would be a fixture no run produces.
-            "file_list": list(_REGISTRY) if found else [],
-            "files": {
-                "total_found": found,
-                "analyzed": analyzed,
-                "skipped": max(0, found - analyzed),
-            },
-        },
-        metrics={
-            "health": health_family_for_population(found=found, analyzed=analyzed)
-        },
+    # The assembly is shared with the memory-sync tests, which need the same
+    # kind of run described by the same two numbers; only the question asked
+    # of it differs, and that question — the state — stays here.
+    document = report_document_for_counters(
+        root,
+        found=found,
+        analyzed=analyzed,
+        registry_items=_REGISTRY,
         baseline_container=container,
         baseline_trust=trust,
     )
@@ -413,6 +398,10 @@ def test_refusal_carries_a_next_step_the_operator_can_run(tmp_path: Path) -> Non
     assert f"codeclone {root}" in message, message
     # The retry, spelled with the flag `memory init` actually takes.
     assert f"codeclone memory init --root {root}" in message, message
+    # The substance, not just the two commands: what to look at once the
+    # analysis has run. The MCP surface pins this same sentence against its
+    # own spelling, so gutting the remedy reds both audiences, not one.
+    assert "inventory.files" in message, message
 
 
 def test_mcp_sync_skips_the_run_that_measured_nothing(tmp_path: Path) -> None:
@@ -442,103 +431,6 @@ def test_mcp_sync_skips_the_run_that_measured_nothing(tmp_path: Path) -> None:
     assert fitness["ingestible"] is False
     _project, db_path = memory_project_db_paths(root)
     assert not db_path.exists()
-
-
-def test_mcp_sync_refusal_carries_the_callers_next_step(tmp_path: Path) -> None:
-    """The agent path ships the same executable remedy the CLI prints.
-
-    ``bootstrap_if_missing`` makes this the first contact an agent has with
-    memory, so this is the refusal an agent is most likely to meet — and the
-    surface where it could act on it. ``status='skipped'`` with
-    ``reason='unfit_run:…'`` names the dead end and offers no move out of it,
-    which is a diagnosis, not a procedure.
-    """
-
-    root, document = _repo_with_run(tmp_path, found=2, analyzed=0)
-    payload = execute_mcp_memory_sync(
-        root_path=root,
-        report_document=document,
-        trigger="auto",
-        run_id="run-unmeasured",
-        force=False,
-    )
-
-    assert payload["status"] == "skipped"
-    # The wording is the refusal owner's, carried whole rather than restated.
-    assert payload["next_step"] == unmeasured_refusal_message(root=str(root.resolve()))
-    # Pinned directly too: equality with the owner alone would stay green if
-    # the owner's text were gutted, which is the hollow half of a relative pin.
-    step = str(payload["next_step"])
-    assert f"codeclone memory init --root {root.resolve()}" in step, step
-
-
-def test_mcp_sync_next_step_has_exactly_one_owner(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The payload reads the refusal owner; it does not restate it.
-
-    Equality against the owner's current text cannot tell delegation from a
-    verbatim copy pasted beside it, and the copy is the defect: two wordings
-    of one refusal drift the moment either is edited, and the two surfaces
-    then disagree about what the operator should do.
-
-    The redirect is installed on the owning module, not on a name re-bound in
-    the sync, so nothing but a call that resolves in the owner can follow it:
-    a same-named twin defined next to the caller — the copy that survives an
-    equality check, because its text is identical today — reds here.
-    """
-
-    root, document = _repo_with_run(tmp_path, found=2, analyzed=0)
-    monkeypatch.setattr(
-        run_fitness_mod,
-        "unmeasured_refusal_message",
-        lambda *, root: f"redirected-owner::{root}",
-    )
-
-    payload = execute_mcp_memory_sync(
-        root_path=root,
-        report_document=document,
-        trigger="auto",
-        run_id="run-unmeasured",
-        force=False,
-    )
-
-    assert payload["next_step"] == f"redirected-owner::{root.resolve()}"
-
-
-def test_mcp_sync_offers_no_next_step_when_nothing_was_refused(
-    tmp_path: Path,
-) -> None:
-    """An outcome that is not a dead end carries no step out of it.
-
-    ``next_step`` is remediation, and the convention this payload joins —
-    start, finish, verify — attaches it only where the caller is blocked;
-    terminal successful outcomes omit the key rather than carry a null or a
-    congratulation. A step on a healthy outcome is noise, and noise is what
-    teaches a reader to stop reading the field that matters.
-    """
-
-    root, document = _repo_with_run(tmp_path, found=2, analyzed=2)
-    completed = execute_mcp_memory_sync(
-        root_path=root,
-        report_document=document,
-        trigger="explicit",
-        run_id="run-measured",
-        force=True,
-    )
-    unchanged = execute_mcp_memory_sync(
-        root_path=root,
-        report_document=document,
-        trigger="auto",
-        run_id="run-measured",
-        force=False,
-    )
-
-    assert completed["status"] == "completed"
-    assert unchanged["status"] == "unchanged"
-    assert "next_step" not in completed, completed
-    assert "next_step" not in unchanged, unchanged
 
 
 # ── the opposite sign: a measured run must not be refused ───────────

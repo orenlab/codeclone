@@ -167,8 +167,14 @@ def _complete_memory_sync(
             # question, drifting from the first edit to either of them.
             # Called through the module rather than through an imported name
             # so the wording resolves in its owner at call time: that leaves
-            # no binding here for a same-named local twin to occupy.
-            next_step=run_fitness.unmeasured_refusal_message(root=str(root_path)),
+            # no binding here for a same-named local twin to occupy. The
+            # surface is stated, never defaulted: a caller that said nothing
+            # would inherit another audience's spelling silently.
+            next_step=run_fitness.refusal_message(
+                reason=refused.refusal_reason,
+                root=str(root_path),
+                surface="mcp",
+            ),
         )
         payload["run_fitness"] = refused.as_payload()
         return payload

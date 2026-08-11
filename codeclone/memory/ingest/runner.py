@@ -234,7 +234,12 @@ def run_memory_init(
         # Refused before anything is resolved or created: a run that observed
         # none of the population it found has no facts to contribute, and its
         # extractors would still speak — they read the *found* file registry.
-        raise UnfitAnalysisRunError(unmeasured_refusal_message(root=str(root_path)))
+        # Spelled for the CLI: this exception's message is what a terminal
+        # prints. The MCP sync catches this and renders the same remedy for
+        # its own caller instead of relaying a shell command to an agent.
+        raise UnfitAnalysisRunError(
+            unmeasured_refusal_message(root=str(root_path), surface="cli")
+        )
 
     resolved_root = root_path.resolve()
     config = resolve_memory_config(resolved_root)
