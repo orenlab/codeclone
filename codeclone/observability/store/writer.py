@@ -25,11 +25,11 @@ _PROFILE_NULL: tuple[None, ...] = (None,) * 8
 _OPERATION_SQL = (
     "INSERT OR REPLACE INTO platform_operations("
     "operation_id, parent_operation_id, correlation_id, surface, name, "
-    "started_at_utc, duration_ms, status, error_kind, session_id, "
+    "started_at_utc, duration_ms, status, plane, error_kind, session_id, "
     "repo_root_digest, request_bytes, response_bytes, request_tokens, "
     "response_tokens, rss_mb, rss_delta_mb, peak_rss_mb, peak_rss_delta_mb, "
     "cpu_user_ms, cpu_system_ms, open_fds, thread_count) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 _SPAN_SQL = (
@@ -69,6 +69,7 @@ def _operation_row(operation: OperationRecord) -> tuple[object, ...]:
         operation.started_at_utc,
         operation.duration_ms,
         operation.status,
+        operation.plane,
         operation.error_kind,
         operation.session_id,
         operation.repo_root_digest,
@@ -141,7 +142,28 @@ def run_retention_gc(
             "DELETE FROM platform_operations WHERE operation_id=?",
             operation_ids,
         )
+    reclaim_store_space(conn)
     return len(operation_ids)
 
 
-__all__ = ["run_retention_gc", "write_operation"]
+def reclaim_store_space(conn: sqlite3.Connection) -> None:
+    """Return deleted pages to the filesystem.
+
+    ``DELETE`` only moves pages onto the freelist and leaves the write-ahead log
+    at its high-water mark, so the store measured 11.12 MiB on disk while
+    holding 180 KiB of live rows. Checkpointing truncates the log and ``VACUUM``
+    rewrites the database without its freelist. Both are best-effort: this is
+    disposable diagnostics, and a busy store must never fail a write because
+    housekeeping could not take its lock.
+    """
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # VACUUM cannot run inside a transaction; isolation_level=None is not
+        # guaranteed here, so close any implicit one first.
+        conn.commit()
+        conn.execute("VACUUM")
+    except sqlite3.Error:
+        return
+
+
+__all__ = ["reclaim_store_space", "run_retention_gc", "write_operation"]

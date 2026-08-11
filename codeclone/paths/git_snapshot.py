@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
+from typing import Final
 
 from ..models import (
     DigestObject,
@@ -27,7 +29,7 @@ from ..models import (
     GitTrackedContent,
     GitWorkspaceSnapshot,
 )
-from ..observability import record_counter
+from ..observability import record_counter, span
 
 
 def _normalize_path(path: str) -> str:
@@ -42,19 +44,34 @@ def _normalize_path(path: str) -> str:
     return cleaned
 
 
+# Git subprocesses are the one analysis cost paid outside this process, and
+# they were invisible: the two declared hygiene spans had no call site, so a
+# slow `git status` on a large worktree looked like slow analysis.
+_GIT_SUBPROCESS_SPANS: Final[Mapping[str, str]] = {
+    "rev-parse": "hygiene.git.rev_parse",
+    "status": "hygiene.git.status",
+}
+
+
+def _git_subprocess_span(args: Sequence[str]) -> AbstractContextManager[object]:
+    name = _GIT_SUBPROCESS_SPANS.get(args[0]) if args else None
+    return nullcontext() if name is None else span(name=name)
+
+
 def _run_git_text(root: Path, args: Sequence[str], *, timeout: int) -> str | None:
-    try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return None
-    return completed.stdout
+    with _git_subprocess_span(args):
+        try:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return None
+        return completed.stdout
 
 
 def _run_git_bytes(

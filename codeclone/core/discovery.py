@@ -388,6 +388,12 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         content_span.set_counter("cache_stat_fast_reject", stat_fast_rejects)
         profile_span.set_counter("cache_lane_neutral_hit", neutral_hits)
         profile_span.set_counter("cache_lane_dependent_miss", dependent_misses)
+        # Whether reuse *hit*, not just that reuse was attempted: a hit is a
+        # file whose whole cached profile was adopted, a miss is a file that had
+        # to be processed anyway. Without these the span recorded that profile
+        # reuse happened and nothing about whether it worked.
+        profile_span.set_counter("cache_profile_hit", cache_hits)
+        profile_span.set_counter("cache_profile_miss", len(files_to_process))
 
     cache.prune_file_entries(all_file_paths)
 

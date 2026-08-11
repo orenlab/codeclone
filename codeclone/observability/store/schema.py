@@ -24,6 +24,7 @@ _OBSERVABILITY_DB_RELATIVE = ".codeclone/db/platform_observability.sqlite3"
 _SCHEMA_META_KEY = "schema_version"
 _COUNTER_VERSION_META_KEY = "db_counter_version"
 _LEGACY_COUNTER_VERSION = "legacy"
+_PLANE_COLUMN = "plane"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS platform_meta (
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS platform_operations (
     started_at_utc TEXT NOT NULL,
     duration_ms REAL NOT NULL,
     status TEXT NOT NULL,
+    plane TEXT,
     error_kind TEXT,
     session_id TEXT,
     repo_root_digest TEXT,
@@ -129,6 +131,24 @@ def _ensure_operation_columns(conn: sqlite3.Connection) -> None:
         row[1] for row in conn.execute("PRAGMA table_info(platform_operations)")
     }
     _ensure_peak_rss_columns(conn, table="platform_operations", existing=existing)
+    if _PLANE_COLUMN not in existing:
+        # Additive and nullable on purpose: rows written before the plane mark
+        # existed stay NULL, and the reader reports them as unattributed rather
+        # than back-filling a plane nobody measured. The index is created here
+        # rather than in _SCHEMA because CREATE TABLE IF NOT EXISTS leaves an
+        # older table untouched — the index must not exist before its column.
+        conn.execute(f"ALTER TABLE platform_operations ADD COLUMN {_PLANE_COLUMN} TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_platform_operations_plane "
+        f"ON platform_operations ({_PLANE_COLUMN}, started_at_utc)"
+    )
+
+
+def operations_have_plane_column(conn: sqlite3.Connection) -> bool:
+    """Can this store tell the runtime plane from the observer plane at all?"""
+    return _PLANE_COLUMN in {
+        row[1] for row in conn.execute("PRAGMA table_info(platform_operations)")
+    }
 
 
 def _schema_version_key(value: str) -> tuple[int, ...] | None:
@@ -211,6 +231,7 @@ __all__ = [
     "create_observability_schema",
     "observability_store_path",
     "open_observability_store",
+    "operations_have_plane_column",
     "read_db_counter_version",
     "validate_observability_schema",
 ]
