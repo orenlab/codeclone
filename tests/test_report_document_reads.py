@@ -62,16 +62,12 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 #: absent read fails as growth, and a fixed one fails as a stale entry, so the
 #: register can only shrink and cannot rot.
 #:
-#: ``codeclone/memory/project.py`` carries the second surviving consumer of the
-#: withdrawn ``integrity.digest`` alias. It is fixed on branch
-#: ``fix/a2-memory-ingest-paths``; when that lands, delete this entry.
-_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {
-    "codeclone/memory/project.py": (
-        "integrity.digest",
-        "integrity.digest.value",
-        "meta.report_generated_at_utc",
-    ),
-}
+#: Empty since ``fix/a2-memory-ingest-paths`` landed: its entry for
+#: ``codeclone/memory/project.py`` went stale the moment that fix merged, the
+#: stale side of the ratchet said so by name, and the entry was deleted rather
+#: than carried. Add an entry only for a read another live branch already owns,
+#: and delete it the moment that branch lands.
+_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {}
 
 
 def _callee_name(node: ast.expr) -> str:
