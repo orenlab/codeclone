@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -20,7 +21,11 @@ from codeclone.memory.application import MemoryApplicationContext
 from codeclone.memory.exceptions import UnfitAnalysisRunError
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
-from codeclone.memory.ingest.run_fitness import unmeasured_refusal_message
+from codeclone.memory.ingest.run_fitness import (
+    REFUSAL_REASONS,
+    refusal_message,
+    unmeasured_refusal_message,
+)
 from codeclone.memory.models import (
     MemoryProject,
     MemoryRecord,
@@ -33,9 +38,13 @@ from codeclone.memory.project import (
     resolve_project_identity,
 )
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+from codeclone.models import BaselineContainerV3, TrustVector
 from codeclone.report.meta import current_report_timestamp_utc
 from codeclone.utils.json_io import read_json_object
-from tests._report_fixtures import build_test_report_document
+from tests._report_fixtures import (
+    build_test_report_document,
+    health_family_for_population,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -218,7 +227,40 @@ def unfit_run_refusal(root: Path) -> UnfitAnalysisRunError:
     ratchet does not allow to reach across.
     """
 
-    return UnfitAnalysisRunError(unmeasured_refusal_message(root=str(root)))
+    return UnfitAnalysisRunError(
+        unmeasured_refusal_message(root=str(root), surface="cli")
+    )
+
+
+def mcp_refusal_next_steps() -> tuple[str, ...]:
+    """Every refusal remedy, rendered as an MCP caller receives it.
+
+    Lives here because the two halves of the check sit in different rings: a
+    memory test may not import the MCP surface, and an MCP test may not import
+    memory ingest. A fixture module is not a ``test_*.py``, so it is the
+    subject of neither ring rule, and this module already owns the CLI-side
+    refusal — the seam is where it already was, not one cut open for this.
+    """
+
+    return tuple(
+        step
+        for reason in sorted(REFUSAL_REASONS)
+        if (step := refusal_message(reason=reason, root="/repo", surface="mcp"))
+        is not None
+    )
+
+
+def tool_calls_named_in(step: str) -> tuple[str, ...]:
+    """The tools a step tells its reader to call, read out of the step itself.
+
+    Taken from the artifact rather than listed beside it. A list of "tools we
+    mention" is a second record of one fact, and it rots exactly where it
+    hurts: silently, while the guard consulting it stays green and blesses a
+    step naming something nobody can call. Nothing here needs keeping in sync,
+    because the step is the only copy.
+    """
+
+    return tuple(sorted(set(re.findall(r"\b([a-z][a-z0-9_]*)\s*\(", step))))
 
 
 def memory_application_context(root: Path) -> MemoryApplicationContext:
@@ -338,6 +380,49 @@ def git_repo_with_cached_report(
         encoding="utf-8",
     )
     return root, report_path, report_document
+
+
+def report_document_for_counters(
+    root: Path,
+    *,
+    found: int,
+    analyzed: int,
+    registry_items: list[str],
+    baseline_container: BaselineContainerV3 | None = None,
+    baseline_trust: TrustVector | None = None,
+) -> dict[str, object]:
+    """A report of a run that found ``found`` files and read ``analyzed``.
+
+    Those two counters are the whole input the population classifier reads, so
+    a fixture that states them describes the run's fitness without naming it —
+    which keeps callers free of the vocabulary and of its renames.
+
+    Shared rather than copied: the run-fitness tests and the memory-sync tests
+    both need such a run, and a second assembly would be a second thing to
+    keep true. A scope with nothing to find lists nothing, because an
+    inventory that contradicted its own counters would be a fixture no real
+    run produces.
+    """
+
+    return build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(root.resolve())},
+        inventory={
+            "file_list": list(registry_items) if found else [],
+            "files": {
+                "total_found": found,
+                "analyzed": analyzed,
+                "skipped": max(0, found - analyzed),
+            },
+        },
+        metrics={
+            "health": health_family_for_population(found=found, analyzed=analyzed)
+        },
+        baseline_container=baseline_container,
+        baseline_trust=baseline_trust,
+    )
 
 
 def registry_items_from_report(report_document: Mapping[str, object]) -> list[str]:

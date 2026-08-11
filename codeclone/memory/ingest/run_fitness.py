@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
+from typing import Final, Literal
 
 from ...models import RunFitness
 from ...utils.coerce import as_mapping, as_sequence
@@ -44,34 +45,100 @@ UNMEASURED_POPULATION = "unmeasured"
 
 REFUSAL_UNMEASURED = "health_population_unmeasured"
 
+#: Every typed reason on which ingest refuses a whole run. Declared beside the
+#: reasons themselves so the set cannot drift from them, and iterated by the
+#: guard that requires each one to ship a remedy naming a tool: a population
+#: state added later cannot grow a refusal that leaves its caller with no move.
+REFUSAL_REASONS: Final[frozenset[str]] = frozenset({REFUSAL_UNMEASURED})
 
-def unmeasured_refusal_message(*, root: str) -> str:
-    """The whole refusal a human reads: the cause, then the commands to type.
+#: Who is being told. The remedy is one fact; only the way each audience
+#: invokes it differs, so this selects a spelling and never a meaning.
+RefusalSurface = Literal["cli", "mcp"]
 
-    One owner for the wording, and deliberately here rather than in the CLI:
-    this module already owns the refusal vocabulary
+
+def _refusal_commands(*, surface: RefusalSurface, root: str) -> tuple[str, str]:
+    """The two invocations — re-analyse, then re-ingest — for one audience.
+
+    This is the whole of what varies between surfaces. An MCP caller has
+    ``analyze_repository`` and ``manage_engineering_memory`` in hand, so
+    sending it to a shell for ``codeclone`` would be second-class advice and
+    would break the rule the rest of that surface keeps — a typed outcome's
+    step names a tool the caller can call. ``run_id`` is optional on the
+    refresh, and named here anyway: omitted, it binds to whatever ran last,
+    which under concurrent agents is silently the wrong run.
+
+    A pair rather than a record: these two strings are unpacked by their only
+    caller on the next line and never travel, so giving them a class would put
+    a data shape outside the model store to describe a local intermediate.
+    """
+
+    if surface == "mcp":
+        return (
+            f"call analyze_repository(root={root!r})",
+            (
+                "call manage_engineering_memory(action='refresh_from_run', "
+                f"root={root!r}, run_id=<the run_id it returned>)"
+            ),
+        )
+    return (
+        f"run `codeclone {root}`",
+        f"re-run `codeclone memory init --root {root}`",
+    )
+
+
+def unmeasured_refusal_message(*, root: str, surface: RefusalSurface) -> str:
+    """The whole refusal one audience reads: the cause, then what to do.
+
+    One owner for the substance, and deliberately here rather than in a
+    surface: this module already owns the refusal vocabulary
     (:data:`REFUSAL_UNMEASURED`), so a remedy owned by one surface would leave
     every other surface either silent or free to invent a second, drifting
-    explanation of the same refusal. The CLI relays this string whole.
+    explanation of the same refusal.
+
+    Rendering per surface is not a second truth. The cause, the order of the
+    moves, what to look at and the condition for retrying are stated once,
+    below; only :func:`_refusal_commands` differs, and it supplies spelling,
+    not meaning. Change the sentence here and both audiences move together —
+    which is exactly what a single owner has to mean once there are two of
+    them.
 
     The step is derived from the cause rather than attached to it.
     ``unmeasured`` means the run opened none of the files it found, so
-    repeating the ingest unchanged would repeat the refusal: the operator has
+    repeating the ingest unchanged would repeat the refusal: the caller has
     to see *why* nothing was read first — ``inventory.files`` reports found
     against analyzed beside the skip counters that name it — and only then
     re-run the ingest.
     """
 
+    reanalyse, reingest = _refusal_commands(surface=surface, root=root)
     return (
         "Refusing to ingest analysis facts from a run whose health population "
         f"is {UNMEASURED_POPULATION!r}: no file was analysed, so every "
         "extracted fact would describe code this run never read. "
-        f"Next step: run `codeclone {root}` and read inventory.files — it "
+        f"Next step: {reanalyse} and read inventory.files — it "
         "reports how many Python files were found against how many were "
         "analyzed, with the skip counters that name the cause. Once at least "
-        "one Python file under that root is readable and parses, re-run "
-        f"`codeclone memory init --root {root}`."
+        "one Python file under that root is readable and parses, "
+        f"{reingest}."
     )
+
+
+def refusal_message(
+    *, reason: str | None, root: str, surface: RefusalSurface
+) -> str | None:
+    """The remedy for one refusal reason, spelled for one surface.
+
+    ``None`` for an unknown reason rather than an exception: the only caller
+    is the handler that is already reporting a refusal, so raising here would
+    replace a typed refusal with a crash. An unregistered reason therefore
+    degrades to a payload with no step — the state that shipped before this
+    existed — while the guard over :data:`REFUSAL_REASONS` keeps that state
+    from reaching a release.
+    """
+
+    if reason == REFUSAL_UNMEASURED:
+        return unmeasured_refusal_message(root=root, surface=surface)
+    return None
 
 
 def _stated(value: object) -> str:
@@ -150,12 +217,15 @@ def run_fitness_evidence(
 
 
 __all__ = [
+    "REFUSAL_REASONS",
     "REFUSAL_UNMEASURED",
     "RUN_FITNESS_EVIDENCE_KIND",
     "UNKNOWN",
     "UNMEASURED_POPULATION",
+    "RefusalSurface",
     "RunFitness",
     "read_run_fitness",
+    "refusal_message",
     "run_fitness_evidence",
     "run_fitness_evidence_id",
     "unmeasured_refusal_message",

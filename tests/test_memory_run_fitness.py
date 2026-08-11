@@ -65,15 +65,12 @@ from codeclone.models import (
     ObservationLaneName,
     TrustVector,
 )
-from tests._report_fixtures import (
-    build_test_report_document,
-    health_family_for_population,
-    single_module_baseline_container,
-)
+from tests._report_fixtures import single_module_baseline_container
 from tests.memory_fixtures import (
     git_repo_with_cached_report,
     memory_application_context,
     memory_project_db_paths,
+    report_document_for_counters,
 )
 
 _SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
@@ -179,24 +176,14 @@ def _run_document(
     """
 
     found, analyzed = _COUNTERS_FOR_POPULATION[population]
-    document = build_test_report_document(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        meta={"scan_root": str(root.resolve())},
-        inventory={
-            # A scope with nothing to find lists nothing: an inventory that
-            # contradicted its own counters would be a fixture no run produces.
-            "file_list": list(_REGISTRY) if found else [],
-            "files": {
-                "total_found": found,
-                "analyzed": analyzed,
-                "skipped": max(0, found - analyzed),
-            },
-        },
-        metrics={
-            "health": health_family_for_population(found=found, analyzed=analyzed)
-        },
+    # The assembly is shared with the memory-sync tests, which need the same
+    # kind of run described by the same two numbers; only the question asked
+    # of it differs, and that question — the state — stays here.
+    document = report_document_for_counters(
+        root,
+        found=found,
+        analyzed=analyzed,
+        registry_items=_REGISTRY,
         baseline_container=container,
         baseline_trust=trust,
     )
@@ -411,6 +398,10 @@ def test_refusal_carries_a_next_step_the_operator_can_run(tmp_path: Path) -> Non
     assert f"codeclone {root}" in message, message
     # The retry, spelled with the flag `memory init` actually takes.
     assert f"codeclone memory init --root {root}" in message, message
+    # The substance, not just the two commands: what to look at once the
+    # analysis has run. The MCP surface pins this same sentence against its
+    # own spelling, so gutting the remedy reds both audiences, not one.
+    assert "inventory.files" in message, message
 
 
 def test_mcp_sync_skips_the_run_that_measured_nothing(tmp_path: Path) -> None:
