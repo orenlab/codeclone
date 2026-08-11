@@ -21,9 +21,18 @@ BASELINE_FINGERPRINT_VERSION: Final = "3"
 # to, in every expression position, replacing the four position-based
 # preservation sites. Alpha-renaming a local no longer moves the wire, and a
 # resolved import keeps its canonical identity where the old wire erased it.
+# The wire is the preimage of every stored fingerprint and statement token, and
+# its generation is not inside those hash domains, so this constant is an input
+# of the module-neutral cache reuse profile (codeclone/cache/reuse.py) instead
+# of depending on BASELINE_FINGERPRINT_VERSION being bumped in the same commit.
 WIRE_VERSION: Final = "2"
 MODULE_IDENTITY_VERSION: Final = "2"
 PORTABLE_PATH_PROFILE_VERSION: Final = "1"
+# Generation of the semantic event vocabulary. Events and the function contract
+# summaries built from them are stored in the module-neutral cache payload, so
+# this constant is an input of that lane's reuse profile
+# (codeclone/cache/reuse.py): a bump re-extracts the files instead of serving
+# the previous vocabulary's events off a warm hit.
 SEMANTIC_EVENT_VERSION: Final = "1"
 CONTRACT_IR_VERSION: Final = "1"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
@@ -56,7 +65,12 @@ DESIGN_METRICS_ALGORITHM_REVISION: Final = "2"
 # contribution, the match wildcard rule, the BoolOp arity rule, the nested
 # scope boundary — or when the lane's population rule moves. Values across
 # revisions are not comparable; a baseline carrying an older revision is
-# untrusted for this lane rather than diffed.
+# untrusted for this lane rather than diffed. Cached values move with it by
+# construction: the constant is an input of the module-NEUTRAL cache reuse
+# profile (codeclone/cache/reuse.py), because the per-unit complexity and its
+# risk band are stored in that payload and a warm hit serves them verbatim.
+# Before that binding a bump moved the report stamp only, and a warm run
+# answered with pre-bump complexity under the new revision's name.
 COMPLEXITY_ALGORITHM_REVISION: Final = "3"
 BASELINE_LANE_DESCRIPTOR_VERSION: Final = "1"
 BASELINE_LANE_DIGEST_DOMAIN: Final = "codeclone.baseline.lane.v1\0"
@@ -125,6 +139,10 @@ STRUCTURAL_FINDINGS_CATALOG_VERSION: Final = "1"
 # is already decided unreachable before any origin is consulted, and no verdict
 # depends on it. No value inference and no propagation: the moment a name
 # lookup counts as evidence the rule stops being this declared predicate.
+# The verdict set is stored per unit in the module-neutral cache payload, so
+# this constant is an input of that lane's reuse profile
+# (codeclone/cache/reuse.py) and a policy bump re-decides instead of serving the
+# previous predicate's answers.
 STATEMENT_REACHABILITY_POLICY_VERSION: Final = "1"
 # Maximum number of inserted, deleted or replaced normalized statements between
 # two units that still group as the ``near_miss`` clone tier (39Y Y8). Integer
@@ -155,7 +173,11 @@ NEAR_MISS_ALGORITHM_REVISION: Final = "3"
 # exact match in its own digest domain — O(n), no pairwise matcher, no
 # similarity score. Bumping this never touches the exact lane:
 # BASELINE_FINGERPRINT_VERSION is unchanged, and the tier reaches no baseline
-# lane and no gate.
+# lane and no gate. It does touch the cache: the per-unit renamed digest and the
+# renamed token sequence are stored in the module-neutral payload and their hash
+# domains embed this revision, so the constant is an input of that lane's reuse
+# profile (codeclone/cache/reuse.py). Without it a partially warm run would
+# group digests of two generations against each other.
 RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 
 # 3.2 adds the two rule-3 fact families: per-class base resolution and

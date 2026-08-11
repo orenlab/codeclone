@@ -20,25 +20,36 @@ with executable evidence, not prose:
 * Candidate 3 - the cache "signature" is a keyless checksum. This pins the
   CURRENT behavior (a hand-forged valid checksum is accepted) so the keyless
   nature is on the record while the vocabulary fork is an owner decision.
+
+The last section generalizes candidate 2 from four named constants into the
+class law they are instances of (X-02): a bump of ANY revision whose output is
+stored in a cache payload must miss exactly the lane carrying that output.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from types import ModuleType
+from typing import Final, cast
 
 import pytest
 
 import codeclone.cache.reuse as cache_reuse
+import codeclone.contracts as contracts
 from codeclone.cache.integrity import cache_envelope_checksum
 from codeclone.cache.reuse import build_module_dependent_profile
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
 from codeclone.models import DigestObject
+from codeclone.paths.module_identity.manifest import build_module_identity_manifest
 from tests.test_cache import (
+    _bind_module_paths,
+    _content_hit_decision,
+    _load_cache_entry,
     _save_single_cache_entry,
 )
 
@@ -282,3 +293,338 @@ def test_cache_integrity_vocabulary_is_checksum_not_signature() -> None:
     source = Path(integ.__file__).read_text("utf-8").lower()
     assert "cache trust equals source trust" in source
     assert "not authentication" in source
+
+
+# --------------------------------------------------------------------------- #
+# X-02 - the class law behind candidate 2.
+#
+# Candidate 2 pinned four named constants one test each. That form cannot catch
+# the NEXT unbound revision, and it did not: the neutral lane carries the whole
+# per-unit payload (complexity, statement reachability, renamed structure,
+# semantic facts) and was an input of no algorithm revision at all, so a
+# complexity recalibration served pre-recalibration values off a warm hit while
+# stamping the new revision on the report. The bump discipline that was supposed
+# to prevent it works only because an unrelated CACHE_VERSION bump happened to
+# ride along - success under the neighbour.
+#
+# The law, stated once and enforced over the whole constant family:
+#
+#   A contracts constant that declares the generation of an algorithm, policy
+#   or catalog whose OUTPUT IS STORED in a cache payload must be an input of
+#   that payload's reuse profile. A constant that declares no stored output
+#   must NOT be an input of either profile - over-invalidation throws away a
+#   warm cache that is still correct, which is a defect in the other direction.
+#
+# Every constant of the family is classified here, so a NEW revision constant
+# fails the completeness test until its author decides which lane it belongs to.
+# --------------------------------------------------------------------------- #
+
+#: Cache payload lanes (``CacheEntryV3.module_neutral`` / ``module_dependent``).
+_LANE_NEUTRAL: Final = "neutral"
+_LANE_DEPENDENT: Final = "dependent"
+#: Not a direct profile input: carried into the dependent profile by the module
+#: manifest digest, which the profile already consumes.
+_LANE_MODULE_MANIFEST: Final = "module_manifest"
+#: Declares nothing that is stored in a cache payload.
+_LANE_NONE: Final = "none"
+
+#: Every ``*_VERSION`` / ``*_REVISION`` / schema / catalog / policy constant in
+#: ``codeclone.contracts``, classified by the cache lane carrying its output.
+_CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
+    # ── neutral lane · CacheNeutralPayload: units, blocks, segments, semantics
+    "BASELINE_FINGERPRINT_VERSION": (_LANE_NEUTRAL, "units[].fingerprint"),
+    "COMPLEXITY_ALGORITHM_REVISION": (
+        _LANE_NEUTRAL,
+        "units[].cyclomatic_complexity and units[].risk are the source-decision "
+        "counter's output and are served verbatim off a warm hit (X-02)",
+    ),
+    "RENAMED_STRUCTURE_ALGORITHM_REVISION": (
+        _LANE_NEUTRAL,
+        "units[].renamed_fingerprint and units[].renamed_statement_sequence are "
+        "digested in domains that embed this revision",
+    ),
+    "SEMANTIC_EVENT_VERSION": (
+        _LANE_NEUTRAL,
+        "semantic_facts.events and .function_contract_summaries ride the neutral "
+        "payload",
+    ),
+    "STATEMENT_REACHABILITY_POLICY_VERSION": (
+        _LANE_NEUTRAL,
+        "units[].unreachable_statements is the policy's verdict set",
+    ),
+    "WIRE_VERSION": (
+        _LANE_NEUTRAL,
+        "the canonical wire is the preimage of units[].fingerprint and of the "
+        "near-miss statement tokens; both are stored",
+    ),
+    # ── dependent lane · CacheDependentPayload
+    "API_SURFACE_SIGNATURE_VERSION": (_LANE_DEPENDENT, "api_surface"),
+    "DESIGN_METRICS_ALGORITHM_REVISION": (
+        _LANE_DEPENDENT,
+        "class_metrics (cbo, lcom4, coupling/cohesion risk)",
+    ),
+    "LIVENESS_POLICY_VERSION": (
+        _LANE_DEPENDENT,
+        "dead_candidates, referenced_qualnames and live-root reasons",
+    ),
+    "RUNTIME_REACHABILITY_CATALOG_VERSION": (_LANE_DEPENDENT, "runtime_reachability"),
+    "SECURITY_SURFACE_CATALOG_VERSION": (_LANE_DEPENDENT, "security_surfaces"),
+    "STRUCTURAL_FINDINGS_CATALOG_VERSION": (_LANE_DEPENDENT, "structural_findings"),
+    # ── carried into the dependent profile by module_manifest_digest
+    "MODULE_IDENTITY_VERSION": (
+        _LANE_MODULE_MANIFEST,
+        "inside the module identity manifest, whose digest the dependent "
+        "profile already consumes",
+    ),
+    # ── no stored output: computed per run OVER cached facts, never stored
+    "AUTHORITY_ANALYSIS_REVISION": (_LANE_NONE, "aggregate authority pass, post-cache"),
+    "AUTHORITY_REGISTRY_VERSION": (_LANE_NONE, "aggregate authority pass, post-cache"),
+    "BASELINE_LANE_DESCRIPTOR_VERSION": (_LANE_NONE, "baseline lane descriptor"),
+    "CONTRACT_IR_VERSION": (_LANE_NONE, "IR is built per run from cached summaries"),
+    "GATE_LANE_MATRIX_VERSION": (_LANE_NONE, "gate projection, post-cache"),
+    "HEALTH_INPUT_MANIFEST_VERSION": (_LANE_NONE, "health projection, post-cache"),
+    "NEAR_MISS_ALGORITHM_REVISION": (
+        _LANE_NONE,
+        "governs what is COMPUTED OVER the stored statement tokens, never the "
+        "tokens: their domain moves with RENAMED_STRUCTURE_ALGORITHM_REVISION "
+        "(analysis/renamed_structure.py) and with the wire, both of which are "
+        "neutral-lane inputs above",
+    ),
+    "OBSERVATION_DIGEST_VERSION": (
+        _LANE_NONE,
+        "observation lane digest, computed per run from facts",
+    ),
+    "OBSERVER_VOCABULARY_VERSION": (_LANE_NONE, "runtime observability vocabulary"),
+    # ── no stored output: artifact/store schemas outside the analysis cache
+    "AUDIT_PROJECTION_VERSION": (_LANE_NONE, "memory projection"),
+    "BASELINE_SCHEMA_VERSION": (_LANE_NONE, "baseline artifact schema"),
+    "CACHE_VERSION": (
+        _LANE_NONE,
+        "the cache's own generation gate: it rejects the whole envelope before "
+        "any profile is consulted (see the version-mismatch tests above), so "
+        "adding it to a profile would be a second, weaker copy of that gate",
+    ),
+    "CORPUS_AGENT_LABEL_CONTRACT_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_ANALYTICS_STORE_SCHEMA_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_CONTROL_PLANE_CONTRACT_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_EMBEDDING_CONTRACT_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_EXPORT_SCHEMA_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_NORMALIZER_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_PARTITION_MAP_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "CORPUS_REPRESENTATION_CONTRACT_VERSION": (_LANE_NONE, "corpus analytics store"),
+    "ENGINEERING_MEMORY_SCHEMA_VERSION": (_LANE_NONE, "memory store schema"),
+    "EXPERIENCE_DISTILLATION_VERSION": (_LANE_NONE, "memory projection"),
+    "IDE_GOVERNANCE_PROTOCOL_VERSION": (_LANE_NONE, "IDE attestation protocol"),
+    "MEMORY_PROJECTION_VERSION": (_LANE_NONE, "memory projection"),
+    "METRICS_BASELINE_SCHEMA_VERSION": (_LANE_NONE, "metrics artifact stamp"),
+    "PATCH_TRAIL_SCHEMA_VERSION": (_LANE_NONE, "audit artifact schema"),
+    "PLATFORM_OBSERVABILITY_SCHEMA_VERSION": (_LANE_NONE, "observability store"),
+    "REPORT_SCHEMA_VERSION": (_LANE_NONE, "report artifact schema"),
+    "SEMANTIC_INDEX_FORMAT_VERSION": (_LANE_NONE, "memory semantic index"),
+    "SEMANTIC_PROJECTION_REVISION_VERSION": (_LANE_NONE, "memory semantic index"),
+    "TRAJECTORY_PROJECTION_VERSION": (_LANE_NONE, "memory projection"),
+    "TRAJECTORY_PROJECTION_VERSION_V1": (_LANE_NONE, "memory projection"),
+    "TRAJECTORY_QUALITY_SCORE_VERSION": (_LANE_NONE, "memory projection"),
+    # ── no stored output: not read by any production code today
+    "PORTABLE_PATH_PROFILE_VERSION": (_LANE_NONE, "dead constant, no producer"),
+    "SOURCE_KIND_POLICY_VERSION": (
+        _LANE_NONE,
+        "dead constant; source kind is derived per run from the path and is not "
+        "stored in either payload",
+    ),
+}
+
+#: Membership law of the family, deliberately wider than "_VERSION": a new
+#: revision is easy to name in a way that a narrow suffix rule would miss.
+_FAMILY_TOKENS: Final = ("VERSION", "REVISION", "SCHEMA", "CATALOG", "POLICY")
+
+
+def _family_constant_names() -> frozenset[str]:
+    return frozenset(
+        name
+        for name in dir(contracts)
+        if name.isupper() and any(token in name for token in _FAMILY_TOKENS)
+    )
+
+
+def _shifted(value: object) -> object:
+    if isinstance(value, bool):  # pragma: no cover - no bool constant today
+        return not value
+    if isinstance(value, int):
+        return value + 1000
+    return f"{value}-bumped"
+
+
+def _bump_everywhere(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Bump one contracts constant the way a real bump lands.
+
+    A constant is consumed through ``from ..contracts import NAME``, so the
+    value a caller sees is a module global of the IMPORTING module. Patching
+    ``codeclone.contracts`` alone would therefore prove nothing. Every already
+    imported ``codeclone`` module that holds this name at its current value is
+    patched, which is exactly the state of the world one commit after an author
+    edits the constant.
+    """
+
+    current = getattr(contracts, name)
+    shifted = _shifted(current)
+    monkeypatch.setattr(contracts, name, shifted)
+    for module_name, module in list(sys.modules.items()):
+        if not module_name.startswith("codeclone.") or not isinstance(
+            module, ModuleType
+        ):
+            continue
+        if getattr(module, name, object()) == current:
+            monkeypatch.setattr(module, name, shifted)
+
+
+def _lane_hits_after_bump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> tuple[bool, bool]:
+    """Return (neutral_hit, dependent_hit) for a warm entry after one bump.
+
+    The entry is written and read back BEFORE the bump, so it carries the
+    profiles of the generation that produced it - the warm cache an author
+    inherits. The reading cache is constructed AFTER the bump, so its profiles
+    are the running generation's. That is the whole trigger, exercised through
+    the public reuse decision rather than through the digest builders.
+
+    Limitation stated on purpose: the module registry handle used here carries a
+    fixture manifest digest, so a constant that reaches the dependent profile
+    ONLY through that digest reads as a miss-free "none" in this harness. There
+    is exactly one such constant and it has its own test below.
+    """
+
+    cache_path = tmp_path / "cache.json"
+    _save_single_cache_entry(cache_path)
+    _, entry = _load_cache_entry(cache_path, "x.py")
+
+    _bump_everywhere(monkeypatch, name)
+
+    reader = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(reader, "x.py")
+    decision = _content_hit_decision(reader, entry)
+    return decision.neutral.hit, decision.dependent.hit
+
+
+def test_every_contracts_version_constant_declares_its_cache_lane() -> None:
+    """A new revision constant must be classified before it can ship.
+
+    This is the half that makes the law a class law instead of a longer list of
+    named guards: the author of the next revision cannot stay silent about
+    whether its output is cached.
+    """
+
+    declared = frozenset(_CACHE_LANE_BY_CONSTANT)
+    actual = _family_constant_names()
+    assert actual - declared == frozenset(), (
+        "unclassified contracts constants - declare the cache lane whose payload "
+        f"stores their output, or _LANE_NONE with a reason: {sorted(actual - declared)}"
+    )
+    assert declared - actual == frozenset(), (
+        f"classified constants that no longer exist: {sorted(declared - actual)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "constant",
+    sorted(
+        name
+        for name, (lane, _reason) in _CACHE_LANE_BY_CONSTANT.items()
+        if lane == _LANE_NEUTRAL
+    ),
+)
+def test_neutral_lane_revision_bump_misses_the_neutral_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, constant: str
+) -> None:
+    """Bumping a revision whose output rides units[]/semantic_facts must miss.
+
+    Pre-fix this is red for every constant except BASELINE_FINGERPRINT_VERSION:
+    the neutral profile binds no algorithm revision at all, so a warm hit serves
+    the previous generation's units while the run stamps the new revision.
+    """
+
+    neutral_hit, _dependent_hit = _lane_hits_after_bump(tmp_path, monkeypatch, constant)
+    assert not neutral_hit, (
+        f"{constant} bumped, yet the neutral lane still hit: a warm run serves "
+        f"pre-bump {_CACHE_LANE_BY_CONSTANT[constant][1]}"
+    )
+
+
+@pytest.mark.parametrize(
+    "constant",
+    sorted(
+        name
+        for name, (lane, _reason) in _CACHE_LANE_BY_CONSTANT.items()
+        if lane == _LANE_DEPENDENT
+    ),
+)
+def test_dependent_lane_policy_bump_misses_only_the_dependent_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, constant: str
+) -> None:
+    """The dependent policies must miss their own lane and spare the neutral one.
+
+    The second half is the over-invalidation guard: re-parsing every unit
+    because a security-surface catalog gained a sink throws away a warm cache
+    that is still correct for fingerprints, complexity and reachability.
+    """
+
+    neutral_hit, dependent_hit = _lane_hits_after_bump(tmp_path, monkeypatch, constant)
+    assert not dependent_hit, (
+        f"{constant} bumped, yet the dependent lane still hit: a warm run serves "
+        f"pre-bump {_CACHE_LANE_BY_CONSTANT[constant][1]}"
+    )
+    assert neutral_hit, (
+        f"{constant} is a dependent-lane policy but its bump also invalidated the "
+        "neutral lane - over-invalidation, not a trigger"
+    )
+
+
+@pytest.mark.parametrize(
+    "constant",
+    sorted(
+        name
+        for name, (lane, _reason) in _CACHE_LANE_BY_CONSTANT.items()
+        if lane == _LANE_NONE
+    ),
+)
+def test_non_cached_constant_bump_invalidates_no_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, constant: str
+) -> None:
+    """Nothing a cache payload stores is an output of these constants.
+
+    The reverse skew is a defect too: a profile that keys on a report schema or
+    a memory projection version discards a correct warm cache on every unrelated
+    bump.
+    """
+
+    neutral_hit, dependent_hit = _lane_hits_after_bump(tmp_path, monkeypatch, constant)
+    assert neutral_hit and dependent_hit, (
+        f"{constant} declares no cached output ({_CACHE_LANE_BY_CONSTANT[constant][1]})"
+        " yet its bump invalidated a lane: over-invalidation"
+    )
+
+
+def test_module_identity_version_is_carried_by_the_manifest_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one constant that reaches a profile through another digest.
+
+    ``module_manifest_digest`` is already a dependent-profile input, and the
+    manifest embeds this version, so the carriage is real rather than declared.
+    Proving it here is what lets the loop above read the fixture-digest harness
+    honestly instead of silently excusing this constant.
+    """
+
+    def digest() -> str:
+        return build_module_identity_manifest(
+            root=tmp_path,
+            paths=(),
+            import_mounts=(),
+            strategy="root",
+        ).manifest_digest
+
+    before = digest()
+    _bump_everywhere(monkeypatch, "MODULE_IDENTITY_VERSION")
+    assert digest() != before

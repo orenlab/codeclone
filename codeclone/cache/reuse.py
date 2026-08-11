@@ -18,11 +18,16 @@ import orjson
 from ..baseline.trust import current_python_tag
 from ..contracts import (
     API_SURFACE_SIGNATURE_VERSION,
+    COMPLEXITY_ALGORITHM_REVISION,
     DESIGN_METRICS_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
+    RENAMED_STRUCTURE_ALGORITHM_REVISION,
     RUNTIME_REACHABILITY_CATALOG_VERSION,
     SECURITY_SURFACE_CATALOG_VERSION,
+    SEMANTIC_EVENT_VERSION,
+    STATEMENT_REACHABILITY_POLICY_VERSION,
     STRUCTURAL_FINDINGS_CATALOG_VERSION,
+    WIRE_VERSION,
 )
 from ..models import (
     CacheEntryV3,
@@ -77,18 +82,44 @@ def build_module_neutral_profile(
             "fingerprint_version": fingerprint_version,
             "block_min_loc": block_min_loc,
             "block_min_stmt": block_min_stmt,
+            # The neutral payload is not only the fingerprint: one cached unit
+            # row also carries the public cyclomatic_complexity and its risk
+            # band, the unreachable-statement set, the renamed-structure digest
+            # and the renamed token sequence, and the file's semantic facts ride
+            # beside it. Each of those is the OUTPUT of an algorithm whose
+            # generation is declared by a contracts constant, and a warm hit
+            # serves the stored output verbatim - so the constant has to key
+            # this digest or a bump is a bump of the report stamp only, with the
+            # pre-bump values underneath it (X-02). Bump discipline that relies
+            # on some neighbouring constant moving at the same time is not a
+            # trigger: CACHE_VERSION rode along by accident once and hid exactly
+            # this for a whole generation.
+            "complexity_algorithm_revision": COMPLEXITY_ALGORITHM_REVISION,
             "min_loc": min_loc,
             "min_stmt": min_stmt,
             "normalization": "ast-normalizer-v2",
             "parser": "python-ast",
             "python_tag": current_python_tag(),
+            "renamed_structure_algorithm_revision": (
+                RENAMED_STRUCTURE_ALGORITHM_REVISION
+            ),
             "segment_algorithm": "stmt-window-v1",
             "segment_min_loc": segment_min_loc,
             "segment_min_stmt": segment_min_stmt,
+            "semantic_event_version": SEMANTIC_EVENT_VERSION,
+            "statement_reachability_policy_version": (
+                STATEMENT_REACHABILITY_POLICY_VERSION
+            ),
             # v3 (39Y Y5): unit facts are emitted for every defined function
             # instead of only clone-eligible ones. Entries written by v2 carry
             # the smaller population, so they must not be reused as-is.
             "unit_algorithm": "cfg-fingerprint-v3",
+            # The canonical wire is the preimage of every stored fingerprint and
+            # of every stored statement token, and its own generation does not
+            # appear in those digests' domains. Binding it here is what makes a
+            # wire generation independent of BASELINE_FINGERPRINT_VERSION
+            # instead of dependent on the two being bumped together by hand.
+            "wire_version": WIRE_VERSION,
         },
     )
 
