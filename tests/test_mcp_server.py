@@ -21,6 +21,7 @@ import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
+from codeclone.surfaces.mcp.messages.help_topics import HELP_TOPIC_SPECS
 from codeclone.surfaces.mcp.messages.patch_contract import (
     FINISH_OUTCOME_REASONS,
     next_step_hint,
@@ -1220,3 +1221,63 @@ def test_patch_contract_steps_name_tools_this_server_registers() -> None:
         assert not unknown, f"{reason} next_step names unregistered tools: {unknown}"
     # Steps that name no call would leave this comparing nothing while green.
     assert checked, "no next_step named a call, so no name reached the registry"
+
+
+def _help_recommended_tool_lanes(
+    payload: Mapping[str, object],
+    *,
+    topic: str,
+) -> list[tuple[str, list[str]]]:
+    """Every lane of a served help payload that hands the reader a tool name.
+
+    The overview republishes each topic's list inside its own index, so a check
+    that read only the top-level field would leave that second lane unchecked.
+    Both are read back out of the served payload rather than listed here.
+    """
+
+    lanes = [(f"{topic} help", cast("list[str]", payload["recommended_tools"]))]
+    index = payload.get("topics")
+    if isinstance(index, list):
+        for entry in index:
+            entry_map = cast("Mapping[str, object]", entry)
+            lanes.append(
+                (
+                    f"{topic} index entry {entry_map['topic']}",
+                    cast("list[str]", entry_map["recommended_tools"]),
+                )
+            )
+    return lanes
+
+
+def test_help_topics_recommend_tools_this_server_registers() -> None:
+    """The same rule again, on the surface whose whole job is routing.
+
+    Every help topic hands its reader tool names to call next, and the overview
+    republishes them in its index. Those names are read back out of the served
+    payload and compared to the registry a caller actually reaches, so neither
+    side keeps a list of tool names to rot. Rename or withdraw a tool and this
+    reds, instead of an agent asking for help and being sent to nothing.
+
+    Comparison is by exact name. A substring test would bless exactly the
+    rename it is meant to catch: analyze_repository is a substring of
+    reanalyze_repository, and finish of unfinish.
+    """
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=4)
+    registered = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    topics = sorted(HELP_TOPIC_SPECS)
+    # A topic table gone empty would visit nothing and stay green.
+    assert topics, "no help topic is defined, so no name reached the registry"
+
+    for topic in topics:
+        payload = _structured_tool_result(
+            asyncio.run(server.call_tool("help", {"topic": topic, "detail": "normal"}))
+        )
+        for lane, named in _help_recommended_tool_lanes(payload, topic=topic):
+            # A lane that recommends nothing routes nobody, and would leave the
+            # comparison below with no name to check.
+            assert named, f"{lane} recommends no tool to call"
+            unknown = sorted(set(named) - registered)
+            assert not unknown, f"{lane} recommends unregistered tools: {unknown}"
