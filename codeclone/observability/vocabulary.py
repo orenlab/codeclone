@@ -42,10 +42,22 @@ def resolve_operation_plane(operation_name: str) -> str:
     )
 
 
+# One entry per MCP tool a caller can reach, over BOTH governance channels
+# (get_workspace_session_stats and get_controller_audit_trail are registered
+# only when ide_governance_channel is on, so the default registry is not the
+# whole registry). server.py wraps every tool call in
+# span(name=f"mcp.{tool_name}") and validate_span_name is unconditional, so a
+# tool missing from this set does not lose telemetry — it stops executing, and
+# the caller gets an ObservabilityVocabularyError instead of an answer. This is
+# a copy of a set that lives elsewhere, kept because codeclone.observability is
+# ring r1 and cannot import the r4 server (nor the optional mcp runtime it
+# needs); tests/test_observability_vocabulary.py therefore compares it to the
+# live registry in both directions rather than to a second hand-written list.
 _MCP_TOOL_NAMES: Final = frozenset(
     {
         "analyze_changed_paths",
         "analyze_repository",
+        "check_authority",
         "check_clones",
         "check_cohesion",
         "check_complexity",
