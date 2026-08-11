@@ -99,6 +99,7 @@ from codeclone.models import (
     SemanticFileFacts,
     StructuralFindingGroupDict,
     UnitCoverageFact,
+    UnreachableStatementItem,
     UnresolvedOverrideItem,
 )
 from codeclone.report.gates.evaluator import (
@@ -331,6 +332,96 @@ def test_optional_runtime_path_resolves_and_falls_back(
         _resolve_optional_runtime_path("coverage.xml", root=tmp_path)
         == (tmp_path / "coverage.xml").absolute()
     )
+
+
+def _unit_with_unreachable(qualname: str, filepath: str) -> dict[str, object]:
+    return {
+        "qualname": qualname,
+        "filepath": filepath,
+        "start_line": 1,
+        "end_line": 5,
+        "cyclomatic_complexity": 1,
+        "nesting_depth": 0,
+        "risk": "low",
+        "unreachable_statements": (
+            UnreachableStatementItem(
+                reason="after_terminator",
+                start_line=3,
+                end_line=3,
+                statement_count=1,
+            ),
+        ),
+    }
+
+
+def _dead_code_lane_with_golden_fixtures(
+    *,
+    golden_fixture_paths: tuple[str, ...],
+) -> ProjectMetrics:
+    project_metrics, _dep_graph, _dead_items = compute_project_metrics(
+        module_registry=_TEST_MODULE_REGISTRY,
+        units=(
+            _unit_with_unreachable(
+                "tests.fixtures.corpus.cases:after_return",
+                "tests/fixtures/corpus/cases.py",
+            ),
+            _unit_with_unreachable("pkg.mod:run", "pkg/mod.py"),
+        ),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        referenced_qualnames=frozenset(),
+        files_found=2,
+        files_analyzed_or_cached=2,
+        function_clone_groups=0,
+        block_clone_groups=0,
+        skip_dependencies=True,
+        skip_dead_code=False,
+        scan_root="",
+        golden_fixture_paths=golden_fixture_paths,
+    )
+    return project_metrics
+
+
+def test_declared_golden_fixtures_reach_the_dead_code_lane() -> None:
+    """The channel the clone lane already honours must reach this lane too.
+
+    A tree declared in ``golden_fixture_paths`` exists to contain the defect
+    it demonstrates, so it is corpus construction rather than project debt.
+    The declaration was honoured for clone groups and ignored here, which is
+    how ten findings in a declared corpus failed this project's own gate.
+    """
+
+    metrics = _dead_code_lane_with_golden_fixtures(
+        golden_fixture_paths=("tests/fixtures/corpus",),
+    )
+
+    surviving = {finding.filepath for finding in metrics.unreachable_statements}
+    assert surviving == {"pkg/mod.py"}
+
+
+def test_golden_fixture_suppression_never_reaches_undeclared_paths() -> None:
+    """The mirror: suppression must not become silence.
+
+    Trading a false finding for a false absence is the same defect facing the
+    other way, so an undeclared path keeps every finding even while a declared
+    sibling is suppressed, and declaring nothing suppresses nothing.
+    """
+
+    undeclared = _dead_code_lane_with_golden_fixtures(golden_fixture_paths=())
+    other_tree = _dead_code_lane_with_golden_fixtures(
+        golden_fixture_paths=("tests/fixtures/unrelated",),
+    )
+
+    assert {finding.filepath for finding in undeclared.unreachable_statements} == {
+        "pkg/mod.py",
+        "tests/fixtures/corpus/cases.py",
+    }
+    assert {finding.filepath for finding in other_tree.unreachable_statements} == {
+        "pkg/mod.py",
+        "tests/fixtures/corpus/cases.py",
+    }
 
 
 def test_compute_project_metrics_respects_skip_flags() -> None:
@@ -566,6 +657,7 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
         "high_confidence": 1,
         "suppressed": 1,
         "unresolved_external_override": 0,
+        "unreachable_statements": 0,
         "live_roots": 0,
     }
     suppressed_items = dead_code["suppressed_items"]

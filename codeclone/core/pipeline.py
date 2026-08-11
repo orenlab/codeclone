@@ -145,6 +145,8 @@ def compute_project_metrics(
     module_registry: ModuleRegistryHandle,
     skip_dependencies: bool,
     skip_dead_code: bool,
+    scan_root: str = "",
+    golden_fixture_paths: Sequence[str] = (),
 ) -> tuple[ProjectMetrics, DepGraph, tuple[DeadItem, ...]]:
     context = MetricProjectContext(
         units=tuple(units),
@@ -173,6 +175,8 @@ def compute_project_metrics(
         module_registry=module_registry,
         skip_dependencies=skip_dependencies,
         skip_dead_code=skip_dead_code,
+        scan_root=scan_root,
+        golden_fixture_paths=tuple(golden_fixture_paths),
     )
     project_fields = project_metrics_defaults()
     dep_graph = DepGraph(
@@ -424,6 +428,8 @@ def analyze(
             module_registry=discovery.module_registry,
             skip_dependencies=boot.args.skip_dependencies,
             skip_dead_code=boot.args.skip_dead_code,
+            scan_root=str(boot.root),
+            golden_fixture_paths=golden_fixture_paths,
         )
         if not boot.args.skip_dead_code:
             suppressed_dead_items = find_suppressed_unused(

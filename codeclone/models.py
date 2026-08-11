@@ -3579,6 +3579,11 @@ class MetricProjectContext:
     block_clone_groups: int = 0
     skip_dependencies: bool = False
     skip_dead_code: bool = False
+    #: Repo-relative trees the project declared as golden-fixture corpora, and
+    #: the root their paths are relative to. Carried so the dead-code lane can
+    #: honour the same declaration the clone lane already honours.
+    scan_root: str = ""
+    golden_fixture_paths: tuple[str, ...] = ()
     memo: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
