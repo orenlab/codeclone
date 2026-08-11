@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ...config.memory import IngestConfig, resolve_memory_config
 from ...report.meta import current_report_timestamp_utc
+from ..exceptions import UnfitAnalysisRunError
 from ..models import IngestionRun, MemoryProject, RecordBatch, generate_memory_id
 from ..project import (
     GitProvenance,
@@ -38,6 +39,12 @@ from .extractors import (
     extract_test_anchors,
     merge_batches,
 )
+from .run_fitness import (
+    RunFitness,
+    read_run_fitness,
+    run_fitness_evidence,
+    unmeasured_refusal_message,
+)
 
 
 def enrich_batch_git_evidence(batch: RecordBatch, git: GitProvenance) -> None:
@@ -59,6 +66,34 @@ def enrich_batch_git_evidence(batch: RecordBatch, git: GitProvenance) -> None:
         )
         if evidence is not None:
             batch.evidence.append(evidence)
+
+
+def enrich_batch_run_fitness_evidence(
+    batch: RecordBatch,
+    fitness: RunFitness,
+    *,
+    analysis_fingerprint: str | None,
+    report_digest: str | None,
+) -> None:
+    """Stamp every record with the fitness of the run that produced it.
+
+    Unconditional, exactly like the population fact riding every report and
+    not only the refused one: a mark written only for bad runs would leave a
+    reader unable to separate "this run was fine" from "this record predates
+    the mark", and absence would have to be read as an answer again.
+    """
+
+    now = current_report_timestamp_utc()
+    for record in batch.records:
+        batch.evidence.append(
+            run_fitness_evidence(
+                record=record,
+                fitness=fitness,
+                analysis_fingerprint=analysis_fingerprint,
+                report_digest=report_digest,
+                created_at_utc=now,
+            )
+        )
 
 
 def _registry_paths(report_document: Mapping[str, object]) -> frozenset[str]:
@@ -172,6 +207,12 @@ def build_init_batch(
         )
     merged = merge_batches(batches)
     enrich_batch_git_evidence(merged, git)
+    enrich_batch_run_fitness_evidence(
+        merged,
+        read_run_fitness(report_document),
+        analysis_fingerprint=analysis_fingerprint,
+        report_digest=report_digest,
+    )
     return merged
 
 
@@ -188,6 +229,13 @@ def run_memory_init(
     report_document: Mapping[str, object],
     options: InitOptions,
 ) -> InitReport:
+    fitness = read_run_fitness(report_document)
+    if not fitness.ingestible:
+        # Refused before anything is resolved or created: a run that observed
+        # none of the population it found has no facts to contribute, and its
+        # extractors would still speak — they read the *found* file registry.
+        raise UnfitAnalysisRunError(unmeasured_refusal_message(root=str(root_path)))
+
     resolved_root = root_path.resolve()
     config = resolve_memory_config(resolved_root)
     db_path = resolve_memory_db_path(resolved_root, config)
@@ -311,6 +359,7 @@ def run_memory_init(
 __all__ = [
     "build_init_batch",
     "enrich_batch_git_evidence",
+    "enrich_batch_run_fitness_evidence",
     "planned_type_counts",
     "run_memory_init",
 ]

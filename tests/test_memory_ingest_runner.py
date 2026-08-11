@@ -17,6 +17,7 @@ from codeclone.config.memory import resolve_memory_config
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.memory.ingest import InitOptions
 from codeclone.memory.ingest.extractors import extract_document_links
+from codeclone.memory.ingest.run_fitness import RUN_FITNESS_EVIDENCE_KIND
 from codeclone.memory.ingest.runner import (
     _registry_paths,
     build_init_batch,
@@ -751,4 +752,9 @@ def test_document_link_records_bind_to_the_commit_they_were_read_at(
         store.close()
 
     assert [tuple(row)[1:] for row in record_rows] == [(head, head, "main")]
-    assert [tuple(row) for row in evidence_rows] == [("git_commit", head, "main")]
+    by_lane = {str(row[0]): tuple(row)[1:] for row in evidence_rows}
+    assert by_lane["git_commit"] == (head, "main")
+    # Exhaustive on purpose, and now two lanes: git provenance answers *when*
+    # the link held, the run-fitness mark answers whether the run that read it
+    # was fit to be believed. A third lane appearing here is a contract change.
+    assert set(by_lane) == {"git_commit", RUN_FITNESS_EVIDENCE_KIND}

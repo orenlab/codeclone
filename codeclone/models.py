@@ -2589,6 +2589,52 @@ class HealthScore:
     population: HealthPopulation = "complete"
 
 
+@dataclass(frozen=True, slots=True)
+class RunFitness:
+    """Whether the run that produced a report was fit to be believed.
+
+    Both facts are read off a finished report, never re-derived here:
+    ``population`` is the health owner's tri-state above, ``baseline_state``
+    is the baseline projection's collapse of the per-lane trust vector.
+    ``"unknown"`` is a legitimate value for either — a report that never
+    stated the fact has not said the run was unfit, and reading silence as a
+    verdict would invent one.
+
+    ``ingestible`` is the only opinion here, and it is narrow: a run that
+    observed none of the population it found has nothing to contribute, while
+    a partial or un-baselined run measured something real and travels on with
+    its provenance attached.
+    """
+
+    population: str
+    baseline_state: str
+    untrusted_lanes: tuple[str, ...]
+    ingestible: bool
+    refusal_reason: str | None
+
+    @property
+    def provenance(self) -> str:
+        """The compact mark stamped on each record the run produced.
+
+        Two fields, alphabetically ordered, one line. The per-lane detail is
+        deliberately absent: it is stated once per run, not copied onto every
+        row that run writes.
+        """
+
+        return f"baseline={self.baseline_state};population={self.population}"
+
+    def as_payload(self) -> dict[str, object]:
+        """Run-level projection, lanes included, for one caller-facing reply."""
+
+        return {
+            "population": self.population,
+            "baseline_state": self.baseline_state,
+            "untrusted_lanes": list(self.untrusted_lanes),
+            "ingestible": self.ingestible,
+            "refusal_reason": self.refusal_reason,
+        }
+
+
 SourceKind = Literal["production", "tests", "fixtures", "mixed", "other"]
 
 

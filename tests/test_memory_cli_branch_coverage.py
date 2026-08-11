@@ -18,7 +18,7 @@ from codeclone.contracts import ExitCode
 from codeclone.memory.ingest import InitReport
 from codeclone.surfaces.cli.memory import _CLI_GOVERNANCE_BREAK_GLASS_FLAG, memory_main
 
-from .memory_fixtures import cli_memory_repo
+from .memory_fixtures import cli_memory_repo, unfit_run_refusal
 
 
 class _MemoryCliConsole:
@@ -166,6 +166,52 @@ def test_memory_cli_init_fails_when_run_init_throws(
         ]
     )
     assert code == int(ExitCode.INTERNAL_ERROR)
+
+
+def test_memory_cli_init_refusal_prints_the_next_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal an operator actually sees carries the executable step.
+
+    The wording is composed by ``unmeasured_refusal_message`` -- one owner --
+    and this pins that the CLI relays it whole rather than summarising it
+    away. Printing only the cause would leave a typed outcome with no move,
+    and a remedy that lives in a source comment is invisible at the terminal.
+    """
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    refusal = unfit_run_refusal(root.resolve())
+
+    def _refuse(**_kwargs: object) -> InitReport:
+        raise refusal
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.load_report_for_memory_init",
+        lambda **_kwargs: SimpleNamespace(
+            rejected_cache_reason=None,
+            source="fresh_analysis",
+            document={},
+        ),
+    )
+    monkeypatch.setattr("codeclone.surfaces.cli.memory.run_memory_init", _refuse)
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.render_init_note",
+        lambda **_kwargs: None,
+    )
+    console = _MemoryCliConsole()
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.memory_console",
+        lambda: console,
+    )
+
+    code = memory_main(["init", "--root", str(root.resolve())])
+
+    printed = "\n".join(console.lines)
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert "Next step:" in printed, printed
+    assert f"codeclone memory init --root {root.resolve()}" in printed, printed
 
 
 @pytest.mark.parametrize(
