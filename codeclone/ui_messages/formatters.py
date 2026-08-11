@@ -15,6 +15,7 @@ import textwrap
 import traceback
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Final
 
 from .. import __version__
 from ..contracts import ISSUES_URL
@@ -508,16 +509,29 @@ def fmt_summary_clones(
     return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
 
 
+#: Population states that print no grade on the summary line, each with its
+#: own sentence. One table rather than a chain of ``if``s: a state added
+#: without a row here prints a score, which is the failure mode this whole
+#: split exists to stop.
+_HEALTH_ABSENCE_LINE: Final[dict[str, str]] = {
+    "unmeasured": "not measured (no file was read)",
+    "complete_empty": "not measured (no source file in scope)",
+}
+
+
 def fmt_metrics_health(
     total: int,
     grade: str,
     *,
-    population: str = "complete",
+    population: str = "complete_nonempty",
 ) -> str:
-    if population == "unmeasured":
-        # No file was read, so there is no grade to print. Showing one — of
-        # any letter — would be a verdict about code the run never opened.
-        return f"  {'Health':<{_L}}[bold]not measured (no file was read)[/bold]"
+    absence = _HEALTH_ABSENCE_LINE.get(population)
+    if absence is not None:
+        # There is no grade to print. Showing one — of any letter — would be a
+        # verdict about code the run never opened, or about code that does not
+        # exist. Two absences, two sentences: one sends the reader to the dead
+        # worker, the other to the analysis root.
+        return f"  {'Health':<{_L}}[bold]{absence}[/bold]"
     s = _HEALTH_GRADE_STYLE.get(grade, "bold")
     return f"  {'Health':<{_L}}[{s}]{total}/100 ({grade})[/{s}]"
 

@@ -87,16 +87,21 @@ def _weighted_total(score: HealthScore) -> int:
 @pytest.mark.parametrize(
     ("found", "analyzed"),
     [
-        pytest.param(0, 0, id="empty-root"),
         pytest.param(40, 0, id="every-found-file-skipped"),
+        pytest.param(1046, 0, id="every-file-lost-to-a-dead-worker"),
     ],
 )
 def test_unread_population_is_unmeasured_not_clean(found: int, analyzed: int) -> None:
-    """Nothing was read, so there is no health to report — from either input.
+    """Files exist and none were read, so there is no health to report.
 
-    An empty root and a root whose every file failed to parse are different
-    accidents with the same evidentiary content: zero observations. Both used
-    to come back ``90/100 (A)``.
+    A root whose every file failed to parse and a root whose worker died are
+    different accidents with the same evidentiary content: zero observations
+    of a population that demonstrably exists. Both used to come back
+    ``90/100 (A)``.
+
+    The empty root that used to share this table has moved to
+    ``tests/test_empty_analysis_scope.py``. It is a different fact: nothing
+    was lost there, because there was nothing to lose.
     """
 
     score = compute_health(_health_inputs(found=found, analyzed=analyzed))
@@ -147,7 +152,7 @@ def test_complete_run_is_scored_exactly_as_before() -> None:
         )
     )
 
-    assert score.population == "complete"
+    assert score.population == "complete_nonempty"
     assert score.total == _weighted_total(score)
     assert score.total > 0
     assert score.grade in {"A", "B", "C", "D", "F"}
@@ -176,12 +181,12 @@ def test_coverage_dimension_re_derives_the_share_that_was_read(
 @pytest.mark.parametrize(
     ("found", "analyzed", "expected"),
     [
-        (0, 0, "unmeasured"),
+        (0, 0, "complete_empty"),
         (40, 0, "unmeasured"),
         (40, 1, "partial"),
         (40, 39, "partial"),
-        (40, 40, "complete"),
-        (1, 1, "complete"),
+        (40, 40, "complete_nonempty"),
+        (1, 1, "complete_nonempty"),
     ],
 )
 def test_population_state_covers_every_input_combination(

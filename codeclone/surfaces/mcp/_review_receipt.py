@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Final, Literal
 
 from ...contracts import REPORT_SCHEMA_VERSION
-from ...report.messages.projections import HEALTH_NOT_MEASURED
+from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ...utils.mapping_paths import section
@@ -455,11 +455,16 @@ def _receipt_health_text(health: Mapping[str, object]) -> str:
 
     A receipt is evidence, so "None/100 (None)" is worse here than anywhere
     else: it reads as a measured score of nothing rather than as the absence
-    of a measurement.
+    of a measurement. And evidence has to name *which* absence: a receipt
+    saying "no file was read" about a scope that simply holds no Python would
+    be a second, quieter falsehood in the same line.
     """
 
     if health.get("score") is None and "population" in health:
-        return HEALTH_NOT_MEASURED
+        return HEALTH_ABSENCE_TEXT.get(
+            str(health.get("population", "")),
+            HEALTH_NOT_MEASURED,
+        )
     return f"{health.get('score', 'n/a')}/100 ({health.get('grade', 'n/a')})"
 
 

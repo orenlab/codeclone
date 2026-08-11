@@ -15,9 +15,10 @@ from ...contracts import (
     GATE_LANE_MATRIX_VERSION,
     HEALTH_INPUT_MANIFEST_VERSION,
     ExitCode,
+    HealthPopulation,
 )
 from ...metrics.registry import METRIC_FAMILIES
-from ...models import HealthPopulation, ObservationLaneName, cycle_kind_counts
+from ...models import ObservationLaneName, cycle_kind_counts
 from ...observability import span
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -105,17 +106,33 @@ class GateState:
     diff_typing_param_permille_delta: int = 0
     diff_typing_return_permille_delta: int = 0
     diff_docstring_permille_delta: int = 0
-    #: How much of the found population the run actually read. Every predicate
-    #: below counts observed debt, so on an unmeasured population they are all
-    #: vacuously satisfied — the gate would be answering a question nobody
-    #: measured. Defaults to ``complete`` so the constructors that build a
-    #: state by hand keep today's behaviour exactly.
-    health_population: HealthPopulation = "complete"
+    #: What the run observed of the population it found. Every predicate below
+    #: counts observed debt, so on a population that was never read — and on
+    #: one that does not exist — they are all vacuously satisfied, and the gate
+    #: would be answering a question with no subject. The two states are
+    #: refused separately in ``_POPULATION_REFUSALS`` because they send an
+    #: operator to two different places. Defaults to ``complete_nonempty`` so
+    #: the constructors that build a state by hand keep today's behaviour
+    #: exactly.
+    health_population: HealthPopulation = "complete_nonempty"
     #: Files found and never read. Produced since the first release, carried
     #: to the summary line and the HTML meta table, and until now read by no
     #: gate and no budget at all.
     files_skipped: int = 0
 
+
+#: The populations no metric gate can be answered over, each with the reason
+#: it is refused for. A table rather than two ``if`` arms so that adding a
+#: fifth population state without deciding its gate outcome is a visible
+#: omission here, not a silent pass through every predicate below.
+#:
+#: ``partial`` is deliberately absent: a truncated run measured something, and
+#: its ordinary verdict stands. Truncation has its own opt-in gate
+#: (``--fail-on-truncated-run``) and must not be smuggled in as a refusal.
+_POPULATION_REFUSALS: dict[HealthPopulation, str] = {
+    "unmeasured": gate_msgs.GATE_REASON_UNMEASURED_POPULATION,
+    "complete_empty": gate_msgs.GATE_REASON_EMPTY_ANALYSIS_SCOPE,
+}
 
 HEALTH_INPUT_LANES: tuple[ObservationLaneName, ...] = (
     "clones.blocks",
@@ -745,18 +762,30 @@ def _evaluate_gate_state_result(
             unavailable_lanes=unavailable_lanes,
         )
 
-    if _any_gate_requested(config) and state.health_population == "unmeasured":
+    if _any_gate_requested(config):
         # Ordered after the lane check so a configuration fault keeps its own
         # exit code, and before every predicate below because none of them can
-        # be answered here. Thirteen would pass on counters that are zero only
-        # because nothing was counted; the two coverage thresholds would fail
-        # quoting 0.0 % of a population that was never read. One honest
-        # outcome replaces both shapes.
-        return GateResult(
-            exit_code=int(ExitCode.GATING_FAILURE),
-            reasons=(f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}",),
-            required_lanes=required_lanes,
-        )
+        # be answered from either population here. Thirteen gates would pass on
+        # counters that are zero only because nothing was counted; the two
+        # coverage thresholds would fail quoting 0.0 % of a population that was
+        # never read. One honest outcome replaces both shapes.
+        #
+        # The two refusals share an exit code and nothing else. ``unmeasured``
+        # is a broken run — files exist and none were read, so look for the
+        # dead worker or the permission fault. ``complete_empty`` is a run that
+        # worked and found no source file, so look at the root and the include
+        # patterns. Both refuse rather than answer, because the "at most" gates
+        # would be vacuously true and the "at least" gates (health floor,
+        # typing and docstring minima) ask for a floor on a quantity that is
+        # undefined over an empty set — and answering that with a fabricated 0
+        # is the same invention in the other direction.
+        refusal = _POPULATION_REFUSALS.get(state.health_population)
+        if refusal is not None:
+            return GateResult(
+                exit_code=int(ExitCode.GATING_FAILURE),
+                reasons=(f"metric:{refusal}",),
+                required_lanes=required_lanes,
+            )
 
     effective_config = replace(
         config,

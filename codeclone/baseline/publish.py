@@ -20,6 +20,7 @@ from uuid import UUID
 
 import orjson
 
+from ..contracts import HealthPopulation
 from ..contracts.errors import BaselineValidationError
 from ..models import (
     BaselineContainerV3,
@@ -235,18 +236,35 @@ def publish_baseline(
     max_size_bytes: int,
     project_label: str | None = None,
     files_skipped: int = 0,
+    analysis_population: HealthPopulation = "complete_nonempty",
 ) -> BaselinePublicationReceipt:
     """Build and CAS-publish one complete container under one observer span.
 
-    Refuses a run that did not read every file it found. Unconditionally: no
-    flag relaxes it, because there is no configuration in which an incomplete
-    reference is the right thing to publish. A baseline built from a partial
-    read bakes in a partial public API, and every symbol that was never opened
-    then reads as *removed* on the next complete run — the reproduction that
-    produced this rule turned 29 lost files into 556 phantom breaking changes.
+    Two independent refusals, kept independent on purpose.
 
-    The guard lives here rather than at the call site because this is the sole
-    publication seam; a check one layer up would only bind today's caller.
+    ``truncated_run`` refuses a run that did not read every file it found.
+    Unconditionally: no flag relaxes it, because there is no configuration in
+    which an incomplete reference is the right thing to publish. A baseline
+    built from a partial read bakes in a partial public API, and every symbol
+    that was never opened then reads as *removed* on the next complete run —
+    the reproduction that produced this rule turned 29 lost files into 556
+    phantom breaking changes.
+
+    ``empty_analysis_scope`` refuses a run whose scope held no source file at
+    all. It consults the population fact rather than re-deriving anything, and
+    it is a separate rule with a separate message: replacing the counter above
+    with "the population is not complete" was proposed and refused, because it
+    swaps one symptom for another and merges "we lost files" with "there were
+    none". A baseline is the reference future runs are compared against, and a
+    reference built from nothing describes no project — the realistic cause of
+    an empty scope at ``--update-baseline`` is a mis-pointed root or a
+    mis-configured include list, and overwriting a good reference with an
+    empty one is the loss this prevents. Note that this does *not* make the
+    lanes dishonest: an empty repository has genuinely empty lanes, and the
+    refusal is a publication policy, not a claim about the observations.
+
+    Both guards live here rather than at the call site because this is the
+    sole publication seam; a check one layer up would only bind today's caller.
     """
 
     if files_skipped > 0:
@@ -255,6 +273,14 @@ def publish_baseline(
             f"Run did not read {files_skipped} of the files it found; "
             "a baseline published from an incomplete read would make every "
             "unread symbol look removed on the next complete run.",
+        )
+    if analysis_population == "complete_empty":
+        raise BaselinePublicationError(
+            "empty_analysis_scope",
+            "Analysis scope contains no source file, so this run describes no "
+            "project; publishing it as the baseline would replace the "
+            "reference with an empty one. Check the analysis root and the "
+            "include patterns.",
         )
 
     with span(name="baseline.container.publish") as publish_span:

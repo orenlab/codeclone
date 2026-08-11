@@ -31,10 +31,11 @@ class MetricsSnapshot:
     dead_code_count: int
     health_total: int
     health_grade: str
-    #: ``unmeasured`` means not a single file was read, so ``health_total``
-    #: and ``health_grade`` are not a verdict about any code and must not be
-    #: presented as one.
-    health_population: str = "complete"
+    #: ``unmeasured`` means files existed and not one was read;
+    #: ``complete_empty`` means the scope held no source file at all. Under
+    #: either, ``health_total`` and ``health_grade`` are not a verdict about
+    #: any code and must not be presented as one.
+    health_population: str = "complete_nonempty"
     #: The kind split behind ``cycles_count``. Shown next to the total because
     #: the total alone no longer predicts the exit code: only import cycles
     #: fail --fail-cycles, so a user seeing "2 cycles" and exit 0 needs the

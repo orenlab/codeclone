@@ -1018,7 +1018,7 @@ def test_gate_state_reports_a_measured_population_as_measured() -> None:
         metrics_diff=None,
     )
 
-    assert state.health_population == "complete"
+    assert state.health_population == "complete_nonempty"
 
 
 def test_gate_state_carries_the_skipped_file_count() -> None:

@@ -78,6 +78,33 @@ KPI_HEALTH_UNMEASURED_TIP: Final = (
 EXECUTIVE_HEALTH_UNMEASURED: Final = (
     "This run read no source file, so it measured no health."
 )
+# The third "no number" card, and the third distinct fact. "n/a" is health
+# never computed; "not measured" is a population that existed and went unread;
+# this one is a scope that holds no source file. The run worked — there is
+# simply nothing here to score, and a ring at 90 would say the opposite.
+KPI_HEALTH_EMPTY_SCOPE: Final = "no source in scope"
+KPI_HEALTH_EMPTY_SCOPE_TIP: Final = (
+    "The analysis scope contains no source file, so there is no health to score"
+)
+EXECUTIVE_HEALTH_EMPTY_SCOPE: Final = (
+    "This run found no source file in scope, so there is no health to measure."
+)
+#: Population states that draw no ring, each with its card text, tip and
+#: executive sentence. One table so the card, the tip and the sentence cannot
+#: drift apart, and so a state added without a row here fails visibly instead
+#: of rendering a gauge over nothing.
+HEALTH_ABSENCE_CARDS: Final[dict[str, tuple[str, str, str]]] = {
+    "unmeasured": (
+        KPI_HEALTH_UNMEASURED,
+        KPI_HEALTH_UNMEASURED_TIP,
+        EXECUTIVE_HEALTH_UNMEASURED,
+    ),
+    "complete_empty": (
+        KPI_HEALTH_EMPTY_SCOPE,
+        KPI_HEALTH_EMPTY_SCOPE_TIP,
+        EXECUTIVE_HEALTH_EMPTY_SCOPE,
+    ),
+}
 ISSUE_BREAKDOWN_EMPTY: Final = "No issues detected"
 # An empty result and an unmeasured one look identical unless the panel
 # says which one it is.

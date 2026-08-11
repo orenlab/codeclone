@@ -85,16 +85,22 @@ _TRUSTED = dict.fromkeys(_ALL_LANES, "trusted")
 
 
 def _unmeasured_state(**overrides: Any) -> GateState:
-    """The state a run produces when it opened not one source file."""
+    """The state a run produces when files existed and it opened none."""
 
     return GateState(health_population="unmeasured", **overrides)
+
+
+def _empty_scope_state(**overrides: Any) -> GateState:
+    """The state a run produces when the scope holds no source file at all."""
+
+    return GateState(health_population="complete_empty", **overrides)
 
 
 def _measured_clean_state(**overrides: Any) -> GateState:
     """A whole tree read, and nothing wrong with it."""
 
     fields: dict[str, Any] = {
-        "health_population": "complete",
+        "health_population": "complete_nonempty",
         "health_score": 95,
         "typing_param_permille": 1000,
         "docstring_permille": 1000,
@@ -165,6 +171,91 @@ def test_lane_unavailability_still_outranks_the_unmeasured_refusal() -> None:
 
     result = evaluate_gate_state(
         state=_unmeasured_state(),
+        config=replace(_CLEAN_CONFIG, fail_health=50),
+        lane_trust=_TRUSTED,
+        enabled_lanes=(),
+    )
+
+    assert result.exit_code == int(ExitCode.CONTRACT_ERROR)
+
+
+# ── an empty scope refuses too, and says so in its own words ────────
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [pytest.param(row, id=name) for name, row in _EVERY_GATE],
+)
+def test_no_gate_is_answered_over_an_empty_analysis_scope(
+    overrides: dict[str, Any],
+) -> None:
+    """A gate is a predicate about code; here there is no code to predicate.
+
+    Argued from what a gate means, not from what is convenient. The "at most"
+    gates (complexity, coupling, cycles, dead code, clones) are vacuously
+    satisfied — truthfully, since there really is no debt. The "at least"
+    gates are the ones that decide this: ``--fail-health``, ``--min-typing-
+    coverage`` and ``--min-docstring-coverage`` ask for a floor on a quantity
+    that is *undefined* over an empty set, and today they answer it with a
+    fabricated ``0``. One outcome has to cover both families, and the only one
+    that invents nothing is a refusal.
+
+    Fail-closed also matches what actually produces an empty scope in a run
+    that asked for gates: a mis-pointed root or a mis-configured include list.
+    A green CI would hide exactly that. It is additionally the *conservative*
+    reading — this input already exits 3 today, by way of the conflation this
+    wave removes, so the exit code is preserved and only the reason becomes
+    honest.
+    """
+
+    result = _evaluate(replace(_CLEAN_CONFIG, **overrides), _empty_scope_state())
+
+    assert result.exit_code == int(ExitCode.GATING_FAILURE)
+    assert any("empty analysis scope" in reason for reason in result.reasons)
+
+
+def test_the_empty_scope_refusal_is_worded_apart_from_the_unmeasured_one() -> None:
+    """Two absences, two remediations; an operator must be told which one.
+
+    "No file was read" sends you to look for a dead worker or a permission
+    fault. "There is no file in scope" sends you to look at the root and the
+    include patterns. A shared string would send everyone to the wrong place.
+
+    ``fail_cycles`` rather than ``fail_health`` on purpose. Written first with
+    ``fail_health=50`` this test passed on unfixed code: the default
+    ``health_score`` of 0 tripped the health threshold, so exit 3 arrived from
+    a sibling mechanism and the refusal under test never ran. The gate chosen
+    here cannot fail on a state with zero cycles, so only the refusal can
+    produce the exit code below.
+    """
+
+    config = replace(_CLEAN_CONFIG, fail_cycles=True)
+
+    empty = _evaluate(config, _empty_scope_state())
+    unread = _evaluate(config, _unmeasured_state())
+
+    assert empty.exit_code == unread.exit_code == int(ExitCode.GATING_FAILURE)
+    assert empty.reasons != unread.reasons
+    assert any("empty analysis scope" in reason for reason in empty.reasons)
+    assert any("unmeasured" in reason for reason in unread.reasons)
+    assert not any("unmeasured" in reason for reason in empty.reasons)
+    assert not any("empty analysis scope" in reason for reason in unread.reasons)
+
+
+def test_an_empty_scope_without_any_gate_stays_silent() -> None:
+    """No gate was asked for, so none is refused — and none is invented."""
+
+    result = _evaluate(_CLEAN_CONFIG, _empty_scope_state())
+
+    assert result.exit_code == int(ExitCode.SUCCESS)
+    assert result.reasons == ()
+
+
+def test_lane_unavailability_still_outranks_the_empty_scope_refusal() -> None:
+    """Same ordering law as the unmeasured refusal: exit 2 is not exit 3."""
+
+    result = evaluate_gate_state(
+        state=_empty_scope_state(),
         config=replace(_CLEAN_CONFIG, fail_health=50),
         lane_trust=_TRUSTED,
         enabled_lanes=(),

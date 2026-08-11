@@ -1732,6 +1732,12 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
                 # The report meta now declares metric families from the payload
                 # the analysis emitted, so the stub must carry that evidence.
                 metrics_payload=None,
+                # Half of what the population state is derived from before a
+                # baseline is published; the stub omitted a field the real
+                # result has always had. Stated here rather than softened at
+                # the consumer with a ``getattr`` default, which would let a
+                # real wiring break read as a measured run.
+                files_analyzed_or_cached=1,
                 observation_bundle=SimpleNamespace(
                     contract=SimpleNamespace(enabled_lanes=()),
                 ),

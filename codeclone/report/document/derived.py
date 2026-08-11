@@ -56,7 +56,11 @@ from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ..overview import build_directory_hotspots
-from ._common import _contract_report_location_path, _is_absolute_path
+from ._common import (
+    _contract_report_location_path,
+    _is_absolute_path,
+    health_verdict_withheld,
+)
 
 if TYPE_CHECKING:
     from ...models import (
@@ -101,10 +105,15 @@ def _health_snapshot(metrics_payload: Mapping[str, object]) -> dict[str, object]
     health = _as_mapping(_as_mapping(metrics_payload.get("families")).get("health"))
     summary = _as_mapping(health.get("summary"))
     # Same rule as the health family above: the population fact travels, the
-    # refusal is carried rather than re-derived, and a strongest/weakest pair
-    # over dimensions nobody measured would be a ranking of nothing.
+    # refusal is consulted rather than re-derived, and a strongest/weakest
+    # pair over dimensions nobody measured would be a ranking of nothing.
+    #
+    # The question goes to the document's one reader of the population state,
+    # not to ``score is None`` here. Both answer the same today, but only one
+    # of them keeps answering correctly when a state is added, and only one
+    # names *which* absence this is — which the surfaces downstream must word.
     population = str(summary.get("population", ""))
-    unmeasured = summary.get("score") is None
+    unmeasured = health_verdict_withheld(summary)
     dimensions = (
         {}
         if unmeasured

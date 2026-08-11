@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import ceil
 from typing import Literal
 
@@ -35,8 +35,11 @@ from ..contracts import (
     HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY,
     HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
     HEALTH_WEIGHTS,
+    HealthPopulation,
+    observed_population,
+    population_carries_score,
 )
-from ..models import HealthPopulation, HealthScore
+from ..models import HealthScore
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,18 +271,18 @@ def _clone_piecewise_score(density: float) -> int:
 
 
 def _observed_population(inputs: HealthInputs) -> HealthPopulation:
-    """Name how much of the found population the score actually saw.
+    """Read this run's population state off its two counters.
 
-    Derived from two counters, never configured: no threshold is involved, so
-    there is nothing here that can drift the way a calibrated constant can.
-    The three states are exhaustive and mutually exclusive by construction.
+    Consults the owner instead of restating the rule. ``observed_population``
+    beside the models is the only implementation, because health, the gates,
+    the baseline publisher and every renderer decide on the same fact, and a
+    second copy here would be a second semantics for one word.
     """
 
-    if inputs.files_analyzed_or_cached <= 0:
-        return "unmeasured"
-    if inputs.files_analyzed_or_cached < inputs.files_found:
-        return "partial"
-    return "complete"
+    return observed_population(
+        files_found=inputs.files_found,
+        files_analyzed_or_cached=inputs.files_analyzed_or_cached,
+    )
 
 
 def compute_health(inputs: HealthInputs) -> HealthScore:
@@ -324,13 +327,15 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
     }
 
     population = _observed_population(inputs)
-    if population == "unmeasured":
-        # Nothing was read, so there is no evidence of health to report. The
-        # weighted sum here would be 90/A — six counter-driven dimensions see
-        # an empty population and report no debt — which is an assertion of
-        # cleanliness about code that was never opened. Refusing is not a
-        # recalibration: no weight, band, or reference moves, and a run that
-        # read even one file takes the ordinary path below unchanged.
+    if not population_carries_score(population):
+        # No observed population, so there is no evidence of health to report.
+        # The weighted sum here would be 90/A — six counter-driven dimensions
+        # see an empty population and report no debt — which is an assertion
+        # of cleanliness about code that was never opened, or about code that
+        # does not exist. Both absences withhold the number; which absence it
+        # was travels in ``population``. Refusing is not a recalibration: no
+        # weight, band, or reference moves, and a run that read even one file
+        # takes the ordinary path below unchanged.
         return HealthScore(
             total=0,
             grade=_grade(0),
@@ -350,23 +355,74 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
     )
 
 
+#: Placeholder inputs for a lane that produced nothing. Every field is zero
+#: because nothing was observed, not because zero was observed — which is
+#: exactly why ``health_not_computed`` states its population instead of
+#: deriving it from these numbers.
+_NO_OBSERVATION_INPUTS: HealthInputs = HealthInputs(
+    files_found=0,
+    files_analyzed_or_cached=0,
+    function_clone_groups=0,
+    block_clone_groups=0,
+    complexity_avg=0.0,
+    complexity_max=0,
+    high_risk_functions=0,
+    elevated_complexity_functions=0,
+    complexity_function_population=0,
+    coupling_avg=0.0,
+    coupling_max=0,
+    high_risk_classes=0,
+    elevated_coupling_classes=0,
+    coupling_class_population=0,
+    cohesion_avg=0.0,
+    low_cohesion_classes=0,
+    import_dependency_cycles=0,
+    deferred_dependency_cycles=0,
+    dependency_max_depth=0,
+    dependency_avg_depth=0.0,
+    dependency_p95_depth=0,
+    dead_code_items=0,
+)
+
+
+def health_not_computed() -> HealthScore:
+    """The score to report when the health lane never executed.
+
+    ``--skip-metrics``, or a metric result that is not a ``HealthScore`` at
+    all. The zeros this is built from are placeholders, not observations, so
+    the state is *declared* rather than derived from them: deriving would read
+    ``files_found == 0`` and call an unrun lane ``complete_empty``, which is
+    the conflation this split removes, reintroduced from the other end.
+
+    ``unmeasured`` is the honest word here — it is the state that means "no
+    evidence", and a lane that did not run produced none.
+    """
+
+    return replace(compute_health(_NO_OBSERVATION_INPUTS), population="unmeasured")
+
+
 def health_report_fields(health: HealthScore) -> dict[str, object]:
     """Project one score into the fields every report surface reads.
 
-    The tri-state turns into a refusal here and nowhere else. ``score`` and
-    ``grade`` are not "0" and "F" for a run that opened no file — 0 is a
+    The population state turns into a refusal here and nowhere else. ``score``
+    and ``grade`` are not "0" and "F" for a run that opened no file — 0 is a
     measured value, and the six counter-driven dimensions reporting 100 are
     the same claim broken into parts. They are ``None``: no measurement was
-    made, so no number is reported.
+    made, so no number is reported. An honestly empty scope is withheld by the
+    same rule and for the symmetric reason: 90/A would be a verdict of
+    excellence about code that does not exist.
 
-    ``population`` rides every run, not only the refused one. A consumer that
-    has to infer the state from a missing key learns nothing; a consumer that
-    reads the key learns the fact. This is also the single owner of that
-    fact for the whole report tree: renderers read it from the document and
-    never re-derive it from the file counters beside it.
+    ``population`` rides every run, not only the refused ones, and it is what
+    keeps the two refusals apart downstream — a surface that inferred the
+    refusal from ``score is None`` would know that something is absent but not
+    which absence, and could not word it. A consumer that has to infer the
+    state from a missing key learns nothing; a consumer that reads the key
+    learns the fact. This is also the single owner of that fact for the whole
+    report tree: renderers read it from the document and never re-derive it
+    from the file counters beside it.
     """
 
-    if health.population == "unmeasured":
+    if not population_carries_score(health.population):
         return {
             "score": None,
             "grade": None,
