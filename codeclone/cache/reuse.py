@@ -17,6 +17,7 @@ import orjson
 
 from ..baseline.trust import current_python_tag
 from ..contracts import (
+    ADOPTION_COVERAGE_POLICY_VERSION,
     API_SURFACE_SIGNATURE_VERSION,
     COHESION_RISK_MEDIUM_MAX,
     COMPLEXITY_ALGORITHM_REVISION,
@@ -25,6 +26,7 @@ from ..contracts import (
     COUPLING_RISK_LOW_MAX,
     COUPLING_RISK_MEDIUM_MAX,
     DESIGN_METRICS_ALGORITHM_REVISION,
+    FUNCTION_RELATIONSHIP_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
     RENAMED_STRUCTURE_ALGORITHM_REVISION,
     RUNTIME_REACHABILITY_CATALOG_VERSION,
@@ -152,6 +154,14 @@ def build_module_dependent_profile(
         domain="codeclone.cache.profile.dependent.v1",
         tag=_DEPENDENT_PROFILE_DOMAIN,
         payload={
+            # typing_coverage and docstring_coverage are counted at extraction
+            # by metrics/adoption.py and rehydrated verbatim - a warm run
+            # re-reads no annotation and no docstring - so the policy deciding
+            # what those counters count has to key this lane. The producer
+            # imports no contracts constant of its own, which is why nothing
+            # here moved when the policy did: the counters had no declaring
+            # generation at all until this constant existed (X-04).
+            "adoption_coverage_policy_version": ADOPTION_COVERAGE_POLICY_VERSION,
             "api_surface": collect_api_surface,
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
@@ -173,6 +183,17 @@ def build_module_dependent_profile(
             # coincide with a neutral-lane change still misses exactly this lane
             # instead of serving stale cbo/lcom4/risk off a warm hit.
             "design_metrics_algorithm_revision": DESIGN_METRICS_ALGORITHM_REVISION,
+            # function_relationship_facts - the per-function call and reference
+            # records with their resolved targets - ride this lane and are
+            # rehydrated verbatim, so the revision governing which expressions
+            # become records and what they resolve to keys it here. Same hole as
+            # the adoption counters above: analysis/_module_walk.py imports no
+            # contracts constant, so the facts had no declaring generation and
+            # the anonymous "call_resolution_version" literal beside them is
+            # reachable from no producer (X-04).
+            "function_relationship_algorithm_revision": (
+                FUNCTION_RELATIONSHIP_ALGORITHM_REVISION
+            ),
             # The dependent lane carries referenced_qualnames, dead candidates
             # and live-root reasons - everything the liveness verdict reads -
             # so a liveness policy bump must miss exactly this lane, never the

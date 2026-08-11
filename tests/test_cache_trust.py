@@ -238,6 +238,67 @@ def test_dependent_profile_versions_structural_findings_catalog(
 
 
 # --------------------------------------------------------------------------- #
+# X-04 - the facts whose owner did not exist.
+#
+# X-02 and X-03 widened WHO the law is asked of, up to every public constant of
+# the contracts ring. That membership rule is mechanical and it is still blind
+# in one direction: the registry classifies constants, so a stored fact whose
+# generation NO constant declares is invisible to it. Two dependent-lane fact
+# families were in exactly that state - their producers
+# (``codeclone/metrics/adoption.py``, ``codeclone/analysis/_module_walk.py``)
+# import no contracts constant at all, so there was nothing to classify and
+# nothing a bump could move.
+#
+# Measured before the fix, through the real CLI on a two-file repository:
+# changing what ``_function_param_rows`` counts as a parameter moved the
+# reported adoption from 57.1% to 66.7% on a cold run and left the warm run at
+# 57.1%; dropping bare references from the relationship walk moved the stored
+# record count from 2 to 1 cold and left it at 2 warm. Same code, same source,
+# two different answers decided by cache state alone.
+# --------------------------------------------------------------------------- #
+
+
+def test_dependent_profile_versions_adoption_coverage_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``typing_coverage`` / ``docstring_coverage`` ride the dependent lane.
+
+    What counts as an annotated parameter, an ``Any`` annotation or a documented
+    public symbol is decided at extraction by ``metrics/adoption.py``, and the
+    resulting counters are stored per module and rehydrated verbatim - they are
+    the whole input of the ``adoption_counts`` observation lane and of the
+    typing/docstring gates. The producer imports no contracts constant, so
+    before this constant existed a policy change was invisible to every warm
+    cache: the pre-change percentages were served under the new policy's name.
+    """
+
+    baseline, shifted = _dependent_profile_digest_under(
+        monkeypatch, "ADOPTION_COVERAGE_POLICY_VERSION"
+    )
+    assert baseline != shifted
+
+
+def test_dependent_profile_versions_function_relationship_algorithm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``function_relationship_facts`` rides the dependent lane.
+
+    Which call and reference expressions become relationship records, and how
+    each one resolves to a target qualname, is decided at extraction by
+    ``analysis/_module_walk.py``; the records are stored per source function and
+    rehydrated verbatim into the dead-code test-reference lane and the call
+    graph. Same shape as the adoption family above and the same pre-fix hole:
+    the producer imports no contracts constant, so no bump could miss the lane
+    the facts ride.
+    """
+
+    baseline, shifted = _dependent_profile_digest_under(
+        monkeypatch, "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION"
+    )
+    assert baseline != shifted
+
+
+# --------------------------------------------------------------------------- #
 # Candidate 3 - the cache checksum is keyless: integrity, not authentication
 # (owner ruling option a - the vocabulary now tells that truth).
 # --------------------------------------------------------------------------- #
@@ -404,6 +465,12 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
         "near-miss statement tokens; both are stored",
     ),
     # ── dependent lane · CacheDependentPayload
+    "ADOPTION_COVERAGE_POLICY_VERSION": (
+        _LANE_DEPENDENT,
+        "typing_coverage and docstring_coverage: what counts as an annotated "
+        "parameter, an Any annotation and a documented public symbol is decided "
+        "at extraction and the counters are rehydrated verbatim (X-04)",
+    ),
     "API_SURFACE_SIGNATURE_VERSION": (_LANE_DEPENDENT, "api_surface"),
     "COHESION_RISK_MEDIUM_MAX": (
         _LANE_DEPENDENT,
@@ -426,6 +493,12 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "DESIGN_METRICS_ALGORITHM_REVISION": (
         _LANE_DEPENDENT,
         "class_metrics (cbo, lcom4, coupling/cohesion risk)",
+    ),
+    "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION": (
+        _LANE_DEPENDENT,
+        "function_relationship_facts: which call and reference expressions "
+        "become records, and the qualname each resolves to, are decided at "
+        "extraction and the records are rehydrated verbatim (X-04)",
     ),
     "LIVENESS_POLICY_VERSION": (
         _LANE_DEPENDENT,

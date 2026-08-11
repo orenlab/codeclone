@@ -110,6 +110,43 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # and never touches the neutral fingerprint lane.
 LIVENESS_POLICY_VERSION: Final = "2"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
+# Generation of the adoption-coverage policy: WHAT COUNTS as an annotated
+# parameter (the receiver of a non-static method is not one; ``*args`` and
+# ``**kwargs`` are), as an ``Any`` annotation (bare, dotted, inside a subscript,
+# a tuple or a ``|`` union) and as a documented public symbol (module-level
+# export, or a public method of an exported class). Sole producer:
+# ``codeclone.metrics.adoption.collect_module_adoption`` together with the
+# visibility rules it reads from ``codeclone.metrics._visibility``.
+#
+# Its OUTPUT is stored: the per-module ``typing_coverage`` and
+# ``docstring_coverage`` counters ride the module-DEPENDENT cache payload and a
+# warm run serves them verbatim, without re-reading a single annotation. They
+# are the whole input of the ``adoption_counts`` observation lane and of the
+# typing/docstring coverage gates. So this constant is an input of that lane's
+# reuse profile (codeclone/cache/reuse.py): a policy change misses exactly the
+# dependent lane and leaves the neutral fingerprint lane alone. Without the
+# binding the same source measured 57.1% annotated parameters warm and 66.7%
+# cold under one policy change — one of two answers chosen by cache state.
+# Bump whenever the counting rule moves; counters across versions are not
+# comparable.
+ADOPTION_COVERAGE_POLICY_VERSION: Final = "1"
+# Algorithm revision of the function-relationship extraction: WHICH expressions
+# inside a function body become relationship records (every call, plus every
+# bare ``Name``/``Attribute`` load that is not the callee of a call) and HOW
+# each one resolves to a target qualname — the import index, the caller's local
+# bindings, top-level function and class names, local method qualnames, the
+# enclosing class and its receiver, and the resolution rule reported beside the
+# record. Sole producer:
+# ``codeclone.analysis._module_walk._collect_function_relationship_facts``.
+#
+# Its OUTPUT is stored: ``function_relationship_facts`` rides the
+# module-DEPENDENT cache payload per source function and is rehydrated verbatim
+# into the dead-code test-reference lane and the call graph, so a resolution
+# change that reaches no re-parsed file is simply not applied. Hence this
+# constant is an input of that lane's reuse profile (codeclone/cache/reuse.py),
+# on the same footing as LIVENESS_POLICY_VERSION above and for the same reason.
+# Bump whenever what becomes a record, or what a record resolves to, changes.
+FUNCTION_RELATIONSHIP_ALGORITHM_REVISION: Final = "1"
 # Closed detector catalogs that ride the module-dependent cache-reuse lane.
 # Each is a mutable enumeration whose EXPANSION changes an emitted dependent
 # fact for unchanged source, so a warm cache hit would otherwise serve the
@@ -584,6 +621,7 @@ def population_carries_score(population: HealthPopulation) -> bool:
 
 
 __all__ = [
+    "ADOPTION_COVERAGE_POLICY_VERSION",
     "API_SURFACE_SIGNATURE_VERSION",
     "AUDIT_PROJECTION_VERSION",
     "AUTHORITY_ANALYSIS_REVISION",
@@ -638,6 +676,7 @@ __all__ = [
     "DOCS_URL",
     "ENGINEERING_MEMORY_SCHEMA_VERSION",
     "EXPERIENCE_DISTILLATION_VERSION",
+    "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION",
     "GATE_LANE_MATRIX_VERSION",
     "HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE",
     "HEALTH_COMPLEXITY_ELEVATED_WEIGHT",
