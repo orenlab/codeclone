@@ -197,9 +197,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         and all(isinstance(value, str) for value in raw_source_roots)
         else (".",)
     )
+    unreadable_paths: list[str] = []
     module_registry = build_module_registry(
         root=boot.root,
         source_roots=source_roots,
+        on_unreadable_path=unreadable_paths.append,
     )
     cache.bind_module_registry(module_registry)
     analyzed_paths = tuple(
@@ -209,6 +211,14 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     )
     git_snapshot = collect_git_content_snapshot(boot.root, analyzed_paths)
     cache.bind_git_content_snapshot(git_snapshot)
+    # A directory the walk could not read is an input the run did not see.
+    # It rides the counters that already own lost files rather than a private
+    # one of its own: a second channel would be a second thing for every
+    # decider to remember to ask, and this one was never asked at all.
+    for unreadable_path in unreadable_paths:
+        files_found += 1
+        files_skipped += 1
+        skipped_warnings.append(f"{unreadable_path}: unreadable path, not scanned")
     blob_hits = digest_hits = digest_misses = 0
     dirty_fallbacks = git_unavailable_fallbacks = 0
     index_ambiguous_fallbacks = racy_fallbacks = untracked_fallbacks = 0

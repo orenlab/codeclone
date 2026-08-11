@@ -497,7 +497,16 @@ def fmt_summary_clones(
     return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
 
 
-def fmt_metrics_health(total: int, grade: str) -> str:
+def fmt_metrics_health(
+    total: int,
+    grade: str,
+    *,
+    population: str = "complete",
+) -> str:
+    if population == "unmeasured":
+        # No file was read, so there is no grade to print. Showing one — of
+        # any letter — would be a verdict about code the run never opened.
+        return f"  {'Health':<{_L}}[bold]not measured (no file was read)[/bold]"
     s = _HEALTH_GRADE_STYLE.get(grade, "bold")
     return f"  {'Health':<{_L}}[{s}]{total}/100 ({grade})[/{s}]"
 

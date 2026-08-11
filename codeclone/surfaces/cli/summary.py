@@ -31,6 +31,10 @@ class MetricsSnapshot:
     dead_code_count: int
     health_total: int
     health_grade: str
+    #: ``unmeasured`` means not a single file was read, so ``health_total``
+    #: and ``health_grade`` are not a verdict about any code and must not be
+    #: presented as one.
+    health_population: str = "complete"
     #: The kind split behind ``cycles_count``. Shown next to the total because
     #: the total alone no longer predicts the exit code: only import cycles
     #: fail --fail-cycles, so a user seeing "2 cycles" and exit 0 needs the
@@ -154,6 +158,7 @@ def build_metrics_snapshot(
         dead_code_count=len(project_metrics.dead_code),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,
+        health_population=project_metrics.health.population,
         suppressed_dead_code_count=analysis_result.suppressed_dead_code_items,
         overloaded_modules_candidates=_as_int(
             overloaded_modules_summary.get("candidates")
@@ -368,7 +373,13 @@ def _print_metrics(
 
         console.print()
         console.print(Rule(title=ui.METRICS_TITLE, style="dim", characters="\u2500"))
-        console.print(ui.fmt_metrics_health(metrics.health_total, metrics.health_grade))
+        console.print(
+            ui.fmt_metrics_health(
+                metrics.health_total,
+                metrics.health_grade,
+                population=metrics.health_population,
+            )
+        )
         console.print(
             ui.fmt_metrics_cc(
                 metrics.complexity_avg,

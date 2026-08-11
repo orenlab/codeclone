@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -998,7 +999,7 @@ def test_cli_cache_not_shared_between_projects(
 
     monkeypatch.setattr(
         "codeclone.paths.module_identity.inventory.discover_python_files",
-        lambda _root, *, hard_excludes, max_files: ((), 0),
+        lambda _root, *, hard_excludes, max_files: ((), 0, ()),
     )
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root2), "--no-progress"])
@@ -4711,3 +4712,140 @@ def test_cli_unsupported_construct_is_visibly_attributed(
             "construct": "unsupported fields on Import: is_lazy",
         }
     ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Unread input is not a clean verdict (W-NODATA)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_cli_empty_root_prints_no_health_grade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A root with nothing to read used to be graded ``90/100 (A)``.
+
+    Six of the seven health dimensions count observed debt, so an unobserved
+    population scored exactly like a clean one. The line must now say that
+    nothing was measured, and it must not carry a letter of any kind — an
+    ``F`` here would be the same false verdict wearing the opposite sign.
+    """
+
+    root = tmp_path / "empty"
+    root.mkdir()
+
+    _run_main(monkeypatch, [str(root), "--no-progress", "--no-skip-metrics"])
+
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Health", "not measured")
+    assert_contains_none(out, "/100 (A)", "/100 (F)")
+
+
+def test_cli_unreadable_corpus_prints_no_health_grade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Files found and none of them read is the same absence, louder."""
+
+    root = tmp_path / "broken"
+    root.mkdir()
+    for index in range(4):
+        (root / f"mod_{index}.py").write_text(
+            f"def f{index}(:\n  ??? {index}\n", "utf-8"
+        )
+
+    _run_main(monkeypatch, [str(root), "--no-progress", "--no-skip-metrics"])
+
+    out = capsys.readouterr().out
+    assert_contains_all(out, "4 found", "0 analyzed", "4 skipped", "not measured")
+
+
+def test_cli_analysed_root_still_prints_its_grade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The reverse skew: a root that was read keeps its ordinary verdict."""
+
+    root = tmp_path / "real"
+    root.mkdir()
+    (root / "mod.py").write_text("def f():\n    return 1\n", "utf-8")
+
+    _run_main(monkeypatch, [str(root), "--no-progress", "--no-skip-metrics"])
+
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Health", "/100 (")
+    assert_contains_none(out, "not measured")
+
+
+def test_cli_health_gate_refuses_a_run_that_read_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--fail-health`` used to pass on a run with zero analysed files.
+
+    The gate is not consulted differently here: it reads the same health
+    total it always read. What changed is that the total is no longer the
+    90 that six vacuous dimensions produced out of an empty population.
+    """
+
+    root = tmp_path / "empty"
+    root.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, [str(root), "--no-progress", "--fail-health", "89"])
+
+    assert exc.value.code == 3
+
+
+def test_cli_health_gate_still_passes_a_healthy_analysed_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reverse skew for the gate: a read repository is not failed."""
+
+    root = tmp_path / "real"
+    root.mkdir()
+    (root / "mod.py").write_text("def f():\n    return 1\n", "utf-8")
+
+    _run_main(monkeypatch, [str(root), "--no-progress", "--fail-health", "50"])
+
+
+def test_cli_unreadable_directory_is_counted_not_swallowed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unreadable subtree used to leave no trace anywhere at all.
+
+    ``os.walk`` ignores errors unless handed ``onerror``, so the directory did
+    not merely go uncounted — it did not exist for the tool, and the summary
+    reported a complete analysis of a tree it had only partly seen.
+    """
+
+    root = tmp_path / "partial"
+    (root / "visible").mkdir(parents=True)
+    (root / "hidden").mkdir()
+    (root / "visible" / "mod_a.py").write_text("def a():\n    return 1\n", "utf-8")
+    (root / "hidden" / "mod_b.py").write_text("def b():\n    return 2\n", "utf-8")
+    probe = tmp_path / "_probe"
+    probe.mkdir()
+    os.chmod(probe, 0o000)
+    try:
+        os.listdir(probe)
+        pytest.skip("filesystem does not enforce directory permissions")
+    except PermissionError:
+        pass
+    finally:
+        os.chmod(probe, 0o755)
+
+    os.chmod(root / "hidden", 0o000)
+    try:
+        _run_main(monkeypatch, [str(root), "--no-progress"])
+    finally:
+        os.chmod(root / "hidden", 0o755)
+
+    out = capsys.readouterr().out
+    assert_contains_all(out, "2 found", "1 analyzed", "1 skipped")

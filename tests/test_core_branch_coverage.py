@@ -1433,9 +1433,9 @@ def _discover_with_single_cached_entry(
         *,
         hard_excludes: tuple[str, ...],
         max_files: int,
-    ) -> tuple[tuple[str, ...], int]:
+    ) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
         del hard_excludes, max_files
-        return (filepath,), 0
+        return (filepath,), 0, ()
 
     monkeypatch.setattr(
         "codeclone.paths.module_identity.inventory.discover_python_files",

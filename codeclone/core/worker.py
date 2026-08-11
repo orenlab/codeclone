@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import os
+import tokenize
+from io import BytesIO
 from pathlib import Path
 
 from ..analysis.normalizer import NormalizationConfig
@@ -36,6 +38,26 @@ from ._types import (
     UNSUPPORTED_CONSTRUCT_ERROR_PREFIX,
     FileProcessResult,
 )
+
+
+def decode_python_source(raw_source: bytes) -> str:
+    """Decode module bytes the way CPython decodes them before compiling.
+
+    A strict UTF-8 decode is not the rule the language uses. It throws away
+    two kinds of file the interpreter imports without complaint: one carrying
+    a UTF-8 BOM, which decodes but then reaches the parser as a leading
+    ``U+FEFF`` and dies there, and one declaring a legacy codec in a PEP 263
+    cookie, which never decodes at all. Both were reported as skipped files
+    while the run still claimed a verdict over the tree.
+
+    ``tokenize.detect_encoding`` is the same detector the tokenizer uses, so
+    the set of files this analyser can read is the set CPython can import —
+    by construction, not by a second guess at the rule.
+    """
+
+    encoding, _first_lines = tokenize.detect_encoding(BytesIO(raw_source).readline)
+    return raw_source.decode(encoding)
+
 
 _WORKER_MODULE_REGISTRY: ModuleRegistryHandle | None = None
 
@@ -114,8 +136,8 @@ def process_file(
         try:
             raw_source = resolved.read_bytes()
             parsed_source_digest = source_content_digest(raw_source)
-            source = raw_source.decode("utf-8")
-        except UnicodeDecodeError as exc:
+            source = decode_python_source(raw_source)
+        except (UnicodeDecodeError, SyntaxError, LookupError) as exc:
             return FileProcessResult(
                 filepath=filepath,
                 success=False,

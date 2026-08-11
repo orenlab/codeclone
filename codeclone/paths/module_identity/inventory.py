@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -273,15 +274,30 @@ def build_module_registry(
     strategy: ModuleIdentityStrategy | None = None,
     analysis_excludes: tuple[str, ...] = DEFAULT_ANALYSIS_EXCLUDES,
     max_files: int = 100_000,
+    on_unreadable_path: Callable[[str], None] | None = None,
 ) -> ModuleRegistryHandle:
-    """Build the complete inventory and analyzed subset from one safe walk."""
+    """Build the complete inventory and analyzed subset from one safe walk.
+
+    ``on_unreadable_path`` receives every directory the walk could not read.
+    It is a side channel rather than a field on the returned handle because
+    the handle is serialized whole into the source-observation digest: a
+    permission fault is a property of one run, and putting it in the registry
+    would move baseline identity. The caller folds these paths into the
+    skipped-file counters that already own lost input.
+    """
 
     with span(name="registry.build") as registry_span:
-        paths, hard_excluded = discover_python_files(
+        paths, hard_excluded, unreadable_paths = discover_python_files(
             str(root),
             hard_excludes=HARD_SAFETY_EXCLUDES,
             max_files=max_files,
         )
+        if on_unreadable_path is not None:
+            for unreadable_path in unreadable_paths:
+                on_unreadable_path(unreadable_path)
+        # No span counter for unreadable paths: the observability vocabulary
+        # is a reviewed, closed catalogue, and the fact already rides the
+        # skipped-file counters that every consumer already reads.
         registry_span.set_counter("registry_discovered", len(paths))
         registry_span.set_counter("registry_inventoried", 0)
         registry_span.set_counter("registry_analyzed", 0)
