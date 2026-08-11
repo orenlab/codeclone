@@ -30,6 +30,7 @@ from ..contracts import (
     HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE,
     HEALTH_COUPLING_TYPICAL_WEIGHT,
     HEALTH_DEPENDENCY_CYCLE_PENALTY,
+    HEALTH_DEPENDENCY_DEFERRED_CYCLE_PENALTY,
     HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER,
     HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY,
     HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
@@ -67,7 +68,14 @@ class HealthInputs:
     coupling_class_population: int
     cohesion_avg: float
     low_cohesion_classes: int
-    dependency_cycles: int
+    #: Cycles whose import-time edges still cycle: they can crash the
+    #: interpreter at import. Split from the raw total on purpose — there is no
+    #: kind-agnostic cycle input any more, so a caller cannot accidentally
+    #: charge a deferred cycle at the import rate by passing one number.
+    import_dependency_cycles: int
+    #: Cycles closed only by deferred, lazy, or typing edges. Real, but they
+    #: cannot fail an import. Priced by their own constant.
+    deferred_dependency_cycles: int
     dependency_max_depth: int
     dependency_avg_depth: float
     dependency_p95_depth: int
@@ -277,7 +285,8 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
     dead_code_score = _clamp_score(100 - inputs.dead_code_items * 8)
     dependency_score = _clamp_score(
         100
-        - inputs.dependency_cycles * HEALTH_DEPENDENCY_CYCLE_PENALTY
+        - inputs.import_dependency_cycles * HEALTH_DEPENDENCY_CYCLE_PENALTY
+        - inputs.deferred_dependency_cycles * HEALTH_DEPENDENCY_DEFERRED_CYCLE_PENALTY
         - _dependency_tail_pressure(
             max_depth=inputs.dependency_max_depth,
             avg_depth=inputs.dependency_avg_depth,

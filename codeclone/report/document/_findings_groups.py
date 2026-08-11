@@ -57,8 +57,10 @@ if TYPE_CHECKING:
 
 from ...findings.ids import clone_group_id, dead_code_group_id, structural_group_id
 from ._common import (
+    ENTITY_NOVELTY_DOMAIN_DEAD_CODE,
     _clone_novelty,
     _contract_report_location_path,
+    _entity_novelty,
     _item_sort_key,
     _normalize_block_machine_facts,
     _priority,
@@ -587,6 +589,13 @@ def _build_structural_groups(
     scan_root: str,
 ) -> list[dict[str, object]]:
     normalized_groups = normalize_structural_findings(groups or ())
+    # No baseline lane carries structural finding identities, so this family
+    # has no per-entity comparison to report — and never a "known".
+    structural_novelty, structural_novelty_reason = _entity_novelty(
+        identity="",
+        domain=FAMILY_STRUCTURAL,
+        entity_novelty_facts=None,
+    )
     out: list[dict[str, object]] = []
     for group in normalized_groups:
         locations = tuple(
@@ -617,6 +626,8 @@ def _build_structural_groups(
                 ),
                 "priority": priority,
                 "count": len(group.items),
+                "novelty": structural_novelty,
+                "novelty_reason": structural_novelty_reason,
                 "source_scope": source_scope,
                 "spread": {
                     "files": spread_files,
@@ -673,6 +684,7 @@ def _build_dead_code_groups(
     metrics_payload: Mapping[str, object],
     *,
     scan_root: str,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     families = _as_mapping(metrics_payload.get("families"))
     dead_code = _as_mapping(families.get(FAMILY_DEAD_CODE))
@@ -683,6 +695,13 @@ def _build_dead_code_groups(
         filepath = str(item_map.get("relative_path", ""))
         confidence = str(item_map.get("confidence", CONFIDENCE_MEDIUM))
         severity = SEVERITY_WARNING if confidence == CONFIDENCE_HIGH else SEVERITY_INFO
+        # The dead-code lane compares symbol identities, so an unused symbol
+        # carries the answer the baseline actually computed for it.
+        novelty, novelty_reason = _entity_novelty(
+            identity=qualname,
+            domain=ENTITY_NOVELTY_DOMAIN_DEAD_CODE,
+            entity_novelty_facts=entity_novelty_facts,
+        )
         groups.append(
             {
                 "id": dead_code_group_id(qualname),
@@ -693,6 +712,8 @@ def _build_dead_code_groups(
                 "confidence": confidence,
                 "priority": _priority(severity, EFFORT_EASY),
                 "count": 1,
+                "novelty": novelty,
+                "novelty_reason": novelty_reason,
                 "source_scope": _single_location_source_scope(
                     filepath,
                     scan_root=scan_root,
@@ -742,6 +763,13 @@ def _build_unreachable_statement_groups(
     payload schema already carries — so nothing here opens a new closed list.
     """
 
+    # The dead-code lane compares symbols, not statements: MetricsDiff has no
+    # unreachable-statement term, so this kind states the missing comparison.
+    novelty, novelty_reason = _entity_novelty(
+        identity="",
+        domain=FINDING_KIND_UNREACHABLE_STATEMENT,
+        entity_novelty_facts=None,
+    )
     groups: list[dict[str, object]] = []
     for item in _as_sequence(dead_code.get("unreachable_statements")):
         item_map = _as_mapping(item)
@@ -768,6 +796,8 @@ def _build_unreachable_statement_groups(
                 "confidence": CONFIDENCE_HIGH,
                 "priority": _priority(SEVERITY_WARNING, EFFORT_EASY),
                 "count": 1,
+                "novelty": novelty,
+                "novelty_reason": novelty_reason,
                 "source_scope": _single_location_source_scope(
                     filepath,
                     scan_root=scan_root,

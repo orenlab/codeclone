@@ -74,7 +74,7 @@ Baseline update and baseline-relative gating both require a stable
 | `--fail-complexity [CC_MAX]` | Exit 3 if cyclomatic complexity exceeds threshold. Default if enabled: 20 |
 | `--fail-coupling [CBO_MAX]` | Exit 3 if class coupling exceeds threshold. Default if enabled: 10 |
 | `--fail-cohesion [LCOM4_MAX]` | Exit 3 if class cohesion exceeds threshold. Default if enabled: 4 |
-| `--fail-cycles` | Exit 3 if circular dependencies detected |
+| `--fail-cycles` | Exit 3 if an **import-time** dependency cycle is detected. Deferred cycles are reported but never fail the build — see [Dependency cycle kinds](#dependency-cycle-kinds) |
 | `--fail-dead-code` | Exit 3 if dead code detected |
 | `--fail-on-unresolved-dead-code` | Exit 3 on unresolved external overrides. These are abstentions, never counted as dead code |
 | `--fail-health [SCORE_MIN]` | Exit 3 if health score below threshold. Default if enabled: 60 |
@@ -86,6 +86,31 @@ Baseline update and baseline-relative gating both require a stable
 | `--min-typing-coverage PERCENT` | Exit 3 if parameter typing coverage below threshold |
 | `--min-docstring-coverage PERCENT` | Exit 3 if public docstring coverage below threshold |
 | `--coverage-min PERCENT` | Coverage threshold for untested hotspots. Default: 50 |
+
+#### Dependency cycle kinds
+
+CodeClone classifies every dependency cycle by the binding time of the edges
+that close it:
+
+| Kind | Meaning | Fails `--fail-cycles` |
+|------|---------|-----------------------|
+| `import_cycle` | The cycle survives when the graph is restricted to import-time edges, so it can raise `ImportError` at interpreter start | Yes |
+| `deferred_cycle` | The cycle is closed only by deferred, lazy, or `TYPE_CHECKING` edges, so it cannot fail an import | No |
+
+Both kinds are always **reported** — a deferred cycle is a real design fact and
+still appears in the summary, the report, and the findings. Only the import
+kind fails the build, because only it can break at runtime. `TYPE_CHECKING`
+edges never form a runtime cycle at all and are excluded before classification.
+
+The same rule governs regression gating: under `--fail-on-new-metrics`, a new
+`import_cycle` fails and a new `deferred_cycle` does not. A cycle whose kind
+*changes* between runs is reported as a kind change rather than as unchanged —
+a `deferred_cycle` that hardens into an `import_cycle` fails the gate, and the
+reverse repair never does.
+
+There is deliberately no flag to gate on every cycle. If you want a deferred
+cycle to block a build, treat it through the report or a review policy rather
+than through the import-time gate.
 
 ### Analysis stages
 

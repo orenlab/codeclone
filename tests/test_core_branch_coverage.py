@@ -1634,7 +1634,7 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         "New high-coupling classes vs metrics baseline: 2."
     ) == ("new_high_coupling_classes", "2")
     assert cli_console._parse_metric_reason_entry(
-        "New dependency cycles vs metrics baseline: 3."
+        "New import-time dependency cycles vs metrics baseline: 3."
     ) == ("new_dependency_cycles", "3")
     assert cli_console._parse_metric_reason_entry(
         "New dead code items vs metrics baseline: 4."
@@ -1656,7 +1656,7 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         "Coverage hotspots detected: hotspots=2, threshold=50."
     ) == ("coverage_hotspots", "2 (threshold=50)")
     assert cli_console._parse_metric_reason_entry(
-        "Dependency cycles detected: 3 cycle(s)."
+        "Import-time dependency cycles detected: 3 cycle(s)."
     ) == ("dependency_cycles", "3")
     assert cli_console._parse_metric_reason_entry(
         "Dead code detected (high confidence): 2 item(s)."

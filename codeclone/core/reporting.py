@@ -226,6 +226,21 @@ def _metrics_for_report(
                 "new_cycles",
                 len(validated_metrics_diff.new_cycles),
             ),
+            # Carried beside the total because only this one gates. Without it
+            # the report document cannot tell the gate evaluator which of the
+            # new cycles can actually break an import.
+            (
+                "dependencies",
+                "dependencies",
+                "new_import_cycles",
+                len(validated_metrics_diff.new_import_cycles),
+            ),
+            (
+                "dependencies",
+                "dependencies",
+                "new_deferred_cycles",
+                len(validated_metrics_diff.new_deferred_cycles),
+            ),
             (
                 "dead_code",
                 "dead_code",
@@ -316,6 +331,10 @@ def build_report_body_for_analysis(
             baseline_trust=baseline_trust,
             near_miss_pairs=analysis.near_miss_pairs,
             renamed_structure_groups=analysis.renamed_structure_groups,
+            # The per-entity baseline differences are computed once and routed
+            # to the gates; they reach the findings that were compared here.
+            project_metrics=analysis.project_metrics,
+            metrics_diff=_coerce_metrics_diff(metrics_diff),
         )
 
 

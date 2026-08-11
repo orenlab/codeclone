@@ -63,10 +63,15 @@ def analysis_completed_payload_from_report(
     *,
     report_document: Mapping[str, object],
     source: AnalysisSource,
-    new_func_count: int,
-    new_block_count: int,
+    new_func_count: int | None,
+    new_block_count: int | None,
 ) -> dict[str, object]:
-    """Build an analysis.completed payload from a canonical report document."""
+    """Build an analysis.completed payload from a canonical report document.
+
+    ``None`` counts mean no clone lane was compared against the baseline, and
+    the recorded ``diff.new_clones`` stays null rather than claiming a zero the
+    run never measured.
+    """
 
     (
         meta,
@@ -105,7 +110,11 @@ def analysis_completed_payload_from_report(
             "functions": inventory.get("functions"),
         },
         "diff": {
-            "new_clones": new_func_count + new_block_count,
+            "new_clones": (
+                None
+                if new_func_count is None or new_block_count is None
+                else new_func_count + new_block_count
+            ),
             "health_delta": None,
         },
     }
@@ -159,8 +168,8 @@ def emit_analysis_completed_from_report(
     report_digest: str,
     run_id: str,
     source: AnalysisSource,
-    new_func_count: int,
-    new_block_count: int,
+    new_func_count: int | None,
+    new_block_count: int | None,
     agent_pid: int | None = None,
     agent_start_epoch: int | None = None,
     agent_label: str | None = None,

@@ -370,21 +370,15 @@ def _main_impl() -> None:
     ap = build_parser(__version__)
 
     raw_argv = tuple(sys.argv[1:])
-    explicit_cli_dests = collect_explicit_cli_dests(ap, argv=raw_argv)
     report_path_origins = _report_path_origins(raw_argv)
     report_generated_at_utc = cli_meta_mod._current_report_timestamp_utc()
-    strictness_explicit = any(
-        arg == "--strictness" or arg.startswith("--strictness=") for arg in raw_argv
-    )
-    cache_path_from_args = any(
-        arg in {"--cache-dir", "--cache-path"}
-        or arg.startswith(("--cache-dir=", "--cache-path="))
-        for arg in sys.argv
-    )
-    baseline_path_from_args = any(
-        arg == "--baseline" or arg.startswith("--baseline=") for arg in sys.argv
-    )
     args = ap.parse_args()
+    # Ask argparse which options were supplied, after it accepted them: token
+    # matching misses the prefix abbreviations argparse itself expands.
+    explicit_cli_dests = collect_explicit_cli_dests(ap, argv=raw_argv)
+    strictness_explicit = "strictness" in explicit_cli_dests
+    cache_path_from_args = "cache_path" in explicit_cli_dests
+    baseline_path_from_args = "baseline" in explicit_cli_dests
     args._full_metrics_explicit = (
         "skip_metrics" in explicit_cli_dests and not bool_attr(args, "skip_metrics")
     )
@@ -603,7 +597,11 @@ def _main_impl() -> None:
                     getattr(analysis_result, "suppressed_clone_groups", ())
                 ),
                 suppressed_segment_groups=analysis_result.suppressed_segment_groups,
-                new_clones_count=diff_context.new_clones_count,
+                new_clones_count=(
+                    diff_context.new_clones_count
+                    if diff_context.clone_novelty_available
+                    else None
+                ),
             )
             print_metrics_if_available(
                 args=args,
@@ -708,8 +706,14 @@ def _main_impl() -> None:
         args=args,
         root_path=root_path,
         report_document=report_artifacts.report_document,
-        new_func_count=len(diff_context.new_func),
-        new_block_count=len(diff_context.new_block),
+        new_func_count=(
+            len(diff_context.new_func) if diff_context.clone_novelty_available else None
+        ),
+        new_block_count=(
+            len(diff_context.new_block)
+            if diff_context.clone_novelty_available
+            else None
+        ),
     )
     controller_exit_code = _run_controller_query(
         args=args,
@@ -792,8 +796,10 @@ def _emit_cli_analysis_completed_if_enabled(
     args: _AuditEnabledArgs,
     root_path: Path,
     report_document: object,
-    new_func_count: int,
-    new_block_count: int,
+    #: ``None`` when no clone lane was compared, so the recorded event does not
+    #: claim a new-clone count the run never measured.
+    new_func_count: int | None,
+    new_block_count: int | None,
 ) -> None:
     if not bool(getattr(args, "audit_enabled", False)):
         return

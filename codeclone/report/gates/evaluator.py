@@ -17,7 +17,7 @@ from ...contracts import (
     ExitCode,
 )
 from ...metrics.registry import METRIC_FAMILIES
-from ...models import ObservationLaneName
+from ...models import ObservationLaneName, cycle_kind_counts
 from ...observability import span
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -67,7 +67,13 @@ class GateState:
     complexity_max: int = 0
     coupling_max: int = 0
     cohesion_max: int = 0
+    #: Every runtime cycle, both kinds. Reported, never gated on: a deferred
+    #: cycle is real but cannot crash an import, so failing a build for one
+    #: would apply an import-time verdict to a fact that is not import-time.
     dependency_cycles: int = 0
+    #: The gating subset — cycles whose import-time edges still cycle. This is
+    #: what --fail-cycles reads.
+    import_dependency_cycles: int = 0
     dead_high_confidence: int = 0
     #: Proven-dead statements inside live symbols. A second lane of the same
     #: family, kept separate because the two count different objects, and read
@@ -83,7 +89,11 @@ class GateState:
     authority_violations: int = 0
     diff_new_high_risk_functions: int = 0
     diff_new_high_coupling_classes: int = 0
+    #: New cycles of either kind — the visibility count.
     diff_new_cycles: int = 0
+    #: Cycles that are import-time now and were not before, including a
+    #: deferred cycle that hardened into one. The only cycle novelty that gates.
+    diff_new_import_cycles: int = 0
     diff_new_dead_code: int = 0
     diff_health_delta: int = 0
     diff_typing_param_permille_delta: int = 0
@@ -182,6 +192,15 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
                 0,
             ),
             "new_cycles": _as_int(payload.get("new_cycles"), 0),
+            # A payload written before the kind split carries no import count.
+            # Falling back to the undifferentiated total keeps such a payload
+            # gating exactly as it used to; defaulting to zero would silently
+            # open the gate for every legacy caller.
+            "new_import_cycles": _as_int(
+                payload.get("new_import_cycles"),
+                _as_int(payload.get("new_cycles"), 0),
+            ),
+            "new_deferred_cycles": _as_int(payload.get("new_deferred_cycles"), 0),
             "new_dead_code": _as_int(payload.get("new_dead_code"), 0),
             "health_delta": _as_int(payload.get("health_delta"), 0),
             "typing_param_permille_delta": _as_int(
@@ -217,6 +236,14 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
         tuple(str(part) for part in _as_sequence(item) if str(part).strip())
         for item in _as_sequence(getattr(metrics_diff, "new_cycles", ()))
     )
+    new_import_cycles = tuple(
+        tuple(str(part) for part in _as_sequence(item) if str(part).strip())
+        for item in _as_sequence(getattr(metrics_diff, "new_import_cycles", ()))
+    )
+    new_deferred_cycles = tuple(
+        tuple(str(part) for part in _as_sequence(item) if str(part).strip())
+        for item in _as_sequence(getattr(metrics_diff, "new_deferred_cycles", ()))
+    )
     new_dead_code = tuple(
         str(item)
         for item in _as_sequence(getattr(metrics_diff, "new_dead_code", ()))
@@ -230,6 +257,8 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
         "new_high_risk_functions": len(new_high_risk_functions),
         "new_high_coupling_classes": len(new_high_coupling_classes),
         "new_cycles": len(new_cycles),
+        "new_import_cycles": len(new_import_cycles),
+        "new_deferred_cycles": len(new_deferred_cycles),
         "new_dead_code": len(new_dead_code),
         "health_delta": _as_int(getattr(metrics_diff, "health_delta", 0), 0),
         "typing_param_permille_delta": _as_int(
@@ -265,6 +294,10 @@ def gate_state_from_project_metrics(
         coupling_max=max(int(project_metrics.coupling_max), 0),
         cohesion_max=max(int(project_metrics.cohesion_max), 0),
         dependency_cycles=len(tuple(project_metrics.dependency_cycles)),
+        import_dependency_cycles=cycle_kind_counts(
+            cycles=tuple(project_metrics.dependency_cycles),
+            details=project_metrics.dependency_cycle_details,
+        ).import_cycles,
         dead_high_confidence=sum(
             1
             for item in project_metrics.dead_code
@@ -308,6 +341,7 @@ def gate_state_from_project_metrics(
             0,
         ),
         diff_new_cycles=_as_int(diff_summary.get("new_cycles"), 0),
+        diff_new_import_cycles=_as_int(diff_summary.get("new_import_cycles"), 0),
         diff_new_dead_code=_as_int(diff_summary.get("new_dead_code"), 0),
         diff_health_delta=_as_int(diff_summary.get("health_delta"), 0),
         diff_typing_param_permille_delta=_as_int(
@@ -430,8 +464,8 @@ def _dependency_cycles_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_cycles and state.dependency_cycles > 0,
-        f"{gate_msgs.GATE_REASON_CYCLES_DETECTED}{state.dependency_cycles}{gate_msgs.GATE_SUFFIX_CYCLES}.",
+        config.fail_cycles and state.import_dependency_cycles > 0,
+        f"{gate_msgs.GATE_REASON_CYCLES_DETECTED}{state.import_dependency_cycles}{gate_msgs.GATE_SUFFIX_CYCLES}.",
     )
 
 
@@ -492,8 +526,8 @@ def _new_dependency_cycles_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_new_cycles > 0,
-        f"{gate_msgs.GATE_REASON_NEW_CYCLES}{state.diff_new_cycles}.",
+        config.fail_on_new_metrics and state.diff_new_import_cycles > 0,
+        f"{gate_msgs.GATE_REASON_NEW_CYCLES}{state.diff_new_import_cycles}.",
     )
 
 
@@ -843,6 +877,13 @@ def _gate_state_from_report_document(
         coupling_max=_as_int(coupling_summary.get("max"), 0),
         cohesion_max=_as_int(cohesion_summary.get("max"), 0),
         dependency_cycles=_as_int(dependencies_summary.get("cycles"), 0),
+        # A document written before the split has no import count. Reading the
+        # total keeps its gate verdict identical rather than quietly passing a
+        # build that used to fail.
+        import_dependency_cycles=_as_int(
+            dependencies_summary.get("import_cycles"),
+            _as_int(dependencies_summary.get("cycles"), 0),
+        ),
         dead_high_confidence=_as_int(dead_code_summary.get("high_confidence"), 0),
         # The published count, not a local measurement: one field feeds this
         # gate and the text/markdown/HTML surfaces, so the number an operator
@@ -884,6 +925,7 @@ def _gate_state_from_report_document(
             0,
         ),
         diff_new_cycles=_as_int(diff_summary.get("new_cycles"), 0),
+        diff_new_import_cycles=_as_int(diff_summary.get("new_import_cycles"), 0),
         diff_new_dead_code=_as_int(diff_summary.get("new_dead_code"), 0),
         diff_health_delta=_as_int(diff_summary.get("health_delta"), 0),
         diff_typing_param_permille_delta=(

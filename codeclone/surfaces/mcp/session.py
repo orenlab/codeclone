@@ -56,7 +56,6 @@ from ._session_shared import (
     DEFAULT_SEGMENT_MIN_STMT,
     MAX_MCP_HISTORY_LIMIT,
     AnalysisMode,
-    Baseline,
     CachePolicy,
     CacheStatus,
     CodeCloneMCPRunStore,
@@ -432,15 +431,18 @@ class MCPSession(
             report_generated_at_utc=_current_report_timestamp_utc(),
         )
 
-        baseline_for_diff = (
-            clone_baseline_state.baseline
-            if clone_baseline_state.trusted_for_diff
-            else Baseline(baseline_path)
-        )
-        new_func, new_block = baseline_for_diff.diff(
-            analysis_result.func_groups,
-            analysis_result.block_groups,
-        )
+        # An untrusted or missing baseline means no comparison ran. Diffing
+        # against a fresh empty Baseline instead turned every clone group into
+        # a "new" one, while the CLI reported none of them -- one repository
+        # state, two contradictory verdicts. Not compared is neither.
+        clone_novelty_available = clone_baseline_state.trusted_for_diff
+        new_func: tuple[str, ...] | set[str] = ()
+        new_block: tuple[str, ...] | set[str] = ()
+        if clone_novelty_available:
+            new_func, new_block = clone_baseline_state.baseline.diff(
+                analysis_result.func_groups,
+                analysis_result.block_groups,
+            )
         metrics_diff = None
         if (
             analysis_result.project_metrics is not None
@@ -505,6 +507,7 @@ class MCPSession(
             cache_status=cache_status,
             new_func=new_func,
             new_block=new_block,
+            clone_novelty_available=clone_novelty_available,
             metrics_diff=metrics_diff,
             warnings=warnings,
             failures=failures,

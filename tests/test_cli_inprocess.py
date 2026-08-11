@@ -684,7 +684,6 @@ _SUMMARY_METRIC_MAP: dict[str, str] = {
     "from cache": "cached",
     "Files skipped": "skipped",
     "skipped": "skipped",
-    "New vs baseline": "new",
     "Function clones": "func",
     "Block clones": "block",
     "Segment clones": "seg",
@@ -701,6 +700,18 @@ def _summary_metric(out: str, label: str) -> int:
     if match:
         return int(match.group(1).replace(",", ""))
     raise AssertionError(f"summary label not found: {label}\n{normalized}")
+
+
+def _summary_clone_qualifiers(out: str) -> str:
+    """Return the parenthesised qualifiers of the summary ``Clones`` line."""
+
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(out)
+    match = re.search(r"^\s*Clones\s+.*?\(([^)]*)\)\s*$", normalized, re.MULTILINE)
+    if match is None:
+        raise AssertionError(f"clone summary line not found\n{normalized}")
+    return match.group(1)
 
 
 def _compact_summary_metric(out: str, key: str) -> int:
@@ -1765,7 +1776,10 @@ def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
         "Comparison will proceed against an empty baseline",
         "New clones detected but --fail-on-new not set.",
     )
-    assert _summary_metric(out, "New vs baseline") == 0
+    # The baseline was rejected, so the run compared nothing. The summary must
+    # say so rather than print a zero it never measured.
+    assert "new unavailable" in _summary_clone_qualifiers(out)
+    assert "0 new" not in _summary_clone_qualifiers(out)
 
 
 def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
@@ -1857,6 +1871,106 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
     _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
+def _audit_analysis_completed_diff(root: Path) -> dict[str, object]:
+    """Return the ``diff`` block of the recorded analysis.completed event.
+
+    Reads the persisted row with stdlib sqlite3 on purpose: this module is a
+    CLI-surface test and must not take a dependency on the audit package.
+    """
+
+    import sqlite3
+
+    conn = sqlite3.connect(root / ".codeclone/db/audit.sqlite3")
+    try:
+        row = conn.execute(
+            "SELECT payload_json FROM controller_events "
+            "WHERE event_type = 'analysis.completed' LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "no analysis.completed audit row was written"
+    return cast(dict[str, object], json.loads(row[0])["diff"])
+
+
+@pytest.mark.parametrize(
+    ("update_baseline", "expected_new_clones"),
+    [(True, 0), (False, None)],
+)
+def test_cli_audit_row_records_uncompared_novelty_as_null(
+    update_baseline: bool,
+    expected_new_clones: int | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The audit trail is evidence, so it must carry the same tri-state the
+    # console does: null when nothing was compared, a count when it was.
+    _write_python_module(tmp_path, "a.py", "def f1():\n    return 1\n")
+    # "compact" payloads drop the diff block entirely, so the tri-state is only
+    # observable in the row under "full".
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.codeclone]\naudit_enabled = true\naudit_payloads = "full"\n',
+        encoding="utf-8",
+    )
+    baseline_path = tmp_path / "baseline.json"
+    _patch_parallel(monkeypatch)
+    args = [
+        str(tmp_path),
+        "--baseline",
+        str(baseline_path),
+        "--json",
+        str(tmp_path / "report.json"),
+        "--no-progress",
+        "--no-color",
+    ]
+    if update_baseline:
+        _run_main(monkeypatch, [*args, "--update-baseline"])
+    _run_main(monkeypatch, args)
+
+    assert _audit_analysis_completed_diff(tmp_path)["new_clones"] == expected_new_clones
+
+
+def test_cli_trusted_baseline_reports_a_new_clone_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Control for the untrusted case: a real comparison prints a number."""
+
+    _write_python_module(
+        tmp_path,
+        "a.py",
+        """
+def f1():
+    return 1
+
+def f2():
+    return 1
+""",
+    )
+    baseline_path = tmp_path / "baseline.json"
+    _patch_parallel(monkeypatch)
+    baseline_args = [
+        str(tmp_path),
+        "--baseline",
+        str(baseline_path),
+        "--min-loc",
+        "1",
+        "--min-stmt",
+        "1",
+        "--no-progress",
+        "--no-color",
+    ]
+    _run_main(monkeypatch, [*baseline_args, "--update-baseline"])
+    capsys.readouterr()
+
+    _run_main(monkeypatch, baseline_args)
+    out = capsys.readouterr().out
+
+    qualifiers = _summary_clone_qualifiers(out)
+    assert "0 new" in qualifiers
+    assert "unavailable" not in qualifiers
+
+
 def test_cli_untrusted_baseline_ignored_for_diff(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1918,7 +2032,10 @@ def f2():
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
-    assert _summary_metric(out, "New vs baseline") == 0
+    # Console and report document must agree: the clone groups below carry
+    # novelty "unavailable", so the summary may not print a new-clone count.
+    assert "new unavailable" in _summary_clone_qualifiers(out)
+    assert "0 new" not in _summary_clone_qualifiers(out)
     report = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(report)["status"] == "integrity_failed"
     assert _report_meta_baseline(report)["loaded"] is False
@@ -3360,7 +3477,8 @@ def test_cli_summary_format_stable(
     assert _summary_metric(out, "Function clones") >= 0
     assert _summary_metric(out, "Block clones") >= 0
     assert _summary_metric(out, "suppressed") >= 0
-    assert _summary_metric(out, "New vs baseline") >= 0
+    # This run has no baseline file at all, so novelty was never computed.
+    assert "new unavailable" in _summary_clone_qualifiers(out)
 
 
 def test_cli_summary_with_metrics_baseline_shows_metrics_section(
@@ -4481,7 +4599,7 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
             ("new_high_risk_functions", "3"),
         ),
         (
-            "Dependency cycles detected: 2 cycle(s).",
+            "Import-time dependency cycles detected: 2 cycle(s).",
             ("dependency_cycles", "2"),
         ),
         (

@@ -9,9 +9,19 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from dataclasses import fields
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
+
+import yaml
+
+from codeclone.config.argparse_builder import build_parser
+
+#: The parser's option set does not depend on the version string the
+#: ``--version`` action prints, and importing the package for it would pull an
+#: r4 dependency into an otherwise r2-scoped test module.
+_PARSER_PROBE_VERSION = "0.0.0"
 
 
 def _load_action_impl() -> ModuleType:
@@ -67,7 +77,6 @@ def test_build_codeclone_args_includes_enabled_gates_and_paths() -> None:
         fail_dead_code=True,
         fail_health=60,
         baseline_path="codeclone.baseline.json",
-        metrics_baseline_path="codeclone.baseline.json",
         extra_args="--no-color --quiet",
         no_progress=True,
     )
@@ -90,11 +99,11 @@ def test_build_codeclone_args_includes_enabled_gates_and_paths() -> None:
             "--fail-dead-code",
             "--no-progress",
             "--baseline",
-            "--metrics-baseline",
             "--no-color",
             "--quiet",
         ),
     )
+    assert "--metrics-baseline" not in args
 
 
 def test_render_pr_comment_uses_canonical_report_summary() -> None:
@@ -250,3 +259,75 @@ def test_action_default_package_version_tracks_release_version() -> None:
 
     assert version == action_impl.DEFAULT_CODECLONE_PACKAGE_VERSION
     assert f'default: "{version}"' in action_metadata
+
+
+def _action_metadata() -> dict[str, Any]:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "actions"
+        / "codeclone"
+        / "action.yml"
+    )
+    return cast(dict[str, Any], yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def _action_default_env() -> dict[str, str]:
+    declared = cast(dict[str, Any], _action_metadata()["inputs"])
+    return {
+        f"INPUT_{name.upper().replace('-', '_')}": str(spec.get("default", ""))
+        for name, spec in declared.items()
+    }
+
+
+def _maximal_action_inputs(action_impl: ModuleType) -> Any:
+    """Populate every action input so no valued option stays unemitted."""
+
+    values: dict[str, object] = {}
+    for field in fields(cast(Any, action_impl.ActionInputs)):
+        annotation = str(field.type)
+        if field.name == "path":
+            values[field.name] = "."
+        elif field.name == "extra_args":
+            # Free-form user text, not part of the action's own CLI contract.
+            values[field.name] = ""
+        elif annotation == "bool":
+            values[field.name] = True
+        elif annotation.startswith("int"):
+            values[field.name] = 1
+        elif annotation == "str":
+            values[field.name] = f"{field.name}.value"
+        else:
+            raise AssertionError(f"Unhandled action input type: {annotation}")
+    return action_impl.ActionInputs(**values)
+
+
+def _unrecognized_cli_arguments(args: list[str]) -> list[str]:
+    """Return the action arguments the real CodeClone parser does not know."""
+
+    _namespace, extras = build_parser(_PARSER_PROBE_VERSION).parse_known_args(args)
+    return list(extras)
+
+
+def test_action_default_invocation_is_accepted_by_the_cli_parser() -> None:
+    # The README quickstart overrides no input, so action.yml defaults alone
+    # must produce a command line the shipped parser accepts. A CLI option
+    # removed in a release but still emitted here fails every default run
+    # before analysis starts.
+    action_impl = _load_action_impl()
+    inputs = action_impl.build_inputs_from_env(_action_default_env())
+    args = cast(list[str], action_impl.build_codeclone_args(inputs))
+
+    assert _unrecognized_cli_arguments(args) == []
+
+
+def test_action_maximal_invocation_is_accepted_by_the_cli_parser() -> None:
+    # Valued options are emitted only when their input is non-empty, so the
+    # defaults alone cannot reach every branch. Populate all of them.
+    action_impl = _load_action_impl()
+    args = cast(
+        list[str],
+        action_impl.build_codeclone_args(_maximal_action_inputs(action_impl)),
+    )
+
+    assert _unrecognized_cli_arguments(args) == []
