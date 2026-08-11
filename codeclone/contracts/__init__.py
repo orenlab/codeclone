@@ -338,6 +338,17 @@ DEFAULT_MARKDOWN_REPORT_PATH: Final = ".codeclone/report.md"
 DEFAULT_SARIF_REPORT_PATH: Final = ".codeclone/report.sarif"
 DEFAULT_TEXT_REPORT_PATH: Final = ".codeclone/report.txt"
 
+# Complexity risk bands. Reviewed and kept unchanged through the Wave D
+# source-decision recalibration (see the health block below).
+#
+# A band is not a gate threshold. A gate threshold is read at report time over
+# stored facts; a band CLASSIFIES at extraction, and the resulting word is
+# stored per unit as ``units[].risk`` in the module-neutral cache payload, which
+# a warm run serves verbatim. Both edges are therefore inputs of that lane's
+# reuse profile (codeclone/cache/reuse.py). Without that binding a
+# recalibration - admissible only through the independent blind benchmark the
+# score-change law requires - would leave every warm-cache user's risk
+# classification exactly as it was, under the new calibration's name.
 COMPLEXITY_RISK_LOW_MAX: Final = 10
 COMPLEXITY_RISK_MEDIUM_MAX: Final = 20
 # Coupling risk bands, derived from the measured CBO distribution of a
@@ -353,6 +364,12 @@ COMPLEXITY_RISK_MEDIUM_MAX: Final = 20
 # than the filter applied to it. Owning test:
 # tests/test_metrics_health_recalibration.py, which recomputes both percentiles
 # from the recorded histogram.
+#
+# Like the complexity bands above, these classify at extraction: the words are
+# stored as ``class_metrics[].risk_coupling`` and ``.risk_cohesion`` in the
+# module-DEPENDENT cache payload and are rehydrated verbatim, so all three edges
+# are inputs of that lane's reuse profile (codeclone/cache/reuse.py) and of no
+# other. A band move re-derives the class rows and spares the neutral lane.
 COUPLING_RISK_LOW_MAX: Final = 4
 COUPLING_RISK_MEDIUM_MAX: Final = 7
 COHESION_RISK_MEDIUM_MAX: Final = 3

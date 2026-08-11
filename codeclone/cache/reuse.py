@@ -18,7 +18,12 @@ import orjson
 from ..baseline.trust import current_python_tag
 from ..contracts import (
     API_SURFACE_SIGNATURE_VERSION,
+    COHESION_RISK_MEDIUM_MAX,
     COMPLEXITY_ALGORITHM_REVISION,
+    COMPLEXITY_RISK_LOW_MAX,
+    COMPLEXITY_RISK_MEDIUM_MAX,
+    COUPLING_RISK_LOW_MAX,
+    COUPLING_RISK_MEDIUM_MAX,
     DESIGN_METRICS_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
     RENAMED_STRUCTURE_ALGORITHM_REVISION,
@@ -95,6 +100,19 @@ def build_module_neutral_profile(
             # trigger: CACHE_VERSION rode along by accident once and hid exactly
             # this for a whole generation.
             "complexity_algorithm_revision": COMPLEXITY_ALGORITHM_REVISION,
+            # The risk BAND is not a threshold read at report time: the band
+            # classifies at extraction and the resulting word is stored as
+            # units[].risk, which rehydrate_cache_neutral serves without
+            # re-classifying. A recalibration is admitted only by an independent
+            # blind benchmark (the score-change law), and an unkeyed lane would
+            # spend that whole procedure on nothing - every warm-cache user
+            # would keep the pre-move classification under the new
+            # calibration's name. Keyed here rather than left to
+            # COMPLEXITY_ALGORITHM_REVISION moving alongside: bands and counter
+            # are separately governed, and "some neighbour will move too" is the
+            # exact discipline X-02 found had never held (X-03).
+            "complexity_risk_low_max": COMPLEXITY_RISK_LOW_MAX,
+            "complexity_risk_medium_max": COMPLEXITY_RISK_MEDIUM_MAX,
             "min_loc": min_loc,
             "min_stmt": min_stmt,
             "normalization": "ast-normalizer-v2",
@@ -137,6 +155,15 @@ def build_module_dependent_profile(
             "api_surface": collect_api_surface,
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
+            # The coupling and cohesion bands classify at extraction exactly as
+            # the complexity band does on the neutral lane, and their words are
+            # stored as class_metrics[].risk_coupling / .risk_cohesion. They ride
+            # THIS lane only, so a band move re-derives the class rows and leaves
+            # the fingerprints, complexity and reachability of a still-correct
+            # warm cache alone (X-03).
+            "cohesion_risk_medium_max": COHESION_RISK_MEDIUM_MAX,
+            "coupling_risk_low_max": COUPLING_RISK_LOW_MAX,
+            "coupling_risk_medium_max": COUPLING_RISK_MEDIUM_MAX,
             "dependency_observation_revision": _DEPENDENCY_OBSERVATION_REVISION,
             # class_metrics (cbo, lcom4, coupling/cohesion risk) ride the
             # dependent lane, and their values are a function of the
