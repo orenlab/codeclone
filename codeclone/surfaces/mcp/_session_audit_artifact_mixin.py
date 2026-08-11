@@ -38,6 +38,8 @@ from ...config.memory import resolve_memory_config
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.schema import open_memory_db_readonly
 from ...memory.trajectory.store import find_trajectory_patch_trails_for_lookup
+from ...observability import SpanHandle, span
+from ...utils.json_io import json_text
 from ...utils.payload_narrow import is_record_mapping
 from ._context_governance import (
     BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND,
@@ -177,22 +179,67 @@ def _durable_artifact_response(
     if not run_id and not artifact_digest:
         raise MCPServiceContractError(require_message)
     audit_path = resolve_audit_path(root_path=Path(root), value=DEFAULT_AUDIT_PATH)
-    try:
-        status, match_count, artifact = lookup(audit_path, run_id, artifact_digest)
-    except AuditReadError as exc:
-        raise MCPServiceContractError(str(exc)) from exc
-    if status != "ok" or artifact is None:
-        return envelope(
-            {
-                "status": status,
-                "run_id": run_id,
-                digest_key: artifact_digest,
-                "match_count": match_count,
-                "source": "audit_event",
-                "durable": True,
-            }
+    with span(name="mcp.run_store.resolve_artifact") as artifact_span:
+        try:
+            status, match_count, artifact = lookup(audit_path, run_id, artifact_digest)
+        except AuditReadError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
+        if status != "ok" or artifact is None:
+            _record_artifact_outcome(artifact_span, status=status, payload=None)
+            return envelope(
+                {
+                    "status": status,
+                    "run_id": run_id,
+                    digest_key: artifact_digest,
+                    "match_count": match_count,
+                    "source": "audit_event",
+                    "durable": True,
+                }
+            )
+        payload = render(artifact, output_format)
+        _record_artifact_outcome(artifact_span, status=status, payload=payload)
+    return envelope(payload)
+
+
+def _resolved_patch_trail(
+    artifact_span: SpanHandle,
+    patch_trail: StoredPatchTrail,
+    *,
+    status: str,
+    output_format: str,
+    source: str = "audit_event",
+) -> dict[str, object]:
+    """Render, record and envelope one found patch trail, whichever store held it."""
+    payload = _render_stored_patch_trail(
+        patch_trail, output_format=output_format, source=source
+    )
+    _record_artifact_outcome(artifact_span, status=status, payload=payload)
+    return _patch_trail_envelope(payload)
+
+
+def _record_artifact_outcome(
+    artifact_span: SpanHandle,
+    *,
+    status: str,
+    payload: Mapping[str, object] | None,
+) -> None:
+    """Classify one durable-artifact resolution for the run-store telemetry.
+
+    Three outcomes, never overlapping: the artifact came back (retained), the
+    trail holds nothing under that key (missing), or something is there but does
+    not answer to the identity asked for (drifted) — a stale digest, an ambiguous
+    match, or a record this build cannot parse.
+    """
+    if status == "ok" and payload is not None:
+        artifact_span.set_counter("run_store_artifacts_retained", 1)
+        artifact_span.set_counter(
+            "run_store_artifact_bytes", len(json_text(dict(payload)))
         )
-    return envelope(render(artifact, output_format))
+        return
+    if status == "not_found":
+        artifact_span.set_counter("run_store_artifacts_missing", 1)
+        return
+    artifact_span.set_counter("run_store_artifacts_drifted", 1)
 
 
 def _patch_trail_response(
@@ -216,35 +263,40 @@ def _patch_trail_response(
         )
     root_path = Path(root)
     audit_path = resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
-    try:
-        status, match_count, artifact = _patch_trail_lookup(
-            audit_path,
-            run_id,
-            patch_trail_digest,
-        )
-    except AuditReadError as exc:
-        raise MCPServiceContractError(str(exc)) from exc
-    if status == "ok" and artifact is not None:
-        return _patch_trail_envelope(
-            _render_stored_patch_trail(artifact, output_format=output_format)
-        )
+    with span(name="mcp.run_store.resolve_artifact") as artifact_span:
+        try:
+            status, match_count, artifact = _patch_trail_lookup(
+                audit_path,
+                run_id,
+                patch_trail_digest,
+            )
+        except AuditReadError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
+        if status == "ok" and artifact is not None:
+            return _resolved_patch_trail(
+                artifact_span,
+                artifact,
+                status=status,
+                output_format=output_format,
+            )
 
-    fallback_status, fallback_count, fallback = _memory_patch_trail_lookup(
-        root_path=root_path,
-        run_id=run_id,
-        patch_trail_digest=patch_trail_digest,
-    )
-    if fallback_status == "ok" and fallback is not None:
-        return _patch_trail_envelope(
-            _render_stored_patch_trail(
+        fallback_status, fallback_count, fallback = _memory_patch_trail_lookup(
+            root_path=root_path,
+            run_id=run_id,
+            patch_trail_digest=patch_trail_digest,
+        )
+        if fallback_status == "ok" and fallback is not None:
+            return _resolved_patch_trail(
+                artifact_span,
                 fallback,
+                status=fallback_status,
                 output_format=output_format,
                 source="memory_trajectory_patch_trail",
             )
-        )
-    if fallback_status != "not_found":
-        status = fallback_status
-        match_count = fallback_count
+        if fallback_status != "not_found":
+            status = fallback_status
+            match_count = fallback_count
+        _record_artifact_outcome(artifact_span, status=status, payload=None)
     return _patch_trail_envelope(
         {
             "status": status,

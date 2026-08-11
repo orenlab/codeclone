@@ -219,7 +219,7 @@ def test_registry_build_has_one_bounded_span_and_one_discovery_walk(
 
     def _discover_once(
         root: str, *, hard_excludes: tuple[str, ...], max_files: int
-    ) -> tuple[tuple[str, ...], int]:
+    ) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
         nonlocal walks
         walks += 1
         return real_discover(

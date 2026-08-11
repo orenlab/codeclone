@@ -91,6 +91,7 @@ def _diff_context(*, new_clones: int = 0) -> DiffContext:
         new_func={f"func-{index}" for index in range(new_clones)},
         new_block=set(),
         new_clones_count=new_clones,
+        clone_novelty_available=True,
         metrics_diff=None,
         coverage_adoption_diff_available=False,
         api_surface_diff_available=False,
@@ -473,6 +474,7 @@ def _diff_context_with_metrics_diff(
         new_func={f"func-{index}" for index in range(new_clones)},
         new_block=set(),
         new_clones_count=new_clones,
+        clone_novelty_available=True,
         metrics_diff=MetricsDiff(
             new_high_risk_functions=(),
             new_high_coupling_classes=(),

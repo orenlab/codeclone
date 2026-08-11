@@ -12,6 +12,9 @@ from typing import TypeGuard
 from ..contracts import COMPLEXITY_RISK_LOW_MAX
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import RISK_HIGH, RISK_LOW
+from ..findings.clones.golden_fixtures import (
+    path_is_declared_golden_fixture,
+)
 from ..models import (
     ApiSurfaceSnapshot,
     DeadItem,
@@ -30,6 +33,7 @@ from ..models import (
     UnreachableStatementFinding,
     UnreachableStatementItem,
     UnresolvedOverrideItem,
+    cycle_kind_counts,
 )
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_str as _as_str
@@ -88,7 +92,8 @@ _EMPTY_HEALTH_SCORE = compute_health(
         coupling_class_population=0,
         cohesion_avg=0.0,
         low_cohesion_classes=0,
-        dependency_cycles=0,
+        import_dependency_cycles=0,
+        deferred_dependency_cycles=0,
         dependency_max_depth=0,
         dependency_avg_depth=0.0,
         dependency_p95_depth=0,
@@ -623,12 +628,20 @@ def _aggregate_dependencies_family(results: list[MetricResult]) -> MetricAggrega
 
 def _collect_unreachable_statements(
     units: Sequence[GroupItemLike],
+    *,
+    golden_fixture_paths: Sequence[str] = (),
+    scan_root: str = "",
 ) -> tuple[UnreachableStatementFinding, ...]:
     """Locate every per-unit reachability fact in the repository.
 
     Deliberately not gated on ``skip_dead_code``: reachability is proven by a
     function's own control flow and needs no reference graph, so the switch
     that silences the symbol lane has no authority over this one.
+
+    A tree the project declared as a golden-fixture corpus is dropped for the
+    same reason its clone groups are: unreachable code there is the fixture's
+    subject matter, not this project's debt. The declaration is read through
+    the one predicate that owns it rather than re-derived here.
     """
 
     findings: list[UnreachableStatementFinding] = []
@@ -636,10 +649,19 @@ def _collect_unreachable_statements(
         qualname = unit.get("qualname")
         filepath = unit.get("filepath")
         facts = unit.get("unreachable_statements", ())
+        # One skip, two reasons: a unit whose fields are not the expected
+        # types, and a unit inside a tree the project declared as a golden
+        # fixture. The isinstance checks come first so the declaration is only
+        # asked about a real path.
         if (
             not isinstance(qualname, str)
             or not isinstance(filepath, str)
             or not isinstance(facts, tuple)
+            or path_is_declared_golden_fixture(
+                filepath,
+                patterns=golden_fixture_paths,
+                scan_root=scan_root,
+            )
         ):
             continue
         findings.extend(
@@ -685,10 +707,19 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
             module_registry=context.module_registry,
             class_metrics=context.class_metrics,
         )
+        # No golden-fixture filter on this lane, deliberately. Declared
+        # patterns are validated to target tests/ or tests/fixtures/ only, and
+        # liveness already treats every symbol under tests/ as a live root, so
+        # a declared corpus can never contribute a dead symbol here. A filter
+        # would be a guard no input can reach.
         dead_items = classification.dead_items
         unresolved_overrides = classification.unresolved_overrides
     return {
-        "unreachable_statements": _collect_unreachable_statements(context.units),
+        "unreachable_statements": _collect_unreachable_statements(
+            context.units,
+            golden_fixture_paths=context.golden_fixture_paths,
+            scan_root=context.scan_root,
+        ),
         "dead_code": dead_items,
         "dead_items": dead_items,
         "unresolved_overrides": unresolved_overrides,
@@ -748,6 +779,10 @@ def _build_health_result(context: MetricProjectContext) -> MetricResult:
     cohesion = _compute_cohesion_family(context)
     dependencies = _compute_dependencies_family(context)
     dead_code = _compute_dead_code_family(context)
+    cycle_counts = cycle_kind_counts(
+        cycles=_result_nested_tuple_str(dependencies, "dependency_cycles"),
+        details=_result_cycle_details(dependencies, "dependency_cycle_details"),
+    )
     health = compute_health(
         HealthInputs(
             files_found=context.files_found,
@@ -782,9 +817,8 @@ def _build_health_result(context: MetricProjectContext) -> MetricResult:
             low_cohesion_classes=len(
                 _result_tuple_str(cohesion, "low_cohesion_classes")
             ),
-            dependency_cycles=len(
-                _result_nested_tuple_str(dependencies, "dependency_cycles")
-            ),
+            import_dependency_cycles=cycle_counts.import_cycles,
+            deferred_dependency_cycles=cycle_counts.deferred_cycles,
             dependency_max_depth=_result_int(dependencies, "dependency_max_depth"),
             dependency_avg_depth=_result_float(dependencies, "dependency_avg_depth"),
             dependency_p95_depth=_result_int(dependencies, "dependency_p95_depth"),

@@ -31,6 +31,7 @@ from fnmatch import fnmatchcase
 from typing import Final
 
 from ...paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
+from ...utils.repo_paths import has_python_suffix
 from .messages.verification import (
     EMPTY_PROFILE_REASON,
     PROFILE_REASONS,
@@ -301,7 +302,9 @@ def _normalize(path: str) -> str:
 
 
 def _is_python_source(path: str) -> bool:
-    return any(path.endswith(ext) for ext in PYTHON_SOURCE_EXTENSIONS)
+    # One owner, in the scanner: a second copy of the rule here is how ".PY"
+    # came to be invisible to the tree walk and to the profile at once.
+    return has_python_suffix(path, include_stubs=True)
 
 
 def _is_documentation(path: str) -> bool:

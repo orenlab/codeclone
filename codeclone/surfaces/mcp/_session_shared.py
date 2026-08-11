@@ -104,6 +104,7 @@ from ...models import (
     ProjectMetrics,
     Suggestion,
 )
+from ...observability import record_counter, span
 from ...report.gates.evaluator import GateResult as GatingResult
 from ...report.gates.evaluator import MetricGateConfig
 from ...report.gates.evaluator import evaluate_gates as _evaluate_report_gates
@@ -638,7 +639,6 @@ class MCPAnalysisRequest:
     coupling_threshold: int | None = None
     cohesion_threshold: int | None = None
     baseline_path: str | None = None
-    metrics_baseline_path: str | None = None
     max_baseline_size_mb: int | None = None
     cache_policy: CachePolicy = "reuse"
     cache_path: str | None = None
@@ -750,14 +750,24 @@ class CodeCloneMCPRunStore:
 
     def register(self, record: MCPRunRecord) -> MCPRunRecord:
         key = run_store_key(record.root, record.run_id)
-        with self._lock:
+        # This LRU is where one agent's run silently disappears while another
+        # agent is still holding its id. The span makes that a measured number
+        # instead of an inference from a later "no run available" error.
+        with span(name="mcp.run_store.register") as register_span, self._lock:
             self._records.pop(key, None)
+            held_without_this_run = len(self._records)
             self._records[key] = record
             self._records.move_to_end(key)
             self._latest_run_id = key
             self._registration_seq += 1
             self._registrations[key] = self._registration_seq
             self._prune_unpinned_locked()
+            retained = len(self._records)
+            register_span.set_counter("run_store_runs_retained", retained)
+            register_span.set_counter(
+                "run_store_runs_evicted",
+                max(0, held_without_this_run + 1 - retained),
+            )
         return record
 
     def is_latest_registration(self, run_id: str, *, root: Path) -> bool:
@@ -832,11 +842,16 @@ class CodeCloneMCPRunStore:
         """
 
         with self._lock:
+            # These two exits answer without reaching _resolve_key_locked, so
+            # they have to report their own outcome — an unconstrained lookup
+            # that quietly finds nothing is precisely the case worth counting.
             if run_id is None:
                 if self._latest_run_id is None:
+                    record_counter("run_store_selector_misses")
                     raise MCPRunNotFoundError(
                         "No matching MCP analysis run is available."
                     )
+                record_counter("run_store_selector_hits")
                 return self._records[self._latest_run_id]
             roots = self._roots_holding_locked(run_id)
             if len(roots) > 1:
@@ -846,6 +861,7 @@ class CodeCloneMCPRunStore:
                     f"({rendered}); pass root to select one."
                 )
             if not roots:
+                record_counter("run_store_selector_misses")
                 raise MCPRunNotFoundError("No matching MCP analysis run is available.")
             key = self._resolve_key_locked(run_id, root=next(iter(roots)))
             if key is None:
@@ -853,6 +869,23 @@ class CodeCloneMCPRunStore:
             return self._records[key]
 
     def _resolve_key_locked(
+        self,
+        run_id: str | None,
+        *,
+        root: Path,
+    ) -> MCPRunKey | None:
+        # The single funnel every lookup goes through, so hit/miss telemetry is
+        # counted once per resolution and cannot drift between call sites. The
+        # counters land on the enclosing tool span; outside one they are inert.
+        key = self._resolve_key_uncounted_locked(run_id, root=root)
+        record_counter(
+            "run_store_selector_hits"
+            if key is not None
+            else "run_store_selector_misses"
+        )
+        return key
+
+    def _resolve_key_uncounted_locked(
         self,
         run_id: str | None,
         *,

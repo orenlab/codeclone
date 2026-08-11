@@ -51,6 +51,11 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     dead_high_conf = _as_int(summary.get("high_confidence", summary.get("critical")))
     dead_suppressed_total = _as_int(summary.get("suppressed", 0))
     dead_unresolved_total = _as_int(summary.get("unresolved_external_override", 0))
+    # Published once by the metrics payload and read here, exactly as the
+    # gate and the text/markdown surfaces read it. This panel used to say
+    # "No dead code detected." beside ten published statement findings
+    # because it only ever asked about unreferenced symbols.
+    dead_unreachable_total = _as_int(summary.get("unreachable_statements", 0))
 
     # Count high confidence from items if summary is 0 but items have them
     items_data = _as_sequence(ctx.dead_code_map.get("items"))
@@ -89,6 +94,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         answer = (
             f"{dead_total} candidates total; "
             f"{dead_high_conf} high-confidence items; "
+            f"{dead_unreachable_total} unreachable statement region(s); "
             f"{dead_suppressed_total} suppressed."
         )
         if dead_unresolved_total:
@@ -96,7 +102,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
                 f" {dead_unresolved_total} unresolved override(s) abstained:"
                 " neither dead nor live."
             )
-        if dead_high_conf > 0:
+        if dead_high_conf > 0 or dead_unreachable_total > 0:
             tone = "risk"
         elif dead_total > 0:
             tone = "warn"

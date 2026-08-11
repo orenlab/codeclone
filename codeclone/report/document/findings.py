@@ -274,6 +274,7 @@ def _build_findings_payload(
     scan_root: str,
     near_miss_pairs: Sequence[NearMissPair] | None = None,
     renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     clone_functions = _build_clone_groups(
         groups=func_groups,
@@ -306,6 +307,7 @@ def _build_findings_payload(
     dead_code_groups = _build_dead_code_groups(
         metrics_payload,
         scan_root=scan_root,
+        entity_novelty_facts=entity_novelty_facts,
     )
     dead_code_family = _as_mapping(
         _as_mapping(metrics_payload.get("families")).get(FAMILY_DEAD_CODE)
@@ -321,6 +323,7 @@ def _build_findings_payload(
         metrics_payload,
         design_thresholds=design_thresholds,
         scan_root=scan_root,
+        entity_novelty_facts=entity_novelty_facts,
     )
     authority_groups, authority_suppressed = _build_authority_groups(metrics_payload)
     suppressed_clone_payload = _build_suppressed_clone_groups(

@@ -1710,6 +1710,7 @@ def test_report_json_dead_code_summary_uses_high_confidence_key() -> None:
         "new_items": 0,
         # 39Y cycle 2b: abstentions ride beside the dead counts, never inside.
         "unresolved_external_override": 0,
+        "unreachable_statements": 0,
         "live_roots": 0,
     }
 
@@ -1792,6 +1793,7 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
         "baseline_diff_available": False,
         "new_items": 0,
         "unresolved_external_override": 0,
+        "unreachable_statements": 0,
         "live_roots": 0,
     }
     suppressed_items = dead_code["suppressed_items"]
@@ -3289,6 +3291,62 @@ def test_report_serialize_helpers_and_text_metrics_section() -> None:
     )
     assert "METRICS SUMMARY" in text_report
     assert "health: score=90" in text_report
+
+
+def test_every_dead_code_surface_reads_one_unreachable_count() -> None:
+    """One field, four consumers, no surface counting for itself.
+
+    The statement lane used to reach the findings while the family summary
+    named only unreferenced symbols, so text, markdown and HTML each printed
+    "0" beside ten published findings. Teaching three renderers to count the
+    list themselves would have created three counters that drift; instead the
+    count is published once and every surface reads that one field. This test
+    asserts each surface shows the published number, so moving the field moves
+    all of them together or fails here.
+    """
+
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/root"},
+        metrics={
+            "dead_code": {
+                "items": [],
+                "unreachable_statements": [
+                    {
+                        "qualname": f"pkg.mod:looping{index}",
+                        "filepath": "/root/pkg/mod.py",
+                        "start_line": 10 + index,
+                        "end_line": 11 + index,
+                        "reason": "after_terminator",
+                        "statement_count": 2,
+                        "confidence": "high",
+                    }
+                    for index in range(3)
+                ],
+                "summary": {"unreachable_statements": 3},
+            }
+        },
+    )
+
+    published = _dict_at(
+        payload,
+        "metrics",
+        "families",
+        "dead_code",
+        "summary",
+    )["unreachable_statements"]
+    assert published == 3
+
+    text = render_text_report_document(payload)
+    assert f"unreachable_statements={published}" in text
+
+    markdown = render_markdown_report_document(payload)
+    assert f"- unreachable_statements: {published}" in markdown
+
+    html = build_html_report(report_document=payload)
+    assert f"{published} unreachable statement" in html
 
 
 def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> None:

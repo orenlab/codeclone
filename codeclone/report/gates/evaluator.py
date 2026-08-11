@@ -17,7 +17,7 @@ from ...contracts import (
     ExitCode,
 )
 from ...metrics.registry import METRIC_FAMILIES
-from ...models import ObservationLaneName
+from ...models import HealthPopulation, ObservationLaneName, cycle_kind_counts
 from ...observability import span
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -50,6 +50,12 @@ class MetricGateConfig:
     # Defaulted so the three constructors outside the CLI reporting path stay
     # untouched; abstentions are opt-in and never gate by default.
     fail_on_unresolved_dead_code: bool = False
+    #: Fail a run that could not read every file it found. Opt-in on purpose:
+    #: a repository that has always carried one unparseable file would start
+    #: failing, and choosing that default is policy, not a defect fix. The
+    #: unconditional half of the same fact lives in baseline publication,
+    #: which refuses a truncated run outright.
+    fail_on_truncated_run: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +73,18 @@ class GateState:
     complexity_max: int = 0
     coupling_max: int = 0
     cohesion_max: int = 0
+    #: Every runtime cycle, both kinds. Reported, never gated on: a deferred
+    #: cycle is real but cannot crash an import, so failing a build for one
+    #: would apply an import-time verdict to a fact that is not import-time.
     dependency_cycles: int = 0
+    #: The gating subset — cycles whose import-time edges still cycle. This is
+    #: what --fail-cycles reads.
+    import_dependency_cycles: int = 0
     dead_high_confidence: int = 0
+    #: Proven-dead statements inside live symbols. A second lane of the same
+    #: family, kept separate because the two count different objects, and read
+    #: by the same predicate because they answer the same question.
+    dead_unreachable_statements: int = 0
     unresolved_external_override: int = 0
     health_score: int = 0
     typing_param_permille: int = 0
@@ -79,12 +95,26 @@ class GateState:
     authority_violations: int = 0
     diff_new_high_risk_functions: int = 0
     diff_new_high_coupling_classes: int = 0
+    #: New cycles of either kind — the visibility count.
     diff_new_cycles: int = 0
+    #: Cycles that are import-time now and were not before, including a
+    #: deferred cycle that hardened into one. The only cycle novelty that gates.
+    diff_new_import_cycles: int = 0
     diff_new_dead_code: int = 0
     diff_health_delta: int = 0
     diff_typing_param_permille_delta: int = 0
     diff_typing_return_permille_delta: int = 0
     diff_docstring_permille_delta: int = 0
+    #: How much of the found population the run actually read. Every predicate
+    #: below counts observed debt, so on an unmeasured population they are all
+    #: vacuously satisfied — the gate would be answering a question nobody
+    #: measured. Defaults to ``complete`` so the constructors that build a
+    #: state by hand keep today's behaviour exactly.
+    health_population: HealthPopulation = "complete"
+    #: Files found and never read. Produced since the first release, carried
+    #: to the summary line and the HTML meta table, and until now read by no
+    #: gate and no budget at all.
+    files_skipped: int = 0
 
 
 HEALTH_INPUT_LANES: tuple[ObservationLaneName, ...] = (
@@ -178,6 +208,15 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
                 0,
             ),
             "new_cycles": _as_int(payload.get("new_cycles"), 0),
+            # A payload written before the kind split carries no import count.
+            # Falling back to the undifferentiated total keeps such a payload
+            # gating exactly as it used to; defaulting to zero would silently
+            # open the gate for every legacy caller.
+            "new_import_cycles": _as_int(
+                payload.get("new_import_cycles"),
+                _as_int(payload.get("new_cycles"), 0),
+            ),
+            "new_deferred_cycles": _as_int(payload.get("new_deferred_cycles"), 0),
             "new_dead_code": _as_int(payload.get("new_dead_code"), 0),
             "health_delta": _as_int(payload.get("health_delta"), 0),
             "typing_param_permille_delta": _as_int(
@@ -213,6 +252,14 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
         tuple(str(part) for part in _as_sequence(item) if str(part).strip())
         for item in _as_sequence(getattr(metrics_diff, "new_cycles", ()))
     )
+    new_import_cycles = tuple(
+        tuple(str(part) for part in _as_sequence(item) if str(part).strip())
+        for item in _as_sequence(getattr(metrics_diff, "new_import_cycles", ()))
+    )
+    new_deferred_cycles = tuple(
+        tuple(str(part) for part in _as_sequence(item) if str(part).strip())
+        for item in _as_sequence(getattr(metrics_diff, "new_deferred_cycles", ()))
+    )
     new_dead_code = tuple(
         str(item)
         for item in _as_sequence(getattr(metrics_diff, "new_dead_code", ()))
@@ -226,6 +273,8 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
         "new_high_risk_functions": len(new_high_risk_functions),
         "new_high_coupling_classes": len(new_high_coupling_classes),
         "new_cycles": len(new_cycles),
+        "new_import_cycles": len(new_import_cycles),
+        "new_deferred_cycles": len(new_deferred_cycles),
         "new_dead_code": len(new_dead_code),
         "health_delta": _as_int(getattr(metrics_diff, "health_delta", 0), 0),
         "typing_param_permille_delta": _as_int(
@@ -252,20 +301,31 @@ def gate_state_from_project_metrics(
     metrics_diff: object | None,
     clone_new_count: int = 0,
     clone_total: int = 0,
+    files_skipped: int = 0,
 ) -> GateState:
     diff_summary = summarize_metrics_diff(metrics_diff) or {}
     return GateState(
+        health_population=project_metrics.health.population,
+        files_skipped=max(files_skipped, 0),
         clone_new_count=max(clone_new_count, 0),
         clone_total=max(clone_total, 0),
         complexity_max=max(int(project_metrics.complexity_max), 0),
         coupling_max=max(int(project_metrics.coupling_max), 0),
         cohesion_max=max(int(project_metrics.cohesion_max), 0),
         dependency_cycles=len(tuple(project_metrics.dependency_cycles)),
+        import_dependency_cycles=cycle_kind_counts(
+            cycles=tuple(project_metrics.dependency_cycles),
+            details=project_metrics.dependency_cycle_details,
+        ).import_cycles,
         dead_high_confidence=sum(
             1
             for item in project_metrics.dead_code
             if str(getattr(item, "confidence", "")).strip().lower() == "high"
         ),
+        # The statement lane rides the same object and is confidence-free by
+        # contract: a region either cannot be entered or is not reported, so
+        # every item here is the high-confidence kind the flag asks about.
+        dead_unreachable_statements=len(tuple(project_metrics.unreachable_statements)),
         # The CLI gate path reads project metrics, not the report document, so
         # without this the opt-in --fail-on-unresolved-dead-code flag could
         # never fire outside the MCP surface.
@@ -300,6 +360,7 @@ def gate_state_from_project_metrics(
             0,
         ),
         diff_new_cycles=_as_int(diff_summary.get("new_cycles"), 0),
+        diff_new_import_cycles=_as_int(diff_summary.get("new_import_cycles"), 0),
         diff_new_dead_code=_as_int(diff_summary.get("new_dead_code"), 0),
         diff_health_delta=_as_int(diff_summary.get("health_delta"), 0),
         diff_typing_param_permille_delta=_as_int(
@@ -365,6 +426,37 @@ def _reason_if(triggered: bool, message: str) -> tuple[str, ...]:
     return (message,) if triggered else ()
 
 
+def _any_gate_requested(config: MetricGateConfig) -> bool:
+    """True when the caller asked for a verdict of any kind.
+
+    Deliberately exhaustive rather than clever: a gate added later without a
+    line here is a gate that can still be answered from a population nobody
+    measured. A run with no gate at all is left alone — refusing where nothing
+    was asked would invent a failure rather than withhold a claim.
+    """
+
+    return bool(
+        config.fail_complexity >= 0
+        or config.fail_coupling >= 0
+        or config.fail_cohesion >= 0
+        or config.fail_cycles
+        or config.fail_dead_code
+        or config.fail_on_unresolved_dead_code
+        or config.fail_health >= 0
+        or config.fail_on_new_metrics
+        or config.fail_on_typing_regression
+        or config.fail_on_docstring_regression
+        or config.fail_on_api_break
+        or config.fail_on_authority_violation
+        or config.fail_on_untested_hotspots
+        or config.fail_on_truncated_run
+        or config.min_typing_coverage >= 0
+        or config.min_docstring_coverage >= 0
+        or config.fail_on_new
+        or config.fail_threshold >= 0
+    )
+
+
 def _complexity_threshold_reason(
     *,
     state: GateState,
@@ -422,8 +514,8 @@ def _dependency_cycles_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_cycles and state.dependency_cycles > 0,
-        f"{gate_msgs.GATE_REASON_CYCLES_DETECTED}{state.dependency_cycles}{gate_msgs.GATE_SUFFIX_CYCLES}.",
+        config.fail_cycles and state.import_dependency_cycles > 0,
+        f"{gate_msgs.GATE_REASON_CYCLES_DETECTED}{state.import_dependency_cycles}{gate_msgs.GATE_SUFFIX_CYCLES}.",
     )
 
 
@@ -432,9 +524,15 @@ def _dead_code_high_confidence_reason(
     state: GateState,
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
+    # Both proven lanes, one predicate. An unreferenced symbol and a statement
+    # that cannot run are both high-confidence dead code in the same family and
+    # both are already published as findings, so a gate reading only the first
+    # passed builds that carried the second. The abstention lane stays out: it
+    # is neither dead nor live and owns a separate opt-in flag.
+    detected = state.dead_high_confidence + state.dead_unreachable_statements
     return _reason_if(
-        config.fail_dead_code and state.dead_high_confidence > 0,
-        f"{gate_msgs.GATE_REASON_DEAD_CODE_DETECTED}{state.dead_high_confidence}{gate_msgs.GATE_SUFFIX_ITEMS}.",
+        config.fail_dead_code and detected > 0,
+        f"{gate_msgs.GATE_REASON_DEAD_CODE_DETECTED}{detected}{gate_msgs.GATE_SUFFIX_ITEMS}.",
     )
 
 
@@ -478,8 +576,8 @@ def _new_dependency_cycles_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_new_cycles > 0,
-        f"{gate_msgs.GATE_REASON_NEW_CYCLES}{state.diff_new_cycles}.",
+        config.fail_on_new_metrics and state.diff_new_import_cycles > 0,
+        f"{gate_msgs.GATE_REASON_NEW_CYCLES}{state.diff_new_import_cycles}.",
     )
 
 
@@ -647,6 +745,19 @@ def _evaluate_gate_state_result(
             unavailable_lanes=unavailable_lanes,
         )
 
+    if _any_gate_requested(config) and state.health_population == "unmeasured":
+        # Ordered after the lane check so a configuration fault keeps its own
+        # exit code, and before every predicate below because none of them can
+        # be answered here. Thirteen would pass on counters that are zero only
+        # because nothing was counted; the two coverage thresholds would fail
+        # quoting 0.0 % of a population that was never read. One honest
+        # outcome replaces both shapes.
+        return GateResult(
+            exit_code=int(ExitCode.GATING_FAILURE),
+            reasons=(f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}",),
+            required_lanes=required_lanes,
+        )
+
     effective_config = replace(
         config,
         fail_on_typing_regression=(
@@ -678,6 +789,13 @@ def _evaluate_gate_state_result(
             "metric:"
             + gate_msgs.GATE_REASON_AUTHORITY_VIOLATIONS
             + f"{state.authority_violations}."
+        )
+
+    if config.fail_on_truncated_run and state.files_skipped > 0:
+        reasons.append(
+            "metric:"
+            + gate_msgs.GATE_REASON_TRUNCATED_RUN
+            + f"{state.files_skipped}{gate_msgs.GATE_SUFFIX_FILES}."
         )
 
     if config.fail_on_new and state.clone_new_count > 0:
@@ -797,9 +915,8 @@ def _gate_state_from_report_document(
     dependencies_summary = _as_mapping(
         _as_mapping(families.get("dependencies")).get("summary")
     )
-    dead_code_summary = _as_mapping(
-        _as_mapping(families.get("dead_code")).get("summary")
-    )
+    dead_code_family = _as_mapping(families.get("dead_code"))
+    dead_code_summary = _as_mapping(dead_code_family.get("summary"))
     health_summary = _as_mapping(_as_mapping(families.get("health")).get("summary"))
     coverage_adoption_summary = _as_mapping(
         _as_mapping(families.get("coverage_adoption")).get("summary")
@@ -830,7 +947,20 @@ def _gate_state_from_report_document(
         coupling_max=_as_int(coupling_summary.get("max"), 0),
         cohesion_max=_as_int(cohesion_summary.get("max"), 0),
         dependency_cycles=_as_int(dependencies_summary.get("cycles"), 0),
+        # A document written before the split has no import count. Reading the
+        # total keeps its gate verdict identical rather than quietly passing a
+        # build that used to fail.
+        import_dependency_cycles=_as_int(
+            dependencies_summary.get("import_cycles"),
+            _as_int(dependencies_summary.get("cycles"), 0),
+        ),
         dead_high_confidence=_as_int(dead_code_summary.get("high_confidence"), 0),
+        # The published count, not a local measurement: one field feeds this
+        # gate and the text/markdown/HTML surfaces, so the number an operator
+        # reads and the number that fails the build cannot come apart.
+        dead_unreachable_statements=_as_int(
+            dead_code_summary.get("unreachable_statements"), 0
+        ),
         unresolved_external_override=_as_int(
             dead_code_summary.get("unresolved_external_override"), 0
         ),
@@ -865,6 +995,7 @@ def _gate_state_from_report_document(
             0,
         ),
         diff_new_cycles=_as_int(diff_summary.get("new_cycles"), 0),
+        diff_new_import_cycles=_as_int(diff_summary.get("new_import_cycles"), 0),
         diff_new_dead_code=_as_int(diff_summary.get("new_dead_code"), 0),
         diff_health_delta=_as_int(diff_summary.get("health_delta"), 0),
         diff_typing_param_permille_delta=(

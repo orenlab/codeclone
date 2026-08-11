@@ -24,6 +24,10 @@ class DiffContext:
     new_func: set[str]
     new_block: set[str]
     new_clones_count: int
+    #: Whether any clone lane was actually compared against the baseline.
+    #: False means the empty ``new_*`` sets are "not compared", never "zero
+    #: new" -- the rule WARN_BASELINE_LANES_OPAQUE already states in words.
+    clone_novelty_available: bool
     metrics_diff: MetricsDiff | None
     coverage_adoption_diff_available: bool
     api_surface_diff_available: bool
@@ -74,6 +78,7 @@ def build_diff_context(
         new_func=raw_new_func,
         new_block=raw_new_block,
         new_clones_count=len(raw_new_func) + len(raw_new_block),
+        clone_novelty_available=function_lane_trusted or block_lane_trusted,
         metrics_diff=metrics_diff,
         coverage_adoption_diff_available=bool(
             metrics_baseline_state.trusted_for_diff

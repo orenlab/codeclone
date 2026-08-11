@@ -18,8 +18,10 @@ if TYPE_CHECKING:
     from ...models import (
         BaselineContainerV3,
         GroupMapLike,
+        MetricsDiff,
         NearMissPair,
         ObservationBundle,
+        ProjectMetrics,
         RenamedStructureGroup,
         StructuralFindingGroup,
         Suggestion,
@@ -28,7 +30,11 @@ if TYPE_CHECKING:
     )
     from ..gates.evaluator import GateResult, MetricGateConfig
 
-from ._common import _collect_report_file_list
+from ._common import (
+    _collect_report_file_list,
+    _entity_novelty_facts,
+    _lane_is_trusted,
+)
 from .derived import (
     _build_derived_module_map,
     _build_derived_overview,
@@ -80,6 +86,8 @@ def build_report_body(
     baseline_trust: TrustVector | None = None,
     near_miss_pairs: Sequence[NearMissPair] | None = None,
     renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
+    project_metrics: ProjectMetrics | None = None,
+    metrics_diff: MetricsDiff | None = None,
 ) -> dict[str, object]:
     """Build canonical report facts before evaluation and integrity sealing."""
 
@@ -128,6 +136,11 @@ def build_report_body(
         scan_root=scan_root,
         near_miss_pairs=near_miss_pairs,
         renamed_structure_groups=renamed_structure_groups,
+        entity_novelty_facts=_entity_novelty_facts(
+            project_metrics=project_metrics,
+            metrics_diff=metrics_diff,
+            baseline_trust=baseline_trust,
+        ),
     )
     overview_payload, hotlists_payload = _build_derived_overview(
         findings=findings_payload,
@@ -170,14 +183,6 @@ def build_report_body(
             ),
         },
     }
-
-
-def _lane_is_trusted(trust: TrustVector | None, lane: str) -> bool:
-    return bool(
-        trust is not None
-        and trust.root_verified
-        and any(item.name == lane and item.status == "trusted" for item in trust.lanes)
-    )
 
 
 def _source_facts(

@@ -541,10 +541,11 @@ def build_metrics_report_payload(
             ],
             # Same family, deliberately its own list: a dead symbol and an
             # unreachable statement inside a live symbol are different defects
-            # and are never added together (39Y Y9). No matching "summary"
-            # counter — this list is the authority and a count beside it would
-            # only be len() restated, unlike the abstention tally, which counts
-            # rows that appear in no list at all.
+            # and are never added together (39Y Y9). The list stays the
+            # authority; the matching summary counter below exists because the
+            # consumers that show a number — text, markdown, HTML and the gate
+            # — all read the summary, and asking each of them to measure this
+            # list instead would be four counters free to drift apart.
             "unreachable_statements": [
                 _serialize_unreachable_statement(item)
                 for item in unreachable_statement_items
@@ -570,6 +571,10 @@ def build_metrics_report_payload(
                 # abstention is neither dead nor live, so folding it into
                 # "total" would be the claim the tri-state exists to refuse.
                 "unresolved_external_override": len(unresolved_override_items),
+                # The one place this lane is counted. Every surface that shows
+                # the number reads this field; nothing downstream re-measures
+                # the list beside it.
+                "unreachable_statements": len(unreachable_statement_items),
                 "live_roots": len(project_metrics.live_root_reasons),
             },
             "runtime_reachability": {

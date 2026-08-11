@@ -76,7 +76,21 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     # projection and the edge classification ride ONE coordinated bump, per
     # the Y8/Y9 discipline. "5" rows read as eager import_time, which is
     # what they asserted; the bump exists so they are re-extracted instead.
-    "dependencies": "6",
+    #
+    # "7" (cycle-policy split) is a READER bump, and the distinction is worth
+    # stating because the next reader will look for a new column and find
+    # none: the wire form is byte-identical to "6". What moved is what a
+    # consumer derives from these rows. Through "6" the metrics reconstruction
+    # discarded each row's binding, so every stored edge read as eager — which
+    # made every reconstructed cycle read as ``import_cycle`` and let a
+    # TYPE_CHECKING-only cycle sit in the baseline's cycle set masking a real
+    # one. Cycle kind and cycle membership derived from a "6" artifact
+    # therefore do not agree with those derived from a "7" artifact of the
+    # same repository, and the cycle kind now decides health, --fail-cycles,
+    # and novelty gating. The declared schema is where that disagreement is
+    # recorded, so a stale artifact is regenerated rather than silently
+    # compared against facts it cannot produce.
+    "dependencies": "7",
     "module_identity": "4",
     "risk_observations": "4",
     "semantic_authority": "2",

@@ -153,6 +153,46 @@ def test_retention_gc_deletes_expired_operations_and_spans(tmp_path: Path) -> No
         conn.close()
 
 
+def test_retention_gc_returns_freed_pages_to_the_filesystem(tmp_path: Path) -> None:
+    """Retention has to reclaim, not just forget.
+
+    ``DELETE`` moves pages onto the freelist and leaves the write-ahead log at
+    its high-water mark, so the audited store held 180 KiB of live rows in
+    11.12 MiB of file with 97.6% of its pages free. The file is a record of all
+    telemetry ever written unless the GC also gives the space back.
+    """
+    path = observability_store_path(tmp_path)
+    conn = open_observability_store(path)
+    try:
+        for index in range(2000):
+            write_operation(
+                conn,
+                _op(
+                    f"gc-{index:05d}",
+                    correlation_id=f"gc-{index:05d}",
+                    spans=(_span(f"s-{index:05d}", operation_id=f"gc-{index:05d}"),),
+                ),
+            )
+        conn.execute(
+            "UPDATE platform_operations SET started_at_utc='2020-01-01T00:00:00Z'"
+        )
+        conn.commit()
+        pages_before = conn.execute("PRAGMA page_count").fetchone()[0]
+        bytes_before = path.stat().st_size
+
+        deleted = run_retention_gc(conn, retention_days=7)
+
+        free_after = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        pages_after = conn.execute("PRAGMA page_count").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert deleted == 2000
+    assert free_after == 0
+    assert pages_after < pages_before
+    assert path.stat().st_size < bytes_before
+
+
 def test_store_uses_standard_sqlite_pragmas(tmp_path: Path) -> None:
     conn = open_observability_store(observability_store_path(tmp_path))
     try:

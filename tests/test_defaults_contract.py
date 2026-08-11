@@ -100,7 +100,9 @@ def test_runtime_and_gate_defaults_follow_contract_defaults(tmp_path: Path) -> N
     assert args.max_cache_size_mb == DEFAULT_MAX_CACHE_SIZE_MB
     assert args.max_baseline_size_mb == DEFAULT_MAX_BASELINE_SIZE_MB
     assert args.baseline == DEFAULT_BASELINE_PATH
-    assert args.metrics_baseline == DEFAULT_BASELINE_PATH
+    # 2.1.0a2 unified the clone and metrics lanes into one baseline container:
+    # there is no separate metrics baseline path left to default.
+    assert not hasattr(args, "metrics_baseline")
     assert args.coverage_min == DEFAULT_COVERAGE_MIN
     assert MCPGateRequest().coverage_min == DEFAULT_COVERAGE_MIN
     assert (

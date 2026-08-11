@@ -6,7 +6,36 @@
 
 from __future__ import annotations
 
-from ..models import MetricsSnapshot, ProjectMetrics
+from ..models import DependencyCycleFact, MetricsSnapshot, ProjectMetrics
+
+
+def _cycle_facts(
+    project_metrics: ProjectMetrics,
+) -> tuple[DependencyCycleFact, ...]:
+    """Pair each cycle with its kind for the snapshot the diff compares.
+
+    Details are aligned with cycles by index at their producer. When they are
+    absent or misaligned the classification simply was not recorded, and every
+    cycle takes the conservative ``import_cycle`` reading — the same fallback
+    the suggestion and finding projections apply, so no surface quietly
+    downgrades a cycle just because the kind went missing.
+    """
+
+    details = project_metrics.dependency_cycle_details
+    cycles = project_metrics.dependency_cycles
+    aligned = len(details) == len(cycles)
+    return tuple(
+        sorted(
+            {
+                DependencyCycleFact(
+                    modules=tuple(cycle),
+                    kind=details[index].kind if aligned else "import_cycle",
+                )
+                for index, cycle in enumerate(cycles)
+            },
+            key=lambda fact: (fact.modules, fact.kind),
+        )
+    )
 
 
 def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSnapshot:
@@ -17,9 +46,7 @@ def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSna
         high_coupling_classes=tuple(sorted(set(project_metrics.high_risk_classes))),
         max_cohesion=int(project_metrics.cohesion_max),
         low_cohesion_classes=tuple(sorted(set(project_metrics.low_cohesion_classes))),
-        dependency_cycles=tuple(
-            sorted({tuple(cycle) for cycle in project_metrics.dependency_cycles})
-        ),
+        dependency_cycles=_cycle_facts(project_metrics),
         dependency_max_depth=int(project_metrics.dependency_max_depth),
         dead_code_items=tuple(
             sorted({item.qualname for item in project_metrics.dead_code})

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..contracts.errors import ValidationError
+from ..utils.repo_paths import has_python_suffix
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -96,7 +97,7 @@ def _is_included_python_file(
     excludes_set: set[str],
     rootp: Path,
 ) -> bool:
-    if not file_path.name.endswith(".py"):
+    if not has_python_suffix(file_path.name):
         return False
     if any(part in excludes_set for part in file_path.parts):
         return False
@@ -116,7 +117,7 @@ def _walk_file_candidate(
     excludes_set: set[str],
     rootp: Path,
 ) -> str | None:
-    if not filename.endswith(".py"):
+    if not has_python_suffix(filename):
         return None
     file_path = os.path.join(dirpath, filename)
     if os.path.islink(file_path) and not _is_included_python_file(
@@ -134,7 +135,7 @@ def iter_py_files(
     *,
     max_files: int = 100_000,
 ) -> Iterable[str]:
-    candidates, _hard_excluded = discover_python_files(
+    candidates, _hard_excluded, _unreadable = discover_python_files(
         root,
         hard_excludes=excludes,
         max_files=max_files,
@@ -147,12 +148,18 @@ def discover_python_files(
     *,
     hard_excludes: tuple[str, ...] = HARD_SAFETY_EXCLUDES,
     max_files: int = 100_000,
-) -> tuple[tuple[str, ...], int]:
+) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
     """Return raw safe Python-file facts from exactly one filesystem walk.
 
     The caller owns analysis filtering. The second result counts hard-pruned
     directories and escaping/unresolvable Python symlinks without traversing
     excluded trees.
+
+    The third result names the directories the walk could not read. Without
+    it the walk was silent by construction: :func:`os.walk` ignores errors
+    unless it is handed an ``onerror`` callback, so an unreadable subtree was
+    not merely uncounted — it did not exist for the tool at all, and the run
+    reported a complete analysis of a tree it had only partly seen.
     """
 
     try:
@@ -171,15 +178,21 @@ def discover_python_files(
     # (e.g. scanning "<repo>/__pycache__"). Parent directories must not suppress
     # scanning, otherwise valid roots like ".../build/project" become empty.
     if rootp.name in excludes_set:
-        return (), 1
+        return (), 1, ()
 
     # Collect and filter first, then sort for deterministic output.
     candidates: list[str] = []
     hard_excluded = 0
+    unreadable: set[str] = set()
+
+    def _record_walk_error(error: OSError) -> None:
+        unreadable.add(str(error.filename or rootp))
+
     for dirpath, dirnames, filenames in os.walk(
         rootp,
         topdown=True,
         followlinks=False,
+        onerror=_record_walk_error,
     ):
         retained_dirnames = [name for name in dirnames if name not in excludes_set]
         hard_excluded += len(dirnames) - len(retained_dirnames)
@@ -192,7 +205,7 @@ def discover_python_files(
                 rootp=rootp,
             )
             if candidate is None:
-                if filename.endswith(".py"):
+                if has_python_suffix(filename):
                     hard_excluded += 1
                 continue
             candidates.append(candidate)
@@ -202,4 +215,4 @@ def discover_python_files(
                     "Use more specific root or increase limit."
                 )
 
-    return tuple(sorted(candidates)), hard_excluded
+    return tuple(sorted(candidates)), hard_excluded, tuple(sorted(unreadable))

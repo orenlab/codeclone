@@ -4,7 +4,7 @@
       "properties": {
         "allow_external_artifacts": {
           "default": false,
-          "description": "Allow optional artifact paths (baseline_path, metrics_baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
+          "description": "Allow optional artifact paths (baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
           "title": "Allow External Artifacts",
           "type": "boolean"
         },
@@ -204,19 +204,6 @@
           "default": null,
           "description": "Max artifact size in megabytes.",
           "title": "Max Cache Size Mb"
-        },
-        "metrics_baseline_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
-          "title": "Metrics Baseline Path"
         },
         "min_loc": {
           "anyOf": [
@@ -308,7 +295,7 @@
       "properties": {
         "allow_external_artifacts": {
           "default": false,
-          "description": "Allow optional artifact paths (baseline_path, metrics_baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
+          "description": "Allow optional artifact paths (baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
           "title": "Allow External Artifacts",
           "type": "boolean"
         },
@@ -508,19 +495,6 @@
           "default": null,
           "description": "Max artifact size in megabytes.",
           "title": "Max Cache Size Mb"
-        },
-        "metrics_baseline_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
-          "title": "Metrics Baseline Path"
         },
         "min_loc": {
           "anyOf": [

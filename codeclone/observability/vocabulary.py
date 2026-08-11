@@ -8,11 +8,39 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final
 
 from ..contracts import OBSERVER_VOCABULARY_VERSION
 
 DB_COUNTER_VERSION: Final = 2
+
+# Telemetry planes. An operation either belongs to the product runtime under
+# observation or to the observation instrument itself; the two are read through
+# separate windows with separate budgets, because a shared window let the
+# instrument evict the evidence it had just pointed at. Persisted per operation:
+# a row written before this mark existed carries NULL and is reported as
+# unattributed, never silently folded into the runtime plane.
+PLANE_RUNTIME: Final = "runtime"
+PLANE_OBSERVER: Final = "observer"
+OBSERVABILITY_PLANES: Final[tuple[str, ...]] = (PLANE_RUNTIME, PLANE_OBSERVER)
+
+# Operations that ARE the instrument. Membership is decided once, at the write
+# edge, so the plane is a stored fact rather than a read-time guess that every
+# consumer would have to re-derive identically.
+OBSERVER_PLANE_OPERATIONS: Final[frozenset[str]] = frozenset(
+    {
+        "mcp.query_platform_observability",
+    }
+)
+
+
+def resolve_operation_plane(operation_name: str) -> str:
+    """Return the plane an operation belongs to, from its name."""
+    return (
+        PLANE_OBSERVER if operation_name in OBSERVER_PLANE_OPERATIONS else PLANE_RUNTIME
+    )
+
 
 _MCP_TOOL_NAMES: Final = frozenset(
     {
@@ -377,6 +405,104 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 
+# --------------------------------------------------------------------------
+# Parking
+#
+# A declared name with no emit site is not "instrumented" — it is a claim the
+# build cannot honour, and the reverse-direction test in
+# tests/test_observability_vocabulary.py fails on any such name. Removing the
+# name instead would be an OBSERVER_VOCABULARY_VERSION change, so a name that
+# genuinely cannot be wired in this build is parked here with the reason it
+# cannot be, and parking is the only way past that test. A parked name that
+# later acquires an emit site must be removed from this registry — the test
+# fails on a name that is both parked and emitted, so parking can never quietly
+# outlive the reason for it.
+PARK_DEFERRED_PHASE_39K: Final = "deferred_phase_39k"
+PARK_OUT_OF_PACKAGE_HARNESS: Final = "out_of_package_harness"
+PARK_RING_BOUNDARY: Final = "ring_boundary"
+PARK_SUPERSEDED: Final = "superseded"
+PARK_SUBSYSTEM_ABSENT: Final = "subsystem_absent"
+
+PARK_REASONS: Final[Mapping[str, str]] = {
+    PARK_DEFERRED_PHASE_39K: (
+        "owned by the Phase 39K cache backend, which the maintainer deferred; "
+        "no backend exists to instrument"
+    ),
+    PARK_OUT_OF_PACKAGE_HARNESS: (
+        "emitted by a release harness that lives outside the shipped package"
+    ),
+    PARK_RING_BOUNDARY: (
+        "the only module that could emit it sits in a lower architecture ring "
+        "than codeclone.observability and cannot import it"
+    ),
+    PARK_SUPERSEDED: "a live name already records this fact",
+    PARK_SUBSYSTEM_ABSENT: "no code path in this build produces the fact",
+}
+
+PARKED_SPAN_NAMES: Final[Mapping[str, str]] = {
+    "audit.digest_link": PARK_SUBSYSTEM_ABSENT,
+    "cache.backend.activate_generation": PARK_DEFERRED_PHASE_39K,
+    "cache.backend.load_generation": PARK_DEFERRED_PHASE_39K,
+    "cache.backend.prune": PARK_DEFERRED_PHASE_39K,
+    "cache.backend.write_generation": PARK_DEFERRED_PHASE_39K,
+    # codeclone.contracts is ring r0; codeclone.observability is r1.
+    "compatibility.check": PARK_RING_BOUNDARY,
+    "controller.registry_bind": PARK_SUPERSEDED,  # analysis.registry_bind
+    "memory.identity.migrate": PARK_SUBSYSTEM_ABSENT,
+    "memory.retrieval.merge": PARK_SUPERSEDED,  # memory.semantic.search
+    "memory.subject.resolve": PARK_SUBSYSTEM_ABSENT,
+    "release.phase39.matrix": PARK_OUT_OF_PACKAGE_HARNESS,
+}
+
+PARKED_COUNTER_KEYS: Final[Mapping[str, str]] = {
+    "audit_digest_links": PARK_SUBSYSTEM_ABSENT,
+    "baseline_publish_recovered": PARK_SUBSYSTEM_ABSENT,
+    "cache_backend_changed_entries": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_contention": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_entries": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_orphans": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_pruned": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_read_bytes": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_recovery_corrupt": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_recovery_current": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_recovery_previous": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_removed_entries": PARK_DEFERRED_PHASE_39K,
+    "cache_backend_write_bytes": PARK_DEFERRED_PHASE_39K,
+    "compatibility_status_compatible": PARK_RING_BOUNDARY,
+    "compatibility_status_incompatible": PARK_RING_BOUNDARY,
+    "compatibility_status_migration_required": PARK_RING_BOUNDARY,
+    "compatibility_status_unknown_contract": PARK_RING_BOUNDARY,
+    "contract_count": PARK_RING_BOUNDARY,
+    "controller_registry_bindings": PARK_SUPERSEDED,  # registry_* on registry.build
+    "files_discovered": PARK_SUPERSEDED,  # registry_discovered
+    "files_inventoried": PARK_SUPERSEDED,  # registry_inventoried
+    "memory_fts_candidates": PARK_SUPERSEDED,  # retrieval.fts_hits
+    "memory_invalidated_jobs": PARK_SUBSYSTEM_ABSENT,
+    "memory_jobs_coalesced": PARK_SUBSYSTEM_ABSENT,
+    "memory_migration_failed": PARK_SUBSYSTEM_ABSENT,
+    "memory_migration_migrated": PARK_SUBSYSTEM_ABSENT,
+    "memory_migration_noop": PARK_SUBSYSTEM_ABSENT,
+    "memory_subjects_mapped": PARK_SUBSYSTEM_ABSENT,
+    "memory_subjects_unchanged": PARK_SUBSYSTEM_ABSENT,
+    "memory_subjects_unresolved": PARK_SUBSYSTEM_ABSENT,
+    "memory_unique_record_ids": PARK_SUBSYSTEM_ABSENT,
+    "memory_vector_candidates": PARK_SUPERSEDED,  # retrieval.vector_memory_hits
+    "memory_vector_fts_overlap": PARK_SUPERSEDED,  # retrieval.fts_vector_overlap
+    "release_bytes": PARK_OUT_OF_PACKAGE_HARNESS,
+    "release_duration_ms": PARK_OUT_OF_PACKAGE_HARNESS,
+    "release_failed": PARK_OUT_OF_PACKAGE_HARNESS,
+    "release_passed": PARK_OUT_OF_PACKAGE_HARNESS,
+    "release_rss_mb": PARK_OUT_OF_PACKAGE_HARNESS,
+    "release_scenarios": PARK_OUT_OF_PACKAGE_HARNESS,
+    "release_sql_statements": PARK_OUT_OF_PACKAGE_HARNESS,
+    # The session run store holds runs and pins. It has no evaluation cache and
+    # no time-to-live, so nothing can evict, retain or expire an evaluation.
+    "run_store_evaluations_evicted": PARK_SUBSYSTEM_ABSENT,
+    "run_store_evaluations_retained": PARK_SUBSYSTEM_ABSENT,
+    "run_store_expired": PARK_SUBSYSTEM_ABSENT,
+}
+
+
 class ObservabilityVocabularyError(ValueError):
     """A span name or counter key is outside the reviewed vocabulary."""
 
@@ -400,9 +526,22 @@ def validate_counter_key(key: str) -> str:
 __all__ = [
     "COUNTER_KEYS",
     "DB_COUNTER_VERSION",
+    "OBSERVABILITY_PLANES",
+    "OBSERVER_PLANE_OPERATIONS",
     "OBSERVER_VOCABULARY_VERSION",
+    "PARKED_COUNTER_KEYS",
+    "PARKED_SPAN_NAMES",
+    "PARK_DEFERRED_PHASE_39K",
+    "PARK_OUT_OF_PACKAGE_HARNESS",
+    "PARK_REASONS",
+    "PARK_RING_BOUNDARY",
+    "PARK_SUBSYSTEM_ABSENT",
+    "PARK_SUPERSEDED",
+    "PLANE_OBSERVER",
+    "PLANE_RUNTIME",
     "SPAN_NAMES",
     "ObservabilityVocabularyError",
+    "resolve_operation_plane",
     "validate_counter_key",
     "validate_span_name",
 ]

@@ -11,7 +11,7 @@ from typing import Protocol
 
 from ... import ui_messages as ui
 from ...core._types import AnalysisResult, DiscoveryResult, ProcessingResult
-from ...models import MetricsDiff
+from ...models import MetricsDiff, cycle_kind_counts
 from ...utils import coerce as _coerce
 
 _as_int = _coerce.as_int
@@ -31,6 +31,16 @@ class MetricsSnapshot:
     dead_code_count: int
     health_total: int
     health_grade: str
+    #: ``unmeasured`` means not a single file was read, so ``health_total``
+    #: and ``health_grade`` are not a verdict about any code and must not be
+    #: presented as one.
+    health_population: str = "complete"
+    #: The kind split behind ``cycles_count``. Shown next to the total because
+    #: the total alone no longer predicts the exit code: only import cycles
+    #: fail --fail-cycles, so a user seeing "2 cycles" and exit 0 needs the
+    #: breakdown to understand why.
+    import_cycles_count: int = 0
+    deferred_cycles_count: int = 0
     dependency_avg_depth: float = 0.0
     dependency_p95_depth: int = 0
     dependency_max_depth: int = 0
@@ -108,6 +118,9 @@ def build_metrics_snapshot(
     api_surface_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
     )
+    dead_code_summary = _as_mapping(
+        _as_mapping(metrics_payload_map.get("dead_code")).get("summary")
+    )
     coverage_join_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("coverage_join")).get("summary")
     )
@@ -115,6 +128,10 @@ def build_metrics_snapshot(
         _as_mapping(metrics_payload_map.get("security_surfaces")).get("summary")
     )
     coverage_join_source = str(coverage_join_summary.get("source", "")).strip()
+    cycle_counts = cycle_kind_counts(
+        cycles=tuple(project_metrics.dependency_cycles),
+        details=project_metrics.dependency_cycle_details,
+    )
     return MetricsSnapshot(
         complexity_avg=project_metrics.complexity_avg,
         complexity_max=project_metrics.complexity_max,
@@ -124,6 +141,8 @@ def build_metrics_snapshot(
         cohesion_avg=project_metrics.cohesion_avg,
         cohesion_max=project_metrics.cohesion_max,
         cycles_count=len(project_metrics.dependency_cycles),
+        import_cycles_count=cycle_counts.import_cycles,
+        deferred_cycles_count=cycle_counts.deferred_cycles,
         dependency_avg_depth=_coerce.as_float(
             _as_mapping(metrics_payload_map.get("dependencies")).get("avg_depth")
         ),
@@ -139,9 +158,19 @@ def build_metrics_snapshot(
             security_surfaces_summary.get("production")
         ),
         security_surfaces_tests=_as_int(security_surfaces_summary.get("tests")),
-        dead_code_count=len(project_metrics.dead_code),
+        # Both proven lanes of the dead_code family, read from the counts the
+        # metrics payload publishes rather than measured again here. Counting
+        # only unreferenced symbols printed "Dead code clean" directly above a
+        # --fail-dead-code failure citing ten items; re-measuring the lists
+        # locally would fix that number while quietly becoming a second
+        # counter, free to drift from the one the gate and the report read.
+        dead_code_count=(
+            _as_int(dead_code_summary.get("total"))
+            + _as_int(dead_code_summary.get("unreachable_statements"))
+        ),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,
+        health_population=project_metrics.health.population,
         suppressed_dead_code_count=analysis_result.suppressed_dead_code_items,
         overloaded_modules_candidates=_as_int(
             overloaded_modules_summary.get("candidates")
@@ -220,7 +249,9 @@ def _print_summary(
     segment_clones_count: int,
     suppressed_golden_fixture_groups: int,
     suppressed_segment_groups: int,
-    new_clones_count: int,
+    #: ``None`` when no clone lane was compared against the baseline. The
+    #: summary then says so instead of printing a zero it did not measure.
+    new_clones_count: int | None,
 ) -> None:
     invariant_ok = files_found == (files_analyzed + cache_hits + files_skipped)
 
@@ -295,6 +326,8 @@ def _print_metrics(
                 lcom_avg=metrics.cohesion_avg,
                 lcom_max=metrics.cohesion_max,
                 cycles=metrics.cycles_count,
+                import_cycles=metrics.import_cycles_count,
+                deferred_cycles=metrics.deferred_cycles_count,
                 dead=metrics.dead_code_count,
                 health=metrics.health_total,
                 grade=metrics.health_grade,
@@ -354,7 +387,13 @@ def _print_metrics(
 
         console.print()
         console.print(Rule(title=ui.METRICS_TITLE, style="dim", characters="\u2500"))
-        console.print(ui.fmt_metrics_health(metrics.health_total, metrics.health_grade))
+        console.print(
+            ui.fmt_metrics_health(
+                metrics.health_total,
+                metrics.health_grade,
+                population=metrics.health_population,
+            )
+        )
         console.print(
             ui.fmt_metrics_cc(
                 metrics.complexity_avg,
@@ -368,7 +407,13 @@ def _print_metrics(
         console.print(
             ui.fmt_metrics_cohesion(metrics.cohesion_avg, metrics.cohesion_max)
         )
-        console.print(ui.fmt_metrics_cycles(metrics.cycles_count))
+        console.print(
+            ui.fmt_metrics_cycles(
+                metrics.cycles_count,
+                import_cycles=metrics.import_cycles_count,
+                deferred=metrics.deferred_cycles_count,
+            )
+        )
         console.print(
             ui.fmt_metrics_dependencies(
                 avg_depth=metrics.dependency_avg_depth,

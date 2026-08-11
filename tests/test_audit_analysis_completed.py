@@ -185,6 +185,25 @@ def test_analysis_completed_payload_from_report_document() -> None:
     assert diff["new_clones"] == 3
 
 
+def test_analysis_completed_payload_keeps_uncompared_novelty_null() -> None:
+    # No clone lane was compared, so the audit row must not record a zero the
+    # run never measured.
+    payload = analysis_completed_payload_from_report(
+        report_document={
+            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "meta": {"runtime": {"analysis_mode": "full"}},
+            "inventory": {"file_registry": {"items": ["a.py"]}, "lines": 10},
+            "findings": {"summary": {"total": 1, "new": 0}},
+            "metrics": {"summary": {"health": {"score": 80, "grade": "B"}}},
+        },
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=None,
+        new_block_count=None,
+    )
+
+    assert cast(dict[str, object], payload["diff"])["new_clones"] is None
+
+
 def test_emit_analysis_completed_from_report_writes_row(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         "[tool.codeclone]\naudit_enabled = true\n",

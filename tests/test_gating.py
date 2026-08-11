@@ -8,6 +8,9 @@ from __future__ import annotations
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
+
+import pytest
 
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.core._types import AnalysisResult, BootstrapResult, OutputPaths
@@ -20,6 +23,7 @@ from codeclone.models import (
     ModuleDep,
     ProjectMetrics,
     TrustVector,
+    UnreachableStatementFinding,
     UnresolvedOverrideItem,
 )
 from codeclone.report.gates.evaluator import (
@@ -30,13 +34,16 @@ from codeclone.report.gates.evaluator import (
     evaluate_gate_state,
     evaluate_gates,
     gate_lane_contract_versions,
+    gate_state_from_project_metrics,
 )
+from codeclone.surfaces.cli.summary import build_metrics_snapshot
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
     MCPGateRequest,
     MCPRunRecord,
 )
+from codeclone.ui_messages import fmt_metrics_dead_code
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
@@ -127,6 +134,46 @@ def _assert_gate(
     assert (result.exit_code, result.reasons) == (exit_code, reasons)
 
 
+def _analysis_result(project_metrics: ProjectMetrics) -> AnalysisResult:
+    """One analysis result, so the gate and the summary read the same run.
+
+    Carries the dead-code counts in the shape the metrics payload publishes
+    them, because that published summary is what both the CLI line and the
+    gate now read. ``codeclone.core.metrics_payload`` owns producing it and is
+    pinned where it is produced; here the contract shape is what matters.
+    """
+
+    published_dead_code = {
+        "summary": {
+            "total": len(project_metrics.dead_code),
+            "high_confidence": sum(
+                1
+                for item in project_metrics.dead_code
+                if str(item.confidence).strip().lower() == "high"
+            ),
+            "unreachable_statements": len(project_metrics.unreachable_statements),
+            "unresolved_external_override": len(project_metrics.unresolved_overrides),
+        }
+    }
+    return AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        suppressed_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=1,
+        project_metrics=project_metrics,
+        metrics_payload={"dead_code": published_dead_code},
+        suggestions=(),
+        segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+    )
+
+
 def _cli_gate_result(
     *,
     tmp_path: Path,
@@ -140,23 +187,7 @@ def _cli_gate_result(
         output_paths=OutputPaths(),
         cache_path=tmp_path / "cache.json",
     )
-    analysis = AnalysisResult(
-        func_groups={},
-        block_groups={},
-        block_groups_report={},
-        segment_groups={},
-        suppressed_segment_groups=0,
-        block_group_facts={},
-        func_clones_count=0,
-        block_clones_count=0,
-        segment_clones_count=0,
-        files_analyzed_or_cached=1,
-        project_metrics=project_metrics,
-        metrics_payload=None,
-        suggestions=(),
-        segment_groups_raw_digest="",
-        observation_bundle=TEST_OBSERVATION_BUNDLE,
-    )
+    analysis = _analysis_result(project_metrics)
     return cli_gate(
         boot=boot,
         analysis=analysis,
@@ -366,7 +397,7 @@ def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
         "health_current",
         "health_delta",
     }
-    assert gate_lane_contract_versions() == ("2", "1")
+    assert gate_lane_contract_versions() == ("2", "2")
 
 
 def _dead_code_gate_config(
@@ -473,6 +504,276 @@ def test_unresolved_override_gate_fails_with_its_own_reason_and_count() -> None:
     )
 
 
+def test_unreachable_statements_trip_the_plain_dead_code_gate() -> None:
+    """``--fail-dead-code`` must read every proven dead-code lane, not one.
+
+    The statement-level lane is proven-dead, high-confidence, and rides the
+    ``dead_code`` family in findings. It reached the gate's own evidence and
+    was simply not consulted, so ten published findings exited 0.
+    """
+    config = _dead_code_gate_config(
+        fail_dead_code=True,
+        fail_on_unresolved_dead_code=False,
+    )
+
+    statements_only = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0, dead_unreachable_statements=3),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+    both_lanes = evaluate_gate_state(
+        state=GateState(dead_high_confidence=1, dead_unreachable_statements=2),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+    neither = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0, dead_unreachable_statements=0),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+
+    _assert_gate(
+        statements_only,
+        exit_code=3,
+        reasons=("metric:Dead code detected (high confidence): 3 item(s).",),
+    )
+    # One predicate, one reason, one count: both proven lanes are the same
+    # question ("is there dead code?"), unlike the abstention lane above.
+    _assert_gate(
+        both_lanes,
+        exit_code=3,
+        reasons=("metric:Dead code detected (high confidence): 3 item(s).",),
+    )
+    _assert_gate(neither, exit_code=0, reasons=())
+    assert statements_only.required_lanes == ("dead_code",)
+
+
+def test_unreachable_statements_never_gate_while_the_flag_is_off() -> None:
+    """The mirror: consulting the lane must not make it gate by default."""
+    disarmed = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0, dead_unreachable_statements=9),
+        config=_dead_code_gate_config(
+            fail_dead_code=False,
+            fail_on_unresolved_dead_code=False,
+        ),
+        enabled_lanes=("dead_code",),
+    )
+    _assert_gate(disarmed, exit_code=0, reasons=())
+
+
+def test_cli_gate_state_carries_the_unreachable_statement_lane() -> None:
+    """The CLI builds its state from project metrics, not from the document.
+
+    Two constructors feed one predicate. Fixing only the document one leaves
+    ``codeclone . --fail-dead-code`` — the surface the operator actually runs —
+    exactly as silent as before.
+    """
+    metrics = replace(
+        _project_metrics(),
+        dead_code=(),
+        unreachable_statements=(
+            UnreachableStatementFinding(
+                qualname="pkg.mod:looping",
+                filepath="pkg/mod.py",
+                reason="after_terminator",
+                start_line=10,
+                end_line=11,
+                statement_count=2,
+            ),
+        ),
+    )
+
+    state = gate_state_from_project_metrics(
+        project_metrics=metrics,
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert state.dead_high_confidence == 0
+    assert state.dead_unreachable_statements == 1
+
+
+def test_report_document_gate_reads_the_statement_lane_it_already_carries() -> None:
+    """Regression barrier for a gate that consulted one lane out of two.
+
+    The document carries both lanes and handed both to the findings builder,
+    which published ten findings while the dead-code gate read only the
+    counter built from ``items`` and exited 0. The gate now reads the same
+    published ``unreachable_statements`` count that text, markdown and HTML
+    read, so this fails the moment it goes back to one lane — or starts
+    measuring the list beside the field for itself.
+    """
+    document = {
+        "metrics": {
+            "families": {
+                "dead_code": {
+                    "summary": {
+                        "total": 0,
+                        "high_confidence": 0,
+                        "unreachable_statements": 4,
+                    },
+                    "items": [],
+                    "unreachable_statements": [
+                        {
+                            "qualname": f"pkg.mod:looping{index}",
+                            "relative_path": "pkg/mod.py",
+                            "start_line": 10 + index,
+                            "end_line": 11 + index,
+                            "reason": "after_terminator",
+                            "statement_count": 2,
+                        }
+                        for index in range(4)
+                    ],
+                }
+            }
+        },
+        "source_facts": {"observation_contract": {"enabled_lanes": ["dead_code"]}},
+    }
+
+    result = evaluate_gates(
+        report_document=document,
+        config=_dead_code_gate_config(
+            fail_dead_code=True,
+            fail_on_unresolved_dead_code=False,
+        ),
+    )
+
+    _assert_gate(
+        result,
+        exit_code=3,
+        reasons=("metric:Dead code detected (high confidence): 4 item(s).",),
+    )
+
+
+def _dead_items(
+    count: int,
+    *,
+    confidence: Literal["high", "medium"] = "high",
+) -> tuple[DeadItem, ...]:
+    return tuple(
+        DeadItem(
+            qualname=f"pkg.mod:unused{index}",
+            filepath="pkg/mod.py",
+            start_line=index + 1,
+            end_line=index + 2,
+            kind="function",
+            confidence=confidence,
+        )
+        for index in range(count)
+    )
+
+
+def _unreachable(count: int) -> tuple[UnreachableStatementFinding, ...]:
+    return tuple(
+        UnreachableStatementFinding(
+            qualname=f"pkg.mod:looping{index}",
+            filepath="pkg/mod.py",
+            reason="after_terminator",
+            start_line=10 + index,
+            end_line=11 + index,
+            statement_count=2,
+        )
+        for index in range(count)
+    )
+
+
+def _gate_cited_dead_code_count(result: GateResult) -> int:
+    """The number the operator reads in the gate reason, parsed back out."""
+
+    prefix = "metric:Dead code detected (high confidence): "
+    cited = [reason for reason in result.reasons if reason.startswith(prefix)]
+    assert len(cited) == 1, f"expected exactly one dead-code reason, got {cited}"
+    return int(cited[0].removeprefix(prefix).split(" ", 1)[0])
+
+
+@pytest.mark.parametrize(
+    ("classic", "unreachable", "expected"),
+    [
+        pytest.param(0, 3, 3, id="statement_lane_only"),
+        pytest.param(2, 3, 5, id="both_lanes"),
+        pytest.param(2, 0, 2, id="classic_lane_only"),
+    ],
+)
+def test_cli_dead_code_summary_shows_the_number_the_gate_cites(
+    tmp_path: Path,
+    classic: int,
+    unreachable: int,
+    expected: int,
+) -> None:
+    """One run, one number: the summary line and the gate reason must agree.
+
+    The gate learned to count the statement lane while the summary line still
+    counted only unreferenced symbols, so a scan could print "Dead code
+    ✔ clean" directly above "dead_code_items 10". Pinning each surface against
+    its own literal would let them drift apart again; this pins them against
+    each other, on one analysis result, in both directions -- a summary that
+    forgets either lane stops matching the reason.
+
+    Every classic item here is high confidence, which is the case the gate
+    speaks about; the medium-confidence boundary is pinned separately below.
+    """
+
+    metrics = replace(
+        _project_metrics(),
+        dead_code=_dead_items(classic),
+        unreachable_statements=_unreachable(unreachable),
+    )
+    snapshot = build_metrics_snapshot(
+        analysis_result=_analysis_result(metrics),
+        metrics_diff=None,
+        api_surface_diff_available=False,
+    )
+    gate = _cli_gate_result(
+        tmp_path=tmp_path,
+        project_metrics=metrics,
+        args=_gating_args(fail_dead_code=True),
+    )
+
+    assert snapshot.dead_code_count == expected
+    assert gate.exit_code == 3
+    assert _gate_cited_dead_code_count(gate) == snapshot.dead_code_count
+    assert "clean" not in fmt_metrics_dead_code(snapshot.dead_code_count)
+
+
+def test_cli_dead_code_summary_never_understates_the_gate(tmp_path: Path) -> None:
+    """The one place the two numbers may differ, and the direction they may differ in.
+
+    A medium-confidence unreferenced symbol is shown as a candidate but does
+    not trip ``--fail-dead-code``, so the summary is deliberately the wider
+    number. That is safe -- the operator sees more than the gate acts on --
+    and it is the reason the invariant above is stated for high-confidence
+    items rather than as blanket equality. What must never happen is the
+    reverse: the summary reading lower than the gate.
+    """
+
+    metrics = replace(
+        _project_metrics(),
+        dead_code=_dead_items(1, confidence="medium"),
+        unreachable_statements=(),
+    )
+    snapshot = build_metrics_snapshot(
+        analysis_result=_analysis_result(metrics),
+        metrics_diff=None,
+        api_surface_diff_available=False,
+    )
+    gate = _cli_gate_result(
+        tmp_path=tmp_path,
+        project_metrics=metrics,
+        args=_gating_args(fail_dead_code=True),
+    )
+    state = gate_state_from_project_metrics(
+        project_metrics=metrics,
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert snapshot.dead_code_count == 1
+    assert gate.exit_code == 0, "a medium-confidence candidate must not gate"
+    assert snapshot.dead_code_count >= (
+        state.dead_high_confidence + state.dead_unreachable_statements
+    )
+
+
 def test_unresolved_override_flag_shares_the_dead_code_gate_family() -> None:
     """The opt-in predicate must not move the versioned gate-to-lane matrix.
 
@@ -497,7 +798,7 @@ def test_unresolved_override_flag_shares_the_dead_code_gate_family() -> None:
 
     assert flag_only == (("dead_code_current", ("dead_code",)),)
     assert both == flag_only
-    assert gate_lane_contract_versions() == ("2", "1")
+    assert gate_lane_contract_versions() == ("2", "2")
 
 
 def _report_document() -> dict[str, object]:
@@ -679,3 +980,59 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
 
     assert cli_result == mcp_result == evaluator_result
     assert cli_result.reasons == expected_reasons
+
+
+def test_gate_state_carries_the_population_the_score_was_measured_over() -> None:
+    """The fact existed on the score and stopped one layer short of the gate.
+
+    ``HealthScore.population`` names whether the run read anything at all.
+    Until it reached ``GateState`` the gate could only see ``health.total``,
+    so an unmeasured run looked to it exactly like a measured clean one.
+    """
+
+    unmeasured = replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=0,
+            grade="F",
+            dimensions={"coverage": 0},
+            population="unmeasured",
+        ),
+    )
+
+    state = gate_state_from_project_metrics(
+        project_metrics=unmeasured,
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert state.health_population == "unmeasured"
+
+
+def test_gate_state_reports_a_measured_population_as_measured() -> None:
+    """The reverse skew: an ordinary run must not look unmeasured."""
+
+    state = gate_state_from_project_metrics(
+        project_metrics=_project_metrics(),
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert state.health_population == "complete"
+
+
+def test_gate_state_carries_the_skipped_file_count() -> None:
+    """``files_skipped`` is carried to the pixel and asked by nobody.
+
+    It reaches the summary line and the HTML meta table, and no gate or budget
+    ever reads it. This is the seam where it enters a decision.
+    """
+
+    state = gate_state_from_project_metrics(
+        project_metrics=_project_metrics(),
+        coverage_join=None,
+        metrics_diff=None,
+        files_skipped=29,
+    )
+
+    assert state.files_skipped == 29

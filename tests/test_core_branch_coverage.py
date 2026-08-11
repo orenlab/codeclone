@@ -860,6 +860,7 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         "high_confidence": 0,
         "suppressed": 1,
         "unresolved_external_override": 0,
+        "unreachable_statements": 0,
         "live_roots": 0,
     }
 
@@ -1433,9 +1434,9 @@ def _discover_with_single_cached_entry(
         *,
         hard_excludes: tuple[str, ...],
         max_files: int,
-    ) -> tuple[tuple[str, ...], int]:
+    ) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
         del hard_excludes, max_files
-        return (filepath,), 0
+        return (filepath,), 0, ()
 
     monkeypatch.setattr(
         "codeclone.paths.module_identity.inventory.discover_python_files",
@@ -1633,7 +1634,7 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         "New high-coupling classes vs metrics baseline: 2."
     ) == ("new_high_coupling_classes", "2")
     assert cli_console._parse_metric_reason_entry(
-        "New dependency cycles vs metrics baseline: 3."
+        "New import-time dependency cycles vs metrics baseline: 3."
     ) == ("new_dependency_cycles", "3")
     assert cli_console._parse_metric_reason_entry(
         "New dead code items vs metrics baseline: 4."
@@ -1655,7 +1656,7 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         "Coverage hotspots detected: hotspots=2, threshold=50."
     ) == ("coverage_hotspots", "2 (threshold=50)")
     assert cli_console._parse_metric_reason_entry(
-        "Dependency cycles detected: 3 cycle(s)."
+        "Import-time dependency cycles detected: 3 cycle(s)."
     ) == ("dependency_cycles", "3")
     assert cli_console._parse_metric_reason_entry(
         "Dead code detected (high confidence): 2 item(s)."

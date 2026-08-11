@@ -522,3 +522,42 @@ def test_reason_stable_for_empty() -> None:
 def test_reason_stable_for_non_python() -> None:
     result = classify_patch(["assets/logo.png"])
     assert "documentation" in result.reason or "outside" in result.reason
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Extension case: the same rule, one owner
+# ═══════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ["codeclone/foo.PY"],
+        ["codeclone/foo.Py"],
+        ["codeclone/foo.PYI"],
+        ["codeclone/only_hidden.PY", "codeclone/only_hidden2.PY"],
+    ],
+)
+def test_uppercase_python_extensions_are_python_source(changed: list[str]) -> None:
+    """A patch of nothing but ``.PY`` used to verify like a README change.
+
+    The suffix rule was case-sensitive in two places at once — here and in the
+    tree walk — so an unconventionally named module escaped both the analysis
+    and the structural checks its own patch was supposed to trigger. The rule
+    now has one owner; the tree-walk half is pinned in
+    ``tests/test_no_data_no_debt.py``.
+    """
+
+    result = classify_patch(changed)
+
+    assert result.profile is VerificationProfile.PYTHON_STRUCTURAL
+    assert result.python_source_touched is True
+
+
+def test_case_insensitive_suffix_does_not_capture_lookalikes() -> None:
+    """The reverse skew: no over-capture from the widened rule."""
+
+    result = classify_patch(["docs/guide.md", "notes.py.txt"])
+
+    assert result.profile is not VerificationProfile.PYTHON_STRUCTURAL
+    assert result.python_source_touched is False
