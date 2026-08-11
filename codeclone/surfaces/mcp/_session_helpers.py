@@ -30,6 +30,7 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
+from ...report.messages.projections import HEALTH_NOT_MEASURED
 from ...utils import coerce as _coerce
 from ...utils.payload_narrow import is_record_mapping
 from ...utils.repo_paths import (
@@ -137,11 +138,18 @@ def _summary_health_score(summary: Mapping[str, object]) -> int | None:
     health = _summary_health_payload(summary)
     if health.get("available") is False:
         return None
+    # An unread run reports no score. Coercing the refusal to 0 here would
+    # hand every caller downstream — patch contract state, compare_runs,
+    # the PR summary — a number the run never measured.
+    if health.get("score") is None:
+        return None
     return _as_int(health.get("score", 0), 0)
 
 
 def _summary_health_delta(summary: Mapping[str, object]) -> int | None:
     if _summary_health_payload(summary).get("available") is False:
+        return None
+    if _summary_health_score(summary) is None:
         return None
     metrics_diff = _as_mapping(summary.get("metrics_diff"))
     return _as_int(metrics_diff.get("health_delta", 0), 0)
@@ -998,16 +1006,18 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     blocking_gates = [
         str(item) for item in _as_sequence(payload.get("blocking_gates")) if str(item)
     ]
+    delta_text = f"{delta:+d}" if payload.get("health_delta") is not None else "n/a"
+    # This heading goes into someone else's pull request. "None/100 (None)"
+    # is what an unread run used to publish there; the score is absent, so
+    # the line says that instead of printing the repr of nothing.
+    health_text = (
+        HEALTH_NOT_MEASURED
+        if health.get("score") is None and "population" in health
+        else f"{score}/100 ({grade})"
+    )
     health_line = (
-        "Health: "
-        f"{score}/100 ({grade}) | Delta: {delta:+d} | "
+        f"Health: {health_text} | Delta: {delta_text} | "
         f"Verdict: {payload.get('verdict', 'stable')}"
-        if payload.get("health_delta") is not None
-        else (
-            "Health: "
-            f"{score}/100 ({grade}) | Delta: n/a | "
-            f"Verdict: {payload.get('verdict', 'stable')}"
-        )
     )
     # The heading is published into someone else's pull request, so it may
     # claim only what the run established: a changed-file scope exists only

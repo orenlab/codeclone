@@ -572,7 +572,9 @@ def _compact_analysis_completed_payload(
         "mode": str(payload.get("mode", "")),
         "focus": str(payload.get("focus", "")),
         "health_score": _int_or_none(health.get("score")),
-        "health_grade": str(health.get("grade", "")),
+        # ``str(None)`` is the four-character string "None". An unread run has
+        # no grade, and an audit row must not record an absence as a value.
+        "health_grade": str(health.get("grade") or ""),
         "findings_total": _int_or_none(findings.get("total")),
         "findings_new": _int_or_none(findings.get("new")),
         "files": _int_or_none(inventory.get("files")),

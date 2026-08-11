@@ -11,6 +11,11 @@ from __future__ import annotations
 from typing import Final
 
 PROJECTION_NONE: Final = "(none)"
+#: Printed where a health verdict would go when the run read no source file.
+#: "0 (F)" is a measurement; this is the absence of one, and it names the
+#: reason so a reader does not go looking for the debt that supposedly
+#: scored it.
+HEALTH_NOT_MEASURED: Final = "not measured (no file was read)"
 MD_TITLE: Final = "# CodeClone Report"
 
 TEXT_SECTION_REPORT_METADATA: Final = "REPORT METADATA"

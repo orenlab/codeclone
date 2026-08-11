@@ -12,7 +12,7 @@ from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import markdown as md_msgs
-from ..messages.projections import PROJECTION_NONE
+from ..messages.projections import HEALTH_NOT_MEASURED, PROJECTION_NONE
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
@@ -38,6 +38,19 @@ def _text(value: object) -> str:
         return "true" if value else "false"
     text = str(value).strip()
     return text or PROJECTION_NONE
+
+
+def _health_headline(snapshot: Mapping[str, object]) -> str:
+    """Render the overview health line, or say why there is none.
+
+    The population is read from the snapshot, never recomputed from the file
+    counters: ``compute_health`` is the only place allowed to decide whether
+    anything was measured.
+    """
+
+    if snapshot.get("score") is None:
+        return HEALTH_NOT_MEASURED
+    return f"{_text(snapshot.get('score'))} ({_text(snapshot.get('grade'))})"
 
 
 def _source_scope_text(scope: Mapping[str, object]) -> str:
@@ -325,10 +338,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         (
             (
                 md_msgs.MD_LABEL_HEALTH,
-                (
-                    f"{_text(health_snapshot.get('score'))} "
-                    f"({_text(health_snapshot.get('grade'))})"
-                ),
+                _health_headline(health_snapshot),
             ),
             (md_msgs.MD_LABEL_TOTAL_FINDINGS, findings_summary.get("total")),
             (
@@ -528,7 +538,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
 
     _append_anchor(lines, *_anchor("metrics"))
     for anchor_id, title, summary_keys, item_keys in (
-        ("health", "Health", ("score", "grade"), ()),
+        ("health", "Health", ("score", "grade", "population"), ()),
         (
             "complexity",
             "Complexity",

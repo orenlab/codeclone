@@ -14,6 +14,7 @@ from ..analysis.suppressions import (
 )
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import CONFIDENCE_HIGH, RISK_LOW
+from ..metrics.health import health_report_fields
 from ..metrics.overloaded_modules import build_overloaded_modules_payload
 from ..models import (
     ClassMetrics,
@@ -582,11 +583,10 @@ def build_metrics_report_payload(
                 "items": runtime_reachability_items,
             },
         },
-        "health": {
-            "score": project_metrics.health.total,
-            "grade": project_metrics.health.grade,
-            "dimensions": dict(project_metrics.health.dimensions),
-        },
+        # Projected through the sole owner of the population tri-state: an
+        # unread run reports no score, no grade and no dimensions, and every
+        # run reports which population the number came from.
+        "health": health_report_fields(project_metrics.health),
         "coverage_adoption": {
             "summary": {
                 "modules": len(coverage_adoption_rows),

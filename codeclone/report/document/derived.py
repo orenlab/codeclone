@@ -100,10 +100,19 @@ def _sort_highest_spread_ids(
 def _health_snapshot(metrics_payload: Mapping[str, object]) -> dict[str, object]:
     health = _as_mapping(_as_mapping(metrics_payload.get("families")).get("health"))
     summary = _as_mapping(health.get("summary"))
-    dimensions = {
-        str(key): _as_int(value)
-        for key, value in _as_mapping(summary.get("dimensions")).items()
-    }
+    # Same rule as the health family above: the population fact travels, the
+    # refusal is carried rather than re-derived, and a strongest/weakest pair
+    # over dimensions nobody measured would be a ranking of nothing.
+    population = str(summary.get("population", ""))
+    unmeasured = summary.get("score") is None
+    dimensions = (
+        {}
+        if unmeasured
+        else {
+            str(key): _as_int(value)
+            for key, value in _as_mapping(summary.get("dimensions")).items()
+        }
+    )
     strongest = None
     weakest = None
     if dimensions:
@@ -116,8 +125,9 @@ def _health_snapshot(metrics_payload: Mapping[str, object]) -> dict[str, object]
             key=lambda key: (dimensions[key], key),
         )
     return {
-        "score": _as_int(summary.get("score")),
-        "grade": str(summary.get("grade", "")),
+        "score": None if unmeasured else _as_int(summary.get("score")),
+        "grade": None if unmeasured else str(summary.get("grade", "")),
+        "population": population,
         "strongest_dimension": strongest,
         "weakest_dimension": weakest,
     }

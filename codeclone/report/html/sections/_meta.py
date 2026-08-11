@@ -191,6 +191,9 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ),
         ("Health score", _meta_pick(meta.get("health_score"))),
         ("Health grade", _meta_pick(meta.get("health_grade"))),
+        # The score and the grade go to "n/a" for two different reasons; this
+        # row is the one that says which.
+        ("Health population", _meta_pick(meta.get("health_population"))),
         ("Source IO skipped", _meta_pick(meta.get("files_skipped_source_io"))),
     ]
 
@@ -327,6 +330,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
             "data-metrics-computed": metrics_csv,
             "data-health-score": meta.get("health_score"),
             "data-health-grade": meta.get("health_grade"),
+            "data-health-population": meta.get("health_population"),
             "data-baseline-file": _path_basename(baseline_path_value),
             "data-baseline-path": baseline_path_value,
             "data-baseline-fingerprint-version": _bl_fp_ver,

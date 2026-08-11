@@ -431,10 +431,24 @@ def _normalize_metrics_families(
 
     health = _as_mapping(metrics_map.get("health"))
     health_comparison = _as_mapping(health.get("summary"))
-    health_dimensions = {
-        str(key): _as_int(value)
-        for key, value in sorted(_as_mapping(health.get("dimensions")).items())
-    }
+    # The refusal is carried, never re-decided. ``compute_health`` owns the
+    # tri-state and already withheld the score; this only asks whether a
+    # score arrived. Coercing the withheld fields back through _as_int/str
+    # would restore the 0/"F" verdict this document exists to stop repeating
+    # — and ``str(None)`` would write the grade as "None". A clones-only run
+    # brings no health block at all and keeps its historical empty shape:
+    # "health was not computed" is a different fact from "computed over a
+    # population of nothing", and only the second one is a refusal.
+    health_population = str(health.get("population", ""))
+    health_unmeasured = bool(health) and health.get("score") is None
+    health_dimensions: dict[str, int] | None = (
+        None
+        if health_unmeasured
+        else {
+            str(key): _as_int(value)
+            for key, value in sorted(_as_mapping(health.get("dimensions")).items())
+        }
+    )
     overloaded_modules = _as_mapping(metrics_map.get(_OVERLOADED_MODULES_FAMILY))
     overloaded_modules_detection = _as_mapping(overloaded_modules.get("detection"))
     overloaded_module_items = sorted(
@@ -907,9 +921,12 @@ def _normalize_metrics_families(
         },
         "health": {
             "summary": {
-                "score": _as_int(health.get("score")),
-                "grade": str(health.get("grade", "")),
+                "score": None if health_unmeasured else _as_int(health.get("score")),
+                "grade": (None if health_unmeasured else str(health.get("grade", ""))),
                 "dimensions": health_dimensions,
+                # Always emitted, so a consumer never has to read the absence
+                # of a key as an answer.
+                "population": health_population,
                 "baseline_diff_available": bool(
                     health_comparison.get("baseline_diff_available")
                 ),

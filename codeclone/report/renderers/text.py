@@ -456,7 +456,15 @@ def _append_overview(
         proj.TEXT_OVERVIEW_HEALTH_SNAPSHOT
         + _format_key_values(
             health_snapshot,
-            ("score", "grade", "strongest_dimension", "weakest_dimension"),
+            (
+                "score",
+                "grade",
+                # Beside the two fields it qualifies: "(none)" alone reads as
+                # a rendering gap, "population=unmeasured" reads as a fact.
+                "population",
+                "strongest_dimension",
+                "weakest_dimension",
+            ),
         )
     )
     hotlist_counts = {
@@ -568,7 +576,7 @@ def _append_metrics_summary_lines(
                     "unreachable_statements",
                 )
             case _:
-                keys = ("score", "grade")
+                keys = ("score", "grade", "population")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
 
 

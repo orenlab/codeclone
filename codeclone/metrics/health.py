@@ -348,3 +348,34 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
         dimensions=dimensions,
         population=population,
     )
+
+
+def health_report_fields(health: HealthScore) -> dict[str, object]:
+    """Project one score into the fields every report surface reads.
+
+    The tri-state turns into a refusal here and nowhere else. ``score`` and
+    ``grade`` are not "0" and "F" for a run that opened no file — 0 is a
+    measured value, and the six counter-driven dimensions reporting 100 are
+    the same claim broken into parts. They are ``None``: no measurement was
+    made, so no number is reported.
+
+    ``population`` rides every run, not only the refused one. A consumer that
+    has to infer the state from a missing key learns nothing; a consumer that
+    reads the key learns the fact. This is also the single owner of that
+    fact for the whole report tree: renderers read it from the document and
+    never re-derive it from the file counters beside it.
+    """
+
+    if health.population == "unmeasured":
+        return {
+            "score": None,
+            "grade": None,
+            "dimensions": None,
+            "population": health.population,
+        }
+    return {
+        "score": health.total,
+        "grade": health.grade,
+        "dimensions": dict(health.dimensions),
+        "population": health.population,
+    }

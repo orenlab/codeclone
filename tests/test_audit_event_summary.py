@@ -13,6 +13,7 @@ from codeclone.audit.events import (
     EVENT_PATCH_VIOLATED,
     EVENT_RECEIPT_CREATED,
     EVENT_WORKSPACE_CONFLICT,
+    _compact_analysis_completed_payload,
     event_summary,
 )
 
@@ -75,3 +76,44 @@ def test_non_incident_event_has_no_summary() -> None:
 
 def test_none_payload_returns_none() -> None:
     assert event_summary(EVENT_PATCH_VIOLATED, None) is None
+
+
+def test_compact_analysis_completed_does_not_stringify_a_missing_grade() -> None:
+    """An unread run has no grade, and ``str(None)`` is not an absence.
+
+    A run that opened no source file now reports ``score: null`` and
+    ``grade: null``; the compaction used to write the four-character string
+    "None" into the audit row, which reads like a value.
+    """
+
+    compact = _compact_analysis_completed_payload(
+        {
+            "source": "cli",
+            "mode": "full",
+            "focus": "repository",
+            "health": {"score": None, "grade": None, "population": "unmeasured"},
+            "findings": {"total": 0, "new": 0},
+            "inventory": {"files": 0},
+        }
+    )
+
+    assert compact["health_score"] is None
+    assert compact["health_grade"] == ""
+
+
+def test_compact_analysis_completed_keeps_a_measured_grade() -> None:
+    """The reverse skew: a measured grade still reaches the audit row."""
+
+    compact = _compact_analysis_completed_payload(
+        {
+            "source": "cli",
+            "mode": "full",
+            "focus": "repository",
+            "health": {"score": 91, "grade": "A", "population": "complete"},
+            "findings": {"total": 0, "new": 0},
+            "inventory": {"files": 12},
+        }
+    )
+
+    assert compact["health_score"] == 91
+    assert compact["health_grade"] == "A"

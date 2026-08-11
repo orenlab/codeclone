@@ -65,6 +65,19 @@ RADAR_LABELS: Final[dict[str, str]] = {
 
 KPI_HEALTH: Final = "Health"
 KPI_HEALTH_NA: Final = "n/a"
+# Distinct from KPI_HEALTH_NA on purpose: "n/a" is what a clones-only run
+# shows because health was never computed. This is what a full run shows when
+# health was computed over a population of nothing — the card must not draw a
+# ring, a score or a grade for code the run never opened.
+KPI_HEALTH_UNMEASURED: Final = "not measured"
+KPI_HEALTH_UNMEASURED_TIP: Final = (
+    "No source file was read, so no health score was measured for this run"
+)
+# Worded apart from the card above so each can be pinned on its own: a test
+# that matched one string could not tell which of the two actually fired.
+EXECUTIVE_HEALTH_UNMEASURED: Final = (
+    "This run read no source file, so it measured no health."
+)
 ISSUE_BREAKDOWN_EMPTY: Final = "No issues detected"
 # An empty result and an unmeasured one look identical unless the panel
 # says which one it is.

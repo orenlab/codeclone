@@ -341,6 +341,10 @@ def build_context(
             ),
             "health_score": health_summary.get("score"),
             "health_grade": health_summary.get("grade"),
+            # Carried beside the two fields it qualifies. Without it the
+            # provenance table cannot tell "n/a because metrics were skipped"
+            # apart from "n/a because no source file was read".
+            "health_population": health_summary.get("population"),
         }
     )
     derived = _as_mapping(document.get("derived"))

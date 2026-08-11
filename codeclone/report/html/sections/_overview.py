@@ -51,6 +51,7 @@ from ...messages.overview import (
     DIRECTORY_BUCKET_ORDER,
     DIRECTORY_KIND_LABELS,
     EXECUTIVE_HEALTH_SNAPSHOT_QUESTION,
+    EXECUTIVE_HEALTH_UNMEASURED,
     EXECUTIVE_SCAN_SCOPE_DEFAULT,
     EXECUTIVE_THRESHOLDS_PREFIX,
     ISSUE_BREAKDOWN_EMPTY,
@@ -62,6 +63,8 @@ from ...messages.overview import (
     KPI_FINDINGS,
     KPI_HEALTH,
     KPI_HEALTH_NA,
+    KPI_HEALTH_UNMEASURED,
+    KPI_HEALTH_UNMEASURED_TIP,
     KPI_HIGH_COMPLEXITY,
     KPI_HIGH_COUPLING,
     KPI_LOW_COHESION,
@@ -107,9 +110,26 @@ _DIRECTORY_KIND_LABELS = DIRECTORY_KIND_LABELS
 
 
 def _health_gauge_html(
-    score: float, grade: str, *, health_delta: int | None = None
+    score: float,
+    grade: str,
+    *,
+    health_delta: int | None = None,
+    population: str = "",
 ) -> str:
-    """Render an SVG ring gauge for health score with optional baseline arc."""
+    """Render an SVG ring gauge for health score with optional baseline arc.
+
+    A ring is a verdict drawn as geometry: an arc at 0 % with "Grade F" under
+    it says "measured, and terrible". When the population is unmeasured there
+    is nothing to draw, so the card says so instead of rendering a shape.
+    """
+    if population == "unmeasured":
+        return _stat_card(
+            KPI_HEALTH,
+            KPI_HEALTH_UNMEASURED,
+            tip=KPI_HEALTH_UNMEASURED_TIP,
+            css_class="meta-item overview-health-card",
+            glossary_tip_fn=glossary_tip,
+        )
     if score < 0:
         return _stat_card(
             KPI_HEALTH,
@@ -878,10 +898,26 @@ def render_overview_panel(ctx: ReportContext) -> str:
         health_score_raw is not None and str(health_score_raw).strip() != ""
     )
     health_score = _as_float(health_score_raw) if health_score_known else -1.0
-    health_grade = str(health_summary.get("grade", "n/a"))
+    # ``or`` rather than a default: ``.get(k, "n/a")`` returns None when the
+    # key is present and null, and ``str(None)`` is the string "None".
+    health_grade = str(health_summary.get("grade") or KPI_HEALTH_NA)
+    health_population = str(health_summary.get("population", ""))
 
     # Overview answer
     def _answer_and_tone() -> tuple[str, Tone]:
+        if health_population == "unmeasured":
+            # Named before the counts beside it, so the reader knows what
+            # population those counts came from.
+            return (
+                f"{EXECUTIVE_HEALTH_UNMEASURED} "
+                + _overview_counts_sentence(
+                    clone_groups=ctx.clone_groups_total,
+                    dead_total=dead_total,
+                    dead_suppressed=dead_suppressed,
+                    dependency_cycles=dependency_cycle_count,
+                ),
+                "info",
+            )
         if ctx.metrics_available and health_score_known:
             ans = f"Health {health_score:.0f}/100 ({health_grade}); " + (
                 _overview_counts_sentence(
@@ -1103,7 +1139,10 @@ def render_overview_panel(ctx: ReportContext) -> str:
     )
 
     health_gauge = _health_gauge_html(
-        health_score, health_grade, health_delta=_health_delta
+        health_score,
+        health_grade,
+        health_delta=_health_delta,
+        population=health_population,
     )
 
     return (
