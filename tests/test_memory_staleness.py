@@ -164,9 +164,21 @@ def test_anchor_drift_status_handles_missing_path_and_existing_stale_state(
     from dataclasses import replace
 
     from codeclone.memory.models import MemorySubject, generate_memory_id
-    from codeclone.memory.staleness import _evaluate_anchor_drift_status
+    from codeclone.memory.staleness import (
+        _apply_anchor_drift_for_record,
+        _evaluate_owner_status,
+    )
 
     from .memory_fixtures import make_module_record, memory_store
+
+    def _status(record: MemoryRecord, subject: MemorySubject, root: Path) -> str | None:
+        decision = _evaluate_owner_status(
+            record,
+            anchor_subject=subject,
+            references=(),
+            root_path=root,
+        )
+        return None if decision is None else decision[0]
 
     with memory_store(tmp_path) as (root, project, store, _db_path):
         record = replace(
@@ -184,34 +196,26 @@ def test_anchor_drift_status_handles_missing_path_and_existing_stale_state(
             relation="about",
         )
         store.write_subject(subject)
-        assert (
-            _evaluate_anchor_drift_status(
-                record,
-                anchor_subject=subject,
-                root_path=root,
-            )
-            == "historical"
-        )
-        historical = replace(record, status="historical")
-        assert (
-            _evaluate_anchor_drift_status(
-                historical,
-                anchor_subject=subject,
-                root_path=root,
-            )
-            is None
-        )
+        # The record's own subject is gone: nothing is left to assert.
+        assert _status(record, subject, root) == "historical"
         stale_record = replace(
             record, status="stale", stale_reason="subject_fingerprint_drift"
         )
-        assert (
-            _evaluate_anchor_drift_status(
-                stale_record,
-                anchor_subject=subject,
-                root_path=root,
-            )
-            == "historical"
+        assert _status(stale_record, subject, root) == "historical"
+
+        # A record already sitting in that state is not moved again. The
+        # verdict is unconditional; whether it is news is asked once, by
+        # _already_recorded, so this is pinned on the composed behaviour.
+        historical = replace(record, status="historical")
+        outcome = _apply_anchor_drift_for_record(
+            store,
+            historical,
+            anchor_subject=subject,
+            references=(),
+            root_path=root,
         )
+        assert outcome.handled is True
+        assert outcome.marked_historical == 0
 
 
 def test_staleness_internal_noop_and_commit_edges(
@@ -235,13 +239,14 @@ def test_staleness_internal_noop_and_commit_edges(
 
     monkeypatch.setattr(
         staleness,
-        "_evaluate_anchor_drift_status",
-        lambda *_args, **_kwargs: record.status,
+        "_evaluate_owner_status",
+        lambda *_args, **_kwargs: (record.status, "reactivated"),
     )
     outcome = staleness._apply_anchor_drift_for_record(
         store,
         record,
         anchor_subject=subject,
+        references=(),
         root_path=root,
     )
     assert outcome.handled is True
