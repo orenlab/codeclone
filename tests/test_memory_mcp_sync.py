@@ -22,14 +22,8 @@ from codeclone.memory.project import resolve_memory_db_path
 from tests.memory_fixtures import (
     git_repo_with_cached_report,
     report_document_for_counters,
+    tool_calls_named_in,
 )
-
-#: The MCP tools a refusal step may cite. Deliberately a literal here and not
-#: read off the service class: importing an r4 surface would raise this whole
-#: module's ring and make its own r2p memory imports boundary violations. That
-#: these names still answer on the surface is checked by hand at the ingest
-#: layer, which is the honest cost of the boundary — see the report note.
-_MCP_TOOLS_NAMED: Final = ("analyze_repository", "manage_engineering_memory")
 
 #: The counters of a run that found Python files and opened none of them —
 #: the one run ingest refuses. Written as what the run did, so the state's
@@ -298,7 +292,10 @@ def test_every_refusal_reason_ships_a_step_naming_an_mcp_tool() -> None:
             reason=reason, root="/repo", surface="mcp"
         )
         assert step is not None, f"{reason} ships no MCP next step"
-        assert any(tool in step for tool in _MCP_TOOLS_NAMED), (
+        # That a call is named at all is this ring's business; that the name
+        # answers on the surface is checked where the registry lives, against
+        # the server itself, so neither place keeps a list of tool names.
+        assert tool_calls_named_in(step), (
             f"{reason} next_step names no tool to call: {step}"
         )
 

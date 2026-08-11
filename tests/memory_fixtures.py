@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -20,7 +21,11 @@ from codeclone.memory.application import MemoryApplicationContext
 from codeclone.memory.exceptions import UnfitAnalysisRunError
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
-from codeclone.memory.ingest.run_fitness import unmeasured_refusal_message
+from codeclone.memory.ingest.run_fitness import (
+    REFUSAL_REASONS,
+    refusal_message,
+    unmeasured_refusal_message,
+)
 from codeclone.memory.models import (
     MemoryProject,
     MemoryRecord,
@@ -225,6 +230,37 @@ def unfit_run_refusal(root: Path) -> UnfitAnalysisRunError:
     return UnfitAnalysisRunError(
         unmeasured_refusal_message(root=str(root), surface="cli")
     )
+
+
+def mcp_refusal_next_steps() -> tuple[str, ...]:
+    """Every refusal remedy, rendered as an MCP caller receives it.
+
+    Lives here because the two halves of the check sit in different rings: a
+    memory test may not import the MCP surface, and an MCP test may not import
+    memory ingest. A fixture module is not a ``test_*.py``, so it is the
+    subject of neither ring rule, and this module already owns the CLI-side
+    refusal — the seam is where it already was, not one cut open for this.
+    """
+
+    return tuple(
+        step
+        for reason in sorted(REFUSAL_REASONS)
+        if (step := refusal_message(reason=reason, root="/repo", surface="mcp"))
+        is not None
+    )
+
+
+def tool_calls_named_in(step: str) -> tuple[str, ...]:
+    """The tools a step tells its reader to call, read out of the step itself.
+
+    Taken from the artifact rather than listed beside it. A list of "tools we
+    mention" is a second record of one fact, and it rots exactly where it
+    hurts: silently, while the guard consulting it stays green and blesses a
+    step naming something nobody can call. Nothing here needs keeping in sync,
+    because the step is the only copy.
+    """
+
+    return tuple(sorted(set(re.findall(r"\b([a-z][a-z0-9_]*)\s*\(", step))))
 
 
 def memory_application_context(root: Path) -> MemoryApplicationContext:

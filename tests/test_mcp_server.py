@@ -24,6 +24,10 @@ from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
 from codeclone.surfaces.mcp.session import MCPServiceContractError
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
+from tests.memory_fixtures import (
+    mcp_refusal_next_steps,
+    tool_calls_named_in,
+)
 
 
 def _structured_tool_result(result: object) -> dict[str, object]:
@@ -1158,3 +1162,25 @@ def test_mcp_server_observability_wrapper_without_root_or_capture(
         asyncio.run(server.call_tool("help", {"topic": "workflow"}))
     )
     assert help_payload["topic"] == "workflow"
+
+
+def test_memory_refusal_steps_name_tools_this_server_registers() -> None:
+    """A refusal's remedy may only cite tools a caller can actually call.
+
+    Nothing here maintains a list of those tools. The names are read out of
+    the rendered step and checked against the server's own registry, so there
+    is no parallel record to rot: rename or withdraw a tool and this reds,
+    instead of an agent discovering it by following a dead instruction.
+    """
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=4)
+    registered = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    steps = mcp_refusal_next_steps()
+    assert steps, "no MCP refusal step was rendered, so nothing was checked"
+    for step in steps:
+        named = tool_calls_named_in(step)
+        assert named, f"refusal step names no tool to call: {step}"
+        unknown = sorted(set(named) - registered)
+        assert not unknown, f"refusal step names unregistered tools: {unknown}"
