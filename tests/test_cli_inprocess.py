@@ -38,6 +38,7 @@ from codeclone.contracts import (
     BASELINE_SCHEMA_VERSION,
     CACHE_VERSION,
     REPORT_SCHEMA_VERSION,
+    ExitCode,
 )
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import FileProcessResult as CliFileProcessResult
@@ -2543,6 +2544,89 @@ def test_cli_update_baseline_transitions_authenticated_v2(
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Baseline updated")
+
+
+def test_cli_update_baseline_refuses_an_empty_analysis_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The empty-scope rule must be reachable through the real wire.
+
+    A guard no input reaches is theatre, and the publisher's guard is five
+    layers below the flag that triggers it: the pipeline names the population,
+    ``AnalysisResult`` carries it, the workflow routes it, ``baseline_state``
+    forwards it, and ``publish_baseline`` decides. Proving it in isolation
+    proves only the last link. This runs the flag a user actually types, over
+    the root that actually produces the state — a directory with no Python —
+    and asserts nothing was written.
+
+    ``files_skipped`` is zero here by construction, so the older truncation
+    rule cannot be what fired.
+    """
+
+    (tmp_path / "notes.md").write_text("no python here\n", "utf-8")
+    baseline = tmp_path / "codeclone.baseline.json"
+
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline),
+                "--update-baseline",
+                "--no-progress",
+            ],
+        )
+
+    assert excinfo.value.code == int(ExitCode.CONTRACT_ERROR)
+    assert not baseline.exists()
+    out = capsys.readouterr().out
+    assert "no source file" in out
+    assert "Baseline updated" not in out
+
+
+def test_cli_update_baseline_still_publishes_a_non_empty_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The reverse skew on the same wire: one Python file is not an empty scope.
+
+    Same invocation, same flags, one module added. A refusal that leaked into
+    this row would turn the new rule into a blanket ban on ``--update-baseline``.
+    """
+
+    _write_python_module(
+        tmp_path,
+        "a.py",
+        """
+def f1():
+    return 1
+""",
+    )
+    (tmp_path / "notes.md").write_text("no python here\n", "utf-8")
+    baseline = tmp_path / "codeclone.baseline.json"
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline),
+            "--update-baseline",
+            "--min-loc",
+            "1",
+            "--min-stmt",
+            "1",
+            "--no-progress",
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Baseline updated")
+    assert baseline.exists()
 
 
 def test_cli_update_baseline(

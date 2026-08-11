@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import Final
+from typing import Final, Literal
 
 BASELINE_SCHEMA_VERSION: Final = "3.0"
 # Version "3" carries two changes that land together and are not separable:
@@ -238,7 +238,19 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # key-name change, or the dependency-row schema, so the bump IS the
 # compatibility guarantee.
 CACHE_VERSION: Final = "3.7"
-REPORT_SCHEMA_VERSION: Final = "3.0"
+# 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
+# changed. "complete" became "complete_nonempty" and "complete_empty" joined
+# it, because one word was carrying two facts — a population that exists and
+# was not read, and a scope holding no source file at all. The enum is
+# wire-visible in every report artifact and in the HTML data attribute, so a
+# reader that switches on it sees a value it has never been told about.
+#
+# The bump IS the compatibility guarantee here, exactly as for the cache
+# above: ``check_report_v3_compatibility`` applies an *exact* policy, so a
+# stored 3.0 report is refused rather than silently misread against the new
+# value set. ``tests/test_report_honest_population.py`` pins the coupling —
+# the enum cannot move again without this constant moving with it.
+REPORT_SCHEMA_VERSION: Final = "3.1"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
 # be described as one: no code branches on it. Whether a stored artifact may be
@@ -471,6 +483,89 @@ def cli_help_epilog() -> str:
     )
 
 
+#: What a run actually observed of the population it found. Six of the seven
+#: health dimensions are counters of *observed* debt, so an unobserved
+#: population scores exactly like a clean one — "we did not measure" and "we
+#: measured, it is clean" used to be bit-identical. This names them apart, in
+#: the same shape the project already uses for baseline-relative novelty: a
+#: fact that is absent is reported as absent, never as a favourable answer.
+#:
+#: Four states, not three. ``unmeasured`` used to carry two unrelated facts: a
+#: population that exists and was not read (a broken run), and a scope that
+#: holds no source file at all (a complete measurement of an empty area). They
+#: need different words because they need different remediations — look for
+#: the dead worker, versus look at the analysis root — and because only the
+#: first one is a fault.
+#:
+#: * ``complete_nonempty`` — every file found was read, and there were files.
+#: * ``complete_empty``    — the scope holds no source file; nothing was lost.
+#: * ``partial``           — files were found, some read, some not.
+#: * ``unmeasured``        — files exist (or the lane never ran) and none were
+#:                           observed. The only state that means "no evidence".
+#:
+#: Lives here, in the dependency-free contract ring, rather than beside the
+#: models: health, the gates, the baseline publisher and the CLI surfaces all
+#: decide on it, and the surfaces may not import the model store at all. A
+#: fact every ring must consult belongs in the ring every ring may reach.
+HealthPopulation = Literal[
+    "complete_nonempty",
+    "complete_empty",
+    "partial",
+    "unmeasured",
+]
+
+#: The states over which a health number exists at all. Derived once, here,
+#: because four states collapse to this binary question at every presenting
+#: surface, and a surface that re-derives it from ``score is None`` reads the
+#: consequence instead of the fact — which is why the two refusals could not
+#: be worded apart before.
+_POPULATIONS_WITH_A_SCORE: Final[frozenset[str]] = frozenset(
+    {"complete_nonempty", "partial"}
+)
+
+
+def observed_population(
+    *,
+    files_found: int,
+    files_analyzed_or_cached: int,
+) -> HealthPopulation:
+    """Name what the run observed, from the two counters and nothing else.
+
+    The sole computer of this fact. Health, the gates, the baseline publisher
+    and the CLI all consult it; a second implementation in any one of them
+    would be two semantics for one word.
+
+    Derived from two counters, never configured: no threshold is involved, so
+    there is nothing here that can drift the way a calibrated constant can.
+    The four states are exhaustive and mutually exclusive by construction —
+    the first branch splits on whether anything was read, and each side then
+    splits on whether there was anything to read.
+    """
+
+    if files_analyzed_or_cached <= 0:
+        # Nothing was read. Which of the two absences it is depends entirely
+        # on whether there was anything to read; conflating them is the defect
+        # this function exists to remove.
+        return "complete_empty" if files_found <= 0 else "unmeasured"
+    if files_analyzed_or_cached < files_found:
+        return "partial"
+    return "complete_nonempty"
+
+
+def population_carries_score(population: HealthPopulation) -> bool:
+    """True when a health number exists for this population.
+
+    One owner for the question every presenting surface asks. ``partial`` is
+    included: a truncated run measured something, and naming the truncation is
+    a different job from withholding the number. The two excluded states both
+    withhold it — for different reasons, which is why they stay
+    distinguishable in ``population`` itself rather than collapsing into a
+    missing key.
+    """
+
+    return population in _POPULATIONS_WITH_A_SCORE
+
+
 __all__ = [
     "API_SURFACE_SIGNATURE_VERSION",
     "AUDIT_PROJECTION_VERSION",
@@ -583,5 +678,6 @@ __all__ = [
     "TRAJECTORY_QUALITY_SCORE_VERSION",
     "WIRE_VERSION",
     "ExitCode",
+    "HealthPopulation",
     "cli_help_epilog",
 ]

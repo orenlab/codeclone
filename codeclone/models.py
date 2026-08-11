@@ -14,6 +14,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_validator
 
+# The four-state population contract lives in the dependency-free contract
+# ring, because the r4 surfaces that decide on it may not import this module.
+from .contracts import HealthPopulation
+
 DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
 DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
 DEFAULT_OBSERVABILITY_MAX_SPANS = 100
@@ -2569,24 +2573,17 @@ class FileMetrics:
     function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
 
 
-#: How much of the found population the score actually saw. Six of the seven
-#: dimensions are counters of *observed* debt, so an unobserved population
-#: scores exactly like a clean one — "we did not measure" and "we measured,
-#: it is clean" used to be bit-identical. This names them apart, in the same
-#: shape the project already uses for baseline-relative novelty: a fact that
-#: is absent is reported as absent, never as a favourable answer.
-HealthPopulation = Literal["complete", "partial", "unmeasured"]
-
-
 @dataclass(frozen=True, slots=True)
 class HealthScore:
     total: int
     grade: Literal["A", "B", "C", "D", "F"]
     dimensions: dict[str, int]
-    #: ``unmeasured`` means ``total`` and ``grade`` are not a verdict about
-    #: any code: no file was read. Consumers that present or gate on health
-    #: must consult this before quoting either field.
-    population: HealthPopulation = "complete"
+    #: ``unmeasured`` and ``complete_empty`` both mean ``total`` and ``grade``
+    #: are not a verdict about any code — nothing was read, or there was
+    #: nothing to read. Consumers that present or gate on health must consult
+    #: this before quoting either field; ``population_carries_score`` is the
+    #: one place that turns the four states into that yes/no.
+    population: HealthPopulation = "complete_nonempty"
 
 
 @dataclass(frozen=True, slots=True)
@@ -3221,6 +3218,12 @@ BaselinePublishFailureReason = Literal[
     "invalid_target",
     "oversize",
     "scope_mismatch",
+    # A run whose analysis scope held no source file at all. Its own rule and
+    # its own name: "found nothing" is not "lost something", and the fix is
+    # not the same one. Deliberately NOT folded into ``truncated_run`` — the
+    # proposal to replace that rule's ``files_skipped > 0`` with "population
+    # is not complete" was refused for exactly that conflation.
+    "empty_analysis_scope",
     # A run that could not read every file it found. Refused unconditionally:
     # publishing an incomplete reference makes every unread symbol look
     # removed on the next complete run.

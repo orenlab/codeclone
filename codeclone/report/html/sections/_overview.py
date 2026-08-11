@@ -51,9 +51,9 @@ from ...messages.overview import (
     DIRECTORY_BUCKET_ORDER,
     DIRECTORY_KIND_LABELS,
     EXECUTIVE_HEALTH_SNAPSHOT_QUESTION,
-    EXECUTIVE_HEALTH_UNMEASURED,
     EXECUTIVE_SCAN_SCOPE_DEFAULT,
     EXECUTIVE_THRESHOLDS_PREFIX,
+    HEALTH_ABSENCE_CARDS,
     ISSUE_BREAKDOWN_EMPTY,
     ISSUE_BREAKDOWN_EMPTY_REASON,
     ISSUE_BREAKDOWN_ROW_LABELS,
@@ -63,8 +63,6 @@ from ...messages.overview import (
     KPI_FINDINGS,
     KPI_HEALTH,
     KPI_HEALTH_NA,
-    KPI_HEALTH_UNMEASURED,
-    KPI_HEALTH_UNMEASURED_TIP,
     KPI_HIGH_COMPLEXITY,
     KPI_HIGH_COUPLING,
     KPI_LOW_COHESION,
@@ -119,21 +117,22 @@ def _health_gauge_html(
     """Render an SVG ring gauge for health score with optional baseline arc.
 
     A ring is a verdict drawn as geometry: an arc at 0 % with "Grade F" under
-    it says "measured, and terrible". When the population is unmeasured there
-    is nothing to draw, so the card says so instead of rendering a shape.
+    it says "measured, and terrible", and a full arc over an empty scope would
+    say "measured, and immaculate". Where the population carries no number
+    there is nothing to draw, so the card says which absence it is instead of
+    rendering a shape.
     """
-    if population == "unmeasured":
+    absence = HEALTH_ABSENCE_CARDS.get(population)
+    if absence is not None or score < 0:
+        # Three no-number cards, one call. They differ only in two strings —
+        # each absence brings its own wording and tip, and "health was never
+        # computed" keeps its historical "n/a" with none — so writing them as
+        # separate returns duplicated the whole card construction.
+        label, tip = (absence[0], absence[1]) if absence else (KPI_HEALTH_NA, "")
         return _stat_card(
             KPI_HEALTH,
-            KPI_HEALTH_UNMEASURED,
-            tip=KPI_HEALTH_UNMEASURED_TIP,
-            css_class="meta-item overview-health-card",
-            glossary_tip_fn=glossary_tip,
-        )
-    if score < 0:
-        return _stat_card(
-            KPI_HEALTH,
-            KPI_HEALTH_NA,
+            label,
+            tip=tip,
             css_class="meta-item overview-health-card",
             glossary_tip_fn=glossary_tip,
         )
@@ -905,11 +904,15 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     # Overview answer
     def _answer_and_tone() -> tuple[str, Tone]:
-        if health_population == "unmeasured":
+        health_absence = HEALTH_ABSENCE_CARDS.get(health_population)
+        if health_absence is not None:
             # Named before the counts beside it, so the reader knows what
-            # population those counts came from.
+            # population those counts came from — and which of the two
+            # absences produced them. Read from the same table as the card
+            # above so the two can never say different things.
+            _label, _tip, executive = health_absence
             return (
-                f"{EXECUTIVE_HEALTH_UNMEASURED} "
+                f"{executive} "
                 + _overview_counts_sentence(
                     clone_groups=ctx.clone_groups_total,
                     dead_total=dead_total,

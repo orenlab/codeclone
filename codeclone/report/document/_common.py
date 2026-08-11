@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from ...contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    population_carries_score,
 )
 from ...domain.findings import (
     CATEGORY_COHESION,
@@ -53,6 +54,7 @@ from ..derived import (
 )
 
 if TYPE_CHECKING:
+    from ...contracts import HealthPopulation
     from ...models import (
         GroupMapLike,
         MetricsDiff,
@@ -301,6 +303,40 @@ def _entity_novelty_facts(
         for domain, lane, compared, new_entities in domains
         if _lane_is_trusted(baseline_trust, lane)
     }
+
+
+def health_verdict_withheld(health: Mapping[str, object]) -> bool:
+    """True when this health block carries no number to project.
+
+    One reader for the whole document tree. The two builders that consume it —
+    the metrics family and the derived overview — used to answer this each on
+    their own, from ``score is None``, which is the *consequence* of the
+    producer's decision rather than the decision itself. That worked while
+    there was exactly one way to be absent; it stops working the moment there
+    are two, because neither builder can then say which absence it is holding,
+    and the surfaces downstream have to word them apart.
+
+    The population state is put to its owner, ``population_carries_score``. A
+    health block carrying no state at all is older than the fact — a hand-built
+    payload, or a wire format from before the split — and falls back to the
+    producer's own signal, unchanged.
+
+    Both signals are consulted, and an absence in either one wins. On every
+    block ``health_report_fields`` produces they agree, so a reader that
+    checked only one looked correct and was untestable: reverting the state
+    check left the whole suite green. They can only disagree on a corrupted or
+    hand-built block, and there the fail-closed reading is the only honest
+    one — a state saying "nothing was measured" beside a number does not make
+    the number real, and a missing number beside "complete" does not make
+    ``0`` a measurement.
+    """
+
+    score_absent = health.get("score") is None
+    population = str(health.get("population", ""))
+    if not population:
+        return score_absent
+    state_absent = not population_carries_score(cast("HealthPopulation", population))
+    return state_absent or score_absent
 
 
 def _dependency_cycle_identity(modules: Iterable[str]) -> str:
@@ -647,5 +683,6 @@ def _normalize_nested_string_rows(value: object) -> list[list[str]]:
 
 __all__ = [
     "_collect_report_file_list",
+    "health_verdict_withheld",
     "normalize_structural_findings",
 ]

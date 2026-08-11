@@ -30,7 +30,7 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
-from ...report.messages.projections import HEALTH_NOT_MEASURED
+from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils import coerce as _coerce
 from ...utils.payload_narrow import is_record_mapping
 from ...utils.repo_paths import (
@@ -1009,9 +1009,14 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     delta_text = f"{delta:+d}" if payload.get("health_delta") is not None else "n/a"
     # This heading goes into someone else's pull request. "None/100 (None)"
     # is what an unread run used to publish there; the score is absent, so
-    # the line says that instead of printing the repr of nothing.
+    # the line says that instead of printing the repr of nothing — and says
+    # which absence it is, because "no file was read" published against a
+    # repository that simply holds no Python is its own false claim.
     health_text = (
-        HEALTH_NOT_MEASURED
+        HEALTH_ABSENCE_TEXT.get(
+            str(health.get("population", "")),
+            HEALTH_NOT_MEASURED,
+        )
         if health.get("score") is None and "population" in health
         else f"{score}/100 ({grade})"
     )

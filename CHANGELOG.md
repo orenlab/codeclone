@@ -7,6 +7,15 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Breaking changes
 
+- **Report schema advanced to `3.1`.** The health population fact —
+  `metrics.families.health.summary.population`, and the `data-health-population` attribute in the HTML report — changed
+  its value set: `complete` became `complete_nonempty`, and `complete_empty` joined it. One word was carrying two
+  facts: a population that exists and was not read, and a scope holding no source file at all. Only the first is a
+  broken run; the second is a complete measurement of an empty area, and reporting it as "unmeasured" blamed the run
+  for the repository. A consumer matching `population == "complete"` now matches nothing, so update it to
+  `complete_nonempty` and treat `complete_empty` as "there was nothing to measure" rather than as a failure. A report
+  written by an earlier release is refused by `codeclone memory init --from-report`, which applies an exact schema
+  policy; re-run the analysis to regenerate it.
 - Baseline format advanced to **3.0** and older baselines are refused. Without a baseline-aware gate the run still
   completes, but every clone group reports `unavailable` novelty; with one, it exits `2`. Regenerate once with
   `--update-baseline`. A legacy file's exact bytes are authenticated and kept as transition evidence, so the change of

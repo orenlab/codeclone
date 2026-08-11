@@ -28,7 +28,7 @@ from ...baseline import (
     publish_baseline,
     recover_publish_lock,
 )
-from ...contracts import ExitCode
+from ...contracts import ExitCode, HealthPopulation
 from ...contracts.errors import BaselineValidationError
 from . import state as cli_state
 from .types import CLIArgsLike, require_status_console
@@ -191,6 +191,7 @@ def resolve_clone_baseline_state(
     console: _PrinterLike,
     required_lanes: frozenset[str],
     files_skipped: int = 0,
+    analysis_population: HealthPopulation = "complete_nonempty",
 ) -> CloneBaselineState:
     baseline = Baseline(baseline_path)
     baseline_loaded = False
@@ -257,6 +258,10 @@ def resolve_clone_baseline_state(
                 max_size_bytes=args.max_baseline_size_mb * 1024 * 1024,
                 project_label=args.project_label,
                 files_skipped=files_skipped,
+                # Consulted, never re-derived: the publisher owns the
+                # empty-scope rule, and this layer only carries the fact the
+                # single computer produced.
+                analysis_population=analysis_population,
             )
             new_baseline = Baseline(baseline_path)
             new_baseline.load(max_size_bytes=args.max_baseline_size_mb * 1024 * 1024)
@@ -459,6 +464,7 @@ def _resolve_clone_baseline_state(
     analysis: AnalysisResult,
     required_lanes: frozenset[str],
     files_skipped: int = 0,
+    analysis_population: HealthPopulation = "complete_nonempty",
 ) -> _CloneBaselineState:
     return resolve_clone_baseline_state(
         args=args,
@@ -468,6 +474,7 @@ def _resolve_clone_baseline_state(
         console=require_status_console(cli_state.get_console()),
         required_lanes=required_lanes,
         files_skipped=files_skipped,
+        analysis_population=analysis_population,
     )
 
 

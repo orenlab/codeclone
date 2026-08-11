@@ -52,6 +52,13 @@ GATE_REASON_DOCSTRING_THRESHOLD: Final = "Docstring coverage below threshold: "
 GATE_REASON_UNMEASURED_POPULATION: Final = (
     "unmeasured population: no source file was read, so no metric gate can be answered"
 )
+# The sibling refusal, worded apart on purpose. The two absences send an
+# operator to two different places: "was not read" means look for the dead
+# worker or the permission fault, "there is none" means look at the root and
+# the include patterns. One shared string would send everyone to the wrong one.
+GATE_REASON_EMPTY_ANALYSIS_SCOPE: Final = (
+    "empty analysis scope: no source file exists here, so no metric gate has a subject"
+)
 GATE_REASON_TRUNCATED_RUN: Final = (
     "Run did not read every file it found (--fail-on-truncated-run): "
 )

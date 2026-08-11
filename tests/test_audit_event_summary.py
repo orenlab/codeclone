@@ -109,7 +109,7 @@ def test_compact_analysis_completed_keeps_a_measured_grade() -> None:
             "source": "cli",
             "mode": "full",
             "focus": "repository",
-            "health": {"score": 91, "grade": "A", "population": "complete"},
+            "health": {"score": 91, "grade": "A", "population": "complete_nonempty"},
             "findings": {"total": 0, "new": 0},
             "inventory": {"files": 12},
         }

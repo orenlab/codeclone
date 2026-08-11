@@ -40,7 +40,7 @@ from ..utils.coerce import as_str as _as_str
 from ._base import MetricAggregate, MetricFamily, MetricResult
 from .dead_code import classify_liveness
 from .dependencies import build_dep_graph
-from .health import HealthInputs, compute_health
+from .health import HealthInputs, compute_health, health_not_computed
 
 
 def _group_item_sort_key(item: object) -> tuple[str, int, int, str]:
@@ -74,32 +74,12 @@ def _empty_dep_graph() -> DepGraph:
     )
 
 
-_EMPTY_HEALTH_SCORE = compute_health(
-    HealthInputs(
-        files_found=0,
-        files_analyzed_or_cached=0,
-        function_clone_groups=0,
-        block_clone_groups=0,
-        complexity_avg=0.0,
-        complexity_max=0,
-        high_risk_functions=0,
-        elevated_complexity_functions=0,
-        complexity_function_population=0,
-        coupling_avg=0.0,
-        coupling_max=0,
-        high_risk_classes=0,
-        elevated_coupling_classes=0,
-        coupling_class_population=0,
-        cohesion_avg=0.0,
-        low_cohesion_classes=0,
-        import_dependency_cycles=0,
-        deferred_dependency_cycles=0,
-        dependency_max_depth=0,
-        dependency_avg_depth=0.0,
-        dependency_p95_depth=0,
-        dead_code_items=0,
-    )
-)
+# The health lane did not run here, so its population is *declared* rather
+# than derived from the placeholder counters it would otherwise be built from.
+# Deriving would read "zero files found" and call an unrun lane an honestly
+# empty scope — the four-state conflation arriving from the other end.
+# ``health_not_computed`` owns that distinction.
+_EMPTY_HEALTH_SCORE = health_not_computed()
 
 
 def _is_tuple_of_str(value: object) -> TypeGuard[tuple[str, ...]]:

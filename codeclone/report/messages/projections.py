@@ -16,6 +16,18 @@ PROJECTION_NONE: Final = "(none)"
 #: reason so a reader does not go looking for the debt that supposedly
 #: scored it.
 HEALTH_NOT_MEASURED: Final = "not measured (no file was read)"
+#: The sibling absence: the run worked and the scope holds no source file.
+#: Kept in its own string because the two send a reader to different places —
+#: one to the dead worker, the other to the analysis root.
+HEALTH_EMPTY_SCOPE: Final = "not measured (no source file in scope)"
+#: The one place the population state is turned into projection wording.
+#: Keyed by state so a surface never has to know the set of states that carry
+#: no number — it asks this table, and an unknown state falls back to the
+#: older, weaker sentence rather than printing a score that does not exist.
+HEALTH_ABSENCE_TEXT: Final[dict[str, str]] = {
+    "unmeasured": HEALTH_NOT_MEASURED,
+    "complete_empty": HEALTH_EMPTY_SCOPE,
+}
 MD_TITLE: Final = "# CodeClone Report"
 
 TEXT_SECTION_REPORT_METADATA: Final = "REPORT METADATA"

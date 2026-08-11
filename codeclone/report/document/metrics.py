@@ -40,6 +40,7 @@ from ._common import (
     _normalize_nested_string_rows,
     _operational_sort_key,
     _optional_str,
+    health_verdict_withheld,
 )
 
 _OVERLOADED_MODULES_FAMILY = "overloaded_modules"
@@ -431,16 +432,20 @@ def _normalize_metrics_families(
 
     health = _as_mapping(metrics_map.get("health"))
     health_comparison = _as_mapping(health.get("summary"))
-    # The refusal is carried, never re-decided. ``compute_health`` owns the
-    # tri-state and already withheld the score; this only asks whether a
-    # score arrived. Coercing the withheld fields back through _as_int/str
-    # would restore the 0/"F" verdict this document exists to stop repeating
-    # — and ``str(None)`` would write the grade as "None". A clones-only run
-    # brings no health block at all and keeps its historical empty shape:
-    # "health was not computed" is a different fact from "computed over a
-    # population of nothing", and only the second one is a refusal.
+    # The refusal is consulted, never re-decided. ``compute_health`` owns the
+    # four population states and already withheld the score; this only asks
+    # the document's one reader whether a score exists for that state.
+    # Coercing the withheld fields back through _as_int/str would restore the
+    # 0/"F" verdict this document exists to stop repeating — and ``str(None)``
+    # would write the grade as "None".
+    #
+    # ``bool(health)`` stays in front, and is a different question: a
+    # clones-only run brings no health block at all and keeps its historical
+    # empty shape. "Health was not computed" is a third fact, distinct from
+    # both "computed over a population of nothing" and "computed over a
+    # population nobody read", and only the last two are refusals.
     health_population = str(health.get("population", ""))
-    health_unmeasured = bool(health) and health.get("score") is None
+    health_unmeasured = bool(health) and health_verdict_withheld(health)
     health_dimensions: dict[str, int] | None = (
         None
         if health_unmeasured

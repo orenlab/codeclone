@@ -12,7 +12,11 @@ from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import markdown as md_msgs
-from ..messages.projections import HEALTH_NOT_MEASURED, PROJECTION_NONE
+from ..messages.projections import (
+    HEALTH_ABSENCE_TEXT,
+    HEALTH_NOT_MEASURED,
+    PROJECTION_NONE,
+)
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
@@ -43,13 +47,19 @@ def _text(value: object) -> str:
 def _health_headline(snapshot: Mapping[str, object]) -> str:
     """Render the overview health line, or say why there is none.
 
-    The population is read from the snapshot, never recomputed from the file
-    counters: ``compute_health`` is the only place allowed to decide whether
-    anything was measured.
+    The withheld score is the producer's own signal, carried; the *reason* is
+    the population state, also carried. Neither is recomputed from the file
+    counters beside them: ``compute_health`` is the only place allowed to
+    decide either question. Two absences reach this line, and each gets its
+    own sentence — "no file was read" and "no source file in scope" send a
+    reader to different places.
     """
 
     if snapshot.get("score") is None:
-        return HEALTH_NOT_MEASURED
+        return HEALTH_ABSENCE_TEXT.get(
+            str(snapshot.get("population", "")),
+            HEALTH_NOT_MEASURED,
+        )
     return f"{_text(snapshot.get('score'))} ({_text(snapshot.get('grade'))})"
 
 
