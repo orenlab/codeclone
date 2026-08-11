@@ -14,6 +14,7 @@ from typing import cast
 import pytest
 
 from codeclone.config.memory import resolve_memory_config
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.memory.ingest import InitOptions
 from codeclone.memory.ingest.extractors import extract_document_links
 from codeclone.memory.ingest.runner import (
@@ -34,7 +35,9 @@ from codeclone.memory.project import (
 )
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.memory.vacuum import run_memory_vacuum
+from codeclone.report.document.integrity import _build_integrity_payload
 
+from ._report_fixtures import build_test_report_document
 from .memory_fixtures import (
     REPO_ROOT,
     git_repo_with_cached_report,
@@ -351,12 +354,134 @@ def test_build_init_batch_rejects_invalid_project_and_git(
         )
 
 
-def test_analysis_fingerprint_from_meta_timestamp() -> None:
-    fp = analysis_fingerprint_from_report(
-        {"meta": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}
+def _integrity_document(
+    *,
+    observation: str = "obs-1",
+    source_facts: dict[str, object] | None = None,
+    baseline: dict[str, object] | None = None,
+    evaluation: dict[str, object] | None = None,
+    generated_at: str = "2026-06-02T12:00:00Z",
+) -> dict[str, object]:
+    """Build one report through the report's own integrity owner.
+
+    The fingerprint rule is pinned against the producer, never against a
+    literal digest: a hard-coded value would only move the magic number into
+    the test and would stay green if the tier changed underneath it.
+    """
+
+    resolved_source_facts = (
+        source_facts
+        if source_facts is not None
+        else {"analysis_scope": [{"path": "pkg/a.py"}]}
     )
-    assert fp != "unknown"
-    assert len(fp) == 16
+    resolved_baseline = baseline if baseline is not None else {"state": "absent"}
+    resolved_evaluation = (
+        evaluation if evaluation is not None else {"outcome": {"exit_code": 0}}
+    )
+    return {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        "meta": {"runtime": {"report_generated_at_utc": generated_at}},
+        "source_facts": resolved_source_facts,
+        "baseline": resolved_baseline,
+        "evaluation": resolved_evaluation,
+        "integrity": _build_integrity_payload(
+            report_schema_version=REPORT_SCHEMA_VERSION,
+            observation_digest=observation,
+            source_facts=resolved_source_facts,
+            baseline=resolved_baseline,
+            evaluation=resolved_evaluation,
+        ),
+    }
+
+
+def test_analysis_fingerprint_reads_the_analysis_facts_tier() -> None:
+    document = _integrity_document()
+    digests = document["integrity"]["digests"]  # type: ignore[index]
+
+    assert (
+        analysis_fingerprint_from_report(document) == digests["analysis_facts"]["value"]
+    )
+
+
+def test_analysis_fingerprint_is_stable_across_runs_over_one_tree() -> None:
+    first = _integrity_document(generated_at="2026-06-02T12:00:00Z")
+    second = _integrity_document(generated_at="2031-12-31T23:59:59Z")
+
+    assert analysis_fingerprint_from_report(first) == analysis_fingerprint_from_report(
+        second
+    )
+
+
+def test_analysis_fingerprint_changes_with_the_observed_source() -> None:
+    before = _integrity_document(observation="obs-1")
+    after = _integrity_document(observation="obs-2")
+
+    assert analysis_fingerprint_from_report(before) != analysis_fingerprint_from_report(
+        after
+    )
+
+
+def test_analysis_fingerprint_changes_with_the_analysed_scope() -> None:
+    before = _integrity_document(source_facts={"analysis_scope": [{"path": "a.py"}]})
+    after = _integrity_document(
+        source_facts={"analysis_scope": [{"path": "a.py"}, {"path": "b.py"}]}
+    )
+
+    assert analysis_fingerprint_from_report(before) != analysis_fingerprint_from_report(
+        after
+    )
+
+
+def test_analysis_fingerprint_ignores_baseline_and_gate_policy() -> None:
+    before = _integrity_document(
+        baseline={"state": "absent"},
+        evaluation={"outcome": {"exit_code": 0}},
+    )
+    after = _integrity_document(
+        baseline={"state": "trusted", "root_digest_or_null": "b" * 64},
+        evaluation={"outcome": {"exit_code": 1, "reasons": ["health"]}},
+    )
+
+    assert analysis_fingerprint_from_report(before) == analysis_fingerprint_from_report(
+        after
+    )
+
+
+def test_analysis_fingerprint_is_unknown_without_an_analysis_facts_digest() -> None:
+    # A clock is not an identity of code, and the pre-v3 singular key is gone.
+    assert (
+        analysis_fingerprint_from_report(
+            {"meta": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}
+        )
+        == "unknown"
+    )
+    assert (
+        analysis_fingerprint_from_report(
+            {"meta": {"runtime": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}}
+        )
+        == "unknown"
+    )
+    assert (
+        analysis_fingerprint_from_report({"integrity": {"digest": {"value": "a" * 64}}})
+        == "unknown"
+    )
+
+
+def test_analysis_fingerprint_is_reachable_from_a_produced_report() -> None:
+    document = build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    fingerprint = analysis_fingerprint_from_report(document)
+
+    assert fingerprint != "unknown"
+    assert (
+        fingerprint
+        == (
+            document["integrity"]["digests"]["analysis_facts"]["value"]  # type: ignore[index]
+        )
+    )
 
 
 def test_read_git_provenance_unavailable_without_branch_or_head(

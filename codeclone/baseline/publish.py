@@ -234,8 +234,28 @@ def publish_baseline(
     scope_id: UUID,
     max_size_bytes: int,
     project_label: str | None = None,
+    files_skipped: int = 0,
 ) -> BaselinePublicationReceipt:
-    """Build and CAS-publish one complete container under one observer span."""
+    """Build and CAS-publish one complete container under one observer span.
+
+    Refuses a run that did not read every file it found. Unconditionally: no
+    flag relaxes it, because there is no configuration in which an incomplete
+    reference is the right thing to publish. A baseline built from a partial
+    read bakes in a partial public API, and every symbol that was never opened
+    then reads as *removed* on the next complete run — the reproduction that
+    produced this rule turned 29 lost files into 556 phantom breaking changes.
+
+    The guard lives here rather than at the call site because this is the sole
+    publication seam; a check one layer up would only bind today's caller.
+    """
+
+    if files_skipped > 0:
+        raise BaselinePublicationError(
+            "truncated_run",
+            f"Run did not read {files_skipped} of the files it found; "
+            "a baseline published from an incomplete read would make every "
+            "unread symbol look removed on the next complete run.",
+        )
 
     with span(name="baseline.container.publish") as publish_span:
         try:

@@ -71,6 +71,8 @@ class OperationView:
     started_at_utc: str
     duration_ms: float
     status: str
+    # None when the row predates the plane mark — unattributed, not runtime.
+    plane: str | None = None
     parent_operation_id: str | None = None
     error_kind: str | None = None
     request_bytes: int | None = None
@@ -253,6 +255,16 @@ class TraceView:
     window_started_at_utc: str
     window_ended_at_utc: str
     aggregates: AggregatesView
+    # Which plane this window read, and how the whole store divides between the
+    # planes regardless of what the window returned.
+    # ``plane_column_available`` false means the store was written by a build
+    # with no plane mark: every row is unattributed and no window can honestly
+    # call any of them runtime.
+    plane: str = "runtime"
+    plane_column_available: bool = True
+    runtime_plane_operations: int = 0
+    observer_plane_operations: int = 0
+    unattributed_plane_operations: int = 0
     repo_root_digest: str | None = None
     focus_operation: OperationView | None = None
     operation_tree: tuple[OperationView, ...] = ()

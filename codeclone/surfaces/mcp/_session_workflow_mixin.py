@@ -75,6 +75,8 @@ VALID_BLAST_RADIUS_DEPTHS: Final[frozenset[str]] = frozenset(
 )
 VALID_BLAST_RADIUS_DETAIL: Final[frozenset[str]] = frozenset({"summary", "full"})
 
+_UNVERIFIED_PATH_SAMPLE_LIMIT: Final = 10
+
 _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     {
         PatchContractStatus.ACCEPTED.value,
@@ -248,6 +250,17 @@ class _MCPSessionWorkflowMixin:
         intent_id = str(declare_payload.get("intent_id", ""))
         declare_status = str(declare_payload.get("status", ""))
 
+        # Declare refused: no intent was created and nothing was evicted. The
+        # refusal payload passes through unchanged so start cannot drop the
+        # fields the caller needs in order to act.
+        if declare_status == "blocked":
+            return _start_governed_response(
+                _helpers.attach_workspace_hygiene_tips(
+                    dict(declare_payload),
+                    root=root_path,
+                )
+            )
+
         # Queued: no blast radius or budget
         if declare_status == IntentStatus.QUEUED.value:
             workspace_after = intent_session._list_workspace_intents(
@@ -267,9 +280,7 @@ class _MCPSessionWorkflowMixin:
                 ),
                 "message": workflow_msgs.START_QUEUED,
             }
-            dirty_snapshot = declare_payload.get("dirty_snapshot")
-            if isinstance(dirty_snapshot, dict):
-                queued_payload["dirty_snapshot"] = dirty_snapshot
+            _carry_declare_context(queued_payload, declare_payload)
             return _start_governed_response(
                 _helpers.attach_workspace_hygiene_tips(
                     queued_payload,
@@ -404,9 +415,7 @@ class _MCPSessionWorkflowMixin:
                 continuing_own_wip=continuing_own_wip,
             ),
         }
-        dirty_snapshot = declare_payload.get("dirty_snapshot")
-        if isinstance(dirty_snapshot, dict):
-            payload["dirty_snapshot"] = dirty_snapshot
+        _carry_declare_context(payload, declare_payload)
         if hygiene.git_available or hygiene.blocks_edit:
             hygiene_payload = hygiene.to_payload()
             if continuing_own_wip:
@@ -725,7 +734,7 @@ class _MCPSessionWorkflowMixin:
                     "intent_cleared": False,
                     "workspace_hygiene_after": workspace_hygiene_after,
                     "summary": _finish_summary(
-                        verify_status=verify_status,
+                        status=verify_status,
                         intent_cleared=False,
                         check_payload=check_payload,
                         verify_payload=verify_payload,
@@ -768,6 +777,10 @@ class _MCPSessionWorkflowMixin:
                     ),
                     intent_id=intent_id,
                     verification_accepted=verify_status in _ACCEPTED_STATUSES,
+                    # A receipt that lists what it does NOT claim must list the
+                    # paths it never checked; otherwise the attestation reads as
+                    # covering the whole tree.
+                    unverified_paths=finish_hygiene.unverified_python_unscoped_dirty,
                 )
             except MCPServiceContractError as exc:
                 receipt_error = str(exc)
@@ -785,8 +798,17 @@ class _MCPSessionWorkflowMixin:
             verify_status,
             finish_hygiene.dirty_paths_outside_scope,
         )
+        # Structural coverage gap: Python outside the declared scope never
+        # entered the derived profile, so nothing about it was checked. The
+        # outcome may still accept — it must not stay silent about that.
+        unverified_advisory = _unverified_paths_advisory(
+            finish_hygiene.unverified_python_unscoped_dirty
+        )
 
-        # 10. Compose response
+        # 10. Compose response. Every status-derived field answers for
+        # effective_status: summary, message and user_action_required are what
+        # an agent reads first, and answering there for the pre-elevation
+        # verify_status is how an elevated verdict reads as fully clean.
         result: dict[str, object] = {
             "intent_id": intent_id,
             "status": effective_status,
@@ -799,7 +821,7 @@ class _MCPSessionWorkflowMixin:
             "intent_cleared": intent_cleared,
             "workspace_hygiene_after": workspace_hygiene_after,
             "summary": _finish_summary(
-                verify_status=verify_status,
+                status=effective_status,
                 intent_cleared=intent_cleared,
                 check_payload=check_payload,
                 verify_payload=verify_payload,
@@ -809,10 +831,13 @@ class _MCPSessionWorkflowMixin:
                 workspace_hygiene_after=workspace_hygiene_after,
                 review_text_present=bool(review_text),
                 claims_text_present=bool(claims_text),
+                unverified_paths=_bounded_unverified_paths(
+                    finish_hygiene.unverified_python_unscoped_dirty
+                ),
             ),
-            "user_action_required": False,
+            "user_action_required": external_advisory is not None,
             "message": self._finish_message(
-                verify_status=verify_status,
+                status=effective_status,
                 intent_cleared=intent_cleared,
                 receipt_error=receipt_error,
             ),
@@ -821,6 +846,9 @@ class _MCPSessionWorkflowMixin:
             result["receipt_error"] = receipt_error
         if external_advisory is not None:
             result["external_changes"] = external_advisory
+            result["next_step"] = workflow_msgs.FINISH_EXTERNAL_NEXT
+        if unverified_advisory["count"]:
+            result["unverified_paths"] = unverified_advisory
         if isinstance(health_regression_advisory, dict):
             result["health_regression_advisory"] = health_regression_advisory
         if propose_memory and verify_status in _ACCEPTED_STATUSES:
@@ -1037,14 +1065,21 @@ class _MCPSessionWorkflowMixin:
     @staticmethod
     def _finish_message(
         *,
-        verify_status: str,
+        status: str,
         intent_cleared: bool,
         receipt_error: str | None,
     ) -> str:
+        """Message for the EFFECTIVE finish status, elevation included.
+
+        The elevation flag is derived here, from the same status the response
+        reports, so message and status cannot answer for different verdicts.
+        """
+
         return workflow_msgs.finish_controlled_change_message(
-            verify_status=verify_status,
+            status=status,
             intent_cleared=intent_cleared,
             receipt_error=receipt_error,
+            external_changes=status == PatchContractStatus.ACCEPTED_EXTERNAL.value,
         )
 
 
@@ -1269,9 +1304,33 @@ def _external_change_advisory(
     return effective_status, advisory
 
 
+def _bounded_unverified_paths(paths: Sequence[str]) -> list[str]:
+    """One owner for how many unverified paths a response names."""
+
+    return list(paths[:_UNVERIFIED_PATH_SAMPLE_LIMIT])
+
+
+def _unverified_paths_advisory(paths: Sequence[str]) -> dict[str, object]:
+    """Name the paths this finish did not structurally verify.
+
+    Not a verdict on anyone: dirtiness proves a file changed, never who
+    changed it. The fact reported is coverage — the derived verification
+    profile is built from declared evidence, so these paths went through no
+    structural check at all, whoever touched them.
+    """
+
+    return {
+        "count": len(paths),
+        "paths": _bounded_unverified_paths(paths),
+        "truncated": len(paths) > _UNVERIFIED_PATH_SAMPLE_LIMIT,
+        "reason": "outside_declared_scope",
+        "structural_verification": "not_performed",
+    }
+
+
 def _finish_summary(
     *,
-    verify_status: str,
+    status: str,
     intent_cleared: bool,
     check_payload: dict[str, object],
     verify_payload: dict[str, object],
@@ -1281,13 +1340,14 @@ def _finish_summary(
     workspace_hygiene_after: dict[str, object],
     review_text_present: bool,
     claims_text_present: bool,
+    unverified_paths: Sequence[str] = (),
 ) -> dict[str, object]:
     structural_delta = _helpers._as_mapping(verify_payload.get("structural_delta"))
     dirty_summary = _helpers._as_mapping(
         workspace_hygiene_after.get("workspace_dirty_summary")
     )
     return {
-        "status": verify_status,
+        "status": status,
         "scope_status": str(check_payload.get("status", "")),
         "verification_profile": verify_payload.get("verification_profile"),
         "structural_verdict": structural_delta.get("verdict"),
@@ -1309,6 +1369,9 @@ def _finish_summary(
             0,
         ),
         "workspace_hygiene_blocked": bool(workspace_hygiene_after.get("blocks_finish")),
+        # Always present: an empty list is the explicit "nothing was left
+        # unchecked", which a missing key cannot say.
+        "unverified_paths": list(unverified_paths),
     }
 
 
@@ -1764,6 +1827,25 @@ def _budget_summary(budget_payload: dict[str, object]) -> dict[str, object]:
         "gate_preview": budget_payload.get("gate_preview"),
         "message": budget_payload.get("message"),
     }
+
+
+def _carry_declare_context(
+    payload: dict[str, object],
+    declare_payload: Mapping[str, object],
+) -> None:
+    """Carry declare-side context the start response must not swallow.
+
+    ``replaced_intents`` in particular: a permitted replacement still killed
+    the caller's previous intent_id, and start builds its own payload rather
+    than passing the declare payload through.
+    """
+
+    dirty_snapshot = declare_payload.get("dirty_snapshot")
+    if isinstance(dirty_snapshot, dict):
+        payload["dirty_snapshot"] = dirty_snapshot
+    replaced_intents = declare_payload.get("replaced_intents")
+    if isinstance(replaced_intents, list) and replaced_intents:
+        payload["replaced_intents"] = replaced_intents
 
 
 def _start_replay_request_key(

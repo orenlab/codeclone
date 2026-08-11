@@ -73,12 +73,13 @@ def test_discovery_facts_leave_analysis_excludes_to_inventory(tmp_path: Path) ->
     hard_excluded.parent.mkdir()
     hard_excluded.write_text("x = 3\n", "utf-8")
 
-    paths, hard_count = discover_python_files(
+    paths, hard_count, unreadable = discover_python_files(
         str(tmp_path), hard_excludes=HARD_SAFETY_EXCLUDES
     )
 
     assert paths == (str(ordinary_excluded), str(analyzed))
     assert hard_count == 1
+    assert unreadable == ()
 
 
 def test_iter_py_files_excludes_node_modules(tmp_path: Path) -> None:

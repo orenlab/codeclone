@@ -81,10 +81,14 @@ from ._workspace_intents import (
     write_workspace_intent_with_existing,
 )
 from .messages import intent as intent_msgs
+from .messages import workflow as workflow_msgs
 
 if TYPE_CHECKING:
     from ._session_finding_mixin import _StateLock
     from ._workspace_hygiene import DirtySnapshot
+
+
+_ORPHANED_PATH_SAMPLE_LIMIT = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,15 +290,28 @@ class _MCPSessionIntentMixin:
             ttl_seconds,
             env_value=os.environ.get("CODECLONE_INTENT_TTL_SECONDS"),
         )
-        replaced_intents: list[IntentRecord] = []
+        # The replacement decision consults the work the replaced intent
+        # authorized, so the snapshot is taken before anything is evicted.
+        dirty_snapshot = _dirty_snapshot_for_declare(record.root, dirty_snapshot)
         with self._state_lock:
-            for existing_id, existing in tuple(self._active_intents.items()):
-                # Replacement is per (root, run_id). Same-commit worktrees
-                # share a run id, and evicting on the id alone orphaned the
-                # other checkout's live intent.
-                if existing.run_id == record.run_id and existing.root == record.root:
-                    self._active_intents.pop(existing_id, None)
-                    replaced_intents.append(existing)
+            # Silent eviction used to convert an unfinished intent's WIP into
+            # dirt nothing had ever declared. Replacement is announced always,
+            # and refused when it would strand uncommitted work the new scope
+            # does not cover.
+            superseded, replacement_reports = _replacement_decision(
+                active_intents=self._active_intents,
+                record=record,
+                replacement_scope=normalized_scope,
+                dirty_paths=dirty_snapshot.paths,
+            )
+            orphaning = _orphaning_replacements(replacement_reports)
+            if orphaning:
+                return _replaces_unfinished_intent_payload(
+                    record=record,
+                    reports=orphaning,
+                )
+            for existing in superseded:
+                self._active_intents.pop(existing.intent_id, None)
             self._intent_sequence += 1
             intent_id = (
                 f"intent-{_helpers._short_run_id(record.run_id)}-"
@@ -325,12 +342,11 @@ class _MCPSessionIntentMixin:
             intent=record_payload,
             ttl_seconds=ttl,
         )
-        dirty_snapshot = _dirty_snapshot_for_declare(record.root, dirty_snapshot)
         workspace_record = replace(
             workspace_record,
             dirty_snapshot=dirty_snapshot.to_payload(),
         )
-        for replaced_intent in replaced_intents:
+        for replaced_intent in superseded:
             remove_workspace_intent(
                 root=record.root,
                 pid=self._agent_pid,
@@ -358,7 +374,7 @@ class _MCPSessionIntentMixin:
         )
         # ── Queue branch: downgrade to queued if conflicts block ───
         if on_conflict == "queue" and concurrent_intents:
-            return self._downgrade_to_queued(
+            queued_payload = self._downgrade_to_queued(
                 record=record,
                 intent=record_payload,
                 workspace_record=workspace_record,
@@ -368,6 +384,8 @@ class _MCPSessionIntentMixin:
                 blast_payload=blast_payload,
                 ttl=ttl,
             )
+            _attach_replaced_intents(queued_payload, replacement_reports)
+            return queued_payload
         # ── Queued context: advisory info about waiting agents ─────
         queued_context = self._queued_context_from_workspace(
             scope=normalized_scope,
@@ -381,6 +399,7 @@ class _MCPSessionIntentMixin:
         payload["dirty_snapshot"] = dirty_snapshot.summary_payload()
         payload["concurrent_intents"] = concurrent_intents
         payload["workspace_relations"] = workspace_relations
+        _attach_replaced_intents(payload, replacement_reports)
         if queued_context:
             payload["queued_context"] = queued_context
         payload["ttl_seconds"] = ttl
@@ -1643,6 +1662,136 @@ def _dirty_snapshot_for_declare(
     from ._workspace_hygiene import collect_dirty_snapshot
 
     return collect_dirty_snapshot(root)
+
+
+def _orphaned_dirty_paths(
+    *,
+    dirty_paths: Sequence[str],
+    replaced_scope: IntentScope,
+    replacement_scope: IntentScope,
+) -> tuple[str, ...]:
+    """Uncommitted work the replaced intent covered and the new one does not.
+
+    These are the paths that would lose every trace of having been declared:
+    at the next finish they resurface as unattributed out-of-scope dirt.
+    """
+
+    from ._workspace_hygiene import paths_in_declared_scope
+
+    if not dirty_paths:
+        return ()
+    covered_now = frozenset(
+        paths_in_declared_scope(
+            dirty_paths,
+            allowed_files=replacement_scope.allowed_files,
+            allowed_related=replacement_scope.allowed_related,
+        )
+    )
+    return tuple(
+        path
+        for path in paths_in_declared_scope(
+            dirty_paths,
+            allowed_files=replaced_scope.allowed_files,
+            allowed_related=replaced_scope.allowed_related,
+        )
+        if path not in covered_now
+    )
+
+
+def _replacement_decision(
+    *,
+    active_intents: Mapping[str, IntentRecord],
+    record: MCPRunRecord,
+    replacement_scope: IntentScope,
+    dirty_paths: Sequence[str],
+) -> tuple[tuple[IntentRecord, ...], tuple[dict[str, object], ...]]:
+    """Intents a declare would supersede, each with its orphaned work."""
+
+    superseded = tuple(
+        existing
+        # Replacement is per (root, run_id). Same-commit worktrees share a run
+        # id, and evicting on the id alone orphaned the other checkout's live
+        # intent.
+        for existing in active_intents.values()
+        if existing.run_id == record.run_id and existing.root == record.root
+    )
+    reports = tuple(
+        _replaced_intent_report(
+            intent=existing,
+            dirty_paths=dirty_paths,
+            replacement_scope=replacement_scope,
+        )
+        for existing in superseded
+    )
+    return superseded, reports
+
+
+def _orphaning_replacements(
+    reports: Sequence[Mapping[str, object]],
+) -> tuple[Mapping[str, object], ...]:
+    """Replacement reports that would strand uncommitted work."""
+
+    return tuple(report for report in reports if report["orphaned_dirty_paths"])
+
+
+def _attach_replaced_intents(
+    payload: dict[str, object],
+    reports: Sequence[Mapping[str, object]],
+) -> None:
+    """An accepted replacement is still an eviction: it is always announced.
+
+    The caller's previous ``intent_id`` stops existing here, and a response
+    that omits that fact leaves the agent holding an id nothing answers for.
+    """
+
+    if reports:
+        payload["replaced_intents"] = [dict(report) for report in reports]
+
+
+def _replaced_intent_report(
+    *,
+    intent: IntentRecord,
+    dirty_paths: Sequence[str],
+    replacement_scope: IntentScope,
+) -> dict[str, object]:
+    """Announce one superseded intent, orphaned work included."""
+
+    orphaned = _orphaned_dirty_paths(
+        dirty_paths=dirty_paths,
+        replaced_scope=intent.scope,
+        replacement_scope=replacement_scope,
+    )
+    report: dict[str, object] = {
+        "intent_id": intent.intent_id,
+        "declared_at_utc": intent.declared_at_utc,
+        "intent_description": intent.intent_description,
+        "orphaned_dirty_paths": list(orphaned[:_ORPHANED_PATH_SAMPLE_LIMIT]),
+    }
+    if len(orphaned) > _ORPHANED_PATH_SAMPLE_LIMIT:
+        report["orphaned_dirty_paths_count"] = len(orphaned)
+        report["orphaned_dirty_paths_truncated"] = True
+    return report
+
+
+def _replaces_unfinished_intent_payload(
+    *,
+    record: MCPRunRecord,
+    reports: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Typed refusal: replacement would strand another intent's live work."""
+
+    return {
+        "intent_id": None,
+        "status": "blocked",
+        "reason": "replaces_unfinished_intent",
+        "run_id": _helpers._short_run_id(record.run_id),
+        "root": str(record.root),
+        "edit_allowed": False,
+        "unfinished_intents": [dict(report) for report in reports],
+        "user_action_required": True,
+        "next_step": workflow_msgs.START_REPLACES_UNFINISHED_INTENT_NEXT,
+        "message": workflow_msgs.START_REPLACES_UNFINISHED_INTENT,
+    }
 
 
 def _apply_blast_context(

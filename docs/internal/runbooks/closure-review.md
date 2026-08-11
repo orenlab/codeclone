@@ -58,7 +58,7 @@ Finish execution order (post-edit, post-analysis if required by profile):
 |------|---------|----------|
 | `missing_evidence` | Changed files in scope but not reported to finish | Add missing files to `changed_files` array, retry finish with same `intent_id` |
 | `foreign_dirty_overlap` | Foreign agent holds active intent in overlapping scope | Queue own intent, wait for foreign to clear, call `manage_change_intent(action="promote")` |
-| `own_unscoped_dirty` | Own unattributed changes outside declared scope | Either remove out-of-scope changes (if unintended) or call `start_controlled_change` with expanded scope |
+| `own_unscoped_dirty` | Own unattributed changes outside declared scope (`CODECLONE_STRICT_FINISH`) | Either remove out-of-scope changes (if unintended) or call `start_controlled_change` with expanded scope |
 | `unverified` | After-run mismatch or Python structural verification required but absent | Call `analyze_repository` with new run_id, pass `after_run_id` to finish again on same `intent_id` |
 | `violated` | Scope check found overflow or uncorrected evidence gap | Fix changed files or widen scope via new `start_controlled_change`, then retry finish on the expanded intent |
 
@@ -83,7 +83,7 @@ Finish execution order (post-edit, post-analysis if required by profile):
 |----------|---------------|--------|
 | Audit trail persists patch_trail and receipt as durably stored artifacts | path_only | codeclone/audit/__init__.py (mem-e228e6288c444029ae1e5c020f2f6678) |
 | MCP session holds exactly one trackable active intent; calling start again evicts the prior one | path_only | codeclone/surfaces/mcp/_workspace_intent_lifecycle.py (mem-527db78f1ce24eb98ad06ce507f0de93) |
-| Scope check reconciles intent snapshot against live tree; unattributed out-of-scope changes block only if CODECLONE_STRICT_FINISH is set | path_only | codeclone/surfaces/mcp/_workspace_intent_lifecycle.py |
+| Scope check reconciles intent snapshot against live tree; unattributed out-of-scope changes block only if CODECLONE_STRICT_FINISH is set, and unchecked out-of-scope Python is named in unverified_paths either way | path_only | codeclone/surfaces/mcp/_workspace_intent_lifecycle.py |
 | Finish clears intent only on accepted status; unverified/violated intents remain active with next_step hint | path_only | codeclone/surfaces/mcp/finish_controlled_change (implementation) |
 | PID liveness for foreign intent owners is tri-state: unknown (PermissionError), recoverable (dead), or active | path_only | codeclone/surfaces/mcp/_workspace_intent_lifecycle.py (mem-6859f67ef1234556981b7ccb36673f77) |
 | Implementation-context facet pages return exact state from saved MCP session artifact, never recomputed | path_only | codeclone/surfaces/mcp/_implementation_context_pages.py (mem-0ebd1dfb9f494c4e9909607bd8832ccf) |

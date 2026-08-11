@@ -314,6 +314,8 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
     assert recorded[1].counters == {
         "cache_lane_neutral_hit": 0,
         "cache_lane_dependent_miss": 0,
+        "cache_profile_hit": 0,
+        "cache_profile_miss": 1,
     }
 
 
@@ -340,9 +342,12 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
     full = core_discovery.discover(boot=boot, cache=cache)
     assert full.cache_hits == 1
     assert [stage.name for stage in recorded].count("cache.profile_reuse") == 1
+    # The span said reuse happened; these two say whether it hit.
     assert recorded[1].counters == {
         "cache_lane_neutral_hit": 1,
         "cache_lane_dependent_miss": 0,
+        "cache_profile_hit": 1,
+        "cache_profile_miss": 0,
     }
 
     (tmp_path / "added.py").write_text("VALUE = 1\n", "utf-8")
@@ -353,6 +358,8 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
     assert recorded[1].counters == {
         "cache_lane_neutral_hit": 1,
         "cache_lane_dependent_miss": 1,
+        "cache_profile_hit": 0,
+        "cache_profile_miss": 2,
     }
 
 

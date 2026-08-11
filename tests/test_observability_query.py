@@ -753,11 +753,28 @@ def test_memory_diagnostic_returns_none_without_peak_or_delta() -> None:
 
 
 def test_analysis_phase_cost_reports_empty_window_message() -> None:
+    """An empty section must name its own cause, not accuse the configuration.
+
+    One message served both cases and blamed a disabled observer either way, so
+    the commonest one — the analysis aged out of the window while the observer
+    was running fine — was reported as a setup mistake nobody had made.
+    """
     from codeclone.observability.views import AggregatesView
 
-    body = query_mod._analysis_phase_body(AggregatesView(operation_count=0), cap=5)
-    assert body["rows"] == []
-    assert "no analysis phase counters" in str(body["message"])
+    empty = query_mod._analysis_phase_body(AggregatesView(operation_count=0), cap=5)
+    assert empty["rows"] == []
+    assert "no operations in this window" in str(empty["message"])
+    assert "CODECLONE_OBSERVABILITY_ENABLED=1" in str(empty["message"])
+
+    collecting = query_mod._analysis_phase_body(
+        AggregatesView(operation_count=12), cap=5
+    )
+    message = str(collecting["message"])
+    assert collecting["rows"] == []
+    assert "12 operations in this window" in message
+    assert "The observer is collecting" in message
+    assert "aged out" in message
+    assert "CODECLONE_OBSERVABILITY_ENABLED=1" not in message
 
 
 def test_analysis_diagnostic_reports_phase_heavy_extract_share() -> None:

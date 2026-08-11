@@ -35,6 +35,8 @@ from .models import OperationRecord, ProfileSample, SpanRecord
 from .reason_kind import ReasonKind
 from .vocabulary import (
     DB_COUNTER_VERSION,
+    PLANE_RUNTIME,
+    resolve_operation_plane,
     validate_counter_key,
     validate_span_name,
 )
@@ -75,9 +77,11 @@ class OperationHandle:
         session_id: str | None,
         repo_root_digest: str | None,
         max_spans_per_operation: int,
+        plane: str,
     ) -> None:
         self.operation_id = operation_id
         self.correlation_id = correlation_id
+        self.plane = plane
         self._surface = surface
         self._name = name
         self._started_at_utc = started_at_utc
@@ -131,6 +135,7 @@ class OperationHandle:
             started_at_utc=self._started_at_utc,
             duration_ms=duration_ms,
             status=self._status,
+            plane=self.plane,
             parent_operation_id=self._parent_operation_id,
             error_kind=self._error_kind,
             session_id=self._session_id,
@@ -230,6 +235,7 @@ def _inert_operation() -> OperationHandle:
         session_id=None,
         repo_root_digest=None,
         max_spans_per_operation=1,
+        plane=PLANE_RUNTIME,
     )
 
 
@@ -258,7 +264,10 @@ class _ActiveRuntime:
         self.session_id: str | None = None
         self._root = root
         self._conn: object | None = None
-        self._persisted_operations = 0
+        # Per-plane, not shared: the write budget is a retention bound, and a
+        # shared one let observer calls spend it so the runtime operations that
+        # followed were never persisted at all.
+        self._persisted_operations: dict[str, int] = {}
         if self.config.persist and self._root is not None:
             self._open_store()
 
@@ -273,13 +282,14 @@ class _ActiveRuntime:
     def persist(self, record: OperationRecord) -> None:
         # Persisted to the per-root store; a root-less enabled session simply
         # drops the record (no in-memory ring in the MVP).
+        persisted = self._persisted_operations.get(record.plane, 0)
         if (
             self.config.persist
             and self._root is not None
-            and self._persisted_operations < self.config.max_operations_per_process
+            and persisted < self.config.max_operations_per_process
         ):
             self._write(record)
-            self._persisted_operations += 1
+            self._persisted_operations[record.plane] = persisted + 1
 
     def _open_store(self) -> sqlite3.Connection:
         from .store.schema import observability_store_path, open_observability_store
@@ -414,6 +424,7 @@ def operation(
         session_id=session_id or runtime.session_id,
         repo_root_digest=repo_root_digest,
         max_spans_per_operation=runtime.config.max_spans_per_operation,
+        plane=resolve_operation_plane(name),
     )
     token = _CURRENT_OP.set(handle)
     baseline = _profile_baseline()

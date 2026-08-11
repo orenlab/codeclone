@@ -1500,6 +1500,11 @@ class ModuleRegistryHandle:
     entries_by_module: ModuleInventoryIndex
     package_prefixes: tuple[PackagePrefix, ...]
     digest: DigestObject
+    # Deliberately carries no unreadable-path field: this whole handle is
+    # serialized into the source-observation digest, so anything added here
+    # changes baseline identity. A permission fault is a property of one run,
+    # not of the inventory, and it is reported through the run's skipped-file
+    # counters instead (see ``build_module_registry(on_unreadable_path=...)``).
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2564,11 +2569,24 @@ class FileMetrics:
     function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
 
 
+#: How much of the found population the score actually saw. Six of the seven
+#: dimensions are counters of *observed* debt, so an unobserved population
+#: scores exactly like a clean one — "we did not measure" and "we measured,
+#: it is clean" used to be bit-identical. This names them apart, in the same
+#: shape the project already uses for baseline-relative novelty: a fact that
+#: is absent is reported as absent, never as a favourable answer.
+HealthPopulation = Literal["complete", "partial", "unmeasured"]
+
+
 @dataclass(frozen=True, slots=True)
 class HealthScore:
     total: int
     grade: Literal["A", "B", "C", "D", "F"]
     dimensions: dict[str, int]
+    #: ``unmeasured`` means ``total`` and ``grade`` are not a verdict about
+    #: any code: no file was read. Consumers that present or gate on health
+    #: must consult this before quoting either field.
+    population: HealthPopulation = "complete"
 
 
 SourceKind = Literal["production", "tests", "fixtures", "mixed", "other"]
@@ -3157,6 +3175,10 @@ BaselinePublishFailureReason = Literal[
     "invalid_target",
     "oversize",
     "scope_mismatch",
+    # A run that could not read every file it found. Refused unconditionally:
+    # publishing an incomplete reference makes every unread symbol look
+    # removed on the next complete run.
+    "truncated_run",
 ]
 LaneTrustReason = Literal[
     "algorithm_revision",

@@ -56,7 +56,7 @@ Core packages: `codeclone.workspace_intent` (lifecycle), `codeclone.budget` (tok
 | `status: "blocked"` | Concurrent foreign intents; `concurrent_intents` non-empty | Narrow scope or coordinate; promote via `manage_change_intent(action='promote')` when foreign clears |
 | `status: "queued"` | Declared scope overlaps active foreign intent | Automatic queue; call `manage_change_intent(action='promote')` when promoted by controller |
 | `needs_analysis` | No valid MCP run for root | Call `analyze_repository(root=...)` before retry |
-| Intent eviction | `start_controlled_change` called twice without `finish` | Call `manage_change_intent(action='recover', intent_id=...)` with saved intent_id |
+| Intent replacement | `start_controlled_change` called twice on the same (root, run_id) without `finish` | The previous intent is replaced and reported in `replaced_intents`; use the new `intent_id`. If the replaced intent held uncommitted work outside the new scope, start refuses instead: `status: "blocked"`, `reason: replaces_unfinished_intent` — finish/clear that intent or declare a scope covering its `orphaned_dirty_paths` |
 | PID unknown (hardened) | Foreign intent owner PID inaccessible | Treated as unknown, not recoverable; remains visible for coordination; hook gate denies write |
 | `finish_block_reason: missing_evidence` | Changed files not reported in `changed_files` or `after_run_id` | Rerun `analyze_repository` with new run_id; call `finish` again with same `intent_id` and updated evidence |
 | `finish_block_reason: foreign_dirty_overlap` | Foreign in-scope dirty files after start snapshot | Coordinate with foreign intent holder; request clear or scope narrowing |
