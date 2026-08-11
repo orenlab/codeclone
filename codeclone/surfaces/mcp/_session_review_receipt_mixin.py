@@ -15,6 +15,7 @@ from ...audit import (
 )
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_int as _coerce_int
+from ...utils.mapping_paths import section
 from . import _session_helpers as _helpers
 from ._context_governance import (
     context_governance_digest,
@@ -295,17 +296,29 @@ class _MCPSessionReviewReceiptMixin:
         }
 
     def _receipt_digest(self, record: MCPRunRecord) -> str:
-        integrity = _helpers._as_mapping(record.report_document.get("integrity"))
-        digest = _helpers._as_mapping(integrity.get("digest"))
-        algorithm = str(digest.get("algorithm", "sha256")).strip() or "sha256"
-        return f"{algorithm}:{_helpers._report_digest(record.report_document)}"
+        """Label the digest with the algorithm its own tier declares.
+
+        The value comes from the comparison tier, so the algorithm must come
+        from the same tier. This asked the withdrawn ``integrity.digest`` block
+        instead and fell back to the literal ``"sha256"`` -- correct only for
+        as long as that stayed the algorithm in use.
+        """
+
+        value = _helpers._report_digest(record.report_document)
+        comparison = section(record.report_document, "integrity.digests.comparison")
+        algorithm = str(comparison.get("algorithm", "")).strip()
+        return f"{algorithm}:{value}"
 
     def _receipt_generated_at(self, record: MCPRunRecord) -> str:
-        meta = _helpers._as_mapping(record.report_document.get("meta"))
-        value = str(meta.get("report_generated_at_utc", "")).strip()
-        if value:
-            return value
-        runtime = _helpers._as_mapping(meta.get("runtime"))
+        """Read the one place a v3 report records when it was generated.
+
+        ``meta.report_generated_at_utc`` was the pre-v3 location; the document
+        now carries the timestamp under ``meta.runtime`` only, so the first
+        lookup could never answer and the receipt reached the runtime block by
+        falling through it.
+        """
+
+        runtime = section(record.report_document, "meta.runtime")
         value = str(runtime.get("report_generated_at_utc", "")).strip()
         if value:
             return value

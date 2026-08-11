@@ -49,7 +49,7 @@ If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is 
 - `findings` — object with `summary` and `groups[]`; each group carries type, locations, risk, and `novelty` (`new` / `known`)
 - `metrics` — object with `summary` and per-family `families` (complexity, coupling, cohesion, …)
 - `derived` — `suggestions`, `overview`, `hotlists`, `module_map`, `review_queue`
-- `integrity` — deterministic `canonicalization` and content `digest`
+- `integrity` — deterministic `canonicalization` and the `digests` hierarchy: `observation`, `analysis_facts`, `comparison`, `evaluation`, `envelope`. Each tier is an object with `kind`, `algorithm`, `digest_version` and `value`, and hashes the tier before it. Read `analysis_facts` to identify the analysed code, `comparison` to identify the run, and `envelope` to identify the exact document
 
 ## Key commands
 

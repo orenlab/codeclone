@@ -674,6 +674,33 @@ def _resolve_doc_anchor_path(
     return None
 
 
+def _document_link_anchors(doc_path: Path) -> dict[str, str]:
+    """Map each path a document anchors to the heading it first appears under.
+
+    A document link is identified by the pair (document, anchored path): that is
+    what :func:`make_identity_key` builds here and what the store enforces as
+    UNIQUE. One record per *occurrence* therefore hands the store a pile of
+    collisions -- a document naming a module under three headings produced three
+    records whose statements differ only in the heading, so the store kept the
+    first and rewrote it twice, writing a revision each time. A single pass over
+    a file nobody had edited manufactured an edit history for its own record.
+
+    Occurrences are folded here, at the producer, before identity exists.
+    Insertion order is the order the paths appear in the document, so the batch
+    is deterministic and reads in document order; the first heading wins because
+    the first mention is the one that introduces the reference.
+    """
+
+    anchors: dict[str, str] = {}
+    heading = "root"
+    for line in doc_path.read_text("utf-8", errors="replace").splitlines():
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip() or heading
+        for match in _CODE_PATH_RE.finditer(line):
+            anchors.setdefault(match.group(1), heading)
+    return anchors
+
+
 def extract_document_links(
     *,
     project: MemoryProject,
@@ -695,92 +722,86 @@ def extract_document_links(
     )
     for doc_path in doc_paths:
         rel = str(doc_path.relative_to(root_path)).replace("\\", "/")
-        text = doc_path.read_text("utf-8", errors="replace")
-        heading = "root"
-        for line in text.splitlines():
-            if line.startswith("#"):
-                heading = line.lstrip("#").strip() or heading
-            for match in _CODE_PATH_RE.finditer(line):
-                anchored = match.group(1)
-                resolved_path = _resolve_doc_anchor_path(
-                    anchored,
-                    root_path=root_path,
-                    registry_paths=registry,
-                )
-                identity = make_identity_key(
+        for anchored, heading in _document_link_anchors(doc_path).items():
+            resolved_path = _resolve_doc_anchor_path(
+                anchored,
+                root_path=root_path,
+                registry_paths=registry,
+            )
+            identity = make_identity_key(
+                type="document_link",
+                subject_kind="doc",
+                subject_key=rel,
+                discriminator=f"path:{anchored}",
+            )
+            record_id = generate_memory_id()
+            batch.records.append(
+                MemoryRecord(
+                    id=record_id,
+                    project_id=project.id,
+                    identity_key=identity,
                     type="document_link",
+                    status="active",
+                    confidence="supported",
+                    origin="system",
+                    ingest_source="doc",
+                    statement=format_document_link_statement(
+                        doc_file=rel,
+                        heading=heading,
+                        anchored_path=anchored,
+                    ),
+                    summary=None,
+                    payload={
+                        "doc_file": rel,
+                        "heading": heading,
+                        "anchored_symbols": [anchored],
+                        **(
+                            {"resolved_path": resolved_path}
+                            if resolved_path is not None
+                            else {}
+                        ),
+                    },
+                    created_at_utc=now,
+                    updated_at_utc=now,
+                    last_verified_at_utc=now,
+                    expires_at_utc=None,
+                    created_by="memory_init",
+                    verified_by=None,
+                    approved_by=None,
+                    approved_at_utc=None,
+                    report_digest=report_digest,
+                    code_fingerprint=code_fingerprint_for_memory_subject(
+                        root_path,
+                        subject_path=rel,
+                        analysis_fingerprint=analysis_fingerprint,
+                    ),
+                    stale_reason=None,
+                    created_on_branch=git.branch,
+                    created_at_commit=git.head,
+                    verified_on_branch=git.branch,
+                    verified_at_commit=git.head,
+                )
+            )
+            batch.subjects.append(
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=record_id,
                     subject_kind="doc",
                     subject_key=rel,
-                    discriminator=f"path:{anchored}",
+                    relation="documents",
                 )
-                record_id = generate_memory_id()
-                batch.records.append(
-                    MemoryRecord(
-                        id=record_id,
-                        project_id=project.id,
-                        identity_key=identity,
-                        type="document_link",
-                        status="active",
-                        confidence="supported",
-                        origin="system",
-                        ingest_source="doc",
-                        statement=format_document_link_statement(
-                            doc_file=rel,
-                            heading=heading,
-                            anchored_path=anchored,
-                        ),
-                        summary=None,
-                        payload={
-                            "doc_file": rel,
-                            "heading": heading,
-                            "anchored_symbols": [anchored],
-                            **(
-                                {"resolved_path": resolved_path}
-                                if resolved_path is not None
-                                else {}
-                            ),
-                        },
-                        created_at_utc=now,
-                        updated_at_utc=now,
-                        last_verified_at_utc=now,
-                        expires_at_utc=None,
-                        created_by="memory_init",
-                        verified_by=None,
-                        approved_by=None,
-                        approved_at_utc=None,
-                        report_digest=report_digest,
-                        code_fingerprint=code_fingerprint_for_memory_subject(
-                            root_path,
-                            subject_path=rel,
-                            analysis_fingerprint=analysis_fingerprint,
-                        ),
-                        stale_reason=None,
-                        created_on_branch=git.branch,
-                        created_at_commit=git.head,
-                        verified_on_branch=git.branch,
-                        verified_at_commit=git.head,
-                    )
-                )
+            )
+            anchored_path = resolved_path
+            if anchored_path is not None and anchored_path.endswith(".py"):
                 batch.subjects.append(
                     MemorySubject(
                         id=generate_memory_id(prefix="subj"),
                         memory_id=record_id,
-                        subject_kind="doc",
-                        subject_key=rel,
-                        relation="documents",
+                        subject_kind="path",
+                        subject_key=anchored_path,
+                        relation="about",
                     )
                 )
-                anchored_path = resolved_path
-                if anchored_path is not None and anchored_path.endswith(".py"):
-                    batch.subjects.append(
-                        MemorySubject(
-                            id=generate_memory_id(prefix="subj"),
-                            memory_id=record_id,
-                            subject_kind="path",
-                            subject_key=anchored_path,
-                            relation="about",
-                        )
-                    )
     return batch
 
 

@@ -8356,16 +8356,19 @@ def test_mcp_service_review_receipt_edge_helpers(tmp_path: Path) -> None:
         "baseline_abuse",
     ]
 
-    top_generated = replace(
+    # A v3 report records its generation time under meta.runtime. This asserted
+    # the pre-v3 meta.report_generated_at_utc location, pinning a lookup no
+    # document has answered since the digest-hierarchy document landed.
+    runtime_generated = replace(
         record,
-        report_document={"meta": {"report_generated_at_utc": "2026-top"}},
+        report_document={"meta": {"runtime": {"report_generated_at_utc": "2026-top"}}},
     )
     fallback_generated = replace(
         record,
         report_document={},
         summary={**record.summary, "analysis_started_at_utc": "2026-fallback"},
     )
-    assert service._receipt_generated_at(top_generated) == "2026-top"
+    assert service._receipt_generated_at(runtime_generated) == "2026-top"
     assert service._receipt_generated_at(fallback_generated) == "2026-fallback"
     assert (
         mcp_review_receipt_mod.receipt_verdict(
@@ -9495,11 +9498,15 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
         is None
     )
+    # Effective design thresholds live in meta.analysis_thresholds, which is
+    # also where the document builder reads them. This fixture used to invent a
+    # findings.thresholds block that no report emits, so the assertion below
+    # passed on the request echo rather than on the threshold it claimed.
     thresholded_report_document = dict(fake_design_record.report_document)
-    thresholded_findings = dict(
-        cast("dict[str, object]", thresholded_report_document["findings"])
+    thresholded_meta = dict(
+        cast("dict[str, object]", thresholded_report_document.get("meta", {}))
     )
-    thresholded_findings["thresholds"] = {
+    thresholded_meta["analysis_thresholds"] = {
         "design_findings": {
             "complexity": {
                 "metric": "cyclomatic_complexity",
@@ -9508,7 +9515,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             }
         }
     }
-    thresholded_report_document["findings"] = thresholded_findings
+    thresholded_report_document["meta"] = thresholded_meta
     thresholded_record = replace(
         fake_design_record,
         report_document=thresholded_report_document,

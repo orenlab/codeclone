@@ -13,6 +13,7 @@ from typing import Final, Literal
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.mapping_paths import section
 from ...utils.payload_narrow import is_record_mapping
 from ._verification_profile import (
     check_matrix,
@@ -56,12 +57,18 @@ CLAIMS_NOT_MADE: Final[tuple[dict[str, str], ...]] = (
 
 
 def derive_baseline_status(report_document: Mapping[str, object]) -> str:
-    meta = _as_mapping(report_document.get("meta"))
-    baseline = _as_mapping(meta.get("baseline"))
+    """Decide baseline trust from the two fields the report meta carries.
+
+    ``trusted_for_diff`` used to be accepted here as a second route to
+    ``"trusted"``. It is a CLI-side field on ``BaselineState`` that the report's
+    ``meta.baseline`` block never projects, so the branch could not fire in any
+    configuration and the status field was always the decider.
+    """
+
+    baseline = section(report_document, "meta.baseline")
     if not bool(baseline.get("loaded", False)):
         return "not_loaded"
-    status = str(baseline.get("status", "")).strip().lower()
-    if bool(baseline.get("trusted_for_diff", False)) or status == "ok":
+    if str(baseline.get("status", "")).strip().lower() == "ok":
         return "trusted"
     return "untrusted"
 
