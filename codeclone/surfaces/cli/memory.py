@@ -24,7 +24,11 @@ from ...memory.application import (
     resolve_memory_application_context,
 )
 from ...memory.embedding import EmbeddingProvider, resolve_embedding_provider
-from ...memory.exceptions import MemoryContractError, MemorySemanticUnavailableError
+from ...memory.exceptions import (
+    MemoryContractError,
+    MemorySemanticUnavailableError,
+    UnfitAnalysisRunError,
+)
 from ...memory.governance import approve_record, archive_record, reject_record
 from ...memory.ingest import InitOptions
 from ...memory.ingest.runner import run_memory_init
@@ -615,6 +619,11 @@ def _run_init(
             report_document=loaded.document,
             options=options,
         )
+    except UnfitAnalysisRunError as exc:
+        # Not an internal error: the run completed and reported, honestly,
+        # that it observed nothing of what it found. Re-analyse, then init.
+        console.print(f"Memory init refused this analysis run: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
     except Exception as exc:
         console.print(f"Memory init failed: {exc}")
         return int(ExitCode.INTERNAL_ERROR)

@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Literal
 
 from ...config.memory import MemoryConfig, resolve_memory_config
+from ..exceptions import UnfitAnalysisRunError
 from ..project import report_digest_from_report, resolve_memory_db_path
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from . import InitOptions, InitReport
+from .run_fitness import read_run_fitness
 from .runner import run_memory_init
 
 MemorySyncAction = Literal["bootstrap", "refresh", "none"]
@@ -118,12 +120,30 @@ def _complete_memory_sync(
     refresh: bool,
     reason: str,
 ) -> dict[str, object]:
-    init_report = sync_report_document_to_memory(
-        root_path=root_path,
-        report_document=report_document,
-        refresh=refresh,
-    )
-    return memory_sync_result_payload(
+    try:
+        init_report = sync_report_document_to_memory(
+            root_path=root_path,
+            report_document=report_document,
+            refresh=refresh,
+        )
+    except UnfitAnalysisRunError:
+        # A skip, not a failure: the run is intact, it simply measured
+        # nothing. Forcing (``refresh_from_run``) does not override this —
+        # the caller asked to re-read this run, not to lower the bar. The
+        # fitness is re-read from the same document rather than carried on
+        # the exception, so one reader owns the projection.
+        refused = read_run_fitness(report_document)
+        payload = memory_sync_result_payload(
+            status="skipped",
+            trigger=trigger,
+            run_id=run_id,
+            report_digest=report_digest,
+            init_report=None,
+            reason=f"unfit_run:{refused.refusal_reason}",
+        )
+        payload["run_fitness"] = refused.as_payload()
+        return payload
+    payload = memory_sync_result_payload(
         status="completed",
         trigger=trigger,
         run_id=run_id,
@@ -131,6 +151,8 @@ def _complete_memory_sync(
         init_report=init_report,
         reason=reason,
     )
+    payload["run_fitness"] = read_run_fitness(report_document).as_payload()
+    return payload
 
 
 def execute_mcp_memory_sync(

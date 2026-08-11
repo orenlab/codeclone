@@ -27,6 +27,20 @@ class MemoryCapacityError(MemoryContractError):
     """Raised when memory store capacity limits are exceeded."""
 
 
+class UnfitAnalysisRunError(MemoryContractError):
+    """Raised when a run is not fit to be a source of durable memory.
+
+    Ingest refuses rather than degrades here for one case only: a run that
+    observed none of the population it found. Its extractors still speak —
+    module roles come from the *found* file registry — so accepting would
+    store "this module was analyzed" about files nobody opened, at the same
+    ``active``/``supported`` grade as a real measurement. The message names
+    the population state; a caller that needs the structured facts re-reads
+    them from the report with ``read_run_fitness`` rather than receiving a
+    second copy on the exception.
+    """
+
+
 class MemorySemanticUnavailableError(MemoryError):
     """Raised when a semantic provider/backend is required but unavailable.
 
@@ -48,4 +62,5 @@ __all__ = [
     "MemorySchemaError",
     "MemorySemanticUnavailableError",
     "SemanticChunkingInvariantError",
+    "UnfitAnalysisRunError",
 ]

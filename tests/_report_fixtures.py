@@ -8,8 +8,12 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
+from uuid import UUID
 
+from codeclone.baseline.container import build_container
+from codeclone.metrics.health import HealthInputs, compute_health, health_report_fields
 from codeclone.models import (
+    BaselineContainerV3,
     GroupMapLike,
     StructuralFindingGroup,
     Suggestion,
@@ -44,6 +48,61 @@ def write_repeated_assert_source(path: Path) -> Path:
     return path
 
 
+def health_family_for_population(*, found: int, analyzed: int) -> dict[str, object]:
+    """The health metrics family exactly as its owner projects it.
+
+    The population string is never typed by hand by a caller: ``compute_health``
+    owns the tri-state and ``health_report_fields`` owns its projection, so a
+    rename or a re-classification in that owner reaches the tests instead of
+    being shadowed by a literal in each of them.
+    """
+
+    return health_report_fields(
+        compute_health(
+            HealthInputs(
+                files_found=found,
+                files_analyzed_or_cached=analyzed,
+                function_clone_groups=0,
+                block_clone_groups=0,
+                complexity_avg=0.0,
+                complexity_max=0,
+                high_risk_functions=0,
+                elevated_complexity_functions=0,
+                complexity_function_population=0,
+                coupling_avg=0.0,
+                coupling_max=0,
+                high_risk_classes=0,
+                elevated_coupling_classes=0,
+                coupling_class_population=0,
+                cohesion_avg=0.0,
+                low_cohesion_classes=0,
+                import_dependency_cycles=0,
+                deferred_dependency_cycles=0,
+                dependency_max_depth=0,
+                dependency_avg_depth=0.0,
+                dependency_p95_depth=0,
+                dead_code_items=0,
+            )
+        )
+    )
+
+
+def single_module_baseline_container(scope_id: UUID) -> BaselineContainerV3:
+    """A real published-shape container, for the baseline states that need one.
+
+    ``baseline.state`` is ``missing`` whenever no container exists, so the
+    ``trusted``/``untrusted`` half of that projection is unreachable without
+    this.
+    """
+
+    _source, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )
+    bundle = build_observation_bundle(scan_root=Path("."), module_registry=registry)
+    return build_container(bundle, scope_id)
+
+
 def build_test_report_document(
     *,
     func_groups: GroupMapLike,
@@ -59,11 +118,20 @@ def build_test_report_document(
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    baseline_container: BaselineContainerV3 | None = None,
     baseline_trust: TrustVector | None = None,
     gate_exit_code: int = 0,
     gate_reasons: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    """Build the sole canonical report-v3 fixture shape used by report tests."""
+    """Build the sole canonical report-v3 fixture shape used by report tests.
+
+    ``baseline_container`` defaults to ``None``, which is the container-less
+    run every existing caller wants and which the builder projects as
+    ``baseline.state == "missing"``. Pass a real container when the test needs
+    the other two states: ``trusted``/``untrusted`` are only reachable when a
+    container exists, and a test that hand-writes the state string instead
+    would be pinning its own guess rather than the builder's projection.
+    """
 
     _source, registry = module_registry_context(
         filepath="pkg/module.py",
@@ -83,7 +151,7 @@ def build_test_report_document(
     )
     return _build_report_document_v3(
         observation_bundle=observation_bundle,
-        baseline_container=None,
+        baseline_container=baseline_container,
         baseline_trust=baseline_trust,
         gate_config=gate_config,
         gate_result=GateResult(exit_code=gate_exit_code, reasons=gate_reasons),
