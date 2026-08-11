@@ -1059,7 +1059,16 @@ def extract_contradictions(
                     approved_by=None,
                     approved_at_utc=None,
                     report_digest=report_digest,
-                    code_fingerprint=analysis_fingerprint,
+                    # Anchored on the document this note is about, because that
+                    # is the subject the refresh witnesses. Storing the analysis
+                    # digest here parked a report identity in a column compared
+                    # against a file hash, so the record would go stale the
+                    # moment a human approved it.
+                    code_fingerprint=code_fingerprint_for_memory_subject(
+                        root_path,
+                        subject_path=rel_doc,
+                        analysis_fingerprint=analysis_fingerprint,
+                    ),
                     stale_reason=None,
                     created_on_branch=git.branch,
                     created_at_commit=git.head,
