@@ -18,6 +18,7 @@ import orjson
 from ...config.memory import IngestConfig
 from ...report.meta import current_report_timestamp_utc
 from ...utils.coerce import as_mapping, as_sequence
+from ...utils.mapping_paths import section
 from ..display import format_document_link_statement
 from ..enums import MemoryConfidence
 from ..identity import make_identity_key
@@ -122,6 +123,70 @@ def _iter_mapping_paths(
         if path is not None:
             pairs.append((mapping, path))
     return pairs
+
+
+def _family_items(
+    families: Mapping[str, object],
+    family_name: str,
+) -> Sequence[object]:
+    return as_sequence(as_mapping(families.get(family_name)).get("items"))
+
+
+def _worst_high_complexity_per_path(
+    families: Mapping[str, object],
+) -> list[tuple[str, Mapping[str, object]]]:
+    """The worst function the complexity family flagged, one row per file.
+
+    Only ``risk == "high"`` rows are risks: the family lists every function in
+    the repository, so ingesting the rest would record "this is a risk" about
+    code the report classified as calm. A risk note is identified by its path,
+    so one file must yield one row — several rows under one identity would
+    write a revision per ingest and let the surviving statement depend on
+    iteration order.
+    """
+
+    worst: dict[str, Mapping[str, object]] = {}
+    for mapping, path in _iter_mapping_paths(
+        _family_items(families, "complexity"),
+        "relative_path",
+    ):
+        if str(mapping.get("risk", "")).strip() != "high":
+            continue
+        incumbent = worst.get(path)
+        if incumbent is None or _complexity_rank(mapping) > _complexity_rank(incumbent):
+            worst[path] = mapping
+    return sorted(worst.items())
+
+
+def _complexity_rank(mapping: Mapping[str, object]) -> tuple[int, str]:
+    raw = mapping.get("cyclomatic_complexity")
+    value = raw if isinstance(raw, int) else 0
+    return (value, str(mapping.get("qualname", "")))
+
+
+def _production_security_categories_per_path(
+    families: Mapping[str, object],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Security-surface categories per production file.
+
+    The family also inventories tests and fixtures; a boundary reached only by
+    a test is not a risk carried by the shipped product, and the family already
+    classifies each row through ``source_kind``.
+    """
+
+    grouped: dict[str, set[str]] = {}
+    for mapping, path in _iter_mapping_paths(
+        _family_items(families, "security_surfaces"),
+        "relative_path",
+    ):
+        if str(mapping.get("source_kind", "")).strip() != "production":
+            continue
+        category = str(mapping.get("category") or "security_surface").strip()
+        grouped.setdefault(path, set()).add(category or "security_surface")
+    return [
+        (path, tuple(sorted(categories)))
+        for path, categories in sorted(grouped.items())
+    ]
 
 
 def _append_path_risk_note(
@@ -506,11 +571,13 @@ def extract_risk_notes(
     analysis_fingerprint: str | None,
 ) -> RecordBatch:
     batch, now, metrics = _new_metrics_batch(report_document)
-    design = as_mapping(metrics.get("design"))
-    complexity_items = as_sequence(design.get("complexity_hotspots"))
-    for mapping, path in _iter_mapping_paths(complexity_items, "path", "file"):
-        value = mapping.get("value")
-        threshold = mapping.get("threshold")
+    families = as_mapping(metrics.get("families"))
+    threshold = section(
+        report_document,
+        "source_facts.analysis_contract.design_findings.complexity",
+    ).get("value")
+    for path, item in _worst_high_complexity_per_path(families):
+        value = item.get("cyclomatic_complexity")
         _append_path_risk_note(
             batch,
             project=project,
@@ -528,18 +595,15 @@ def extract_risk_notes(
                 "risk_kind": "high_complexity",
                 "metric_value": value,
                 "threshold": threshold,
+                "qualname": str(item.get("qualname", "")),
                 "severity": "medium",
                 "interpretation": "Structural complexity hotspot from analysis.",
             },
             confidence="verified",
         )
 
-    security = as_mapping(metrics.get("security_surfaces"))
-    for mapping, path in _iter_mapping_paths(
-        as_sequence(security.get("items")),
-        "path",
-    ):
-        category = str(mapping.get("category") or "security_surface").strip()
+    for path, categories in _production_security_categories_per_path(families):
+        listed = ", ".join(categories)
         _append_path_risk_note(
             batch,
             project=project,
@@ -551,12 +615,12 @@ def extract_risk_notes(
             analysis_fingerprint=analysis_fingerprint,
             discriminator="security_surface",
             statement=(
-                f"{path} is in the security surface inventory ({category}). "
+                f"{path} is in the security surface inventory ({listed}). "
                 "Report-only inventory; not a vulnerability finding."
             ),
             payload={
                 "risk_kind": "security_surface",
-                "category": category,
+                "categories": list(categories),
                 "interpretation": "report_only_inventory",
             },
             confidence="supported",
