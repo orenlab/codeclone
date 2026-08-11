@@ -184,6 +184,7 @@ def gating_mode_enabled(args: object) -> bool:
         or bool_attr(args, "fail_on_docstring_regression")
         or bool_attr(args, "fail_on_api_break")
         or bool_attr(args, "fail_on_authority_violation")
+        or bool_attr(args, "fail_on_truncated_run")
         or int_attr(args, "min_typing_coverage", -1) >= 0
         or int_attr(args, "min_docstring_coverage", -1) >= 0
     )

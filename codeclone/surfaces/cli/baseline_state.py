@@ -190,6 +190,7 @@ def resolve_clone_baseline_state(
     observation_bundle: ObservationBundle,
     console: _PrinterLike,
     required_lanes: frozenset[str],
+    files_skipped: int = 0,
 ) -> CloneBaselineState:
     baseline = Baseline(baseline_path)
     baseline_loaded = False
@@ -255,6 +256,7 @@ def resolve_clone_baseline_state(
                 scope_id=scope_id,
                 max_size_bytes=args.max_baseline_size_mb * 1024 * 1024,
                 project_label=args.project_label,
+                files_skipped=files_skipped,
             )
             new_baseline = Baseline(baseline_path)
             new_baseline.load(max_size_bytes=args.max_baseline_size_mb * 1024 * 1024)
@@ -456,6 +458,7 @@ def _resolve_clone_baseline_state(
     baseline_exists: bool,
     analysis: AnalysisResult,
     required_lanes: frozenset[str],
+    files_skipped: int = 0,
 ) -> _CloneBaselineState:
     return resolve_clone_baseline_state(
         args=args,
@@ -464,6 +467,7 @@ def _resolve_clone_baseline_state(
         observation_bundle=analysis.observation_bundle,
         console=require_status_console(cli_state.get_console()),
         required_lanes=required_lanes,
+        files_skipped=files_skipped,
     )
 
 

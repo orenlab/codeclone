@@ -535,6 +535,7 @@ def _main_impl() -> None:
             baseline_exists=baseline_inputs.baseline_exists,
             analysis=analysis_result,
             required_lanes=baseline_required_lanes,
+            files_skipped=processing_result.files_skipped,
         )
         metrics_baseline_state = _resolve_metrics_baseline_state(
             args=args,
@@ -679,6 +680,7 @@ def _main_impl() -> None:
                 ),
                 baseline_trust=baseline_trust,
                 gate_config=patch_gate_config,
+                files_skipped=processing_result.files_skipped,
             )
             report_artifacts = report(
                 boot=boot,

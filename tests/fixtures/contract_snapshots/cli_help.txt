@@ -22,6 +22,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--fail-cycles | --no-fail-cycles]
                  [--fail-dead-code | --no-fail-dead-code]
                  [--fail-on-unresolved-dead-code | --no-fail-on-unresolved-dead-code]
+                 [--fail-on-truncated-run | --no-fail-on-truncated-run]
                  [--fail-health [SCORE_MIN]]
                  [--fail-on-typing-regression | --no-fail-on-typing-regression]
                  [--fail-on-docstring-regression | --no-fail-on-docstring-regression]
@@ -143,6 +144,12 @@ Quality gates:
   --fail-on-unresolved-dead-code, --no-fail-on-unresolved-dead-code
                         Exit with code 3 if any symbol is an unresolved external override.
                         These are abstentions, not findings: a public method whose class inherits from a base outside the analysis root, with no evidence either way. Off by default, and never counted as dead code.
+  --fail-on-truncated-run, --no-fail-on-truncated-run
+                        Exit with code 3 if the run could not read every file it found.
+                        Files lost to a dead worker, a permission fault or an unreadable
+                        encoding leave metrics measured over an incomplete population.
+                        Off by default; publishing a baseline from such a run is refused
+                        unconditionally either way.
   --fail-health [SCORE_MIN]
                         Exit with code 3 if the overall health score falls below the threshold.
                         If enabled without a value, uses 60.

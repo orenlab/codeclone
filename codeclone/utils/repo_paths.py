@@ -9,12 +9,40 @@
 The helpers here are intentionally small and policy-driven.  They are used for
 security-sensitive state/artifact paths; general CLI output paths keep their
 existing behavior unless a caller opts into these stricter rules.
+
+It also owns the one question every layer asks about a repository path: is
+this Python source? That rule lives here, below both the tree walk and the
+patch classifier, because it used to live in *both* of them and the two copies
+agreed only by luck — see :func:`has_python_suffix`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+
+PYTHON_SOURCE_SUFFIX = ".py"
+PYTHON_STUB_SUFFIX = ".pyi"
+
+
+def has_python_suffix(name: str, *, include_stubs: bool = False) -> bool:
+    """Sole owner of "this repository path names Python source".
+
+    Case-insensitive on purpose. A file called ``Other.PY`` holds Python and
+    carries the same debt as any other module, yet a case-sensitive suffix
+    test made such files invisible twice over: the tree walk never offered
+    them for analysis, and the patch classifier gave a patch of nothing but
+    ``.PY`` files the verification profile of a README change. One rule, one
+    owner — the two copies that used to disagree are gone.
+
+    Stubs are opt-in: they are Python for the purpose of classifying a patch,
+    and they are not analysed source for the purpose of walking a tree.
+    """
+
+    lowered = name.lower()
+    if lowered.endswith(PYTHON_SOURCE_SUFFIX):
+        return True
+    return include_stubs and lowered.endswith(PYTHON_STUB_SUFFIX)
 
 
 class RepoPathError(ValueError):

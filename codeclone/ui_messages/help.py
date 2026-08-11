@@ -130,6 +130,13 @@ HELP_FAIL_ON_UNRESOLVED_DEAD_CODE = (
     "inherits from a base outside the analysis root, with no evidence "
     "either way. Off by default, and never counted as dead code."
 )
+HELP_FAIL_ON_TRUNCATED_RUN = (
+    "Exit with code 3 if the run could not read every file it found.\n"
+    "Files lost to a dead worker, a permission fault or an unreadable\n"
+    "encoding leave metrics measured over an incomplete population.\n"
+    "Off by default; publishing a baseline from such a run is refused\n"
+    "unconditionally either way."
+)
 HELP_FAIL_HEALTH = (
     "Exit with code 3 if the overall health score falls below the threshold.\n"
     "If enabled without a value, uses 60."

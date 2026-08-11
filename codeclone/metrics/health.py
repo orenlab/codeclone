@@ -36,7 +36,7 @@ from ..contracts import (
     HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
     HEALTH_WEIGHTS,
 )
-from ..models import HealthScore
+from ..models import HealthPopulation, HealthScore
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +267,21 @@ def _clone_piecewise_score(density: float) -> int:
     return 0
 
 
+def _observed_population(inputs: HealthInputs) -> HealthPopulation:
+    """Name how much of the found population the score actually saw.
+
+    Derived from two counters, never configured: no threshold is involved, so
+    there is nothing here that can drift the way a calibrated constant can.
+    The three states are exhaustive and mutually exclusive by construction.
+    """
+
+    if inputs.files_analyzed_or_cached <= 0:
+        return "unmeasured"
+    if inputs.files_analyzed_or_cached < inputs.files_found:
+        return "partial"
+    return "complete"
+
+
 def compute_health(inputs: HealthInputs) -> HealthScore:
     total_clone_groups = inputs.function_clone_groups + inputs.block_clone_groups
     clone_density = _safe_div(
@@ -308,8 +323,28 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
         "coverage": coverage_score,
     }
 
+    population = _observed_population(inputs)
+    if population == "unmeasured":
+        # Nothing was read, so there is no evidence of health to report. The
+        # weighted sum here would be 90/A — six counter-driven dimensions see
+        # an empty population and report no debt — which is an assertion of
+        # cleanliness about code that was never opened. Refusing is not a
+        # recalibration: no weight, band, or reference moves, and a run that
+        # read even one file takes the ordinary path below unchanged.
+        return HealthScore(
+            total=0,
+            grade=_grade(0),
+            dimensions=dimensions,
+            population=population,
+        )
+
     total = sum(
         dimensions[name] * HEALTH_WEIGHTS[name] for name in sorted(HEALTH_WEIGHTS)
     )
     score = _clamp_score(total)
-    return HealthScore(total=score, grade=_grade(score), dimensions=dimensions)
+    return HealthScore(
+        total=score,
+        grade=_grade(score),
+        dimensions=dimensions,
+        population=population,
+    )

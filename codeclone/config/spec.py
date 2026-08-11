@@ -552,6 +552,15 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         pyproject_type=bool,
     ),
     _option(
+        dest="fail_on_truncated_run",
+        group="Quality gates",
+        cli_kind="bool_optional",
+        flags=("--fail-on-truncated-run",),
+        default=False,
+        help_text=ui.HELP_FAIL_ON_TRUNCATED_RUN,
+        pyproject_type=bool,
+    ),
+    _option(
         dest="fail_health",
         group="Quality gates",
         cli_kind="value",
