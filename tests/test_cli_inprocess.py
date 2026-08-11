@@ -4598,7 +4598,7 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
             ("new_high_risk_functions", "3"),
         ),
         (
-            "Dependency cycles detected: 2 cycle(s).",
+            "Import-time dependency cycles detected: 2 cycle(s).",
             ("dependency_cycles", "2"),
         ),
         (

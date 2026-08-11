@@ -24,8 +24,8 @@ from ..contracts.errors import BaselineValidationError
 from ..metrics.dependencies import (
     build_import_graph,
     depth_profile,
-    find_cycles,
     max_depth,
+    runtime_cycle_facts,
 )
 from ..metrics.health import HealthInputs, compute_health
 from ..models import (
@@ -56,6 +56,7 @@ from ..models import (
     ObservationLaneName,
     ProjectMetrics,
     PublicSymbol,
+    cycle_kind_counts,
 )
 from ..observations.projection import glued_observation_identity
 from ._metrics_baseline_contract import (
@@ -399,6 +400,8 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
     )
 
     dependency_payload = _lane_payload(container, "dependencies")
+    modules: tuple[str, ...] = ()
+    dependency_edges: tuple[ModuleDep, ...] = ()
     if isinstance(dependency_payload, DependencyObservationPayload):
         modules = tuple(
             sorted(
@@ -417,18 +420,23 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
                 }
             )
         )
-        graph = build_import_graph(
-            modules=modules,
-            deps=tuple(
-                _import_dependency(item)
-                for item in dependency_payload.observations
-                if item.source.python_module is not None
-                and item.resolved_target is not None
-            ),
+        dependency_edges = tuple(
+            _import_dependency(item)
+            for item in dependency_payload.observations
+            if item.source.python_module is not None
+            and item.resolved_target is not None
         )
-    else:
-        graph = {}
-    cycles = find_cycles(graph)
+    graph = build_import_graph(modules=modules, deps=dependency_edges)
+    # Same owner as the live path, so a baseline and a fresh run classify the
+    # same repository identically. The lane has carried each row's binding
+    # since payload_schema "6"; reading it here is what makes the stored kinds
+    # survive across runs instead of every reconstructed cycle reading as
+    # critical.
+    cycle_facts = runtime_cycle_facts(modules=modules, deps=dependency_edges)
+    cycle_counts = cycle_kind_counts(
+        cycles=tuple(fact.modules for fact in cycle_facts),
+        details=cycle_facts,
+    )
     depth_avg, depth_p95 = depth_profile(graph)
     graph_depth = max_depth(graph)
 
@@ -496,7 +504,8 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
             coupling_class_population=class_population,
             cohesion_avg=_average(cohesion, class_population),
             low_cohesion_classes=len(low_cohesion),
-            dependency_cycles=len(cycles),
+            import_dependency_cycles=cycle_counts.import_cycles,
+            deferred_dependency_cycles=cycle_counts.deferred_cycles,
             dependency_max_depth=graph_depth,
             dependency_avg_depth=depth_avg,
             dependency_p95_depth=depth_p95,
@@ -510,7 +519,7 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
         high_coupling_classes=high_coupling,
         max_cohesion=max(cohesion, default=0),
         low_cohesion_classes=low_cohesion,
-        dependency_cycles=cycles,
+        dependency_cycles=cycle_facts,
         dependency_max_depth=graph_depth,
         dead_code_items=tuple(sorted(dead)),
         health_score=health.total,
@@ -536,6 +545,14 @@ def _import_dependency(item: ImportObservation) -> ModuleDep:
         requested_module=item.requested_module,
         requested_names=item.requested_names,
         candidate_targets=item.candidate_targets,
+        # Carried, not defaulted. ``ModuleDep`` defaults binding to
+        # ``import_time``, so omitting these silently rewrote every stored
+        # deferred, lazy, and typing edge into an eager one — which made every
+        # reconstructed cycle read as critical and hid TYPE_CHECKING-only
+        # cycles inside the baseline's cycle set.
+        mechanism=item.mechanism,
+        binding=item.binding,
+        is_lazy=item.is_lazy,
     )
 
 

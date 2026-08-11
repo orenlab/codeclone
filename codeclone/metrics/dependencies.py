@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from ..models import (
     DependencyCycleDetail,
+    DependencyCycleFact,
     DependencyCycleKind,
     DepGraph,
     ModuleDep,
@@ -140,21 +141,49 @@ def _classify_cycle(
 
 
 def _cycle_details(
-    cycles: tuple[tuple[str, ...], ...],
+    facts: Sequence[DependencyCycleFact],
     *,
-    edges: Sequence[ModuleDep],
     registry: ModuleRegistryHandle,
 ) -> tuple[DependencyCycleDetail, ...]:
-    import_time_edges = tuple(dep for dep in edges if dep.binding == "import_time")
+    """Project already-classified facts onto registry paths. Never reclassifies."""
+
     return tuple(
         DependencyCycleDetail(
-            modules=cycle,
-            kind=_classify_cycle(cycle, import_time_edges=import_time_edges),
+            modules=fact.modules,
+            kind=fact.kind,
             member_paths=tuple(
-                module_path_from_registry(module, registry) for module in cycle
+                module_path_from_registry(module, registry) for module in fact.modules
             ),
         )
-        for cycle in cycles
+        for fact in facts
+    )
+
+
+def runtime_cycle_facts(
+    *,
+    modules: Iterable[str],
+    deps: Sequence[ModuleDep],
+) -> tuple[DependencyCycleFact, ...]:
+    """The sole owner of "which cycles exist, and of what kind".
+
+    Both the live analysis and the baseline reconstruction call this, so the
+    two can never drift into disagreeing about the same repository. It applies
+    the same two rules in the same order: TYPE_CHECKING edges never execute so
+    they cannot close a runtime cycle, and a surviving cycle is critical only
+    if its import-time edges still cycle among its own members.
+    """
+
+    runtime_graph = build_import_graph(
+        modules=modules,
+        deps=tuple(dep for dep in deps if dep.binding != "type_checking"),
+    )
+    import_time_edges = tuple(dep for dep in deps if dep.binding == "import_time")
+    return tuple(
+        DependencyCycleFact(
+            modules=cycle,
+            kind=_classify_cycle(cycle, import_time_edges=import_time_edges),
+        )
+        for cycle in find_cycles(runtime_graph)
     )
 
 
@@ -297,27 +326,24 @@ def build_dep_graph(
         )
     )
     graph = build_import_graph(modules=graph_modules, deps=internal_edges)
-    # Runtime cycles only: TYPE_CHECKING edges never execute, so a cycle they
-    # close is not a runtime fact. They stay visible in ``edges`` untouched;
-    # depth and chain metrics keep reading the full graph because layering is
-    # a design question, not an import-order one.
-    runtime_graph = build_import_graph(
-        modules=graph_modules,
-        deps=tuple(dep for dep in internal_edges if dep.binding != "type_checking"),
-    )
-    cycles = find_cycles(runtime_graph)
+    # Cycles and their kinds come from the one owner, so the bare ``cycles``
+    # tuple and ``cycle_details`` are two projections of a single
+    # classification pass and cannot disagree. Depth and chain metrics keep
+    # reading the full graph because layering is a design question, not an
+    # import-order one.
+    facts = runtime_cycle_facts(modules=graph_modules, deps=internal_edges)
     depth = max_depth(graph)
     avg_depth, p95_depth = depth_profile(graph)
     chains = longest_chains(graph)
     return DepGraph(
         modules=frozenset(graph.keys()),
         edges=internal_edges,
-        cycles=cycles,
+        cycles=tuple(fact.modules for fact in facts),
         max_depth=depth,
         avg_depth=avg_depth,
         p95_depth=p95_depth,
         longest_chains=chains,
-        cycle_details=_cycle_details(cycles, edges=internal_edges, registry=registry),
+        cycle_details=_cycle_details(facts, registry=registry),
     )
 
 

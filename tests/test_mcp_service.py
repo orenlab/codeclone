@@ -4507,12 +4507,15 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
             new_cycles=(("pkg.a", "pkg.b"),),
             new_dead_code=("pkg.a:unused",),
             health_delta=-3,
+            new_import_cycles=(("pkg.a", "pkg.b"),),
         )
     )
     assert payload == {
         "new_high_risk_functions": 1,
         "new_high_coupling_classes": 1,
         "new_cycles": 1,
+        "new_import_cycles": 1,
+        "new_deferred_cycles": 0,
         "new_dead_code": 1,
         "health_delta": -3,
         "typing_param_permille_delta": 0,

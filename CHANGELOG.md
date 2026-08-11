@@ -34,6 +34,17 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   import binding time — see the Fixed entry below. A consumer matching `kind == "cycle"` on a `design` finding now
   matches nothing instead of failing loudly, so update automation, CI scripts, and agent workflows to the new kinds.
   The `metrics.families.dependencies.summary.cycles` metric is unchanged.
+- **`--fail-cycles` now fails on import-time cycles only.** A cycle closed purely by deferred, lazy, or
+  `TYPE_CHECKING` imports cannot raise at interpreter start, so it is reported without failing the build. A
+  repository whose only cycles are deferred now exits `0` where it previously exited `3`. The same rule governs
+  regression gating under `--fail-on-new-metrics`: a new `import_cycle` fails, a new `deferred_cycle` does not, and a
+  `deferred_cycle` that hardens into an `import_cycle` fails because the crash risk is new even though the members
+  are not. There is deliberately no flag to gate on every cycle — a good default beats another policy surface. The
+  two cycle gate messages now name "import-time" so the failing count can be reconciled against the reported total.
+- The dependencies lane advances to payload schema `7`. The wire form is unchanged, but cycle membership and cycle
+  kind derived from a schema-`6` artifact do not agree with a `7` reader's, and those now decide health, gating, and
+  novelty — so an existing baseline is untrusted for that lane until regenerated with `--update-baseline`.
+  `HEALTH_INPUT_MANIFEST_VERSION` advances to `2`: health consumes two cycle inputs where it consumed one.
 
 ### Added
 
@@ -89,9 +100,24 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- **Dependency cycles are reported with their kind split beside the total.** The CLI metrics line reads
+  `Cycles  2 detected (1 import, 1 deferred)` and the compact line
+  `cycles=2(import=1,deferred=1)`, because the total alone no longer predicts the exit code. A deferred-only run is
+  styled as a warning rather than a failure. `metrics.families.dependencies.summary` gains `import_cycles`,
+  `deferred_cycles`, `new_import_cycles`, and `new_deferred_cycles`; `cycles` and `new_cycles` keep their meanings,
+  and the two kind counts always partition the total.
+- **Baseline diffs distinguish a new cycle from a cycle that changed kind.** The dependencies lane remembers each
+  cycle's kind, so gaining an import cycle and converting an import cycle into a deferred one — semantically opposite
+  events that both left the count unmoved — are no longer both reported as unchanged. The metrics diff carries
+  `new_import_cycles`, `new_deferred_cycles`, and `cycle_kind_changes` alongside `new_cycles`.
+- Health prices the two cycle kinds through two separate constants. `HEALTH_DEPENDENCY_CYCLE_PENALTY` (25) applies to
+  import cycles exactly as before, and a new `HEALTH_DEPENDENCY_DEFERRED_CYCLE_PENALTY` applies to deferred ones.
+  **No health score moves in this release**: the deferred penalty is deliberately set to the same 25, so the change
+  creates the calibratable seam without touching the scale. Choosing its real value is a separate task that requires
+  an independent blind benchmark over frozen external repositories.
 - **Cache trust envelope hardened; `CACHE_VERSION` → 3.7.** Three cache-integrity changes land together under one
   version bump (the same combined generation also carries Wave D's widened 18-column unit row — see the complexity entry
-  above — and cycle-honesty's dependency-row binding-time and PEP 810 laziness schema, `payload_schema` 6). (1) The
+  above — and cycle-honesty's dependency-row binding-time and PEP 810 laziness schema, `payload_schema` 7). (1) The
   integrity checksum now covers the versioned pre-image `{v, payload}` instead of `payload` alone,
   bringing the generation gate `v` inside the checksummed scope: a migration, backup, or edit-in-place that rewrites the
   top-level `v` without re-checksumming is now refused as an integrity failure instead of being trusted as a payload it
@@ -149,8 +175,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   A cycle is `import_cycle` (critical) exactly when the subgraph of import-time edges still cycles; otherwise it is
   `deferred_cycle` (warning) — real, but unable to crash at import. Typing-only edges no longer create runtime
   cycles at all, while staying visible in the edge list with their kinds. Finding copy states what was measured.
-  The dependencies lane advances to payload schema `6` and the analysis cache to `3.7`; pre-upgrade cache entries
+  The dependencies lane advances to payload schema `7` and the analysis cache to `3.7`; pre-upgrade cache entries
   re-analyze on the next run.
+- **The cycle kind now reaches every layer that decides, not just the prose.** The classification above previously
+  stopped at the suggestion text and the `cycle_details` payload: health, `--fail-cycles`, regression gating, the
+  baseline lane, and the summary all kept reading one undifferentiated count. A deferred cycle was therefore
+  described as a warning and then scored and failed the build exactly like a fatal one — two meanings for one fact.
+  Each of those layers now consumes the split. See the breaking-change and Changed entries for the behaviour that
+  moves.
+- **The baseline no longer forgets how a cycle was bound.** Reconstructing metrics from a stored baseline dropped each
+  dependency row's binding, so every remembered edge read as eager: every reconstructed cycle came back
+  `import_cycle`, and a `TYPE_CHECKING`-only cycle sat in the baseline's cycle set where it could mask a real runtime
+  one. The stored binding is now carried through, so a baseline and a fresh run classify the same repository
+  identically, and both sides of a diff agree on what a cycle is.
 - **Cycle findings no longer invent file paths for package modules.** A cycle member resolves through the
   module-identity inventory — a package reports `pkg/__init__.py`, never the phantom `pkg.py` whose link 404s —
   and a member without a resolvable file keeps its module identity with no path claim. The same law now governs

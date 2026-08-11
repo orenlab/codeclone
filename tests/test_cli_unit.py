@@ -1900,14 +1900,17 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             cbo_max=8,
             lcom_avg=1.2,
             lcom_max=4,
-            cycles=0,
+            cycles=3,
+            import_cycles=1,
+            deferred_cycles=2,
             dead=1,
             health=85,
             grade="B",
             overloaded_modules=3,
         )
         == "Metrics  cc=2.8/21  cbo=0.6/8  lcom4=1.2/4"
-        "  cycles=0  dead_code=1  health=85(B)  overloaded_modules=3"
+        "  cycles=3(import=1,deferred=2)"
+        "  dead_code=1  health=85(B)  overloaded_modules=3"
     )
     assert (
         ui.fmt_summary_compact_dependencies(
@@ -1996,7 +1999,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     assert "[bold yellow]3[/bold yellow] seg" in clones
     assert "[yellow]2[/yellow] fixtures" in clones
 
-    assert "5 detected" in ui.fmt_metrics_cycles(5)
+    assert "5 detected" in ui.fmt_metrics_cycles(5, import_cycles=2, deferred=3)
     dependencies = ui.fmt_metrics_dependencies(
         avg_depth=4.0,
         p95_depth=13,

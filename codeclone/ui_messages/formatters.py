@@ -344,6 +344,8 @@ def fmt_summary_compact_metrics(
     lcom_avg: float,
     lcom_max: int,
     cycles: int,
+    import_cycles: int,
+    deferred_cycles: int,
     dead: int,
     health: int,
     grade: str,
@@ -357,6 +359,8 @@ def fmt_summary_compact_metrics(
         lcom_avg=f"{lcom_avg:.1f}",
         lcom_max=lcom_max,
         cycles=cycles,
+        import_cycles=import_cycles,
+        deferred_cycles=deferred_cycles,
         dead=dead,
         health=health,
         grade=grade,
@@ -526,16 +530,20 @@ def fmt_metrics_cohesion(avg: float, max_val: int) -> str:
     return f"  {'Cohesion':<{_L}}avg {avg:.1f} \u00b7 max {max_val}"
 
 
-def fmt_metrics_cycles(count: int) -> str:
-    match count:
-        case 0:
-            return (
-                f"  {'Cycles':<{_L}}{styled(f'{GLYPH_OK} clean', STYLE_VERDICT_PASS)}"
-            )
-        case _:
-            return (
-                f"  {'Cycles':<{_L}}{styled(f'{count:,} detected', STYLE_VERDICT_FAIL)}"
-            )
+def fmt_metrics_cycles(count: int, *, import_cycles: int, deferred: int) -> str:
+    """Render the cycle total with its kind split.
+
+    The total alone stopped predicting the exit code once only import cycles
+    gate, so the breakdown is not decoration: it is the difference between a
+    build that fails and one that does not. A deferred-only run is styled as a
+    warning rather than a failure because that is exactly what it now is.
+    """
+
+    if count == 0:
+        return f"  {'Cycles':<{_L}}{styled(f'{GLYPH_OK} clean', STYLE_VERDICT_PASS)}"
+    detail = f"{count:,} detected ({import_cycles:,} import, {deferred:,} deferred)"
+    style = STYLE_VERDICT_FAIL if import_cycles > 0 else STYLE_VERDICT_WARN
+    return f"  {'Cycles':<{_L}}{styled(detail, style)}"
 
 
 def fmt_metrics_dependencies(

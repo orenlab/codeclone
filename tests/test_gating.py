@@ -366,7 +366,7 @@ def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
         "health_current",
         "health_delta",
     }
-    assert gate_lane_contract_versions() == ("2", "1")
+    assert gate_lane_contract_versions() == ("2", "2")
 
 
 def _dead_code_gate_config(
@@ -497,7 +497,7 @@ def test_unresolved_override_flag_shares_the_dead_code_gate_family() -> None:
 
     assert flag_only == (("dead_code_current", ("dead_code",)),)
     assert both == flag_only
-    assert gate_lane_contract_versions() == ("2", "1")
+    assert gate_lane_contract_versions() == ("2", "2")
 
 
 def _report_document() -> dict[str, object]:

@@ -120,8 +120,21 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # payload_schema bump ("5" -> "6") together with the G4 observation
     # projection. Pre-bump digest was
     # 9487ff03b6974056e1857cfe32e4860ea0fb3596bbe3290560671b03d32b4ef8.
+    #
+    # SANCTIONED golden change, cycle-policy split ("6" -> "7"). Unlike every
+    # other entry here this bump adds no field: the payload SHAPE and the wire
+    # bytes are unchanged. What moved is what a consumer derives from the rows.
+    # Through "6" the metrics reconstruction dropped each row's binding, so
+    # stored deferred/lazy/typing edges read as eager — every reconstructed
+    # cycle came back ``import_cycle`` and a TYPE_CHECKING-only cycle sat in
+    # the baseline's cycle set. Cycle kind now decides health, --fail-cycles,
+    # and novelty gating, so a "6" artifact cannot answer the questions a "7"
+    # reader asks of it. Confinement proven before repinning: exactly this one
+    # descriptor digest moves and the other nine stay byte-identical to the
+    # values pinned here. Pre-bump digest was
+    # 2c533080e26a676bbf099998b23fb129b9a7c8731e9f31df6375eb5f14f2fd2c.
     "dependencies": (
-        "2c533080e26a676bbf099998b23fb129b9a7c8731e9f31df6375eb5f14f2fd2c"
+        "7bf4c16877b8a2c3e7a8bd098525350c72a9c17f3a06a675e7d83361959c61fa"
     ),
     "module_identity": (
         "6550f3624d9644ab0626b26928a6d1f5fbbaf7c672e04a7128dc6706798206c7"
@@ -186,7 +199,10 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         "dead_code": "3",
         # Cycle-honesty wave: edge binding time + PEP 810 laziness ride the
         # dependency rows — one coordinated bump with the G4 observation field.
-        "dependencies": "6",
+        # "7" is the cycle-policy split's reader bump: the wire form did NOT
+        # change, but cycle membership and cycle kind derived from these rows
+        # did, and those now decide health, --fail-cycles, and novelty gating.
+        "dependencies": "7",
         "module_identity": "4",
         "risk_observations": "4",
         "semantic_authority": "2",

@@ -1793,6 +1793,9 @@ def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:
             new_cycles=(("pkg.x", "pkg.y"),),
             new_dead_code=("pkg.mod:new_dead",),
             health_delta=-1,
+            # The new cycle has to be an import cycle for the novelty gate to
+            # fire at all: a new deferred cycle is reported and does not gate.
+            new_import_cycles=(("pkg.x", "pkg.y"),),
         ),
         config=MetricGateConfig(
             fail_complexity=20,
@@ -1808,12 +1811,17 @@ def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:
     assert any(reason.startswith("Complexity threshold exceeded") for reason in reasons)
     assert any(reason.startswith("Coupling threshold exceeded") for reason in reasons)
     assert any(reason.startswith("Cohesion threshold exceeded") for reason in reasons)
-    assert any(reason.startswith("Dependency cycles detected") for reason in reasons)
+    assert any(
+        reason.startswith("Import-time dependency cycles detected")
+        for reason in reasons
+    )
     assert any(reason.startswith("Dead code detected") for reason in reasons)
     assert any(reason.startswith("Health score below threshold") for reason in reasons)
     assert any(reason.startswith("New high-risk functions") for reason in reasons)
     assert any(reason.startswith("New high-coupling classes") for reason in reasons)
-    assert any(reason.startswith("New dependency cycles") for reason in reasons)
+    assert any(
+        reason.startswith("New import-time dependency cycles") for reason in reasons
+    )
     assert any(reason.startswith("New dead code items") for reason in reasons)
     assert any(reason.startswith("Health score regressed") for reason in reasons)
 
@@ -1983,6 +1991,7 @@ def test_metric_gate_reasons_new_metrics_optional_buckets_empty() -> None:
             new_cycles=(("pkg.a", "pkg.b"),),
             new_dead_code=(),
             health_delta=-2,
+            new_import_cycles=(("pkg.a", "pkg.b"),),
         ),
         config=MetricGateConfig(
             fail_complexity=-1,
@@ -1995,7 +2004,7 @@ def test_metric_gate_reasons_new_metrics_optional_buckets_empty() -> None:
         ),
     )
     assert reasons == (
-        "New dependency cycles vs metrics baseline: 1.",
+        "New import-time dependency cycles vs metrics baseline: 1.",
         "Health score regressed vs metrics baseline: delta=-2.",
     )
 
