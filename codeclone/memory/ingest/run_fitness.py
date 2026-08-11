@@ -45,6 +45,35 @@ UNMEASURED_POPULATION = "unmeasured"
 REFUSAL_UNMEASURED = "health_population_unmeasured"
 
 
+def unmeasured_refusal_message(*, root: str) -> str:
+    """The whole refusal a human reads: the cause, then the commands to type.
+
+    One owner for the wording, and deliberately here rather than in the CLI:
+    this module already owns the refusal vocabulary
+    (:data:`REFUSAL_UNMEASURED`), so a remedy owned by one surface would leave
+    every other surface either silent or free to invent a second, drifting
+    explanation of the same refusal. The CLI relays this string whole.
+
+    The step is derived from the cause rather than attached to it.
+    ``unmeasured`` means the run opened none of the files it found, so
+    repeating the ingest unchanged would repeat the refusal: the operator has
+    to see *why* nothing was read first — ``inventory.files`` reports found
+    against analyzed beside the skip counters that name it — and only then
+    re-run the ingest.
+    """
+
+    return (
+        "Refusing to ingest analysis facts from a run whose health population "
+        f"is {UNMEASURED_POPULATION!r}: no file was analysed, so every "
+        "extracted fact would describe code this run never read. "
+        f"Next step: run `codeclone {root}` and read inventory.files — it "
+        "reports how many Python files were found against how many were "
+        "analyzed, with the skip counters that name the cause. Once at least "
+        "one Python file under that root is readable and parses, re-run "
+        f"`codeclone memory init --root {root}`."
+    )
+
+
 def _stated(value: object) -> str:
     text = str(value or "").strip()
     return text or UNKNOWN
@@ -129,4 +158,5 @@ __all__ = [
     "read_run_fitness",
     "run_fitness_evidence",
     "run_fitness_evidence_id",
+    "unmeasured_refusal_message",
 ]

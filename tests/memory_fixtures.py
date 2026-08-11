@@ -17,8 +17,10 @@ from codeclone.audit.schema import open_audit_db
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.application import MemoryApplicationContext
+from codeclone.memory.exceptions import UnfitAnalysisRunError
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
+from codeclone.memory.ingest.run_fitness import unmeasured_refusal_message
 from codeclone.memory.models import (
     MemoryProject,
     MemoryRecord,
@@ -205,6 +207,18 @@ def memory_project_db_paths(root: Path) -> tuple[MemoryProject, Path]:
         msg = f"memory db path must stay under test root: {db_path}"
         raise ValueError(msg)
     return project, db_path
+
+
+def unfit_run_refusal(root: Path) -> UnfitAnalysisRunError:
+    """The exact refusal a memory init raises for a run that measured nothing.
+
+    Built here so a CLI test can raise the real typed outcome carrying the
+    real wording without importing the memory ingest package itself: ingest
+    sits at ring r2p and a CLI test module sits at r4, which the architecture
+    ratchet does not allow to reach across.
+    """
+
+    return UnfitAnalysisRunError(unmeasured_refusal_message(root=str(root)))
 
 
 def memory_application_context(root: Path) -> MemoryApplicationContext:

@@ -221,6 +221,29 @@ def test_run_that_measured_nothing_is_refused_by_ingest(tmp_path: Path) -> None:
     assert not db_path.exists()
 
 
+def test_refusal_carries_a_next_step_the_operator_can_run(tmp_path: Path) -> None:
+    """A typed outcome ships with an executable next step, not just a cause.
+
+    "Your run measured nothing" tells an operator what happened and leaves
+    them with no move. The refusal must name the command that shows *why*
+    nothing was read and the command to retry once that is fixed, both
+    spelled with the real subcommand and flag names.
+    """
+
+    root, document = _repo_with_run(tmp_path, found=2, analyzed=0)
+
+    with pytest.raises(UnfitAnalysisRunError) as excinfo:
+        _ingest(root, document)
+
+    message = str(excinfo.value)
+    assert "Next step:" in message, message
+    # The analysis command that reports found against analyzed, plus the
+    # skip counters that name the cause.
+    assert f"codeclone {root}" in message, message
+    # The retry, spelled with the flag `memory init` actually takes.
+    assert f"codeclone memory init --root {root}" in message, message
+
+
 def test_mcp_sync_skips_the_run_that_measured_nothing(tmp_path: Path) -> None:
     """The MCP auto-bootstrap path refuses too, and says why.
 

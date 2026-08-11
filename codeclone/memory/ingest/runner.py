@@ -39,7 +39,12 @@ from .extractors import (
     extract_test_anchors,
     merge_batches,
 )
-from .run_fitness import RunFitness, read_run_fitness, run_fitness_evidence
+from .run_fitness import (
+    RunFitness,
+    read_run_fitness,
+    run_fitness_evidence,
+    unmeasured_refusal_message,
+)
 
 
 def enrich_batch_git_evidence(batch: RecordBatch, git: GitProvenance) -> None:
@@ -229,11 +234,7 @@ def run_memory_init(
         # Refused before anything is resolved or created: a run that observed
         # none of the population it found has no facts to contribute, and its
         # extractors would still speak — they read the *found* file registry.
-        raise UnfitAnalysisRunError(
-            "Refusing to ingest analysis facts from a run whose health "
-            f"population is {fitness.population!r}: no file was analysed, so "
-            "every extracted fact would describe code this run never read."
-        )
+        raise UnfitAnalysisRunError(unmeasured_refusal_message(root=str(root_path)))
 
     resolved_root = root_path.resolve()
     config = resolve_memory_config(resolved_root)
