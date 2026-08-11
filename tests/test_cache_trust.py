@@ -24,6 +24,10 @@ with executable evidence, not prose:
 The last section generalizes candidate 2 from four named constants into the
 class law they are instances of (X-02): a bump of ANY revision whose output is
 stored in a cache payload must miss exactly the lane carrying that output.
+X-03 then widens WHO the law is asked of: from a family recognised by the
+spelling of its name to every constant of the contracts ring, because the
+calibrated risk bands - whose verdict word IS a stored payload field - are not
+spelled like a revision and rode a warm hit unnoticed.
 """
 
 from __future__ import annotations
@@ -41,9 +45,15 @@ import pytest
 import codeclone.cache.reuse as cache_reuse
 import codeclone.contracts as contracts
 from codeclone.cache.integrity import cache_envelope_checksum
-from codeclone.cache.reuse import build_module_dependent_profile
+from codeclone.cache.reuse import (
+    build_module_dependent_profile,
+    build_module_neutral_profile,
+)
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
+from codeclone.metrics.cohesion import cohesion_risk
+from codeclone.metrics.complexity import risk_level
+from codeclone.metrics.coupling import coupling_risk
 from codeclone.models import DigestObject
 from codeclone.paths.module_identity.manifest import build_module_identity_manifest
 from tests.test_cache import (
@@ -309,14 +319,32 @@ def test_cache_integrity_vocabulary_is_checksum_not_signature() -> None:
 #
 # The law, stated once and enforced over the whole constant family:
 #
-#   A contracts constant that declares the generation of an algorithm, policy
-#   or catalog whose OUTPUT IS STORED in a cache payload must be an input of
-#   that payload's reuse profile. A constant that declares no stored output
+#   A contracts constant whose OUTPUT IS STORED in a cache payload must be an
+#   input of that payload's reuse profile. A constant with no stored output
 #   must NOT be an input of either profile - over-invalidation throws away a
 #   warm cache that is still correct, which is a defect in the other direction.
 #
-# Every constant of the family is classified here, so a NEW revision constant
-# fails the completeness test until its author decides which lane it belongs to.
+# X-03 - who the law is asked of.
+#
+# X-02 asked it of a family recognised by name: anything spelled with VERSION,
+# REVISION, SCHEMA, CATALOG or POLICY. That rule covered 49 of the 110 constants
+# in ``codeclone.contracts``, and the 61 it left out were assumed to be paths,
+# URLs and option defaults. Five of them were not. The calibrated risk bands
+# (COMPLEXITY_RISK_*_MAX, COUPLING_RISK_*_MAX, COHESION_RISK_MEDIUM_MAX) are the
+# producers of ``units[].risk`` and ``class_metrics[].risk_coupling`` /
+# ``risk_cohesion`` - stored payload fields, served verbatim off a warm hit - so
+# a recalibration of a band left every warm-cache user's risk classification
+# exactly as it was, under the new calibration's name. The score-change law
+# admits a band move only after an independent blind benchmark; a silent warm
+# lane would spend that whole procedure on nothing.
+#
+# So the membership rule is no longer a spelling. The question is asked of EVERY
+# public constant of the contracts ring, which is the only mechanical rule that
+# asks it of the constants nobody thought to name like a revision. (Limitation
+# stated on purpose: a generation constant defined outside ``contracts`` is out
+# of this registry's reach - ``CLAUDE.md`` requires them to live here, and
+# ``_DEPENDENCY_OBSERVATION_REVISION`` is deliberately local to the profile
+# module it keys.)
 # --------------------------------------------------------------------------- #
 
 #: Cache payload lanes (``CacheEntryV3.module_neutral`` / ``module_dependent``).
@@ -325,11 +353,17 @@ _LANE_DEPENDENT: Final = "dependent"
 #: Not a direct profile input: carried into the dependent profile by the module
 #: manifest digest, which the profile already consumes.
 _LANE_MODULE_MANIFEST: Final = "module_manifest"
-#: Declares nothing that is stored in a cache payload.
+#: Not a direct profile input either, and for a sharper reason: the constant is
+#: the DEFAULT of an analysis option, and what the profile binds is the option
+#: value in force. Wiring the default itself would key the cache on a number the
+#: run may not be using. The reason column names the profile input that carries
+#: it, and the test below proves that input moves the digest.
+_LANE_EFFECTIVE_CONFIG: Final = "effective_config"
+#: Nothing this constant produces is stored in a cache payload.
 _LANE_NONE: Final = "none"
 
-#: Every ``*_VERSION`` / ``*_REVISION`` / schema / catalog / policy constant in
-#: ``codeclone.contracts``, classified by the cache lane carrying its output.
+#: Every public constant of ``codeclone.contracts``, classified by the cache
+#: lane carrying its output.
 _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     # ── neutral lane · CacheNeutralPayload: units, blocks, segments, semantics
     "BASELINE_FINGERPRINT_VERSION": (_LANE_NEUTRAL, "units[].fingerprint"),
@@ -337,6 +371,18 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
         _LANE_NEUTRAL,
         "units[].cyclomatic_complexity and units[].risk are the source-decision "
         "counter's output and are served verbatim off a warm hit (X-02)",
+    ),
+    "COMPLEXITY_RISK_LOW_MAX": (
+        _LANE_NEUTRAL,
+        "units[].risk IS this band's verdict word: metrics.complexity.risk_level "
+        "classifies at extraction and rehydrate_cache_neutral serves the stored "
+        "word without re-classifying (X-03)",
+    ),
+    "COMPLEXITY_RISK_MEDIUM_MAX": (
+        _LANE_NEUTRAL,
+        "units[].risk IS this band's verdict word: metrics.complexity.risk_level "
+        "classifies at extraction and rehydrate_cache_neutral serves the stored "
+        "word without re-classifying (X-03)",
     ),
     "RENAMED_STRUCTURE_ALGORITHM_REVISION": (
         _LANE_NEUTRAL,
@@ -359,6 +405,24 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     ),
     # ── dependent lane · CacheDependentPayload
     "API_SURFACE_SIGNATURE_VERSION": (_LANE_DEPENDENT, "api_surface"),
+    "COHESION_RISK_MEDIUM_MAX": (
+        _LANE_DEPENDENT,
+        "class_metrics[].risk_cohesion IS this band's verdict word: "
+        "analysis.class_metrics classifies at extraction and the cache row is "
+        "rehydrated without re-classifying (X-03)",
+    ),
+    "COUPLING_RISK_LOW_MAX": (
+        _LANE_DEPENDENT,
+        "class_metrics[].risk_coupling IS this band's verdict word: "
+        "analysis.class_metrics classifies at extraction and the cache row is "
+        "rehydrated without re-classifying (X-03)",
+    ),
+    "COUPLING_RISK_MEDIUM_MAX": (
+        _LANE_DEPENDENT,
+        "class_metrics[].risk_coupling IS this band's verdict word: "
+        "analysis.class_metrics classifies at extraction and the cache row is "
+        "rehydrated without re-classifying (X-03)",
+    ),
     "DESIGN_METRICS_ALGORITHM_REVISION": (
         _LANE_DEPENDENT,
         "class_metrics (cbo, lcom4, coupling/cohesion risk)",
@@ -376,6 +440,14 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
         "inside the module identity manifest, whose digest the dependent "
         "profile already consumes",
     ),
+    # ── carried by the option value in force; the reason names the profile
+    #    input, and the test below proves that input moves the digest
+    "DEFAULT_BLOCK_MIN_LOC": (_LANE_EFFECTIVE_CONFIG, "block_min_loc"),
+    "DEFAULT_BLOCK_MIN_STMT": (_LANE_EFFECTIVE_CONFIG, "block_min_stmt"),
+    "DEFAULT_MIN_LOC": (_LANE_EFFECTIVE_CONFIG, "min_loc"),
+    "DEFAULT_MIN_STMT": (_LANE_EFFECTIVE_CONFIG, "min_stmt"),
+    "DEFAULT_SEGMENT_MIN_LOC": (_LANE_EFFECTIVE_CONFIG, "segment_min_loc"),
+    "DEFAULT_SEGMENT_MIN_STMT": (_LANE_EFFECTIVE_CONFIG, "segment_min_stmt"),
     # ── no stored output: computed per run OVER cached facts, never stored
     "AUTHORITY_ANALYSIS_REVISION": (_LANE_NONE, "aggregate authority pass, post-cache"),
     "AUTHORITY_REGISTRY_VERSION": (_LANE_NONE, "aggregate authority pass, post-cache"),
@@ -433,18 +505,138 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
         "dead constant; source kind is derived per run from the path and is not "
         "stored in either payload",
     ),
+    # ── no stored output: hash domains of artifacts outside the analysis cache
+    "BASELINE_LANE_DIGEST_DOMAIN": (_LANE_NONE, "baseline container lane digest"),
+    "BASELINE_ROOT_DIGEST_DOMAIN": (_LANE_NONE, "baseline container root digest"),
+    "REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
+    "REPORT_COMPARISON_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
+    "REPORT_ENVELOPE_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
+    "REPORT_EVALUATION_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
+    # ── no stored output: thresholds READ over stored facts, never stored with
+    #    them. A gate threshold decides a verdict at report time; moving it must
+    #    not re-parse a single file (the risk BANDS above are the opposite case
+    #    precisely because their word is written into the payload).
+    "DEFAULT_COHESION_THRESHOLD": (_LANE_NONE, "gate threshold over stored lcom4"),
+    "DEFAULT_COMPLEXITY_THRESHOLD": (
+        _LANE_NONE,
+        "gate threshold over stored cyclomatic_complexity",
+    ),
+    "DEFAULT_COUPLING_THRESHOLD": (_LANE_NONE, "gate threshold over stored cbo"),
+    "DEFAULT_COVERAGE_MIN": (_LANE_NONE, "gate threshold, post-cache"),
+    "DEFAULT_HEALTH_THRESHOLD": (
+        _LANE_NONE,
+        "gate threshold over the health projection, post-cache",
+    ),
+    "DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD": (
+        _LANE_NONE,
+        "report presentation threshold, post-cache",
+    ),
+    "DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD": (
+        _LANE_NONE,
+        "report presentation threshold, post-cache",
+    ),
+    "DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD": (
+        _LANE_NONE,
+        "report presentation threshold, post-cache",
+    ),
+    # ── no stored output: locations, budgets, process shape and links
+    "DEFAULT_BASELINE_PATH": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_HTML_REPORT_PATH": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_JSON_REPORT_PATH": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_MARKDOWN_REPORT_PATH": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_MAX_BASELINE_SIZE_MB": (_LANE_NONE, "artifact size budget"),
+    "DEFAULT_MAX_CACHE_SIZE_MB": (_LANE_NONE, "cache size budget, not a payload fact"),
+    "DEFAULT_PROCESSES": (
+        _LANE_NONE,
+        "worker count; every stored fact is per file and identical under any "
+        "split of the work",
+    ),
+    "DEFAULT_ROOT": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_SARIF_REPORT_PATH": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_TEXT_REPORT_PATH": (_LANE_NONE, "filesystem location"),
+    "DOCS_URL": (_LANE_NONE, "presentation link"),
+    "ISSUES_URL": (_LANE_NONE, "presentation link"),
+    "REPOSITORY_URL": (_LANE_NONE, "presentation link"),
+    # ── no stored output: the health projection is computed per run OVER the
+    #    stored facts. A weight, a reference permille or a saturation multiple
+    #    changes the score, never a payload field.
+    "HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COMPLEXITY_ELEVATED_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COMPLEXITY_EXTREME_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COMPLEXITY_OUTLIER_SATURATION_MULTIPLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COMPLEXITY_OUTLIER_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COMPLEXITY_TAIL_SATURATION_MULTIPLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COMPLEXITY_TYPICAL_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COUPLING_ELEVATED_REFERENCE_PERMILLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COUPLING_ELEVATED_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COUPLING_EXTREME_REFERENCE_PERMILLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COUPLING_EXTREME_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COUPLING_OUTLIER_SATURATION_MULTIPLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COUPLING_OUTLIER_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_COUPLING_TYPICAL_WEIGHT": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_DEPENDENCY_CYCLE_PENALTY": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_DEPENDENCY_DEFERRED_CYCLE_PENALTY": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY": (
+        _LANE_NONE,
+        "health projection, post-cache",
+    ),
+    "HEALTH_DEPENDENCY_DEPTH_P95_MARGIN": (_LANE_NONE, "health projection, post-cache"),
+    "HEALTH_WEIGHTS": (_LANE_NONE, "health projection, post-cache"),
+    # ── no stored output: computed OVER stored tokens, like its own revision
+    "NEAR_MISS_MAX_EDIT_STATEMENTS": (
+        _LANE_NONE,
+        "the near-miss tier groups over the stored statement tokens; the tokens "
+        "themselves are not a function of this edit budget",
+    ),
 }
 
-#: Membership law of the family, deliberately wider than "_VERSION": a new
-#: revision is easy to name in a way that a narrow suffix rule would miss.
-_FAMILY_TOKENS: Final = ("VERSION", "REVISION", "SCHEMA", "CATALOG", "POLICY")
 
+def _contracts_constant_names() -> frozenset[str]:
+    """Membership: every public constant of the contracts ring, no name rule.
 
-def _family_constant_names() -> frozenset[str]:
+    X-02 asked the question of constants spelled VERSION/REVISION/SCHEMA/
+    CATALOG/POLICY, which is a rule about naming habits rather than about where
+    a value ends up. The risk bands are the counter-example that cost a
+    generation of warm caches their risk classification, so the spelling is
+    gone: a constant that lands in ``codeclone.contracts`` is asked whether its
+    output is stored, whatever it is called.
+    """
+
     return frozenset(
-        name
-        for name in dir(contracts)
-        if name.isupper() and any(token in name for token in _FAMILY_TOKENS)
+        name for name in dir(contracts) if name.isupper() and not name.startswith("_")
     )
 
 
@@ -456,7 +648,9 @@ def _shifted(value: object) -> object:
     return f"{value}-bumped"
 
 
-def _bump_everywhere(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+def _bump_everywhere(
+    monkeypatch: pytest.MonkeyPatch, name: str, *, value: object | None = None
+) -> None:
     """Bump one contracts constant the way a real bump lands.
 
     A constant is consumed through ``from ..contracts import NAME``, so the
@@ -465,10 +659,15 @@ def _bump_everywhere(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     imported ``codeclone`` module that holds this name at its current value is
     patched, which is exactly the state of the world one commit after an author
     edits the constant.
+
+    ``value`` re-points the constant at a chosen number instead of shifting it
+    out of range. A generic shift proves a digest is keyed on the constant; a
+    chosen edge value proves the constant still DECIDES something for a real
+    input, which is what a calibrated band has to be shown to do.
     """
 
     current = getattr(contracts, name)
-    shifted = _shifted(current)
+    shifted = _shifted(current) if value is None else value
     monkeypatch.setattr(contracts, name, shifted)
     for module_name, module in list(sys.modules.items()):
         if not module_name.startswith("codeclone.") or not isinstance(
@@ -480,7 +679,11 @@ def _bump_everywhere(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
 
 
 def _lane_hits_after_bump(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    *,
+    value: object | None = None,
 ) -> tuple[bool, bool]:
     """Return (neutral_hit, dependent_hit) for a warm entry after one bump.
 
@@ -500,7 +703,7 @@ def _lane_hits_after_bump(
     _save_single_cache_entry(cache_path)
     _, entry = _load_cache_entry(cache_path, "x.py")
 
-    _bump_everywhere(monkeypatch, name)
+    _bump_everywhere(monkeypatch, name, value=value)
 
     reader = Cache(cache_path, root=tmp_path)
     _bind_module_paths(reader, "x.py")
@@ -508,16 +711,18 @@ def _lane_hits_after_bump(
     return decision.neutral.hit, decision.dependent.hit
 
 
-def test_every_contracts_version_constant_declares_its_cache_lane() -> None:
-    """A new revision constant must be classified before it can ship.
+def test_every_contracts_constant_declares_its_cache_lane() -> None:
+    """A new contracts constant must be classified before it can ship.
 
     This is the half that makes the law a class law instead of a longer list of
-    named guards: the author of the next revision cannot stay silent about
-    whether its output is cached.
+    named guards: the author of the next constant cannot stay silent about
+    whether its output is cached. X-03 removed the name filter that stood here,
+    because the constants that escaped it were exactly the ones nobody thought
+    of as generations - calibrated numbers whose verdict word is a stored field.
     """
 
     declared = frozenset(_CACHE_LANE_BY_CONSTANT)
-    actual = _family_constant_names()
+    actual = _contracts_constant_names()
     assert actual - declared == frozenset(), (
         "unclassified contracts constants - declare the cache lane whose payload "
         f"stores their output, or _LANE_NONE with a reason: {sorted(actual - declared)}"
@@ -628,3 +833,140 @@ def test_module_identity_version_is_carried_by_the_manifest_digest(
     before = digest()
     _bump_everywhere(monkeypatch, "MODULE_IDENTITY_VERSION")
     assert digest() != before
+
+
+@pytest.mark.parametrize(
+    ("constant", "profile_input"),
+    sorted(
+        (name, reason)
+        for name, (lane, reason) in _CACHE_LANE_BY_CONSTANT.items()
+        if lane == _LANE_EFFECTIVE_CONFIG
+    ),
+)
+def test_option_default_is_carried_by_the_effective_profile_input(
+    constant: str, profile_input: str
+) -> None:
+    """The clone floors reach the profile as the value in force, not as defaults.
+
+    These constants are the only ones that would read as over-invalidation in
+    the harness above for the wrong reason, so they get a carriage proof of
+    their own instead of a silent excuse. What matters is that the neutral
+    profile is a FUNCTION of the floor the run is using: change the floor and a
+    unit becomes clone-eligible that was not, so the stored population moves.
+    Wiring the default itself would key the cache on a number a configured run
+    is not using at all.
+
+    The reason column of the registry is the profile keyword, so this test also
+    stops that column from rotting into prose - a wrong keyword is a TypeError,
+    not a comment nobody re-reads.
+    """
+
+    baseline_kwargs: dict[str, object] = {
+        "fingerprint_version": contracts.BASELINE_FINGERPRINT_VERSION,
+        "min_loc": contracts.DEFAULT_MIN_LOC,
+        "min_stmt": contracts.DEFAULT_MIN_STMT,
+        "block_min_loc": contracts.DEFAULT_BLOCK_MIN_LOC,
+        "block_min_stmt": contracts.DEFAULT_BLOCK_MIN_STMT,
+        "segment_min_loc": contracts.DEFAULT_SEGMENT_MIN_LOC,
+        "segment_min_stmt": contracts.DEFAULT_SEGMENT_MIN_STMT,
+    }
+    assert baseline_kwargs[profile_input] == getattr(contracts, constant)
+
+    moved_kwargs = dict(baseline_kwargs)
+    moved_kwargs[profile_input] = cast(int, baseline_kwargs[profile_input]) + 1
+    baseline = build_module_neutral_profile(**baseline_kwargs)  # type: ignore[arg-type]
+    moved = build_module_neutral_profile(**moved_kwargs)  # type: ignore[arg-type]
+    assert baseline.value != moved.value, (
+        f"{profile_input} moved and the neutral profile did not: the floor in "
+        f"force is not an input, so {constant} reaches the cache through nothing"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# X-03 - the bands decide, and the decision is stored.
+#
+# The three tests below are the reachability half of the law. A parametrized
+# bump proves a digest is keyed on a constant; it does not prove the constant
+# still decides anything, and a band wired into a profile while classifying
+# nothing would be exactly the theatre this project forbids. Each test names a
+# real input - a measurement sitting on the band edge - moves the edge by one,
+# and shows the same input now earns a DIFFERENT stored word. That is what makes
+# the warm hit a lie rather than a stale-looking number.
+#
+# The move is a monkeypatch inside the test. The shipped calibration is not
+# touched: moving a published band is a user-facing score change and is governed
+# by the blind-benchmark law, which is precisely why the warm lane must not
+# silently absorb it.
+# --------------------------------------------------------------------------- #
+
+
+def test_complexity_band_move_changes_the_word_stored_in_units_risk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``units[].risk`` is the band's verdict, and it is served verbatim."""
+
+    edge = contracts.COMPLEXITY_RISK_LOW_MAX
+    assert risk_level(edge) == "low"
+
+    neutral_hit, _dependent_hit = _lane_hits_after_bump(
+        tmp_path, monkeypatch, "COMPLEXITY_RISK_LOW_MAX", value=edge - 1
+    )
+
+    assert risk_level(edge) == "medium", (
+        "no input reaches the moved band - the guard would be unreachable"
+    )
+    assert not neutral_hit, (
+        "the complexity band moved and the neutral lane still hit: a warm run "
+        "serves the pre-move risk word for a function whose classification the "
+        "recalibration changed"
+    )
+
+
+def test_coupling_band_move_changes_the_word_stored_in_class_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``class_metrics[].risk_coupling`` is the band's verdict, stored per class."""
+
+    edge = contracts.COUPLING_RISK_LOW_MAX
+    assert coupling_risk(edge) == "low"
+
+    neutral_hit, dependent_hit = _lane_hits_after_bump(
+        tmp_path, monkeypatch, "COUPLING_RISK_LOW_MAX", value=edge - 1
+    )
+
+    assert coupling_risk(edge) == "medium", (
+        "no input reaches the moved band - the guard would be unreachable"
+    )
+    assert not dependent_hit, (
+        "the coupling band moved and the dependent lane still hit: a warm run "
+        "serves the pre-move risk_coupling word"
+    )
+    assert neutral_hit, (
+        "a coupling band is a dependent-lane fact; invalidating the neutral "
+        "lane too would re-parse every unit for nothing"
+    )
+
+
+def test_cohesion_band_move_changes_the_word_stored_in_class_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``class_metrics[].risk_cohesion`` is the band's verdict, stored per class."""
+
+    edge = contracts.COHESION_RISK_MEDIUM_MAX
+    assert cohesion_risk(edge) == "medium"
+
+    neutral_hit, dependent_hit = _lane_hits_after_bump(
+        tmp_path, monkeypatch, "COHESION_RISK_MEDIUM_MAX", value=edge - 1
+    )
+
+    assert cohesion_risk(edge) == "high", (
+        "no input reaches the moved band - the guard would be unreachable"
+    )
+    assert not dependent_hit, (
+        "the cohesion band moved and the dependent lane still hit: a warm run "
+        "serves the pre-move risk_cohesion word"
+    )
+    assert neutral_hit, (
+        "a cohesion band is a dependent-lane fact; invalidating the neutral "
+        "lane too would re-parse every unit for nothing"
+    )
