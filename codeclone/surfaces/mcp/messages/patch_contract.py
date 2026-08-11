@@ -13,12 +13,12 @@ from typing import Final
 
 NEXT_STEP_HINTS: Final[dict[str, str]] = {
     "no_before_run": (
-        "Run analyze_repository, then pass the run_id as"
+        "Run analyze_repository(root=<repo root>), then pass the run_id as"
         " before_run_id — or pass intent_id to auto-resolve."
     ),
     "no_after_run": (
-        "Run analyze_repository after editing, then pass the"
-        " new run_id as after_run_id."
+        "Run analyze_repository(root=<repo root>) after editing, then pass"
+        " the new run_id as after_run_id."
     ),
     "after_run_not_new": (
         "No analysis ran for this root since the intent went active, or the "
@@ -31,16 +31,16 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
     ),
     "after_run_required_for_governance": (
         "Governance config changes require a post-edit analysis."
-        " Run analyze_repository and pass after_run_id."
+        " Run analyze_repository(root=<repo root>) and pass after_run_id."
     ),
     "before_run_root_mismatch": (
         "The before-run belongs to a different repository root than the"
-        " intent. Run analyze_repository on the intent's own root and pass"
-        " that run_id as before_run_id."
+        " intent. Run analyze_repository(root=<intent root>) on the intent's"
+        " own root and pass that run_id as before_run_id."
     ),
     "incomparable_runs": (
         "Before and after runs are not comparable."
-        " Re-run analyze_repository with the same settings."
+        " Re-run analyze_repository(root=<repo root>) with the same settings."
     ),
     "intent_not_active": (
         "Queued intent must be promoted before editing or"
@@ -49,24 +49,27 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
     ),
     "report_digest_mismatch": (
         "Intent was declared against a different report. Call "
-        "finish_controlled_change with the original intent_id and its original "
-        "before_run_id. Do not redeclare on the after-run: a fresh intent "
-        "would bind to the post-edit report, making before and after the same "
-        "run. If the original before-run is gone from this session, bridge it "
-        "with manage_change_intent(action='declare', run_id=<pre-edit run_id>) "
+        "finish_controlled_change(intent_id=..., before_run_id=...) with the "
+        "original intent_id and its original before_run_id. Do not redeclare "
+        "on the after-run: a fresh intent would bind to the post-edit report, "
+        "making before and after the same run. If the original before-run is "
+        "gone from this session, bridge it with "
+        "manage_change_intent(action='declare', run_id=<pre-edit run_id>) "
         "before verifying."
     ),
     "state_artifact_mutation": (
         "Baseline, cache, or generated state was touched. Revert those paths, "
-        "then call finish_controlled_change again with changed_files listing "
-        "only source files. Baseline and generated state require a separate "
-        "explicit workflow and never verify through this contract."
+        "then call finish_controlled_change(changed_files=[...]) again with "
+        "changed_files listing only source files. Baseline and generated "
+        "state require a separate explicit workflow and never verify through "
+        "this contract."
     ),
     "scope_violation": (
         "Patch touched files outside declared scope. Either revert the "
-        "out-of-scope files and call finish_controlled_change again, or — "
-        "after user approval — call start_controlled_change with the widened "
-        "scope and finish against the new intent_id."
+        "out-of-scope files and call finish_controlled_change(intent_id=...) "
+        "again, or — after user approval — call "
+        "start_controlled_change(root=..., scope=...) with the widened scope "
+        "and finish against the new intent_id."
     ),
 }
 

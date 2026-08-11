@@ -21,6 +21,10 @@ import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
+from codeclone.surfaces.mcp.messages.patch_contract import (
+    FINISH_OUTCOME_REASONS,
+    next_step_hint,
+)
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
 from codeclone.surfaces.mcp.session import MCPServiceContractError
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
@@ -1184,3 +1188,35 @@ def test_memory_refusal_steps_name_tools_this_server_registers() -> None:
         assert named, f"refusal step names no tool to call: {step}"
         unknown = sorted(set(named) - registered)
         assert not unknown, f"refusal step names unregistered tools: {unknown}"
+
+
+def test_patch_contract_steps_name_tools_this_server_registers() -> None:
+    """The same rule on the patch contract, the more load-bearing surface.
+
+    That a typed outcome names a call at all is its own surface's business and
+    is checked there. Whether the name answers belongs here, where the server
+    is built: the names are read out of the rendered step and compared to the
+    registry a caller actually reaches, so neither side keeps a list of tool
+    names to rot. Rename or withdraw a tool and this reds, instead of an agent
+    meeting the outcome and following a dead instruction.
+    """
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=4)
+    registered = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    steps = [
+        (reason, step)
+        for reason in sorted(FINISH_OUTCOME_REASONS)
+        if (step := next_step_hint(reason)) is not None
+    ]
+    assert steps, "no typed-outcome next_step was rendered, so nothing was checked"
+
+    checked = 0
+    for reason, step in steps:
+        named = tool_calls_named_in(step)
+        checked += len(named)
+        unknown = sorted(set(named) - registered)
+        assert not unknown, f"{reason} next_step names unregistered tools: {unknown}"
+    # Steps that name no call would leave this comparing nothing while green.
+    assert checked, "no next_step named a call, so no name reached the registry"
