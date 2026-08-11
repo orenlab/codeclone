@@ -45,14 +45,30 @@ from ..views import (
     WaterfallGroup,
     WaterfallRow,
 )
-from ..vocabulary import DB_COUNTER_VERSION
+from ..vocabulary import (
+    DB_COUNTER_VERSION,
+    OBSERVABILITY_PLANES,
+    PLANE_OBSERVER,
+    PLANE_RUNTIME,
+)
 from .schema import (
     observability_store_path,
+    operations_have_plane_column,
     read_db_counter_version,
     validate_observability_schema,
 )
 
 _DEFAULT_WINDOW = 20
+
+# Read-window plane selectors. Each plane spends its own window budget, so the
+# observer can never consume a slot the runtime needed; PLANE_ALL is the union
+# of the per-plane windows, not one shared window over everything.
+PLANE_ALL = "all"
+_SELECTABLE_PLANES = (*OBSERVABILITY_PLANES, PLANE_ALL)
+# Rows written before the plane column existed. Selectable only under
+# PLANE_ALL, and always counted separately: an unmarked row is not evidence
+# that the operation belonged to the runtime.
+_PLANE_UNATTRIBUTED = "unattributed"
 
 # Counters whose presence marks a span as *meant* to do productive work; when
 # they are all present-and-zero the span ran but touched nothing (a no-op).
@@ -169,6 +185,16 @@ def _span_views(
     return {key: tuple(value) for key, value in grouped.items()}
 
 
+def _row_plane(row: sqlite3.Row) -> str | None:
+    # sqlite3.Row membership tests values, so probe the column names — the same
+    # tolerance _span_view uses for stores written before a column existed.
+    columns = row.keys()
+    if "plane" not in columns:
+        return None
+    value = row["plane"]
+    return str(value) if value is not None else None
+
+
 def _operation_view(
     row: sqlite3.Row,
     spans: tuple[SpanView, ...],
@@ -179,6 +205,7 @@ def _operation_view(
         correlation_id=str(row["correlation_id"]),
         surface=str(row["surface"]),
         name=str(row["name"]),
+        plane=_row_plane(row),
         started_at_utc=str(row["started_at_utc"]),
         duration_ms=float(row["duration_ms"]),
         status=str(row["status"]),
@@ -215,6 +242,76 @@ def _by_correlations(
     )
 
 
+def _plane_counts(
+    conn: sqlite3.Connection, *, plane_column: bool
+) -> tuple[int, int, int]:
+    """``(runtime, observer, unattributed)`` over the whole store."""
+    if not plane_column:
+        total = int(
+            conn.execute("SELECT COUNT(*) FROM platform_operations").fetchone()[0]
+        )
+        return 0, 0, total
+    counts = {
+        (str(row[0]) if row[0] is not None else _PLANE_UNATTRIBUTED): int(row[1])
+        for row in conn.execute(
+            "SELECT plane, COUNT(*) FROM platform_operations GROUP BY plane"
+        )
+    }
+    return (
+        counts.get(PLANE_RUNTIME, 0),
+        counts.get(PLANE_OBSERVER, 0),
+        counts.get(_PLANE_UNATTRIBUTED, 0),
+    )
+
+
+def _plane_window_roots(
+    conn: sqlite3.Connection, *, plane: str, limit: int
+) -> list[sqlite3.Row]:
+    """The last ``limit`` root operations of one plane bucket.
+
+    One query per bucket is what makes the budgets independent: a plane can only
+    ever spend its own ``limit``, so no volume of observer calls can push a
+    runtime operation out of the runtime window.
+    """
+    predicate = "plane IS NULL" if plane == _PLANE_UNATTRIBUTED else "plane = ?"
+    parameters: tuple[object, ...] = (
+        (limit,) if plane == _PLANE_UNATTRIBUTED else (plane, limit)
+    )
+    return list(
+        conn.execute(
+            "SELECT operation_id, correlation_id FROM platform_operations "
+            f"WHERE parent_operation_id IS NULL AND {predicate} "
+            "ORDER BY started_at_utc DESC, operation_id DESC LIMIT ?",
+            parameters,
+        ).fetchall()
+    )
+
+
+def _window_roots(
+    conn: sqlite3.Connection, *, plane: str, plane_column: bool, limit: int
+) -> list[sqlite3.Row]:
+    if not plane_column:
+        # The store cannot tell the planes apart. Only the explicit "everything"
+        # window may read it; the runtime window refuses rather than guess.
+        if plane != PLANE_ALL:
+            return []
+        return list(
+            conn.execute(
+                "SELECT operation_id, correlation_id FROM platform_operations "
+                "WHERE parent_operation_id IS NULL "
+                "ORDER BY started_at_utc DESC, operation_id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        )
+    buckets = (
+        (*OBSERVABILITY_PLANES, _PLANE_UNATTRIBUTED) if plane == PLANE_ALL else (plane,)
+    )
+    rows: list[sqlite3.Row] = []
+    for bucket in buckets:
+        rows.extend(_plane_window_roots(conn, plane=bucket, limit=limit))
+    return rows
+
+
 def _select_operations(
     conn: sqlite3.Connection,
     *,
@@ -222,6 +319,8 @@ def _select_operations(
     correlation_id: str | None,
     session_id: str | None,
     last: int | None,
+    plane: str,
+    plane_column: bool,
 ) -> tuple[list[sqlite3.Row], str | None]:
     if operation_id is not None:
         row = conn.execute(
@@ -240,12 +339,12 @@ def _select_operations(
             (session_id,),
         ).fetchall()
         return list(rows), None
-    root_rows = conn.execute(
-        "SELECT operation_id, correlation_id FROM platform_operations "
-        "WHERE parent_operation_id IS NULL "
-        "ORDER BY started_at_utc DESC, operation_id DESC LIMIT ?",
-        (last if last is not None else _DEFAULT_WINDOW,),
-    ).fetchall()
+    root_rows = _window_roots(
+        conn,
+        plane=plane,
+        plane_column=plane_column,
+        limit=last if last is not None else _DEFAULT_WINDOW,
+    )
     if not root_rows:
         return [], None
     correlations = sorted({str(row["correlation_id"]) for row in root_rows})
@@ -761,13 +860,25 @@ def build_trace_view(
     correlation_id: str | None = None,
     session_id: str | None = None,
     last: int | None = None,
+    plane: str = PLANE_RUNTIME,
 ) -> TraceView:
+    """Build the read model for one plane's window (runtime unless asked).
+
+    The default is the runtime plane deliberately: ``query_platform_observability``
+    is itself an instrumented operation, and a shared window meant that reading
+    the instrument evicted the runtime evidence it had just named.
+    """
+    if plane not in _SELECTABLE_PLANES:
+        plane = PLANE_RUNTIME
+    plane_column = operations_have_plane_column(conn)
     rows, focus_id = _select_operations(
         conn,
         operation_id=operation_id,
         correlation_id=correlation_id,
         session_id=session_id,
         last=last,
+        plane=plane,
+        plane_column=plane_column,
     )
     operation_ids = [str(row["operation_id"]) for row in rows]
     spans_by_op = _span_views(conn, operation_ids)
@@ -778,10 +889,16 @@ def build_trace_view(
     by_id = {view.operation_id: view for view in flat}
     starts = [str(row["started_at_utc"]) for row in rows]
     operation_tree = _build_forest(rows, spans_by_op)
+    plane_counts = _plane_counts(conn, plane_column=plane_column)
     return TraceView(
         schema_version=PLATFORM_OBSERVABILITY_SCHEMA_VERSION,
         window_started_at_utc=min(starts) if starts else "",
         window_ended_at_utc=max(starts) if starts else "",
+        plane=plane,
+        plane_column_available=plane_column,
+        runtime_plane_operations=plane_counts[0],
+        observer_plane_operations=plane_counts[1],
+        unattributed_plane_operations=plane_counts[2],
         aggregates=_aggregates(flat, spans_by_op),
         focus_operation=by_id.get(focus_id) if focus_id is not None else None,
         operation_tree=operation_tree,
@@ -791,6 +908,7 @@ def build_trace_view(
 
 
 __all__ = [
+    "PLANE_ALL",
     "build_trace_view",
     "open_observability_store_readonly",
     "read_counter_semantics",

@@ -932,3 +932,48 @@ def test_legacy_transition_accepts_a_prior_fingerprint_generation(
     # the legacy artifact is imported.
     assert transition.from_fingerprint == "2"
     assert transition.imported_lanes == ()
+
+
+def test_publication_refuses_a_run_that_did_not_read_every_file(
+    tmp_path: Path,
+) -> None:
+    """A truncated run may not become the reference other runs are judged by.
+
+    A baseline built from a partial read bakes in a partial public API. Every
+    symbol that was never opened then reads as *removed* on the next complete
+    run — 556 phantom breaking changes in the reproduction that produced this
+    rule. The refusal is unconditional: no flag turns it off, because there is
+    no configuration in which publishing an incomplete reference is correct.
+    """
+
+    target = tmp_path / "baseline.json"
+
+    with pytest.raises(BaselinePublicationError) as excinfo:
+        publish_baseline(
+            target=target,
+            bundle=_bundle(),
+            scope_id=_SCOPE_ID,
+            max_size_bytes=5_000_000,
+            files_skipped=29,
+        )
+
+    assert excinfo.value.reason == "truncated_run"
+    assert "29" in str(excinfo.value)
+    assert not target.exists()
+
+
+def test_publication_proceeds_when_every_file_was_read(tmp_path: Path) -> None:
+    """The reverse skew: a complete run publishes exactly as before."""
+
+    target = tmp_path / "baseline.json"
+
+    receipt = publish_baseline(
+        target=target,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+        files_skipped=0,
+    )
+
+    assert receipt.outcome == "published"
+    assert target.exists()

@@ -980,3 +980,59 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
 
     assert cli_result == mcp_result == evaluator_result
     assert cli_result.reasons == expected_reasons
+
+
+def test_gate_state_carries_the_population_the_score_was_measured_over() -> None:
+    """The fact existed on the score and stopped one layer short of the gate.
+
+    ``HealthScore.population`` names whether the run read anything at all.
+    Until it reached ``GateState`` the gate could only see ``health.total``,
+    so an unmeasured run looked to it exactly like a measured clean one.
+    """
+
+    unmeasured = replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=0,
+            grade="F",
+            dimensions={"coverage": 0},
+            population="unmeasured",
+        ),
+    )
+
+    state = gate_state_from_project_metrics(
+        project_metrics=unmeasured,
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert state.health_population == "unmeasured"
+
+
+def test_gate_state_reports_a_measured_population_as_measured() -> None:
+    """The reverse skew: an ordinary run must not look unmeasured."""
+
+    state = gate_state_from_project_metrics(
+        project_metrics=_project_metrics(),
+        coverage_join=None,
+        metrics_diff=None,
+    )
+
+    assert state.health_population == "complete"
+
+
+def test_gate_state_carries_the_skipped_file_count() -> None:
+    """``files_skipped`` is carried to the pixel and asked by nobody.
+
+    It reaches the summary line and the HTML meta table, and no gate or budget
+    ever reads it. This is the seam where it enters a decision.
+    """
+
+    state = gate_state_from_project_metrics(
+        project_metrics=_project_metrics(),
+        coverage_join=None,
+        metrics_diff=None,
+        files_skipped=29,
+    )
+
+    assert state.files_skipped == 29

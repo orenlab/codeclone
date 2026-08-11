@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .reason_kind import ReasonKind
+from .vocabulary import PLANE_RUNTIME
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +61,9 @@ class OperationRecord:
     started_at_utc: str
     duration_ms: float
     status: str
+    # Which telemetry plane this operation belongs to: the product runtime, or
+    # the observation instrument itself. Resolved once at the write edge.
+    plane: str = PLANE_RUNTIME
     parent_operation_id: str | None = None
     error_kind: str | None = None
     session_id: str | None = None

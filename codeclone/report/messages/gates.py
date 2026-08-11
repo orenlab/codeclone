@@ -46,7 +46,18 @@ GATE_REASON_HEALTH_THRESHOLD: Final = "Health score below threshold: "
 GATE_REASON_TYPING_THRESHOLD: Final = "Typing coverage below threshold: "
 GATE_REASON_DOCSTRING_THRESHOLD: Final = "Docstring coverage below threshold: "
 
+# Neither a threshold nor a count: the run read no source file, so no metric
+# predicate has an answer here. Worded as a refusal rather than a failure so an
+# operator does not go looking for the debt that supposedly tripped it.
+GATE_REASON_UNMEASURED_POPULATION: Final = (
+    "unmeasured population: no source file was read, so no metric gate can be answered"
+)
+GATE_REASON_TRUNCATED_RUN: Final = (
+    "Run did not read every file it found (--fail-on-truncated-run): "
+)
+
 GATE_SUFFIX_CYCLES: Final = " cycle(s)"
 GATE_SUFFIX_ITEMS: Final = " item(s)"
+GATE_SUFFIX_FILES: Final = " file(s) skipped"
 
 GATE_FAILURE_HEADER: Final = "GATING FAILURE [{code}]"

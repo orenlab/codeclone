@@ -21,6 +21,12 @@ CLAIM_REASON_BASELINE_DEBT_NOT_REGRESSION: Final = (
 CLAIM_REASON_REPORT_ONLY_NOT_CI_FAILURE: Final = (
     "Report-only signals were not treated as CI gate failures."
 )
+CLAIM_REASON_UNVERIFIED_WORKSPACE_PATHS: Final = (
+    "Python files outside the declared scope were dirty in the working tree; "
+    "this review performed no structural check on them and makes no claim "
+    "about them."
+)
+
 CLAIM_REASON_SUPPRESSED_CLONE_NOT_REGRESSION: Final = (
     "Suppressed clone groups were not counted as active new regressions."
 )

@@ -406,6 +406,7 @@ def report(
                 new_block=new_block,
                 metrics_diff=_coerce_metrics_diff(metrics_diff),
                 baseline_trust=resolved_baseline_trust,
+                files_skipped=processing.files_skipped,
             )
         # Sealing hashes the whole document, so it is a heavyweight stage in
         # its own right and needs to be visible next to build and render.
@@ -518,6 +519,7 @@ def build_gate_config(args: object) -> MetricGateConfig:
         coverage_min=int(getattr(args, "coverage_min", DEFAULT_COVERAGE_MIN)),
         fail_on_new=bool(getattr(args, "fail_on_new", False)),
         fail_threshold=int(getattr(args, "fail_threshold", -1)),
+        fail_on_truncated_run=bool(getattr(args, "fail_on_truncated_run", False)),
     )
 
 
@@ -557,6 +559,7 @@ def gate_with_config(
     clone_threshold_total: int | None = None,
     baseline_trust: TrustVector | None = None,
     gate_config: MetricGateConfig | None = None,
+    files_skipped: int = 0,
 ) -> tuple[MetricGateConfig, GatingResult]:
     config = gate_config if gate_config is not None else _gate_config(boot)
     clone_new_count = len(tuple(new_func)) + len(tuple(new_block))
@@ -566,7 +569,11 @@ def gate_with_config(
         else max(clone_threshold_total, 0)
     )
     if analysis.project_metrics is None:
-        state = GateState(clone_new_count=clone_new_count, clone_total=clone_total)
+        state = GateState(
+            clone_new_count=clone_new_count,
+            clone_total=clone_total,
+            files_skipped=max(files_skipped, 0),
+        )
     else:
         state = _gate_state_from_metrics(
             project_metrics=analysis.project_metrics,
@@ -574,6 +581,7 @@ def gate_with_config(
             metrics_diff=metrics_diff,
             clone_new_count=clone_new_count,
             clone_total=clone_total,
+            files_skipped=files_skipped,
         )
     lane_trust: Mapping[str, str] | None = (
         None

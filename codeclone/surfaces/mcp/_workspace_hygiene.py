@@ -19,6 +19,9 @@ from ...api.workspace import (
     collect_workspace_dirty_snapshot,
 )
 from ...observability import span
+from ._verification_profile import (
+    _is_python_source,  # single owner of "this path is Python source"
+)
 from ._workspace_intent_lifecycle import (
     WorkspaceIntentStatus,
     is_terminal_workspace_intent_status,
@@ -182,6 +185,7 @@ class WorkspaceHygieneResult:
     new_unattributed_unscoped_dirty: tuple[str, ...] = ()
     modified_unattributed_unscoped_dirty: tuple[str, ...] = ()
     unknown_unattributed_unscoped_dirty: tuple[str, ...] = ()
+    unverified_python_unscoped_dirty: tuple[str, ...] = ()
     foreign_attributed_outside_scope: tuple[str, ...] = ()
     dirty_attribution: tuple[DirtyAttribution, ...] = ()
     dirty_snapshot: DirtySnapshot | None = None
@@ -203,6 +207,7 @@ class WorkspaceHygieneResult:
             "unknown_unattributed_unscoped": len(
                 self.unknown_unattributed_unscoped_dirty
             ),
+            "unverified_python_unscoped": len(self.unverified_python_unscoped_dirty),
             "foreign_attributed_outside_scope": len(
                 self.foreign_attributed_outside_scope
             ),
@@ -224,6 +229,14 @@ class WorkspaceHygieneResult:
         if self.unacknowledged_dirty_in_scope:
             payload["unacknowledged_dirty_in_scope"] = list(
                 self.unacknowledged_dirty_in_scope
+            )
+        # Coverage gap: summary-first, like unacknowledged in-scope dirt.
+        # These paths are what the patch did NOT verify, so they must not hide
+        # behind detail_level="full" — an accepted outcome that omits them
+        # reads as a clean verification of the whole tree.
+        if self.unverified_python_unscoped_dirty:
+            payload["unverified_python_unscoped_dirty"] = list(
+                self.unverified_python_unscoped_dirty
             )
         if self.dirty_snapshot is not None:
             payload["dirty_snapshot"] = self.dirty_snapshot.summary_payload()
@@ -412,6 +425,23 @@ def _declared_scope_sets(
         _normalize_path(path) for path in (allowed_related or ()) if path.strip()
     } - blocking_scope
     return blocking_scope, related_scope, blocking_scope | related_scope
+
+
+def paths_in_declared_scope(
+    paths: Sequence[str],
+    *,
+    allowed_files: Sequence[str],
+    allowed_related: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Return the subset of ``paths`` covered by a declared scope.
+
+    One owner for "is this path inside that intent's scope", shared by finish
+    hygiene and by the start-time check that refuses to replace an unfinished
+    intent whose scope still holds uncommitted work.
+    """
+
+    _blocking, _related, declared = _declared_scope_sets(allowed_files, allowed_related)
+    return tuple(sorted(path for path in paths if _path_in_scope(path, declared)))
 
 
 def _iter_foreign_intent_scope_matches(
@@ -632,6 +662,14 @@ def finish_hygiene_check(
     unattributed_unscoped = tuple(
         sorted(new_unattributed + modified_unattributed + unknown_unattributed)
     )
+    # Python outside the declared scope: the verification profile is derived
+    # from declared evidence, so these files were classified by nothing and
+    # compared against nothing. This lane states that coverage gap by name.
+    # It says nothing about authorship — "dirty" proves change, never who
+    # changed it — so it never blocks; CODECLONE_STRICT_FINISH owns blocking.
+    unverified_python_unscoped = tuple(
+        path for path in dirty_outside_declared if _is_python_source(path)
+    )
     unacknowledged = tuple(sorted(set(dirty_in_declared) - evidence))
     # Scope check covers only the agent's declared patch (its evidence).
     # Out-of-scope unattributed dirt is external context, not part of this
@@ -640,9 +678,9 @@ def finish_hygiene_check(
     files_for_scope_check = tuple(sorted(evidence))
     # Finish blocks ONLY on proven problems with the agent's own patch:
     # in-scope dirt missing from evidence, or a live foreign intent
-    # overlapping the declared scope. New/modified/unknown unattributed dirt
-    # outside the declared scope is non-blocking advisory (surfaced via
-    # dirty_paths_outside_scope and the attribution detail).
+    # overlapping the declared scope. Out-of-scope unattributed dirt is
+    # advisory — it is reported by name (see unverified_python_unscoped_dirty)
+    # and blocks only under CODECLONE_STRICT_FINISH.
     finish_block_reason = _finish_block_reason(
         unacknowledged=unacknowledged,
         foreign_dirty_overlaps=foreign_dirty_overlaps,
@@ -665,6 +703,7 @@ def finish_hygiene_check(
         new_unattributed_unscoped_dirty=new_unattributed,
         modified_unattributed_unscoped_dirty=modified_unattributed,
         unknown_unattributed_unscoped_dirty=unknown_unattributed,
+        unverified_python_unscoped_dirty=unverified_python_unscoped,
         foreign_attributed_outside_scope=tuple(sorted(foreign_attributed_outside)),
         dirty_attribution=attribution,
         dirty_snapshot=current_snapshot,
@@ -802,6 +841,8 @@ def _finish_block_reason(
         return "missing_evidence"
     if foreign_dirty_overlaps:
         return "foreign_dirty_overlap"
+    # Blocking on out-of-scope dirt stays opt-in: dirtiness proves that a file
+    # changed, never that this agent changed it.
     if _strict_finish_enabled(strict_finish) and unattributed_unscoped:
         return "own_unscoped_dirty"
     return None
@@ -963,5 +1004,6 @@ __all__ = [
     "evaluate_scoped_hygiene",
     "finish_hygiene_check",
     "hygiene_blocks_start_edit",
+    "paths_in_declared_scope",
     "workspace_dirty_summary",
 ]

@@ -39,6 +39,8 @@ class ReceiptPatchStatus(str, Enum):
     NOT_CHECKED = "not_checked"
 
 
+MAX_UNVERIFIED_RECEIPT_PATHS: Final = 10
+
 CLAIMS_NOT_MADE: Final[tuple[dict[str, str], ...]] = (
     {
         "claim_type": "security_vulnerability",
@@ -123,6 +125,8 @@ def derive_human_decision_points(
 
 def derive_claims_not_made(
     report_document: Mapping[str, object],
+    *,
+    unverified_paths: Sequence[str] = (),
 ) -> list[dict[str, object]]:
     claims: list[dict[str, object]] = [dict(item) for item in CLAIMS_NOT_MADE]
     if _suppressed_clone_count(report_document) > 0:
@@ -130,6 +134,19 @@ def derive_claims_not_made(
             {
                 "claim_type": "suppressed_clone_regression",
                 "reason": receipt_msgs.CLAIM_REASON_SUPPRESSED_CLONE_NOT_REGRESSION,
+            }
+        )
+    named = list(unverified_paths)
+    if named:
+        # The paths are named, not counted: a receipt that says "something was
+        # not checked" without saying what is not an attestation, it is a mood.
+        claims.append(
+            {
+                "claim_type": "unverified_workspace_paths",
+                "reason": receipt_msgs.CLAIM_REASON_UNVERIFIED_WORKSPACE_PATHS,
+                "paths": named[:MAX_UNVERIFIED_RECEIPT_PATHS],
+                "count": len(named),
+                "truncated": len(named) > MAX_UNVERIFIED_RECEIPT_PATHS,
             }
         )
     return claims
@@ -312,7 +329,11 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     else:
         lines.append(receipt_msgs.RECEIPT_MD_LIST_NONE)
     lines.extend(["", receipt_msgs.RECEIPT_MD_SECTION_CLAIMS_NOT_MADE])
-    lines.extend(f"- {claim.get('reason', '')}" for claim in claims)
+    for claim in claims:
+        lines.append(f"- {claim.get('reason', '')}")
+        # A claim that names paths renders them: the markdown receipt is what
+        # a human reads, and "no claim about them" is empty without "them".
+        lines.extend(f"  - `{path}`" for path in _as_sequence(claim.get("paths")))
     lines.extend(
         [
             "",

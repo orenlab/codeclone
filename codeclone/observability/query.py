@@ -18,17 +18,20 @@ payload bodies, no prompts.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
+from typing import Final
 
 from ..config.observability import resolve_observability_config
 from .runtime import DB_COUNTER_VERSION
 from .store.reader import (
+    PLANE_ALL,
     build_trace_view,
     open_observability_store_readonly,
     read_counter_semantics,
 )
 from .views import AggregatesView, OperationView, SpanView, TraceView
+from .vocabulary import PLANE_OBSERVER, PLANE_RUNTIME
 
 _DETAIL_LEVELS = ("compact", "normal", "full")
 _LIMIT_MIN = 1
@@ -71,8 +74,24 @@ def _db_per_call(total_queries: int, span_count: int) -> int:
     return round(total_queries / span_count) if span_count else 0
 
 
-def _envelope(section: str, detail_level: str, window: str) -> dict[str, object]:
-    return {
+# Window keywords, resolved to a telemetry plane. "latest" stays the default
+# and now means the last operations of the *runtime* plane only: this tool is
+# itself an instrumented MCP operation, and while both planes shared one
+# 20-slot window, ten diagnostic calls took half of it — the tool erased the
+# evidence its own summary had just pointed at. Anything else is still read as
+# a correlation id, so the parameter shape is unchanged.
+_WINDOW_PLANES: Final[Mapping[str, str]] = {
+    "latest": PLANE_RUNTIME,
+    "runtime": PLANE_RUNTIME,
+    "observer": PLANE_OBSERVER,
+    "all": PLANE_ALL,
+}
+
+
+def _envelope(
+    section: str, detail_level: str, window: str, plane: str | None
+) -> dict[str, object]:
+    envelope: dict[str, object] = {
         "surface": "platform_observability",
         "audience": "codeclone_development",
         "user_facing": False,
@@ -82,6 +101,10 @@ def _envelope(section: str, detail_level: str, window: str) -> dict[str, object]
         "detail_level": detail_level,
         "window": window,
     }
+    if plane is not None:
+        envelope["plane"] = plane
+        envelope["available_windows"] = sorted(_WINDOW_PLANES)
+    return envelope
 
 
 def _resolve_detail(detail_level: str, section: str, warnings: list[str]) -> str:
@@ -133,8 +156,9 @@ def _absent_status() -> str:
 
 
 def _build_trace(conn: sqlite3.Connection, window: str) -> TraceView:
-    if window == "latest":
-        return build_trace_view(conn)
+    plane = _WINDOW_PLANES.get(window)
+    if plane is not None:
+        return build_trace_view(conn, plane=plane)
     return build_trace_view(conn, correlation_id=window)
 
 
@@ -258,6 +282,27 @@ def _agent_context_body(agg: AggregatesView, cap: int) -> dict[str, object]:
     }
 
 
+def _analysis_phase_empty_message(agg: AggregatesView) -> str:
+    """Name the actual reason there are no rows.
+
+    The old single message blamed a disabled observer whatever the cause — so
+    the commonest case by far, an analysis that the read window had already
+    dropped, was reported as a configuration mistake that had not been made.
+    """
+    if not agg.operation_count:
+        return (
+            "no operations in this window; run with "
+            "CODECLONE_OBSERVABILITY_ENABLED=1 and a full analyze, or widen the "
+            "window."
+        )
+    return (
+        f"{agg.operation_count} operations in this window, none carrying "
+        "pipeline.process phase counters. The observer is collecting; either no "
+        "analysis ran in this window, or the analysis that did has aged out of "
+        "it — select its correlation id with window=<correlation_id>."
+    )
+
+
 def _analysis_phase_body(agg: AggregatesView, cap: int) -> dict[str, object]:
     rows = [
         {
@@ -277,10 +322,7 @@ def _analysis_phase_body(agg: AggregatesView, cap: int) -> dict[str, object]:
         "rows": rows,
     }
     if not rows:
-        body["message"] = (
-            "no analysis phase counters in window; run with "
-            "CODECLONE_OBSERVABILITY_ENABLED=1 and a full analyze."
-        )
+        body["message"] = _analysis_phase_empty_message(agg)
     return body
 
 
@@ -506,6 +548,30 @@ def _summary_body(trace: TraceView) -> dict[str, object]:
     return body
 
 
+def _apply_plane_coverage(
+    response: dict[str, object], *, trace: TraceView, warnings: list[str]
+) -> None:
+    """Publish the plane split and refuse to let unmarked rows pass as runtime."""
+    unattributed = trace.unattributed_plane_operations
+    response["plane"] = trace.plane
+    response["plane_coverage"] = {
+        "plane_column_available": trace.plane_column_available,
+        "runtime": trace.runtime_plane_operations,
+        "observer": trace.observer_plane_operations,
+        "unattributed": unattributed,
+    }
+    if not trace.plane_column_available:
+        warnings.append(
+            f"this store predates the telemetry plane mark; all {unattributed} "
+            "operations are unattributed and readable only with window='all'"
+        )
+    elif unattributed:
+        warnings.append(
+            f"{unattributed} operations are unattributed (written before the "
+            "plane mark) and are excluded from the runtime window"
+        )
+
+
 def _aggregate_status(agg: AggregatesView) -> str:
     return "ok" if agg.operation_count else "empty"
 
@@ -584,7 +650,7 @@ def query_platform_observability(
     clamped = _clamp_limit(limit, warnings)
     row_cap = min(clamped, _COMPACT_ROWS) if detail == "compact" else clamped
 
-    response = _envelope(section, detail, window)
+    response = _envelope(section, detail, window, _WINDOW_PLANES.get(window))
     if detail != detail_level:
         response["requested_detail_level"] = detail_level
     ignored = _ignored_parameters(section, operation_id, span_id)
@@ -628,6 +694,7 @@ def query_platform_observability(
     finally:
         conn.close()
 
+    _apply_plane_coverage(response, trace=trace, warnings=warnings)
     response["mixed_semantics"] = counter_semantics.mixed_semantics
     response["counter_semantics"] = {
         "stored_version": counter_semantics.stored_version,
