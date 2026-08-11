@@ -28,7 +28,7 @@ This page documents the contracts, mapping, failure modes, and verification requ
 | `BASELINE_SCHEMA_VERSION` | 3.0 | Baseline JSON structure (fingerprints, metadata, metrics) |
 | `BASELINE_FINGERPRINT_VERSION` | 3 | Fingerprint stability; changes block historical comparison |
 | `CACHE_VERSION` | 3.7 | Cache file serialization and projection format |
-| `REPORT_SCHEMA_VERSION` | 3.0 | Report JSON sections: meta, metrics, findings, derived, integrity, inventory |
+| `REPORT_SCHEMA_VERSION` | 3.1 | Report JSON sections: meta, metrics, findings, derived, integrity, inventory |
 | `AUDIT_PROJECTION_VERSION` | audit-v1 | Audit trail projection into report integrity section |
 | `METRICS_BASELINE_SCHEMA_VERSION` | 1.3 | Metrics baseline metrics formatting for `compare_runs` |
 

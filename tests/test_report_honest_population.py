@@ -27,10 +27,15 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 import pytest
 
+from codeclone.contracts import (
+    REPORT_SCHEMA_VERSION,
+    HealthPopulation,
+    population_carries_score,
+)
 from codeclone.report.html import build_html_report
 from codeclone.report.messages.overview import (
     EXECUTIVE_HEALTH_EMPTY_SCOPE,
@@ -791,4 +796,92 @@ def test_population_rides_every_surface_even_when_measured() -> None:
     )
     assert 'data-health-population="complete_nonempty"' in build_html_report(
         report_document=document
+    )
+
+
+# ── the enum is wire-visible, so it is bound to the schema version ──
+
+
+#: The population value set as published under a given report schema version.
+#:
+#: Not a restatement of the enum: the members below are *compared against* the
+#: live ``HealthPopulation``, which the tests read through ``get_args``. What
+#: this records is the pairing — that this exact value set went out under this
+#: exact schema version. The two must move together, because the value set is
+#: wire-visible (the report document, and the HTML data attribute) and a
+#: consumer switching on it cannot discover a new member on its own. That is
+#: not a hypothetical: `complete` -> `complete_nonempty` plus the new
+#: `complete_empty` is what forced 3.0 -> 3.1.
+#:
+#: Updating one side alone reds. Updating both is a two-line acknowledgement,
+#: and the acknowledgement is the point.
+_POPULATION_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
+    "3.1",
+    ("complete_empty", "complete_nonempty", "partial", "unmeasured"),
+)
+
+
+def _health_block(population: str) -> dict[str, object]:
+    """A health block for one population, shaped by the owner of the refusal.
+
+    Which states carry a number is asked of ``population_carries_score``
+    rather than listed here; listing it would put a second copy of the rule in
+    the test that exists to prove there is only one.
+    """
+
+    base = (
+        COMPLETE_HEALTH
+        if population_carries_score(cast(HealthPopulation, population))
+        else UNMEASURED_HEALTH
+    )
+    return dict(base) | {"population": population}
+
+
+@pytest.mark.parametrize("population", sorted(get_args(HealthPopulation)))
+def test_every_population_member_reaches_the_wire(population: str) -> None:
+    """Each state must be observable in the report artifacts, or it is not wire.
+
+    Parametrised over the live type, so a member added later is automatically
+    required to show up here. This is what makes the version coupling below
+    guard something real: a value set nobody can observe would not need a
+    schema version at all, and pinning it would be theatre.
+    """
+
+    document = _document(health=_health_block(population))
+    rendered_json = cast(dict[str, Any], json.loads(json.dumps(document)))
+
+    assert (
+        _mapping_at(rendered_json, "metrics", "families", "health", "summary")[
+            "population"
+        ]
+        == population
+    )
+    assert f'data-health-population="{population}"' in build_html_report(
+        report_document=document
+    )
+
+
+def test_the_population_value_set_cannot_move_without_the_schema_version() -> None:
+    """The value set and the schema version are one fact; they move together.
+
+    Deliberately not ``assert REPORT_SCHEMA_VERSION == "3.1"`` — that would
+    move the magic number into the test and assert nothing about *why* the
+    version has that value. The rule asserted here is the pairing, with the
+    members re-read from the live type rather than retyped, so:
+
+    * adding, removing or renaming a member without bumping the version reds;
+    * bumping the version without touching the members also reds, which is
+      intended. A schema bump for any other reason is exactly the moment to
+      confirm that this wire-visible enum is still what the ledger says, and
+      the confirmation costs one line.
+    """
+
+    live = (REPORT_SCHEMA_VERSION, tuple(sorted(get_args(HealthPopulation))))
+
+    assert live == _POPULATION_WIRE_CONTRACT, (
+        "The report health population value set and REPORT_SCHEMA_VERSION are "
+        "one wire contract. If the members changed, bump "
+        "REPORT_SCHEMA_VERSION and record the new pair here. If the version "
+        "changed for another reason, record the unchanged members against the "
+        f"new version. Live: {live}. Recorded: {_POPULATION_WIRE_CONTRACT}."
     )

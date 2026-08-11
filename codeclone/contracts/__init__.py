@@ -216,7 +216,19 @@ RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
 # key-name change, or the dependency-row schema, so the bump IS the
 # compatibility guarantee.
 CACHE_VERSION: Final = "3.7"
-REPORT_SCHEMA_VERSION: Final = "3.0"
+# 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
+# changed. "complete" became "complete_nonempty" and "complete_empty" joined
+# it, because one word was carrying two facts — a population that exists and
+# was not read, and a scope holding no source file at all. The enum is
+# wire-visible in every report artifact and in the HTML data attribute, so a
+# reader that switches on it sees a value it has never been told about.
+#
+# The bump IS the compatibility guarantee here, exactly as for the cache
+# above: ``check_report_v3_compatibility`` applies an *exact* policy, so a
+# stored 3.0 report is refused rather than silently misread against the new
+# value set. ``tests/test_report_honest_population.py`` pins the coupling —
+# the enum cannot move again without this constant moving with it.
+REPORT_SCHEMA_VERSION: Final = "3.1"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
 # be described as one: no code branches on it. Whether a stored artifact may be
