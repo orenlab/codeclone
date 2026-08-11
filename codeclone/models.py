@@ -3175,6 +3175,10 @@ BaselinePublishFailureReason = Literal[
     "invalid_target",
     "oversize",
     "scope_mismatch",
+    # A run that could not read every file it found. Refused unconditionally:
+    # publishing an incomplete reference makes every unread symbol look
+    # removed on the next complete run.
+    "truncated_run",
 ]
 LaneTrustReason = Literal[
     "algorithm_revision",

@@ -4968,3 +4968,147 @@ def test_cli_unreadable_directory_is_counted_not_swallowed(
 
     out = capsys.readouterr().out
     assert_contains_all(out, "2 found", "1 analyzed", "1 skipped")
+
+
+_GOOD_MODULE = "def a():\n    return 1\n"
+_BROKEN_MODULE = "def b(:\n    ??? nope\n"
+
+
+def _repo_with(tmp_path: Path, name: str, sources: dict[str, str]) -> Path:
+    """One tree, written once: the setups below differ only in their contents."""
+
+    root = tmp_path / name
+    root.mkdir()
+    for filename, source in sources.items():
+        (root / filename).write_text(source, "utf-8")
+    return root
+
+
+def test_cli_update_baseline_refuses_a_truncated_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A run that lost a file may not become the reference for later runs.
+
+    The refusal is unconditional — no flag relaxes it. The failure it prevents
+    is a silent one: an unread symbol is indistinguishable from a deleted one
+    once the truncated surface is the baseline, so the next complete run
+    reports removals that never happened.
+    """
+
+    root = _repo_with(
+        tmp_path,
+        "repo",
+        {"good.py": _GOOD_MODULE, "broken.py": _BROKEN_MODULE},
+    )
+    baseline = root / "codeclone.baseline.json"
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(root),
+                "--no-progress",
+                "--update-baseline",
+                "--baseline",
+                str(baseline),
+            ],
+        )
+
+    assert exc.value.code == 2
+    assert not baseline.exists()
+    assert_contains_all(capsys.readouterr().out, "1 of the files it found")
+
+
+def test_cli_update_baseline_still_publishes_a_complete_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reverse skew: a run that read everything publishes as before."""
+
+    root = _repo_with(tmp_path, "repo", {"good.py": _GOOD_MODULE})
+    baseline = root / "codeclone.baseline.json"
+
+    _run_main(
+        monkeypatch,
+        [str(root), "--no-progress", "--update-baseline", "--baseline", str(baseline)],
+    )
+
+    assert baseline.exists()
+
+
+def test_cli_gates_refuse_an_unmeasured_run_instead_of_passing_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--fail-cycles`` used to pass on a root whose every file failed.
+
+    Zero cycles were found because zero files were read. The same holds for
+    dead code and every other counted predicate.
+    """
+
+    root = _repo_with(
+        tmp_path,
+        "broken",
+        {f"mod_{index}.py": f"def f{index}(:\n  ??? {index}\n" for index in range(3)},
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, [str(root), "--no-progress", "--fail-cycles"])
+
+    assert exc.value.code == 3
+    assert_contains_all(capsys.readouterr().out, "unmeasured population")
+
+
+def test_cli_coverage_threshold_stops_blaming_an_unread_population(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The loud half of the same defect: 0.0 % of nothing is not a finding."""
+
+    root = _repo_with(tmp_path, "broken", {"mod.py": _BROKEN_MODULE})
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [str(root), "--no-progress", "--min-typing-coverage", "90"],
+        )
+
+    out = capsys.readouterr().out
+    assert exc.value.code == 3
+    assert_contains_all(out, "unmeasured population")
+    assert_contains_none(out, "Typing coverage below threshold")
+
+
+def test_cli_truncation_gate_fails_a_run_that_lost_a_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Opt-in, and loud when asked for: one unread file out of two."""
+
+    root = _repo_with(
+        tmp_path,
+        "repo",
+        {"good.py": _GOOD_MODULE, "broken.py": _BROKEN_MODULE},
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, [str(root), "--no-progress", "--fail-on-truncated-run"])
+
+    assert exc.value.code == 3
+    assert_contains_all(capsys.readouterr().out, "did not read every file it found")
+
+
+def test_cli_truncation_gate_passes_a_complete_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reverse skew: nothing skipped, nothing to fail."""
+
+    root = _repo_with(tmp_path, "repo", {"good.py": _GOOD_MODULE})
+
+    _run_main(monkeypatch, [str(root), "--no-progress", "--fail-on-truncated-run"])

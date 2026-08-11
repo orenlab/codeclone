@@ -17,7 +17,7 @@ from ...contracts import (
     ExitCode,
 )
 from ...metrics.registry import METRIC_FAMILIES
-from ...models import ObservationLaneName, cycle_kind_counts
+from ...models import HealthPopulation, ObservationLaneName, cycle_kind_counts
 from ...observability import span
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -50,6 +50,12 @@ class MetricGateConfig:
     # Defaulted so the three constructors outside the CLI reporting path stay
     # untouched; abstentions are opt-in and never gate by default.
     fail_on_unresolved_dead_code: bool = False
+    #: Fail a run that could not read every file it found. Opt-in on purpose:
+    #: a repository that has always carried one unparseable file would start
+    #: failing, and choosing that default is policy, not a defect fix. The
+    #: unconditional half of the same fact lives in baseline publication,
+    #: which refuses a truncated run outright.
+    fail_on_truncated_run: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +105,16 @@ class GateState:
     diff_typing_param_permille_delta: int = 0
     diff_typing_return_permille_delta: int = 0
     diff_docstring_permille_delta: int = 0
+    #: How much of the found population the run actually read. Every predicate
+    #: below counts observed debt, so on an unmeasured population they are all
+    #: vacuously satisfied — the gate would be answering a question nobody
+    #: measured. Defaults to ``complete`` so the constructors that build a
+    #: state by hand keep today's behaviour exactly.
+    health_population: HealthPopulation = "complete"
+    #: Files found and never read. Produced since the first release, carried
+    #: to the summary line and the HTML meta table, and until now read by no
+    #: gate and no budget at all.
+    files_skipped: int = 0
 
 
 HEALTH_INPUT_LANES: tuple[ObservationLaneName, ...] = (
@@ -285,9 +301,12 @@ def gate_state_from_project_metrics(
     metrics_diff: object | None,
     clone_new_count: int = 0,
     clone_total: int = 0,
+    files_skipped: int = 0,
 ) -> GateState:
     diff_summary = summarize_metrics_diff(metrics_diff) or {}
     return GateState(
+        health_population=project_metrics.health.population,
+        files_skipped=max(files_skipped, 0),
         clone_new_count=max(clone_new_count, 0),
         clone_total=max(clone_total, 0),
         complexity_max=max(int(project_metrics.complexity_max), 0),
@@ -405,6 +424,37 @@ _GATE_REASON_ORDER = {
 
 def _reason_if(triggered: bool, message: str) -> tuple[str, ...]:
     return (message,) if triggered else ()
+
+
+def _any_gate_requested(config: MetricGateConfig) -> bool:
+    """True when the caller asked for a verdict of any kind.
+
+    Deliberately exhaustive rather than clever: a gate added later without a
+    line here is a gate that can still be answered from a population nobody
+    measured. A run with no gate at all is left alone — refusing where nothing
+    was asked would invent a failure rather than withhold a claim.
+    """
+
+    return bool(
+        config.fail_complexity >= 0
+        or config.fail_coupling >= 0
+        or config.fail_cohesion >= 0
+        or config.fail_cycles
+        or config.fail_dead_code
+        or config.fail_on_unresolved_dead_code
+        or config.fail_health >= 0
+        or config.fail_on_new_metrics
+        or config.fail_on_typing_regression
+        or config.fail_on_docstring_regression
+        or config.fail_on_api_break
+        or config.fail_on_authority_violation
+        or config.fail_on_untested_hotspots
+        or config.fail_on_truncated_run
+        or config.min_typing_coverage >= 0
+        or config.min_docstring_coverage >= 0
+        or config.fail_on_new
+        or config.fail_threshold >= 0
+    )
 
 
 def _complexity_threshold_reason(
@@ -695,6 +745,19 @@ def _evaluate_gate_state_result(
             unavailable_lanes=unavailable_lanes,
         )
 
+    if _any_gate_requested(config) and state.health_population == "unmeasured":
+        # Ordered after the lane check so a configuration fault keeps its own
+        # exit code, and before every predicate below because none of them can
+        # be answered here. Thirteen would pass on counters that are zero only
+        # because nothing was counted; the two coverage thresholds would fail
+        # quoting 0.0 % of a population that was never read. One honest
+        # outcome replaces both shapes.
+        return GateResult(
+            exit_code=int(ExitCode.GATING_FAILURE),
+            reasons=(f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}",),
+            required_lanes=required_lanes,
+        )
+
     effective_config = replace(
         config,
         fail_on_typing_regression=(
@@ -726,6 +789,13 @@ def _evaluate_gate_state_result(
             "metric:"
             + gate_msgs.GATE_REASON_AUTHORITY_VIOLATIONS
             + f"{state.authority_violations}."
+        )
+
+    if config.fail_on_truncated_run and state.files_skipped > 0:
+        reasons.append(
+            "metric:"
+            + gate_msgs.GATE_REASON_TRUNCATED_RUN
+            + f"{state.files_skipped}{gate_msgs.GATE_SUFFIX_FILES}."
         )
 
     if config.fail_on_new and state.clone_new_count > 0:
