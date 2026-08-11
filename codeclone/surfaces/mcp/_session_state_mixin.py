@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
+from ._code_provenance import code_provenance_payload
 from ._context_governance import attach_passive_context_governance
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
@@ -450,6 +451,7 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
+    _agent_start_epoch: int
 
     def _changed_analysis_payload(
         self,
@@ -469,6 +471,11 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "run_id": _helpers._short_run_id(record.run_id),
             "focus": "changed_paths",
             "health_scope": "repository",
+            # Same rule as the run summary: a response that reports analysis
+            # truth says which code produced it.
+            "code_provenance": code_provenance_payload(
+                process_start_epoch=self._agent_start_epoch,
+            ),
             "baseline": dict(
                 _helpers._summary_trusted_state_payload(
                     record.summary,
@@ -618,6 +625,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
+    _agent_start_epoch: int
 
     def _summary_payload(
         self,
@@ -648,6 +656,11 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             "focus": _FOCUS_REPOSITORY,
             "health_scope": _HEALTH_SCOPE_REPOSITORY,
             "version": str(summary.get("codeclone_version", __version__)),
+            # `version` is the same string on every commit of a release, so it
+            # cannot say which code answered. This does.
+            "code_provenance": code_provenance_payload(
+                process_start_epoch=self._agent_start_epoch,
+            ),
             "schema": str(summary.get("report_schema_version", "")),
             "mode": str(summary.get("analysis_mode", "")),
             "baseline": self._summary_baseline_payload(summary),

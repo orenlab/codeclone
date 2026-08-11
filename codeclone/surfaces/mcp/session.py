@@ -25,6 +25,7 @@ from ...report.meta import computed_metric_families as _computed_metric_families
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
+from ._code_provenance import process_code_provenance
 from ._implementation_context import build_unit_location_inventory
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
@@ -170,6 +171,11 @@ class MCPSession(
         self._intent_sequence = 0
         self._agent_pid = os.getpid()
         self._agent_start_epoch = int(time.time())
+        # Pin the served code's identity now, while the process is starting and
+        # the disk still holds what was imported. Computed lazily on the first
+        # response it would describe a checkout this process never loaded --
+        # exactly the stale-server case the marker exists to expose.
+        process_code_provenance()
         self._agent_label_cache: str | None = None
         self._fastmcp: object | None = None
         self._audit_writer_override = audit_writer
