@@ -5,13 +5,13 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+import argparse
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import codeclone.models as domain_models
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Mapping, Sequence
 
 
@@ -58,22 +58,38 @@ def collect_explicit_cli_dests(
     *,
     argv: Sequence[str],
 ) -> set[str]:
-    option_to_dest: dict[str, str] = {}
-    for action in parser._actions:
-        for option in action.option_strings:
-            option_to_dest[option] = action.dest
+    """Return the option dests the user actually supplied on the command line.
 
-    explicit: set[str] = set()
-    for token in argv:
-        if token == "--":
-            break
-        if not token.startswith("-"):
-            continue
-        option = token.split("=", maxsplit=1)[0]
-        dest = option_to_dest.get(option)
-        if dest is not None:
-            explicit.add(dest)
-    return explicit
+    Ask argparse, never the raw tokens. ``allow_abbrev`` defaults to ``True``,
+    so ``--min-l 5`` is a flag argparse accepts and expands; comparing tokens
+    against full option names cannot see it, and the value the user passed was
+    then silently overwritten by ``pyproject.toml``. Re-parsing with every
+    default suppressed leaves exactly the supplied options in the namespace --
+    the documented argparse way to tell "absent" from "given".
+
+    Call this only for an ``argv`` the parser already accepted: the probe runs
+    the same actions again, so ``--help``/``--version`` would fire twice.
+    """
+
+    saved_action_defaults = [(action, action.default) for action in parser._actions]
+    saved_parser_defaults = dict(parser._defaults)
+    try:
+        for action in parser._actions:
+            action.default = argparse.SUPPRESS
+        parser._defaults.clear()
+        namespace, _unrecognized = parser.parse_known_args(list(argv))
+    finally:
+        for action, default in saved_action_defaults:
+            action.default = default
+        parser._defaults.clear()
+        parser._defaults.update(saved_parser_defaults)
+
+    # Positionals were never part of this set: a positional cannot be
+    # "not passed" in a way pyproject would override.
+    optional_dests = {
+        action.dest for action in parser._actions if action.option_strings
+    }
+    return {dest for dest in vars(namespace) if dest in optional_dests}
 
 
 def resolve_config(

@@ -226,6 +226,21 @@ def _metrics_for_report(
                 "new_cycles",
                 len(validated_metrics_diff.new_cycles),
             ),
+            # Carried beside the total because only this one gates. Without it
+            # the report document cannot tell the gate evaluator which of the
+            # new cycles can actually break an import.
+            (
+                "dependencies",
+                "dependencies",
+                "new_import_cycles",
+                len(validated_metrics_diff.new_import_cycles),
+            ),
+            (
+                "dependencies",
+                "dependencies",
+                "new_deferred_cycles",
+                len(validated_metrics_diff.new_deferred_cycles),
+            ),
             (
                 "dead_code",
                 "dead_code",

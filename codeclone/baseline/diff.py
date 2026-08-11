@@ -9,12 +9,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Set
+    from collections.abc import Mapping, Sequence, Set
 
 from ..metrics.api_surface import compare_api_surfaces
 from ..models import (
     ApiBreakingChange,
     ApiSurfaceSnapshot,
+    DependencyCycleDiff,
+    DependencyCycleFact,
+    DependencyCycleKind,
+    DependencyCycleKindChange,
     MetricsDiff,
     MetricsSnapshot,
 )
@@ -30,6 +34,71 @@ def diff_clone_groups(
     new_funcs = set(func_groups.keys()) - known_functions
     new_blocks = set(block_groups.keys()) - known_blocks
     return new_funcs, new_blocks
+
+
+def _kind_by_members(
+    facts: Sequence[DependencyCycleFact],
+) -> dict[tuple[str, ...], DependencyCycleKind]:
+    # Sorted so that a member set carrying two kinds — which the classifier
+    # cannot produce, but a hand-built snapshot could — resolves the same way
+    # on every run instead of depending on iteration order.
+    return {fact.modules: fact.kind for fact in sorted(facts, key=_fact_key)}
+
+
+def _fact_key(fact: DependencyCycleFact) -> tuple[tuple[str, ...], str]:
+    return (fact.modules, fact.kind)
+
+
+def _diff_cycles(
+    *,
+    baseline: Sequence[DependencyCycleFact],
+    current: Sequence[DependencyCycleFact],
+) -> DependencyCycleDiff:
+    """Compare two runs' cycles as (members, kind), never as members alone.
+
+    Three questions, three answers, because collapsing them loses the fact
+    that made the kind worth classifying:
+
+    * ``new_cycles`` — these modules did not cycle before. The visibility lane;
+      deferred entries belong here and must still be reported.
+    * ``new_import_cycles`` — a crash-at-import risk exists now and did not
+      before. True both for a brand-new import cycle and for a deferred cycle
+      that hardened into one, so it is not a subset of ``new_cycles``. This is
+      the only cycle lane that gates.
+    * ``cycle_kind_changes`` — the members still cycle but the law now reads
+      them differently. Without this a deferred cycle turning critical, and an
+      import cycle repaired into a deferred one, would both read as
+      "unchanged": one count in, one count out.
+    """
+
+    baseline_kinds = _kind_by_members(baseline)
+    current_kinds = _kind_by_members(current)
+    new_members = sorted(set(current_kinds) - set(baseline_kinds))
+    return DependencyCycleDiff(
+        new_cycles=tuple(new_members),
+        new_import_cycles=tuple(
+            sorted(
+                members
+                for members, kind in current_kinds.items()
+                if kind == "import_cycle"
+                and baseline_kinds.get(members) != "import_cycle"
+            )
+        ),
+        new_deferred_cycles=tuple(
+            members
+            for members in new_members
+            if current_kinds[members] == "deferred_cycle"
+        ),
+        cycle_kind_changes=tuple(
+            DependencyCycleKindChange(
+                modules=members,
+                previous_kind=baseline_kinds[members],
+                current_kind=current_kinds[members],
+            )
+            for members in sorted(set(current_kinds) & set(baseline_kinds))
+            if baseline_kinds[members] != current_kinds[members]
+        ),
+    )
 
 
 def diff_metrics(
@@ -69,10 +138,9 @@ def diff_metrics(
             - set(snapshot.high_coupling_classes)
         )
     )
-    new_cycles = tuple(
-        sorted(
-            set(current_snapshot.dependency_cycles) - set(snapshot.dependency_cycles)
-        )
+    cycle_diff = _diff_cycles(
+        baseline=snapshot.dependency_cycles,
+        current=current_snapshot.dependency_cycles,
     )
     new_dead_code = tuple(
         sorted(set(current_snapshot.dead_code_items) - set(snapshot.dead_code_items))
@@ -91,7 +159,10 @@ def diff_metrics(
     return MetricsDiff(
         new_high_risk_functions=new_high_risk_functions,
         new_high_coupling_classes=new_high_coupling_classes,
-        new_cycles=new_cycles,
+        new_cycles=cycle_diff.new_cycles,
+        new_import_cycles=cycle_diff.new_import_cycles,
+        new_deferred_cycles=cycle_diff.new_deferred_cycles,
+        cycle_kind_changes=cycle_diff.cycle_kind_changes,
         new_dead_code=new_dead_code,
         health_delta=current_snapshot.health_score - snapshot.health_score,
         typing_param_permille_delta=(

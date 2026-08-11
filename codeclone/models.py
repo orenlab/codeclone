@@ -1936,6 +1936,91 @@ class DependencyCycleDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class DependencyCycleFact:
+    """A cycle's member set plus its binding-time classification.
+
+    ``DependencyCycleDetail`` without the registry path projection. Baseline
+    snapshots reconstruct cycles from stored import observations, where no
+    honest member path exists, so they carry this narrower fact instead of
+    inventing paths. It is what the policy layers — health, gates, novelty —
+    consume: the members answer "which cycle", the kind answers "how bad".
+    """
+
+    modules: tuple[str, ...]
+    kind: DependencyCycleKind
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyCycleKindChange:
+    """One cycle whose member set survived but whose classification moved.
+
+    Neither "new" nor "unchanged": the same modules still cycle, but the
+    binding law now reads them differently. ``deferred_cycle`` ->
+    ``import_cycle`` is a regression (a crash-at-import risk appeared where
+    there was none); the reverse is a repair.
+    """
+
+    modules: tuple[str, ...]
+    previous_kind: DependencyCycleKind
+    current_kind: DependencyCycleKind
+
+    def __post_init__(self) -> None:
+        if self.previous_kind == self.current_kind:
+            raise ValueError("a cycle kind change must change the kind")
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyCycleKindCounts:
+    """The kind split of one run's cycles. ``total`` is never derived twice."""
+
+    import_cycles: int
+    deferred_cycles: int
+
+    @property
+    def total(self) -> int:
+        return self.import_cycles + self.deferred_cycles
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyCycleDiff:
+    """Two runs' cycles compared as (members, kind) rather than members alone."""
+
+    new_cycles: tuple[tuple[str, ...], ...]
+    new_import_cycles: tuple[tuple[str, ...], ...]
+    new_deferred_cycles: tuple[tuple[str, ...], ...]
+    cycle_kind_changes: tuple[DependencyCycleKindChange, ...]
+
+
+def cycle_kind_counts(
+    *,
+    cycles: Sequence[object],
+    details: Sequence[DependencyCycleDetail | DependencyCycleFact],
+) -> DependencyCycleKindCounts:
+    """Split a run's cycles into import and deferred counts, for the deciders.
+
+    Lives beside the models because every decision layer needs it and none of
+    it is graph work: it reads the classification that is already recorded.
+
+    When ``details`` do not align with ``cycles`` the classification is simply
+    absent — a projection built before the binding law, or a payload that lost
+    it in transit. Every cycle then counts as ``import_cycle``: the pre-wave
+    reading, and the only conservative one. Silently counting them as deferred
+    would drop a real crash risk out of health and out of the gate.
+    """
+
+    if len(details) != len(cycles):
+        return DependencyCycleKindCounts(
+            import_cycles=len(cycles),
+            deferred_cycles=0,
+        )
+    deferred = sum(1 for detail in details if detail.kind == "deferred_cycle")
+    return DependencyCycleKindCounts(
+        import_cycles=len(details) - deferred,
+        deferred_cycles=deferred,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class DepGraph:
     modules: frozenset[str]
     edges: tuple[ModuleDep, ...]
@@ -2584,7 +2669,11 @@ class MetricsSnapshot:
     high_coupling_classes: tuple[str, ...]
     max_cohesion: int
     low_cohesion_classes: tuple[str, ...]
-    dependency_cycles: tuple[tuple[str, ...], ...]
+    # Kind-carrying by contract. A baseline that remembered only the member
+    # sets could not tell "gained an import cycle" from "converted an import
+    # cycle into a deferred one" — semantically opposite events that both read
+    # as an unchanged count.
+    dependency_cycles: tuple[DependencyCycleFact, ...]
     dependency_max_depth: int
     dead_code_items: tuple[str, ...]
     health_score: int
@@ -2599,6 +2688,10 @@ class MetricsSnapshot:
 class MetricsDiff:
     new_high_risk_functions: tuple[str, ...]
     new_high_coupling_classes: tuple[str, ...]
+    #: Cycles whose MEMBER SET is new, of either kind. The visibility lane:
+    #: every new cycle is reported here, including deferred ones that must not
+    #: gate. Kind transitions are absent by construction — those members
+    #: already cycled — and live in ``cycle_kind_changes``.
     new_cycles: tuple[tuple[str, ...], ...]
     new_dead_code: tuple[str, ...]
     health_delta: int
@@ -2607,6 +2700,15 @@ class MetricsDiff:
     docstring_permille_delta: int = 0
     new_api_symbols: tuple[str, ...] = ()
     new_api_breaking_changes: tuple[ApiBreakingChange, ...] = ()
+    #: The gating lane: cycles that are ``import_cycle`` now and were not
+    #: ``import_cycle`` before. That covers both a brand-new import cycle and a
+    #: deferred cycle that hardened into one — the crash-at-import risk is
+    #: equally new in either case, so this is NOT a subset of ``new_cycles``.
+    new_import_cycles: tuple[tuple[str, ...], ...] = ()
+    #: New member sets that are only deferred-bound. Reported, never gating.
+    new_deferred_cycles: tuple[tuple[str, ...], ...] = ()
+    #: Surviving member sets whose classification moved, both directions.
+    cycle_kind_changes: tuple[DependencyCycleKindChange, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

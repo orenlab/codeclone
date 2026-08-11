@@ -16,8 +16,9 @@ import subprocess
 from argparse import Namespace
 from collections import OrderedDict, UserDict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import timedelta
+from inspect import signature
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
@@ -1025,6 +1026,95 @@ def _mapping_child(
     key: str,
 ) -> dict[str, object]:
     return cast("dict[str, object]", payload[key])
+
+
+def _latest_report_document(service: CodeCloneMCPService) -> Mapping[str, object]:
+    return service._runs.records()[-1].report_document
+
+
+def test_mcp_untrusted_baseline_reports_clone_novelty_as_unavailable(
+    tmp_path: Path,
+) -> None:
+    # No baseline means no comparison ran. Diffing the run against an empty
+    # baseline turns every clone group into a "new" one -- the opposite error
+    # from the CLI's "0 new". One repository state, two contradictory answers.
+    # The canonical report document already answers "unavailable".
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    findings = _mapping_child(_latest_report_document(service), "findings")
+    document_clones = _mapping_child(_mapping_child(findings, "summary"), "clones")
+
+    assert _mapping_child(summary, "baseline")["trusted"] is False
+    assert cast("int", document_clones["unavailable"]) > 0
+    assert document_clones["new"] == 0
+    assert _mapping_child(summary, "diff")["new_clones"] is None
+
+
+def test_mcp_trusted_baseline_still_counts_new_clone_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    resolve_state = mcp_baseline_mod.resolve_clone_baseline_state
+    monkeypatch.setattr(
+        mcp_session_mod,
+        "resolve_clone_baseline_state",
+        lambda **kwargs: replace(resolve_state(**kwargs), trusted_for_diff=True),
+    )
+
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    assert _mapping_child(summary, "diff")["new_clones"] == 1
+
+
+def test_mcp_baseline_path_moves_the_metrics_lane_too(tmp_path: Path) -> None:
+    # 2.1.0a2 unified both lanes into one baseline container and removed
+    # --metrics-baseline from the CLI. MCP kept an independent metrics path,
+    # so redirecting the baseline left the metrics lane pointed at the old
+    # default and silently untrusted.
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            baseline_path="custom.baseline.json",
+        )
+    )
+
+    stored = service._runs.records()[-1].summary
+
+    assert _mapping_child(stored, "baseline")["path"] == "custom.baseline.json"
+    assert (
+        _mapping_child(stored, "metrics_baseline")["path"]
+        == _mapping_child(stored, "baseline")["path"]
+    )
+
+
+def test_mcp_analysis_request_has_no_separate_metrics_baseline_path() -> None:
+    request_fields = {field.name for field in fields(MCPAnalysisRequest)}
+    analyze_parameters = set(
+        signature(CodeCloneMCPService.analyze_repository).parameters
+    )
+
+    assert "metrics_baseline_path" not in request_fields
+    assert "metrics_baseline_path" not in analyze_parameters
 
 
 def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> None:
@@ -4311,7 +4401,6 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
         request=MCPAnalysisRequest(
             respect_pyproject=True,
             analysis_mode="clones_only",
-            metrics_baseline_path="metrics.json",
             coverage_xml="coverage.xml",
         ),
     )
@@ -4322,7 +4411,6 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
     assert args.skip_dependencies is True
     assert str(args.baseline).endswith("conf-baseline.json")
     assert str(args.cache_path).endswith("conf-cache.json")
-    assert str(args.metrics_baseline).endswith("metrics.json")
     assert str(args.coverage_xml).endswith("coverage.xml")
 
     monkeypatch.setattr(
@@ -4419,12 +4507,15 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
             new_cycles=(("pkg.a", "pkg.b"),),
             new_dead_code=("pkg.a:unused",),
             health_delta=-3,
+            new_import_cycles=(("pkg.a", "pkg.b"),),
         )
     )
     assert payload == {
         "new_high_risk_functions": 1,
         "new_high_coupling_classes": 1,
         "new_cycles": 1,
+        "new_import_cycles": 1,
+        "new_deferred_cycles": 0,
         "new_dead_code": 1,
         "health_delta": -3,
         "typing_param_permille_delta": 0,
@@ -4707,18 +4798,16 @@ def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> 
         request=MCPAnalysisRequest(
             respect_pyproject=False,
             baseline_path="custom-baseline.json",
-            metrics_baseline_path="metrics-only.json",
             cache_path="custom-cache.json",
         ),
     )
     assert str(args.baseline).endswith("custom-baseline.json")
-    assert str(args.metrics_baseline).endswith("metrics-only.json")
     assert str(args.cache_path).endswith("custom-cache.json")
 
     _, _, metrics_baseline_path, metrics_baseline_exists = (
         service._resolve_baseline_inputs(root_path=tmp_path, args=args)
     )
-    assert str(metrics_baseline_path).endswith("metrics-only.json")
+    assert str(metrics_baseline_path).endswith("custom-baseline.json")
     assert metrics_baseline_exists is False
 
 
@@ -4851,13 +4940,6 @@ def _mcp_request_with_artifact_path(
             allow_external_artifacts=allow_external_artifacts,
             baseline_path=value,
         )
-    if field == "metrics_baseline_path":
-        return MCPAnalysisRequest(
-            root=root_text,
-            respect_pyproject=False,
-            allow_external_artifacts=allow_external_artifacts,
-            metrics_baseline_path=value,
-        )
     if field == "cache_path":
         return MCPAnalysisRequest(
             root=root_text,
@@ -4879,7 +4961,6 @@ def _mcp_request_with_artifact_path(
     ("field", "value"),
     [
         ("baseline_path", "baseline.json"),
-        ("metrics_baseline_path", "metrics.json"),
         ("cache_path", "cache.json"),
         ("coverage_xml", "coverage.xml"),
     ],
@@ -4930,7 +5011,6 @@ def test_mcp_analysis_request_coverage_xml_allows_in_repo_absolute_path(
     ("field", "value"),
     [
         ("baseline_path", "baseline.json"),
-        ("metrics_baseline_path", "metrics.json"),
         ("cache_path", "cache.json"),
         ("coverage_xml", "coverage.xml"),
     ],

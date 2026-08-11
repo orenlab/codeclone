@@ -274,7 +274,13 @@ def _entity_novelty_facts(
             ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
             "dependencies",
             tuple(
-                _dependency_cycle_identity(cycle) for cycle in current.dependency_cycles
+                # The snapshot carries DependencyCycleFact since the cycle-policy
+                # split (members + binding kind), while ``new_cycles`` is still
+                # plain member tuples. Both sides must spell the identity from
+                # the members alone: key them differently and every cycle would
+                # read "not compared" while the diff says otherwise.
+                _dependency_cycle_identity(cycle.modules)
+                for cycle in current.dependency_cycles
             ),
             tuple(
                 _dependency_cycle_identity(cycle) for cycle in metrics_diff.new_cycles

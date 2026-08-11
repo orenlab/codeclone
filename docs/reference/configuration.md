@@ -127,7 +127,7 @@ value applies the built-in threshold shown in parentheses.
 | `fail_complexity` | int | `-1` (disabled) | `--fail-complexity` | Exit nonzero if cyclomatic complexity exceeds the threshold (bare flag: `20`) |
 | `fail_coupling` | int | `-1` (disabled) | `--fail-coupling` | Exit nonzero if class coupling exceeds the threshold (bare flag: `10`) |
 | `fail_cohesion` | int | `-1` (disabled) | `--fail-cohesion` | Exit nonzero if class cohesion (LCOM4) exceeds the threshold (bare flag: `4`) |
-| `fail_cycles` | bool | `false` | `--fail-cycles` | Exit nonzero on dependency cycles |
+| `fail_cycles` | bool | `false` | `--fail-cycles` | Exit nonzero on **import-time** dependency cycles. Deferred cycles are reported but never gate |
 | `fail_dead_code` | bool | `false` | `--fail-dead-code` | Exit nonzero on dead code |
 | `fail_on_unresolved_dead_code` | bool | `false` | `--fail-on-unresolved-dead-code` | Exit nonzero on unresolved external overrides |
 | `fail_health` | int | `-1` (disabled) | `--fail-health` | Exit nonzero if health score is below the threshold, 0–100 (bare flag: `60`) |
@@ -387,6 +387,11 @@ fail_on_new = true
 fail_cycles = true
 fail_dead_code = true
 ```
+
+`fail_cycles` fails the build on import-time cycles only. A cycle closed purely
+by deferred, lazy, or `TYPE_CHECKING` imports cannot raise at interpreter
+start, so it is reported without gating. See
+[Dependency cycle kinds](cli.md#dependency-cycle-kinds).
 
 ### Extended audit trail
 

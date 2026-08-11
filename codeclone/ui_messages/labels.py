@@ -39,9 +39,13 @@ SUMMARY_COMPACT_CLONES = (
     "Clones   func={function}  block={block}  seg={segment}"
     "  suppressed={suppressed}  new={new}"
 )
+# ``cycles`` keeps the total; the parenthesised split says how many of them can
+# actually fail an import, which is the only part --fail-cycles reads.
 SUMMARY_COMPACT_METRICS = (
     "Metrics  cc={cc_avg}/{cc_max}  cbo={cbo_avg}/{cbo_max}"
-    "  lcom4={lcom_avg}/{lcom_max}  cycles={cycles}  dead_code={dead}"
+    "  lcom4={lcom_avg}/{lcom_max}"
+    "  cycles={cycles}(import={import_cycles},deferred={deferred_cycles})"
+    "  dead_code={dead}"
     "  health={health}({grade})  overloaded_modules={overloaded_modules}"
 )
 SUMMARY_COMPACT_DEPENDENCIES = (

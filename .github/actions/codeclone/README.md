@@ -98,7 +98,6 @@ jobs:
 | `fail-health`           | `-1`                            | Minimum health score                                                                                              |
 | `require-baseline`      | `true`                          | Fail early if the baseline file is missing                                                                        |
 | `baseline-path`         | `codeclone.baseline.json`       | Baseline path passed to CodeClone                                                                                 |
-| `metrics-baseline-path` | `codeclone.baseline.json`       | Metrics baseline path passed to CodeClone                                                                         |
 | `extra-args`            | `""`                            | Additional CodeClone CLI arguments                                                                                |
 | `no-progress`           | `true`                          | Disable progress output                                                                                           |
 
