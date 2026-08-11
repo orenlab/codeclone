@@ -118,6 +118,9 @@ def build_metrics_snapshot(
     api_surface_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
     )
+    dead_code_summary = _as_mapping(
+        _as_mapping(metrics_payload_map.get("dead_code")).get("summary")
+    )
     coverage_join_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("coverage_join")).get("summary")
     )
@@ -155,7 +158,16 @@ def build_metrics_snapshot(
             security_surfaces_summary.get("production")
         ),
         security_surfaces_tests=_as_int(security_surfaces_summary.get("tests")),
-        dead_code_count=len(project_metrics.dead_code),
+        # Both proven lanes of the dead_code family, read from the counts the
+        # metrics payload publishes rather than measured again here. Counting
+        # only unreferenced symbols printed "Dead code clean" directly above a
+        # --fail-dead-code failure citing ten items; re-measuring the lists
+        # locally would fix that number while quietly becoming a second
+        # counter, free to drift from the one the gate and the report read.
+        dead_code_count=(
+            _as_int(dead_code_summary.get("total"))
+            + _as_int(dead_code_summary.get("unreachable_statements"))
+        ),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,
         health_population=project_metrics.health.population,
@@ -237,7 +249,9 @@ def _print_summary(
     segment_clones_count: int,
     suppressed_golden_fixture_groups: int,
     suppressed_segment_groups: int,
-    new_clones_count: int,
+    #: ``None`` when no clone lane was compared against the baseline. The
+    #: summary then says so instead of printing a zero it did not measure.
+    new_clones_count: int | None,
 ) -> None:
     invariant_ok = files_found == (files_analyzed + cache_hits + files_skipped)
 

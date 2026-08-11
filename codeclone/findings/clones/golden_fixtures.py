@@ -82,6 +82,34 @@ def path_matches_golden_fixture_pattern(relative_path: str, pattern: str) -> boo
     return any(path.match(pattern) for path in candidates)
 
 
+def path_is_declared_golden_fixture(
+    filepath: str,
+    *,
+    patterns: Sequence[str],
+    scan_root: str = "",
+) -> bool:
+    """Whether one file sits inside a declared golden-fixture tree.
+
+    The single owner of that question. Every lane that honours the declaration
+    asks here rather than re-deriving it, so the source-kind guard and the
+    pattern match can never drift between the clone lane and the dead-code
+    lane: a tree is corpus construction for both, or for neither.
+    """
+
+    if not patterns:
+        return False
+    filepath = str(filepath).strip()
+    if not filepath:
+        return False
+    if classify_source_kind(filepath, scan_root=scan_root) not in _ALLOWED_SOURCE_KINDS:
+        return False
+    relative_path = relative_repo_path(filepath, scan_root=scan_root)
+    return any(
+        path_matches_golden_fixture_pattern(relative_path, pattern)
+        for pattern in patterns
+    )
+
+
 def split_clone_groups_for_golden_fixtures(
     *,
     groups: GroupMapLike,
@@ -161,18 +189,18 @@ def _matched_patterns_for_group(
     matched: set[str] = set()
     for item in items:
         filepath = str(item.get("filepath", "")).strip()
-        if not filepath:
-            return ()
-        source_kind = classify_source_kind(filepath, scan_root=scan_root)
-        if source_kind not in _ALLOWED_SOURCE_KINDS:
+        if not path_is_declared_golden_fixture(
+            filepath,
+            patterns=patterns,
+            scan_root=scan_root,
+        ):
             return ()
         relative_path = relative_repo_path(filepath, scan_root=scan_root)
-        item_matches = tuple(
+        # The predicate above already established that at least one pattern
+        # matches, so this only re-collects which ones did.
+        matched.update(
             pattern
             for pattern in patterns
             if path_matches_golden_fixture_pattern(relative_path, pattern)
         )
-        if not item_matches:
-            return ()
-        matched.update(item_matches)
     return tuple(sorted(matched))

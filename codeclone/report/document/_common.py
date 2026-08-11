@@ -55,9 +55,12 @@ from ..derived import (
 if TYPE_CHECKING:
     from ...models import (
         GroupMapLike,
+        MetricsDiff,
+        ProjectMetrics,
         SourceKind,
         StructuralFindingGroup,
         SuppressedCloneGroup,
+        TrustVector,
     )
 
 _OVERLOADED_MODULES_FAMILY = "overloaded_modules"
@@ -196,6 +199,155 @@ def _clone_novelty(
         if group_key in frozenset(new_keys or ())
         else CLONE_NOVELTY_KNOWN
     )
+
+
+# Novelty domains whose per-entity difference the baseline actually computes
+# (``codeclone/baseline/diff.py``). Everything outside this set has no
+# comparison term at all, so its findings can only ever say "unavailable".
+ENTITY_NOVELTY_DOMAIN_COMPLEXITY: Final = CATEGORY_COMPLEXITY
+ENTITY_NOVELTY_DOMAIN_COUPLING: Final = CATEGORY_COUPLING
+ENTITY_NOVELTY_DOMAIN_DEPENDENCIES: Final = "dependencies"
+ENTITY_NOVELTY_DOMAIN_DEAD_CODE: Final = FAMILY_DEAD_CODE
+BASELINE_GOVERNED_ENTITY_DOMAINS: Final = (
+    ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
+    ENTITY_NOVELTY_DOMAIN_COUPLING,
+    ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
+    ENTITY_NOVELTY_DOMAIN_DEAD_CODE,
+)
+
+NOVELTY_REASON_LANE_UNAVAILABLE: Final = "lane_unavailable"
+NOVELTY_REASON_NOT_GOVERNED: Final = "not_baseline_governed"
+NOVELTY_REASON_ENTITY_NOT_COMPARED: Final = "entity_not_compared"
+
+_ENTITY_NOVELTY_COMPARED_KEY: Final = "compared"
+_ENTITY_NOVELTY_NEW_KEY: Final = "new"
+
+
+def _lane_is_trusted(trust: TrustVector | None, lane: str) -> bool:
+    return bool(
+        trust is not None
+        and trust.root_verified
+        and any(item.name == lane and item.status == "trusted" for item in trust.lanes)
+    )
+
+
+def _entity_novelty_facts(
+    *,
+    project_metrics: ProjectMetrics | None,
+    metrics_diff: MetricsDiff | None,
+    baseline_trust: TrustVector | None,
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Route the per-entity differences the baseline already computed.
+
+    ``codeclone/baseline/diff.py`` computes these set differences and sends
+    them to the gates; without this they never reach the findings that were
+    compared, and ``list_findings(novelty="new")`` disagrees with the gate
+    about the same regression. A domain is published only when its lane is
+    trusted, so an untrusted lane still yields an honest "unavailable".
+
+    ``compared`` is the current snapshot's population for that domain — the
+    exact set ``compute_metrics_diff`` subtracted the baseline from — so an
+    entity outside it is never called "known".
+    """
+
+    if project_metrics is None or metrics_diff is None:
+        return {}
+    # The same builder the diff itself uses for its current snapshot, so the
+    # identities here cannot drift from the identities that were subtracted.
+    from ...baseline._metrics_baseline_payload import snapshot_from_project_metrics
+
+    current = snapshot_from_project_metrics(project_metrics)
+    domains: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+        (
+            ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
+            "risk_observations",
+            current.high_risk_functions,
+            metrics_diff.new_high_risk_functions,
+        ),
+        (
+            ENTITY_NOVELTY_DOMAIN_COUPLING,
+            "coupling_cohesion_observations",
+            current.high_coupling_classes,
+            metrics_diff.new_high_coupling_classes,
+        ),
+        (
+            ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
+            "dependencies",
+            tuple(
+                # The snapshot carries DependencyCycleFact since the cycle-policy
+                # split (members + binding kind), while ``new_cycles`` is still
+                # plain member tuples. Both sides must spell the identity from
+                # the members alone: key them differently and every cycle would
+                # read "not compared" while the diff says otherwise.
+                _dependency_cycle_identity(cycle.modules)
+                for cycle in current.dependency_cycles
+            ),
+            tuple(
+                _dependency_cycle_identity(cycle) for cycle in metrics_diff.new_cycles
+            ),
+        ),
+        (
+            ENTITY_NOVELTY_DOMAIN_DEAD_CODE,
+            "dead_code",
+            current.dead_code_items,
+            metrics_diff.new_dead_code,
+        ),
+    )
+    return {
+        domain: {
+            _ENTITY_NOVELTY_COMPARED_KEY: tuple(sorted(set(compared))),
+            _ENTITY_NOVELTY_NEW_KEY: tuple(sorted(set(new_entities))),
+        }
+        for domain, lane, compared, new_entities in domains
+        if _lane_is_trusted(baseline_trust, lane)
+    }
+
+
+def _dependency_cycle_identity(modules: Iterable[str]) -> str:
+    """Identity a dependency cycle is compared under.
+
+    Producer (``_entity_novelty_facts``) and consumer (the dependency design
+    group) must spell one cycle the same way; both call this.
+    """
+
+    return " -> ".join(str(module) for module in modules)
+
+
+def _entity_novelty(
+    *,
+    identity: str,
+    domain: str,
+    entity_novelty_facts: Mapping[str, object] | None,
+) -> tuple[str, str | None]:
+    """Return ``(novelty, novelty_reason)`` for one baseline-comparable entity.
+
+    Three honest outcomes, never folded into two: the domain carries no
+    comparison at all, the lane that would carry it is not trusted, or the
+    comparison ran and this entity was inside its population. Absence of
+    evidence stays ``unavailable`` — calling it ``known`` would assert a
+    comparison that never happened.
+    """
+
+    if domain not in BASELINE_GOVERNED_ENTITY_DOMAINS:
+        return CLONE_NOVELTY_UNAVAILABLE, NOVELTY_REASON_NOT_GOVERNED
+    domain_facts = _as_mapping(_as_mapping(entity_novelty_facts).get(domain))
+    if not domain_facts:
+        return CLONE_NOVELTY_UNAVAILABLE, NOVELTY_REASON_LANE_UNAVAILABLE
+    compared = frozenset(
+        str(value)
+        for value in _as_sequence(domain_facts.get(_ENTITY_NOVELTY_COMPARED_KEY))
+    )
+    if identity not in compared:
+        return CLONE_NOVELTY_UNAVAILABLE, NOVELTY_REASON_ENTITY_NOT_COMPARED
+    novelty = _clone_novelty(
+        group_key=identity,
+        lane_trusted=True,
+        new_keys=frozenset(
+            str(value)
+            for value in _as_sequence(domain_facts.get(_ENTITY_NOVELTY_NEW_KEY))
+        ),
+    )
+    return novelty, None
 
 
 def _item_sort_key(item: Mapping[str, object]) -> tuple[str, int, int, str]:

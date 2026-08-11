@@ -308,7 +308,6 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
             design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
             update_metrics_baseline=False,
-            metrics_baseline=DEFAULT_BASELINE_PATH,
             skip_metrics=False,
             skip_dead_code=False,
             skip_dependencies=False,
@@ -396,15 +395,6 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                     allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
-        if request.metrics_baseline_path is not None:
-            args.metrics_baseline = str(
-                _helpers._resolve_optional_path(
-                    request.metrics_baseline_path,
-                    root_path,
-                    kind="metrics_baseline",
-                    allow_external_artifacts=request.allow_external_artifacts,
-                )
-            )
         if request.cache_path is not None:
             args.cache_path = str(
                 _helpers._resolve_optional_path(
@@ -443,20 +433,14 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         )
         baseline_exists = baseline_path.exists()
 
-        metrics_baseline_arg_path = _helpers._resolve_optional_path(
-            str(args.metrics_baseline),
-            root_path,
-            kind="metrics_baseline",
-            allow_external_artifacts=allow_external_artifacts,
-            allow_repo_absolute=True,
-        )
-        metrics_baseline_exists = metrics_baseline_arg_path.exists()
-
+        # One container, one path. 2.1.0a2 unified the clone and metrics lanes
+        # and dropped --metrics-baseline; an independent metrics path here let
+        # a redirected baseline leave the metrics lane on the old default.
         return (
             baseline_path,
             baseline_exists,
-            metrics_baseline_arg_path,
-            metrics_baseline_exists,
+            baseline_path,
+            baseline_exists,
         )
 
 
@@ -524,6 +508,9 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         cache_status: CacheStatus,
         new_func: Sequence[str] | set[str],
         new_block: Sequence[str] | set[str],
+        #: False when the caller never ran a clone comparison, so ``new_func``
+        #: and ``new_block`` are "not measured" rather than "measured empty".
+        clone_novelty_available: bool,
         metrics_diff: MetricsDiff | None,
         warnings: Sequence[str],
         failures: Sequence[str],
@@ -590,10 +577,19 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "inventory": dict(inventory),
             "findings_summary": dict(summary),
             "health": dict(_helpers._as_mapping(metrics_summary.get("health"))),
+            # Null, not zero, when no clone lane was compared: the canonical
+            # report document already reports that novelty as "unavailable",
+            # and a count here would contradict it inside one payload.
             "baseline_diff": {
-                "new_function_clone_groups": len(new_func),
-                "new_block_clone_groups": len(new_block),
-                "new_clone_groups_total": len(new_func) + len(new_block),
+                "new_function_clone_groups": (
+                    len(new_func) if clone_novelty_available else None
+                ),
+                "new_block_clone_groups": (
+                    len(new_block) if clone_novelty_available else None
+                ),
+                "new_clone_groups_total": (
+                    len(new_func) + len(new_block) if clone_novelty_available else None
+                ),
             },
             "metrics_diff": _helpers._metrics_diff_payload(metrics_diff),
             "warnings": list(warnings),
@@ -707,41 +703,39 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
                 "total": _as_int(findings_summary.get("total", 0), 0),
                 "new": 0,
                 "known": 0,
+                "unavailable": 0,
                 "by_family": {},
                 "production": 0,
                 "new_by_source_kind": _helpers._source_kind_breakdown(()),
             }
         findings = self._base_findings(record)
-        by_family: dict[str, int] = {
-            "clones": 0,
-            "structural": 0,
-            "dead_code": 0,
-            "design": 0,
-        }
-        new_count = 0
-        known_count = 0
+        # Built from the families actually present, never from a literal
+        # dictionary: a family missing from that literal was counted in
+        # ``total`` and nowhere else, so the breakdown silently lost it.
+        by_family: dict[str, int] = {}
         production_count = 0
         new_by_source_kind = _helpers._source_kind_breakdown(
             _helpers._finding_source_kind(finding)
             for finding in findings
-            if str(finding.get("novelty", "")).strip() == "new"
+            if _helpers._is_new_finding(finding)
         )
         for finding in findings:
             family = str(finding.get("family", "")).strip()
-            family_key = "clones" if family == FAMILY_CLONE else family
-            if family_key in by_family:
-                by_family[family_key] += 1
-            if str(finding.get("novelty", "")).strip() == "new":
-                new_count += 1
-            else:
-                known_count += 1
+            family_key = (
+                "clones" if family == FAMILY_CLONE else family or "unclassified"
+            )
+            by_family[family_key] = by_family.get(family_key, 0) + 1
             if _helpers._finding_source_kind(finding) == SOURCE_KIND_PRODUCTION:
                 production_count += 1
+        # The tri-state counters live with the novelty rule itself, so this
+        # projection cannot grow a private second opinion about it again.
+        novelty_counts = _helpers._novelty_bucket_counts(findings)
         return {
             "total": len(findings),
-            "new": new_count,
-            "known": known_count,
-            "by_family": {key: value for key, value in by_family.items() if value > 0},
+            "new": novelty_counts["new"],
+            "known": novelty_counts["known"],
+            "unavailable": novelty_counts["unavailable"],
+            "by_family": dict(sorted(by_family.items())),
             "production": production_count,
             "new_by_source_kind": new_by_source_kind,
         }
@@ -1356,11 +1350,21 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             git_diff_ref=git_diff_ref,
             prefer_record_paths=True,
         )
-        changed_items = self._query_findings(
+        scoped_items = self._query_findings(
             record=record,
             detail_level="summary",
             changed_paths=paths_filter,
         )
+        # "New findings" is a claim about the baseline comparison, so only
+        # findings the comparison actually called new may be published under
+        # it; an uncompared finding is not a regression in someone's PR. The
+        # verdict below still reads the whole in-scope set, unchanged.
+        changed_items = [
+            item for item in scoped_items if _helpers._is_new_finding(item)
+        ]
+        # ...and "in changed files" is a claim about the diff scope, which
+        # only exists when changed paths were actually supplied.
+        findings_scope = "changed_files" if paths_filter else "repository"
         previous = self._previous_run_for_root(record)
         resolved: list[dict[str, object]] = []
         if previous is not None:
@@ -1382,16 +1386,15 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             )
         verdict = _helpers._changed_verdict(
             changed_projection={
-                "total": len(changed_items),
-                "new": sum(
-                    1 for item in changed_items if str(item.get("novelty", "")) == "new"
-                ),
+                "total": len(scoped_items),
+                "new": len(changed_items),
             },
             health_delta=_helpers._summary_health_delta(record.summary),
         )
         payload: dict[str, object] = {
             "run_id": _helpers._short_run_id(record.run_id),
             "changed_files": len(paths_filter),
+            "findings_scope": findings_scope,
             "health": _helpers._summary_health_payload(record.summary),
             "health_delta": _helpers._summary_health_delta(record.summary),
             "verdict": verdict,

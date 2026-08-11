@@ -926,6 +926,12 @@ def _block_holding(cfg: CFG, text: str) -> Block:
     return matches[0]
 
 
+def _blocks_holding(cfg: CFG, *texts: str) -> tuple[Block, ...]:
+    """The blocks holding each snippet, in the order asked for."""
+
+    return tuple(_block_holding(cfg, text) for text in texts)
+
+
 def _weakly_connected_components(cfg: CFG) -> int:
     parent = {block.id: block.id for block in cfg.blocks}
 
@@ -1114,6 +1120,157 @@ def test_norm_f5_break_outside_any_finally_is_unaffected() -> None:
         "cleanup" in ast.unparse(stmt)
         for block in breaking.successors
         for stmt in block.statements
+    )
+
+
+def test_norm_f5_break_through_a_finally_still_reaches_the_loop_exit() -> None:
+    """F5/F6: routing through the finally must not lose the ``break`` target.
+
+    Entering the finally is only half of F5. A ``break`` that runs a cleanup on
+    its way out still leaves the loop, so the finally has to carry that
+    continuation to the block after the loop. Pinning only the entry edge left
+    the exit unpinned, and the code after a ``while True`` was published as
+    unreachable while CPython ran it.
+    """
+
+    cfg = build_cfg_from_source(
+        """
+        def looping():
+            while True:
+                try:
+                    break
+                finally:
+                    cleanup()
+            after_loop()
+        """
+    )
+    finally_block, after_loop = _blocks_holding(cfg, "cleanup()", "after_loop()")
+    assert after_loop in finally_block.successors
+    assert after_loop.id in _reachable_ids(cfg)
+
+
+def test_norm_f5_continue_through_a_finally_still_reaches_the_header() -> None:
+    """The ``continue`` half of F5: the deferred target is the loop header."""
+
+    cfg = build_cfg_from_source(
+        """
+        def looping(flag):
+            while True:
+                try:
+                    if flag:
+                        break
+                    continue
+                finally:
+                    cleanup()
+            after_loop()
+        """
+    )
+    finally_block, header, after_loop = _blocks_holding(
+        cfg, "cleanup()", "True", "after_loop()"
+    )
+    assert header in finally_block.successors, (
+        "a continue that runs a finally still returns to the loop header"
+    )
+    assert after_loop in finally_block.successors
+    assert after_loop.id in _reachable_ids(cfg)
+
+
+def test_norm_f5_break_through_nested_finallys_unwinds_one_level() -> None:
+    """Each enclosing finally runs in turn, so the target is handed outward.
+
+    The inner finally does not jump past the outer one: it hands the pending
+    ``break`` to the finally that still stands between it and the loop, and
+    only the outermost one edges to the loop exit.
+    """
+
+    cfg = build_cfg_from_source(
+        """
+        def looping():
+            while True:
+                try:
+                    try:
+                        break
+                    finally:
+                        inner_cleanup()
+                finally:
+                    outer_cleanup()
+            after_loop()
+        """
+    )
+    inner, outer, after_loop = _blocks_holding(
+        cfg, "inner_cleanup()", "outer_cleanup()", "after_loop()"
+    )
+    assert after_loop in outer.successors
+    assert after_loop not in inner.successors, (
+        "the inner finally must not skip the outer cleanup"
+    )
+    assert after_loop.id in _reachable_ids(cfg)
+
+
+def test_norm_f5_exits_parked_at_two_depths_keep_their_own_targets() -> None:
+    """One loop can hold pending exits behind two different finallys at once.
+
+    The ``continue`` waits on the outer cleanup while the ``break`` waits on
+    the inner one, and two different targets — the loop header and the
+    block after the loop. When the inner finally completes it must deliver its
+    own pending exit and leave the outer one untouched: a resume that dropped
+    or delivered every parked exit regardless of which finally it belonged to
+    would lose the header edge, and nothing sharing a target could show it.
+    """
+
+    cfg = build_cfg_from_source(
+        """
+        def looping(flag):
+            while True:
+                try:
+                    if flag:
+                        continue
+                    try:
+                        break
+                    finally:
+                        inner_cleanup()
+                finally:
+                    outer_cleanup()
+            after_loop()
+        """
+    )
+    inner, outer, header, after_loop = _blocks_holding(
+        cfg, "inner_cleanup()", "outer_cleanup()", "True", "after_loop()"
+    )
+    assert after_loop in outer.successors
+    assert header in outer.successors, (
+        "the continue parked behind the outer finally must still return there"
+    )
+    assert after_loop not in inner.successors, (
+        "the pending break may not skip the outer cleanup"
+    )
+    assert header not in inner.successors
+    assert after_loop.id in _reachable_ids(cfg)
+
+
+def test_norm_f5_a_continue_only_loop_never_reaches_the_loop_exit() -> None:
+    """The mirror: a deferred target is the one the terminator actually named.
+
+    ``continue`` cannot leave the loop, so carrying it through the finally must
+    not hand the block after a ``while True`` an edge it has not earned. This
+    is the boundary a blanket ``finally -> break_target`` edge would erase.
+    """
+
+    cfg = build_cfg_from_source(
+        """
+        def looping():
+            while True:
+                try:
+                    continue
+                finally:
+                    cleanup()
+            after_loop()
+        """
+    )
+    finally_block, after_loop = _blocks_holding(cfg, "cleanup()", "after_loop()")
+    assert after_loop not in finally_block.successors
+    assert after_loop.id not in _reachable_ids(cfg), (
+        "nothing breaks out of this loop, so its tail really is dead"
     )
 
 

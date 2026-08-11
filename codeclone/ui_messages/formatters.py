@@ -307,6 +307,11 @@ def fmt_summary_compact(
     )
 
 
+#: Rendered in place of a new-clone count when no clone lane was compared
+#: against the baseline. "Not compared" is not "zero new".
+CLONE_NOVELTY_UNAVAILABLE_TEXT = "unavailable"
+
+
 def fmt_summary_compact_clones(
     *,
     function: int,
@@ -314,7 +319,7 @@ def fmt_summary_compact_clones(
     segment: int,
     suppressed: int,
     fixture_excluded: int,
-    new: int,
+    new: int | None,
 ) -> str:
     parts = [
         f"Clones   func={function}",
@@ -324,7 +329,9 @@ def fmt_summary_compact_clones(
     ]
     if fixture_excluded > 0:
         parts.append(f"fixtures={fixture_excluded}")
-    parts.append(f"new={new}")
+    parts.append(
+        f"new={CLONE_NOVELTY_UNAVAILABLE_TEXT}" if new is None else f"new={new}"
+    )
     return "  ".join(parts)
 
 
@@ -479,7 +486,7 @@ def fmt_summary_clones(
     segment: int,
     suppressed: int,
     fixture_excluded: int,
-    new: int,
+    new: int | None,
 ) -> str:
     clone_parts = [
         f"{_v(func, STYLE_COUNT_ATTENTION)} func",
@@ -493,7 +500,11 @@ def fmt_summary_clones(
     ]
     if fixture_excluded > 0:
         quals.append(f"{_v(fixture_excluded, STYLE_COUNT_ATTENTION_SOFT)} fixtures")
-    quals.append(f"{_v(new, STYLE_COUNT_CRITICAL)} new")
+    quals.append(
+        f"[{STYLE_META}]new {CLONE_NOVELTY_UNAVAILABLE_TEXT}[/{STYLE_META}]"
+        if new is None
+        else f"{_v(new, STYLE_COUNT_CRITICAL)} new"
+    )
     return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
 
 

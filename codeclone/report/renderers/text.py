@@ -561,7 +561,12 @@ def _append_metrics_summary_lines(
                     "tests",
                 )
             case "dead_code":
-                keys = ("total", "high_confidence", "suppressed")
+                keys = (
+                    "total",
+                    "high_confidence",
+                    "suppressed",
+                    "unreachable_statements",
+                )
             case _:
                 keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")

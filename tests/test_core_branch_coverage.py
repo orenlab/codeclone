@@ -860,6 +860,7 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         "high_confidence": 0,
         "suppressed": 1,
         "unresolved_external_override": 0,
+        "unreachable_statements": 0,
         "live_roots": 0,
     }
 

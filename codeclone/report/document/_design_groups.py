@@ -41,8 +41,13 @@ from ..derived import (
 )
 from ._common import (
     _COVERAGE_JOIN_FAMILY,
+    ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
+    ENTITY_NOVELTY_DOMAIN_COUPLING,
+    ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
     _coerced_nonnegative_threshold,
     _contract_report_location_path,
+    _dependency_cycle_identity,
+    _entity_novelty,
     _priority,
     _source_scope_from_filepaths,
 )
@@ -61,7 +66,15 @@ def _design_singleton_group(
     scan_root: str,
     item_data: Mapping[str, object],
     facts: Mapping[str, object],
+    novelty_domain: str,
+    novelty_identity: str | None = None,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    novelty, novelty_reason = _entity_novelty(
+        identity=qualname if novelty_identity is None else novelty_identity,
+        domain=novelty_domain,
+        entity_novelty_facts=entity_novelty_facts,
+    )
     return {
         "id": design_group_id(category, qualname),
         "family": FAMILY_DESIGN,
@@ -71,6 +84,8 @@ def _design_singleton_group(
         "confidence": CONFIDENCE_HIGH,
         "priority": _priority(severity, EFFORT_MODERATE),
         "count": 1,
+        "novelty": novelty,
+        "novelty_reason": novelty_reason,
         "source_scope": _single_location_source_scope(
             filepath,
             scan_root=scan_root,
@@ -97,6 +112,7 @@ def _complexity_design_group(
     *,
     threshold: int,
     scan_root: str,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     cc = _as_int(item_map.get("cyclomatic_complexity"), 1)
     if cc <= threshold:
@@ -123,6 +139,8 @@ def _complexity_design_group(
             "cyclomatic_complexity": cc,
             "nesting_depth": nesting_depth,
         },
+        novelty_domain=ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
+        entity_novelty_facts=entity_novelty_facts,
     )
 
 
@@ -131,6 +149,7 @@ def _coupling_design_group(
     *,
     threshold: int,
     scan_root: str,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     cbo = _as_int(item_map.get("cbo"))
     if cbo <= threshold:
@@ -156,6 +175,8 @@ def _coupling_design_group(
             "cbo": cbo,
             "coupled_classes": coupled_classes,
         },
+        novelty_domain=ENTITY_NOVELTY_DOMAIN_COUPLING,
+        entity_novelty_facts=entity_novelty_facts,
     )
 
 
@@ -192,6 +213,9 @@ def _cohesion_design_group(
             "method_count": method_count,
             "instance_var_count": instance_var_count,
         },
+        # MetricsDiff carries no ``new_low_cohesion_classes`` term, so cohesion
+        # has no per-entity baseline answer to report.
+        novelty_domain=CATEGORY_COHESION,
     )
 
 
@@ -210,6 +234,7 @@ def _dependency_design_group(
     detail: Mapping[str, object],
     *,
     scan_root: str,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     modules = [
         str(module)
@@ -236,7 +261,12 @@ def _dependency_design_group(
         else "cycle only over deferred edges (function-scope, module "
         "__getattr__, or lazy imports)"
     )
-    cycle_key = " -> ".join(modules)
+    cycle_key = _dependency_cycle_identity(modules)
+    novelty, novelty_reason = _entity_novelty(
+        identity=cycle_key,
+        domain=ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
+        entity_novelty_facts=entity_novelty_facts,
+    )
     items: list[dict[str, object]] = []
     for module, member_path in zip(modules, member_paths, strict=True):
         item: dict[str, object] = {
@@ -264,6 +294,8 @@ def _dependency_design_group(
         "confidence": CONFIDENCE_HIGH,
         "priority": _priority(severity, EFFORT_HARD),
         "count": len(modules),
+        "novelty": novelty,
+        "novelty_reason": novelty_reason,
         "source_scope": _source_scope_from_filepaths(
             (
                 _module_classification_path(module, member_path)
@@ -310,6 +342,11 @@ def _coverage_design_group(
     else:
         kind = FINDING_KIND_COVERAGE_HOTSPOT
         detail = "Joined line coverage is below the configured hotspot threshold."
+    coverage_novelty, coverage_novelty_reason = _entity_novelty(
+        identity=subject_key,
+        domain=CATEGORY_COVERAGE,
+        entity_novelty_facts=None,
+    )
     return {
         "id": design_group_id(CATEGORY_COVERAGE, subject_key),
         "family": FAMILY_DESIGN,
@@ -319,6 +356,10 @@ def _coverage_design_group(
         "confidence": CONFIDENCE_HIGH,
         "priority": _priority(severity, EFFORT_MODERATE),
         "count": 1,
+        # The coverage join is a current-run signal only; the baseline has no
+        # coverage lane and therefore no comparison to report.
+        "novelty": coverage_novelty,
+        "novelty_reason": coverage_novelty_reason,
         "source_scope": _single_location_source_scope(
             filepath,
             scan_root=scan_root,
@@ -359,6 +400,7 @@ def _build_design_groups(
     *,
     design_thresholds: Mapping[str, object] | None = None,
     scan_root: str,
+    entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     families = _as_mapping(metrics_payload.get("families"))
     thresholds = _as_mapping(design_thresholds)
@@ -387,6 +429,7 @@ def _build_design_groups(
             _as_mapping(item),
             threshold=complexity_threshold,
             scan_root=scan_root,
+            entity_novelty_facts=entity_novelty_facts,
         )
         if group is not None:
             groups.append(group)
@@ -397,6 +440,7 @@ def _build_design_groups(
             _as_mapping(item),
             threshold=coupling_threshold,
             scan_root=scan_root,
+            entity_novelty_facts=entity_novelty_facts,
         )
         if group is not None:
             groups.append(group)
@@ -425,7 +469,11 @@ def _build_design_groups(
             for cycle in _as_sequence(dependencies.get("cycles"))
         ]
     for detail in cycle_details:
-        group = _dependency_design_group(_as_mapping(detail), scan_root=scan_root)
+        group = _dependency_design_group(
+            _as_mapping(detail),
+            scan_root=scan_root,
+            entity_novelty_facts=entity_novelty_facts,
+        )
         if group is not None:
             groups.append(group)
 

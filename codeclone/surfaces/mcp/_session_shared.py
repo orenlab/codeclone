@@ -638,7 +638,6 @@ class MCPAnalysisRequest:
     coupling_threshold: int | None = None
     cohesion_threshold: int | None = None
     baseline_path: str | None = None
-    metrics_baseline_path: str | None = None
     max_baseline_size_mb: int | None = None
     cache_policy: CachePolicy = "reuse"
     cache_path: str | None = None

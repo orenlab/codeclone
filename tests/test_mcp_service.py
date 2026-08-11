@@ -15,9 +15,10 @@ import sqlite3
 import subprocess
 from argparse import Namespace
 from collections import OrderedDict, UserDict
-from collections.abc import Callable, Mapping
-from dataclasses import replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import fields, replace
 from datetime import timedelta
+from inspect import signature
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
@@ -1025,6 +1026,95 @@ def _mapping_child(
     key: str,
 ) -> dict[str, object]:
     return cast("dict[str, object]", payload[key])
+
+
+def _latest_report_document(service: CodeCloneMCPService) -> Mapping[str, object]:
+    return service._runs.records()[-1].report_document
+
+
+def test_mcp_untrusted_baseline_reports_clone_novelty_as_unavailable(
+    tmp_path: Path,
+) -> None:
+    # No baseline means no comparison ran. Diffing the run against an empty
+    # baseline turns every clone group into a "new" one -- the opposite error
+    # from the CLI's "0 new". One repository state, two contradictory answers.
+    # The canonical report document already answers "unavailable".
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    findings = _mapping_child(_latest_report_document(service), "findings")
+    document_clones = _mapping_child(_mapping_child(findings, "summary"), "clones")
+
+    assert _mapping_child(summary, "baseline")["trusted"] is False
+    assert cast("int", document_clones["unavailable"]) > 0
+    assert document_clones["new"] == 0
+    assert _mapping_child(summary, "diff")["new_clones"] is None
+
+
+def test_mcp_trusted_baseline_still_counts_new_clone_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    resolve_state = mcp_baseline_mod.resolve_clone_baseline_state
+    monkeypatch.setattr(
+        mcp_session_mod,
+        "resolve_clone_baseline_state",
+        lambda **kwargs: replace(resolve_state(**kwargs), trusted_for_diff=True),
+    )
+
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    assert _mapping_child(summary, "diff")["new_clones"] == 1
+
+
+def test_mcp_baseline_path_moves_the_metrics_lane_too(tmp_path: Path) -> None:
+    # 2.1.0a2 unified both lanes into one baseline container and removed
+    # --metrics-baseline from the CLI. MCP kept an independent metrics path,
+    # so redirecting the baseline left the metrics lane pointed at the old
+    # default and silently untrusted.
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            baseline_path="custom.baseline.json",
+        )
+    )
+
+    stored = service._runs.records()[-1].summary
+
+    assert _mapping_child(stored, "baseline")["path"] == "custom.baseline.json"
+    assert (
+        _mapping_child(stored, "metrics_baseline")["path"]
+        == _mapping_child(stored, "baseline")["path"]
+    )
+
+
+def test_mcp_analysis_request_has_no_separate_metrics_baseline_path() -> None:
+    request_fields = {field.name for field in fields(MCPAnalysisRequest)}
+    analyze_parameters = set(
+        signature(CodeCloneMCPService.analyze_repository).parameters
+    )
+
+    assert "metrics_baseline_path" not in request_fields
+    assert "metrics_baseline_path" not in analyze_parameters
 
 
 def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> None:
@@ -4311,7 +4401,6 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
         request=MCPAnalysisRequest(
             respect_pyproject=True,
             analysis_mode="clones_only",
-            metrics_baseline_path="metrics.json",
             coverage_xml="coverage.xml",
         ),
     )
@@ -4322,7 +4411,6 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
     assert args.skip_dependencies is True
     assert str(args.baseline).endswith("conf-baseline.json")
     assert str(args.cache_path).endswith("conf-cache.json")
-    assert str(args.metrics_baseline).endswith("metrics.json")
     assert str(args.coverage_xml).endswith("coverage.xml")
 
     monkeypatch.setattr(
@@ -4710,18 +4798,16 @@ def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> 
         request=MCPAnalysisRequest(
             respect_pyproject=False,
             baseline_path="custom-baseline.json",
-            metrics_baseline_path="metrics-only.json",
             cache_path="custom-cache.json",
         ),
     )
     assert str(args.baseline).endswith("custom-baseline.json")
-    assert str(args.metrics_baseline).endswith("metrics-only.json")
     assert str(args.cache_path).endswith("custom-cache.json")
 
     _, _, metrics_baseline_path, metrics_baseline_exists = (
         service._resolve_baseline_inputs(root_path=tmp_path, args=args)
     )
-    assert str(metrics_baseline_path).endswith("metrics-only.json")
+    assert str(metrics_baseline_path).endswith("custom-baseline.json")
     assert metrics_baseline_exists is False
 
 
@@ -4854,13 +4940,6 @@ def _mcp_request_with_artifact_path(
             allow_external_artifacts=allow_external_artifacts,
             baseline_path=value,
         )
-    if field == "metrics_baseline_path":
-        return MCPAnalysisRequest(
-            root=root_text,
-            respect_pyproject=False,
-            allow_external_artifacts=allow_external_artifacts,
-            metrics_baseline_path=value,
-        )
     if field == "cache_path":
         return MCPAnalysisRequest(
             root=root_text,
@@ -4882,7 +4961,6 @@ def _mcp_request_with_artifact_path(
     ("field", "value"),
     [
         ("baseline_path", "baseline.json"),
-        ("metrics_baseline_path", "metrics.json"),
         ("cache_path", "cache.json"),
         ("coverage_xml", "coverage.xml"),
     ],
@@ -4933,7 +5011,6 @@ def test_mcp_analysis_request_coverage_xml_allows_in_repo_absolute_path(
     ("field", "value"),
     [
         ("baseline_path", "baseline.json"),
-        ("metrics_baseline_path", "metrics.json"),
         ("cache_path", "cache.json"),
         ("coverage_xml", "coverage.xml"),
     ],
@@ -10025,6 +10102,7 @@ def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
         "new_items": 0,
         "suppressed": 0,
         "total": 0,
+        "unreachable_statements": 0,
         "unresolved_external_override": 0,
     }
     # ... but neither the stored summary nor get_run_summary surfaces it, the
@@ -10775,6 +10853,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "total": 7,
         "new": 0,
         "known": 0,
+        "unavailable": 0,
         "by_family": {},
         "production": 0,
         "new_by_source_kind": {
@@ -10851,6 +10930,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "total": 1,
         "new": 1,
         "known": 0,
+        "unavailable": 0,
         "by_family": {"clones": 1},
         "production": 1,
         "new_by_source_kind": {
@@ -10875,11 +10955,16 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
             }
         ],
     )
+    # The breakdown is built from the families actually present, so a family
+    # outside the historical four-bucket literal is counted instead of being
+    # silently dropped: the old pin froze ``by_family: {}`` at ``total: 1``,
+    # i.e. it froze a lost counter as expected behaviour.
     assert service._summary_findings_payload({}, record=record) == {
         "total": 1,
         "new": 0,
         "known": 1,
-        "by_family": {},
+        "unavailable": 0,
+        "by_family": {"custom": 1},
         "production": 0,
         "new_by_source_kind": {
             "production": 0,
@@ -11234,6 +11319,7 @@ def _dead_code_family_with_abstentions() -> dict[str, object]:
             "baseline_diff_available": True,
             "new_items": 0,
             "unresolved_external_override": 2,
+            "unreachable_statements": 0,
             "live_roots": 4,
         },
         "items": [
@@ -11419,6 +11505,7 @@ def test_mcp_service_metrics_detail_family_refuses_false_zero_when_skipped() -> 
             "baseline_diff_available": False,
             "new_items": 0,
             "unresolved_external_override": 0,
+            "unreachable_statements": 0,
             "live_roots": 0,
         },
         "items": [],
@@ -17718,3 +17805,219 @@ def test_get_run_summary_without_analysis_profile(tmp_path: Path) -> None:
     summary = service.get_run_summary(record.run_id)
     assert summary["run_id"] == record.run_id[:8]
     assert "analysis_profile" not in summary
+
+
+# ---------------------------------------------------------------------------
+# Novelty honesty in the MCP projections. ``list_findings`` already answers
+# through the one rule; the run summary and the PR summary must not contradict
+# it about the same run.
+# ---------------------------------------------------------------------------
+
+
+def _novelty_finding(
+    finding_id: str,
+    *,
+    family: str,
+    novelty: str | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": finding_id,
+        "family": family,
+        "category": "duplicated_branches",
+        "kind": "duplicated_branches",
+        "severity": "warning",
+        "confidence": "high",
+        "priority": 1.0,
+        "count": 1,
+        "source_scope": {"dominant_kind": "production", "impact_scope": "runtime"},
+        "spread": {"files": 1, "functions": 1},
+        "items": [
+            {
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:fn",
+                "start_line": 1,
+                "end_line": 2,
+            }
+        ],
+        "facts": {},
+    }
+    if novelty is not None:
+        payload["novelty"] = novelty
+    return payload
+
+
+def _mixed_novelty_groups() -> dict[str, object]:
+    """Two findings the baseline never compared, one new, one known."""
+
+    return {
+        "clones": {"functions": [], "blocks": [], "segments": []},
+        "structural": {
+            "groups": [
+                _novelty_finding(
+                    "struct:uncompared:1", family="structural", novelty=None
+                ),
+                _novelty_finding(
+                    "struct:uncompared:2", family="structural", novelty=None
+                ),
+            ]
+        },
+        "dead_code": {"groups": []},
+        "design": {
+            "groups": [
+                _novelty_finding("design:regression:1", family="design", novelty="new"),
+                _novelty_finding("design:debt:1", family="design", novelty="known"),
+            ]
+        },
+        "authority": {"groups": []},
+    }
+
+
+def _novelty_record(root: Path, run_id: str, groups: dict[str, object]) -> MCPRunRecord:
+    return replace(
+        _dummy_run_record(root, run_id),
+        report_document={"findings": {"groups": groups}},
+        summary={"run_id": run_id, "health": {"score": 80, "grade": "B"}},
+    )
+
+
+def _novelty_service(record: MCPRunRecord) -> CodeCloneMCPService:
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(record)
+    return service
+
+
+@pytest.mark.parametrize("compared_bucket", ["known", "new"])
+def test_run_summary_never_folds_uncompared_findings_into_a_compared_bucket(
+    tmp_path: Path,
+    compared_bucket: str,
+) -> None:
+    """Both directions, each on its own case.
+
+    Two of the four findings carry no ``novelty`` at all. Folding them into
+    ``known`` asserts a comparison that never happened; folding them into
+    ``new`` invents a regression. Only the one finding that really carries
+    each verdict may be counted under it.
+    """
+
+    record = _novelty_record(
+        tmp_path,
+        f"summary-{compared_bucket}",
+        _mixed_novelty_groups(),
+    )
+    service = _novelty_service(record)
+
+    payload = service._summary_findings_payload({}, record=record)
+
+    assert payload[compared_bucket] == 1
+
+
+def test_run_summary_reports_uncompared_findings_as_unavailable(
+    tmp_path: Path,
+) -> None:
+    record = _novelty_record(tmp_path, "summary-unavail", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service._summary_findings_payload({}, record=record)
+
+    assert payload["unavailable"] == 2
+    buckets = ("new", "known", "unavailable")
+    assert sum(cast(int, payload[key]) for key in buckets) == payload["total"]
+
+
+def test_run_summary_by_family_never_drops_a_family(tmp_path: Path) -> None:
+    groups = _mixed_novelty_groups()
+    groups["authority"] = {
+        "groups": [
+            _novelty_finding(
+                "authority:v1:1", family="authority", novelty="unavailable"
+            )
+        ]
+    }
+    record = _novelty_record(tmp_path, "summary-family", groups)
+    service = _novelty_service(record)
+
+    payload = service._summary_findings_payload({}, record=record)
+    by_family = dict(cast(Mapping[str, int], payload["by_family"]))
+
+    assert by_family == {"authority": 1, "design": 2, "structural": 2}
+    assert sum(by_family.values()) == payload["total"]
+
+
+def test_pr_summary_json_lists_only_genuinely_new_findings(tmp_path: Path) -> None:
+    record = _novelty_record(tmp_path, "pr-json-only-new", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(run_id="pr-json-only-new", format="json")
+    listed = [
+        str(cast(Mapping[str, object], item).get("id"))
+        for item in cast(Sequence[object], payload["new_findings_in_changed_files"])
+    ]
+
+    assert listed == ["design:regression:1"]
+
+
+def test_pr_summary_json_keeps_the_new_finding(tmp_path: Path) -> None:
+    """Guard against over-filtering: a real regression must still be published."""
+
+    record = _novelty_record(tmp_path, "pr-json-keeps-new", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(run_id="pr-json-keeps-new", format="json")
+    listed = [
+        str(cast(Mapping[str, object], item).get("id"))
+        for item in cast(Sequence[object], payload["new_findings_in_changed_files"])
+    ]
+
+    assert "design:regression:1" in listed
+
+
+def test_pr_summary_markdown_counts_only_new_findings(tmp_path: Path) -> None:
+    record = _novelty_record(tmp_path, "pr-md-count", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    content = str(
+        service.generate_pr_summary(run_id="pr-md-count", format="markdown")["content"]
+    )
+
+    assert "### New findings" in content
+    assert "(1)" in content.split("### New findings")[1].split("\n")[0]
+
+
+def test_pr_summary_without_changed_scope_does_not_claim_changed_files(
+    tmp_path: Path,
+) -> None:
+    record = _novelty_record(tmp_path, "pr-no-scope", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(run_id="pr-no-scope", format="json")
+    content = str(
+        service.generate_pr_summary(run_id="pr-no-scope", format="markdown")["content"]
+    )
+
+    assert payload["changed_files"] == 0
+    assert payload["findings_scope"] == "repository"
+    assert "in changed files" not in content
+
+
+def test_pr_summary_with_changed_scope_claims_changed_files(tmp_path: Path) -> None:
+    """The scope guard has a reachable input in the other direction too."""
+
+    record = _novelty_record(tmp_path, "pr-with-scope", _mixed_novelty_groups())
+    service = _novelty_service(record)
+
+    payload = service.generate_pr_summary(
+        run_id="pr-with-scope",
+        changed_paths=("pkg/mod.py",),
+        format="json",
+    )
+    content = str(
+        service.generate_pr_summary(
+            run_id="pr-with-scope",
+            changed_paths=("pkg/mod.py",),
+            format="markdown",
+        )["content"]
+    )
+
+    assert payload["changed_files"] == 1
+    assert payload["findings_scope"] == "changed_files"
+    assert "### New findings in changed files (1)" in content

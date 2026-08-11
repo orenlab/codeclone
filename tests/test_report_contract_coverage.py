@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -17,10 +18,17 @@ import codeclone.report.document._common as document_common_mod
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
+    DeadItem,
+    HealthScore,
+    LaneTrust,
+    MetricsDiff,
+    ModuleDep,
+    ProjectMetrics,
     ReportLocation,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
+    TrustVector,
 )
 from codeclone.report import derived as derived_mod
 from codeclone.report import overview as overview_mod
@@ -30,6 +38,7 @@ from codeclone.report.document._common import (
     _contract_path,
     _count_file_lines,
     _count_file_lines_for_path,
+    _entity_novelty_facts,
     _is_absolute_path,
     _normalize_block_machine_facts,
     _normalize_nested_string_rows,
@@ -39,6 +48,8 @@ from codeclone.report.document._common import (
 )
 from codeclone.report.document._design_groups import _build_design_groups
 from codeclone.report.document._findings_groups import (
+    _build_dead_code_groups,
+    _build_structural_groups,
     _clone_group_assessment,
     _csv_values,
     _structural_group_assessment,
@@ -3293,3 +3304,411 @@ def test_report_file_list_skips_suppressed_items_without_filepath() -> None:
         scan_root="",
     )
     assert files == ["pkg/mod.py"]
+
+
+# ---------------------------------------------------------------------------
+# Novelty honesty in the report document: the baseline comparison that is
+# already computed must reach the findings it compared, and the families with
+# no comparison term must say so instead of defaulting to "known".
+# ---------------------------------------------------------------------------
+
+_NOVELTY_SCAN_ROOT = "/repo/proj"
+_NOVELTY_LANES = (
+    "risk_observations",
+    "coupling_cohesion_observations",
+    "dependencies",
+    "dead_code",
+)
+
+
+def _novelty_trust(*, trusted: bool = True) -> TrustVector:
+    return TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(
+                name=cast(Any, name),
+                status="trusted" if trusted else "unavailable",
+                reason="compatible" if trusted else "lane_digest_mismatch",
+            )
+            for name in _NOVELTY_LANES
+        ),
+    )
+
+
+def _novelty_project_metrics() -> ProjectMetrics:
+    return ProjectMetrics(
+        complexity_avg=10.0,
+        complexity_max=30,
+        high_risk_functions=("pkg.mod:fresh_hot", "pkg.mod:old_hot"),
+        coupling_avg=5.0,
+        coupling_max=12,
+        high_risk_classes=("pkg.mod:FreshService", "pkg.mod:OldService"),
+        cohesion_avg=2.5,
+        cohesion_max=6,
+        low_cohesion_classes=("pkg.mod:Blob",),
+        dependency_modules=2,
+        dependency_edges=1,
+        dependency_edge_list=(
+            ModuleDep(source="pkg.a", target="pkg.b", import_type="import", line=1),
+        ),
+        dependency_cycles=(("pkg.a", "pkg.b"),),
+        dependency_max_depth=1,
+        dependency_longest_chains=(),
+        dead_code=(
+            DeadItem(
+                qualname="pkg.mod:fresh_unused",
+                filepath="pkg/mod.py",
+                start_line=1,
+                end_line=2,
+                kind="function",
+                confidence="high",
+            ),
+            DeadItem(
+                qualname="pkg.mod:old_unused",
+                filepath="pkg/mod.py",
+                start_line=4,
+                end_line=5,
+                kind="function",
+                confidence="high",
+            ),
+        ),
+        health=HealthScore(total=90, grade="A", dimensions={"health": 90}),
+    )
+
+
+def _novelty_metrics_diff() -> MetricsDiff:
+    return MetricsDiff(
+        new_high_risk_functions=("pkg.mod:fresh_hot",),
+        new_high_coupling_classes=("pkg.mod:FreshService",),
+        new_cycles=(("pkg.a", "pkg.b"),),
+        new_dead_code=("pkg.mod:fresh_unused",),
+        health_delta=0,
+    )
+
+
+def _novelty_design_metrics_payload() -> dict[str, object]:
+    return {
+        "families": {
+            "complexity": {
+                "items": [
+                    {
+                        "qualname": qualname,
+                        "relative_path": "pkg/mod.py",
+                        "cyclomatic_complexity": 30,
+                        "nesting_depth": 3,
+                        "risk": "high",
+                        "start_line": 1,
+                        "end_line": 9,
+                    }
+                    for qualname in ("pkg.mod:fresh_hot", "pkg.mod:old_hot")
+                ]
+            },
+            "coupling": {
+                "items": [
+                    {
+                        "qualname": qualname,
+                        "relative_path": "pkg/mod.py",
+                        "cbo": 12,
+                        "risk": "high",
+                        "coupled_classes": [],
+                        "start_line": 1,
+                        "end_line": 9,
+                    }
+                    for qualname in ("pkg.mod:FreshService", "pkg.mod:OldService")
+                ]
+            },
+            "cohesion": {
+                "items": [
+                    {
+                        "qualname": "pkg.mod:Blob",
+                        "relative_path": "pkg/mod.py",
+                        "lcom4": 6,
+                        "risk": "high",
+                        "method_count": 5,
+                        "instance_var_count": 3,
+                        "start_line": 1,
+                        "end_line": 9,
+                    }
+                ]
+            },
+            "dependencies": {
+                "cycle_details": [
+                    {
+                        "modules": ["pkg.a", "pkg.b"],
+                        "kind": "import_cycle",
+                        "member_paths": ["pkg/a.py", "pkg/b.py"],
+                    }
+                ]
+            },
+        }
+    }
+
+
+def _novelty_dead_code_metrics_payload() -> dict[str, object]:
+    return {
+        "families": {
+            "dead_code": {
+                "items": [
+                    {
+                        "qualname": qualname,
+                        "relative_path": "pkg/mod.py",
+                        "kind": "function",
+                        "confidence": "high",
+                        "start_line": 1,
+                        "end_line": 2,
+                    }
+                    for qualname in ("pkg.mod:fresh_unused", "pkg.mod:old_unused")
+                ],
+                "unreachable_statements": [
+                    {
+                        "qualname": "pkg.mod:live",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 7,
+                        "end_line": 8,
+                        "reason": "after_return",
+                        "statement_count": 1,
+                    }
+                ],
+            }
+        }
+    }
+
+
+def _novelty_facts(*, trusted: bool = True) -> dict[str, dict[str, tuple[str, ...]]]:
+    return _entity_novelty_facts(
+        project_metrics=_novelty_project_metrics(),
+        metrics_diff=_novelty_metrics_diff(),
+        baseline_trust=_novelty_trust(trusted=trusted),
+    )
+
+
+def _novelty_by_qualname(groups: list[dict[str, object]]) -> dict[str, str]:
+    return {
+        str(dict(cast(Mapping[str, object], item)).get("qualname", "")): str(
+            group.get("novelty")
+        )
+        for group in groups
+        for item in cast(Sequence[object], group.get("items") or ())
+    }
+
+
+@pytest.mark.parametrize(
+    ("fresh_entity", "baseline_entity"),
+    [
+        ("pkg.mod:fresh_hot", "pkg.mod:old_hot"),
+        ("pkg.mod:FreshService", "pkg.mod:OldService"),
+    ],
+    ids=["complexity", "coupling"],
+)
+def test_design_hotspot_carries_the_computed_baseline_comparison(
+    fresh_entity: str,
+    baseline_entity: str,
+) -> None:
+    groups = _build_design_groups(
+        _novelty_design_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts=_novelty_facts(),
+    )
+
+    novelty = _novelty_by_qualname(groups)
+
+    assert novelty[fresh_entity] == "new"
+    assert novelty[baseline_entity] == "known"
+
+
+def test_cohesion_hotspot_has_no_baseline_comparison_term() -> None:
+    """MetricsDiff carries no ``new_low_cohesion_classes``; say so, do not guess."""
+
+    groups = _build_design_groups(
+        _novelty_design_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts=_novelty_facts(),
+    )
+    cohesion = [group for group in groups if str(group.get("category")) == "cohesion"]
+
+    assert [str(group.get("novelty")) for group in cohesion] == ["unavailable"]
+    assert [str(group.get("novelty_reason")) for group in cohesion] == [
+        "not_baseline_governed"
+    ]
+
+
+def test_dependency_cycle_carries_the_computed_baseline_comparison() -> None:
+    groups = _build_design_groups(
+        _novelty_design_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts=_novelty_facts(),
+    )
+    cycles = [group for group in groups if str(group.get("category")) == "dependency"]
+
+    assert [str(group.get("novelty")) for group in cycles] == ["new"]
+
+
+def test_design_groups_stay_unavailable_when_the_lane_is_untrusted() -> None:
+    groups = _build_design_groups(
+        _novelty_design_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts=_novelty_facts(trusted=False),
+    )
+
+    assert {str(group.get("novelty")) for group in groups} == {"unavailable"}
+    assert {
+        str(group.get("novelty_reason"))
+        for group in groups
+        if str(group.get("category")) in {"complexity", "coupling", "dependency"}
+    } == {"lane_unavailable"}
+
+
+def test_dead_code_symbols_carry_the_comparison_and_statements_do_not() -> None:
+    groups = _build_dead_code_groups(
+        _novelty_dead_code_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts=_novelty_facts(),
+    )
+    by_kind_novelty = {
+        (
+            str(group.get("kind")),
+            str(dict(cast(Mapping[str, object], item)).get("qualname", "")),
+        ): str(group.get("novelty"))
+        for group in groups
+        for item in cast(Sequence[object], group.get("items") or ())
+    }
+
+    assert by_kind_novelty[("unused_symbol", "pkg.mod:fresh_unused")] == "new"
+    assert by_kind_novelty[("unused_symbol", "pkg.mod:old_unused")] == "known"
+    assert by_kind_novelty[("unreachable_statement", "pkg.mod:live")] == "unavailable"
+
+
+def test_structural_groups_declare_the_missing_baseline_comparison() -> None:
+    signature = {
+        "calls": "0",
+        "has_loop": "1",
+        "has_try": "0",
+        "nested_if": "0",
+        "raises": "0",
+        "stmt_seq": "Expr,For",
+        "terminal": "fallthrough",
+    }
+    groups = _build_structural_groups(
+        [
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="a" * 40,
+                signature=signature,
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="a" * 40,
+                        file_path=f"{_NOVELTY_SCAN_ROOT}/pkg/mod.py",
+                        qualname="pkg.mod:fn",
+                        start=10,
+                        end=12,
+                        signature=signature,
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="a" * 40,
+                        file_path=f"{_NOVELTY_SCAN_ROOT}/pkg/mod.py",
+                        qualname="pkg.mod:fn",
+                        start=20,
+                        end=22,
+                        signature=signature,
+                    ),
+                ),
+            )
+        ],
+        scan_root=_NOVELTY_SCAN_ROOT,
+    )
+
+    assert [str(group.get("novelty")) for group in groups] == ["unavailable"]
+    assert [str(group.get("novelty_reason")) for group in groups] == [
+        "not_baseline_governed"
+    ]
+
+
+def test_entity_novelty_facts_are_gated_by_lane_trust() -> None:
+    trusted = _novelty_facts(trusted=True)
+    untrusted = _novelty_facts(trusted=False)
+
+    assert set(trusted) == {"complexity", "coupling", "dependencies", "dead_code"}
+    assert untrusted == {}
+
+
+def test_entity_novelty_facts_require_a_diff_and_a_current_population() -> None:
+    assert (
+        _entity_novelty_facts(
+            project_metrics=_novelty_project_metrics(),
+            metrics_diff=None,
+            baseline_trust=_novelty_trust(),
+        )
+        == {}
+    )
+    assert (
+        _entity_novelty_facts(
+            project_metrics=None,
+            metrics_diff=_novelty_metrics_diff(),
+            baseline_trust=_novelty_trust(),
+        )
+        == {}
+    )
+
+
+def test_entity_outside_the_compared_population_is_not_called_known() -> None:
+    """A hotspot the compared snapshot never carried was never compared."""
+
+    facts = _entity_novelty_facts(
+        project_metrics=replace(
+            _novelty_project_metrics(),
+            high_risk_functions=("pkg.mod:old_hot",),
+        ),
+        metrics_diff=_novelty_metrics_diff(),
+        baseline_trust=_novelty_trust(),
+    )
+    groups = _build_design_groups(
+        _novelty_design_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts=facts,
+    )
+    complexity = {
+        str(dict(cast(Mapping[str, object], item)).get("qualname", "")): (
+            str(group.get("novelty")),
+            group.get("novelty_reason"),
+        )
+        for group in groups
+        if str(group.get("category")) == "complexity"
+        for item in cast(Sequence[object], group.get("items") or ())
+    }
+
+    assert complexity["pkg.mod:fresh_hot"] == ("unavailable", "entity_not_compared")
+    assert complexity["pkg.mod:old_hot"] == ("known", None)
+
+
+def test_entity_novelty_facts_spell_a_cycle_as_arrow_joined_modules() -> None:
+    """Producer side of the cycle identity, pinned against a literal.
+
+    The identity also feeds ``design_group_id`` for dependency findings, so it
+    is a published contract, not a private convention: a relative pin (both
+    ends call one helper) stays green for ANY separator and would let it drift.
+    """
+
+    facts = _novelty_facts()
+
+    assert facts["dependencies"]["compared"] == ("pkg.a -> pkg.b",)
+    assert facts["dependencies"]["new"] == ("pkg.a -> pkg.b",)
+
+
+def test_dependency_group_matches_the_arrow_joined_cycle_identity() -> None:
+    """Consumer side of the same identity, pinned against the same literal."""
+
+    groups = _build_design_groups(
+        _novelty_design_metrics_payload(),
+        scan_root=_NOVELTY_SCAN_ROOT,
+        entity_novelty_facts={
+            "dependencies": {
+                "compared": ("pkg.a -> pkg.b",),
+                "new": ("pkg.a -> pkg.b",),
+            }
+        },
+    )
+    cycles = [group for group in groups if str(group.get("category")) == "dependency"]
+
+    assert [str(group.get("novelty")) for group in cycles] == ["new"]

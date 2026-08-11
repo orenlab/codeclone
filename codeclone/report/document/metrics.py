@@ -886,6 +886,12 @@ def _normalize_metrics_families(
                 "unresolved_external_override": _as_int(
                     dead_code_summary.get("unresolved_external_override")
                 ),
+                # Carried forward, never recomputed here: the metrics payload
+                # owns this count, and every surface reading this document —
+                # text, markdown, HTML and the gate — takes it from here.
+                "unreachable_statements": _as_int(
+                    dead_code_summary.get("unreachable_statements")
+                ),
                 "live_roots": _as_int(dead_code_summary.get("live_roots")),
             },
             "items": dead_items,
