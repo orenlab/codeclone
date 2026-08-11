@@ -85,6 +85,10 @@ class _MCPSessionReviewReceiptMixin:
         # receipt (gh #57 family B).  The MCP tool wrapper does not expose it,
         # so standalone tool calls keep deriving the verdict from the contract.
         verification_accepted: bool | None = None,
+        # Internal-only: paths this finish left structurally unchecked (dirty
+        # Python outside the declared scope).  Named in claims_not_made so the
+        # receipt cannot read as covering the whole working tree.
+        unverified_paths: tuple[str, ...] = (),
     ) -> dict[str, object]:
         output_format = self._validated_receipt_format(format)
         # A known intent names the checkout this receipt attests; resolve the
@@ -144,7 +148,10 @@ class _MCPSessionReviewReceiptMixin:
             "patch_contract": patch_contract,
             "structural_delta": structural_delta,
             "human_decision_points": human_decisions,
-            "claims_not_made": derive_claims_not_made(record.report_document),
+            "claims_not_made": derive_claims_not_made(
+                record.report_document,
+                unverified_paths=unverified_paths,
+            ),
             "health": self._receipt_health(record),
             "verdict": receipt_verdict(
                 reviewed_count=_coerce_int(reviewed_evidence.get("reviewed_count")),

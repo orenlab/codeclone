@@ -130,18 +130,6 @@ FINISH_HYGIENE_UNACKNOWLEDGED_DIRTY: Final = (
 
 FINISH_HYGIENE_FOREIGN_DIRTY: Final = "Foreign dirty overlap remains in declared scope."
 
-FINISH_HYGIENE_UNVERIFIED_PYTHON: Final = (
-    "Git shows Python files changed outside the declared scope since intent "
-    "start, claimed by no intent. Accepting would attest them without any "
-    "structural check."
-)
-
-FINISH_HYGIENE_UNVERIFIED_PYTHON_NEXT: Final = (
-    "Declare those Python paths in scope with start_controlled_change and "
-    "verify them with an after-run, or revert them. The blocking paths are "
-    "listed in workspace_hygiene_after.unverified_python_unscoped_dirty."
-)
-
 FINISH_DONE_EXTERNAL: Final = (
     "Done. Intent cleared. Workspace changes outside the declared scope were "
     "NOT verified by this patch — report the external-change advisory instead "
@@ -150,8 +138,8 @@ FINISH_DONE_EXTERNAL: Final = (
 
 FINISH_EXTERNAL_NEXT: Final = (
     "Report external_changes: this verification covers the declared scope "
-    "only. workspace_hygiene_after.dirty_paths_outside_scope lists the "
-    "unverified paths."
+    "only. unverified_paths names the Python this patch never checked, and "
+    "workspace_hygiene_after.dirty_paths_outside_scope lists the rest."
 )
 
 START_REPLACES_UNFINISHED_INTENT: Final = (

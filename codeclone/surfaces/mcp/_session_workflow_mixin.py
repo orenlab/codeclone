@@ -75,6 +75,8 @@ VALID_BLAST_RADIUS_DEPTHS: Final[frozenset[str]] = frozenset(
 )
 VALID_BLAST_RADIUS_DETAIL: Final[frozenset[str]] = frozenset({"summary", "full"})
 
+_UNVERIFIED_PATH_SAMPLE_LIMIT: Final = 10
+
 _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     {
         PatchContractStatus.ACCEPTED.value,
@@ -609,22 +611,13 @@ class _MCPSessionWorkflowMixin:
         }
         if finish_hygiene.blocks_finish:
             block_reason = finish_hygiene.finish_block_reason or ""
-            # Proven patch/scope conflicts block finish: in-scope dirt missing
-            # from evidence, a live foreign intent overlapping the declared
-            # scope, or unverified Python changed outside scope inside this
-            # intent's window. Other out-of-scope dirt is advisory.
+            # Only proven patch/scope conflicts block finish: in-scope dirt
+            # missing from evidence, or a live foreign intent overlapping the
+            # declared scope. Out-of-scope unattributed dirt is advisory.
             detail_message = {
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
-                "unverified_python_outside_scope": (
-                    workflow_msgs.FINISH_HYGIENE_UNVERIFIED_PYTHON
-                ),
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
-            next_step = {
-                "unverified_python_outside_scope": (
-                    workflow_msgs.FINISH_HYGIENE_UNVERIFIED_PYTHON_NEXT
-                ),
-            }.get(block_reason, workflow_msgs.FINISH_HYGIENE_NEXT)
             return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
@@ -636,7 +629,7 @@ class _MCPSessionWorkflowMixin:
                     "receipt": None,
                     "intent_cleared": False,
                     "user_action_required": True,
-                    "next_step": next_step,
+                    "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
                     "workspace_hygiene_after": workspace_hygiene_after,
                     "message": detail_message,
                 }
@@ -784,6 +777,10 @@ class _MCPSessionWorkflowMixin:
                     ),
                     intent_id=intent_id,
                     verification_accepted=verify_status in _ACCEPTED_STATUSES,
+                    # A receipt that lists what it does NOT claim must list the
+                    # paths it never checked; otherwise the attestation reads as
+                    # covering the whole tree.
+                    unverified_paths=finish_hygiene.unverified_python_unscoped_dirty,
                 )
             except MCPServiceContractError as exc:
                 receipt_error = str(exc)
@@ -800,6 +797,12 @@ class _MCPSessionWorkflowMixin:
         effective_status, external_advisory = _external_change_advisory(
             verify_status,
             finish_hygiene.dirty_paths_outside_scope,
+        )
+        # Structural coverage gap: Python outside the declared scope never
+        # entered the derived profile, so nothing about it was checked. The
+        # outcome may still accept — it must not stay silent about that.
+        unverified_advisory = _unverified_paths_advisory(
+            finish_hygiene.unverified_python_unscoped_dirty
         )
 
         # 10. Compose response. Every status-derived field answers for
@@ -828,6 +831,9 @@ class _MCPSessionWorkflowMixin:
                 workspace_hygiene_after=workspace_hygiene_after,
                 review_text_present=bool(review_text),
                 claims_text_present=bool(claims_text),
+                unverified_paths=_bounded_unverified_paths(
+                    finish_hygiene.unverified_python_unscoped_dirty
+                ),
             ),
             "user_action_required": external_advisory is not None,
             "message": self._finish_message(
@@ -841,6 +847,8 @@ class _MCPSessionWorkflowMixin:
         if external_advisory is not None:
             result["external_changes"] = external_advisory
             result["next_step"] = workflow_msgs.FINISH_EXTERNAL_NEXT
+        if unverified_advisory["count"]:
+            result["unverified_paths"] = unverified_advisory
         if isinstance(health_regression_advisory, dict):
             result["health_regression_advisory"] = health_regression_advisory
         if propose_memory and verify_status in _ACCEPTED_STATUSES:
@@ -1296,6 +1304,30 @@ def _external_change_advisory(
     return effective_status, advisory
 
 
+def _bounded_unverified_paths(paths: Sequence[str]) -> list[str]:
+    """One owner for how many unverified paths a response names."""
+
+    return list(paths[:_UNVERIFIED_PATH_SAMPLE_LIMIT])
+
+
+def _unverified_paths_advisory(paths: Sequence[str]) -> dict[str, object]:
+    """Name the paths this finish did not structurally verify.
+
+    Not a verdict on anyone: dirtiness proves a file changed, never who
+    changed it. The fact reported is coverage — the derived verification
+    profile is built from declared evidence, so these paths went through no
+    structural check at all, whoever touched them.
+    """
+
+    return {
+        "count": len(paths),
+        "paths": _bounded_unverified_paths(paths),
+        "truncated": len(paths) > _UNVERIFIED_PATH_SAMPLE_LIMIT,
+        "reason": "outside_declared_scope",
+        "structural_verification": "not_performed",
+    }
+
+
 def _finish_summary(
     *,
     status: str,
@@ -1308,6 +1340,7 @@ def _finish_summary(
     workspace_hygiene_after: dict[str, object],
     review_text_present: bool,
     claims_text_present: bool,
+    unverified_paths: Sequence[str] = (),
 ) -> dict[str, object]:
     structural_delta = _helpers._as_mapping(verify_payload.get("structural_delta"))
     dirty_summary = _helpers._as_mapping(
@@ -1336,6 +1369,9 @@ def _finish_summary(
             0,
         ),
         "workspace_hygiene_blocked": bool(workspace_hygiene_after.get("blocks_finish")),
+        # Always present: an empty list is the explicit "nothing was left
+        # unchecked", which a missing key cannot say.
+        "unverified_paths": list(unverified_paths),
     }
 
 

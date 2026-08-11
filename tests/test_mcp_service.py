@@ -17766,7 +17766,8 @@ def _finish_after_undeclared_edit(
     *,
     undeclared_path: str,
     undeclared_body: str,
-) -> dict[str, object]:
+    create_receipt: bool = False,
+) -> tuple[CodeCloneMCPService, dict[str, object]]:
     """Finish a README-scoped intent that also left one undeclared edit.
 
     The undeclared file never reaches ``changed_files``, so nothing about it
@@ -17778,11 +17779,48 @@ def _finish_after_undeclared_edit(
     )
     root.joinpath("README.md").write_text("# repo\n\nmore\n", encoding="utf-8")
     root.joinpath(undeclared_path).write_text(undeclared_body, encoding="utf-8")
-    return service.finish_controlled_change(
+    finished = service.finish_controlled_change(
         intent_id=str(started["intent_id"]),
         changed_files=["README.md"],
-        create_receipt=False,
+        create_receipt=create_receipt,
         detail_level="full",
+    )
+    return service, finished
+
+
+def test_receipt_claims_name_unverified_paths_when_present() -> None:
+    """A conditional claim: absent when nothing was left unchecked, and NAMED
+    (never merely counted) when something was."""
+    clean = mcp_review_receipt_mod.derive_claims_not_made(
+        _blast_radius_report_document()
+    )
+    assert "unverified_workspace_paths" not in [claim["claim_type"] for claim in clean]
+
+    named = mcp_review_receipt_mod.derive_claims_not_made(
+        _blast_radius_report_document(),
+        unverified_paths=("pkg/a.py", "pkg/b.py"),
+    )
+    claim = named[-1]
+    assert claim["claim_type"] == "unverified_workspace_paths"
+    assert claim["paths"] == ["pkg/a.py", "pkg/b.py"]
+    assert claim["count"] == 2
+    assert claim["truncated"] is False
+
+    overflowing = mcp_review_receipt_mod.derive_claims_not_made(
+        _blast_radius_report_document(),
+        unverified_paths=tuple(f"pkg/m{index}.py" for index in range(14)),
+    )[-1]
+    assert overflowing["count"] == 14
+    assert overflowing["truncated"] is True
+    assert (
+        len(cast("list[str]", overflowing["paths"]))
+        == mcp_review_receipt_mod.MAX_UNVERIFIED_RECEIPT_PATHS
+    )
+    # One rule, two surfaces: the live response and the receipt name the same
+    # number of paths, so a reader cannot see more in one than in the other.
+    assert (
+        workflow_mod._UNVERIFIED_PATH_SAMPLE_LIMIT
+        == mcp_review_receipt_mod.MAX_UNVERIFIED_RECEIPT_PATHS
     )
 
 
@@ -17852,37 +17890,41 @@ def test_mcp_start_reports_replaced_intent(tmp_path: Path) -> None:
         service.manage_change_intent(action="get", intent_id=first_id)
 
 
-def test_mcp_finish_blocks_undeclared_python_outside_scope(tmp_path: Path) -> None:
-    """Undeclared Python must not be attested by a docs-profile finish.
+def test_mcp_finish_names_the_paths_it_did_not_verify(tmp_path: Path) -> None:
+    """Accept, and say by name what was never checked.
 
     The verification profile is derived from the agent's declared evidence, so
-    a python file left out of changed_files is classified by nothing, compared
-    against nothing, and gated by nothing — while the outcome still accepts.
+    a python file left out of changed_files is classified by nothing and
+    compared against nothing — yet the outcome used to read as a clean accept.
+    The fix is not a block (change is not authorship: a human editing their own
+    file must not fail an agent's finish) but a third honest answer: accepted,
+    with the unverified paths named in the result, the summary and the receipt.
     """
-    finished = _finish_after_undeclared_edit(
+    _service, finished = _finish_after_undeclared_edit(
         tmp_path,
         undeclared_path="pkg/a.py",
         undeclared_body=_CHANGE_CONTROL_MODULE
         + "\n\ndef undeclared():\n    return 2\n",
+        create_receipt=True,
     )
-    assert {
-        key: finished[key]
-        for key in ("status", "reason", "intent_cleared", "verification")
-    } == {
-        "status": "unverified",
-        "reason": "workspace_hygiene",
-        "intent_cleared": False,
-        # Structural verification never ran, so it is not reported as done.
-        "verification": None,
-    }
-    assert finished["user_action_required"] is True
-    hygiene_after = cast("dict[str, object]", finished["workspace_hygiene_after"])
-    assert hygiene_after["finish_block_reason"] == "unverified_python_outside_scope"
-    assert hygiene_after["unverified_python_unscoped_dirty"] == ["pkg/a.py"]
-    # The block is typed, so its message and next_step must be too — the
-    # generic hygiene text would leave the agent guessing which rule fired.
-    assert "Python files" in str(finished["message"])
-    assert "unverified_python_unscoped_dirty" in str(finished["next_step"])
+    # Advisory default: not punished, not silently cleaned.
+    assert finished["status"] == "accepted_with_external_changes"
+    assert finished["intent_cleared"] is True
+
+    unverified = cast("dict[str, object]", finished["unverified_paths"])
+    assert unverified["paths"] == ["pkg/a.py"]
+    assert unverified["count"] == 1
+    assert unverified["structural_verification"] == "not_performed"
+
+    summary = cast("dict[str, object]", finished["summary"])
+    assert summary["unverified_paths"] == ["pkg/a.py"]
+
+    # The receipt is what a human reads afterwards: the gap has to be legible
+    # there by name, not only in the live response an agent may summarise away.
+    receipt_content = str(cast("dict[str, object]", finished["receipt"])["content"])
+    claims_section = receipt_content.split("### Claims Not Made", 1)[1]
+    assert "makes no claim about them" in claims_section
+    assert "`pkg/a.py`" in claims_section
 
 
 def test_mcp_finish_external_changes_reach_summary_and_message(
@@ -17895,7 +17937,7 @@ def test_mcp_finish_external_changes_reach_summary_and_message(
     verdict — the response contradicts itself in the fields meant for quick
     reading.
     """
-    finished = _finish_after_undeclared_edit(
+    _service, finished = _finish_after_undeclared_edit(
         tmp_path,
         undeclared_path="notes.txt",
         undeclared_body="scratch edited\n",

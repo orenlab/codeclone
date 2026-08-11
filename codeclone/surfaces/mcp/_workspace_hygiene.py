@@ -230,9 +230,10 @@ class WorkspaceHygieneResult:
             payload["unacknowledged_dirty_in_scope"] = list(
                 self.unacknowledged_dirty_in_scope
             )
-        # Blocking subset: summary-first, like unacknowledged in-scope dirt.
-        # These paths are the reason a finish is refused by default, so they
-        # must not hide behind detail_level="full".
+        # Coverage gap: summary-first, like unacknowledged in-scope dirt.
+        # These paths are what the patch did NOT verify, so they must not hide
+        # behind detail_level="full" — an accepted outcome that omits them
+        # reads as a clean verification of the whole tree.
         if self.unverified_python_unscoped_dirty:
             payload["unverified_python_unscoped_dirty"] = list(
                 self.unverified_python_unscoped_dirty
@@ -661,20 +662,13 @@ def finish_hygiene_check(
     unattributed_unscoped = tuple(
         sorted(new_unattributed + modified_unattributed + unknown_unattributed)
     )
-    # Python that provably changed while this intent was open, outside the
-    # declared scope and claimed by no intent. The verification profile is
-    # derived from declared evidence, so these files are classified by
-    # nothing and compared against nothing: accepting here would attest a
-    # structural change that never went through a structural check.
-    # "unknown" start state stays out — authorship inside the window is not
-    # proven there, and unproven dirt remains advisory (strict finish covers
-    # it), same doctrine as preexisting dirt.
+    # Python outside the declared scope: the verification profile is derived
+    # from declared evidence, so these files were classified by nothing and
+    # compared against nothing. This lane states that coverage gap by name.
+    # It says nothing about authorship — "dirty" proves change, never who
+    # changed it — so it never blocks; CODECLONE_STRICT_FINISH owns blocking.
     unverified_python_unscoped = tuple(
-        sorted(
-            path
-            for path in new_unattributed + modified_unattributed
-            if _is_python_source(path)
-        )
+        path for path in dirty_outside_declared if _is_python_source(path)
     )
     unacknowledged = tuple(sorted(set(dirty_in_declared) - evidence))
     # Scope check covers only the agent's declared patch (its evidence).
@@ -682,18 +676,15 @@ def finish_hygiene_check(
     # patch's scope assertion, so it must not be fed into the scope check
     # (doing so would mislabel a peer's dirt as a scope violation).
     files_for_scope_check = tuple(sorted(evidence))
-    # Finish blocks on proven problems with the agent's own patch: in-scope
-    # dirt missing from evidence, a live foreign intent overlapping the
-    # declared scope, or unverified Python that changed inside this intent's
-    # window outside the declared scope. Non-Python and unproven (unknown /
-    # preexisting) out-of-scope dirt stays non-blocking advisory (surfaced via
-    # dirty_paths_outside_scope and the attribution detail) unless strict
-    # finish is enabled.
+    # Finish blocks ONLY on proven problems with the agent's own patch:
+    # in-scope dirt missing from evidence, or a live foreign intent
+    # overlapping the declared scope. Out-of-scope unattributed dirt is
+    # advisory — it is reported by name (see unverified_python_unscoped_dirty)
+    # and blocks only under CODECLONE_STRICT_FINISH.
     finish_block_reason = _finish_block_reason(
         unacknowledged=unacknowledged,
         foreign_dirty_overlaps=foreign_dirty_overlaps,
         unattributed_unscoped=unattributed_unscoped,
-        unverified_python_unscoped=unverified_python_unscoped,
         strict_finish=strict_finish,
     )
     return WorkspaceHygieneResult(
@@ -844,20 +835,16 @@ def _finish_block_reason(
     unacknowledged: Sequence[str],
     foreign_dirty_overlaps: Sequence[ForeignDirtyOverlap],
     unattributed_unscoped: Sequence[str],
-    unverified_python_unscoped: Sequence[str],
     strict_finish: bool | None,
 ) -> str | None:
     if unacknowledged:
         return "missing_evidence"
     if foreign_dirty_overlaps:
         return "foreign_dirty_overlap"
-    # Strict finish is the wider rule (every file type, including unproven
-    # start states); it is checked first so its reason keeps naming the wider
-    # set when both apply.
+    # Blocking on out-of-scope dirt stays opt-in: dirtiness proves that a file
+    # changed, never that this agent changed it.
     if _strict_finish_enabled(strict_finish) and unattributed_unscoped:
         return "own_unscoped_dirty"
-    if unverified_python_unscoped:
-        return "unverified_python_outside_scope"
     return None
 
 

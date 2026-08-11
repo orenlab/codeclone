@@ -74,7 +74,8 @@ graph LR
 | Scope violation | Edits outside `allowed_files` detected by `finish` | `finish_block_reason: own_unscoped_dirty` | Remove out-of-scope edits or expand scope via new `start_controlled_change` |
 | Missing verification | After-run not provided for Python/config patch | `status: unverified`, `next_step` returned | Run `analyze_repository` with new run_id, call `finish` again on same intent_id |
 | Concurrent foreign intent | Foreign agent holds active intent in same session | `concurrent_intents` non-empty; no edit granted | Queue current intent, wait for foreign finish, promote via `manage_change_intent(action=promote)` |
-| Workspace hygiene | Git tree, start snapshot, finish evidence disagree | `finish_block_reason: missing_evidence`, `foreign_dirty_overlap`, `unverified_python_outside_scope`, or `own_unscoped_dirty` (if `CODECLONE_STRICT_FINISH`) | Reconcile git state, widen scope, or provide missing evidence |
+| Workspace hygiene | Git tree, start snapshot, finish evidence disagree | `finish_block_reason: missing_evidence`, `foreign_dirty_overlap`, or `own_unscoped_dirty` (if `CODECLONE_STRICT_FINISH`) | Reconcile git state, widen scope, or provide missing evidence |
+| Unverified out-of-scope Python | Dirty `.py`/`.pyi` outside declared scope at finish | Never blocks by default; named in `unverified_paths`, `summary.unverified_paths` and the receipt's `claims_not_made` | Declare and verify those paths if they belong to this patch; otherwise report the gap — do not restate the outcome as fully verified |
 
 ## Verification
 
