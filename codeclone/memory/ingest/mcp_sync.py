@@ -15,7 +15,7 @@ from ...config.memory import MemoryConfig, resolve_memory_config
 from ..exceptions import UnfitAnalysisRunError
 from ..project import report_digest_from_report, resolve_memory_db_path
 from ..sqlite_store import SqliteEngineeringMemoryStore
-from . import InitOptions, InitReport
+from . import InitOptions, InitReport, run_fitness
 from .run_fitness import read_run_fitness
 from .runner import run_memory_init
 
@@ -83,7 +83,25 @@ def memory_sync_result_payload(
     report_digest: str | None,
     init_report: InitReport | None,
     reason: str | None = None,
+    next_step: str | None = None,
 ) -> dict[str, object]:
+    """Shape one sync outcome for the caller.
+
+    ``next_step`` is remediation, so it is present only where the caller is
+    blocked, and absent — not null — everywhere else. That is the convention
+    this payload joins rather than invents: ``start_controlled_change``
+    attaches one only when ``edit_allowed`` is false, verify only on
+    non-accepted outcomes, and the patch-contract vocabulary states the rule
+    outright — outcomes already terminal and successful carry no next step
+    because remediation would be meaningless. A step printed beside
+    ``status='completed'`` would be a suggestion posing as a procedure, and a
+    field that is noise on the common path is a field readers learn to skip
+    on the path that matters.
+
+    This function owns *whether* the key appears; the caller owns *which*
+    step, because only the refusal knows its own remedy.
+    """
+
     payload: dict[str, object] = {
         "status": status,
         "trigger": trigger,
@@ -91,6 +109,8 @@ def memory_sync_result_payload(
         "report_digest": report_digest,
         "reason": reason,
     }
+    if next_step is not None:
+        payload["next_step"] = next_step
     if init_report is None:
         return payload
     payload.update(
@@ -140,6 +160,15 @@ def _complete_memory_sync(
             report_digest=report_digest,
             init_report=None,
             reason=f"unfit_run:{refused.refusal_reason}",
+            # Read from the refusal's owner, never restated here. This path
+            # is where an agent meets the refusal — bootstrap_if_missing
+            # makes it the first contact memory has with a repository — and
+            # a second wording beside the CLI's would be two answers to one
+            # question, drifting from the first edit to either of them.
+            # Called through the module rather than through an imported name
+            # so the wording resolves in its owner at call time: that leaves
+            # no binding here for a same-named local twin to occupy.
+            next_step=run_fitness.unmeasured_refusal_message(root=str(root_path)),
         )
         payload["run_fitness"] = refused.as_payload()
         return payload
