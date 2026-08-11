@@ -82,7 +82,7 @@ from codeclone.surfaces.mcp.session import (
 from codeclone.utils import coerce as _coerce
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests._report_access import _dict_at
-from tests.memory_fixtures import cli_memory_repo
+from tests.memory_fixtures import cli_memory_repo, tool_calls_named_in
 from tests.test_cli_inprocess import _write_native_baseline
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
@@ -13856,8 +13856,11 @@ def test_mcp_after_run_not_new_next_step_is_executable(tmp_path: Path) -> None:
     )
     assert blocked["reason"] == "after_run_not_new"
     next_step = str(blocked["next_step"])
-    # The instruction names the tool, its argument, and both outcomes.
-    assert "analyze_repository" in next_step
+    # The instruction names the tool, its argument, and both outcomes. The
+    # name is read out of the step rather than matched as a substring:
+    # "analyze_repository" is contained in "reanalyze_repository", so a
+    # substring check blesses a rename no caller can follow.
+    assert "analyze_repository" in tool_calls_named_in(next_step)
     assert "after_run_id" in next_step
     assert "analyzer_invariant" in next_step
 
@@ -13892,6 +13895,7 @@ def test_mcp_typed_outcomes_are_documented_not_tribal_knowledge() -> None:
         if name.isupper() and isinstance(value, str)
     )
 
+    hinted = 0
     for reason in sorted(patch_msgs.FINISH_OUTCOME_REASONS):
         assert reason in help_text, f"{reason} has no help-topic mention"
         if reason in patch_msgs.ACCEPTED_OUTCOME_REASONS:
@@ -13902,16 +13906,19 @@ def test_mcp_typed_outcomes_are_documented_not_tribal_knowledge() -> None:
             assert reason in patch_msgs.WORKFLOW_OUTCOME_REASONS
             assert workflow_text.strip()
             continue
-        # An executable instruction names a tool to call, not just a diagnosis.
-        assert any(
-            tool in hint
-            for tool in (
-                "analyze_repository",
-                "start_controlled_change",
-                "manage_change_intent",
-                "finish",
-            )
-        ), f"{reason} next_step names no tool to call: {hint}"
+        hinted += 1
+        # An executable instruction names a tool to CALL, not just a
+        # diagnosis. Nothing here lists which tools exist: the names are read
+        # out of the step itself, and whether they answer is checked against
+        # the server's own registry in tests/test_mcp_server.py. A list of
+        # names here would be a second record of the registry, and it rots
+        # silently — green while the step points at nothing callable.
+        assert tool_calls_named_in(hint), (
+            f"{reason} next_step names no tool to call: {hint}"
+        )
+    # Without this, a vocabulary that stopped rendering steps would check zero
+    # strings and stay green.
+    assert hinted, "no typed outcome rendered a next_step, so nothing was checked"
 
     # A new typed verify outcome cannot ship without joining the vocabulary.
     source = Path(mcp_patch_session_mod.__file__).read_text(encoding="utf-8")
