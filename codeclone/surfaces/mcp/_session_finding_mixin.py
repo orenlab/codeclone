@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Protocol
 
+from ...utils.mapping_paths import section
 from ...utils.repo_paths import RepoPathError, RepoPathPolicy, resolve_under_repo_root
 from . import _session_helpers as _helpers
 from ._authority_candidates import (
@@ -1257,9 +1258,13 @@ class _MCPSessionFindingMixin:
         spec = _DESIGN_CHECK_CONTEXT[check]
         category = str(spec["category"])
         default_threshold = _as_int(spec["default_threshold"])
-        findings = _helpers._as_mapping(record.report_document.get("findings"))
-        thresholds = _helpers._as_mapping(
-            _helpers._as_mapping(findings.get("thresholds")).get("design_findings")
+        # The effective design thresholds live in meta.analysis_thresholds --
+        # the same block the document builder reads to classify design groups.
+        # This asked findings.thresholds, which the findings block does not
+        # carry, so the request echo below answered every call.
+        thresholds = section(
+            record.report_document,
+            "meta.analysis_thresholds.design_findings",
         )
         threshold_payload = _helpers._as_mapping(thresholds.get(category))
         if threshold_payload:

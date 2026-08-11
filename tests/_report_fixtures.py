@@ -101,3 +101,46 @@ def build_test_report_document(
         suggestions=suggestions,
         structural_findings=structural_findings,
     )
+
+
+def build_maximal_report_document() -> dict[str, object]:
+    """The canonical fixture with every optional section populated.
+
+    A default run omits the metric families that depend on run mode --
+    ``coverage_join`` needs joined coverage, ``semantic_authority`` needs
+    authority analysis -- and omits the suppressed-clone group. All three are
+    part of the schema, so a consumer reading them is reading a key the report
+    carries. Callers that check consumer reads against a document need this
+    shape, not a default one, or a conditional section reads as a withdrawn key.
+    """
+
+    return build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics={
+            "coverage_join": {"summary": {}, "items": []},
+            "semantic_authority": {"summary": {}, "items": []},
+        },
+        suppressed_clone_groups=(
+            SuppressedCloneGroup(
+                kind="function",
+                group_key="golden-group",
+                items=(
+                    {
+                        "qualname": "tests.fixtures.golden.a:run",
+                        "filepath": "/root/tests/fixtures/golden_project/a.py",
+                        "start_line": 10,
+                        "end_line": 12,
+                        "loc": 3,
+                        "stmt_count": 2,
+                        "fingerprint": "fp-a",
+                        "loc_bucket": "0-19",
+                    },
+                ),
+                matched_patterns=("tests/fixtures/golden_*",),
+                suppression_rule="golden_fixture",
+                suppression_source="project_config",
+            ),
+        ),
+    )

@@ -18,6 +18,7 @@ import orjson
 from ...config.memory import IngestConfig
 from ...report.meta import current_report_timestamp_utc
 from ...utils.coerce import as_mapping, as_sequence
+from ...utils.mapping_paths import section
 from ..display import format_document_link_statement
 from ..enums import MemoryConfidence
 from ..identity import make_identity_key
@@ -122,6 +123,70 @@ def _iter_mapping_paths(
         if path is not None:
             pairs.append((mapping, path))
     return pairs
+
+
+def _family_items(
+    families: Mapping[str, object],
+    family_name: str,
+) -> Sequence[object]:
+    return as_sequence(as_mapping(families.get(family_name)).get("items"))
+
+
+def _worst_high_complexity_per_path(
+    families: Mapping[str, object],
+) -> list[tuple[str, Mapping[str, object]]]:
+    """The worst function the complexity family flagged, one row per file.
+
+    Only ``risk == "high"`` rows are risks: the family lists every function in
+    the repository, so ingesting the rest would record "this is a risk" about
+    code the report classified as calm. A risk note is identified by its path,
+    so one file must yield one row — several rows under one identity would
+    write a revision per ingest and let the surviving statement depend on
+    iteration order.
+    """
+
+    worst: dict[str, Mapping[str, object]] = {}
+    for mapping, path in _iter_mapping_paths(
+        _family_items(families, "complexity"),
+        "relative_path",
+    ):
+        if str(mapping.get("risk", "")).strip() != "high":
+            continue
+        incumbent = worst.get(path)
+        if incumbent is None or _complexity_rank(mapping) > _complexity_rank(incumbent):
+            worst[path] = mapping
+    return sorted(worst.items())
+
+
+def _complexity_rank(mapping: Mapping[str, object]) -> tuple[int, str]:
+    raw = mapping.get("cyclomatic_complexity")
+    value = raw if isinstance(raw, int) else 0
+    return (value, str(mapping.get("qualname", "")))
+
+
+def _production_security_categories_per_path(
+    families: Mapping[str, object],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Security-surface categories per production file.
+
+    The family also inventories tests and fixtures; a boundary reached only by
+    a test is not a risk carried by the shipped product, and the family already
+    classifies each row through ``source_kind``.
+    """
+
+    grouped: dict[str, set[str]] = {}
+    for mapping, path in _iter_mapping_paths(
+        _family_items(families, "security_surfaces"),
+        "relative_path",
+    ):
+        if str(mapping.get("source_kind", "")).strip() != "production":
+            continue
+        category = str(mapping.get("category") or "security_surface").strip()
+        grouped.setdefault(path, set()).add(category or "security_surface")
+    return [
+        (path, tuple(sorted(categories)))
+        for path, categories in sorted(grouped.items())
+    ]
 
 
 def _append_path_risk_note(
@@ -506,11 +571,13 @@ def extract_risk_notes(
     analysis_fingerprint: str | None,
 ) -> RecordBatch:
     batch, now, metrics = _new_metrics_batch(report_document)
-    design = as_mapping(metrics.get("design"))
-    complexity_items = as_sequence(design.get("complexity_hotspots"))
-    for mapping, path in _iter_mapping_paths(complexity_items, "path", "file"):
-        value = mapping.get("value")
-        threshold = mapping.get("threshold")
+    families = as_mapping(metrics.get("families"))
+    threshold = section(
+        report_document,
+        "source_facts.analysis_contract.design_findings.complexity",
+    ).get("value")
+    for path, item in _worst_high_complexity_per_path(families):
+        value = item.get("cyclomatic_complexity")
         _append_path_risk_note(
             batch,
             project=project,
@@ -528,18 +595,15 @@ def extract_risk_notes(
                 "risk_kind": "high_complexity",
                 "metric_value": value,
                 "threshold": threshold,
+                "qualname": str(item.get("qualname", "")),
                 "severity": "medium",
                 "interpretation": "Structural complexity hotspot from analysis.",
             },
             confidence="verified",
         )
 
-    security = as_mapping(metrics.get("security_surfaces"))
-    for mapping, path in _iter_mapping_paths(
-        as_sequence(security.get("items")),
-        "path",
-    ):
-        category = str(mapping.get("category") or "security_surface").strip()
+    for path, categories in _production_security_categories_per_path(families):
+        listed = ", ".join(categories)
         _append_path_risk_note(
             batch,
             project=project,
@@ -551,12 +615,12 @@ def extract_risk_notes(
             analysis_fingerprint=analysis_fingerprint,
             discriminator="security_surface",
             statement=(
-                f"{path} is in the security surface inventory ({category}). "
+                f"{path} is in the security surface inventory ({listed}). "
                 "Report-only inventory; not a vulnerability finding."
             ),
             payload={
                 "risk_kind": "security_surface",
-                "category": category,
+                "categories": list(categories),
                 "interpretation": "report_only_inventory",
             },
             confidence="supported",
@@ -674,6 +738,33 @@ def _resolve_doc_anchor_path(
     return None
 
 
+def _document_link_anchors(doc_path: Path) -> dict[str, str]:
+    """Map each path a document anchors to the heading it first appears under.
+
+    A document link is identified by the pair (document, anchored path): that is
+    what :func:`make_identity_key` builds here and what the store enforces as
+    UNIQUE. One record per *occurrence* therefore hands the store a pile of
+    collisions -- a document naming a module under three headings produced three
+    records whose statements differ only in the heading, so the store kept the
+    first and rewrote it twice, writing a revision each time. A single pass over
+    a file nobody had edited manufactured an edit history for its own record.
+
+    Occurrences are folded here, at the producer, before identity exists.
+    Insertion order is the order the paths appear in the document, so the batch
+    is deterministic and reads in document order; the first heading wins because
+    the first mention is the one that introduces the reference.
+    """
+
+    anchors: dict[str, str] = {}
+    heading = "root"
+    for line in doc_path.read_text("utf-8", errors="replace").splitlines():
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip() or heading
+        for match in _CODE_PATH_RE.finditer(line):
+            anchors.setdefault(match.group(1), heading)
+    return anchors
+
+
 def extract_document_links(
     *,
     project: MemoryProject,
@@ -695,92 +786,86 @@ def extract_document_links(
     )
     for doc_path in doc_paths:
         rel = str(doc_path.relative_to(root_path)).replace("\\", "/")
-        text = doc_path.read_text("utf-8", errors="replace")
-        heading = "root"
-        for line in text.splitlines():
-            if line.startswith("#"):
-                heading = line.lstrip("#").strip() or heading
-            for match in _CODE_PATH_RE.finditer(line):
-                anchored = match.group(1)
-                resolved_path = _resolve_doc_anchor_path(
-                    anchored,
-                    root_path=root_path,
-                    registry_paths=registry,
-                )
-                identity = make_identity_key(
+        for anchored, heading in _document_link_anchors(doc_path).items():
+            resolved_path = _resolve_doc_anchor_path(
+                anchored,
+                root_path=root_path,
+                registry_paths=registry,
+            )
+            identity = make_identity_key(
+                type="document_link",
+                subject_kind="doc",
+                subject_key=rel,
+                discriminator=f"path:{anchored}",
+            )
+            record_id = generate_memory_id()
+            batch.records.append(
+                MemoryRecord(
+                    id=record_id,
+                    project_id=project.id,
+                    identity_key=identity,
                     type="document_link",
+                    status="active",
+                    confidence="supported",
+                    origin="system",
+                    ingest_source="doc",
+                    statement=format_document_link_statement(
+                        doc_file=rel,
+                        heading=heading,
+                        anchored_path=anchored,
+                    ),
+                    summary=None,
+                    payload={
+                        "doc_file": rel,
+                        "heading": heading,
+                        "anchored_symbols": [anchored],
+                        **(
+                            {"resolved_path": resolved_path}
+                            if resolved_path is not None
+                            else {}
+                        ),
+                    },
+                    created_at_utc=now,
+                    updated_at_utc=now,
+                    last_verified_at_utc=now,
+                    expires_at_utc=None,
+                    created_by="memory_init",
+                    verified_by=None,
+                    approved_by=None,
+                    approved_at_utc=None,
+                    report_digest=report_digest,
+                    code_fingerprint=code_fingerprint_for_memory_subject(
+                        root_path,
+                        subject_path=rel,
+                        analysis_fingerprint=analysis_fingerprint,
+                    ),
+                    stale_reason=None,
+                    created_on_branch=git.branch,
+                    created_at_commit=git.head,
+                    verified_on_branch=git.branch,
+                    verified_at_commit=git.head,
+                )
+            )
+            batch.subjects.append(
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=record_id,
                     subject_kind="doc",
                     subject_key=rel,
-                    discriminator=f"path:{anchored}",
+                    relation="documents",
                 )
-                record_id = generate_memory_id()
-                batch.records.append(
-                    MemoryRecord(
-                        id=record_id,
-                        project_id=project.id,
-                        identity_key=identity,
-                        type="document_link",
-                        status="active",
-                        confidence="supported",
-                        origin="system",
-                        ingest_source="doc",
-                        statement=format_document_link_statement(
-                            doc_file=rel,
-                            heading=heading,
-                            anchored_path=anchored,
-                        ),
-                        summary=None,
-                        payload={
-                            "doc_file": rel,
-                            "heading": heading,
-                            "anchored_symbols": [anchored],
-                            **(
-                                {"resolved_path": resolved_path}
-                                if resolved_path is not None
-                                else {}
-                            ),
-                        },
-                        created_at_utc=now,
-                        updated_at_utc=now,
-                        last_verified_at_utc=now,
-                        expires_at_utc=None,
-                        created_by="memory_init",
-                        verified_by=None,
-                        approved_by=None,
-                        approved_at_utc=None,
-                        report_digest=report_digest,
-                        code_fingerprint=code_fingerprint_for_memory_subject(
-                            root_path,
-                            subject_path=rel,
-                            analysis_fingerprint=analysis_fingerprint,
-                        ),
-                        stale_reason=None,
-                        created_on_branch=git.branch,
-                        created_at_commit=git.head,
-                        verified_on_branch=git.branch,
-                        verified_at_commit=git.head,
-                    )
-                )
+            )
+            anchored_path = resolved_path
+            if anchored_path is not None and anchored_path.endswith(".py"):
                 batch.subjects.append(
                     MemorySubject(
                         id=generate_memory_id(prefix="subj"),
                         memory_id=record_id,
-                        subject_kind="doc",
-                        subject_key=rel,
-                        relation="documents",
+                        subject_kind="path",
+                        subject_key=anchored_path,
+                        relation="about",
                     )
                 )
-                anchored_path = resolved_path
-                if anchored_path is not None and anchored_path.endswith(".py"):
-                    batch.subjects.append(
-                        MemorySubject(
-                            id=generate_memory_id(prefix="subj"),
-                            memory_id=record_id,
-                            subject_kind="path",
-                            subject_key=anchored_path,
-                            relation="about",
-                        )
-                    )
     return batch
 
 

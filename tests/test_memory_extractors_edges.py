@@ -21,7 +21,7 @@ from codeclone.memory.ingest.extractors import (
     extract_risk_notes,
     extract_test_anchors,
 )
-from codeclone.memory.models import MemoryProject
+from codeclone.memory.models import MemoryProject, MemoryRecord
 from codeclone.memory.project import (
     GitProvenance,
     read_git_provenance,
@@ -137,55 +137,185 @@ def test_extract_public_surfaces_skips_empty_symbol_and_reads_mcp_snapshot(
     assert tool_surface_names == ["toolA", "toolB"]
 
 
-def test_extract_risk_notes_complexity_and_security_categories(
-    tmp_path: Path,
-) -> None:
+def _risk_note_report_document() -> dict[str, object]:
+    """One report in the shape the report builder actually emits.
+
+    Metric families live under ``metrics.families`` and locate themselves with
+    ``relative_path``; there is no ``metrics.design`` family and no flat
+    ``metrics.security_surfaces`` key.
+    """
+
+    return {
+        "source_facts": {
+            "analysis_contract": {
+                "design_findings": {
+                    # Deliberately not the shipped default: a threshold that
+                    # matched the default would keep a hard-coded reader green.
+                    "complexity": {
+                        "metric": "cyclomatic_complexity",
+                        "operator": ">",
+                        "value": 7,
+                    }
+                }
+            }
+        },
+        "metrics": {
+            "families": {
+                "complexity": {
+                    "items": [
+                        {
+                            "qualname": "pkg.a:wide",
+                            "relative_path": "pkg/a.py",
+                            "cyclomatic_complexity": 34,
+                            "risk": "high",
+                        },
+                        {
+                            "qualname": "pkg.a:wider",
+                            "relative_path": "pkg/a.py",
+                            "cyclomatic_complexity": 57,
+                            "risk": "high",
+                        },
+                        # Above the printed threshold, yet the producer did not
+                        # flag it: the classification is the report's, not ours.
+                        {
+                            "qualname": "pkg.b:calm",
+                            "relative_path": "pkg/b.py",
+                            "cyclomatic_complexity": 12,
+                            "risk": "medium",
+                        },
+                        {
+                            "qualname": "pkg.c:nameless",
+                            "cyclomatic_complexity": 99,
+                            "risk": "high",
+                        },
+                    ]
+                },
+                "security_surfaces": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/secure.py",
+                            "category": "  process_boundary  ",
+                            "source_kind": "production",
+                        },
+                        {
+                            "relative_path": "pkg/secure.py",
+                            "category": "database_boundary",
+                            "source_kind": "production",
+                        },
+                        {
+                            "relative_path": "tests/test_secure.py",
+                            "category": "process_boundary",
+                            "source_kind": "tests",
+                        },
+                        {
+                            "relative_path": "   ",
+                            "category": "network_boundary",
+                            "source_kind": "production",
+                        },
+                    ]
+                },
+            }
+        },
+    }
+
+
+def test_extract_risk_notes_reads_the_real_metric_families(tmp_path: Path) -> None:
     project = _project(tmp_path)
     git = GitProvenance(remote=None, branch="main", head="deadbeef", available=True)
-    report_document: dict[str, object] = {
-        "metrics": {
-            "design": {
-                "complexity_hotspots": [
-                    # valid via path key
-                    {"path": "pkg/a.py", "value": 11, "threshold": 5},
-                    # empty path => skip
-                    {"path": "   ", "value": 1, "threshold": 1},
-                    # both path/file absent => skip
-                    {"value": 2, "threshold": 2},
-                ]
-            },
-            "security_surfaces": {
-                "items": [
-                    {"path": "pkg/secure.py", "category": "  Critical  "},
-                    {"path": "   "},  # empty => skip
-                ]
-            },
-        }
-    }
+
     batch = extract_risk_notes(
         project=project,
-        report_document=report_document,
+        report_document=_risk_note_report_document(),
         git=git,
         report_digest="r1",
         analysis_fingerprint="f1",
         root_path=tmp_path,
     )
 
-    risk_kind: list[str | None] = []
-    for r in batch.records:
-        assert r.payload is not None
-        raw = r.payload.get("risk_kind")
-        risk_kind.append(str(raw) if raw is not None else None)
-    assert risk_kind.count("high_complexity") == 1
-    assert risk_kind.count("security_surface") == 1
+    by_kind: dict[str, list[MemoryRecord]] = {}
+    for record in batch.records:
+        assert record.payload is not None
+        by_kind.setdefault(str(record.payload.get("risk_kind")), []).append(record)
 
-    security = next(
-        r
-        for r in batch.records
-        if r.payload is not None and r.payload.get("risk_kind") == "security_surface"
-    )
+    # One record per file: the worst offender the producer flagged, not one
+    # record per function, and never a second row under the same identity.
+    assert len(by_kind["high_complexity"]) == 1
+    complexity = by_kind["high_complexity"][0]
+    assert complexity.payload is not None
+    assert complexity.payload.get("metric_value") == 57
+    assert complexity.payload.get("threshold") == 7
+    assert "pkg/a.py" in complexity.statement
+
+    assert len(by_kind["security_surface"]) == 1
+    security = by_kind["security_surface"][0]
     assert security.payload is not None
-    assert security.payload.get("category") == "Critical"
+    assert security.payload.get("categories") == [
+        "database_boundary",
+        "process_boundary",
+    ]
+
+    identities = [record.identity_key for record in batch.records]
+    assert len(identities) == len(set(identities))
+
+
+def test_extract_risk_notes_ignores_surfaces_the_producer_did_not_flag(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    git = GitProvenance(remote=None, branch="main", head="deadbeef", available=True)
+
+    batch = extract_risk_notes(
+        project=project,
+        report_document=_risk_note_report_document(),
+        git=git,
+        report_digest="r1",
+        analysis_fingerprint="f1",
+        root_path=tmp_path,
+    )
+    statements = {
+        str(record.payload.get("risk_kind")): record.statement
+        for record in batch.records
+        if record.payload is not None
+    }
+
+    # medium-risk complexity, test-owned security surfaces and pathless rows
+    # are inventory, not risk: ingesting them would assert a fact the report
+    # never made.
+    assert "pkg/b.py" not in statements["high_complexity"]
+    assert "pkg/c" not in statements["high_complexity"]
+    assert "tests/test_secure.py" not in statements["security_surface"]
+
+
+def test_extract_risk_notes_ingests_nothing_from_absent_families(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    git = GitProvenance(remote=None, branch="main", head="deadbeef", available=True)
+    # The pre-v3 imagined shape: a "design" family and flat family keys. None
+    # of it exists in a produced report, so none of it may become memory.
+    legacy_document: dict[str, object] = {
+        "metrics": {
+            "design": {
+                "complexity_hotspots": [
+                    {"path": "pkg/a.py", "value": 11, "threshold": 5}
+                ]
+            },
+            "security_surfaces": {
+                "items": [{"path": "pkg/secure.py", "category": "Critical"}]
+            },
+        }
+    }
+
+    batch = extract_risk_notes(
+        project=project,
+        report_document=legacy_document,
+        git=git,
+        report_digest="r1",
+        analysis_fingerprint="f1",
+        root_path=tmp_path,
+    )
+
+    assert batch.records == []
 
 
 def test_extract_test_anchors_skips_unparseable_tests_file(tmp_path: Path) -> None:
@@ -543,8 +673,10 @@ def test_memory_project_fingerprints_and_subject_kinds(tmp_path: Path) -> None:
     )
 
     assert (
-        analysis_fingerprint_from_report({"integrity": {"digest": {"value": "a" * 64}}})
-        == "a" * 16
+        analysis_fingerprint_from_report(
+            {"integrity": {"digests": {"analysis_facts": {"value": "a" * 64}}}}
+        )
+        == "a" * 64
     )
 
     # A path that cannot normalize under the repo yields no fingerprint.

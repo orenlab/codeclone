@@ -72,7 +72,7 @@ graph TD
 | `status: "violated"` on finish | In-scope files were edited outside declared scope | Expand scope via `start_controlled_change` with wider scope, then retry finish on the new intent |
 | `finish_block_reason: "missing_evidence"` | Changed files not reported to finish | List all changed files, pass as `changed_files=[...]` to finish; re-call analyze if Python structural files were touched |
 | `status: "queued"` on start | Foreign intent active in workspace | Call `manage_change_intent(action=promote, intent_id=<yours>)` after foreign intent clears, or narrow scope to avoid overlap |
-| Intent eviction: "Unknown change intent id" on finish | New intent declared via start before previous finish | Never call start twice without finish in between; one active intent per session |
+| Intent replacement: "Unknown change intent id" on finish | New intent declared via start before previous finish | Prefer one active intent per (root, run_id); a replacement is announced in `replaced_intents`, and is refused outright when the replaced intent still holds uncommitted work outside the new scope |
 
 ## Verification
 

@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from codeclone.config.memory import resolve_memory_config
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.memory.ingest import InitOptions
+from codeclone.memory.ingest.extractors import extract_document_links
 from codeclone.memory.ingest.runner import (
     _registry_paths,
     build_init_batch,
@@ -31,7 +35,9 @@ from codeclone.memory.project import (
 )
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.memory.vacuum import run_memory_vacuum
+from codeclone.report.document.integrity import _build_integrity_payload
 
+from ._report_fixtures import build_test_report_document
 from .memory_fixtures import (
     REPO_ROOT,
     git_repo_with_cached_report,
@@ -348,12 +354,134 @@ def test_build_init_batch_rejects_invalid_project_and_git(
         )
 
 
-def test_analysis_fingerprint_from_meta_timestamp() -> None:
-    fp = analysis_fingerprint_from_report(
-        {"meta": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}
+def _integrity_document(
+    *,
+    observation: str = "obs-1",
+    source_facts: dict[str, object] | None = None,
+    baseline: dict[str, object] | None = None,
+    evaluation: dict[str, object] | None = None,
+    generated_at: str = "2026-06-02T12:00:00Z",
+) -> dict[str, object]:
+    """Build one report through the report's own integrity owner.
+
+    The fingerprint rule is pinned against the producer, never against a
+    literal digest: a hard-coded value would only move the magic number into
+    the test and would stay green if the tier changed underneath it.
+    """
+
+    resolved_source_facts = (
+        source_facts
+        if source_facts is not None
+        else {"analysis_scope": [{"path": "pkg/a.py"}]}
     )
-    assert fp != "unknown"
-    assert len(fp) == 16
+    resolved_baseline = baseline if baseline is not None else {"state": "absent"}
+    resolved_evaluation = (
+        evaluation if evaluation is not None else {"outcome": {"exit_code": 0}}
+    )
+    return {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        "meta": {"runtime": {"report_generated_at_utc": generated_at}},
+        "source_facts": resolved_source_facts,
+        "baseline": resolved_baseline,
+        "evaluation": resolved_evaluation,
+        "integrity": _build_integrity_payload(
+            report_schema_version=REPORT_SCHEMA_VERSION,
+            observation_digest=observation,
+            source_facts=resolved_source_facts,
+            baseline=resolved_baseline,
+            evaluation=resolved_evaluation,
+        ),
+    }
+
+
+def test_analysis_fingerprint_reads_the_analysis_facts_tier() -> None:
+    document = _integrity_document()
+    digests = document["integrity"]["digests"]  # type: ignore[index]
+
+    assert (
+        analysis_fingerprint_from_report(document) == digests["analysis_facts"]["value"]
+    )
+
+
+def test_analysis_fingerprint_is_stable_across_runs_over_one_tree() -> None:
+    first = _integrity_document(generated_at="2026-06-02T12:00:00Z")
+    second = _integrity_document(generated_at="2031-12-31T23:59:59Z")
+
+    assert analysis_fingerprint_from_report(first) == analysis_fingerprint_from_report(
+        second
+    )
+
+
+def test_analysis_fingerprint_changes_with_the_observed_source() -> None:
+    before = _integrity_document(observation="obs-1")
+    after = _integrity_document(observation="obs-2")
+
+    assert analysis_fingerprint_from_report(before) != analysis_fingerprint_from_report(
+        after
+    )
+
+
+def test_analysis_fingerprint_changes_with_the_analysed_scope() -> None:
+    before = _integrity_document(source_facts={"analysis_scope": [{"path": "a.py"}]})
+    after = _integrity_document(
+        source_facts={"analysis_scope": [{"path": "a.py"}, {"path": "b.py"}]}
+    )
+
+    assert analysis_fingerprint_from_report(before) != analysis_fingerprint_from_report(
+        after
+    )
+
+
+def test_analysis_fingerprint_ignores_baseline_and_gate_policy() -> None:
+    before = _integrity_document(
+        baseline={"state": "absent"},
+        evaluation={"outcome": {"exit_code": 0}},
+    )
+    after = _integrity_document(
+        baseline={"state": "trusted", "root_digest_or_null": "b" * 64},
+        evaluation={"outcome": {"exit_code": 1, "reasons": ["health"]}},
+    )
+
+    assert analysis_fingerprint_from_report(before) == analysis_fingerprint_from_report(
+        after
+    )
+
+
+def test_analysis_fingerprint_is_unknown_without_an_analysis_facts_digest() -> None:
+    # A clock is not an identity of code, and the pre-v3 singular key is gone.
+    assert (
+        analysis_fingerprint_from_report(
+            {"meta": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}
+        )
+        == "unknown"
+    )
+    assert (
+        analysis_fingerprint_from_report(
+            {"meta": {"runtime": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}}
+        )
+        == "unknown"
+    )
+    assert (
+        analysis_fingerprint_from_report({"integrity": {"digest": {"value": "a" * 64}}})
+        == "unknown"
+    )
+
+
+def test_analysis_fingerprint_is_reachable_from_a_produced_report() -> None:
+    document = build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    fingerprint = analysis_fingerprint_from_report(document)
+
+    assert fingerprint != "unknown"
+    assert (
+        fingerprint
+        == (
+            document["integrity"]["digests"]["analysis_facts"]["value"]  # type: ignore[index]
+        )
+    )
 
 
 def test_read_git_provenance_unavailable_without_branch_or_head(
@@ -429,3 +557,198 @@ def test_run_memory_init_refresh_records_vacuum_deletions(
     assert result.ingestion_mode == "refresh"
     assert result.records_marked_stale == 2
     assert result.vacuum_deleted == 4
+
+
+def _doc_link_repo(
+    tmp_path: Path,
+    docs: dict[str, str],
+) -> tuple[Path, dict[str, object]]:
+    """A git repo whose docs reference one real module, plus its report."""
+
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/mod.py": "def f():\n    return 1\n"},
+        registry_items=["pkg/mod.py"],
+    )
+    for rel, body in docs.items():
+        doc_path = root / rel
+        doc_path.parent.mkdir(parents=True, exist_ok=True)
+        doc_path.write_text(body, encoding="utf-8")
+    return root, report_document
+
+
+def _document_link_batch(
+    root: Path,
+    report_document: dict[str, object],
+) -> RecordBatch:
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    return extract_document_links(
+        project=project,
+        root_path=root,
+        git=git,
+        report_digest=None,
+        analysis_fingerprint=None,
+        registry_paths=frozenset({"pkg/mod.py"}),
+    )
+
+
+def test_document_links_emit_one_record_per_document_and_path(tmp_path: Path) -> None:
+    """Repeated mentions of one path in one document are one link.
+
+    The identity of a document link is the pair (document, anchored path), and
+    the store enforces that with a UNIQUE constraint. The producer emitted a
+    record for every occurrence and left the store to absorb the rest, so a
+    document that mentions a module under several headings paid a revision per
+    extra mention -- a rewrite of the same record with a different heading.
+    """
+
+    root, report_document = _doc_link_repo(
+        tmp_path,
+        {
+            "README.md": (
+                "# Overview\n"
+                "See `pkg/mod.py` for the entry point.\n"
+                "`pkg/mod.py` is also mentioned here.\n"
+                "## Details\n"
+                "And once more in `pkg/mod.py`.\n"
+            )
+        },
+    )
+    batch = _document_link_batch(root, report_document)
+
+    payloads = [dict(record.payload or {}) for record in batch.records]
+
+    assert [payload["anchored_symbols"] for payload in payloads] == [["pkg/mod.py"]]
+    assert payloads[0]["heading"] == "Overview"
+    assert len({record.identity_key for record in batch.records}) == len(batch.records)
+
+
+def test_document_links_keep_distinct_pairs_apart(tmp_path: Path) -> None:
+    """Collapsing must not merge links that are legitimately different.
+
+    Two documents naming the same module are two links, and one document naming
+    two modules is two links; only the (document, path) pair is the identity.
+    """
+
+    root, report_document = _doc_link_repo(
+        tmp_path,
+        {
+            "README.md": "# R\n`pkg/mod.py` and `README.md` here.\n",
+            "AGENTS.md": "# A\n`pkg/mod.py` again.\n",
+        },
+    )
+    batch = _document_link_batch(root, report_document)
+
+    pairs = sorted(
+        (
+            str(payload["doc_file"]),
+            str(next(iter(cast("list[object]", payload["anchored_symbols"])))),
+        )
+        for payload in (dict(record.payload or {}) for record in batch.records)
+    )
+    assert pairs == [
+        ("AGENTS.md", "pkg/mod.py"),
+        ("README.md", "README.md"),
+        ("README.md", "pkg/mod.py"),
+    ]
+    assert len({record.identity_key for record in batch.records}) == 3
+
+
+def test_document_link_ingest_writes_no_revisions_for_repeated_mentions(
+    tmp_path: Path,
+) -> None:
+    """One ingest of one unchanged tree must not revise its own records.
+
+    Each surplus record collided on identity_key with a different statement, so
+    the store rewrote the surviving record and wrote a revision -- an edit
+    history manufactured by a single pass over a file nobody changed.
+    """
+
+    root, report_document = _doc_link_repo(
+        tmp_path,
+        {
+            "README.md": (
+                "# Overview\n"
+                "`pkg/mod.py` here.\n"
+                "## Details\n"
+                "`pkg/mod.py` there.\n"
+                "## More\n"
+                "`pkg/mod.py` everywhere.\n"
+            )
+        },
+    )
+    run_memory_init(
+        root_path=root,
+        report_document=report_document,
+        options=InitOptions(include_docs=True, include_tests=False),
+    )
+    config = resolve_memory_config(root)
+    store = SqliteEngineeringMemoryStore(resolve_memory_db_path(root, config))
+    try:
+        revisions = store._conn.execute(
+            "SELECT COUNT(*) FROM memory_revisions"
+        ).fetchone()[0]
+        links = store._conn.execute(
+            "SELECT COUNT(*) FROM memory_records WHERE type='document_link'"
+        ).fetchone()[0]
+        evidence = store._conn.execute(
+            "SELECT COUNT(*) FROM memory_evidence e "
+            "JOIN memory_records r ON r.id = e.memory_id "
+            "WHERE r.type='document_link' AND e.evidence_kind='git_commit'"
+        ).fetchone()[0]
+    finally:
+        store.close()
+
+    assert int(revisions) == 0
+    assert int(links) == 1
+    assert int(evidence) == 1
+
+
+def test_document_link_records_bind_to_the_commit_they_were_read_at(
+    tmp_path: Path,
+) -> None:
+    """A document link states when in the tree's history it was true.
+
+    Two lanes carry that: the commit/branch columns on the record, and a
+    ``git_commit`` evidence row that ``enrich_batch_git_evidence`` attaches to
+    every record in the merged batch. Both must reach ``document_link`` -- a
+    link between a document and a module that does not say which tree state it
+    held for is an assertion nobody can re-check. The commit column is also a
+    precondition of drift evaluation, so losing it silently disables staleness
+    for these records rather than failing.
+    """
+
+    root, report_document = _doc_link_repo(
+        tmp_path,
+        {"README.md": "# Overview\nSee `pkg/mod.py`.\n"},
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    run_memory_init(
+        root_path=root,
+        report_document=report_document,
+        options=InitOptions(include_docs=True, include_tests=False),
+    )
+    config = resolve_memory_config(root)
+    store = SqliteEngineeringMemoryStore(resolve_memory_db_path(root, config))
+    try:
+        record_rows = store._conn.execute(
+            "SELECT id, created_at_commit, verified_at_commit, created_on_branch "
+            "FROM memory_records WHERE type='document_link'"
+        ).fetchall()
+        evidence_rows = store._conn.execute(
+            "SELECT e.evidence_kind, e.ref, e.locator FROM memory_evidence e "
+            "JOIN memory_records r ON r.id = e.memory_id "
+            "WHERE r.type='document_link'"
+        ).fetchall()
+    finally:
+        store.close()
+
+    assert [tuple(row)[1:] for row in record_rows] == [(head, head, "main")]
+    assert [tuple(row) for row in evidence_rows] == [("git_commit", head, "main")]

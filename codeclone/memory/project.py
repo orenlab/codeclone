@@ -15,7 +15,6 @@ from ..baseline.trust import current_python_tag
 from ..config.memory import MemoryConfig, resolve_memory_config
 from ..paths.module_identity.projection import module_path_under_root
 from ..report.meta import current_report_timestamp_utc
-from ..utils.coerce import as_mapping
 from ..utils.mapping_paths import section
 from ..utils.repo_identity import resolve_repository_anchor_root
 from ..utils.repo_paths import (
@@ -114,16 +113,23 @@ def git_head_evidence(
 
 
 def analysis_fingerprint_from_report(report_document: dict[str, object]) -> str:
-    integrity = as_mapping(report_document.get("integrity"))
-    digest = as_mapping(integrity.get("digest"))
-    value = str(digest.get("value", "")).strip()
-    if value:
-        return value[:16]
-    meta = as_mapping(report_document.get("meta"))
-    generated = str(meta.get("report_generated_at_utc", "")).strip()
-    if generated:
-        return hashlib.sha256(generated.encode("utf-8")).hexdigest()[:16]
-    return "unknown"
+    """Identity of the analysis a memory record was derived from.
+
+    Reads the report-v3 ``analysis_facts`` tier: the digest over the source
+    observations, the report schema version and the analysis contract. That
+    tier changes when — and only when — the analysed facts change, so two
+    runs over one tree agree while a run after a real edit does not. The
+    baseline-relative ``comparison`` tier answers a different question and
+    stays with :func:`report_digest_from_report`; ``envelope`` covers the
+    whole document including its timestamps and identifies a run, not code.
+
+    An absent tier yields ``"unknown"``. Deriving a fingerprint from the clock
+    would make every run look like a new state of the code, which is exactly
+    the identity this value must not carry.
+    """
+
+    analysis_facts = section(report_document, "integrity.digests.analysis_facts")
+    return str(analysis_facts.get("value", "")).strip() or "unknown"
 
 
 def report_digest_from_report(report_document: dict[str, object]) -> str | None:

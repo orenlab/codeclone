@@ -369,6 +369,8 @@ def test_finish_hygiene_check_treats_new_unattributed_as_advisory(
 ) -> None:
     # Scope-aware finish hygiene: out-of-scope dirt with no foreign-intent
     # attribution is classified for diagnostics but does NOT block finish.
+    # "Changed since start" proves change, not authorship — a human editing
+    # a file in their own editor must never fail an agent's finish.
     store = get_workspace_intent_store(tmp_path)
     start_snapshot = DirtySnapshot(
         git_available=True,
@@ -868,3 +870,106 @@ def test_continue_own_wip_policy_allows_own_dirty_without_foreign() -> None:
         )
         is False
     )
+
+
+def test_finish_hygiene_check_names_unverified_python_without_blocking(
+    tmp_path: Path,
+) -> None:
+    """Name what was not verified; do not punish for it.
+
+    Out-of-scope Python is exactly what the derived verification profile never
+    sees: the profile comes from declared evidence, so those files are
+    classified by nothing and compared against nothing. That fact must be
+    stated by name — and it must NOT block, because "changed" is not "changed
+    by this agent". Blocking is reserved for CODECLONE_STRICT_FINISH.
+    """
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/a.py",
+                status_xy=" M",
+                digest="start-a",
+                digest_status="ok",
+            ),
+        ),
+    )
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/undeclared.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.unverified_python_unscoped_dirty == ("pkg/undeclared.py",)
+    assert hygiene.blocks_finish is False
+    assert hygiene.finish_block_reason is None
+
+
+def test_finish_hygiene_check_names_unverified_python_whoever_changed_it(
+    tmp_path: Path,
+) -> None:
+    """Authorship is not the question — verification coverage is.
+
+    A path that was already dirty before the intent started, unchanged since,
+    is provably not this patch's doing, and it is still Python this finish did
+    not verify. It is named for that reason alone, and stays non-blocking.
+    """
+    store = get_workspace_intent_store(tmp_path)
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/preexisting.py\n"):
+        snapshot = collect_dirty_snapshot(tmp_path)
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=snapshot,
+        )
+    assert hygiene.preexisting_unscoped_dirty == ("pkg/preexisting.py",)
+    assert hygiene.unverified_python_unscoped_dirty == ("pkg/preexisting.py",)
+    assert hygiene.blocks_finish is False
+
+
+def test_finish_hygiene_check_unverified_lane_holds_python_only(
+    tmp_path: Path,
+) -> None:
+    """Only Python carries structural verification, so only Python is named.
+
+    Naming a text file as "structurally unverified" would be noise: no
+    verification profile ever promises structural checks for it.
+    """
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(),
+    )
+    with _mock_git_porcelain(" M notes/scratch.txt\n M pkg/undeclared.pyi\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.dirty_paths_outside_scope == (
+        "notes/scratch.txt",
+        "pkg/undeclared.pyi",
+    )
+    assert hygiene.unverified_python_unscoped_dirty == ("pkg/undeclared.pyi",)
+    assert hygiene.blocks_finish is False

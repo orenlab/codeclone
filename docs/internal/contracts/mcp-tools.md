@@ -91,7 +91,7 @@ Memory-aware tools require `get_relevant_memory` after `start_controlled_change`
 ### Violated scope
 
 - **Condition**: Out-of-scope files modified and not accounted for in dirty snapshot.
-- **Response**: `status: violated`, `finish_block_reason: own_unscoped_dirty` (only if `CODECLONE_STRICT_FINISH` truthy).
+- **Response**: `status: violated`, `finish_block_reason: own_unscoped_dirty` (only if `CODECLONE_STRICT_FINISH` truthy). Without it the outcome accepts and names the unchecked Python in `unverified_paths` instead.
 - **Recovery**: Remove out-of-scope changes, or widen scope via `start_controlled_change(root=..., scope=...)` and retry `finish` on new intent.
 
 ### Missing evidence
@@ -127,7 +127,7 @@ uv run pytest -q tests/test_mcp_*.py tests/test_memory_mcp_sync.py tests/test_ob
 
 - **What is verified**: Schema compliance, lifecycle state transitions, blast radius computation, scope reconciliation, patch contract (via `check_patch_contract` internally).
 - **What is not verified**: Edit correctness (finish does not re-run structural checks on user edits; after-run verification is delegated).
-- **Assertion scope**: Tools enforce contracts only within their declared scope and preconditions; violations outside declared scope are reported but do not block (unless `CODECLONE_STRICT_FINISH` is truthy).
+- **Assertion scope**: Tools enforce contracts only within their declared scope and preconditions; violations outside declared scope are reported but do not block (unless `CODECLONE_STRICT_FINISH` is truthy). A finish that accepts while out-of-scope Python was dirty names those paths in `unverified_paths`, `summary.unverified_paths` and the receipt's `claims_not_made`.
 
 ## Evidence index
 
