@@ -30,6 +30,7 @@ site/
 .idea/
 .vscode/
 /.cursor/
+/.enacta/
 
 # OS
 .DS_Store
