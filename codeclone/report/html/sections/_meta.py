@@ -171,9 +171,6 @@ def render_meta_panel(ctx: ReportContext) -> str:
     integrity_digest = _as_mapping(
         _as_mapping(integrity_map.get("digests")).get("envelope")
     )
-    canonical_sections = ", ".join(
-        str(i) for i in _as_sequence(integrity_canon.get("sections")) if str(i).strip()
-    )
 
     general_rows: list[tuple[str, object]] = [
         ("CodeClone", _meta_pick(meta.get("codeclone_version"), __version__)),
@@ -295,12 +292,21 @@ def render_meta_panel(ctx: ReportContext) -> str:
     integ_rows = [
         r
         for r in (
+            # The same rows the canonical report prints, in the same order: a
+            # scope, a section list and a verified flag were asked for here
+            # and the document declares none of the three, so those rows were
+            # dropped as empty while the facts canonicalization does publish
+            # were never asked for.
             ("Canonicalization version", integrity_canon.get("version")),
-            ("Canonicalization scope", integrity_canon.get("scope")),
-            ("Canonical sections", canonical_sections),
+            ("Canonicalization serializer", integrity_canon.get("serializer")),
+            (
+                "Envelope null sentinel",
+                integrity_canon.get("envelope_null_sentinel"),
+            ),
+            ("Digest kind", integrity_digest.get("kind")),
             ("Digest algorithm", integrity_digest.get("algorithm")),
+            ("Digest version", integrity_digest.get("digest_version")),
             ("Digest value", integrity_digest.get("value")),
-            ("Digest verified", integrity_digest.get("verified")),
         )
         if _meta_pick(r[1]) is not None
     ]
@@ -362,11 +368,14 @@ def render_meta_panel(ctx: ReportContext) -> str:
                 "metrics_baseline_path_absolute"
             ),
             "data-canonicalization-version": integrity_canon.get("version"),
-            "data-canonicalization-scope": integrity_canon.get("scope"),
-            "data-canonical-sections": canonical_sections,
+            "data-canonicalization-serializer": integrity_canon.get("serializer"),
+            "data-envelope-null-sentinel": integrity_canon.get(
+                "envelope_null_sentinel"
+            ),
+            "data-digest-kind": integrity_digest.get("kind"),
             "data-digest-algorithm": integrity_digest.get("algorithm"),
+            "data-digest-version": integrity_digest.get("digest_version"),
             "data-digest-value": integrity_digest.get("value"),
-            "data-digest-verified": _meta_display(integrity_digest.get("verified")),
         }
     )
 

@@ -83,23 +83,15 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 #: this branch. The register is a work queue with a deadline, not a permit: the
 #: stale side reds the moment a read is repaired and the entry is not removed.
 #:
-#: The seven reads of ``codeclone/audit/analysis_completed.py`` were the first
-#: of that queue to land, and their entry was deleted with the fix rather than
-#: carried: the audit event now reads its counts from ``inventory.files``,
-#: ``inventory.code`` and ``findings.summary`` and its health figures from
-#: ``metrics.summary.health``.
-_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {
-    # The Markdown integrity block prints a canonicalization ``scope`` and
-    # ``sections`` list, and an envelope ``verified`` flag. The document
-    # declares ``version``, ``serializer`` and ``envelope_null_sentinel``, and
-    # the envelope tier carries ``kind``/``algorithm``/``digest_version``/
-    # ``value``.
-    "codeclone/report/renderers/markdown.py": (
-        "integrity.canonicalization.scope",
-        "integrity.canonicalization.sections",
-        "integrity.digests.envelope.verified",
-    ),
-}
+#: Emptied again once that queue was worked off, in the order it was written:
+#: the seven reads of ``codeclone/audit/analysis_completed.py`` first -- the
+#: audit event now takes its counts from ``inventory.files``/``inventory.code``
+#: and ``findings.summary`` and its health figures from
+#: ``metrics.summary.health`` -- and then the three of the Markdown integrity
+#: block, which now prints the canonicalization block and the envelope tier
+#: whole. Both entries were deleted by the commit that repaired the reads, and
+#: the stale side named each one the moment it was not deleted.
+_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {}
 
 
 def _callee_name(node: ast.expr) -> str:

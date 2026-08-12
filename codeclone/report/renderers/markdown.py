@@ -682,16 +682,20 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     _append_kv_bullets(
         lines,
         (
+            # The canonicalization block and the envelope tier, each printed
+            # whole. A scope, a section list and a verified flag were asked
+            # for here; the document declares none of the three, so those
+            # bullets rendered "(none)" while the two facts canonicalization
+            # does publish went unprinted.
             ("Canonicalization version", canonicalization.get("version")),
-            ("Canonicalization scope", canonicalization.get("scope")),
+            ("Canonicalization serializer", canonicalization.get("serializer")),
             (
-                "Canonical sections",
-                ", ".join(
-                    str(item) for item in _as_sequence(canonicalization.get("sections"))
-                ),
+                "Envelope null sentinel",
+                canonicalization.get("envelope_null_sentinel"),
             ),
+            ("Digest kind", digest.get("kind")),
             ("Digest algorithm", digest.get("algorithm")),
-            ("Digest verified", digest.get("verified")),
+            ("Digest version", digest.get("digest_version")),
             ("Digest value", digest.get("value")),
             (
                 "Hotlists",

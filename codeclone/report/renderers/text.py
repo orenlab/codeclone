@@ -977,15 +977,21 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         [
             "",
             proj.TEXT_SECTION_INTEGRITY,
+            # The canonicalization block and the envelope tier, each printed
+            # whole. A scope, a section list and a verified flag were asked
+            # for here and the document declares none of the three; this
+            # helper skips a key it cannot find, so the three absences printed
+            # nothing at all and the two facts canonicalization does publish
+            # were never asked for.
             proj.TEXT_INTEGRITY_CANONICALIZATION
             + _format_key_values(
                 canonicalization,
-                ("version", "scope", "sections"),
+                ("version", "serializer", "envelope_null_sentinel"),
             ),
             proj.TEXT_INTEGRITY_DIGEST
             + _format_key_values(
                 digest,
-                ("algorithm", "verified", "value"),
+                ("kind", "algorithm", "digest_version", "value"),
             ),
         ]
     )
