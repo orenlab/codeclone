@@ -581,13 +581,18 @@ class MCPSession(
             module_imports=processing_result.module_deps,
         )
         self._runs.register(record)
+        self._prune_session_state()
+        # The audit row reports the same figures this call returns. The
+        # internal summary carries the report document's own sub-blocks --
+        # ``inventory`` is a mapping of blocks there, not a file count -- so
+        # the row used to record a mapping where a count belongs.
+        summary_payload = self._summary_payload(record.summary, record=record)
         self._emit_analysis_completed_audit(
             root_path=root_path,
             record=record,
-            summary=summary,
+            summary=summary_payload,
         )
-        self._prune_session_state()
-        return self._summary_payload(record.summary, record=record)
+        return summary_payload
 
     def _emit_analysis_completed_audit(
         self,

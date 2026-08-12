@@ -82,20 +82,13 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 #: not caused by that fix, and each is owned by its own following commit in
 #: this branch. The register is a work queue with a deadline, not a permit: the
 #: stale side reds the moment a read is repaired and the entry is not removed.
+#:
+#: The seven reads of ``codeclone/audit/analysis_completed.py`` were the first
+#: of that queue to land, and their entry was deleted with the fix rather than
+#: carried: the audit event now reads its counts from ``inventory.files``,
+#: ``inventory.code`` and ``findings.summary`` and its health figures from
+#: ``metrics.summary.health``.
 _ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {
-    # The completed-analysis audit event reports counts and a health grade from
-    # paths the canonical document has never had: the counts live under
-    # ``findings.summary``/``inventory.files``/``inventory.code`` and the health
-    # figures under ``metrics.summary.health``.
-    "codeclone/audit/analysis_completed.py": (
-        "findings.summary.new",
-        "findings.total",
-        "inventory.functions",
-        "inventory.lines",
-        "meta.health_grade",
-        "meta.health_score",
-        "meta.runtime.analysis_mode",
-    ),
     # The Markdown integrity block prints a canonicalization ``scope`` and
     # ``sections`` list, and an envelope ``verified`` flag. The document
     # declares ``version``, ``serializer`` and ``envelope_null_sentinel``, and

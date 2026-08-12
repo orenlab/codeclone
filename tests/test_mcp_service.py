@@ -2764,6 +2764,104 @@ def test_mcp_session_audit_emit_swallows_counter_errors(
     )
 
 
+def _write_counted_repository(root: Path) -> None:
+    """A repository whose file, line and entity counts cannot coincide."""
+
+    package = root / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "alpha.py").write_text(
+        "def widen(value: int) -> int:\n"
+        "    return value * 2\n"
+        "\n"
+        "\n"
+        "class Holder:\n"
+        "    def keep(self, value: int) -> int:\n"
+        "        return widen(value)\n",
+        encoding="utf-8",
+    )
+    (package / "beta.py").write_text(
+        "from .alpha import widen\n"
+        "\n"
+        "\n"
+        "def narrow(value: int) -> int:\n"
+        "    return widen(value) - 1\n"
+        "\n"
+        "\n"
+        "def shift(value: int) -> int:\n"
+        "    return narrow(value) + 3\n"
+        "\n"
+        "\n"
+        "def scale(value: int) -> int:\n"
+        "    return shift(value) * 5\n",
+        encoding="utf-8",
+    )
+
+
+def test_mcp_analysis_completed_event_carries_the_run_summary_figures(
+    tmp_path: Path,
+) -> None:
+    """The audit row reports the figures this call returns to its caller.
+
+    The event was handed the session's *internal* summary, whose ``inventory``
+    is the report document's own section -- a mapping of sub-blocks, not a
+    count -- so every MCP analysis persisted a mapping where a file count
+    belongs and the reader saw ``files: null``. The canonical run summary
+    already projects those blocks into counts; comparing against it is the law
+    being pinned: one run, one set of figures.
+    """
+
+    _write_counted_repository(tmp_path)
+    audit = _RecordingAuditWriter()
+    service = mcp_session_mod.MCPSession(history_limit=4, audit_writer=audit)
+
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    inventory = cast(dict[str, object], summary["inventory"])
+    files = cast(int, inventory["files"])
+    lines = cast(int, inventory["lines"])
+    functions = cast(int, inventory["functions"])
+    # No two of them may coincide, or a payload reporting the wrong one would
+    # still match.
+    assert len({files, lines, functions}) == 3
+    assert min(files, lines, functions) > 0
+
+    events = [
+        event
+        for event in audit.events
+        if event.event_type == mcp_audit_events.EVENT_ANALYSIS_COMPLETED
+    ]
+    assert len(events) == 1, [event.event_type for event in audit.events]
+    payload = events[0].payload
+    assert payload is not None
+
+    assert payload["inventory"] == {
+        "files": files,
+        "lines": lines,
+        "functions": functions,
+    }
+    assert (
+        cast(dict[str, object], payload["health"])["score"]
+        == (cast(dict[str, object], summary["health"])["score"])
+    )
+    assert (
+        cast(dict[str, object], payload["findings"])["total"]
+        == (cast(dict[str, object], summary["findings"])["total"])
+    )
+    assert (
+        cast(dict[str, object], payload["diff"])["new_clones"]
+        == (cast(dict[str, object], summary["diff"])["new_clones"])
+    )
+    assert payload["mode"] == summary["mode"]
+    assert payload["schema"] == summary["schema"]
+
+
 def test_mcp_session_emit_analysis_completed_audit_swallows_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

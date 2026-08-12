@@ -28,17 +28,24 @@ def analysis_completed_payload(
     summary: Mapping[str, object],
     source: AnalysisSource,
 ) -> dict[str, object]:
-    """Build the audit payload for ``analysis.completed`` from a run summary."""
+    """Build the audit payload for ``analysis.completed`` from a run summary.
+
+    The summary is the canonical run summary a surface publishes -- the same
+    object the MCP session returns to its caller -- where every figure is
+    already a count. The session's *internal* summary carries the report
+    document's own sub-blocks under these names instead, so feeding that one
+    here recorded a mapping where a file count belongs.
+    """
 
     health = _mapping(summary.get("health"))
-    findings = _findings_summary(summary)
+    findings = _mapping(summary.get("findings"))
     inventory = _mapping(summary.get("inventory"))
     diff = _mapping(summary.get("diff"))
     return {
         "source": source,
         "focus": str(summary.get("focus", "repository")),
-        "mode": _analysis_mode(summary),
-        "schema": str(summary.get("schema", summary.get("report_schema_version", ""))),
+        "mode": _mode_text(summary.get("mode")),
+        "schema": str(summary.get("schema", "")),
         "health": {
             "score": health.get("score"),
             "grade": health.get("grade"),
@@ -71,43 +78,55 @@ def analysis_completed_payload_from_report(
     ``None`` counts mean no clone lane was compared against the baseline, and
     the recorded ``diff.new_clones`` stays null rather than claiming a zero the
     run never measured.
+
+    Every figure is the one the document publishes. The file count in
+    particular is ``inventory.files.total_found`` and not the length of the
+    file registry: the registry lists the paths that resolved under the scan
+    root, so counting it here was a second counter of a fact the document
+    already carries, and the two disagree whenever a path does not resolve.
     """
 
     (
         meta,
-        runtime,
-        inventory,
-        file_registry,
-        findings,
+        inventory_files,
+        inventory_code,
         findings_summary,
         health,
     ) = sections(
         report_document,
         "meta",
-        "meta.runtime",
-        "inventory",
-        "inventory.file_registry",
-        "findings",
+        "inventory.files",
+        "inventory.code",
         "findings.summary",
         "metrics.summary.health",
     )
     return {
         "source": source,
         "focus": "repository",
-        "mode": str(runtime.get("analysis_mode", meta.get("analysis_mode", "full"))),
+        "mode": _mode_text(meta.get("analysis_mode")),
         "schema": str(report_document.get("report_schema_version", "")),
         "health": {
-            "score": health.get("score", meta.get("health_score")),
-            "grade": health.get("grade", meta.get("health_grade")),
+            "score": health.get("score"),
+            "grade": health.get("grade"),
         },
         "findings": {
-            "total": findings_summary.get("total", findings.get("total")),
-            "new": findings_summary.get("new"),
+            "total": findings_summary.get("total"),
+            # The document publishes novelty per finding and a clone-lane
+            # rollup, but no cross-family "new" total. Counting the groups here
+            # would be a second counter of a fact the document does not claim,
+            # so the row records the absence instead.
+            "new": None,
         },
         "inventory": {
-            "files": len(_sequence(file_registry.get("items"))),
-            "lines": inventory.get("lines"),
-            "functions": inventory.get("functions"),
+            "files": inventory_files.get("total_found"),
+            "lines": inventory_code.get("parsed_lines"),
+            # Methods are function definitions too, and the MCP surface records
+            # this same field with methods included. One event field cannot
+            # mean two things depending on which surface wrote the row.
+            "functions": _summed_counts(
+                inventory_code.get("functions"),
+                inventory_code.get("methods"),
+            ),
         },
         "diff": {
             "new_clones": (
@@ -134,6 +153,39 @@ def emit_analysis_completed(
 ) -> None:
     """Append an ``analysis.completed`` audit row when audit is enabled."""
 
+    _emit_payload(
+        root_path=root_path,
+        payload=analysis_completed_payload(summary=summary, source=source),
+        source=source,
+        report_digest=report_digest,
+        run_id=run_id,
+        agent_pid=agent_pid,
+        agent_start_epoch=agent_start_epoch,
+        agent_label=agent_label,
+        writer=writer,
+    )
+
+
+def _emit_payload(
+    *,
+    root_path: Path,
+    payload: Mapping[str, object],
+    source: AnalysisSource,
+    report_digest: str,
+    run_id: str,
+    agent_pid: int,
+    agent_start_epoch: int,
+    agent_label: str,
+    writer: AuditWriter | None,
+) -> None:
+    """Write one built payload, or nothing when audit is disabled.
+
+    Both entry points build their own payload from the shape they are handed
+    and hand it here. Re-deriving one payload from the other through a
+    synthesized summary is what made a builder change able to reach the wire
+    twice, in two different spellings.
+    """
+
     from .runtime import open_audit_writer_for_root
 
     active_writer = (
@@ -141,8 +193,7 @@ def emit_analysis_completed(
     )
     if isinstance(active_writer, NullAuditWriter):
         return
-    payload = analysis_completed_payload(summary=summary, source=source)
-    status = _analysis_mode(summary)
+    status = _mode_text(payload.get("mode"))
     active_writer.emit(
         AuditEvent(
             event_type=EVENT_ANALYSIS_COMPLETED,
@@ -154,7 +205,7 @@ def emit_analysis_completed(
             run_id=run_id,
             report_digest=report_digest,
             status=status,
-            payload=payload,
+            payload=dict(payload),
             surface=source,
             tool_name=f"{source}:analysis",
         )
@@ -175,25 +226,14 @@ def emit_analysis_completed_from_report(
     agent_label: str | None = None,
     writer: AuditWriter | None = None,
 ) -> None:
-    payload = analysis_completed_payload_from_report(
-        report_document=report_document,
-        source=source,
-        new_func_count=new_func_count,
-        new_block_count=new_block_count,
-    )
-    summary = {
-        **payload,
-        "focus": payload["focus"],
-        "mode": payload["mode"],
-        "schema": payload["schema"],
-        "health": payload["health"],
-        "findings": payload["findings"],
-        "inventory": payload["inventory"],
-        "diff": payload["diff"],
-    }
-    emit_analysis_completed(
+    _emit_payload(
         root_path=root_path,
-        summary=summary,
+        payload=analysis_completed_payload_from_report(
+            report_document=report_document,
+            source=source,
+            new_func_count=new_func_count,
+            new_block_count=new_block_count,
+        ),
         source=source,
         report_digest=report_digest,
         run_id=run_id,
@@ -204,19 +244,13 @@ def emit_analysis_completed_from_report(
     )
 
 
-def _analysis_mode(summary: Mapping[str, object]) -> str:
-    mode = summary.get("mode") or summary.get("analysis_mode")
+def _mode_text(mode: object) -> str:
+    """One spelling of an analysis mode, and "completed" when there is none."""
+
     if mode is None:
         return "completed"
     text = str(mode).strip()
     return text or "completed"
-
-
-def _findings_summary(summary: Mapping[str, object]) -> Mapping[str, object]:
-    findings = _mapping(summary.get("findings"))
-    if findings:
-        return findings
-    return _mapping(summary.get("findings_summary"))
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -225,12 +259,19 @@ def _mapping(value: object) -> Mapping[str, object]:
     return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
-def _sequence(value: object) -> tuple[object, ...]:
-    if isinstance(value, str):
-        return ()
-    if isinstance(value, list):
-        return tuple(value)
-    return ()
+def _summed_counts(*values: object) -> int | None:
+    """Add the counts that were published, or answer None when none was.
+
+    A run that never counted entities publishes neither, and a zero there
+    would be a measurement the run did not make.
+    """
+
+    counts = [
+        value
+        for value in values
+        if isinstance(value, int) and not isinstance(value, bool)
+    ]
+    return sum(counts) if counts else None
 
 
 __all__ = [
