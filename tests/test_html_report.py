@@ -5903,11 +5903,17 @@ def _stat_card(html: str, label: str) -> str:
     Scoped to a single ``meta-item`` on purpose: a pattern allowed to run over
     the whole document can satisfy itself from another card's digits and report
     a pass that means nothing.
+
+    The label is matched without its tooltip. ``glossary_tip`` returns an empty
+    string for a label the glossary does not carry, so a locator that required
+    the ``kpi-help`` span made these pins depend on the glossary rather than on
+    the figure they exist to check -- and failed intermittently in the full
+    suite while passing in isolation.
     """
 
-    opening = f'<div class="meta-label">{label} <span class="kpi-help"'
-    start = html.find(opening)
-    assert start != -1, f"no stat card labelled {label!r}"
+    match = re.search(rf'<div class="meta-label">{re.escape(label)} ?<', html)
+    assert match is not None, f"no stat card labelled {label!r}"
+    start = match.start()
     card_start = html.rfind('<div class="meta-item">', 0, start)
     end = html.find('<div class="meta-item">', start)
     return html[card_start : end if end != -1 else len(html)]

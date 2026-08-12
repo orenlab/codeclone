@@ -289,8 +289,8 @@ def test_report_reader_rejects_non_mapping_model_projection(
     report = tmp_path / "report.json"
     report.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
-        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate_json",
-        staticmethod(lambda _raw: _NonMappingProjection()),
+        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate",
+        staticmethod(lambda _decoded: _NonMappingProjection()),
     )
 
     result = load_report_artifact(report)
@@ -4029,3 +4029,56 @@ def test_text_and_markdown_inventory_carry_the_unsupported_construct_count() -> 
     )
     markdown_out = render_markdown_report_document(document)
     assert "unsupported_construct_skipped=1" in markdown_out
+
+
+def test_report_reader_parses_the_stored_document_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One artifact, one parse.
+
+    The reader scanned the raw bytes for duplicate keys with ``json.loads`` and
+    then handed the same bytes to ``model_validate_json``, so every stored
+    report was decoded twice and two full object graphs were alive at the
+    process high-water mark. On the artifact this repository emits that is two
+    parses of a document already measured at 3.08x the reader's own byte limit;
+    the cost is paid by ``memory init`` and by every API caller.
+
+    The duplicate-key scan already produces the mapping, so validating that
+    mapping is the same contract for one decode instead of two. Counting the
+    decodes is the honest pin: asserting only that the read still succeeds
+    stays green with the second parse restored.
+    """
+
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(tmp_path)},
+    )
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(document), encoding="utf-8")
+
+    decodes: list[str] = []
+    real_loads = json.loads
+
+    def counting_loads(*args: object, **kwargs: object) -> object:
+        decodes.append("json.loads")
+        return real_loads(*args, **kwargs)  # type: ignore[arg-type]
+
+    def refuse_validate_json(*_args: object, **_kwargs: object) -> object:
+        decodes.append("model_validate_json")
+        raise AssertionError("the raw bytes must not be decoded a second time")
+
+    monkeypatch.setattr("codeclone.report.document.reader.json.loads", counting_loads)
+    monkeypatch.setattr(
+        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate_json",
+        staticmethod(refuse_validate_json),
+    )
+
+    result = load_report_artifact(report)
+
+    assert not isinstance(result, ReportArtifactFailure), getattr(
+        result, "detail", result
+    )
+    assert decodes == ["json.loads"]
