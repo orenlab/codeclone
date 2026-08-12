@@ -437,11 +437,11 @@ def extract_public_surfaces(
     ingest: IngestConfig | None = None,
 ) -> RecordBatch:
     batch, now, metrics = _new_metrics_batch(report_document)
-    api_surface = as_mapping(metrics.get("api_surface"))
-    for item in as_sequence(api_surface.get("items")):
+    families = as_mapping(metrics.get("families"))
+    for item in _family_items(families, "api_surface"):
         mapping = as_mapping(item)
-        symbol = str(mapping.get("qualname") or mapping.get("name") or "").strip()
-        file_path = str(mapping.get("file") or mapping.get("path") or "").strip()
+        symbol = str(mapping.get("qualname", "")).strip()
+        file_path = str(mapping.get("relative_path", "")).strip()
         if not symbol:
             continue
         identity = make_identity_key(

@@ -68,19 +68,13 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 #: than carried. Add an entry only for a read another live branch already owns,
 #: and delete it the moment that branch lands.
 #:
-#: The ``extract_public_surfaces`` entry is the first read this scan could see
-#: only after the alias hole below was closed: the canonical ``metrics`` node
-#: carries exactly ``families`` and ``summary``, so ``metrics.api_surface``
-#: names a family where a section is expected and that lane has never
-#: extracted a record. Owned by the next commit on this branch, which deletes
-#: both the read and this entry; the stale side of the ratchet enforces the
-#: deletion.
-_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {
-    "codeclone/memory/ingest/extractors.py": (
-        "metrics.api_surface",
-        "metrics.api_surface.items",
-    ),
-}
+#: Emptied again once ``extract_public_surfaces`` stopped reading
+#: ``metrics.api_surface``: that entry was added by the commit that taught this
+#: scan to follow a section bound through tuple unpacking, and deleted by the
+#: commit that fixed the read it exposed. Both sides of the ratchet did their
+#: job -- the growth side while the defect was live, the stale side the moment
+#: it was not.
+_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {}
 
 
 def _callee_name(node: ast.expr) -> str:

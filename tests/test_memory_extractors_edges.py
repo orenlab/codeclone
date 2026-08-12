@@ -86,16 +86,34 @@ def test_extract_module_roles_dedup_and_skips_non_py(tmp_path: Path) -> None:
 def test_extract_public_surfaces_skips_empty_symbol_and_reads_mcp_snapshot(
     tmp_path: Path,
 ) -> None:
+    """Edge behaviour, on the shape the report builder actually emits.
+
+    This fixture used to nest ``api_surface`` directly under ``metrics`` and
+    locate rows with ``file``/``path``/``name``. The canonical ``metrics`` node
+    carries only ``families`` and ``summary``, and the api-surface projection
+    emits ``qualname`` and ``relative_path``, so the old fixture described a
+    document no run has produced -- it was written to match the extractor
+    rather than the contract, and it kept the lane's emptiness invisible.
+    ``_risk_note_report_document`` below already stated the correct shape for
+    its own lane; this one is now consistent with it.
+    """
+
     project = _project(tmp_path)
     git = GitProvenance(remote=None, branch="main", head="deadbeef", available=True)
     report_document: dict[str, object] = {
         "metrics": {
-            "api_surface": {
-                "items": [
-                    {"qualname": "x.y.Exported", "file": "pkg/mod.py"},
-                    {"name": "  Zed  ", "path": "pkg/zed.py"},
-                    {"qualname": "   ", "file": "pkg/skip.py"},  # empty symbol => skip
-                ]
+            "families": {
+                "api_surface": {
+                    "items": [
+                        {
+                            "qualname": "x.y.Exported",
+                            "relative_path": "pkg/mod.py",
+                        },
+                        {"qualname": "  Zed  ", "relative_path": "pkg/zed.py"},
+                        # empty symbol => skip
+                        {"qualname": "   ", "relative_path": "pkg/skip.py"},
+                    ]
+                }
             }
         }
     }
