@@ -5895,3 +5895,227 @@ def test_location_paths_resolve_against_scan_root(tmp_path: Path) -> None:
     assert location_file_target(ctx, {}, relative_path="pkg/b.py") == str(
         (tmp_path / "pkg" / "b.py").resolve()
     )
+
+
+def _stat_card(html: str, label: str) -> str:
+    """The markup of exactly one named stat card, and nothing around it.
+
+    Scoped to a single ``meta-item`` on purpose: a pattern allowed to run over
+    the whole document can satisfy itself from another card's digits and report
+    a pass that means nothing.
+    """
+
+    opening = f'<div class="meta-label">{label} <span class="kpi-help"'
+    start = html.find(opening)
+    assert start != -1, f"no stat card labelled {label!r}"
+    card_start = html.rfind('<div class="meta-item">', 0, start)
+    end = html.find('<div class="meta-item">', start)
+    return html[card_start : end if end != -1 else len(html)]
+
+
+def _stat_card_value(html: str, label: str) -> str:
+    """The value the HTML report prints on one named stat card."""
+
+    match = re.search(r'<div class="meta-value[^"]*">([^<]*)', _stat_card(html, label))
+    assert match is not None, f"card {label!r} has no value"
+    return match.group(1)
+
+
+def _stat_card_badge(html: str, label: str, badge: str) -> str:
+    """The figure printed on one named micro-badge of one named stat card."""
+
+    match = re.search(
+        r'<span class="kpi-micro-val">([^<]*)</span>'
+        rf'<span class="kpi-micro-lbl">{re.escape(badge)}</span>',
+        _stat_card(html, label),
+    )
+    assert match is not None, f"card {label!r} has no {badge!r} badge"
+    return match.group(1)
+
+
+def _contradictory_coupling_document() -> dict[str, Any]:
+    """One document whose summary and rows deliberately disagree.
+
+    A consumer that reports the document's own figure is indifferent to the
+    rows; a consumer that re-derives the figure from the rows answers with the
+    other number. Agreement between the two on an honest document proves
+    nothing, which is exactly how the divergence below survived: on this
+    repository the report said ``average 1.41`` and the HTML card said ``2.9``,
+    and both looked plausible next to a table nobody totalled by hand.
+    """
+
+    return build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics={
+            "coupling": {
+                "summary": {"average": 1.41, "max": 12, "high_risk": 1},
+                "classes": [
+                    {
+                        "qualname": "pkg.a:A",
+                        "relative_path": "pkg/a.py",
+                        "cbo": 12,
+                        "risk": "high",
+                    },
+                    {
+                        "qualname": "pkg.b:B",
+                        "relative_path": "pkg/b.py",
+                        "cbo": 0,
+                        "risk": "low",
+                    },
+                    {
+                        "qualname": "pkg.c:C",
+                        "relative_path": "pkg/c.py",
+                        "cbo": 0,
+                        "risk": "low",
+                    },
+                ],
+            }
+        },
+    )
+
+
+def test_html_average_card_reports_the_document_figure_not_a_recount() -> None:
+    """The HTML must not answer a metric question differently from the report.
+
+    ``Avg CBO`` was computed in the renderer over rows with a positive value,
+    so it divided by the classes that happen to be coupled instead of by the
+    measured population. Text, Markdown, SARIF and the CLI all print
+    ``metrics.summary.coupling.average``; the HTML printed its own number under
+    the same name.
+    """
+
+    document = _contradictory_coupling_document()
+    coupling_summary = document["metrics"]["families"]["coupling"]["summary"]
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_document=document,
+    )
+
+    assert coupling_summary["average"] == 1.41
+    assert _stat_card_value(html, "Avg CBO") == "1.4"
+
+
+def test_html_population_badge_reports_the_measured_total() -> None:
+    """The population badge counts the measured classes, not the coupled ones.
+
+    Same defect, second face: the badge beside the average showed the length of
+    the filtered row list, so a document measuring three classes advertised
+    one.
+    """
+
+    document = _contradictory_coupling_document()
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_document=document,
+    )
+
+    assert document["metrics"]["families"]["coupling"]["summary"]["total"] == 3
+    assert _stat_card_badge(html, "Avg CBO", "classes") == "3"
+
+
+def test_html_authority_counts_come_from_the_summary_not_from_the_rows() -> None:
+    """Authority figures are read, not recounted, on a contradictory document.
+
+    Five counts on this panel were re-derived by filtering ``items``. The sink
+    count was the worst of them: ``sum(1 for ...) or summary["sinks"]`` reads
+    as a fallback but is a silent substitution, and it is the shape that would
+    quietly survive a projection that stops emitting sink rows.
+
+    The document below says one thing in its summary and another in its rows.
+    A renderer that reports the summary is unmoved by the rows; a renderer that
+    recounts answers with the row figures, so each recount dies here.
+
+    Every kind carries a non-zero row count that differs from its summary
+    figure, and that is load-bearing rather than decoration. An earlier version
+    of this fixture left ``items`` empty, which made ``sum(...) or
+    summary["sinks"]`` fall through to the summary and return the right number
+    for the wrong reason -- the mutation restoring that expression survived.
+    The pin was reproducing the coincidence that hid the defect instead of
+    excluding it.
+    """
+
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics={
+            "semantic_authority": {
+                "summary": {
+                    "enabled": True,
+                    "enforcement_enabled": True,
+                    "registry_contracts": 9,
+                    "sinks": 77,
+                    "candidates": 55,
+                    "governed_sinks": 33,
+                    "active_violations": 11,
+                    "suppressed_violations": 22,
+                },
+                "items": [
+                    {"item_kind": "sink", "sink_identity": "pkg.a:one"},
+                    {"item_kind": "sink", "sink_identity": "pkg.a:two"},
+                    {
+                        "item_kind": "governed_sink",
+                        "contract_id": "c1",
+                        "sink_identity": "pkg.a:one",
+                        "authority_status": "resolved",
+                    },
+                    {
+                        "item_kind": "violation",
+                        "contract_id": "c1",
+                        "kind": "duplicate_authority",
+                        "sink_identity": "pkg.a:one",
+                        "suppressed": False,
+                    },
+                    {
+                        "item_kind": "violation",
+                        "contract_id": "c1",
+                        "kind": "duplicate_authority",
+                        "sink_identity": "pkg.a:two",
+                        "suppressed": True,
+                    },
+                    {
+                        "item_kind": "candidate",
+                        "candidate_id": "cand-1",
+                        "level": "exact_contract_ir",
+                        "score": 90,
+                        "producers": ["pkg.a:one"],
+                    },
+                    {
+                        "item_kind": "candidate",
+                        "candidate_id": "cand-2",
+                        "level": "exact_contract_ir",
+                        "score": 80,
+                        "producers": ["pkg.a:two"],
+                    },
+                    {
+                        "item_kind": "candidate",
+                        "candidate_id": "cand-3",
+                        "level": "exact_contract_ir",
+                        "score": 70,
+                        "producers": ["pkg.a:three"],
+                    },
+                ],
+            }
+        },
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_document=document,
+    )
+
+    assert _stat_card_value(html, "Violations") == "11"
+    assert _stat_card_badge(html, "Violations", "suppressed") == "22"
+    assert _stat_card_badge(html, "Governed contracts", "owners") == "33"
+    assert _stat_card_value(html, "Discovery") == "55"
+    assert _stat_card_badge(html, "Discovery", "sinks examined") == "77"

@@ -303,9 +303,21 @@ def render_authority_panel(ctx: ReportContext) -> str:
     # discovery population, one entry per semantic sink in the tree, and it is
     # evidence for the candidates rather than a list anybody acts on. Its size
     # is stated below so the kind is accounted for instead of dropped.
-    sink_total = sum(
-        1 for item in items if str(item.get("item_kind", "")) == "sink"
-    ) or _as_int(summary.get("sinks"))
+    #
+    # Every count on this panel is read from the summary the document carries,
+    # never recounted from the rows. The rows above are filtered because the
+    # panel renders them; the numbers are a separate question and the document
+    # already answers it. The sink count in particular used to be
+    # ``sum(1 for ... ) or summary["sinks"]``, which is worse than a plain
+    # recount: the ``or`` silently substituted one answer for the other, so a
+    # document whose rows and summary disagreed rendered whichever the rows
+    # happened to say, and a projection that stopped emitting sink rows would
+    # have swapped the source with nothing to show for it.
+    sink_total = _as_int(summary.get("sinks"))
+    governed_total = _as_int(summary.get("governed_sinks"))
+    active_total = _as_int(summary.get("active_violations"))
+    suppressed_total = _as_int(summary.get("suppressed_violations"))
+    candidate_total = _as_int(summary.get("candidates"))
 
     governed_rows = [
         (
@@ -364,12 +376,12 @@ def render_authority_panel(ctx: ReportContext) -> str:
     )
     answer, tone = _authority_answer(
         enabled=enabled,
-        active=len(active),
-        suppressed=len(suppressed),
+        active=active_total,
+        suppressed=suppressed_total,
         registry_contracts=_as_int(summary.get("registry_contracts")),
-        governed_total=len(governed),
+        governed_total=governed_total,
         unresolved_total=unresolved_governed,
-        candidate_total=len(candidates),
+        candidate_total=candidate_total,
     )
     governed_panel = render_rows_table(
         headers=("Contract", "Sink", "Status", "Resolution", "Why"),
@@ -400,7 +412,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
     # already carries it.
     shown = len(candidate_rows)
     candidate_panel = (
-        _candidate_meta_html(shown, len(candidates))
+        _candidate_meta_html(shown, candidate_total)
         + _level_strip_html(candidates)
         + render_rows_table(
             headers=("Owner", "Level", "Score", "Producers", "Propose"),
@@ -419,21 +431,21 @@ def render_authority_panel(ctx: ReportContext) -> str:
     cards = [
         _stat_card(
             "Violations",
-            len(active),
-            detail=_micro_badges(("suppressed", len(suppressed))),
-            value_tone="bad" if active else "good",
+            active_total,
+            detail=_micro_badges(("suppressed", suppressed_total)),
+            value_tone="bad" if active_total else "good",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Governed contracts",
             _as_int(summary.get("registry_contracts")),
-            detail=_micro_badges(("owners", len(governed))),
+            detail=_micro_badges(("owners", governed_total)),
             value_tone="muted" if not enabled else "",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Discovery",
-            len(candidates),
+            candidate_total,
             detail=_micro_badges(("sinks examined", sink_total or "n/a")),
             value_tone="muted",
             glossary_tip_fn=glossary_tip,
@@ -441,7 +453,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Unresolved owners",
             unresolved_governed,
-            secondary=f"of {len(governed)}" if governed else "",
+            secondary=f"of {governed_total}" if governed_total else "",
             value_tone="warn" if unresolved_governed else "good",
             glossary_tip_fn=glossary_tip,
         ),
@@ -456,10 +468,10 @@ def render_authority_panel(ctx: ReportContext) -> str:
         + render_split_tabs(
             group_id="semantic-authority",
             tabs=(
-                ("violations", "Violations", len(active), active_panel),
-                ("governed", "Contracts", len(governed), governed_panel),
-                ("candidates", "Discovery", len(candidates), candidate_panel),
-                ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
+                ("violations", "Violations", active_total, active_panel),
+                ("governed", "Contracts", governed_total, governed_panel),
+                ("candidates", "Discovery", candidate_total, candidate_panel),
+                ("suppressed", "Suppressed", suppressed_total, suppressed_panel),
             ),
         )
     )
