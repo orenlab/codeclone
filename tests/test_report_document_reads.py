@@ -68,13 +68,45 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 #: than carried. Add an entry only for a read another live branch already owns,
 #: and delete it the moment that branch lands.
 #:
-#: Emptied again once ``extract_public_surfaces`` stopped reading
+#: Emptied once ``extract_public_surfaces`` stopped reading
 #: ``metrics.api_surface``: that entry was added by the commit that taught this
 #: scan to follow a section bound through tuple unpacking, and deleted by the
 #: commit that fixed the read it exposed. Both sides of the ratchet did their
 #: job -- the growth side while the defect was live, the stale side the moment
 #: it was not.
-_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {}
+#:
+#: The entries below were exposed by the second alias fix in the same series:
+#: teaching the scan to bind the names unpacked from one ``sections()`` call
+#: made a whole renderer's and a whole audit event's key access visible for the
+#: first time. They are read from a document that does not carry them, they are
+#: not caused by that fix, and each is owned by its own following commit in
+#: this branch. The register is a work queue with a deadline, not a permit: the
+#: stale side reds the moment a read is repaired and the entry is not removed.
+_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {
+    # The completed-analysis audit event reports counts and a health grade from
+    # paths the canonical document has never had: the counts live under
+    # ``findings.summary``/``inventory.files``/``inventory.code`` and the health
+    # figures under ``metrics.summary.health``.
+    "codeclone/audit/analysis_completed.py": (
+        "findings.summary.new",
+        "findings.total",
+        "inventory.functions",
+        "inventory.lines",
+        "meta.health_grade",
+        "meta.health_score",
+        "meta.runtime.analysis_mode",
+    ),
+    # The Markdown integrity block prints a canonicalization ``scope`` and
+    # ``sections`` list, and an envelope ``verified`` flag. The document
+    # declares ``version``, ``serializer`` and ``envelope_null_sentinel``, and
+    # the envelope tier carries ``kind``/``algorithm``/``digest_version``/
+    # ``value``.
+    "codeclone/report/renderers/markdown.py": (
+        "integrity.canonicalization.scope",
+        "integrity.canonicalization.sections",
+        "integrity.digests.envelope.verified",
+    ),
+}
 
 
 def _callee_name(node: ast.expr) -> str:
@@ -228,6 +260,23 @@ def _section_handouts(tree: ast.AST) -> dict[str, dict[int | None, str]]:
     return handouts
 
 
+def _accessor_paths(node: ast.Call) -> dict[int | None, str]:
+    """Which section each result of one ``sections(doc, *paths)`` call carries.
+
+    The accessor returns one section per path, in argument order, so the
+    positions are the contract and nothing else needs resolving. Keyed the same
+    way as the handout table above so both tuple sources bind identically.
+    """
+
+    if _callee_name(node.func) not in _ACCESSORS or len(node.args) < 2:
+        return {}
+    return {
+        index: argument.value
+        for index, argument in enumerate(node.args[1:])
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str)
+    }
+
+
 def _rebind(
     aliases: dict[str, str],
     target: ast.expr,
@@ -266,7 +315,7 @@ def _bind_assignment(
     if isinstance(target, ast.Tuple):
         source = _strip_coercions(value)
         by_index = (
-            handouts.get(_callee_name(source.func), {})
+            _accessor_paths(source) or handouts.get(_callee_name(source.func), {})
             if isinstance(source, ast.Call)
             else {}
         )
@@ -438,6 +487,37 @@ def test_report_document_read_scanner_follows_a_helper_return_through_unpacking(
         "findings.groups",
         "metrics",
         "metrics.ghost",
+    ]
+
+
+def test_report_document_read_scanner_binds_a_sections_tuple_by_position() -> None:
+    """``sections()`` hands back one section per path, in argument order.
+
+    Both report renderers open with a dozen-name unpacking of a single
+    ``sections(payload, ...)`` call and then read sub-keys off those names. The
+    scan saw the paths passed to the accessor and none of the reads performed
+    through the names it bound, so a whole renderer's key access was invisible
+    -- which is how two absent reads survived in the integrity block of the
+    Markdown and text reports.
+
+    Position is the entire contract: the second name carries the second path. A
+    binding off by one would resolve every read against the wrong section and
+    report absent keys that are in fact present.
+    """
+
+    source = (
+        "def render(payload):\n"
+        "    meta, canonicalization = sections(\n"
+        "        payload, 'meta', 'integrity.canonicalization'\n"
+        "    )\n"
+        "    return meta.get('project_name'), canonicalization.get('ghost')\n"
+    )
+
+    assert sorted(path for _line, path in report_document_reads(source)) == [
+        "integrity.canonicalization",
+        "integrity.canonicalization.ghost",
+        "meta",
+        "meta.project_name",
     ]
 
 
