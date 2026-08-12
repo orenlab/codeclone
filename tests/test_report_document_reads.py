@@ -62,12 +62,25 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 #: absent read fails as growth, and a fixed one fails as a stale entry, so the
 #: register can only shrink and cannot rot.
 #:
-#: Empty since ``fix/a2-memory-ingest-paths`` landed: its entry for
+#: Emptied once ``fix/a2-memory-ingest-paths`` landed: its entry for
 #: ``codeclone/memory/project.py`` went stale the moment that fix merged, the
 #: stale side of the ratchet said so by name, and the entry was deleted rather
 #: than carried. Add an entry only for a read another live branch already owns,
 #: and delete it the moment that branch lands.
-_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {}
+#:
+#: The ``extract_public_surfaces`` entry is the first read this scan could see
+#: only after the alias hole below was closed: the canonical ``metrics`` node
+#: carries exactly ``families`` and ``summary``, so ``metrics.api_surface``
+#: names a family where a section is expected and that lane has never
+#: extracted a record. Owned by the next commit on this branch, which deletes
+#: both the read and this entry; the stale side of the ratchet enforces the
+#: deletion.
+_ABSENT_READS_OWNED_ELSEWHERE: dict[str, tuple[str, ...]] = {
+    "codeclone/memory/ingest/extractors.py": (
+        "metrics.api_surface",
+        "metrics.api_surface.items",
+    ),
+}
 
 
 def _callee_name(node: ast.expr) -> str:
@@ -97,7 +110,11 @@ def _names_the_document(node: ast.expr) -> bool:
     return False
 
 
-def _section_path(node: ast.Call, aliases: Mapping[str, str]) -> str | None:
+def _section_path(
+    node: ast.Call,
+    aliases: Mapping[str, str],
+    handouts: Mapping[str, Mapping[int | None, str]],
+) -> str | None:
     """Reconstruct the path a single ``section(x, "a.b")`` call addresses."""
 
     if (
@@ -111,26 +128,37 @@ def _section_path(node: ast.Call, aliases: Mapping[str, str]) -> str | None:
     source = _strip_coercions(node.args[0])
     if _names_the_document(source):
         return path
-    parent = _read_path(source, aliases)
+    parent = _read_path(source, aliases, handouts)
     return None if parent is None else f"{parent}.{path}"
 
 
-def _read_path(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
+def _read_path(
+    node: ast.expr,
+    aliases: Mapping[str, str],
+    handouts: Mapping[str, Mapping[int | None, str]],
+) -> str | None:
     """Reconstruct the dotted key path one read addresses, or None.
 
-    Covers all three shapes a consumer writes: a ``.get()`` chain rooted at the
-    document, a ``section()`` call, and either of those reached through a local
-    that an earlier statement bound. The alias step is what makes the scan see
+    Covers every shape a consumer writes: a ``.get()`` chain rooted at the
+    document, a ``section()`` call, either of those reached through a local
+    that an earlier statement bound, and either of those reached through a
+    module-local helper that hands a section back to its caller. The alias step
+    is what makes the scan see
     ``integrity = as_mapping(document.get("integrity"))`` followed by
     ``integrity.get("digest")`` -- the exact shape the withdrawn alias survived
-    in, and the shape a ``section()`` result is usually consumed in too.
+    in, and the shape a ``section()`` result is usually consumed in too. The
+    handout step covers the same read spelled across a function boundary.
     """
 
     node = _strip_coercions(node)
     if isinstance(node, ast.Name):
         return aliases.get(node.id)
     if isinstance(node, ast.Call) and _callee_name(node.func) == "section":
-        return _section_path(node, aliases)
+        return _section_path(node, aliases, handouts)
+    if isinstance(node, ast.Call):
+        handed_out = handouts.get(_callee_name(node.func))
+        if handed_out is not None and None in handed_out:
+            return handed_out[None]
     if not (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -144,7 +172,7 @@ def _read_path(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
     receiver = _strip_coercions(node.func.value)
     if _names_the_document(receiver):
         return key
-    parent = _read_path(receiver, aliases)
+    parent = _read_path(receiver, aliases, handouts)
     return None if parent is None else f"{parent}.{key}"
 
 
@@ -158,10 +186,107 @@ def _scope_nodes(node: ast.AST) -> Iterator[ast.AST]:
         yield from _scope_nodes(child)
 
 
+def _section_handouts(tree: ast.AST) -> dict[str, dict[int | None, str]]:
+    """Which section each module-local function hands back to its callers.
+
+    Keyed by function name, then by tuple index -- or by ``None`` when the
+    function returns the section itself rather than a tuple carrying it. A
+    consumer that reaches a section through such a helper is reading that
+    section, and resolving the read at the call site is what makes the spelling
+    irrelevant to the class pin.
+
+    Deliberately one level deep and module-local: it resolves the shape this
+    tree actually uses, and a helper built on another helper stays unresolved
+    rather than guessed. Under-reporting is the safe direction here -- the pin
+    fails on reads it can see, so a missed chain costs coverage, while an
+    invented chain would cost trust.
+    """
+
+    handouts: dict[str, dict[int | None, str]] = {}
+    for scope in (node for node in ast.walk(tree) if isinstance(node, _SCOPES)):
+        aliases: dict[str, str] = {}
+        handed_out: dict[int | None, str] = {}
+        for node in _scope_nodes(scope):
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+            ):
+                path = _read_path(node.value, aliases, {})
+                if path is None:
+                    aliases.pop(node.targets[0].id, None)
+                else:
+                    aliases[node.targets[0].id] = path
+            if not isinstance(node, ast.Return) or node.value is None:
+                continue
+            returned = _strip_coercions(node.value)
+            elements: tuple[tuple[int | None, ast.expr], ...] = (
+                tuple(enumerate(returned.elts))
+                if isinstance(returned, ast.Tuple)
+                else ((None, returned),)
+            )
+            for index, element in elements:
+                path = _read_path(element, aliases, {})
+                if path is not None:
+                    handed_out[index] = path
+        if handed_out:
+            handouts[scope.name] = handed_out
+    return handouts
+
+
+def _rebind(
+    aliases: dict[str, str],
+    target: ast.expr,
+    path: str | None,
+) -> None:
+    """Bind one name to a path, or drop whatever it was bound to before.
+
+    Dropping is the half that was missing: a name rebound by a statement the
+    scan cannot resolve kept its previous binding, so the scan reported a read
+    at a line that performs a different one.
+    """
+
+    if not isinstance(target, ast.Name):
+        return
+    if path is None:
+        aliases.pop(target.id, None)
+    else:
+        aliases[target.id] = path
+
+
+def _bind_assignment(
+    aliases: dict[str, str],
+    *,
+    target: ast.expr,
+    value: ast.expr,
+    handouts: Mapping[str, Mapping[int | None, str]],
+) -> None:
+    """Update the alias table for one assignment, whatever its target shape.
+
+    A tuple target takes its paths from the callee's handout table by index;
+    every other target resolves the right-hand side directly. Both shapes go
+    through :func:`_rebind`, so an unresolvable right-hand side drops the
+    binding either way instead of leaving a stale one behind.
+    """
+
+    if isinstance(target, ast.Tuple):
+        source = _strip_coercions(value)
+        by_index = (
+            handouts.get(_callee_name(source.func), {})
+            if isinstance(source, ast.Call)
+            else {}
+        )
+        for index, element in enumerate(target.elts):
+            _rebind(aliases, element, by_index.get(index))
+        return
+    _rebind(aliases, target, _read_path(value, aliases, handouts))
+
+
 def report_document_reads(source: str) -> list[tuple[int, str]]:
     """Every report-document key path one module reads, with its line."""
 
     tree = ast.parse(source)
+    handouts = _section_handouts(tree)
     scopes: list[ast.AST] = [tree]
     scopes.extend(node for node in ast.walk(tree) if isinstance(node, _SCOPES))
     reads: list[tuple[int, str]] = []
@@ -180,20 +305,16 @@ def report_document_reads(source: str) -> list[tuple[int, str]]:
                         and isinstance(argument.value, str)
                     )
                     continue
-                path = _read_path(node, aliases)
+                path = _read_path(node, aliases, handouts)
                 if path is not None:
                     reads.append((node.lineno, path))
-            if (
-                isinstance(node, ast.Assign)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-            ):
-                target = node.targets[0].id
-                path = _read_path(node.value, aliases)
-                if path is None:
-                    aliases.pop(target, None)
-                else:
-                    aliases[target] = path
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                _bind_assignment(
+                    aliases,
+                    target=node.targets[0],
+                    value=node.value,
+                    handouts=handouts,
+                )
     return reads
 
 
@@ -279,6 +400,71 @@ def test_report_document_read_scanner_reconstructs_every_chain_shape() -> None:
         "integrity.ghost",
         "integrity.ghost",
     ]
+
+
+def test_report_document_read_scanner_follows_a_helper_return_through_unpacking() -> (
+    None
+):
+    """A helper that hands the document out is still a read at its callers.
+
+    The withdrawn-key class does not care which statement spells the read.
+    ``codeclone/memory/ingest/extractors.py`` binds the ``metrics`` section
+    through ``batch, now, metrics = _new_metrics_batch(report_document)`` and
+    then asks it for a family by name; that is the same defect as a direct
+    ``document.get("metrics").get(...)`` chain, and the scan saw none of it
+    because an alias was recorded only for a single ``ast.Name`` target.
+
+    Both halves are required. Seeing the tuple target without following the
+    helper's return binds nothing, and following the return without unpacking
+    the tuple binds the wrong name.
+
+    The two helpers are counted differently, and the difference is the point.
+    ``_single`` returns the section, so its call site *is* a read of that
+    section and ``findings`` is counted twice -- once inside the helper, once
+    at the caller. ``_split`` returns a tuple that carries the section, so its
+    call site reads a tuple and not a section; ``metrics`` is counted once,
+    inside the helper, and the caller's read is the ``metrics.ghost`` the
+    unpacked name goes on to perform.
+    """
+
+    source = (
+        "def _split(report_document):\n"
+        "    return (Batch(), stamp(), as_mapping(report_document.get('metrics')))\n"
+        "def _single(document):\n"
+        "    return as_mapping(document.get('findings'))\n"
+        "def caller(report_document):\n"
+        "    batch, now, metrics = _split(report_document)\n"
+        "    findings = _single(report_document)\n"
+        "    return metrics.get('ghost'), findings.get('groups')\n"
+    )
+
+    assert sorted(path for _line, path in report_document_reads(source)) == [
+        "findings",
+        "findings",
+        "findings.groups",
+        "metrics",
+        "metrics.ghost",
+    ]
+
+
+def test_report_document_read_scanner_drops_an_alias_rebound_by_unpacking() -> None:
+    """A name that stops naming a section must stop resolving to it.
+
+    Unpacking was not merely unseen, it was ignored: a name already bound to a
+    section kept that binding after a tuple assignment rebound it to something
+    else, so the scan could report a path the code never reads. A scanner that
+    invents reads is worse than one that misses them -- it sends the reader to
+    a line that is not the defect.
+    """
+
+    source = (
+        "def caller(document):\n"
+        "    metrics = as_mapping(document.get('metrics'))\n"
+        "    metrics, other = unrelated()\n"
+        "    return metrics.get('ghost')\n"
+    )
+
+    assert sorted(path for _line, path in report_document_reads(source)) == ["metrics"]
 
 
 def _run_record(document: Mapping[str, object]) -> MCPRunRecord:
