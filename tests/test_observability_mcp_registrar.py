@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import inspect
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,11 +21,12 @@ from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
 )
+from codeclone.observability.vocabulary import _MCP_TOOL_NAMES, validate_span_name
 from codeclone.surfaces.mcp._context_governance import (
     CONTEXT_GOVERNANCE_CONTRACT_VERSION,
     CONTEXT_GOVERNANCE_ESTIMATOR,
 )
-from codeclone.surfaces.mcp.server import _instrument_tool
+from codeclone.surfaces.mcp.server import _instrument_tool, build_mcp_server
 
 
 @pytest.fixture(autouse=True)
@@ -147,3 +150,61 @@ def test_registrar_inert_when_disabled(tmp_path: Path) -> None:
     result = wrapped(root=str(tmp_path), limit=2)
     assert result == {"root": str(tmp_path), "limit": 2, "items": [0, 1]}
     assert not observability_store_path(tmp_path).exists()
+
+
+@functools.cache
+def _registered_mcp_tools() -> frozenset[str]:
+    """Every tool name a caller can reach, read out of the servers themselves.
+
+    Both governance channels, because ``get_workspace_session_stats`` and
+    ``get_controller_audit_trail`` are registered only when
+    ``ide_governance_channel`` is on: absent from the default registry without
+    being withdrawn. Checking against the default registry alone would read
+    them as dead names and invite their removal.
+    """
+    pytest.importorskip("mcp.server.fastmcp")
+    names: set[str] = set()
+    try:
+        for governance_channel in (False, True):
+            server = build_mcp_server(
+                history_limit=4,
+                ide_governance_channel=governance_channel,
+            )
+            names |= {tool.name for tool in asyncio.run(server.list_tools())}
+    finally:
+        # build_mcp_server bootstraps the process-wide observer; hand the
+        # runtime back in the state the other tests here expect.
+        shutdown()
+    return frozenset(names)
+
+
+def test_every_registered_tool_has_a_span_name() -> None:
+    """A registered tool with no span name does not run at all.
+
+    ``_instrument_tool`` opens ``span(name=f"mcp.{tool_name}")`` around every
+    handler and ``validate_span_name`` is unconditional, so a name missing from
+    the vocabulary is not lost telemetry — the tool raises before it does any
+    work and the caller is told to "update the reviewed vocabulary".
+    ``check_authority`` shipped that way: registered, called, and refused for
+    as long as observability was on, while a suite of 6175 tests stayed green.
+    This hands the live registry to the same validator the wrapper calls, so
+    the failure here is the failure a user gets.
+    """
+    registered = _registered_mcp_tools()
+    assert registered, "no tool was registered, so no name reached the validator"
+    for tool_name in sorted(registered):
+        validate_span_name(f"mcp.{tool_name}")
+
+
+def test_no_mcp_span_name_outlives_the_tool_it_names() -> None:
+    """The opposite direction, and the opposite consequence.
+
+    A name for a tool nobody can call breaks nothing at the call edge: it just
+    never appears in a trace, and the vocabulary quietly documents a server
+    that no longer exists — until someone reads it as the inventory it looks
+    like. Neither side keeps a second list of tool names: this compares the
+    declared set to the registry a caller actually reaches.
+    """
+    registered = _registered_mcp_tools()
+    assert registered, "no tool was registered, so nothing was compared"
+    assert sorted(set(_MCP_TOOL_NAMES) - registered) == []
