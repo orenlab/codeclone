@@ -2398,8 +2398,8 @@ def test_meta_column_lift_stays_lossless_and_bounds_values() -> None:
     )
     assert (kept_headers, kept_rows, parts) == (headers, rows, [])
 
-    band = tables_mod._meta_band_html([("origin", ["a", "b", "c", "d", "e", "f"])])
-    assert "+2 more" in band
+    lead = tables_mod._meta_lead_html([("origin", ["a", "b", "c", "d", "e", "f"])])
+    assert "+2 more" in lead
 
 
 def test_pygments_highlight_refuses_unknown_languages(

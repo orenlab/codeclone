@@ -173,6 +173,86 @@ _META_COLUMN_MAX_VALUES = 4
 _COUNT_HEADER = "Groups"
 
 
+#: How the canonical document ordered the rows a panel drew, in the words the
+#: meta band prints. A panel states one of these only when the document really
+#: sorted that family that way -- a cut described as "worst first" over rows
+#: ordered by file path would be a claim the report cannot back.
+ORDER_WORST_FIRST = "worst first"
+ORDER_BY_LOCATION = "in file order"
+
+
+def graded_coverage(
+    label: str,
+    all_items: Sequence[Mapping[str, object]],
+    shown_items: Sequence[Mapping[str, object]],
+    *,
+    field: str,
+    value: str,
+) -> tuple[str, int, int] | None:
+    """How many of the graded rows survived the cut, counted from one grade.
+
+    Both counts read the same published field on the same rows, so the band
+    can never disagree with the table it sits on: it is the document's own
+    per-row grade, counted over the rows the panel held and over the rows it
+    drew. The summary's own count of the same population is deliberately not
+    used -- reading one number here and a different one from the cards would
+    be two counters for one fact, which is the defect this report keeps
+    paying for.
+
+    Returns ``None`` when nothing carries the grade: a panel with no high-risk
+    row has no coverage question to answer.
+    """
+
+    def _graded(item: Mapping[str, object]) -> bool:
+        return str(item.get(field, "")).strip().lower() == value
+
+    population = sum(1 for item in all_items if _graded(item))
+    if not population:
+        return None
+    return (label, sum(1 for item in shown_items if _graded(item)), population)
+
+
+def row_cut_note_html(
+    *,
+    total: int,
+    shown: int,
+    ordering: str,
+    covered: tuple[str, int, int] | None = None,
+) -> str:
+    """State a table's cut on its meta band, or say nothing when none happened.
+
+    A table that renders fifty of nine hundred rows in silence leaves "there
+    are fifty" and "you are looking at fifty of them" as the same page. This
+    is the one sentence that tells them apart, and every cut table in the
+    report builds it here rather than wording its own.
+
+    ``ordering`` names the order the *document* put the rows in, so the reader
+    knows whether the rows that fell off are the least interesting ones or
+    merely the ones whose paths sort late. ``covered`` answers the sharper
+    question a card above a cut table raises -- "it says thirty-eight
+    high-risk; are all thirty-eight here?" -- as ``(label, in_table, in_all)``,
+    which :func:`graded_coverage` counts.
+
+    Silent when the table drew everything it had: a band on every table would
+    be noise, and the panels that *do* cut are the ones a reader needs warned
+    about. Nothing here compares against a number of the renderer's own -- both
+    comparisons are between two measured counts.
+    """
+
+    if total <= shown:
+        return ""
+    parts = [f"Showing {shown} of {total} rows", ordering]
+    if covered is not None:
+        label, in_table, in_all = covered
+        parts.append(
+            f"all {in_all} {label} rows"
+            if in_table >= in_all
+            else f"{in_table} of {in_all} {label} rows"
+        )
+    joined = " · ".join(part for part in parts if part)
+    return f'<span class="table-meta-count">{_escape_html(joined)}</span>'
+
+
 def _column_values(rows: Sequence[Sequence[str]], index: int) -> list[str]:
     return [row[index] if index < len(row) else "" for row in rows]
 
@@ -246,7 +326,7 @@ def _lift_meta_columns(
     )
 
 
-def _meta_band_html(parts: Sequence[tuple[str, Sequence[str]]]) -> str:
+def _meta_lead_html(parts: Sequence[tuple[str, Sequence[str]]]) -> str:
     """State the lifted columns once, above the rows they used to repeat in."""
     chunks = []
     for label, values in parts:
@@ -258,10 +338,20 @@ def _meta_band_html(parts: Sequence[tuple[str, Sequence[str]]]) -> str:
             f'{_escape_html(label)}: <span class="table-meta-value">'
             f"{_escape_html(text)}</span>"
         )
-    return (
-        '<div class="table-meta"><span class="table-meta-lead">'
-        f"{' &middot; '.join(chunks)}</span></div>"
-    )
+    return f'<span class="table-meta-lead">{" &middot; ".join(chunks)}</span>'
+
+
+def table_meta_band_html(lead_html: str, count_html: str) -> str:
+    """One band per table: what introduces the rows left, what qualifies them right.
+
+    Both halves are optional and a table with neither renders none, but they
+    share a band when both exist -- two stacked strips of the same width above
+    one table read as two tables that lost their headers.
+    """
+
+    if not lead_html and not count_html:
+        return ""
+    return f'<div class="table-meta">{lead_html}{count_html}</div>'
 
 
 def _count_identical_rows(
@@ -314,7 +404,7 @@ def _condense_rows(
         working_headers, working_rows = _count_identical_rows(
             working_headers, working_rows
         )
-    return working_headers, working_rows, _meta_band_html(lifted) if lifted else ""
+    return working_headers, working_rows, _meta_lead_html(lifted) if lifted else ""
 
 
 def render_rows_table(
@@ -328,6 +418,7 @@ def render_rows_table(
     row_details: Sequence[str] | None = None,
     meta_columns: Collection[str] = (),
     count_identical_rows: bool = False,
+    row_cut_note: str = "",
     ctx: ReportContext | None = None,
 ) -> str:
     """Render a data table with badges, tooltips, and col sizing.
@@ -342,11 +433,17 @@ def render_rows_table(
     near-constant and lifting keeps every row distinguishable.
     *count_identical_rows* collapses rows that are identical across every
     rendered column into one row carrying the count.
+
+    *row_cut_note* is the caller's :func:`row_cut_note_html` statement of how
+    many rows it handed over out of how many it held. The panel builds it
+    because only the panel knows the population: the rows arriving here are
+    already cut, and this renderer condenses them further, so neither end of
+    the count is recoverable from ``rows``.
     """
     if not rows:
         return _tab_empty(empty_message, description=empty_description)
 
-    headers, rows, meta_html = _condense_rows(
+    headers, rows, lead_html = _condense_rows(
         headers,
         rows,
         meta_columns=meta_columns,
@@ -441,7 +538,7 @@ def render_rows_table(
     body_html = "".join(_row(index, row) for index, row in enumerate(rows))
 
     return (
-        f"{meta_html}"
+        f"{table_meta_band_html(lead_html, row_cut_note)}"
         '<div class="table-wrap"><table class="table">'
         f"{''.join(cg)}"
         f"<thead><tr>{''.join(th_parts)}</tr></thead>"

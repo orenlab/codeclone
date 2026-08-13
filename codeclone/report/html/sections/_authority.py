@@ -21,7 +21,11 @@ from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
 from ..widgets.highlight import highlight_block
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import (
+    render_rows_table,
+    row_cut_note_html,
+    table_meta_band_html,
+)
 from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
@@ -75,25 +79,32 @@ _STRONG_CANDIDATE_LEVELS: Final = (
 _CANDIDATE_LEAD = "Discovered owners, ranked by evidence strength."
 _CANDIDATE_DOCTRINE = "Tools propose, humans own."
 
+#: How the document ordered the candidates, in the band's own words. The total
+#: this band counts against is every candidate the run proposed, including the
+#: levels below the row cut; the footnote under the table names those levels,
+#: so the two statements together account for the whole population.
+_CANDIDATE_ORDER = "strongest evidence first"
+
 
 def _candidate_meta_html(shown: int, total: int) -> str:
     """State the lead and the shown-of-total count on the table's own band.
 
     A count belongs beside the table it counts, not inside a sentence: the
     reader who wants to know how much is hidden looks to the table's edge.
+
+    This panel declared its cut before any other did; the count is now built
+    by the same renderer every other table uses, so there is one sentence for
+    "you are looking at part of this" in the whole report rather than one per
+    panel that happened to be honest.
     """
 
-    count = (
-        f'<span class="table-meta-count">Showing {shown} of {total}</span>'
-        if total > shown
-        else ""
-    )
-    return (
-        '<div class="table-meta">'
-        f'<span class="table-meta-lead">{_escape_html(_CANDIDATE_LEAD)} '
-        f"{_escape_html(_CANDIDATE_DOCTRINE)}</span>"
-        f"{count}"
-        "</div>"
+    return table_meta_band_html(
+        (
+            '<span class="table-meta-lead">'
+            f"{_escape_html(_CANDIDATE_LEAD)} {_escape_html(_CANDIDATE_DOCTRINE)}"
+            "</span>"
+        ),
+        row_cut_note_html(total=total, shown=shown, ordering=_CANDIDATE_ORDER),
     )
 
 

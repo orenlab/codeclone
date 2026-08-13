@@ -15,7 +15,12 @@ from codeclone.utils import coerce as _coerce
 from ..widgets.badges import _micro_badges, _render_chain_flow, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import (
+    ORDER_WORST_FIRST,
+    graded_coverage,
+    render_rows_table,
+    row_cut_note_html,
+)
 from ..widgets.tabs import render_split_tabs
 from ._coverage_join import (
     coverage_join_quality_count,
@@ -37,6 +42,21 @@ _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
+#: Rows drawn per quality sub-tab. The three families arrive at the scale of
+#: the whole tree -- twelve thousand functions on this repository -- so the
+#: table shows the head of the document's own ranking and states the rest.
+#:
+#: Every one of these three tables takes the *declaring* branch of the choice
+#: rather than the silent one: the document does rank them worst-first
+#: (``_operational_sort_key``: risk descending, then the metric that earned
+#: the rank), so the cut demonstrably keeps the worst rows -- but that alone
+#: cannot promise the card above the table is covered. The high-risk
+#: population is not bounded by fifty on any repository, so a panel that
+#: leaned on the ordering alone would be silently wrong exactly on the
+#: repositories where it matters. The band therefore says both: how much of
+#: the table is drawn, and how much of the graded population reached it.
+_QUALITY_TABLE_ROW_LIMIT = 50
+
 
 def _render_coupled_cell(row_data: Mapping[str, object]) -> str:
     raw = _as_sequence(row_data.get("coupled_classes"))
@@ -57,6 +77,26 @@ def _render_coupled_cell(row_data: Mapping[str, object]) -> str:
         "</summary>"
         f'<div class="coupled-expanded">{full}</div>'
         "</details>"
+    )
+
+
+def _quality_high_risk_coverage(
+    all_rows: Sequence[object],
+    shown_rows: Sequence[Mapping[str, object]],
+) -> tuple[str, int, int] | None:
+    """How many of the family's high-risk rows the fifty-row cut kept.
+
+    All three quality families publish ``risk`` on every row, so the answer is
+    the document's own verdict counted twice over the same list -- once over
+    what the panel held, once over what it drew.
+    """
+
+    return graded_coverage(
+        "high-risk",
+        [_as_mapping(row) for row in all_rows],
+        shown_rows,
+        field="risk",
+        value="high",
     )
 
 
@@ -258,15 +298,16 @@ def render_quality_panel(ctx: ReportContext) -> str:
 
     # Complexity sub-tab
     cx_rows_data = _as_sequence(ctx.complexity_map.get("functions"))
+    cx_shown = [_as_mapping(r) for r in cx_rows_data[:_QUALITY_TABLE_ROW_LIMIT]]
     cx_rows = [
         (
-            str(_as_mapping(r).get("qualname", "")),
-            str(_as_mapping(r).get("relative_path", "")),
-            str(_as_mapping(r).get("cyclomatic_complexity", "")),
-            str(_as_mapping(r).get("nesting_depth", "")),
-            str(_as_mapping(r).get("risk", "")),
+            str(r.get("qualname", "")),
+            str(r.get("relative_path", "")),
+            str(r.get("cyclomatic_complexity", "")),
+            str(r.get("nesting_depth", "")),
+            str(r.get("risk", "")),
         )
-        for r in cx_rows_data[:50]
+        for r in cx_shown
     ]
     cx_panel = _complexity_cards(complexity_summary, cx_rows_data) + render_rows_table(
         headers=("Function", "File", "CC", "Nesting", "Risk"),
@@ -277,20 +318,27 @@ def render_quality_panel(ctx: ReportContext) -> str:
             "empty for a clones-only analysis or a tree with no callables."
         ),
         column_types={"CC": "meter", "Nesting": "meter"},
+        row_cut_note=row_cut_note_html(
+            total=len(cx_rows_data),
+            shown=len(cx_shown),
+            ordering=ORDER_WORST_FIRST,
+            covered=_quality_high_risk_coverage(cx_rows_data, cx_shown),
+        ),
         ctx=ctx,
     )
 
     # Coupling sub-tab
     cp_rows_data = _as_sequence(ctx.coupling_map.get("classes"))
+    cp_shown = [_as_mapping(r) for r in cp_rows_data[:_QUALITY_TABLE_ROW_LIMIT]]
     cp_rows = [
         (
-            str(_as_mapping(r).get("qualname", "")),
-            str(_as_mapping(r).get("relative_path", "")),
-            str(_as_mapping(r).get("cbo", "")),
-            str(_as_mapping(r).get("risk", "")),
-            _render_coupled_cell(_as_mapping(r)),
+            str(r.get("qualname", "")),
+            str(r.get("relative_path", "")),
+            str(r.get("cbo", "")),
+            str(r.get("risk", "")),
+            _render_coupled_cell(r),
         )
-        for r in cp_rows_data[:50]
+        for r in cp_shown
     ]
     cp_panel = _coupling_cards(coupling_summary) + render_rows_table(
         headers=("Class", "File", "CBO", "Risk", "Coupled classes"),
@@ -302,21 +350,28 @@ def render_quality_panel(ctx: ReportContext) -> str:
         ),
         raw_html_headers=("Coupled classes",),
         column_types={"CBO": "meter"},
+        row_cut_note=row_cut_note_html(
+            total=len(cp_rows_data),
+            shown=len(cp_shown),
+            ordering=ORDER_WORST_FIRST,
+            covered=_quality_high_risk_coverage(cp_rows_data, cp_shown),
+        ),
         ctx=ctx,
     )
 
     # Cohesion sub-tab
     ch_rows_data = _as_sequence(ctx.cohesion_map.get("classes"))
+    ch_shown = [_as_mapping(r) for r in ch_rows_data[:_QUALITY_TABLE_ROW_LIMIT]]
     ch_rows = [
         (
-            str(_as_mapping(r).get("qualname", "")),
-            str(_as_mapping(r).get("relative_path", "")),
-            str(_as_mapping(r).get("lcom4", "")),
-            str(_as_mapping(r).get("risk", "")),
-            str(_as_mapping(r).get("method_count", "")),
-            str(_as_mapping(r).get("instance_var_count", "")),
+            str(r.get("qualname", "")),
+            str(r.get("relative_path", "")),
+            str(r.get("lcom4", "")),
+            str(r.get("risk", "")),
+            str(r.get("method_count", "")),
+            str(r.get("instance_var_count", "")),
         )
-        for r in ch_rows_data[:50]
+        for r in ch_shown
     ]
     ch_panel = _cohesion_cards(cohesion_summary) + render_rows_table(
         headers=("Class", "File", "LCOM4", "Risk", "Methods", "Fields"),
@@ -327,6 +382,16 @@ def render_quality_panel(ctx: ReportContext) -> str:
             "clones-only analysis or a tree with no classes."
         ),
         column_types={"LCOM4": "meter", "Methods": "meter", "Fields": "meter"},
+        # The tab badge counts low-cohesion classes, a population the document
+        # publishes only as a summary figure; the coverage half of the band
+        # therefore answers for ``risk``, which every row carries, rather than
+        # re-deriving the badge's own rule here from LCOM4.
+        row_cut_note=row_cut_note_html(
+            total=len(ch_rows_data),
+            shown=len(ch_shown),
+            ordering=ORDER_WORST_FIRST,
+            covered=_quality_high_risk_coverage(ch_rows_data, ch_shown),
+        ),
         ctx=ctx,
     )
 

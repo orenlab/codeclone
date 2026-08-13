@@ -28,7 +28,11 @@ from ..widgets.dep_graph_layout import (
     render_block_diagram,
 )
 from ..widgets.glossary import glossary_tip
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import (
+    graded_coverage,
+    render_rows_table,
+    row_cut_note_html,
+)
 from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
@@ -40,7 +44,16 @@ _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
 _CANDIDATE = "candidate"
+
+#: Overload rows drawn before the tail is summarised. The document ranks this
+#: family candidates-first and then by score descending, so the cut keeps the
+#: modules worth unwinding -- but the cards beside the table count candidates
+#: over the whole ranked population, and nothing bounds that by fifty, so the
+#: band declares both the row count and how many candidates reached the table.
 _OVERLOADED_TABLE_CAP = 50
+
+#: How the document ordered this family, in the band's own words.
+_OVERLOADED_ORDER = "candidates first, by score"
 _OVERLOADED_HEADING = "Overloaded Modules"
 _EMPTY_GRAPH_MESSAGE = "Dependency graph is not available."
 #: An empty panel must separate a clean result from a measurement that
@@ -52,12 +65,16 @@ _EMPTY_GRAPH_DESC = (
 _OVERLOADED_EMPTY_MESSAGE = "Overloaded-module profiling is not available."
 _METRICS_SKIPPED = "Metrics are skipped for this run."
 
-# Mandatory honesty copy (spec §11): report-only, sampled SVG, full tables.
+# Mandatory honesty copy (spec §11): report-only, sampled SVG, and what the
+# tables below really hold. "Overload table lists the full codebase" was false
+# from the day the fifty-row cap was added: the unwind table is complete, the
+# overload table is not, and saying both were complete is the same defect this
+# panel's own truncation notice exists to prevent.
 _MODULE_MAP_INSIGHT = (
     "Report-only import-graph signals for refactor triage. Not CI gates. The SVG "
-    "may show a deterministic sample of packages/modules on large repos; unwind "
-    "and overload tables list module-level facts for the full codebase. Verify in "
-    "source before editing."
+    "may show a deterministic sample of packages/modules on large repos; the "
+    "unwind table lists every candidate and the overload table states how many "
+    "of the ranked modules it draws. Verify in source before editing."
 )
 
 _MM_LEGEND = (
@@ -325,21 +342,18 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
         return ""
     summary = _as_mapping(overloaded.get("summary"))
     rows_data = _as_sequence(overloaded.get("items"))
+    shown_data = [_as_mapping(r) for r in rows_data[:_OVERLOADED_TABLE_CAP]]
     rows = [
         (
-            str(_as_mapping(r).get("module", "")),
-            str(
-                _as_mapping(r).get("relative_path")
-                or _as_mapping(r).get("filepath")
-                or ""
-            ),
-            str(_as_mapping(r).get("score", "")),
-            str(_as_mapping(r).get("candidate_status", "")),
-            str(_as_mapping(r).get("loc", "")),
-            f"{_as_mapping(r).get('fan_in', '')}/{_as_mapping(r).get('fan_out', '')}",
-            str(_as_mapping(r).get("complexity_total", "")),
+            str(r.get("module", "")),
+            str(r.get("relative_path") or r.get("filepath") or ""),
+            str(r.get("score", "")),
+            str(r.get("candidate_status", "")),
+            str(r.get("loc", "")),
+            f"{r.get('fan_in', '')}/{r.get('fan_out', '')}",
+            str(r.get("complexity_total", "")),
         )
-        for r in rows_data[:_OVERLOADED_TABLE_CAP]
+        for r in shown_data
     ]
     return (
         f'<h3 class="subsection-title">{_OVERLOADED_HEADING}</h3>'
@@ -366,6 +380,18 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
                 "LOC": "meter",
                 "Complexity total": "meter",
             },
+            row_cut_note=row_cut_note_html(
+                total=len(rows_data),
+                shown=len(shown_data),
+                ordering=_OVERLOADED_ORDER,
+                covered=graded_coverage(
+                    "candidate",
+                    [_as_mapping(row) for row in rows_data],
+                    shown_data,
+                    field="candidate_status",
+                    value=_CANDIDATE,
+                ),
+            ),
             ctx=ctx,
         )
     )

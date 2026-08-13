@@ -36,7 +36,7 @@ from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
 from ..widgets.icons import ICONS
 from ..widgets.snippets import _render_code_block
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import render_rows_table, row_cut_note_html
 from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
@@ -218,12 +218,25 @@ def _suppressed_group_label(
     return label, filepath
 
 
+#: Suppressed groups drawn before the tail is summarised. Nothing ranks this
+#: list: it is the three clone buckets concatenated, each in the document's own
+#: order, so the two hundred rows drawn are simply the first two hundred. There
+#: is no "the interesting ones are here" to claim, which leaves declaring the
+#: count as the only honest option -- and the tab badge counts every group, so
+#: the gap was invisible until the band said it.
+_SUPPRESSED_GROUP_ROW_LIMIT = 200
+
+#: What the order of this table actually is, in the band's own words.
+_SUPPRESSED_GROUP_ORDER = "functions, then blocks, then segments"
+
+
 def _render_suppressed_clone_panel(
     ctx: ReportContext,
     groups: Sequence[Mapping[str, object]],
 ) -> str:
+    shown_groups = groups[:_SUPPRESSED_GROUP_ROW_LIMIT]
     rows: list[tuple[str, str, str, str, str, str, str]] = []
-    for group in groups[:200]:
+    for group in shown_groups:
         label, filepath = _suppressed_group_label(group, ctx)
         matched_patterns = ", ".join(
             str(pattern).strip()
@@ -268,6 +281,15 @@ def _render_suppressed_clone_panel(
         },
         meta_columns=("Rule", "Pattern"),
         count_identical_rows=True,
+        # Counted in groups, which is what the tab badge counts and what the
+        # reader is asking about. The table then collapses groups that render
+        # identically into one row carrying "x N", so the drawn row count is
+        # legitimately smaller than the number stated here.
+        row_cut_note=row_cut_note_html(
+            total=len(groups),
+            shown=len(shown_groups),
+            ordering=_SUPPRESSED_GROUP_ORDER,
+        ),
         ctx=ctx,
     )
 

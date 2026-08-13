@@ -15,17 +15,30 @@ from codeclone.utils import coerce as _coerce
 from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import (
+    ORDER_BY_LOCATION,
+    ORDER_WORST_FIRST,
+    graded_coverage,
+    render_rows_table,
+    row_cut_note_html,
+)
 from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+#: Rows drawn per dead-code tab. Both tabs declare their cut, but for
+#: different reasons: the active list is ranked by confidence, so the band can
+#: also say how much of the high-confidence population is on screen, while the
+#: suppressed list is ordered by file path -- there the cut keeps whatever
+#: sorts first, which is a reason to state it louder, not quieter.
+_DEAD_CODE_ROW_LIMIT = 200
 
 
 def _dead_row(
@@ -42,6 +55,96 @@ def _dead_row(
         str(item.get("confidence", "")),
         str(item.get("reason", "unreferenced")),
         test_reference_sources,
+    )
+
+
+def _active_dead_code_table(ctx: ReportContext, items_data: Sequence[object]) -> str:
+    """The active candidates table, declaring what the row cut left behind."""
+
+    shown = [_as_mapping(it) for it in items_data[:_DEAD_CODE_ROW_LIMIT]]
+    return render_rows_table(
+        headers=(
+            "Name",
+            "File",
+            "Line",
+            "Kind",
+            "Confidence",
+            "Reason",
+            "Held by tests",
+        ),
+        rows=[_dead_row(item, ctx) for item in shown],
+        empty_message="No dead code detected.",
+        empty_description=(
+            "An entry appears when a definition has no reference anywhere in "
+            "the analysed set, so an empty list means every definition is used."
+        ),
+        row_cut_note=row_cut_note_html(
+            total=len(items_data),
+            shown=len(shown),
+            ordering=ORDER_WORST_FIRST,
+            covered=graded_coverage(
+                "high-confidence",
+                [_as_mapping(it) for it in items_data],
+                shown,
+                field="confidence",
+                value="high",
+            ),
+        ),
+        ctx=ctx,
+    )
+
+
+def _suppressed_dead_code_row(
+    item: Mapping[str, object],
+    ctx: ReportContext,
+) -> tuple[str, str, str, str, str, str, str, str, str]:
+    suppressed_by = _as_sequence(item.get("suppressed_by"))
+    first = _as_mapping(suppressed_by[0]) if suppressed_by else {}
+    return (
+        *_dead_row(item, ctx),
+        str(first.get("rule", "")),
+        str(first.get("source", "")),
+    )
+
+
+def _suppressed_dead_code_table(
+    ctx: ReportContext,
+    suppressed_data: Sequence[object],
+) -> str:
+    """The suppressed candidates table, which cannot claim a useful ordering.
+
+    No coverage claim and no "worst first": the document orders this list by
+    path and line, so the two hundred rows drawn are the ones whose files sort
+    first, not the ones worth reading first. Naming the ordering is the whole
+    point -- a reader who assumed otherwise here would be wrong.
+    """
+
+    shown = [_as_mapping(it) for it in suppressed_data[:_DEAD_CODE_ROW_LIMIT]]
+    return render_rows_table(
+        headers=(
+            "Name",
+            "File",
+            "Line",
+            "Kind",
+            "Confidence",
+            "Reason",
+            "Held by tests",
+            "Rule",
+            "Source",
+        ),
+        rows=[_suppressed_dead_code_row(item, ctx) for item in shown],
+        empty_message="No suppressed dead-code candidates.",
+        empty_description=(
+            "Entries land here when a suppression rule in your configuration "
+            "excludes a candidate, so this fills only once a rule matches."
+        ),
+        column_types={"Source": "source_kind"},
+        row_cut_note=row_cut_note_html(
+            total=len(suppressed_data),
+            shown=len(shown),
+            ordering=ORDER_BY_LOCATION,
+        ),
+        ctx=ctx,
     )
 
 
@@ -70,21 +173,6 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     if dead_suppressed_total == 0:
         dead_suppressed_total = len(suppressed_data)
 
-    # Rows
-    active_rows = [_dead_row(_as_mapping(it), ctx) for it in items_data[:200]]
-    suppressed_rows: list[tuple[str, str, str, str, str, str, str, str, str]] = []
-    for it in suppressed_data[:200]:
-        im = _as_mapping(it)
-        suppressed_by = _as_sequence(im.get("suppressed_by"))
-        first = _as_mapping(suppressed_by[0]) if suppressed_by else {}
-        suppressed_rows.append(
-            (
-                *_dead_row(im, ctx),
-                str(first.get("rule", "")),
-                str(first.get("source", "")),
-            )
-        )
-
     # Insight
     answer: str
     tone: Tone
@@ -109,45 +197,8 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         else:
             tone = "ok"
 
-    active_panel = render_rows_table(
-        headers=(
-            "Name",
-            "File",
-            "Line",
-            "Kind",
-            "Confidence",
-            "Reason",
-            "Held by tests",
-        ),
-        rows=active_rows,
-        empty_message="No dead code detected.",
-        empty_description=(
-            "An entry appears when a definition has no reference anywhere in "
-            "the analysed set, so an empty list means every definition is used."
-        ),
-        ctx=ctx,
-    )
-    suppressed_panel = render_rows_table(
-        headers=(
-            "Name",
-            "File",
-            "Line",
-            "Kind",
-            "Confidence",
-            "Reason",
-            "Held by tests",
-            "Rule",
-            "Source",
-        ),
-        rows=suppressed_rows,
-        empty_message="No suppressed dead-code candidates.",
-        empty_description=(
-            "Entries land here when a suppression rule in your configuration "
-            "excludes a candidate, so this fills only once a rule matches."
-        ),
-        column_types={"Source": "source_kind"},
-        ctx=ctx,
-    )
+    active_panel = _active_dead_code_table(ctx, items_data)
+    suppressed_panel = _suppressed_dead_code_table(ctx, suppressed_data)
 
     # Stat cards
     pct = (dead_high_conf / max(1, dead_total)) * 100 if dead_total > 0 else 0

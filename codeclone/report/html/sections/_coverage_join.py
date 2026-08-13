@@ -17,7 +17,12 @@ from ..primitives.escape import _escape_html
 from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
 from ..widgets.glossary import glossary_tip
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import (
+    ORDER_WORST_FIRST,
+    graded_coverage,
+    render_rows_table,
+    row_cut_note_html,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -27,6 +32,13 @@ if TYPE_CHECKING:
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+#: Review rows drawn before the tail is summarised. The document ranks this
+#: family hotspot-first, then scope gaps, then risk, then coverage ascending,
+#: so the cut keeps the rows a reviewer opens first -- and the band still
+#: declares the count, because the cards above it count hotspots over the
+#: whole population and nothing bounds that population by fifty.
+_REVIEW_ROW_LIMIT = 50
 
 
 def coverage_join_quality_count(ctx: ReportContext) -> int:
@@ -76,16 +88,18 @@ def render_coverage_join_panel(ctx: ReportContext) -> str:
         _measured_units_card(coverage_summary),
     ]
 
+    review_rows, review_cut_note = _coverage_join_table_rows(ctx, coverage_join)
     return (
         f'<div class="stat-cards">{"".join(cards)}</div>'
         + '<h3 class="subsection-title">Coverage review items</h3>'
         + render_rows_table(
             headers=("Function", "Location", "CC", "Status", "Coverage", "Risk"),
-            rows=_coverage_join_table_rows(ctx, coverage_join),
+            rows=review_rows,
             empty_message=_coverage_join_empty_message(),
             empty_description=_coverage_join_empty_description(),
             raw_html_headers=("Location",),
             column_types={"CC": "meter", "Status": "chips"},
+            row_cut_note=review_cut_note,
             ctx=ctx,
         )
     )
@@ -169,7 +183,14 @@ def _measured_units_card(coverage_summary: Mapping[str, object]) -> str:
 def _coverage_join_table_rows(
     ctx: ReportContext,
     coverage_family: Mapping[str, object],
-) -> list[tuple[str, str, str, str, str, str]]:
+) -> tuple[list[tuple[str, str, str, str, str, str]], str]:
+    """The drawn rows and how many of the review items they are.
+
+    Returns both because the caller cannot recover the second from the first:
+    the review population is filtered out of the family here, so the row list
+    alone no longer knows how much it left behind.
+    """
+
     review_items = [
         _as_mapping(item)
         for item in _as_sequence(coverage_family.get("items"))
@@ -177,7 +198,8 @@ def _coverage_join_table_rows(
         or bool(_as_mapping(item).get("coverage_hotspot"))
         or bool(_as_mapping(item).get("scope_gap_hotspot"))
     ]
-    return [
+    shown_items = review_items[:_REVIEW_ROW_LIMIT]
+    rows = [
         (
             str(item.get("qualname", "")).strip() or "(unknown)",
             _location_cell_html(ctx, item),
@@ -186,8 +208,20 @@ def _coverage_join_table_rows(
             _coverage_cell_label(item),
             str(item.get("risk", "low")).strip() or "low",
         )
-        for item in review_items[:50]
+        for item in shown_items
     ]
+    return rows, row_cut_note_html(
+        total=len(review_items),
+        shown=len(shown_items),
+        ordering=ORDER_WORST_FIRST,
+        covered=graded_coverage(
+            "high-risk",
+            review_items,
+            shown_items,
+            field="risk",
+            value="high",
+        ),
+    )
 
 
 def _coverage_join_empty_message() -> str:

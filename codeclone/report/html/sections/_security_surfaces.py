@@ -46,7 +46,11 @@ from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
 from ..widgets.components import overview_summary_item_html
 from ..widgets.glossary import glossary_tip
-from ..widgets.tables import render_rows_table
+from ..widgets.tables import (
+    ORDER_BY_LOCATION,
+    render_rows_table,
+    row_cut_note_html,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -56,6 +60,14 @@ if TYPE_CHECKING:
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+#: Surface rows drawn before the tail is summarised. This family carries no
+#: per-row grade and the document orders it by path and line, so there is no
+#: ranking to lean on: the cut keeps whatever sorts first and the band has to
+#: say so. The Surfaces card counts the whole population -- three hundred and
+#: ninety-four on this repository against fifty rows -- which is exactly the
+#: gap a reader could not see before.
+_SURFACE_ROW_LIMIT = 50
 
 
 def security_surfaces_quality_count(ctx: ReportContext) -> int:
@@ -105,16 +117,18 @@ def render_security_surfaces_panel(ctx: ReportContext) -> str:
             glossary_tip_fn=glossary_tip,
         ),
     ]
+    surface_rows, surface_cut_note = _security_surface_rows(ctx, items)
     return (
         f'<div class="stat-cards">{"".join(cards)}</div>'
         + _security_surfaces_context_html(ctx, items)
         + f'<h3 class="subsection-title">{SECURITY_TABLE_TITLE}</h3>'
         + render_rows_table(
             headers=SECURITY_TABLE_HEADERS,
-            rows=_security_surface_rows(ctx, items),
+            rows=surface_rows,
             empty_message=SECURITY_TABLE_EMPTY,
             empty_description=SECURITY_TABLE_EMPTY_DESC,
             raw_html_headers=("Location",),
+            row_cut_note=surface_cut_note,
             ctx=ctx,
         )
     )
@@ -127,9 +141,12 @@ def _security_surfaces_summary(ctx: ReportContext) -> Mapping[str, object]:
 def _security_surface_rows(
     ctx: ReportContext,
     items: tuple[Mapping[str, object], ...],
-) -> list[tuple[str, str, str, str, str, str]]:
+) -> tuple[list[tuple[str, str, str, str, str, str]], str]:
+    """The drawn rows and how many of the inventory they are."""
+
     coverage_index = _coverage_review_index(ctx)
-    return [
+    shown_items = items[:_SURFACE_ROW_LIMIT]
+    rows = [
         (
             _humanize(str(item.get("category", ""))),
             _humanize(str(item.get("capability", ""))),
@@ -138,8 +155,13 @@ def _security_surface_rows(
             _location_cell_html(ctx, item),
             _review_cell_text(ctx, item, coverage_index=coverage_index),
         )
-        for item in items[:50]
+        for item in shown_items
     ]
+    return rows, row_cut_note_html(
+        total=len(items),
+        shown=len(shown_items),
+        ordering=ORDER_BY_LOCATION,
+    )
 
 
 def _location_cell_html(ctx: ReportContext, item: Mapping[str, object]) -> str:
