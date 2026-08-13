@@ -154,9 +154,10 @@ def build_html_report(
     _as_int = _coerce.as_int
     dead_summary = _as_mapping(ctx.dead_code_map.get("summary"))
     dead_total = _as_int(dead_summary.get("total"))
-    dead_high_conf = _as_int(
-        dead_summary.get("high_confidence", dead_summary.get("critical"))
-    )
+    # ``critical`` was the raw metrics payload's spelling; the report document
+    # renamed it to ``high_confidence`` and emits only that, so the fallback
+    # could not fire in any configuration.
+    dead_high_conf = _as_int(dead_summary.get("high_confidence"))
     if dead_total > 0 and dead_high_conf == 0:
         dead_high_conf = sum(
             1
@@ -361,14 +362,10 @@ def build_html_report(
     # -- Footer --
     version = str(ctx.meta.get("codeclone_version", __version__))
     _report_schema = ctx.report_schema_version
-    _baseline_schema = _meta_pick(
-        ctx.meta.get("baseline_schema_version"),
-        ctx.baseline_meta.get("schema_version"),
-    )
-    _cache_schema = _meta_pick(
-        ctx.meta.get("cache_schema_version"),
-        ctx.cache_meta.get("schema_version"),
-    )
+    # Read from the blocks that carry them. The flat ``meta`` spellings are
+    # what ``_build_meta_payload`` consumes on the way in, not what it emits.
+    _baseline_schema = _meta_pick(ctx.baseline_meta.get("schema_version"))
+    _cache_schema = _meta_pick(ctx.cache_meta.get("schema_version"))
     _schema_parts: list[str] = []
     if _report_schema:
         _schema_parts.append(

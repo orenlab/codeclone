@@ -87,17 +87,21 @@ def build_topbar_provenance_summary(ctx: ReportContext) -> tuple[str, str, str]:
 
     Collapses the full provenance state into a single word + colour +
     hover tooltip. The detail lives in the modal, not the topbar.
+
+    Every provenance value is read from the block that carries it. ``meta``
+    used to be consulted first for a flat ``baseline_*``/``cache_*`` spelling,
+    which is what the pre-v3 report carried; ``_build_meta_payload`` now
+    *consumes* those names and projects them into ``meta.baseline`` and
+    ``meta.cache``, so the first lookup of each pair could not fire in any
+    configuration and only made the panel look like it had two sources.
     """
     meta = ctx.meta
     baseline_meta = ctx.baseline_meta
     cache_meta = ctx.cache_meta
 
-    bl_verified = _meta_pick(
-        meta.get("baseline_payload_sha256_verified"),
-        baseline_meta.get("payload_sha256_verified"),
-    )
-    bl_loaded = _meta_pick(meta.get("baseline_loaded"), baseline_meta.get("loaded"))
-    cache_used = _meta_pick(meta.get("cache_used"), cache_meta.get("used"))
+    bl_verified = _meta_pick(baseline_meta.get("payload_sha256_verified"))
+    bl_loaded = _meta_pick(baseline_meta.get("loaded"))
+    cache_used = _meta_pick(cache_meta.get("used"))
     analysis_mode = str(_meta_pick(meta.get("analysis_mode")) or "").strip()
 
     bl_part: str
@@ -133,7 +137,16 @@ def build_topbar_provenance_summary(ctx: ReportContext) -> tuple[str, str, str]:
 
 
 def render_meta_panel(ctx: ReportContext) -> str:
-    """Build the collapsible Report Provenance panel."""
+    """Build the collapsible Report Provenance panel.
+
+    Same rule as the topbar above: a value is read from the block that owns
+    it. The flat ``meta["baseline_*"]`` / ``meta["cache_*"]`` /
+    ``meta["metrics_baseline_*"]`` names, and ``meta["metrics_computed"]``,
+    are the pre-v3 spellings that ``_build_meta_payload`` reads *in* and
+    projects out under different names, so twenty-one lookups on this panel
+    could never resolve and the rows they head were carried entirely by the
+    fallback beside them.
+    """
     meta = ctx.meta
     baseline_meta = ctx.baseline_meta
     cache_meta, metrics_baseline_meta, runtime_meta, integrity_map = (
@@ -144,17 +157,14 @@ def render_meta_panel(ctx: ReportContext) -> str:
     )
 
     baseline_path_value = _meta_pick(
-        meta.get("baseline_path"),
         baseline_meta.get("path"),
         runtime_meta.get("baseline_path_absolute"),
     )
     cache_path_value = _meta_pick(
-        meta.get("cache_path"),
         cache_meta.get("path"),
         runtime_meta.get("cache_path_absolute"),
     )
     mbl_path_value = _meta_pick(
-        meta.get("metrics_baseline_path"),
         metrics_baseline_meta.get("path"),
         runtime_meta.get("metrics_baseline_path_absolute"),
     )
@@ -163,10 +173,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
     )
     python_tag_value = _meta_pick(meta.get("python_tag"))
     report_mode_value = _meta_pick(meta.get("report_mode"), "full")
-    metrics_computed_value = _meta_pick(
-        meta.get("metrics_computed"),
-        meta.get("computed_metric_families"),
-    )
+    metrics_computed_value = _meta_pick(meta.get("computed_metric_families"))
     integrity_canon = _as_mapping(integrity_map.get("canonicalization"))
     integrity_digest = _as_mapping(
         _as_mapping(integrity_map.get("digests")).get("envelope")
@@ -194,31 +201,15 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Source IO skipped", _meta_pick(meta.get("files_skipped_source_io"))),
     ]
 
-    _bl_status = _meta_pick(meta.get("baseline_status"), baseline_meta.get("status"))
-    _bl_loaded = _meta_pick(meta.get("baseline_loaded"), baseline_meta.get("loaded"))
-    _bl_fp_ver = _meta_pick(
-        meta.get("baseline_fingerprint_version"),
-        baseline_meta.get("fingerprint_version"),
-    )
-    _bl_schema_ver = _meta_pick(
-        meta.get("baseline_schema_version"), baseline_meta.get("schema_version")
-    )
-    _bl_py_tag = _meta_pick(
-        meta.get("baseline_python_tag"), baseline_meta.get("python_tag")
-    )
-    _bl_gen_name = _meta_pick(
-        meta.get("baseline_generator_name"), baseline_meta.get("generator_name")
-    )
-    _bl_gen_ver = _meta_pick(
-        meta.get("baseline_generator_version"), baseline_meta.get("generator_version")
-    )
-    _bl_sha256 = _meta_pick(
-        meta.get("baseline_payload_sha256"), baseline_meta.get("payload_sha256")
-    )
-    _bl_verified = _meta_pick(
-        meta.get("baseline_payload_sha256_verified"),
-        baseline_meta.get("payload_sha256_verified"),
-    )
+    _bl_status = _meta_pick(baseline_meta.get("status"))
+    _bl_loaded = _meta_pick(baseline_meta.get("loaded"))
+    _bl_fp_ver = _meta_pick(baseline_meta.get("fingerprint_version"))
+    _bl_schema_ver = _meta_pick(baseline_meta.get("schema_version"))
+    _bl_py_tag = _meta_pick(baseline_meta.get("python_tag"))
+    _bl_gen_name = _meta_pick(baseline_meta.get("generator_name"))
+    _bl_gen_ver = _meta_pick(baseline_meta.get("generator_version"))
+    _bl_sha256 = _meta_pick(baseline_meta.get("payload_sha256"))
+    _bl_verified = _meta_pick(baseline_meta.get("payload_sha256_verified"))
 
     bl_rows: list[tuple[str, object]] = [
         ("Baseline file", _path_basename(baseline_path_value)),
@@ -234,24 +225,11 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Baseline payload verified", _bl_verified),
     ]
 
-    _mbl_loaded = _meta_pick(
-        meta.get("metrics_baseline_loaded"), metrics_baseline_meta.get("loaded")
-    )
-    _mbl_status = _meta_pick(
-        meta.get("metrics_baseline_status"), metrics_baseline_meta.get("status")
-    )
-    _mbl_schema_ver = _meta_pick(
-        meta.get("metrics_baseline_schema_version"),
-        metrics_baseline_meta.get("schema_version"),
-    )
-    _mbl_sha256 = _meta_pick(
-        meta.get("metrics_baseline_payload_sha256"),
-        metrics_baseline_meta.get("payload_sha256"),
-    )
-    _mbl_verified = _meta_pick(
-        meta.get("metrics_baseline_payload_sha256_verified"),
-        metrics_baseline_meta.get("payload_sha256_verified"),
-    )
+    _mbl_loaded = _meta_pick(metrics_baseline_meta.get("loaded"))
+    _mbl_status = _meta_pick(metrics_baseline_meta.get("status"))
+    _mbl_schema_ver = _meta_pick(metrics_baseline_meta.get("schema_version"))
+    _mbl_sha256 = _meta_pick(metrics_baseline_meta.get("payload_sha256"))
+    _mbl_verified = _meta_pick(metrics_baseline_meta.get("payload_sha256_verified"))
 
     mbl_rows: list[tuple[str, object]] = [
         ("Metrics baseline path", mbl_path_value),
@@ -262,11 +240,9 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Metrics baseline payload verified", _mbl_verified),
     ]
 
-    _cache_schema_ver = _meta_pick(
-        meta.get("cache_schema_version"), cache_meta.get("schema_version")
-    )
-    _cache_status = _meta_pick(meta.get("cache_status"), cache_meta.get("status"))
-    _cache_used = _meta_pick(meta.get("cache_used"), cache_meta.get("used"))
+    _cache_schema_ver = _meta_pick(cache_meta.get("schema_version"))
+    _cache_status = _meta_pick(cache_meta.get("status"))
+    _cache_used = _meta_pick(cache_meta.get("used"))
 
     cache_rows: list[tuple[str, object]] = [
         ("Cache path", cache_path_value),

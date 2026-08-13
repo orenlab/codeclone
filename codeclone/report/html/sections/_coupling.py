@@ -172,7 +172,6 @@ def _complexity_cards(
 
 def _coupling_cards(summary: Mapping[str, object]) -> str:
     high_risk, total, max_cbo, avg_cbo = _summary_card_inputs(summary, max_key="max")
-    medium_risk = _as_int(summary.get("medium_risk"))
     cards = [
         _stat_card(
             "High-coupling classes",
@@ -197,22 +196,43 @@ def _coupling_cards(summary: Mapping[str, object]) -> str:
             # and leaves the verdict to the values the document does band.
             glossary_tip_fn=glossary_tip,
         ),
-        _stat_card(
-            "Medium risk",
-            medium_risk,
-            value_tone="warn" if medium_risk > 0 else "muted",
-            glossary_tip_fn=glossary_tip,
-        ),
+        # No fourth card. This band used to draw a "Medium risk" count read
+        # from ``summary["medium_risk"]`` -- a key no metric family emits, in
+        # this document or any other. ``_as_int`` turned the absence into 0,
+        # so the card had reported zero medium-risk classes in every report
+        # ever built, on every repository, and a reader could not tell that
+        # from a measurement. The product bands a row's ``risk`` and publishes
+        # the high-risk population; the medium tail is not published, so it is
+        # not drawn. Adding the field to the document to make the read valid
+        # would be a schema change, and inventing the count here from the rows
+        # would be a second classifier beside the one the document owns.
     ]
     return f'<div class="stat-cards">{"".join(cards)}</div>'
 
 
 def _cohesion_cards(summary: Mapping[str, object]) -> str:
+    """The figures the cohesion summary publishes, and nothing else.
+
+    This band used to end in "High risk" and "Medium risk", read from
+    ``high_risk`` and ``medium_risk``. Cohesion publishes neither: its summary
+    carries ``{total, average, max, low_cohesion}``, so both cards drew
+    ``_as_int(None)`` and half of this tab's figures were a zero nobody had
+    measured, in every report ever built.
+
+    Neither card comes back under another name, and the difference between
+    them is worth stating. ``low_cohesion`` *is* this family's high-risk
+    population -- the registry fills it from the ``risk_cohesion`` band, the
+    same band that fills ``high_risk`` for complexity and coupling -- so the
+    first card above already showed exactly what "High risk" was asking for,
+    and restoring it would print one number twice under two labels. The medium
+    tail is not published at all; drawing it would need either a new field in
+    the document or a second classifier here over the rows, and the document
+    owns that classification.
+    """
+
     low_cohesion = _as_int(summary.get("low_cohesion"))
     total = _as_int(summary.get("total"))
     max_lcom4 = _as_int(summary.get("max"))
-    high_risk = _as_int(summary.get("high_risk"))
-    medium_risk = _as_int(summary.get("medium_risk"))
     cards = [
         _stat_card(
             "Low-cohesion classes",
@@ -226,18 +246,6 @@ def _cohesion_cards(summary: Mapping[str, object]) -> str:
             max_lcom4,
             detail=_micro_badges(("target", "= 1")),
             value_tone="bad" if max_lcom4 > 3 else "warn" if max_lcom4 > 1 else "good",
-            glossary_tip_fn=glossary_tip,
-        ),
-        _stat_card(
-            "High risk",
-            high_risk,
-            value_tone="bad" if high_risk > 0 else "good",
-            glossary_tip_fn=glossary_tip,
-        ),
-        _stat_card(
-            "Medium risk",
-            medium_risk,
-            value_tone="warn" if medium_risk > 0 else "muted",
             glossary_tip_fn=glossary_tip,
         ),
     ]

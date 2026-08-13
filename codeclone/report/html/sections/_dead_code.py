@@ -151,7 +151,10 @@ def _suppressed_dead_code_table(
 def render_dead_code_panel(ctx: ReportContext) -> str:
     summary = _as_mapping(ctx.dead_code_map.get("summary"))
     dead_total = _as_int(summary.get("total"))
-    dead_high_conf = _as_int(summary.get("high_confidence", summary.get("critical")))
+    # ``critical`` was the raw metrics payload's spelling; the report document
+    # renamed it to ``high_confidence`` and emits only that, so the fallback
+    # could not fire in any configuration.
+    dead_high_conf = _as_int(summary.get("high_confidence"))
     dead_suppressed_total = _as_int(summary.get("suppressed", 0))
     dead_unresolved_total = _as_int(summary.get("unresolved_external_override", 0))
     # Published once by the metrics payload and read here, exactly as the
