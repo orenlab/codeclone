@@ -828,9 +828,8 @@ def test_the_run_identity_tier_is_named_by_the_contract_in_every_reader() -> Non
         if "digests" not in tokens:
             continue
         readers.append(relative)
-        if relative in _RUN_IDENTITY_TIER_LITERAL_OWNERS:
-            continue
-        if REPORT_RUN_IDENTITY_TIER in tokens:
+        restates_the_tier = REPORT_RUN_IDENTITY_TIER in tokens
+        if restates_the_tier and relative not in _RUN_IDENTITY_TIER_LITERAL_OWNERS:
             offenders.append(relative)
 
     assert offenders == [], (
