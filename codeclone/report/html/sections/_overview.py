@@ -106,6 +106,41 @@ _DIRECTORY_BUCKET_LABELS = DIRECTORY_BUCKET_LABELS
 _DIRECTORY_BUCKET_ORDER = DIRECTORY_BUCKET_ORDER
 _DIRECTORY_KIND_LABELS = DIRECTORY_KIND_LABELS
 
+#: How one published health grade is drawn: the ring's stroke and the tone of
+#: the executive banner. The single place this page answers "how good is this
+#: score", and it answers from the letter the document published in
+#: ``metrics.summary.health.grade`` -- never from the number beside it.
+#:
+#: The ring and the banner used to grade that number themselves, at 75/60 and
+#: at 80/60 respectively, so between 75 and 79 one document produced two
+#: verdicts. Two lists of numbers kept in step by hand are two truths that
+#: happen to agree; the fix is not a third list but the removal of both, and
+#: the grade is the only grading of health the product publishes.
+#:
+#: No band is introduced here and no colour moves: ``B`` begins exactly where
+#: the ring's top band began, ``C`` where its middle band began, so every score
+#: keeps the stroke it already had.
+_HEALTH_GRADE_VERDICTS: dict[str, tuple[Tone, str]] = {
+    "A": ("ok", "var(--success)"),
+    "B": ("ok", "var(--success)"),
+    "C": ("warn", "var(--warning)"),
+    "D": ("risk", "var(--error)"),
+    "F": ("risk", "var(--error)"),
+}
+
+#: What a block that published no grade is drawn as. ``health_report_fields``
+#: withholds the score and the grade together, so this is reached by a foreign
+#: or hand-built document -- and there the honest drawing is the neutral one.
+#: Falling back to the best or the worst verdict would be the renderer issuing
+#: the grade the document declined to state.
+_HEALTH_GRADE_UNPUBLISHED: tuple[Tone, str] = ("info", "var(--info)")
+
+
+def _health_grade_verdict(grade: str) -> tuple[Tone, str]:
+    """Return ``(tone, stroke)`` for one published grade letter."""
+
+    return _HEALTH_GRADE_VERDICTS.get(grade.strip().upper(), _HEALTH_GRADE_UNPUBLISHED)
+
 
 def _health_gauge_html(
     score: float,
@@ -139,12 +174,9 @@ def _health_gauge_html(
     _R = 42.0
     circumference = 2.0 * math.pi * _R
     offset = circumference * (1.0 - score / 100.0)
-    if score >= 75:
-        color = "var(--success)"
-    elif score >= 60:
-        color = "var(--warning)"
-    else:
-        color = "var(--error)"
+    # The arc's length is the score drawn; its colour is the document's verdict
+    # read. Only the first of those is this renderer's to compute.
+    _tone, color = _health_grade_verdict(grade)
 
     # Baseline comparison arc: show where baseline was relative to current.
     # SVG circle with rotate(-90deg) starts at 12 o'clock, goes clockwise.
@@ -930,11 +962,10 @@ def render_overview_panel(ctx: ReportContext) -> str:
                     dependency_cycles=dependency_cycle_count,
                 )
             )
-            if health_score >= 80.0:
-                return ans, "ok"
-            if health_score >= 60.0:
-                return ans, "warn"
-            return ans, "risk"
+            # Same table as the ring above, so the sentence and the shape
+            # beside it cannot answer the same question differently.
+            tone, _color = _health_grade_verdict(health_grade)
+            return ans, tone
         if ctx.metrics_available:
             ans = _overview_counts_sentence(
                 clone_groups=ctx.clone_groups_total,

@@ -159,14 +159,11 @@ _METRIC_BANDS_DEFERRED_TO_F3: dict[str, tuple[str, ...]] = {
         "total_degree > 2",
     ),
     "codeclone/report/html/sections/_overview.py": (
-        # Two different band sets for one health score in one file: the ring
-        # colours at 75/60 and the insight tone at 80/60. The document already
-        # carries ``metrics.summary.health.grade``; neither reads it.
-        "health_score >= 60.0",
-        "health_score >= 80.0",
-        "score >= 60",
-        "score >= 75",
-        # A radar spoke below 60 is drawn as weak.
+        # A radar spoke below 60 is drawn as weak. The health *score* is no
+        # longer here: the ring's 75/60 and the banner's 80/60 -- two band sets
+        # over one number, disagreeing between 75 and 79 -- were deleted, and
+        # both drawings now read ``metrics.summary.health.grade``. A dimension
+        # has no published grade of its own, so this one stays.
         "s < 60",
     ),
     "codeclone/report/html/widgets/badges.py": (

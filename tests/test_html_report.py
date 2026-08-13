@@ -1797,8 +1797,12 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
         segment_groups={},
         report_meta={"scan_root": "/repo"},
         metrics=_metrics_payload(
+            # 70 is a ``C``: the pair is what ``_grade`` publishes, because the
+            # warn tone below is now read off the letter. The fixture used to
+            # say ``B`` beside 70 -- a document the producer cannot emit -- and
+            # the assertion passed off a warn banner belonging to another tab.
             health_score=70,
-            health_grade="B",
+            health_grade="C",
             complexity_max=25,
             complexity_high_risk=1,
             coupling_high_risk=1,
@@ -1811,7 +1815,7 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
     )
     assert "insight-warn" in html
     assert "dep-graph-svg" in html
-    assert "Grade B" in html
+    assert "Grade C" in html
     assert "Cycles: 0; avg depth: 2.5; p95 depth: 3; max dependency depth: 9." in html
     assert "pkg.mod.func" in html
     assert "mod.py" in html
@@ -1824,8 +1828,11 @@ def test_html_report_metrics_risk_branches() -> None:
         segment_groups={},
         report_meta={"scan_root": "/outside/project"},
         metrics=_metrics_payload(
+            # Same correction as the warn case above: ``_grade(50)`` is ``D``,
+            # and the risk tone and the red ring asserted below are the
+            # verdict of that letter, not of the string "50".
             health_score="50",
-            health_grade="C",
+            health_grade="D",
             complexity_max=55,
             complexity_high_risk=3,
             coupling_high_risk=2,
