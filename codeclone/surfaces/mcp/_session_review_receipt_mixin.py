@@ -305,15 +305,17 @@ class _MCPSessionReviewReceiptMixin:
     def _receipt_digest(self, record: MCPRunRecord) -> str:
         """Label the digest with the algorithm its own tier declares.
 
-        The value comes from the comparison tier, so the algorithm must come
-        from the same tier. This asked the withdrawn ``integrity.digest`` block
-        instead and fell back to the literal ``"sha256"`` -- correct only for
-        as long as that stayed the algorithm in use.
+        Value and algorithm are read through the same owner
+        (``_run_identity_digest``) so they cannot drift apart: this named the
+        tier a second time here, and a receipt that carries one tier's value
+        under another tier's algorithm is not provenance. The earlier form
+        asked the withdrawn ``integrity.digest`` block and fell back to the
+        literal ``"sha256"`` -- correct only for as long as that stayed the
+        algorithm in use.
         """
 
         value = _helpers._report_digest(record.report_document)
-        comparison = section(record.report_document, "integrity.digests.comparison")
-        algorithm = str(comparison.get("algorithm", "")).strip()
+        algorithm = _helpers._report_digest_algorithm(record.report_document)
         return f"{algorithm}:{value}"
 
     def _receipt_generated_at(self, record: MCPRunRecord) -> str:

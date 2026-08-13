@@ -559,20 +559,28 @@ def test_receipt_digest_names_the_algorithm_the_document_declares() -> None:
     truth, so the label was right by coincidence. Changing the algorithm the
     document declares must change the label; a receipt that cannot report the
     algorithm it actually used is not provenance.
+
+    Value and label must name the *same* tier. The receipt attests to a
+    verdict, so its value is the run identity -- the ``evaluation`` tier -- and
+    reading the algorithm off ``comparison`` would label one tier's digest with
+    another tier's algorithm and be right only while both say ``sha256``.
     """
 
     service = CodeCloneMCPService(history_limit=2)
     document = build_maximal_report_document()
     record = _run_record(document)
+    evaluation = document["integrity"]["digests"]["evaluation"]  # type: ignore[index]
     comparison = document["integrity"]["digests"]["comparison"]  # type: ignore[index]
+    assert isinstance(evaluation, dict)
     assert isinstance(comparison, dict)
+    assert evaluation["value"] != comparison["value"]
 
     digest = service._receipt_digest(record)
 
-    assert digest == f"{comparison['algorithm']}:{comparison['value']}"
+    assert digest == f"{evaluation['algorithm']}:{evaluation['value']}"
 
     other = deepcopy(document)
-    other["integrity"]["digests"]["comparison"]["algorithm"] = "blake2b"  # type: ignore[index]
+    other["integrity"]["digests"]["evaluation"]["algorithm"] = "blake2b"  # type: ignore[index]
     other_digest = service._receipt_digest(replace(record, report_document=other))
 
     assert other_digest.split(":", 1)[0] == "blake2b"
@@ -653,6 +661,6 @@ def test_maximal_report_document_populates_the_conditional_sections() -> None:
         "metrics.families.coverage_join.summary",
         "metrics.families.semantic_authority.summary",
         "findings.groups.clones.suppressed",
-        "integrity.digests.comparison.algorithm",
+        "integrity.digests.evaluation.algorithm",
     ):
         assert _document_carries(document, path), path

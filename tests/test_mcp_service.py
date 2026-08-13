@@ -313,15 +313,29 @@ def _trusted_gate_facts() -> dict[str, object]:
 
 
 def _blast_radius_report_document(digest: str = "digest-a") -> dict[str, object]:
+    """A stand-in report whose identity tier is the one the session reads.
+
+    ``digest`` names the run, so it belongs on ``evaluation`` -- the tier the
+    MCP run identity is taken from. The comparison tier is carried too, with a
+    deliberately different value: a fixture that gave both tiers one string
+    would still satisfy a consumer that read the wrong one.
+    """
+
     return {
         "integrity": {
             "digests": {
                 "comparison": {
-                    "value": digest,
+                    "value": f"{digest}-comparison",
                     "algorithm": "sha256",
                     "digest_version": "1",
                     "kind": "comparison",
-                }
+                },
+                "evaluation": {
+                    "value": digest,
+                    "algorithm": "sha256",
+                    "digest_version": "1",
+                    "kind": "evaluation",
+                },
             }
         },
         "inventory": {

@@ -726,14 +726,41 @@ def _build_cache(
     return cache
 
 
-def _report_digest(report_document: Mapping[str, object]) -> str:
+def _run_identity_digest(report_document: Mapping[str, object]) -> Mapping[str, object]:
+    """Return the one digest tier every MCP run identity is taken from.
+
+    ``evaluation`` seals the facts, the baseline, the gate thresholds and the
+    verdict. The tier below it -- ``comparison`` -- stops at facts and
+    baseline, so two runs over one tree that answer differently because their
+    thresholds differ shared an id: the run store is keyed by
+    ``(root, run_id)``, so the second registration replaced the first and the
+    disagreement left no trace. The tier above it -- the envelope -- also
+    seals ``meta.runtime.report_generated_at_utc``, the document's only
+    time-like field, which would make every re-analysis a new run by
+    construction and leave ``after_run_not_new`` permanently unable to fire.
+
+    Named once, and read through here by both callers, because the receipt
+    labels the value with the algorithm this same tier declares: a value from
+    one tier under another tier's algorithm is not provenance.
+    """
+
     integrity = _as_mapping(report_document.get("integrity"))
     digests = _as_mapping(integrity.get("digests"))
-    comparison = _as_mapping(digests.get("comparison"))
-    value = comparison.get("value")
+    return _as_mapping(digests.get("evaluation"))
+
+
+def _report_digest(report_document: Mapping[str, object]) -> str:
+    value = _run_identity_digest(report_document).get("value")
     if not isinstance(value, str) or not value:
         raise MCPServiceError("Canonical report digest is missing.")
     return value
+
+
+def _report_digest_algorithm(report_document: Mapping[str, object]) -> str:
+    """Name the algorithm the identity tier itself declares."""
+
+    algorithm = _run_identity_digest(report_document).get("algorithm")
+    return algorithm.strip() if isinstance(algorithm, str) else ""
 
 
 def _summary_analysis_profile_payload(summary: Mapping[str, object]) -> dict[str, int]:

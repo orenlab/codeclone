@@ -24,7 +24,11 @@ from codeclone.observations.projection import build_observation_bundle
 from codeclone.report.document.builder import (
     build_report_document as _build_report_document_v3,
 )
-from codeclone.report.gates.evaluator import GateResult, MetricGateConfig
+from codeclone.report.gates.evaluator import (
+    GateResult,
+    MetricGateConfig,
+    evaluate_gates,
+)
 
 from ._ast_metrics_helpers import module_registry_context
 
@@ -101,6 +105,102 @@ def single_module_baseline_container(scope_id: UUID) -> BaselineContainerV3:
     )
     bundle = build_observation_bundle(scan_root=Path("."), module_registry=registry)
     return build_container(bundle, scope_id)
+
+
+GATE_POLICY_GENERATED_AT = "2026-08-13T10:00:00Z"
+
+
+def _gate_policy_health_family() -> dict[str, object]:
+    """A health family carrying real debt, so a threshold can bracket it.
+
+    A defect-free fixture scores 100 and leaves no room above it for a strict
+    threshold, which would make two policies agree and any pin resting on
+    their disagreement vacuous. No caller types the score: it is read back off
+    the built document, so a recalibration moves the fixture with the metric.
+    """
+
+    return health_report_fields(
+        compute_health(
+            HealthInputs(
+                files_found=10,
+                files_analyzed_or_cached=10,
+                function_clone_groups=4,
+                block_clone_groups=3,
+                complexity_avg=12.0,
+                complexity_max=45,
+                high_risk_functions=6,
+                elevated_complexity_functions=9,
+                complexity_function_population=40,
+                coupling_avg=9.0,
+                coupling_max=30,
+                high_risk_classes=4,
+                elevated_coupling_classes=6,
+                coupling_class_population=20,
+                cohesion_avg=0.2,
+                low_cohesion_classes=7,
+                import_dependency_cycles=3,
+                deferred_dependency_cycles=1,
+                dependency_max_depth=9,
+                dependency_avg_depth=4.0,
+                dependency_p95_depth=8,
+                dead_code_items=25,
+            )
+        )
+    )
+
+
+def build_gate_policy_report_document(
+    *,
+    fail_health: int = -1,
+    report_generated_at_utc: str = GATE_POLICY_GENERATED_AT,
+) -> dict[str, object]:
+    """One observed tree, gated at ``fail_health``, evaluated for real.
+
+    Everything below the evaluation tier is a function of the tree and the
+    baseline, so two documents from this builder differ only where the gate
+    policy differs -- which is what makes them usable for asking what an
+    identity is allowed to depend on.
+
+    The verdict is not typed by the caller: the document is built once with
+    the requested policy, handed to the gate owner, and rebuilt carrying the
+    result that owner returned. A fixture that wrote its own exit code would
+    pin its opinion of the gate rather than the gate.
+    """
+
+    gate_config = MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=False,
+        fail_health=fail_health,
+        fail_on_new_metrics=False,
+    )
+    metrics = {"health": _gate_policy_health_family()}
+    meta = {"report_generated_at_utc": report_generated_at_utc}
+
+    def _build(gate_result: GateResult) -> dict[str, object]:
+        _source, registry = module_registry_context(
+            filepath="pkg/module.py",
+            module_name="pkg.module",
+        )
+        return _build_report_document_v3(
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+            observation_bundle=build_observation_bundle(
+                scan_root=Path("."), module_registry=registry
+            ),
+            baseline_container=None,
+            baseline_trust=None,
+            gate_config=gate_config,
+            gate_result=gate_result,
+            metrics=metrics,
+            meta=meta,
+        )
+
+    unevaluated = _build(GateResult(exit_code=0, reasons=()))
+    return _build(evaluate_gates(report_document=unevaluated, config=gate_config))
 
 
 def build_test_report_document(
