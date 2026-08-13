@@ -1114,12 +1114,20 @@ def test_is_report_document_type_guard_preserves_identity() -> None:
     assert not _is_report_document("not-a-dict")
 
 
-def test_report_digest_from_document_missing_integrity() -> None:
-    from codeclone.surfaces.cli.workflow import _report_digest_from_document
+def test_report_run_identity_refuses_a_malformed_integrity_block() -> None:
+    from codeclone.surfaces.cli.run_identity import (
+        ReportRunIdentityError,
+        report_run_identity,
+    )
 
-    assert _report_digest_from_document({}) == ""
-    assert _report_digest_from_document({"integrity": "bad"}) == ""
-    assert _report_digest_from_document({"integrity": {"digest": "bad"}}) == ""
+    for document in (
+        {},
+        {"integrity": "bad"},
+        {"integrity": {"digests": "bad"}},
+        {"integrity": {"digest": {"value": "a" * 64}}},
+    ):
+        with pytest.raises(ReportRunIdentityError):
+            report_run_identity(document)
 
 
 def test_emit_cli_analysis_completed_if_enabled_skips_when_disabled(
@@ -1151,7 +1159,15 @@ def test_emit_cli_analysis_completed_if_enabled_writes_audit_row(
     digest = "f" * 64
     report_document = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
-        "integrity": {"digests": {"comparison": {"value": digest}}},
+        # The run is named by the evaluation tier; the comparison tier is
+        # carried alongside with a different value so a consumer reading the
+        # wrong one cannot pass this test by coincidence.
+        "integrity": {
+            "digests": {
+                "comparison": {"value": "c" * 64},
+                "evaluation": {"value": digest},
+            }
+        },
         "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 91},
         "inventory": {"file_registry": {"items": ["pkg/a.py"]}},
         "findings": {"total": 0},
@@ -1169,19 +1185,28 @@ def test_emit_cli_analysis_completed_if_enabled_writes_audit_row(
     conn = open_audit_db(db_path)
     try:
         row = conn.execute(
-            "SELECT event_type, payload_json FROM controller_events LIMIT 1"
+            "SELECT event_type, payload_json, run_id FROM controller_events LIMIT 1"
         ).fetchone()
     finally:
         conn.close()
     assert row is not None
     assert row[0] == "analysis.completed"
     assert '"source": "cli"' in str(row[1]) or '"source":"cli"' in str(row[1])
+    assert row[2] == digest
 
 
 def test_emit_cli_analysis_completed_if_enabled_swallows_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A failure to write the row must not take the analysis down with it.
+
+    The document must carry a real run identity for this to mean anything:
+    the earlier fixture named the withdrawn ``integrity.digest`` block, so the
+    call returned before it ever reached the emit and the raiser installed
+    here was never invoked. ``calls`` is the proof that it now is.
+    """
+
     from codeclone.surfaces.cli.workflow import _emit_cli_analysis_completed_if_enabled
 
     (tmp_path / "pyproject.toml").write_text(
@@ -1189,8 +1214,10 @@ def test_emit_cli_analysis_completed_if_enabled_swallows_errors(
         encoding="utf-8",
     )
     args = SimpleNamespace(audit_enabled=True)
+    calls: list[object] = []
 
     def _boom(**kwargs: object) -> None:
+        calls.append(kwargs)
         raise RuntimeError("emit failed")
 
     monkeypatch.setattr(
@@ -1200,10 +1227,12 @@ def test_emit_cli_analysis_completed_if_enabled_swallows_errors(
     _emit_cli_analysis_completed_if_enabled(
         args=args,
         root_path=tmp_path,
-        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        report_document={"integrity": {"digests": {"evaluation": {"value": "a" * 64}}}},
         new_func_count=0,
         new_block_count=0,
     )
+
+    assert len(calls) == 1
 
 
 def test_workflow_audit_emit_and_digest_helpers(
@@ -1213,6 +1242,7 @@ def test_workflow_audit_emit_and_digest_helpers(
     import sys
 
     from codeclone.surfaces.cli import workflow as cli_workflow
+    from codeclone.surfaces.cli.run_identity import ReportRunIdentityError
 
     class _Args:
         audit_enabled = True
@@ -1224,13 +1254,16 @@ def test_workflow_audit_emit_and_digest_helpers(
         new_func_count=0,
         new_block_count=0,
     )
-    cli_workflow._emit_cli_analysis_completed_if_enabled(
-        args=_Args(),
-        root_path=tmp_path,
-        report_document={"integrity": {"digest": {"value": ""}}},
-        new_func_count=0,
-        new_block_count=0,
-    )
+    # A document that carries no run identity is refused, not skipped: the
+    # trail must not record this run and "audit off" as the same absence.
+    with pytest.raises(ReportRunIdentityError):
+        cli_workflow._emit_cli_analysis_completed_if_enabled(
+            args=_Args(),
+            root_path=tmp_path,
+            report_document={"integrity": {"digests": {"evaluation": {"value": ""}}}},
+            new_func_count=0,
+            new_block_count=0,
+        )
 
     def _boom(**_kwargs: object) -> None:
         raise RuntimeError("audit unavailable")
@@ -1242,17 +1275,9 @@ def test_workflow_audit_emit_and_digest_helpers(
     cli_workflow._emit_cli_analysis_completed_if_enabled(
         args=_Args(),
         root_path=tmp_path,
-        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        report_document={"integrity": {"digests": {"evaluation": {"value": "a" * 64}}}},
         new_func_count=1,
         new_block_count=0,
-    )
-
-    assert cli_workflow._report_digest_from_document({}) == ""
-    assert (
-        cli_workflow._report_digest_from_document(
-            {"integrity": {"digest": "not-a-mapping"}}
-        )
-        == ""
     )
 
     monkeypatch.setattr(sys, "argv", ["codeclone", "observability"])

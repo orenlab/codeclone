@@ -29,6 +29,7 @@ from codeclone.utils.mapping_paths import section
 
 from ._report_fixtures import (
     GATE_POLICY_GENERATED_AT,
+    build_gate_policy_disagreement_pair,
     build_gate_policy_report_document,
 )
 
@@ -41,24 +42,6 @@ def _digest(document: Mapping[str, object], tier: str) -> str:
     return value
 
 
-def _health_score(document: Mapping[str, object]) -> int:
-    score = section(document, "metrics.families.health.summary").get("score")
-    assert isinstance(score, int)
-    return score
-
-
-def _exit_code(document: Mapping[str, object]) -> int:
-    exit_code = section(document, "evaluation.outcome").get("exit_code")
-    assert isinstance(exit_code, int)
-    return exit_code
-
-
-def _gate_reasons(document: Mapping[str, object]) -> list[object]:
-    reasons = section(document, "evaluation.outcome").get("reasons")
-    assert isinstance(reasons, list)
-    return reasons
-
-
 def test_run_identity_moves_when_the_gate_verdict_moves() -> None:
     """Same tree, different thresholds, different verdicts -- different ids.
 
@@ -68,25 +51,14 @@ def test_run_identity_moves_when_the_gate_verdict_moves() -> None:
     tier -- facts and baseline, no policy -- produced exactly that, because
     the thresholds and the outcome live one tier above it.
 
-    The fixture makes an accidental pass impossible: the two runs are asserted
-    to share every tier below ``evaluation`` (same tree, same baseline) and to
-    disagree on the verdict, with the strict run carrying a real gate reason
-    rather than a silent refusal.
+    The fixture owner makes an accidental pass impossible: it asserts that the
+    two runs share every tier below ``evaluation`` (same tree, same baseline)
+    and that they disagree on the verdict, with the strict run carrying a real
+    gate reason rather than a silent refusal. That arrangement is shared with
+    the CLI's identity pin and lives in ``_report_fixtures`` for both.
     """
 
-    probe = build_gate_policy_report_document()
-    score = _health_score(probe)
-    assert 10 <= score <= 90, "fixture must leave room on both sides of the score"
-
-    lenient = build_gate_policy_report_document(fail_health=score - 10)
-    strict = build_gate_policy_report_document(fail_health=score + 10)
-
-    assert _exit_code(lenient) == 0
-    assert _exit_code(strict) != 0
-    assert _gate_reasons(strict)
-
-    for tier in ("observation", "analysis_facts", "comparison"):
-        assert _digest(lenient, tier) == _digest(strict, tier), tier
+    lenient, strict = build_gate_policy_disagreement_pair()
 
     assert _helpers._report_digest(lenient) != _helpers._report_digest(strict)
 

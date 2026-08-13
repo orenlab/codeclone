@@ -59,6 +59,7 @@ from . import state as cli_state
 from . import summary as cli_summary
 from . import tips as cli_tips
 from .attrs import bool_attr
+from .run_identity import report_run_identity
 from .subcommands import dispatch_subcommand
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
@@ -818,9 +819,10 @@ def _emit_cli_analysis_completed_if_enabled(
         return
     if not _is_report_document(report_document):
         return
-    digest = _report_digest_from_document(report_document)
-    if not digest:
-        return
+    # Read outside the guard below on purpose: that guard exists so a failure
+    # to *write* the row cannot take the analysis down with it, and catching
+    # the identity refusal in it would restore the silent skip this replaced.
+    digest = report_run_identity(report_document)
     try:
         from ...audit.analysis_completed import (
             ANALYSIS_SOURCE_CLI,
@@ -843,19 +845,6 @@ def _emit_cli_analysis_completed_if_enabled(
 
 def _is_report_document(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
-
-
-def _report_digest_from_document(report_document: dict[str, object]) -> str:
-    integrity = report_document.get("integrity")
-    if not isinstance(integrity, dict):
-        return ""
-    digests = integrity.get("digests")
-    if not isinstance(digests, dict):
-        return ""
-    comparison = digests.get("comparison")
-    if not isinstance(comparison, dict):
-        return ""
-    return str(comparison.get("value", "")).strip()
 
 
 def main() -> None:

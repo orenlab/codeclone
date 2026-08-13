@@ -29,6 +29,7 @@ from codeclone.report.gates.evaluator import (
     MetricGateConfig,
     evaluate_gates,
 )
+from codeclone.utils.mapping_paths import section
 
 from ._ast_metrics_helpers import module_registry_context
 
@@ -201,6 +202,66 @@ def build_gate_policy_report_document(
 
     unevaluated = _build(GateResult(exit_code=0, reasons=()))
     return _build(evaluate_gates(report_document=unevaluated, config=gate_config))
+
+
+def build_gate_policy_disagreement_pair() -> tuple[
+    dict[str, object], dict[str, object]
+]:
+    """Two documents over one tree whose gate verdicts genuinely disagree.
+
+    Every surface that names a run needs this same arrangement to ask what an
+    identity may depend on, and each surface writing it out again is how the
+    CLI pin came to be a copy of the MCP pin. It lives here once.
+
+    The self-checks are part of the fixture, not of any one surface's pin:
+    they are what makes an accidental pass impossible. The pair must sit in
+    the middle of the score range so a strict and a lenient threshold can
+    bracket it, must actually answer differently, must carry a real gate
+    reason rather than a silent refusal, and must agree on every tier below
+    ``evaluation`` -- same tree, same baseline, policy the only difference.
+    """
+
+    probe = build_gate_policy_report_document()
+    score = _gate_policy_health_score(probe)
+    assert 10 <= score <= 90, "fixture must leave room on both sides of the score"
+
+    lenient = build_gate_policy_report_document(fail_health=score - 10)
+    strict = build_gate_policy_report_document(fail_health=score + 10)
+
+    assert _gate_policy_exit_code(lenient) == 0
+    assert _gate_policy_exit_code(strict) != 0
+    assert _gate_policy_gate_reasons(strict)
+
+    for tier in ("observation", "analysis_facts", "comparison"):
+        assert _gate_policy_digest(lenient, tier) == _gate_policy_digest(
+            strict, tier
+        ), tier
+
+    return lenient, strict
+
+
+def _gate_policy_digest(document: Mapping[str, object], tier: str) -> str:
+    value = section(document, f"integrity.digests.{tier}").get("value")
+    assert isinstance(value, str) and value
+    return value
+
+
+def _gate_policy_health_score(document: Mapping[str, object]) -> int:
+    score = section(document, "metrics.families.health.summary").get("score")
+    assert isinstance(score, int)
+    return score
+
+
+def _gate_policy_exit_code(document: Mapping[str, object]) -> int:
+    exit_code = section(document, "evaluation.outcome").get("exit_code")
+    assert isinstance(exit_code, int)
+    return exit_code
+
+
+def _gate_policy_gate_reasons(document: Mapping[str, object]) -> list[object]:
+    reasons = section(document, "evaluation.outcome").get("reasons")
+    assert isinstance(reasons, list)
+    return reasons
 
 
 def build_test_report_document(

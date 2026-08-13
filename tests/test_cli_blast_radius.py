@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import codeclone.surfaces.cli.blast_radius as cli_blast_radius
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.blast_radius import render_blast_radius
 
@@ -27,7 +28,7 @@ class _RecordingPrinter:
 
 def _report_document() -> dict[str, object]:
     return {
-        "integrity": {"digest": {"value": "a" * 64}},
+        "integrity": {"digests": {"evaluation": {"value": "a" * 64}}},
         "inventory": {
             "file_registry": {
                 "items": ["pkg/a.py", "pkg/b.py", "pkg/c.py"],
@@ -154,6 +155,76 @@ def test_blast_radius_none_report_returns_contract_error(tmp_path: Path) -> None
     assert "Blast radius requires a canonical report" in printer.text
 
 
+def test_blast_radius_report_without_run_identity_returns_contract_error(
+    tmp_path: Path,
+) -> None:
+    """Some input reaches the identity guard, and it refuses there.
+
+    A guard no input can trip is theatre, so this is the proof that this one
+    runs: the document is otherwise complete -- inventory, metrics, findings
+    all present, the origin file is in the inventory -- and differs from the
+    rendering fixture only in carrying no run identity.
+    """
+
+    document = _report_document()
+    document["integrity"] = {"digests": {}}
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=document,
+        files=("pkg/a.py",),
+        root_path=tmp_path,
+        quiet=True,
+    )
+
+    assert exit_code == int(ExitCode.CONTRACT_ERROR)
+    assert "integrity.digests.evaluation.value" in printer.text
+
+
+def test_blast_radius_names_the_run_by_the_audited_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One run, one name, on both CLI consumers of the document.
+
+    This used to read the envelope tier and fall back to a literal when it was
+    absent, so a single ``codeclone`` invocation could report one id to the
+    audit trail and a different one -- or an invented one -- here. The
+    envelope value is carried in the fixture with a different value, so
+    reading the wrong tier cannot pass by coincidence.
+    """
+
+    document = _report_document()
+    integrity = document["integrity"]
+    assert isinstance(integrity, dict)
+    digests = integrity["digests"]
+    assert isinstance(digests, dict)
+    digests["envelope"] = {"value": "e" * 64}
+    captured: dict[str, object] = {}
+
+    class _Reached(Exception):
+        """Raised once the computation has been handed its arguments."""
+
+    def _capture(**kwargs: object) -> object:
+        captured.update(kwargs)
+        raise _Reached
+
+    monkeypatch.setattr(cli_blast_radius, "compute_blast_radius", _capture)
+    printer = _RecordingPrinter()
+
+    with pytest.raises(_Reached):
+        render_blast_radius(
+            console=printer,
+            report_document=document,
+            files=("pkg/a.py",),
+            root_path=tmp_path,
+            quiet=True,
+        )
+
+    assert captured["run_id"] == "a" * 64
+
+
 def test_blast_radius_verbose_output_renders_all_sections(tmp_path: Path) -> None:
     printer = _RecordingPrinter()
 
@@ -204,7 +275,7 @@ def _report_document_many_files() -> dict[str, object]:
         {"source": f"pkg.f{index:03d}", "target": "pkg.f000"} for index in range(1, 25)
     ]
     return {
-        "integrity": {"digest": {"value": "b" * 64}},
+        "integrity": {"digests": {"evaluation": {"value": "b" * 64}}},
         "inventory": {"file_registry": {"items": files}},
         "metrics": {
             "families": {

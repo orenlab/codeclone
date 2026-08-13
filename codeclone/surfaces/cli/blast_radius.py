@@ -15,7 +15,7 @@ from ...analysis.blast_radius import BlastRadiusResult, compute_blast_radius
 from ...contracts import ExitCode
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ...utils.mapping_paths import section
+from .run_identity import ReportRunIdentityError, report_run_identity
 from .types import PrinterLike
 
 _RISK_STYLES = {
@@ -25,11 +25,6 @@ _RISK_STYLES = {
     "critical": ui.STYLE_VERDICT_FAIL,
 }
 _MAX_RENDERED_ITEMS = 20
-
-
-def _report_run_id(report_document: Mapping[str, object]) -> str:
-    envelope = section(report_document, "integrity.digests.envelope")
-    return str(envelope.get("value", "")).strip() or "cli-blast-radius"
 
 
 def _inventory_paths(report_document: Mapping[str, object]) -> frozenset[str]:
@@ -179,6 +174,13 @@ def render_blast_radius(
             console=console,
             message=ui.BLAST_RADIUS_REQUIRES_REPORT,
         )
+    # The same identity the audit trail names this run by, from the same
+    # owner. Naming a second tier here gave one run two ids, and the literal
+    # this used to fall back to invented a third that named nothing at all.
+    try:
+        run_id = report_run_identity(report_document)
+    except ReportRunIdentityError as exc:
+        return _contract_error_result(console=console, message=str(exc))
 
     origin_paths = _validated_origin_paths(
         report_document=report_document,
@@ -187,7 +189,7 @@ def render_blast_radius(
         quiet=quiet,
     )
     result = compute_blast_radius(
-        run_id=_report_run_id(report_document),
+        run_id=run_id,
         report_document=report_document,
         files=origin_paths,
     )
