@@ -80,6 +80,24 @@ REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN: Final = "codeclone.report.analysis_facts.v1
 REPORT_COMPARISON_DIGEST_DOMAIN: Final = "codeclone.report.comparison.v1\0"
 REPORT_EVALUATION_DIGEST_DOMAIN: Final = "codeclone.report.evaluation.v1\0"
 REPORT_ENVELOPE_DIGEST_DOMAIN: Final = "codeclone.report.envelope.v1\0"
+# Which of the five report digest tiers names a run, for every surface that has
+# to answer "which run is this". Exactly one tier can: ``evaluation`` seals the
+# facts, the baseline, the gate thresholds and the outcome, so two runs over one
+# tree that answer differently because their thresholds differ get different
+# names. The tier below it -- ``comparison`` -- stops at facts and baseline, and
+# gave those two runs one name. The tier above it -- the envelope -- also seals
+# ``meta.runtime.report_generated_at_utc``, the document's only time-like field,
+# so an identity taken from there would be new on every run by construction and
+# no consumer could tell a repeated measurement from a changed one.
+#
+# It lives in r0 because its readers do not share a ring: the CLI and MCP
+# surfaces are r4, the controller plane (``controller_insights``) is r2p, and
+# r2p may not import r4. Owned one ring below both, it is reachable from either
+# without a boundary violation, which is the whole reason it is here and not
+# beside its first consumer. Not a version: the value is a wire key of the
+# report document, so it moves only with the document's digest tier set, which
+# ``report/document/integrity.py`` emits and verifies.
+REPORT_RUN_IDENTITY_TIER: Final = "evaluation"
 GATE_LANE_MATRIX_VERSION: Final = "2"
 # Version "2" (cycle-policy split): the dependency-cycle input stopped being one
 # kind-agnostic count and became two — import cycles and deferred cycles, each
@@ -719,6 +737,7 @@ __all__ = [
     "REPORT_COMPARISON_DIGEST_DOMAIN",
     "REPORT_ENVELOPE_DIGEST_DOMAIN",
     "REPORT_EVALUATION_DIGEST_DOMAIN",
+    "REPORT_RUN_IDENTITY_TIER",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
     "RUNTIME_REACHABILITY_CATALOG_VERSION",

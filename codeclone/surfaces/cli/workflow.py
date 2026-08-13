@@ -45,6 +45,7 @@ from ...core.reporting import (
 from ...observability import bootstrap as start_observability
 from ...observability import operation, span
 from ...report.html import build_html_report
+from ...utils.run_identity import report_run_identity
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
 from . import console as cli_console
@@ -59,7 +60,6 @@ from . import state as cli_state
 from . import summary as cli_summary
 from . import tips as cli_tips
 from .attrs import bool_attr
-from .run_identity import report_run_identity
 from .subcommands import dispatch_subcommand
 from .types import CLIArgsLike, StatusConsole, require_status_console
 

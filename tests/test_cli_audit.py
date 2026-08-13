@@ -1134,7 +1134,7 @@ def test_is_report_document_type_guard_preserves_identity() -> None:
 
 
 def test_report_run_identity_refuses_a_malformed_integrity_block() -> None:
-    from codeclone.surfaces.cli.run_identity import (
+    from codeclone.utils.run_identity import (
         ReportRunIdentityError,
         report_run_identity,
     )
@@ -1288,7 +1288,7 @@ def test_workflow_audit_emit_and_digest_helpers(
     import sys
 
     from codeclone.surfaces.cli import workflow as cli_workflow
-    from codeclone.surfaces.cli.run_identity import ReportRunIdentityError
+    from codeclone.utils.run_identity import ReportRunIdentityError
 
     class _Args:
         audit_enabled = True

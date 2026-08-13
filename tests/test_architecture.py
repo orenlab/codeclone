@@ -10,6 +10,7 @@ import ast
 import json
 from pathlib import Path
 
+from codeclone.contracts import REPORT_RUN_IDENTITY_TIER
 from tests._import_graph import (
     _iter_import_edges,
     _iter_local_imports,
@@ -759,3 +760,82 @@ def test_phase39i_legacy_content_hit_and_git_owners_are_absent() -> None:
 def test_phase39l_observations_package_is_an_r2_fact_owner() -> None:
     assert _ring_for_module("codeclone.observations") == "r2"
     assert _ring_for_module("codeclone.observations.lanes") == "r2"
+
+
+#: The two modules allowed to spell the run-identity tier as a literal, and the
+#: reason each one is not a reader.
+#:
+#: ``report/document/integrity.py`` is the value's producer: ``pyproject.toml``
+#: registers ``codeclone.report.document.integrity:_build_integrity_payload`` as
+#: the canonical owner of ``report.run_identity/v1``, and the wire keys it emits
+#: are the document schema itself, not a lookup into someone else's document.
+#: ``models.py`` declares ``ReportDigestKind``, the closed vocabulary of tier
+#: names; a ``Literal`` member is a type, and a type cannot be imported as a
+#: value by a module that has to navigate to one.
+_RUN_IDENTITY_TIER_LITERAL_OWNERS = (
+    "codeclone/models.py",
+    "codeclone/report/document/integrity.py",
+)
+
+
+def _module_address_tokens(path: Path) -> frozenset[str]:
+    """Every string constant in a module, plus its dotted-path segments.
+
+    Segments matter because a reader does not have to spell ``"digests"`` on
+    its own: ``utils.mapping_paths.section`` is addressed by one dotted string,
+    so ``f"integrity.digests.{tier}"`` hides both the navigation and, when the
+    tier is inlined, the duplicated answer inside a single constant. Splitting
+    on ``.`` is what makes those two spellings the same fact to this scan --
+    without it the guard silently skipped the very module that owned the
+    duplicate.
+    """
+
+    tree = ast.parse(path.read_text("utf-8"))
+    tokens: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            tokens.add(node.value)
+            tokens.update(node.value.split("."))
+    return frozenset(tokens)
+
+
+def test_the_run_identity_tier_is_named_by_the_contract_in_every_reader() -> None:
+    """A module that navigates report digests takes the tier from r0.
+
+    The tier that names a run was owned by ``surfaces.cli.run_identity`` (r4),
+    which ``controller_insights`` (r2p) cannot import: the two rings share only
+    r0 and r1, so the controller plane could not reach the ratified answer and
+    spelled its own address instead. Moving the name into ``contracts`` makes
+    the answer reachable; this keeps it single.
+
+    The rule is stated over readers, not over the word: ``"evaluation"`` also
+    names an unrelated workflow phase and the document section the tier seals,
+    and neither of those modules navigates ``digests``. A module is a reader
+    here exactly when it spells ``digests``, and a reader may not also spell
+    the tier -- it has to import ``REPORT_RUN_IDENTITY_TIER``.
+
+    The discovered reader set is asserted non-empty and named, because a
+    detector that matches nothing would let this pass over an empty scan.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    readers: list[str] = []
+    offenders: list[str] = []
+    for module_name, path in _iter_codeclone_modules(root):
+        assert module_name  # every production module is ring-registered
+        relative = str(path.relative_to(root))
+        tokens = _module_address_tokens(path)
+        if "digests" not in tokens:
+            continue
+        readers.append(relative)
+        if relative in _RUN_IDENTITY_TIER_LITERAL_OWNERS:
+            continue
+        if REPORT_RUN_IDENTITY_TIER in tokens:
+            offenders.append(relative)
+
+    assert offenders == [], (
+        "these modules read report digests and still spell the run identity "
+        f"tier instead of importing REPORT_RUN_IDENTITY_TIER: {offenders}"
+    )
+    assert "codeclone/utils/run_identity.py" in readers
+    assert "codeclone/surfaces/mcp/_session_helpers.py" in readers

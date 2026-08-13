@@ -29,11 +29,11 @@ import codeclone.surfaces.cli.console as cli_console
 import codeclone.surfaces.cli.post_run as cli_post_run
 import codeclone.surfaces.cli.report_meta as cli_meta_mod
 import codeclone.surfaces.cli.reports_output as cli_reports
-import codeclone.surfaces.cli.run_identity as cli_run_identity
 import codeclone.surfaces.cli.runtime as cli_runtime
 import codeclone.surfaces.cli.summary as cli_summary
 import codeclone.surfaces.cli.tips as cli_tips
 import codeclone.surfaces.cli.workflow as cli
+import codeclone.utils.run_identity as run_identity_mod
 from codeclone import __version__
 from codeclone import ui_messages as ui
 from codeclone.analysis.normalizer import NormalizationConfig
@@ -1874,8 +1874,8 @@ def test_report_run_identity_refuses_every_shape_of_absence(
     disagreeing runs share a name.
     """
 
-    with pytest.raises(cli_run_identity.ReportRunIdentityError):
-        cli_run_identity.report_run_identity(report_document)
+    with pytest.raises(run_identity_mod.ReportRunIdentityError):
+        run_identity_mod.report_run_identity(report_document)
 
 
 def test_banner_title_without_root_returns_single_line() -> None:

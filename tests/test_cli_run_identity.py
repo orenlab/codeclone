@@ -32,11 +32,11 @@ from types import SimpleNamespace
 import pytest
 
 from codeclone.surfaces.cli import workflow as cli_workflow
-from codeclone.surfaces.cli.run_identity import (
+from codeclone.utils.mapping_paths import section
+from codeclone.utils.run_identity import (
     ReportRunIdentityError,
     report_run_identity,
 )
-from codeclone.utils.mapping_paths import section
 
 from ._report_fixtures import (
     GATE_POLICY_GENERATED_AT,

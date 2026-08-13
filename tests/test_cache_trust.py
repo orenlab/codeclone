@@ -585,6 +585,12 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "REPORT_COMPARISON_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
     "REPORT_ENVELOPE_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
     "REPORT_EVALUATION_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
+    "REPORT_RUN_IDENTITY_TIER": (
+        _LANE_NONE,
+        "names which report integrity digest a run is called by; a wire key of "
+        "a document built after the cache is read, so no cache payload stores "
+        "it or anything derived from it",
+    ),
     # ── no stored output: thresholds READ over stored facts, never stored with
     #    them. A gate threshold decides a verdict at report time; moving it must
     #    not re-parse a single file (the risk BANDS above are the opposite case

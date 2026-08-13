@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 from ...cache.store import Cache
-from ...contracts import REPORT_SCHEMA_VERSION
+from ...contracts import REPORT_RUN_IDENTITY_TIER, REPORT_SCHEMA_VERSION
 from ...domain.findings import (
     CLONE_NOVELTY_KNOWN,
     CLONE_NOVELTY_NEW,
@@ -729,24 +729,22 @@ def _build_cache(
 def _run_identity_digest(report_document: Mapping[str, object]) -> Mapping[str, object]:
     """Return the one digest tier every MCP run identity is taken from.
 
-    ``evaluation`` seals the facts, the baseline, the gate thresholds and the
-    verdict. The tier below it -- ``comparison`` -- stops at facts and
-    baseline, so two runs over one tree that answer differently because their
-    thresholds differ shared an id: the run store is keyed by
-    ``(root, run_id)``, so the second registration replaced the first and the
-    disagreement left no trace. The tier above it -- the envelope -- also
-    seals ``meta.runtime.report_generated_at_utc``, the document's only
-    time-like field, which would make every re-analysis a new run by
-    construction and leave ``after_run_not_new`` permanently unable to fire.
+    Which tier that is, and why it is the only one that can be, is stated once
+    at :data:`~codeclone.contracts.REPORT_RUN_IDENTITY_TIER`. This module used
+    to restate it: the run store is keyed by ``(root, run_id)``, so a tier that
+    moves too rarely makes two disagreeing runs replace each other under one
+    id, and one that moves too often leaves ``after_run_not_new`` unable to
+    fire -- the same two failures the CLI reasoned about separately, in its own
+    words, next to its own copy of the answer.
 
-    Named once, and read through here by both callers, because the receipt
+    The whole mapping is returned rather than the value, because the receipt
     labels the value with the algorithm this same tier declares: a value from
     one tier under another tier's algorithm is not provenance.
     """
 
     integrity = _as_mapping(report_document.get("integrity"))
     digests = _as_mapping(integrity.get("digests"))
-    return _as_mapping(digests.get("evaluation"))
+    return _as_mapping(digests.get(REPORT_RUN_IDENTITY_TIER))
 
 
 def _report_digest(report_document: Mapping[str, object]) -> str:

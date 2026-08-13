@@ -4,27 +4,26 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""The one place the CLI decides which report digest names a run."""
+"""The one place a report document is asked which run it reports.
+
+This lived in ``surfaces/cli`` (ring r4) while the controller plane that needs
+the same answer -- ``controller_insights`` (r2p) -- may only import r0, r1 and
+its own ring. The answer was therefore unreachable from the surface that most
+needed it, and the status line grew its own address into the document instead:
+one fact, two owners, and the two drifted. Ring r1 is the lowest ring that can
+both reach :mod:`codeclone.utils.mapping_paths` and be reached by r2p and r4
+alike, so the reader belongs here and the tier it reads belongs one ring lower,
+in :mod:`codeclone.contracts`.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Final
 
-from ...utils.mapping_paths import section
+from ..contracts import REPORT_RUN_IDENTITY_TIER
+from .mapping_paths import section
 
-#: The digest tier a CLI run is named by.
-#:
-#: ``evaluation`` seals the facts, the baseline, the gate thresholds and the
-#: outcome. The tier below it -- ``comparison`` -- stops at facts and baseline,
-#: so two runs over one tree that answer differently because their thresholds
-#: differ were written to the audit trail under one name, and nothing in the
-#: trail could tell them apart. The tier above it -- the envelope -- also seals
-#: ``meta.runtime.report_generated_at_utc``, the document's only time-like
-#: field, so an identity taken from there would be new on every run by
-#: construction and no consumer could tell a repeated measurement from a
-#: changed one.
-_RUN_IDENTITY_TIER: Final = "evaluation"
+_RUN_IDENTITY_PATH = f"integrity.digests.{REPORT_RUN_IDENTITY_TIER}"
 
 
 class ReportRunIdentityError(RuntimeError):
@@ -46,13 +45,10 @@ def report_run_identity(report_document: Mapping[str, object]) -> str:
     so; none of them may substitute a value for it.
     """
 
-    value = section(report_document, f"integrity.digests.{_RUN_IDENTITY_TIER}").get(
-        "value"
-    )
+    value = section(report_document, _RUN_IDENTITY_PATH).get("value")
     if not isinstance(value, str) or not value.strip():
         raise ReportRunIdentityError(
-            "Report document carries no "
-            f"integrity.digests.{_RUN_IDENTITY_TIER}.value run identity."
+            f"Report document carries no {_RUN_IDENTITY_PATH}.value run identity."
         )
     return value
 

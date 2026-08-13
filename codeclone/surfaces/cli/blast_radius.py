@@ -15,7 +15,7 @@ from ...analysis.blast_radius import BlastRadiusResult, compute_blast_radius
 from ...contracts import ExitCode
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from .run_identity import ReportRunIdentityError, report_run_identity
+from ...utils.run_identity import ReportRunIdentityError, report_run_identity
 from .types import PrinterLike
 
 _RISK_STYLES = {
