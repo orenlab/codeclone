@@ -24,6 +24,8 @@ from codeclone.audit.schema import open_audit_db
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 
+from ._report_fixtures import build_test_report_document
+
 
 def _default_analysis_summary() -> dict[str, object]:
     return {
@@ -127,16 +129,25 @@ def test_open_audit_db_stores_agent_start_epoch(tmp_path: Path) -> None:
     assert payload["files"] == 2
 
 
-def test_emit_accepts_mcp_internal_summary_shape(tmp_path: Path) -> None:
+def test_emit_reads_the_canonical_run_summary_shape(tmp_path: Path) -> None:
+    """One spelling per figure: the canonical run summary, nothing beside it.
+
+    The emitter used to accept a second spelling of every figure -- the run
+    session's internal ``analysis_mode``/``report_schema_version``/
+    ``findings_summary`` -- so a surface handing over the wrong object still
+    produced a row that looked populated. It no longer does, and the surfaces
+    hand over the summary they publish.
+    """
+
     db_path = _write_analysis_completed_event(
         tmp_path,
         summary={
-            "analysis_mode": "full",
-            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "mode": "full",
+            "schema": REPORT_SCHEMA_VERSION,
             "health": {"score": 88, "grade": "A"},
-            "findings_summary": {"total": 3, "new": 0},
+            "findings": {"total": 3, "new": 0},
             "inventory": {"files": 10, "lines": 100, "functions": 5},
-            "baseline_diff": {"new_clone_groups_total": 0},
+            "diff": {"new_clones": 0, "health_delta": None},
         },
         run_id="runmcpinternal",
         agent_label="cursor-vscode/test",
@@ -154,48 +165,13 @@ def test_emit_accepts_mcp_internal_summary_shape(tmp_path: Path) -> None:
     assert payload["findings_total"] == 3
 
 
-def test_analysis_completed_payload_from_report_document() -> None:
-    payload = analysis_completed_payload_from_report(
-        report_document={
-            "report_schema_version": REPORT_SCHEMA_VERSION,
-            "meta": {
-                "runtime": {"analysis_mode": "full"},
-                "health_score": 82,
-                "health_grade": "B",
-            },
-            "inventory": {
-                "file_registry": {"items": ["a.py", "b.py"]},
-                "lines": 100,
-                "functions": 4,
-            },
-            "findings": {"summary": {"total": 7, "new": 2}},
-            "metrics": {"summary": {"health": {"score": 80, "grade": "B"}}},
-        },
-        source=ANALYSIS_SOURCE_CLI,
-        new_func_count=1,
-        new_block_count=2,
-    )
-    assert payload["source"] == "cli"
-    assert payload["mode"] == "full"
-    findings = cast(dict[str, object], payload["findings"])
-    inventory = cast(dict[str, object], payload["inventory"])
-    diff = cast(dict[str, object], payload["diff"])
-    assert findings["total"] == 7
-    assert inventory["files"] == 2
-    assert diff["new_clones"] == 3
-
-
-def test_analysis_completed_payload_keeps_uncompared_novelty_null() -> None:
+def test_analysis_completed_payload_keeps_uncompared_novelty_null(
+    tmp_path: Path,
+) -> None:
     # No clone lane was compared, so the audit row must not record a zero the
     # run never measured.
     payload = analysis_completed_payload_from_report(
-        report_document={
-            "report_schema_version": REPORT_SCHEMA_VERSION,
-            "meta": {"runtime": {"analysis_mode": "full"}},
-            "inventory": {"file_registry": {"items": ["a.py"]}, "lines": 10},
-            "findings": {"summary": {"total": 1, "new": 0}},
-            "metrics": {"summary": {"health": {"score": 80, "grade": "B"}}},
-        },
+        report_document=_document_with_distinct_figures(tmp_path),
         source=ANALYSIS_SOURCE_CLI,
         new_func_count=None,
         new_block_count=None,
@@ -209,16 +185,9 @@ def test_emit_analysis_completed_from_report_writes_row(tmp_path: Path) -> None:
         "[tool.codeclone]\naudit_enabled = true\n",
         encoding="utf-8",
     )
-    report = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 90},
-        "inventory": {"file_registry": {"items": ["x.py"]}},
-        "findings": {"total": 1},
-        "metrics": {"summary": {"health": {"score": 90, "grade": "A"}}},
-    }
     emit_analysis_completed_from_report(
         root_path=tmp_path,
-        report_document=report,
+        report_document=_document_with_distinct_figures(tmp_path),
         report_digest="d" * 64,
         run_id="runfromreport",
         source=ANALYSIS_SOURCE_CLI,
@@ -230,41 +199,36 @@ def test_emit_analysis_completed_from_report_writes_row(tmp_path: Path) -> None:
         "SELECT status, agent_label FROM controller_events LIMIT 1",
     )
     assert row is not None
-    assert row[0] == "full"
+    assert row[0] == "changed_paths"
     assert str(row[1]).startswith("codeclone-cli/")
 
 
-def test_analysis_completed_payload_resolves_internal_summary_keys() -> None:
-    payload = analysis_completed_payload(
-        summary={
-            "analysis_mode": "changed_paths",
-            "findings_summary": {"total": 4, "new": 0},
-            "health": {"score": 55, "grade": "C"},
-            "inventory": {"files": 1},
-            "diff": {},
-        },
-        source=ANALYSIS_SOURCE_MCP,
-    )
-    assert payload["mode"] == "changed_paths"
-    findings = cast(dict[str, object], payload["findings"])
-    assert findings["total"] == 4
+def test_analysis_completed_payload_records_uncounted_entities_as_null() -> None:
+    """A run that counted nothing must not be recorded as having counted zero.
 
+    ``inventory.code`` is absent from a document whose run never counted
+    entities, and a zero there would be a measurement that never happened --
+    the same refusal the uncompared clone lane makes for ``diff.new_clones``.
+    """
 
-def test_analysis_completed_payload_ignores_string_file_registry_items() -> None:
     payload = analysis_completed_payload_from_report(
         report_document={
             "report_schema_version": REPORT_SCHEMA_VERSION,
-            "meta": {"runtime": {"analysis_mode": "full"}},
-            "inventory": {"file_registry": {"items": "not-a-list"}},
-            "findings": {"total": 0},
+            "meta": {"analysis_mode": "full"},
+            "inventory": {},
+            "findings": {"summary": {"total": 0}},
             "metrics": {"summary": {"health": {"score": 1, "grade": "F"}}},
         },
         source=ANALYSIS_SOURCE_CLI,
         new_func_count=0,
         new_block_count=0,
     )
-    inventory = cast(dict[str, object], payload["inventory"])
-    assert inventory["files"] == 0
+
+    assert payload["inventory"] == {
+        "files": None,
+        "lines": None,
+        "functions": None,
+    }
 
 
 def test_analysis_mode_fallback_to_completed() -> None:
@@ -296,16 +260,9 @@ def test_emit_analysis_completed_from_report_custom_agent_fields(
         "[tool.codeclone]\naudit_enabled = true\n",
         encoding="utf-8",
     )
-    report = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 90},
-        "inventory": {"file_registry": {"items": ["x.py"]}},
-        "findings": {"total": 1},
-        "metrics": {"summary": {"health": {"score": 90, "grade": "A"}}},
-    }
     emit_analysis_completed_from_report(
         root_path=tmp_path,
-        report_document=report,
+        report_document=_document_with_distinct_figures(tmp_path),
         report_digest="d" * 64,
         run_id="runcustomagent",
         source=ANALYSIS_SOURCE_MCP,
@@ -325,9 +282,131 @@ def test_emit_analysis_completed_from_report_custom_agent_fields(
     assert row == (4242, 1700000001, "custom-agent")
 
 
-def test_sequence_normalizes_only_list_values() -> None:
-    from codeclone.audit.analysis_completed import _sequence
+def _document_with_distinct_figures(scan_root: Path) -> dict[str, object]:
+    """A product-built report whose figures cannot coincide.
 
-    assert _sequence("not-a-list") == ()
-    assert _sequence([1, 2]) == (1, 2)
-    assert _sequence(42) == ()
+    ``as_mapping`` answers a missing key with an empty mapping, so a read of a
+    key the document never carried is indistinguishable from a read of a zero
+    -- and a fixture full of zeros cannot tell them apart either. Every count
+    here differs from every other one: 37 files were found while the file
+    registry holds 4 paths, parsed lines, functions and methods are pairwise
+    distinct, and the health score matches none of them. A payload that reports
+    the wrong fact therefore cannot look right by accident.
+    """
+
+    return build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"analysis_mode": "changed_paths", "scan_root": str(scan_root)},
+        inventory={
+            "file_list": [str(scan_root / f"pkg/mod_{index}.py") for index in range(4)],
+            "files": {"total_found": 37, "analyzed": 31, "cached": 0, "skipped": 6},
+            "code": {
+                "parsed_lines": 6131,
+                "functions": 419,
+                "methods": 57,
+                "classes": 23,
+            },
+        },
+        metrics={"health": {"score": 74, "grade": "B"}},
+    )
+
+
+def test_analysis_completed_payload_reports_the_documents_own_figures(
+    tmp_path: Path,
+) -> None:
+    """The CLI event carries the run's counts, not a recount of a rendered list.
+
+    ``inventory.lines`` and ``inventory.functions`` are keys the canonical
+    document has never had, so both were recorded as null on every CLI
+    analysis, and the file count was the length of the file registry rather
+    than the number of files the run found. The registry is a projection of
+    the paths that resolved under the scan root; equating it with
+    ``inventory.files.total_found`` is a second counter of a fact the document
+    already publishes, and here the two differ by 33.
+    """
+
+    document = _document_with_distinct_figures(tmp_path)
+    inventory = cast(dict[str, object], document["inventory"])
+    registry = cast(dict[str, object], inventory["file_registry"])
+    assert len(cast(list[object], registry["items"])) == 4
+
+    payload = analysis_completed_payload_from_report(
+        report_document=document,
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=1,
+        new_block_count=2,
+    )
+
+    assert payload["mode"] == "changed_paths"
+    assert payload["health"] == {"score": 74, "grade": "B"}
+    assert payload["inventory"] == {"files": 37, "lines": 6131, "functions": 476}
+    assert cast(dict[str, object], payload["findings"])["total"] == 0
+    assert cast(dict[str, object], payload["diff"])["new_clones"] == 3
+
+
+def test_analysis_completed_payload_ignores_the_withdrawn_locations(
+    tmp_path: Path,
+) -> None:
+    """The keys the document stopped carrying must not be consulted at all.
+
+    Each of these was read first and the correct location second, so every one
+    of them was right by coincidence: the fallback happened to hold the truth.
+    Asserting only the correct answer stays green with the withdrawn read
+    restored in front of it, which is why each withdrawn location is filled
+    here with a value no correct payload can report.
+    """
+
+    document = _document_with_distinct_figures(tmp_path)
+    meta = cast(dict[str, object], document["meta"])
+    cast(dict[str, object], meta["runtime"])["analysis_mode"] = "full"
+    meta["health_score"] = 999
+    meta["health_grade"] = "Z"
+    cast(dict[str, object], document["findings"])["total"] = 999
+
+    payload = analysis_completed_payload_from_report(
+        report_document=document,
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=0,
+        new_block_count=0,
+    )
+
+    assert payload["mode"] == "changed_paths"
+    assert payload["health"] == {"score": 74, "grade": "B"}
+    assert cast(dict[str, object], payload["findings"])["total"] == 0
+
+
+def test_emitted_cli_analysis_row_carries_the_documents_file_count(
+    tmp_path: Path,
+) -> None:
+    """The wire is what a reader sees; prove the number reaches it.
+
+    The compact projection is the shape stored for every analysis, and the
+    file count is the one inventory figure it carries. Reading it back from
+    SQLite proves the fix survives the whole path, not only the builder.
+    """
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\naudit_enabled = true\n",
+        encoding="utf-8",
+    )
+    emit_analysis_completed_from_report(
+        root_path=tmp_path,
+        report_document=_document_with_distinct_figures(tmp_path),
+        report_digest="f" * 64,
+        run_id="rundistinctfigures",
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=0,
+        new_block_count=0,
+    )
+
+    row = _fetch_first_event_row(
+        tmp_path / ".codeclone/db/audit.sqlite3",
+        "SELECT payload_json FROM controller_events LIMIT 1",
+    )
+    assert row is not None
+    payload = json.loads(str(row[0]))
+    assert payload["files"] == 37
+    assert payload["health_score"] == 74
+    assert payload["mode"] == "changed_paths"

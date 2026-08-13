@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from .._context import ReportContext
 
+_as_float = _coerce.as_float
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
@@ -59,30 +60,27 @@ def _render_coupled_cell(row_data: Mapping[str, object]) -> str:
     )
 
 
-def _positive_row_metric_values(
-    rows_data: Sequence[object],
-    *,
-    key: str,
-) -> list[int]:
-    return [
-        _as_int(_as_mapping(row).get(key))
-        for row in rows_data
-        if _as_int(_as_mapping(row).get(key)) > 0
-    ]
-
-
 def _summary_card_inputs(
     summary: Mapping[str, object],
-    rows_data: Sequence[object],
     *,
     max_key: str,
-    value_key: str,
-) -> tuple[int, int, int, list[int]]:
+) -> tuple[int, int, int, float]:
+    """The four figures a metric card band shows, all read from the document.
+
+    The average and the population used to be re-derived here from the rendered
+    rows, over the rows with a positive value only. That divided by the classes
+    that happen to be coupled rather than by the measured population, so the
+    HTML answered a metric question differently from the same run's text,
+    Markdown, SARIF and CLI output -- 2.9 against the document's 1.41 on this
+    repository. The presentation layer shows what the document carries; it does
+    not recompute it.
+    """
+
     return (
         _as_int(summary.get("high_risk")),
         _as_int(summary.get("total")),
         _as_int(summary.get(max_key)),
-        _positive_row_metric_values(rows_data, key=value_key),
+        _as_float(summary.get("average")),
     )
 
 
@@ -90,13 +88,7 @@ def _complexity_cards(
     summary: Mapping[str, object],
     rows_data: Sequence[object],
 ) -> str:
-    high_risk, total, max_cc, cc_vals = _summary_card_inputs(
-        summary,
-        rows_data,
-        max_key="max",
-        value_key="cyclomatic_complexity",
-    )
-    avg_cc = sum(cc_vals) / len(cc_vals) if cc_vals else 0
+    high_risk, total, max_cc, avg_cc = _summary_card_inputs(summary, max_key="max")
     deep = sum(1 for r in rows_data if _as_int(_as_mapping(r).get("nesting_depth")) > 4)
     cards = [
         _stat_card(
@@ -116,7 +108,7 @@ def _complexity_cards(
         _stat_card(
             "Avg CC",
             f"{avg_cc:.1f}",
-            detail=_micro_badges(("functions", len(cc_vals))),
+            detail=_micro_badges(("functions", total)),
             value_tone="warn" if avg_cc > 5 else "good",
             glossary_tip_fn=glossary_tip,
         ),
@@ -131,17 +123,8 @@ def _complexity_cards(
     return f'<div class="stat-cards">{"".join(cards)}</div>'
 
 
-def _coupling_cards(
-    summary: Mapping[str, object],
-    rows_data: Sequence[object],
-) -> str:
-    high_risk, total, max_cbo, cbo_vals = _summary_card_inputs(
-        summary,
-        rows_data,
-        max_key="max",
-        value_key="cbo",
-    )
-    avg_cbo = sum(cbo_vals) / len(cbo_vals) if cbo_vals else 0
+def _coupling_cards(summary: Mapping[str, object]) -> str:
+    high_risk, total, max_cbo, avg_cbo = _summary_card_inputs(summary, max_key="max")
     medium_risk = _as_int(summary.get("medium_risk"))
     cards = [
         _stat_card(
@@ -161,7 +144,7 @@ def _coupling_cards(
         _stat_card(
             "Avg CBO",
             f"{avg_cbo:.1f}",
-            detail=_micro_badges(("classes", len(cbo_vals))),
+            detail=_micro_badges(("classes", total)),
             value_tone="warn" if avg_cbo > 5 else "good",
             glossary_tip_fn=glossary_tip,
         ),
@@ -300,7 +283,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         )
         for r in cp_rows_data[:50]
     ]
-    cp_panel = _coupling_cards(coupling_summary, cp_rows_data) + render_rows_table(
+    cp_panel = _coupling_cards(coupling_summary) + render_rows_table(
         headers=("Class", "File", "CBO", "Risk", "Coupled classes"),
         rows=cp_rows,
         empty_message="Coupling metrics are not available.",

@@ -1373,6 +1373,11 @@ def _discovery_panel_html(*, sinks: int = 9) -> str:
             "enforcement_enabled": True,
             "registry_contracts": 2,
             "sinks": sinks,
+            # The candidate population, stated the way the report states it.
+            # The panel reads its counts from the summary instead of recounting
+            # rows, so a fixture omitting this key describes a document the
+            # builder never emits and leaves shown-of-total without a total.
+            "candidates": len(items),
         },
         "items": items,
     }

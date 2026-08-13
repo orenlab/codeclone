@@ -6,6 +6,7 @@
 
 import ast
 import json
+import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
@@ -79,6 +80,7 @@ from tests._report_access import (
 )
 from tests._report_fixtures import (
     REPEATED_STMT_HASH,
+    build_maximal_report_document,
     repeated_block_group_key,
     write_repeated_assert_source,
 )
@@ -289,8 +291,8 @@ def test_report_reader_rejects_non_mapping_model_projection(
     report = tmp_path / "report.json"
     report.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
-        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate_json",
-        staticmethod(lambda _raw: _NonMappingProjection()),
+        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate",
+        staticmethod(lambda _decoded: _NonMappingProjection()),
     )
 
     result = load_report_artifact(report)
@@ -1138,6 +1140,97 @@ def test_report_json_serializes_rich_suggestions_and_overview() -> None:
         "items": [],
     }
     assert payload["derived"]["hotlists"]["most_actionable_ids"] == []
+
+
+def _markdown_integrity_bullets(markdown: str) -> list[tuple[str, str]]:
+    """The Integrity block's bullets, as ``(label, rendered value)``."""
+
+    block = markdown.split("## Integrity", 1)[1]
+    rows: list[tuple[str, str]] = []
+    for line in block.splitlines():
+        if not line.startswith("- "):
+            continue
+        label, _sep, value = line[2:].partition(": ")
+        rows.append((label, value))
+    return rows
+
+
+def _text_integrity_fields(text: str, prefix: str) -> dict[str, str]:
+    """One ``key=value`` line of the text report's INTEGRITY block.
+
+    Splitting on spaces is safe for exactly this block: every value it prints
+    is a single token, and a value that grew a space would show up here as a
+    stray field rather than pass unnoticed.
+    """
+
+    line = next(row for row in text.splitlines() if row.startswith(prefix))
+    fields: dict[str, str] = {}
+    for field in line[len(prefix) :].split(" "):
+        key, sep, value = field.partition("=")
+        if sep:
+            fields[key] = value
+    return fields
+
+
+def _html_integrity_labels(html: str) -> list[str]:
+    """The row labels of the HTML provenance panel's Integrity section."""
+
+    section = html.split(">Integrity</h3>", 1)[1].split("</section>", 1)[0]
+    return re.findall(r'prov-td-label">([^<]+)</td>', section)
+
+
+def _html_integrity_data_attrs(html: str) -> dict[str, str]:
+    """The machine-readable twin of that panel, one attribute per fact."""
+
+    return dict(
+        re.findall(r'(data-(?:canonical|digest|envelope)[a-z-]*)="([^"]*)"', html)
+    )
+
+
+def test_every_surface_prints_the_integrity_facts_the_document_carries() -> None:
+    """One integrity block, and the document decides what is in it.
+
+    All three surfaces asked the canonicalization block for a ``scope`` and a
+    ``sections`` list, and the envelope tier for a ``verified`` flag. The
+    document carries none of the three: canonicalization declares ``version``,
+    ``serializer`` and ``envelope_null_sentinel``, and the envelope tier
+    declares ``kind``/``algorithm``/``digest_version``/``value``. Markdown
+    printed the three absences as "(none)" bullets, the text report dropped
+    them silently, and every surface omitted the canonicalization facts the
+    document does publish.
+
+    The comparison is a multiset equality against the document's own values,
+    not a list of expected literals: a fact added to either block and printed
+    nowhere fails here, and so does a bullet with nothing behind it.
+    """
+
+    document = build_maximal_report_document()
+    integrity = cast(dict[str, object], document["integrity"])
+    canonicalization = cast(dict[str, str], integrity["canonicalization"])
+    envelope = cast(
+        dict[str, str],
+        cast(dict[str, object], integrity["digests"])["envelope"],
+    )
+    assert len(canonicalization) + len(envelope) == 7
+
+    text = render_text_report_document(document)
+    markdown = render_markdown_report_document(document)
+    html = build_html_report(report_document=document)
+
+    assert _text_integrity_fields(text, "Canonicalization: ") == canonicalization
+    assert _text_integrity_fields(text, "Digest: ") == envelope
+
+    bullets = _markdown_integrity_bullets(markdown)
+    printed = [value for label, value in bullets if label != "Hotlists"]
+    assert sorted(printed) == sorted([*canonicalization.values(), *envelope.values()])
+
+    assert _html_integrity_labels(html) == [
+        label for label, _value in bullets if label != "Hotlists"
+    ]
+    # The panel and its data attributes are two renderings of one block, so a
+    # withdrawn key coming back in the machine-readable half alone is still a
+    # surface disagreeing with the canonical report.
+    assert sorted(_html_integrity_data_attrs(html).values()) == sorted(printed)
 
 
 def test_report_json_integrity_matches_canonical_sections() -> None:
@@ -4029,3 +4122,56 @@ def test_text_and_markdown_inventory_carry_the_unsupported_construct_count() -> 
     )
     markdown_out = render_markdown_report_document(document)
     assert "unsupported_construct_skipped=1" in markdown_out
+
+
+def test_report_reader_parses_the_stored_document_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One artifact, one parse.
+
+    The reader scanned the raw bytes for duplicate keys with ``json.loads`` and
+    then handed the same bytes to ``model_validate_json``, so every stored
+    report was decoded twice and two full object graphs were alive at the
+    process high-water mark. On the artifact this repository emits that is two
+    parses of a document already measured at 3.08x the reader's own byte limit;
+    the cost is paid by ``memory init`` and by every API caller.
+
+    The duplicate-key scan already produces the mapping, so validating that
+    mapping is the same contract for one decode instead of two. Counting the
+    decodes is the honest pin: asserting only that the read still succeeds
+    stays green with the second parse restored.
+    """
+
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(tmp_path)},
+    )
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(document), encoding="utf-8")
+
+    decodes: list[str] = []
+    real_loads = json.loads
+
+    def counting_loads(*args: object, **kwargs: object) -> object:
+        decodes.append("json.loads")
+        return real_loads(*args, **kwargs)  # type: ignore[arg-type]
+
+    def refuse_validate_json(*_args: object, **_kwargs: object) -> object:
+        decodes.append("model_validate_json")
+        raise AssertionError("the raw bytes must not be decoded a second time")
+
+    monkeypatch.setattr("codeclone.report.document.reader.json.loads", counting_loads)
+    monkeypatch.setattr(
+        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate_json",
+        staticmethod(refuse_validate_json),
+    )
+
+    result = load_report_artifact(report)
+
+    assert not isinstance(result, ReportArtifactFailure), getattr(
+        result, "detail", result
+    )
+    assert decodes == ["json.loads"]

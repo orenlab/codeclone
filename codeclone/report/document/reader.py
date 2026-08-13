@@ -61,7 +61,7 @@ def read_report_document_v3(
         return ReportReadFailure(reason="unreadable", detail=str(exc))
 
     try:
-        json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+        decoded = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
     except _DuplicateKeyError as exc:
         return ReportReadFailure(
             reason="duplicate_key",
@@ -70,8 +70,17 @@ def read_report_document_v3(
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         return ReportReadFailure(reason="invalid_json", detail=str(exc))
 
+    # Validate what the duplicate-key scan already decoded. Handing the raw
+    # bytes to ``model_validate_json`` decoded this artifact a second time and
+    # held a second full object graph alive at the process high-water mark, for
+    # a document already measured at several times the reader's own byte limit.
+    # The two paths are equivalent for this shape rather than equivalent by
+    # hope: the model is strict, and the strict JSON and strict Python
+    # validators differ only where a JSON scalar has to be coerced into a
+    # narrower Python type -- there is no tuple field and no float field here
+    # for them to disagree about.
     try:
-        parsed = ReportDocumentV3Input.model_validate_json(raw)
+        parsed = ReportDocumentV3Input.model_validate(decoded)
     except ValueError as exc:
         return ReportReadFailure(reason="invalid_shape", detail=str(exc))
 
