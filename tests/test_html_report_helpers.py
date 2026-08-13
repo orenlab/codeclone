@@ -421,7 +421,10 @@ def _section_ctx(**overrides: object) -> SimpleNamespace:
         "segment_sorted": (),
         "new_func_keys": frozenset({"clone:new"}),
         "new_block_keys": frozenset(),
-        "overview_data": {"source_breakdown": {"production": 3, "tests": 1}},
+        # ``derived.overview`` publishes the counts under this name; the flat
+        # ``source_breakdown`` spelling this fixture used to carry exists only
+        # in a materializer no production path calls.
+        "overview_data": {"source_scope_breakdown": {"production": 3, "tests": 1}},
         "bare_qualname": (
             lambda qualname, _filepath: qualname.rsplit(":", maxsplit=1)[-1]
         ),
@@ -882,22 +885,29 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
 
 
 def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
+    """The provenance tones, driven from the blocks the document carries.
+
+    This case used to hand the panel a flat ``meta`` carrying
+    ``baseline_python_tag``, ``cache_status`` and two ``metrics_baseline_*``
+    names. The v3 document projects all four into ``meta.baseline``,
+    ``meta.cache`` and ``meta.metrics_baseline``, so this fixture was the only
+    place those spellings existed and it kept the panel's withdrawn lookups
+    looking alive by supplying them itself.
+    """
+
     runtime_tag = current_python_tag()
     baseline_tag = "cp313" if runtime_tag != "cp313" else "cp314"
     meta_html = render_meta_panel(
         cast(
             Any,
             SimpleNamespace(
-                meta={
-                    "python_tag": runtime_tag,
-                    "baseline_python_tag": baseline_tag,
-                    "cache_status": "stale",
-                    "metrics_baseline_loaded": True,
-                    "metrics_baseline_payload_sha256_verified": True,
+                meta={"python_tag": runtime_tag},
+                baseline_meta={"status": "FAILED", "python_tag": baseline_tag},
+                cache_meta={"status": "stale"},
+                metrics_baseline_meta={
+                    "loaded": True,
+                    "payload_sha256_verified": True,
                 },
-                baseline_meta={"status": "FAILED"},
-                cache_meta={},
-                metrics_baseline_meta={},
                 runtime_meta={},
                 integrity_map={},
                 report_schema_version="2.9",

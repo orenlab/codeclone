@@ -919,9 +919,10 @@ def render_overview_panel(ctx: ReportContext) -> str:
     dependency_cycle_count = len(dep_cycles)
     dependency_max_depth = _as_int(dependencies_summary.get("max_depth"))
     dead_total = _as_int(dead_code_summary.get("total"))
-    dead_high_conf = _as_int(
-        dead_code_summary.get("high_confidence", dead_code_summary.get("critical"))
-    )
+    # ``critical`` was the raw metrics payload's spelling; the report document
+    # renamed it to ``high_confidence`` and emits only that, so the fallback
+    # could not fire in any configuration.
+    dead_high_conf = _as_int(dead_code_summary.get("high_confidence"))
     dead_suppressed = _as_int(dead_code_summary.get("suppressed", 0))
 
     health_score_raw = health_summary.get("score")
@@ -1165,8 +1166,15 @@ def render_overview_panel(ctx: ReportContext) -> str:
         )
         + overview_summary_item_html(
             label=CLUSTER_SOURCE_BREAKDOWN,
+            # ``derived.overview`` publishes this under
+            # ``source_scope_breakdown``. The flat ``source_breakdown``
+            # spelling exists only inside ``materialize_report_overview``,
+            # which no production path calls, so this panel had always been
+            # handed an empty mapping and had always answered "No source data
+            # available" -- while the same document counted ninety-five
+            # production files, forty test files and six fixtures.
             body_html=overview_source_breakdown_html(
-                _as_mapping(ctx.overview_data.get("source_breakdown"))
+                _as_mapping(ctx.overview_data.get("source_scope_breakdown"))
             ),
         )
         + "</div></section>"

@@ -280,14 +280,33 @@ def build_maximal_report_document() -> dict[str, object]:
     part of the schema, so a consumer reading them is reading a key the report
     carries. Callers that check consumer reads against a document need this
     shape, not a default one, or a conditional section reads as a withdrawn key.
+
+    Two more sections are optional in the same way and were missing here. The
+    analysis profile is emitted only when all six thresholds are declared, and
+    ``health.summary.dimensions`` is filled only when the health family carries
+    a measurement -- so the Overview's threshold line and the Dependencies
+    panel's health figure both read keys a thinner fixture does not carry. The
+    document is the reference for "what a consumer may read", so a gap in it
+    reads as a defect in the consumer.
     """
 
     return build_test_report_document(
         func_groups={},
         block_groups={},
         segment_groups={},
+        meta={
+            "analysis_profile": {
+                "min_loc": 6,
+                "min_stmt": 4,
+                "block_min_loc": 20,
+                "block_min_stmt": 8,
+                "segment_min_loc": 20,
+                "segment_min_stmt": 10,
+            },
+        },
         metrics={
             "coverage_join": {"summary": {}, "items": []},
+            "health": health_family_for_population(found=10, analyzed=10),
             "semantic_authority": {"summary": {}, "items": []},
         },
         suppressed_clone_groups=(
