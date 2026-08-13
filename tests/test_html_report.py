@@ -5919,12 +5919,20 @@ def _stat_card(html: str, label: str) -> str:
     return html[card_start : end if end != -1 else len(html)]
 
 
+def _stat_card_value_capture(html: str, label: str, pattern: str) -> str:
+    """One capture taken from a named stat card's value element."""
+
+    match = re.search(pattern, _stat_card(html, label))
+    assert match is not None, f"card {label!r} has no value"
+    return match.group(1)
+
+
 def _stat_card_value(html: str, label: str) -> str:
     """The value the HTML report prints on one named stat card."""
 
-    match = re.search(r'<div class="meta-value[^"]*">([^<]*)', _stat_card(html, label))
-    assert match is not None, f"card {label!r} has no value"
-    return match.group(1)
+    return _stat_card_value_capture(
+        html, label, r'<div class="meta-value[^"]*">([^<]*)'
+    )
 
 
 def _stat_card_badge(html: str, label: str, badge: str) -> str:
@@ -6025,6 +6033,90 @@ def test_html_population_badge_reports_the_measured_total() -> None:
 
     assert document["metrics"]["families"]["coupling"]["summary"]["total"] == 3
     assert _stat_card_badge(html, "Avg CBO", "classes") == "3"
+
+
+def _stat_card_value_classes(html: str, label: str) -> str:
+    """The classes one named stat card puts on its value, tone included."""
+
+    return _stat_card_value_capture(html, label, r'<div class="(meta-value[^"]*)">')
+
+
+def _graded_averages_document() -> dict[str, Any]:
+    """A document whose averages are far above the band the renderer invented.
+
+    Both averages sit above the ``5`` the two cards used to grade against, so a
+    renderer that still holds an opinion about an average says so out loud.
+    """
+
+    return build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics={
+            "complexity": {
+                "summary": {
+                    "average": 41.5,
+                    "max": 107,
+                    "high_risk": 3,
+                    "total": 12,
+                },
+                "functions": [
+                    {
+                        "qualname": "pkg.a:heavy",
+                        "relative_path": "pkg/a.py",
+                        "cyclomatic_complexity": 107,
+                        "nesting_depth": 6,
+                        "risk": "high",
+                    }
+                ],
+            },
+            "coupling": {
+                "summary": {
+                    "average": 33.0,
+                    "max": 27,
+                    "high_risk": 2,
+                    "total": 9,
+                },
+                "classes": [
+                    {
+                        "qualname": "pkg.a:A",
+                        "relative_path": "pkg/a.py",
+                        "cbo": 27,
+                        "risk": "high",
+                    }
+                ],
+            },
+        },
+    )
+
+
+def test_html_average_cards_state_the_figure_without_grading_it() -> None:
+    """The average cards print a number and pass no verdict on it.
+
+    ``Avg CC`` and ``Avg CBO`` were painted ``warn`` above five and ``good``
+    below it. No band for an average is published anywhere in the product --
+    the calibrated bands belong to a row's ``risk`` -- so the colour was the
+    renderer's own opinion on a scale it had invented, offered to the reader
+    with the same authority as a measured fact.
+
+    ``Max CC`` is asserted beside them on purpose. Without it this test would
+    also pass if stat cards stopped carrying tones altogether, and it would be
+    reporting that the tone mechanism is dead rather than that these two cards
+    decline to use it.
+    """
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_document=_graded_averages_document(),
+    )
+
+    assert _stat_card_value(html, "Avg CC") == "41.5"
+    assert _stat_card_value(html, "Avg CBO") == "33.0"
+    assert _stat_card_value_classes(html, "Avg CC") == "meta-value"
+    assert _stat_card_value_classes(html, "Avg CBO") == "meta-value"
+    assert _stat_card_value_classes(html, "Max CC") == "meta-value meta-value--bad"
 
 
 def test_html_authority_counts_come_from_the_summary_not_from_the_rows() -> None:

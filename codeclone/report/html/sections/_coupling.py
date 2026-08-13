@@ -109,7 +109,14 @@ def _complexity_cards(
             "Avg CC",
             f"{avg_cc:.1f}",
             detail=_micro_badges(("functions", total)),
-            value_tone="warn" if avg_cc > 5 else "good",
+            # No tone, deliberately. The product calibrates bands for a row's
+            # ``risk``; it publishes none for an average, so the five this card
+            # used to grade against ("warn" above it, "good" below) was the
+            # renderer's own invention -- a verdict on a scale that exists
+            # nowhere in the document, the contracts or any reference
+            # population. The figure is printed; grading it is not
+            # presentation's to do, and a threshold that moves a user-facing
+            # verdict is a calibration decision, not a rendering one.
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
@@ -145,7 +152,9 @@ def _coupling_cards(summary: Mapping[str, object]) -> str:
             "Avg CBO",
             f"{avg_cbo:.1f}",
             detail=_micro_badges(("classes", total)),
-            value_tone="warn" if avg_cbo > 5 else "good",
+            # Neutral for the same reason as Avg CC above: no band for an
+            # average is published, so this card states the measured figure
+            # and leaves the verdict to the values the document does band.
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
