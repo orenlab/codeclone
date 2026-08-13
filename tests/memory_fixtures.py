@@ -330,7 +330,23 @@ def load_memory_init_report_document(
 
 
 def init_git_repo(root: Path) -> None:
+    """A repository whose branch, identity, and history come from this fixture.
+
+    ``git init`` takes the first branch name from the host's
+    ``init.defaultBranch``, so a test that reads the branch back was really
+    reading the developer's machine: ``main`` on a workstation configured for
+    it, ``master`` on a stock runner. Writing ``HEAD`` here makes the name a
+    property of the fixture instead of the environment, and ``symbolic-ref``
+    does it on every git version without consulting configuration at all.
+    """
+
     subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
         cwd=root,
