@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from ..surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 
 from ..paths.workspace import REPORT_JSON_PARTS as _REPORT_PATH_PARTS
+from ..utils.run_identity import ReportRunIdentityError, report_run_identity
 from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
 
 _MAX_ALLOWED_FILES_SHOWN = 2
@@ -335,9 +336,7 @@ def _read_disk_report(
     age_seconds: int | None = None
 
     data_mapping = data if isinstance(data, dict) else {}
-    digest_value = _string_field(
-        _mapping_at(data_mapping, ("integrity", "digest")), "value"
-    )
+    digest_value = _report_run_identity(data_mapping)
     if digest_value is not None and len(digest_value) >= 8:
         run_id = digest_value[:8]
 
@@ -346,8 +345,11 @@ def _read_disk_report(
         "items",
     )
     if _mapping_at(data_mapping, ("metrics", "families")) is not None:
-        health = _int_field(_mapping_at(data_mapping, ("health",)), "score")
-    findings = _int_field(_mapping_at(data_mapping, ("findings",)), "total")
+        health = _int_field(
+            _mapping_at(data_mapping, ("metrics", "summary", "health")),
+            "score",
+        )
+    findings = _int_field(_mapping_at(data_mapping, ("findings", "summary")), "total")
 
     generated_at = _string_field(
         _mapping_at(data_mapping, ("meta", "runtime")),
@@ -367,6 +369,27 @@ def _read_disk_report(
             pass
 
     return run_id, health, findings, files, age_seconds, True
+
+
+def _report_run_identity(payload: Mapping[str, object]) -> str | None:
+    """The run this document names, or ``None`` if it names none.
+
+    The tier is not decided here. :func:`report_run_identity` is the one place
+    that decides which digest names a run, and this reader is held to it rather
+    than spelling a tier of its own: a status line that named runs by a
+    different digest than the audit trail would report two identities for one
+    measurement. That is not hypothetical -- it is what this module did, for as
+    long as the owner sat in a ring it could not import.
+
+    Session stats is a status surface, so it degrades instead of raising --
+    a document that carries no identity leaves ``latest_run`` empty, which is
+    exactly what the caller renders as absence.
+    """
+
+    try:
+        return report_run_identity(payload)
+    except ReportRunIdentityError:
+        return None
 
 
 def _mapping_at(

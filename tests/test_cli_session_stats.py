@@ -9,6 +9,7 @@ import io
 import json
 import os
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from rich.console import Console
 
 import codeclone.controller_insights.session_stats as insights_mod
 import codeclone.surfaces.cli.session_stats as session_stats_mod
+from codeclone import ui_messages as ui
 from codeclone.contracts import ExitCode
 from codeclone.controller_insights.session_stats import (
     AgentSnapshot,
@@ -48,6 +50,42 @@ from codeclone.surfaces.mcp._workspace_intents import (
     format_utc,
     write_workspace_intent,
 )
+from codeclone.utils.run_identity import report_run_identity
+
+from ._report_fixtures import build_test_report_document, health_family_for_population
+
+#: Fixed so the written report has a generation time the reader can age, and
+#: so two documents in one test differ only where the test made them differ.
+_REPORT_GENERATED_AT = "2026-08-13T10:00:00Z"
+
+#: One clone group, so the document carries a finding rather than none. A
+#: findings total of zero cannot tell "the reader found the count" from "the
+#: reader found nothing and reported a default", and the count is the fact
+#: the surface prints.
+_ONE_CLONE_GROUP: dict[str, list[dict[str, object]]] = {
+    "fp-a|20-49": [
+        {
+            "qualname": "pkg.a:run",
+            "filepath": "/repo/pkg/a.py",
+            "start_line": 1,
+            "end_line": 20,
+            "loc": 20,
+            "stmt_count": 8,
+            "fingerprint": "fp-a",
+            "loc_bucket": "20-49",
+        },
+        {
+            "qualname": "pkg.b:run",
+            "filepath": "/repo/pkg/b.py",
+            "start_line": 1,
+            "end_line": 20,
+            "loc": 20,
+            "stmt_count": 8,
+            "fingerprint": "fp-a",
+            "loc_bucket": "20-49",
+        },
+    ]
+}
 
 
 def _repo_root_from_intents_dir(intents_dir: Path) -> Path:
@@ -118,20 +156,92 @@ def _write_intent_file(
     return intents_dir / f"{pid}-{now_epoch}-{intent_id}.json"
 
 
-def _write_report(root: Path, *, health: int = 90, files: int = 10) -> Path:
-    """Write a synthetic report.json."""
-    report = {
-        "integrity": {"digest": {"value": "abcdef01" + "0" * 56}},
-        "inventory": {"file_registry": {"items": [f"f{i}.py" for i in range(files)]}},
-        "metrics": {"families": {}},
-        "health": {"score": health, "grade": "A"},
-        "findings": {"total": 0},
-    }
-    report_dir = root / ".codeclone"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / "report.json"
-    report_path.write_text(json.dumps(report))
-    return report_path
+def _write_report(
+    root: Path,
+    *,
+    files: int = 10,
+    analyzed: int | None = None,
+    generated_at: str | None = _REPORT_GENERATED_AT,
+) -> dict[str, object]:
+    """Write the report the product actually emits, and hand it back.
+
+    The disk reader is a consumer of ``report.json``. A hand-written stand-in
+    lets it drift against the document it claims to read: the shape this
+    fixture used to build carried ``integrity.digest``, a top-level ``health``
+    block and ``findings.total``, none of which report-v3 emits -- so the
+    reader's navigations and the fixture agreed with each other and with
+    nothing else.
+
+    The document is returned rather than its path so that no caller types a
+    run id, a health score or a file count. Each is read off the document that
+    was written, and a change in which key carries a fact moves the fixture
+    with the document instead of leaving a literal behind.
+
+    ``analyzed`` under-runs ``files`` when a caller needs a health score that
+    is not the ubiquitous 100 of a defect-free fixture. ``generated_at=None``
+    builds the document the builder produces when no generation time was
+    supplied -- ``meta.runtime.report_generated_at_utc`` is null -- which is
+    the only shape that makes the reader fall back to the file's mtime for the
+    run's age.
+    """
+
+    document = build_test_report_document(
+        func_groups=_ONE_CLONE_GROUP,
+        block_groups={},
+        segment_groups={},
+        meta={} if generated_at is None else {"report_generated_at_utc": generated_at},
+        inventory={"file_list": [f"f{index}.py" for index in range(files)]},
+        metrics={
+            "health": health_family_for_population(
+                found=files,
+                analyzed=files if analyzed is None else analyzed,
+            )
+        },
+    )
+    _write_report_payload(root, document)
+    return document
+
+
+def _document_run_id(document: Mapping[str, object]) -> str:
+    """The run id a reader must derive from a report document.
+
+    The tier is not named here and is not this test's invention:
+    :func:`codeclone.utils.run_identity.report_run_identity` is the one place
+    the product decides which digest names a run, and holding the disk
+    reader to that owner is what keeps one document from answering "which run
+    is this" in two tiers. The reader shortens the digest for display, so the
+    expectation is shortened the same way.
+    """
+
+    return report_run_identity(document)[:8]
+
+
+def _document_digest_prefix(document: Mapping[str, object], tier: str) -> str:
+    digests = cast("Mapping[str, object]", document["integrity"])["digests"]
+    return cast("Mapping[str, Mapping[str, str]]", digests)[tier]["value"][:8]
+
+
+def _document_health(document: Mapping[str, object]) -> int:
+    metrics = cast("Mapping[str, Mapping[str, Mapping[str, int]]]", document["metrics"])
+    return metrics["summary"]["health"]["score"]
+
+
+def _document_findings_total(document: Mapping[str, object]) -> int:
+    findings = cast("Mapping[str, Mapping[str, int]]", document["findings"])
+    return findings["summary"]["total"]
+
+
+def _document_file_count(document: Mapping[str, object]) -> int:
+    inventory = cast("Mapping[str, Mapping[str, Sequence[str]]]", document["inventory"])
+    return len(inventory["file_registry"]["items"])
+
+
+def _latest_run_line(text: str) -> str:
+    """The single line the user reads the latest run off."""
+
+    lines = [line for line in text.splitlines() if ui.SESSION_STATS_LATEST_RUN in line]
+    assert len(lines) == 1, text
+    return lines[0]
 
 
 def _write_report_payload(root: Path, payload: object) -> Path:
@@ -326,7 +436,7 @@ def test_session_stats_active_quiet(tmp_path: Path) -> None:
 
 
 def test_session_stats_with_cached_report(tmp_path: Path) -> None:
-    _write_report(tmp_path, health=85, files=42)
+    document = _write_report(tmp_path, files=42)
     printer = _RecordingPrinter()
 
     exit_code = render_session_stats(
@@ -336,8 +446,8 @@ def test_session_stats_with_cached_report(tmp_path: Path) -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "latest_run=abcdef01" in printer.text
-    assert "health=85" in printer.text
+    assert f"latest_run={_document_run_id(document)}" in printer.text
+    assert f"health={_document_health(document)}" in printer.text
 
 
 def test_session_stats_stale_quiet(tmp_path: Path) -> None:
@@ -414,7 +524,7 @@ def test_session_stats_active_verbose(tmp_path: Path) -> None:
 
 
 def test_session_stats_verbose_with_report(tmp_path: Path) -> None:
-    _write_report(tmp_path, health=92, files=100)
+    document = _write_report(tmp_path, files=100)
     printer = _RecordingPrinter()
 
     exit_code = render_session_stats(
@@ -425,9 +535,37 @@ def test_session_stats_verbose_with_report(tmp_path: Path) -> None:
 
     assert exit_code == int(ExitCode.SUCCESS)
     text = printer.text
-    assert "abcdef01" in text
-    assert "health=92" in text
-    assert "100 files" in text
+    assert _document_run_id(document) in text
+    assert f"health={_document_health(document)}" in text
+    assert f"{_document_file_count(document)} files" in text
+
+
+def test_default_config_reports_the_run_its_disk_report_names(tmp_path: Path) -> None:
+    """Audit off plus a report on disk means a run on screen, never ``none``.
+
+    This is the default installation: ``audit_enabled`` defaults to False, so
+    the document on disk is the only place the surface can answer from, and
+    ``Latest run: none`` printed beside a live ``report.json`` is the product
+    defect this pin holds shut for good.
+
+    It is stated as what the user reads, not as what ``_read_disk_report``
+    returns, so it keeps holding however that reader is rewritten -- and the
+    document is built by the report builder rather than typed here, so a
+    document that stops carrying one of these facts reaches this pin instead
+    of being shadowed by a literal.
+    """
+
+    document = _write_report(tmp_path, files=6)
+    # Without this the pin could pass through the audit trail and prove
+    # nothing about the path the default user is actually on.
+    assert _read_audit_config(tmp_path) == (False, None)
+
+    line = _latest_run_line(_render_session_stats_text(tmp_path, quiet=False))
+
+    assert ui.SESSION_STATS_LATEST_RUN_NONE not in line
+    assert _document_run_id(document) in line
+    assert f"health={_document_health(document)}" in line
+    assert f"findings={_document_findings_total(document)}" in line
 
 
 def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
@@ -448,22 +586,23 @@ def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
 def test_session_stats_verbose_with_report_without_file_count(
     tmp_path: Path,
 ) -> None:
-    report_dir = tmp_path / ".codeclone"
-    report_dir.mkdir(parents=True)
-    (report_dir / "report.json").write_text(
-        json.dumps(
-            {
-                "integrity": {"digest": {"value": "12345678" + "0" * 56}},
-                "metrics": {"families": {}},
-                "health": {"score": 77},
-                "findings": {"total": 3},
-            }
-        )
-    )
+    """A report that lost its file registry still renders, without a count.
+
+    Built by removing that one block from a real document rather than by
+    writing a thin payload around it: report-v3 always emits
+    ``inventory.file_registry``, so this branch is unreachable from a complete
+    document and the fixture has to say out loud which block it took away.
+    """
+
+    document = _corrupted_report()
+    inventory = cast("dict[str, object]", document["inventory"])
+    del inventory["file_registry"]
+    _write_report_payload(tmp_path, document)
+
     text = _render_session_stats_text(tmp_path, quiet=False)
 
-    assert "12345678" in text
-    assert "findings=3" in text
+    assert _document_run_id(document) in text
+    assert f"findings={_document_findings_total(document)}" in text
     assert "Cache:" not in text
 
 
@@ -732,13 +871,71 @@ def test_read_disk_report_missing(tmp_path: Path) -> None:
 
 
 def test_read_disk_report_valid(tmp_path: Path) -> None:
-    _write_report(tmp_path, health=88, files=50)
-    run_id, health, _findings, files, age, present = _read_disk_report(tmp_path)
-    assert run_id == "abcdef01"
-    assert health == 88
-    assert files == 50
+    document = _write_report(tmp_path, files=50)
+    run_id, health, findings, files, age, present = _read_disk_report(tmp_path)
+    assert run_id == _document_run_id(document)
+    assert health == _document_health(document)
+    assert findings == _document_findings_total(document)
+    assert files == _document_file_count(document)
     assert present is True
     assert age is not None and age >= 0
+
+
+def test_disk_report_run_id_is_the_evaluation_digest(tmp_path: Path) -> None:
+    """The run is named by the tier the CLI's identity owner names it by.
+
+    The tier is never spelled in this test: the expectation comes back
+    through ``report_run_identity``. The neighbouring ``comparison`` tier is
+    asserted to differ first, so a reader answering from the neighbour -- or
+    from the withdrawn ``integrity.digest`` block, which yields no id at all
+    -- cannot pass here by coincidence.
+    """
+
+    document = _write_report(tmp_path, files=4)
+    expected = _document_run_id(document)
+    assert expected != _document_digest_prefix(document, "comparison")
+
+    run_id, _health, _findings, _files, _age, present = _read_disk_report(tmp_path)
+
+    assert present is True
+    assert run_id == expected
+
+
+def test_disk_report_health_is_the_documents_metrics_summary(tmp_path: Path) -> None:
+    """Health comes from the metrics summary the document publishes.
+
+    The population is deliberately partial so the score is not the 100 that a
+    defect-free fixture prints from every dimension: a pin resting on 100
+    cannot tell the health summary apart from any other perfect number in the
+    document.
+    """
+
+    document = _write_report(tmp_path, files=10, analyzed=5)
+    expected = _document_health(document)
+    assert expected != 100
+
+    _run_id, health, _findings, _files, _age, present = _read_disk_report(tmp_path)
+
+    assert present is True
+    assert health == expected
+
+
+def test_disk_report_findings_total_is_the_documents_summary(tmp_path: Path) -> None:
+    """The finding count comes from the findings summary, and is not absence.
+
+    The document carries a real finding, so "read the wrong address" answers
+    ``None`` while "read the right one" answers a number -- a distinction a
+    zero-finding fixture cannot make.
+    """
+
+    document = _write_report(tmp_path, files=4)
+    expected = _document_findings_total(document)
+    assert expected > 0
+
+    _run_id, _health, findings, _files, _age, present = _read_disk_report(tmp_path)
+
+    assert present is True
+    assert findings == expected
 
 
 def test_read_disk_report_non_object_payload(tmp_path: Path) -> None:
@@ -751,15 +948,43 @@ def test_read_disk_report_non_object_payload(tmp_path: Path) -> None:
     assert present is True
 
 
+def _corrupted_report(**replacements: object) -> dict[str, object]:
+    """A real document with named addresses replaced by the wrong type.
+
+    Corrupting the document the product emits is what keeps these probes
+    honest. Hand-writing a malformed payload lets it name addresses the report
+    never carries -- which is how they came to malform ``integrity.digest``,
+    a key no document has -- and a reader that skips such a payload proves
+    nothing about the payload it will actually be handed.
+    """
+
+    document = build_test_report_document(
+        func_groups=_ONE_CLONE_GROUP,
+        block_groups={},
+        segment_groups={},
+        meta={"report_generated_at_utc": _REPORT_GENERATED_AT},
+        inventory={"file_list": ["a.py"]},
+        metrics={"health": health_family_for_population(found=1, analyzed=1)},
+    )
+    for dotted, value in replacements.items():
+        *parents, leaf = dotted.split("__")
+        current: object = document
+        for key in parents:
+            current = cast("Mapping[str, object]", current)[key]
+        assert leaf in cast("Mapping[str, object]", current), dotted
+        cast("dict[str, object]", current)[leaf] = value
+    return document
+
+
 def test_read_disk_report_nested_type_mismatches(tmp_path: Path) -> None:
     _write_report_payload(
         tmp_path,
-        {
-            "integrity": {"digest": []},
-            "inventory": {"file_registry": []},
-            "metrics": {"families": []},
-            "findings": [],
-        },
+        _corrupted_report(
+            integrity__digests=[],
+            inventory__file_registry=[],
+            metrics__summary=[],
+            findings__summary=[],
+        ),
     )
 
     run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
@@ -772,13 +997,12 @@ def test_read_disk_report_nested_type_mismatches(tmp_path: Path) -> None:
 def test_read_disk_report_leaf_type_mismatches(tmp_path: Path) -> None:
     _write_report_payload(
         tmp_path,
-        {
-            "integrity": {"digest": {"value": 123}},
-            "inventory": {"file_registry": {"items": "bad"}},
-            "metrics": {"families": {}},
-            "health": [],
-            "findings": {"total": "bad"},
-        },
+        _corrupted_report(
+            integrity__digests__evaluation__value=123,
+            inventory__file_registry__items="bad",
+            metrics__summary__health=[],
+            findings__summary__total="bad",
+        ),
     )
 
     run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
@@ -792,7 +1016,7 @@ def test_read_disk_report_stat_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_report(tmp_path)
+    document = _write_report(tmp_path, generated_at=None)
 
     def raise_stat_error(self: Path) -> object:
         raise OSError("stat failed")
@@ -802,7 +1026,7 @@ def test_read_disk_report_stat_failure(
 
     run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
 
-    assert run_id == "abcdef01"
+    assert run_id == _document_run_id(document)
     assert age is None
     assert present is True
 
@@ -1091,10 +1315,10 @@ def test_session_stats_verbose_plain_with_token_footprint() -> None:
 
 def test_session_stats_rich_with_cached_report_and_files(tmp_path: Path) -> None:
     """Exercise Rich path with latest_run_files (lines 298-301)."""
-    _write_report(tmp_path, health=92, files=100)
+    document = _write_report(tmp_path, files=100)
     text = _render_rich_session_stats(tmp_path)
     assert "report.json present" in text
-    assert "100 files" in text
+    assert f"{_document_file_count(document)} files" in text
 
 
 # ── Rich verbose with token footprint ──
@@ -1458,7 +1682,14 @@ def test_collect_session_snapshot_prefers_audit_latest_run(tmp_path: Path) -> No
         agent_start_epoch=1,
         agent_label="mcp/test",
     )
-    _write_report(tmp_path, health=50, files=99)
+    document = _write_report(tmp_path, files=99)
+
+    # The audit row only proves it wins while the report on disk would have
+    # answered differently. Asserted, not assumed: a document that happened to
+    # agree would make the preference invisible.
+    assert _document_health(document) != 93
+    assert _document_findings_total(document) != 2
+    assert _document_file_count(document) != 11
 
     _assert_snapshot_latest_run_from_audit(
         collect_session_snapshot(tmp_path),
@@ -1469,12 +1700,76 @@ def test_collect_session_snapshot_prefers_audit_latest_run(tmp_path: Path) -> No
     )
 
 
+def test_the_disk_report_answers_only_where_the_audit_trail_cannot(
+    tmp_path: Path,
+) -> None:
+    """One document, two configurations: a fallback that stayed a fallback.
+
+    Reaching the disk report is a repair on one side of a precedence rule, and
+    a repair like that can quietly install a second authority: hoist the disk
+    read above the audit read, or let it answer when the audit row already
+    has, and the surface starts naming runs by whichever source happens to
+    exist rather than by the ratified order. One pin on the fixed side cannot
+    see that -- it passes either way.
+
+    So both cells are asserted over the same document, and the two candidate
+    answers are asserted to differ first. Whichever id comes out therefore
+    names the source that spoke, and neither cell can pass by the two sources
+    agreeing.
+    """
+
+    from codeclone.audit.analysis_completed import ANALYSIS_SOURCE_MCP
+
+    from .audit_fixtures import write_compact_analysis_completed_event
+
+    without_audit = tmp_path / "default_install"
+    with_audit = tmp_path / "audit_enabled"
+    without_audit.mkdir()
+    with_audit.mkdir()
+
+    disk_only = _write_report(without_audit, files=6)
+    also_on_disk = _write_report(with_audit, files=6)
+    # The two roots hold the same report; only the configuration differs.
+    assert _document_run_id(disk_only) == _document_run_id(also_on_disk)
+
+    _write_audit_pyproject(with_audit)
+    write_compact_analysis_completed_event(
+        with_audit,
+        db_path=with_audit / ".codeclone/db/audit.sqlite3",
+        summary={
+            "mode": "full",
+            "health": {"score": 93, "grade": "A"},
+            "findings": {"total": 2, "new": 0},
+            "inventory": {"files": 11, "lines": 1, "functions": 1},
+            "diff": {"new_clones": 0, "health_delta": None},
+        },
+        source=ANALYSIS_SOURCE_MCP,
+        report_digest="a" * 64,
+        run_id="runaudit1234567890",
+        agent_pid=1,
+        agent_start_epoch=1,
+        agent_label="mcp/test",
+    )
+    assert _document_run_id(also_on_disk) != "runaudit"
+
+    assert _read_audit_config(without_audit) == (False, None)
+    no_trail = collect_session_snapshot(without_audit)
+    assert no_trail.latest_run_source == "disk_report"
+    assert no_trail.latest_run_id == _document_run_id(disk_only)
+
+    assert _read_audit_config(with_audit)[0] is True
+    trail = collect_session_snapshot(with_audit)
+    assert trail.latest_run_source == "audit_mcp"
+    assert trail.latest_run_id == "runaudit"
+    assert trail.latest_run_id != _document_run_id(also_on_disk)
+
+
 def test_collect_session_snapshot_tolerates_audit_read_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _write_audit_pyproject(tmp_path)
-    _write_report(tmp_path, health=70, files=3)
+    _write_report(tmp_path, files=3)
 
     def _boom(**_kwargs: object) -> None:
         raise RuntimeError("audit read failed")
