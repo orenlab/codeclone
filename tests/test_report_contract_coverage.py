@@ -2603,6 +2603,12 @@ def test_sarif_private_helper_edge_branches(
     assert _sarif_baseline_state({"novelty": "known"}) == "unchanged"
 
 
+#: The tier the SARIF renderer reads for its canonical digest. The payload
+#: below used to carry ``integrity.digest``, which no document emits and the
+#: renderer never consults, so the block was inert and the read went unpinned.
+_SARIF_ENVELOPE_DIGEST = "abc123"
+
+
 def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -> None:
     payload = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -2612,7 +2618,7 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
             "report_mode": "full",
             "runtime": {},
         },
-        "integrity": {"digest": {"value": "abc123"}},
+        "integrity": {"digests": {"envelope": {"value": _SARIF_ENVELOPE_DIGEST}}},
         "findings": {
             "groups": {
                 "clones": {"functions": [], "blocks": [], "segments": []},
@@ -2648,6 +2654,8 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
     sarif = json.loads(render_sarif_report_document(payload))
     run = cast(dict[str, object], sarif["runs"][0])
     assert "originalUriBaseIds" not in run
+    properties = cast(dict[str, object], run["properties"])
+    assert properties["canonicalDigestSha256"] == _SARIF_ENVELOPE_DIGEST
     invocation = cast(dict[str, object], cast(list[object], run["invocations"])[0])
     assert "workingDirectory" not in invocation
     assert "startTimeUtc" not in invocation

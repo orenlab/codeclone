@@ -544,6 +544,16 @@ def test_run_controller_query_routes_blast_radius(
     def _render_blast_radius(**kwargs: object) -> int:
         files_obj = kwargs.get("files", ())
         assert isinstance(files_obj, tuple)
+        # Standing in for the renderer means answering for what the renderer
+        # needs. It navigates these two addresses, so a stub that accepted any
+        # object let the caller hand it a document real code cannot read --
+        # which is how a withdrawn shape survived at this call site.
+        document = kwargs.get("report_document")
+        assert isinstance(document, dict)
+        integrity = cast("dict[str, Any]", document["integrity"])
+        assert integrity["digests"]["envelope"]["value"]
+        inventory = cast("dict[str, Any]", document["inventory"])
+        assert isinstance(inventory["file_registry"]["items"], list)
         calls.append(tuple(str(path) for path in files_obj))
         return int(ExitCode.SUCCESS)
 
@@ -558,7 +568,7 @@ def test_run_controller_query_routes_blast_radius(
     )
     result = cli_workflow._run_controller_query(
         args=cast(Any, args),
-        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        report_document=_report_document(),
         root_path=tmp_path,
         analysis_result=_analysis(),
         diff_context=_diff_context(),

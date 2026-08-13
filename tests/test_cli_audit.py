@@ -41,6 +41,25 @@ from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.audit import render_audit
 from codeclone.surfaces.cli.types import CLIArgsLike, PrinterLike
 
+from ._report_fixtures import build_test_report_document
+
+
+def _report_document() -> dict[str, object]:
+    """The document the CLI hands to the audit emit, as the product builds it.
+
+    Hand-written stand-ins let a call site name keys no document carries --
+    ``integrity.digest`` is the one that got here -- and a guard fed a
+    withdrawn address returns before the behaviour under test, so the test
+    passes for a reason it never states.
+    """
+
+    return build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"report_generated_at_utc": "2026-08-13T10:00:00Z"},
+    )
+
 
 class _RecordingPrinter:
     def __init__(self) -> None:
@@ -1133,16 +1152,43 @@ def test_report_run_identity_refuses_a_malformed_integrity_block() -> None:
 def test_emit_cli_analysis_completed_if_enabled_skips_when_disabled(
     tmp_path: Path,
 ) -> None:
+    """The flag is what stops the emit, and the emit happens without it.
+
+    This asserted nothing at all, so it could not tell "the flag stopped the
+    row" from "nothing would have been written anyway". The enabled run is the
+    control: "no database appeared" means nothing until one is shown to appear
+    when the flag is on, over the same document and the same configuration.
+
+    The document is the one the builder emits, so the run that is meant to
+    write reaches the writer: fed the withdrawn ``integrity.digest`` block it
+    would be refused for having no run identity, and both halves would answer
+    "no database" for two different reasons.
+    """
+
     from codeclone.surfaces.cli.workflow import _emit_cli_analysis_completed_if_enabled
 
-    args = SimpleNamespace(audit_enabled=False)
-    _emit_cli_analysis_completed_if_enabled(
-        args=args,
-        root_path=tmp_path,
-        report_document={"integrity": {"digest": {"value": "a" * 64}}},
-        new_func_count=0,
-        new_block_count=0,
-    )
+    document = _report_document()
+    roots: dict[str, Path] = {}
+    for name in ("off", "on"):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "pyproject.toml").write_text(
+            "[tool.codeclone]\naudit_enabled = true\n",
+            encoding="utf-8",
+        )
+        roots[name] = root
+
+    for name, enabled in (("off", False), ("on", True)):
+        _emit_cli_analysis_completed_if_enabled(
+            args=SimpleNamespace(audit_enabled=enabled),
+            root_path=roots[name],
+            report_document=document,
+            new_func_count=0,
+            new_block_count=0,
+        )
+
+    assert not (roots["off"] / ".codeclone/db/audit.sqlite3").exists()
+    assert (roots["on"] / ".codeclone/db/audit.sqlite3").exists()
 
 
 def test_emit_cli_analysis_completed_if_enabled_writes_audit_row(
