@@ -1,406 +1,291 @@
 # AGENTS.md — CodeClone (AI Agent Playbook)
 
-This document is the **source of truth** for agent operating rules in this repository.
-It is optimized for **explicit scope**, **determinism**, **CI stability**, and
-**reproducible, human-reviewable changes**.
+**Audience: autonomous agents.**
 
-For architecture, module ownership, and runtime behavior, the **current repository code is the source of truth**.
-If AGENTS.md and code diverge, follow code and update AGENTS.md accordingly.
+## Authority model of this document
 
-**CodeClone** is a deterministic **Structural Change Controller** for
-AI-assisted Python development. It starts before a diff exists: an agent
-declares intent, CodeClone maps the structural blast radius, bounds the edit,
-verifies the resulting patch against one canonical report, and leaves an
-auditable receipt.
+**AUTH1 — Normativity is confined to owning rule blocks.**
 
-> Repository goal: make AI-assisted structural change **explicit**, **bounded**,
-> **remembered**, and **verifiable** without turning LLM output into truth.
+Every obligation in this document belongs to exactly one **owning rule block**, identified by
+a stable id (`P1`, `E3`, `W5`, `AP4`, …). A rule id MAY own a multi-sentence block.
 
----
+1. **Only text inside an identified owning rule block is normative.** Text outside such a
+   block — headers, routing tables, checklists, notes, prose — is **non-normative** and MUST
+   NOT be relied on as a source of obligation.
+2. **Every normative obligation MUST be expressed with RFC-2119 uppercase modality**
+   (**MUST**, **MUST NOT**, **MAY**). An imperative without that modality is not an
+   obligation, regardless of tone.
+3. A summary MUST NOT state an obligation its owner does not contain. Where a summary and its
+   owner disagree, an agent MUST follow the owner **and MUST report the divergence as a defect
+   in this document** — silently following either side reproduces, inside our own governance,
+   the defect class this project exists to catch (`G2`).
+4. Agents MUST cite rule ids in briefs, reports, and reviews.
 
-## 1) Operating principles (non‑negotiable)
+**AUTH2 — Mechanical conformance (required, not yet implemented).** `AUTH1` MUST be enforced by
+a policy lint over this file. The lint MUST red on: an RFC-2119 uppercase modal outside an
+owning block · one id owning two disjoint blocks · an owning block containing no modal · a
+rule id cited anywhere in the file that no block defines.
 
-1. **Do not break public contracts.**
-    - Treat controller workflow semantics, baseline, analysis cache, canonical
-      report formats, Engineering Memory schemas/governance, documented MCP
-      payloads, and published client behavior as **public APIs**.
-    - Any contract change must be **versioned**, documented, and accompanied by tests.
+*Current epistemic status of `AUTH1`, stated under `I5` discipline:* owning blocks have been
+assigned by hand across every section containing modals. **The single-owner property is
+therefore claimed manually and is rebuttable, not mechanically proven.** Until the lint exists,
+an agent MUST NOT cite `AUTH1` as an established property of this file — only as its declared
+intent. Building that lint is a nameable task, not an assumption.
 
-2. **Determinism > cleverness.**
-    - Outputs must be stable across runs given identical inputs (same repo, tool version, python tag).
+**AUTH3 — Source precedence and conflict resolution.**
 
-3. **Evidence-based explainability.**
-    - The core engine produces **facts/metrics**.
-    - HTML/UI **renders facts**, it must not invent interpretations.
+Code is the source of truth for implementation. Where this document and the code diverge, an
+agent MUST follow the code and MUST report the divergence.
 
-4. **Safety first.**
-    - Never delete or overwrite user files outside repo.
-    - Any write must be atomic where relevant (e.g., baseline `.tmp` + `os.replace`).
+Where this document conflicts with a maintainer instruction in a pull request or issue thread,
+an agent MUST ask for clarification in that thread and MUST default to this document until the
+conflict is resolved.
 
-5. **Golden tests are contract sentinels.**
-    - Do not update golden snapshots to “fix” failing tests unless the contract change is intentional, versioned where
-      required, documented, and explicitly approved.
-6. **Fingerprint-adjacent optimization policy**
-
-    - Performance work must not change AST normalization, fingerprint inputs, or clone identity semantics while
-      `BASELINE_FINGERPRINT_VERSION` remains unchanged.
-
-    - If a change in AST/core analysis can affect fingerprint bytes, clone identity, NEW vs KNOWN classification, or
-      baseline compatibility semantics, it is not a routine optimization. It must be treated as an explicit fingerprint
-      contract change and requires:
-        - `BASELINE_FINGERPRINT_VERSION` review or bump
-        - documentation updates
-        - migration/release notes
-        - explicit maintainer approval
-    - Performance alone is never a sufficient reason to change fingerprint semantics.
-
-7. **Control starts before the diff.**
-    - For repository edits, declare intent and scope before editing.
-    - `edit_allowed=true` is the authoritative permission signal when the
-      change-control surface is available.
-    - Blast radius, do-not-touch boundaries, actual changed files, patch
-      verification, and the review receipt are part of the change contract.
-
-8. **Agent-authored code requires human ownership.**
-    - CodeClone accepts code written with agents and language models.
-    - A human contributor must inspect and understand the complete diff, verify
-      tests/contracts/security/provenance, and be able to maintain it.
-    - Substantive human review is mandatory before merge. Agent-only review,
-      automated approval, or green CI does not satisfy this requirement.
-    - Material agent assistance must be disclosed in the pull request.
-
-9. **Mutation-proven pins (mandatory law).**
-    - Red-first proves a test was red once; **mutation** proves it dies when the exact behavior it pins breaks. A green
-      test alone proves nothing.
-    - Every load-bearing fix or claim ships **mutation evidence**: revert or corrupt the exact production behavior a
-      test pins, and that test **MUST** turn red, verbatim, on that mutation. A surviving mutant (the test stays green)
-      is a hollow test — strengthen it until it dies.
-    - **Comprehensive = both boundaries.** Where a fix corrects a value or classification, mutate in BOTH directions;
-      each opposite error MUST red under a different test. Catching only one side of an error is incomplete.
-    - **"Informal" = targeted manual mutations**, not (necessarily) a mutation-testing framework: revert-the-behavior
-      probes covering the defect class. A full mutation runner (mutmut / cosmic-ray) as a gate is a later candidate; the
-      manual targeted mutation is mandatory **now** — for agents and for the controller's merge audit.
-    - Part of the standing evidence law: "I fixed it" without a mutation that reds the pin does not exist. Named
-      hollow-test classes, precedents, and the fix-report requirement live in §17 "Mutation evidence (mandatory law)".
-
-10. **Score-change independent benchmark (mandatory law).**
-    - Any change to a parameter that moves a **user-facing score or verdict** — the health score and its dimensions
-      (complexity, coupling, cohesion, dead_code, coverage, dependencies, clones), reference permilles / bands, health
-      weights, gate thresholds (`fail_*`), severity mappings, outlier terms — is accepted **only** via an independent
-      benchmark run *after* the recalibration. **Self-repo validation alone is NOT acceptance.**
-    - **Independent = blind, frozen, adversarial.** A **blind** agent is given the measurement protocol, not the goal —
-      a lab technician, not an advocate for the change. It runs on **≥5 frozen external repositories** spanning orders of
-      magnitude and Python styles, each pinned to a commit SHA recorded before the first run; the **same** pinned
-      measurement; thresholds **unchanged**; raw distributions reported first. The external projects must try to
-      **refute** the calibration, not re-fit it.
-    - A self-calibrated scale measures the morphology of the object that produced it — "a very precise micrometer for
-      exactly one part". "It looks fine on our own repo" is not proof of general fitness.
-    - **If external validity fails, that is a new fact, not a tuning signal.** "Pinned self-calibration failed external
-      validity" requires a reference-population redesign as a separate task — never a silent re-fit of thresholds against
-      the benchmark repos (the same grinding-to-the-scale, just external). A floor or policy threshold is revised only
-      from an independent policy basis, never from the current self-score.
-    - Purely factual, categorical facts without an evaluative scale (identity; tri-state novelty as a fact) are not
-      covered; the interpretation of a fact into a score is. The full statement lives in §17 "Score-change independent
-      benchmark (mandatory law)".
+Published contract pages are **TBD** during the docs migration. An agent verifying a claim MUST
+prefer, in order: code · tests · `CHANGELOG.md` · `README.md` · surface-local READMEs and
+skills. An agent MUST NOT cite removed documentation paths.
 
 ---
 
-## 2) Quick orientation
+**CodeClone** is a deterministic **Structural Change Controller** for AI-assisted Python
+development. It starts before a diff exists: an agent declares intent, CodeClone maps the
+structural blast radius, bounds the edit, verifies the patch against one canonical report, and
+leaves an auditable receipt.
 
-CodeClone controls structural change through this deterministic lifecycle:
+> Goal: make AI-assisted structural change **explicit**, **bounded**, **remembered**, and
+> **verifiable**, without turning model output into truth.
 
-1. declare intent and allowed scope;
-2. inspect blast radius, review context, and do-not-touch boundaries
-   (`get_implementation_context` with `intent_id` after `start`, or `get_blast_radius`
-   for blast-only inspection — see `codeclone-implementation-context` skill in plugins);
-3. make the bounded edit only after permission is granted;
-4. reconcile actual changed files with declared scope;
-5. verify structural deltas and review claims against one canonical report;
-6. leave an auditable receipt and Patch Trail evidence.
+---
 
-The controller is built on one deterministic structural analysis. The canonical
-report includes function/block/segment clones, structural findings, quality
-metrics, coverage and API-surface joins, baseline-aware novelty, and health
-signals. CLI, reports, MCP, IDEs, plugins, and CI project the same facts.
+## 0) Start here
 
-Key state and surfaces:
+*Non-normative routing (`AUTH1.1`). Every obligation cited lives in its owner.*
 
-- `codeclone.baseline.json` — trusted comparison snapshot for baseline-aware CI
-- `.codeclone/cache.json` — integrity-checked analysis optimization, never truth
-- `.codeclone/report.html|report.json|report.md|report.sarif|report.txt` —
-  deterministic projections of the canonical report
-- `.codeclone/intents/` or configured SQLite registry — ephemeral,
-  lease/TTL-bound workspace coordination, never analysis truth
-- `.codeclone/db/audit.sqlite3` — optional passive controller evidence
-- `.codeclone/memory/engineering_memory.sqlite3` — governed Engineering Memory
-  with FTS, trajectory, Patch Trail, Experience, and projection-job state
-- `.codeclone/memory/semantic_index.lance` — optional semantic sidecar
-- `.codeclone/db/platform_observability.sqlite3` — opt-in local diagnostics for
-  CodeClone itself; never repository quality evidence or a gate input
-- `codeclone-mcp` — optional MCP server: read-only with respect to source
-  files, baselines, canonical/generated reports, and analysis cache; explicit
-  controller, audit, memory, projection, and observability contracts may write
-  only their documented bounded local state (install via `codeclone[mcp]`)
-- `codeclone setup` — lazy-loaded CLI readiness surface (`status`, `doctor`,
-  `plan`, `apply`, `wizard`); capability snapshots and bounded `pyproject.toml` /
-  `.gitignore` merges only — not MCP change control and never writes baselines,
-  cache, or canonical reports
-- `extensions/vscode-codeclone/` — stable VS Code extension as a native, read-only IDE client over `codeclone-mcp`
-- `extensions/claude-desktop-codeclone/` — stable Claude Desktop `.mcpb` bundle as a local install wrapper over
-  `codeclone-mcp`
-- `plugins/claude-code-codeclone/` — stable Claude Code plugin source, synchronized to the public
-  `orenlab/codeclone-claude-code` marketplace with bundled MCP configuration and CodeClone skills
-- `plugins/codeclone/` + `.agents/plugins/marketplace.json` — stable Codex plugin as a native local discovery layer
-  over `codeclone-mcp`, with bundled CodeClone skills under `plugins/codeclone/skills/`
-- `plugins/cursor-codeclone/` — stable Cursor plugin as a native local discovery layer over `codeclone-mcp`, with
-  bundled skills, rules, hooks, and an agent definition
-- MCP runs are in-memory only. Review markers are session-local. Change intent
-  truth is session-local, with optional ephemeral workspace coordination records
-  under `.codeclone/intents/`; none of this may leak into
-  baseline/cache/report artifacts. Optional audit trail is passive evidence
-  state and must not affect canonical report digests, baseline trust, cache
-  compatibility, or finding identity.
-- `docs/`, `zensical.toml`, `.github/workflows/docs.yml` — docs site in migration (published
-  contract pages **TBD**); build pipeline and sample-report generation remain active
+### 0.1 Before any repository edit
+
+```
+analyze  →  declare intent + scope  →  read memory  →  EDIT  →  analyze  →  verify  →  receipt
+                    │                                                          │
+            edit_allowed == true                              accepted · scope reconciled
+            is the ONLY permission                            · receipt · intent cleared
+```
+
+Pre-edit authorization and completion are owned by **`P7`**. Read it before your first edit.
+
+### 0.2 The acceptance laws
+
+| Law                   | One line                                                                                              | Owner     |
+|-----------------------|-------------------------------------------------------------------------------------------------------|-----------|
+| **Evidence**          | A green test proves nothing; only a kill on a semantic witness does.                                  | `E1`–`E8` |
+| **Inventory**         | Completeness is relative to two declared analysis contracts; claims are bounded by the stage reached. | `I1`–`I7` |
+| **Change acceptance** | Empirical calibration, normative policy, and correctness are three different paths.                   | `S1`–`S6` |
+
+### 0.3 Routing
+
+| What you are doing                              | Read                                 |
+|-------------------------------------------------|--------------------------------------|
+| editing any repository file                     | `P7`, `RPT1`, §19                    |
+| writing or changing tests                       | §17                                  |
+| touching baseline, cache, or report shape       | §4, `C1`, `MCP1`, `RP1`–`RP3`, `CR1` |
+| touching MCP, CLI, or a client surface          | `ST1`, `SUR1`, `MCP1`, `CLI1`, `CR1` |
+| changing a threshold, weight, band, or severity | `S1`–`S6`                            |
+| reviewing, merging, or accepting work           | `AP1`–`AP8`, `A1`–`A9`               |
+| implementing from a brief                       | `X1`–`X8`                            |
+| auditing "all" of something                     | `I1`–`I7`, `AU1`–`AU3`               |
+| recording something durable                     | `MEM1`–`MEM5`                        |
+
+### 0.4 Definition of done
+
+*Collects `P7`, `E5`, `E8`, `I5`, `X8`; defines nothing.*
+
+---
+
+## 1) Operating principles
+
+**P1 — Public contracts MUST NOT break silently or without versioning.** Controller workflow
+semantics, baseline, analysis cache, canonical report formats, Engineering Memory schemas and
+governance, documented MCP payloads, and published client behavior are public APIs. A contract
+change is permitted **only** when it is versioned, documented, and tested. An unversioned or
+undocumented break is prohibited.
+
+**P2 — Determinism, and the difference between results and identity.**
+
+Identical canonical semantic inputs and versioned contract witnesses MUST produce
+byte-identical semantic output. Volatile provenance — timestamps, durations, host and process
+identifiers, run ordering artifacts, and any value that varies per execution — lies **outside**
+semantic identity and MUST NOT affect canonical semantic bytes.
+
+Two runs whose configuration, scope, contract activation, or comparison context differ are
+**not** required to agree: their semantic inputs differ.
+
+**Result equality is not identity equality.** Different semantic inputs **MAY** legitimately
+produce identical semantic results — two different sources may each yield zero findings, and
+nothing is wrong. The defect arises when an identity contract is **defined to distinguish**
+those inputs and the identity input it consumes collapses them. Such inputs MUST NOT receive
+the same identity (`G5`).
+
+**P3 — Core owns facts; renderers present them.** No presentation-only heuristic MAY affect
+gating. No renderer MAY display a value derived by logic that differs from the canonical
+report.
+
+**P4 — Filesystem safety.** An agent MUST NOT delete or overwrite files it does not own outside
+the repository. It **MAY** create, write, and remove **its own** temporary artifacts — scratch
+directories, detached worktrees required by `W1`, experiment copies — provided the agent created
+them and no other party's data is inside. Writes that can be interrupted MUST be atomic.
+
+**P5 — Golden tests are contract sentinels.** An agent MUST NOT refresh a snapshot to make a
+test pass. A snapshot change requires an intentional, versioned, documented, approved contract
+change.
+
+**P6 — Fingerprint-adjacent work is never routine.** Performance work MUST NOT change AST
+normalization, fingerprint inputs, or clone identity semantics while the fingerprint version is
+unchanged. If a change can affect fingerprint bytes, clone identity, NEW-vs-KNOWN
+classification, or baseline compatibility, it is a fingerprint contract change: version review
+or bump, documentation, migration notes, explicit maintainer approval. Performance alone is
+never sufficient justification.
+
+**P7 — Pre-edit authorization and completion.**
+
+An agent **MUST NOT** create, modify, or delete any tracked repository file until the controller
+has returned `edit_allowed == true` for a declared intent and scope. This covers tests,
+fixtures, documentation, CI configuration, and coverage work; task type never removes it.
+Intent, scope, blast radius, do-not-touch boundaries, actual changed files, patch verification,
+and the receipt are all part of the change contract, not post-hoc annotations.
+
+An agent **MUST NOT** describe work as done, verified, or ready unless **all four** hold:
+
+1. the controller returned an accepted status;
+2. the declared scope reconciled with the files actually changed;
+3. **the review receipt was produced and persisted** — where the accepted status already
+   entails the receipt, this condition is satisfied by it, and the agent MUST NOT treat the
+   receipt as optional on that basis;
+4. the intent was cleared.
+
+Leaving an active or recoverable intent behind is blocked cleanup, not completion. Where the
+change-control surface is unavailable and the task requires it, the agent MUST stop and report
+the blocker.
+
+**P8 — Agent-authored code requires human ownership.** A human MUST inspect and understand the
+complete diff, verify tests, contracts, security, and provenance, and accept maintenance
+responsibility. Agent review, receipts, and green CI are evidence, never approval. An agent MUST
+NOT describe any of them as a substitute for substantive human review. Material agent assistance
+MUST be disclosed in the pull request.
+
+---
+
+## 2) Orientation
+
+| Artifact                                       | Role                                              |
+|------------------------------------------------|---------------------------------------------------|
+| `codeclone.baseline.json`                      | trusted comparison snapshot for baseline-aware CI |
+| `.codeclone/cache.json`                        | integrity-checked optimization — never truth      |
+| `.codeclone/report.{html,json,md,sarif,txt}`   | deterministic projections of the canonical report |
+| `.codeclone/intents/` or a configured registry | workspace coordination state                      |
+| `.codeclone/db/audit.sqlite3`                  | optional passive controller evidence              |
+| `.codeclone/memory/engineering_memory.sqlite3` | governed Engineering Memory                       |
+| `.codeclone/memory/semantic_index.lance`       | optional semantic sidecar                         |
+| `.codeclone/db/platform_observability.sqlite3` | opt-in local diagnostics for CodeClone itself     |
+
+**ST1 — Two kinds of ephemeral state, never conflated.**
+
+*Session-local state* is analysis runs held in memory and review markers: it exists inside one
+server process and is never persisted. *Workspace coordination state* is the intent registry:
+persisted, visible across processes, lease- and TTL-bound, and advisory coordination only.
+
+Neither kind MAY leak into baseline, cache, or report artifacts. Neither MAY affect canonical
+report digests, baseline admissibility, cache compatibility, or finding identity.
+
+**SUR1 — One rule for every client surface.** IDE extensions, desktop bundles, editor plugins,
+and CI actions are discovery, guidance, or view layers over the MCP server or the CLI contracts.
+Each MUST NOT introduce a second analyzer, a second server, or a second truth path. The setup
+CLI additionally MUST NOT declare intent, MUST NOT return `edit_allowed`, and MUST NOT write
+baselines, cache, or canonical reports.
 
 ---
 
 ## 3) Validation stages
 
-The installed `pre-commit` stage runs hygiene checks, Ruff, Mypy, Ty (production scope),
-baseline-aware `codeclone . --ci`, and the docs admonition fixer:
+**V1 — Gate execution.**
 
 ```bash
-uv run pre-commit run --all-files
-```
-
-This does **not** run the `pre-push` pytest hook. Run it explicitly before
-pushing:
-
-```bash
-uv run pre-commit run --hook-stage pre-push --all-files
-```
-
-The pre-push hook and CI enforce package coverage `>=99%`:
-
-```bash
+uv run pre-commit run --all-files                        # hygiene, lint, types, baseline-aware CI run, docs fixer
+uv run pre-commit run --hook-stage pre-push --all-files  # NOT run by the command above
 uv run pytest -q --cov=codeclone --cov-report=term-missing --cov-fail-under=99
 ```
 
-Hooks may rewrite files. Inspect `git diff` again afterward. Never use
-`--no-verify` to bypass a failing hook.
+Hooks MAY rewrite files; an agent MUST re-inspect the diff afterward. An agent **MUST NOT** use
+`--no-verify` or otherwise bypass a failing hook — the underlying issue MUST be fixed. Every gate
+result MUST be reported with its exit code (`E5`). One red gate is a blocker (`W9`).
 
-If you touched baseline/cache/report contracts or CLI/MCP audit surfaces, also exercise the CLI audit path
-(`--audit` / `codeclone/surfaces/cli/audit.py`) or the relevant audit/MCP tests.
+An agent MUST additionally **run** the surface-specific commands below when the corresponding
+files were touched. This obligation is to *run* them; whether tests must also be *added or
+changed* is owned by `CR1`.
 
-If you touched the setup readiness CLI surface (`codeclone setup`, pyproject writer,
-setup plan/apply/wizard), also run:
-
-```bash
-uv run pytest -q tests/test_cli_setup.py tests/test_pyproject_writer.py
-```
-
-If you touched `docs/`, `zensical.toml`, docs publishing workflow, or sample-report generation, also run:
-
-```bash
-uv run --with zensical==0.0.46 zensical build --clean --strict
-```
-
-Published contract-page routing is **TBD** during the docs migration; still run the build when
-`docs/` or the pipeline changes.
-
-If you touched Corpus Analytics (`codeclone/analytics/*`, `codeclone analytics` CLI), also run:
-
-```bash
-uv run pytest -q tests/test_analytics_*.py tests/test_config_analytics.py
-```
-
-If you touched the MCP surface, also run:
-
-```bash
-uv run pytest -q tests/test_mcp_service.py tests/test_mcp_server.py
-```
-
-If you touched Engineering Memory, semantic retrieval, trajectories,
-Experiences, or projection jobs, run the nearest owning modules, including the
-applicable `tests/test_memory_*.py`, `tests/test_semantic_*.py`, and MCP memory
-contract tests.
-
-If you touched Platform Observability, also run:
-
-```bash
-uv run pytest -q tests/test_observability_*.py
-```
-
-If you touched the VS Code extension surface, also run:
-
-```bash
-node --check extensions/vscode-codeclone/src/support.js
-node --check extensions/vscode-codeclone/src/mcpClient.js
-node --check extensions/vscode-codeclone/src/extension.js
-node --test extensions/vscode-codeclone/test/*.test.js
-node extensions/vscode-codeclone/test/runExtensionHost.js
-```
-
-If you touched VS Code extension packaging metadata (`package.json`,
-README/changelog/license, media assets, or `.vscodeignore`), also run a package
-smoke:
-
-```bash
-cd extensions/vscode-codeclone
-vsce package --out /tmp/codeclone.vsix
-```
-
-If you touched the Claude Desktop bundle surface, also run:
-
-```bash
-node --check extensions/claude-desktop-codeclone/server/index.js
-node --check extensions/claude-desktop-codeclone/src/launcher.js
-node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs
-node --test extensions/claude-desktop-codeclone/test/*.test.js
-node extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs --out /tmp/codeclone-claude-desktop.mcpb
-```
-
-If you touched the Codex plugin surface, also run:
-
-```bash
-python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json >/tmp/codeclone-codex-plugin.json
-python3 -m json.tool plugins/codeclone/.mcp.json >/tmp/codeclone-codex-mcp.json
-python3 -m json.tool .agents/plugins/marketplace.json >/tmp/codeclone-codex-marketplace.json
-uv run pytest -q tests/test_codex_plugin.py
-```
-
-If you touched the Claude Code plugin surface, also run:
-
-```bash
-python3 -m json.tool plugins/claude-code-codeclone/.claude-plugin/plugin.json >/tmp/codeclone-claude-code-plugin.json
-python3 -m json.tool plugins/claude-code-codeclone/.mcp.json >/tmp/codeclone-claude-code-mcp.json
-python3 -m json.tool scripts/integration_dist/marketplace.claude-code.json >/tmp/codeclone-claude-code-marketplace.json
-claude plugin validate plugins/claude-code-codeclone
-uv run pytest -q tests/test_claude_code_plugin.py
-```
-
-If you touched the Cursor plugin surface, also run:
-
-```bash
-uv run pytest -q tests/test_cursor_plugin.py tests/test_cursor_plugin_hooks.py
-```
-
-If you touched the GitHub Action helpers, also run:
-
-```bash
-uv run pytest -q tests/test_github_action_helpers.py
-```
-
-If you touched `scripts/sync_integrations.py`,
-`scripts/integration_dist/*`, or integration distribution layouts, also run:
-
-```bash
-uv run pytest -q tests/test_sync_integrations.py
-```
+| IF you touched                                                         | THEN also run                                                                                                                               |
+|------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| baseline, cache, or report contracts; CLI/MCP audit surfaces           | the CLI audit path or the audit/MCP tests                                                                                                   |
+| setup readiness CLI                                                    | `pytest -q tests/test_cli_setup.py tests/test_pyproject_writer.py`                                                                          |
+| MCP surface                                                            | `pytest -q tests/test_mcp_service.py tests/test_mcp_server.py`                                                                              |
+| memory, semantic retrieval, trajectories, experiences, projection jobs | nearest owning modules plus `tests/test_memory_*.py`, `tests/test_semantic_*.py`, MCP memory contract tests                                 |
+| Platform Observability                                                 | `pytest -q tests/test_observability_*.py`                                                                                                   |
+| Corpus Analytics                                                       | `pytest -q tests/test_analytics_*.py tests/test_config_analytics.py`                                                                        |
+| CI action helpers                                                      | `pytest -q tests/test_github_action_helpers.py`                                                                                             |
+| integration sync or distribution overlays                              | `pytest -q tests/test_sync_integrations.py` (dry-run first)                                                                                 |
+| a plugin surface                                                       | that plugin's manifest JSON validation plus its plugin tests                                                                                |
+| a Node-based extension or bundle                                       | `node --check` on each changed script, `node --test` on its test directory, plus the package or build smoke when packaging metadata changed |
+| docs site or sample-report generation                                  | the documentation build in strict mode                                                                                                      |
 
 ---
 
-## 4) Baseline contract (v3, stable)
+## 4) Baseline contract (v3)
 
-### Versioned constants (single source of truth)
+**B1 — Version constants are read from code.** Cross-surface constants live in
+`codeclone/contracts/__init__.py`; subsystem-local wire versions live with their owning modules.
+An agent MUST read every version value from code and MUST NOT copy one from any document,
+including this one — a copied version number is an unexecuted claim that rots.
 
-Cross-surface schema/version constants live in
-`codeclone/contracts/__init__.py`; subsystem-local wire versions may live with
-their owning modules. **Always read values from code, never copy from another
-doc.** Current central values (verified at write time):
-
-| Constant                                 | Current value   |
-|------------------------------------------|-----------------|
-| `BASELINE_SCHEMA_VERSION`                | `3.0`           |
-| `BASELINE_FINGERPRINT_VERSION`           | `3`             |
-| `CACHE_VERSION`                          | `3.7`           |
-| `REPORT_SCHEMA_VERSION`                  | `3.1`           |
-| `METRICS_BASELINE_SCHEMA_VERSION`        | `1.3`           |
-| `ENGINEERING_MEMORY_SCHEMA_VERSION`      | `1.7`           |
-| `SEMANTIC_INDEX_FORMAT_VERSION`          | `3`             |
-| `SEMANTIC_PROJECTION_REVISION_VERSION`   | `1`             |
-| `MEMORY_PROJECTION_VERSION`              | `memory-v1`     |
-| `AUDIT_PROJECTION_VERSION`               | `audit-v1`      |
-| `PATCH_TRAIL_SCHEMA_VERSION`             | `1`             |
-| `PLATFORM_OBSERVABILITY_SCHEMA_VERSION`  | `1.1`           |
-| `TRAJECTORY_PROJECTION_VERSION`          | `trajectory-v3` |
-| `TRAJECTORY_QUALITY_SCORE_VERSION`       | `2`             |
-| `EXPERIENCE_DISTILLATION_VERSION`        | `experience-v1` |
-| `IDE_GOVERNANCE_PROTOCOL_VERSION`        | `2`             |
-| `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION`  | `1.2`           |
-| `CORPUS_EXPORT_SCHEMA_VERSION`           | `1.3`           |
-| `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `1`             |
-| `CORPUS_CONTROL_PLANE_CONTRACT_VERSION`  | `1.0`           |
-| `CORPUS_REPRESENTATION_CONTRACT_VERSION` | `3`             |
-| `CORPUS_NORMALIZER_VERSION`              | `1`             |
-| `CORPUS_EMBEDDING_CONTRACT_VERSION`      | `2`             |
-| `CORPUS_AGENT_LABEL_CONTRACT_VERSION`    | `1`             |
-| `CORPUS_PARTITION_MAP_VERSION`           | `1`             |
-
-Subsystem-local wire versions (not in `contracts/__init__.py`):
-
-| Constant                                 | Value                 | Owner                                               |
-|------------------------------------------|-----------------------|-----------------------------------------------------|
-| `AUDIT_EVENT_CORE_VERSION`               | `2`                   | `codeclone/audit/events.py`                         |
-| `CONTEXT_CONTRACT_VERSION`               | `1`                   | `codeclone/surfaces/mcp/_implementation_context.py` |
-| `CALL_RESOLUTION_VERSION`                | `1`                   | `codeclone/surfaces/mcp/_implementation_context.py` |
-| `CONTEXT_GOVERNANCE_CONTRACT_VERSION`    | `1.0`                 | `codeclone/surfaces/mcp/_context_governance.py`     |
-| `CONTEXT_GOVERNANCE_DIGEST_VERSION`      | `1`                   | `codeclone/surfaces/mcp/_context_governance.py`     |
-| `CONTEXT_GOVERNANCE_ESTIMATOR`           | `utf8_bytes_div_4_v1` | `codeclone/surfaces/mcp/_context_governance.py`     |
-| `RECEIPT_VERSION`                        | `1`                   | `codeclone/surfaces/mcp/_review_receipt.py`         |
-| `BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION` | `1`                   | `codeclone/surfaces/mcp/_blast_radius.py`           |
-
-When updating any doc that mentions a version, re-read `codeclone/contracts/__init__.py` first. Do not derive
-versions from another document.
-
-### Baseline file structure (canonical)
-
-Schema `3.0` is a lane container (see `codeclone/baseline/container.py`),
-not the flat v2 `meta`/`clones`/`metrics` layout. Skeleton (elided values
-as `…`):
+**B2 — Container shape.** The current schema is a lane container. An agent MUST NOT
+reintroduce the flat pre-v3 top-level layout:
 
 ```json
 {
   "format": "codeclone-baseline",
   "baseline_scope_id": "…",
   "meta": {
-    "container_version": "3.0",
+    "container_version": "…",
     "generator": {
       "name": "codeclone",
-      "version": "X.Y.Z"
+      "version": "…"
     },
-    "python_tag": "cp314",
-    "created_at": "2026-02-08T14:20:15Z",
+    "python_tag": "…",
+    "created_at": "…",
     "project_label": "…",
     "root_digest": {
-      "domain": "codeclone.baseline.root.v1",
+      "domain": "…",
       "algorithm": "sha256",
       "value": "…"
     }
   },
   "contracts": {
-    "BASELINE_FINGERPRINT_VERSION": "3",
     "…": "required contract versions sampled at write time"
   },
   "lanes": {
-    "clones.functions": {
+    "<lane name>": {
       "descriptor": {
-        "name": "clones.functions",
+        "name": "…",
         "payload_schema": "…",
         "algorithm_revision": "…",
         "required_contracts": []
       },
       "digest": {
-        "domain": "codeclone.baseline.lane.v1",
+        "domain": "…",
         "algorithm": "sha256",
         "value": "…"
       },
       "observation_digest": "…",
       "payload": "…",
       "required": false
-    },
-    "…": "one entry per enabled observation lane"
+    }
   },
   "observation_contract": {
     "enabled_lanes": [],
@@ -413,917 +298,831 @@ as `…`):
     "module_registry_digest": "…",
     "observation_digest": "…"
   },
-  "transition": "one-shot 2.1→3.0 epoch-transition evidence, when migrated"
+  "transition": "one-shot epoch-transition evidence, when migrated"
 }
 ```
 
-### Rules
+`meta.container_version` is the baseline **schema** version, not the package version.
 
-- `meta.container_version` is the **baseline schema version**, not the
-  package version. The loader maps it onto `schema_version`
-  (`codeclone/baseline/clone_baseline.py`).
-- Runtime writes the current `BASELINE_SCHEMA_VERSION` = `3.0`.
-- Acceptance is **exact match**, not a range: `verify_compatibility` in both
-  baseline containers (`codeclone/baseline/clone_baseline.py` and
-  `codeclone/baseline/metrics_baseline.py`) compares the stored schema
-  version against the current `BASELINE_SCHEMA_VERSION`; any other value
-  fails with `MISMATCH_SCHEMA_VERSION` and the baseline is untrusted. There
-  is no minor-version acceptance window and no downgrade path.
-- The only cross-version path is the one-shot legacy migration in
-  `codeclone/baseline/transition.py`: `read_legacy_transition` authenticates
-  the exact bytes of a schema-`2.1` artifact (generator match, canonical
-  sorted-unique clone ids, constant-time `payload_sha256` check), records
-  epoch-transition evidence targeting schema `3.0`, and imports **no** lane
-  data — every lane is regenerated from the current run.
-  `preserve_legacy_backup` keeps the legacy bytes once as an immutable
-  `*.v2.<digest>.json` backup and never overwrites it.
-- Baseline novelty is **baseline-relative**, not patch-relative:
-  `novelty="known"` means a finding fingerprint is accepted by the trusted
-  baseline. It does not prove that the current patch did not introduce or
-  reintroduce that finding.
-- Patch-local regression claims require clean before-run to after-run evidence
-  (`compare_runs` / `check_patch_contract(mode="verify")`), not a single run's
-  baseline novelty.
-- Compatibility is tied to:
-    - schema version (exact match, above)
-    - `fingerprint_version` (exact match)
-    - `python_tag`, `baseline_scope_id`, and per-lane required contracts
-      (lane-level trust: one stale lane is reported as unavailable instead
-      of condemning the whole container)
-    - `generator.name == "codeclone"` (checked at container read)
-- Integrity is digest-based: every lane carries a `digest` and the container
-  carries `meta.root_digest` over the lane digests
-  (`codeclone/baseline/container_digest.py`); comparisons use constant-time
-  `hmac.compare_digest`. The legacy `payload_sha256` canonical-payload check
-  (stable key order, sorted-unique clone id lists) survives only inside the
-  2.1→3.0 transition authenticator.
+**B3 — Legacy path.** The only cross-version path is the one-shot legacy migration. It
+authenticates the exact bytes of the prior artifact, records transition evidence, and imports
+**no** lane data — every lane MUST be regenerated from the current run. Legacy bytes MUST be
+preserved once as an immutable backup and MUST NOT be overwritten.
 
-### Trust model
+**B4 — Four separate concepts; never one word "trusted".** Collapsing these is how a surface
+comes to publish confident answers about comparisons that never ran (`G3`). An agent MUST keep
+them distinct in code, in payloads, and in prose.
 
-- A baseline is either **trusted** (`baseline_status = ok`) or **untrusted**.
-- **Normal mode**:
-    - warn
-    - ignore untrusted baseline
-    - compare vs empty baseline
-- **CI gating mode** (`--ci` / `--fail-on-new`):
-    - fail‑fast if baseline untrusted
-    - exit code **2** for untrusted baseline
+| Level                                | Question                                                        | Binds                                                                |
+|--------------------------------------|-----------------------------------------------------------------|----------------------------------------------------------------------|
+| **Artifact admissibility**           | Is this artifact authentic and well-formed at all?              | schema version (exact) · format · integrity digests · generator name |
+| **Comparison-context compatibility** | Is this artifact applicable to *this* run?                      | baseline scope id · python tag · global required contracts           |
+| **Per-lane compatibility**           | Is *this lane* comparable under current contracts?              | lane required contracts · payload schema · algorithm revision        |
+| **Comparison availability**          | Did a comparison actually run for *this family*, in *this run*? | executed comparison, per family                                      |
 
-### Legacy behavior
+A valid, authentic artifact belonging to a different scope or python tag is **not
+inadmissible**: it is admissible and **context-incompatible**. An agent MUST NOT report the
+second as the first.
 
-- Legacy baselines (<= 1.3.x layout) must be treated as **untrusted** with explicit messaging and tests.
+**B5 — Lane-level trust.** One incompatible lane MUST be reported unavailable and MUST NOT
+condemn the whole container.
+
+**B6 — Integrity.** Each lane carries a digest, the container carries a root digest over lane
+digests, and comparisons MUST use constant-time equality.
+
+**B7 — Novelty is baseline-relative, not patch-relative.** `novelty="known"` means a fingerprint
+is accepted by the trusted baseline. It does **not** prove the current patch did not introduce or
+reintroduce it. A patch-local regression claim MUST rest on clean before-run to after-run
+evidence, never on a single run's novelty.
+
+**B8 — Comparison availability is a published fact, not an inference.** A consumer MUST NOT
+derive it from container presence, from lane compatibility, or from an empty difference set. **An
+empty difference set with no comparison is not evidence of sameness.**
+
+**B9 — Absence of a trusted comparison MUST be reported as comparison-unavailable.** It MUST NOT
+be presented, digested, or classified as a completed comparison against an empty baseline. A
+finding whose family had no comparison MUST NOT be classified `known`.
+
+> *Non-normative note:* if the implementation performs a literal comparison against an empty
+> baseline in non-gating mode, that is a code/document divergence to resolve deliberately.
+> `AUTH3` governs what an agent does about it.
+
+**B10 — Gating mode** MUST fail fast with the baseline gating exit code when the container is
+inadmissible or context-incompatible, and the two cases MUST be distinguishable in the message.
+Pre-v3 layouts are inadmissible, with explicit messaging and tests.
 
 ---
 
-## 5) Cache contract (integrity + size guards)
+## 5) Cache contract
 
-- Cache is an **optimization**, never a source of truth.
-- If cache is invalid or too large:
-    - warn
-    - proceed without cache
-    - ensure report meta reflects `cache_used=false`
-
-Never “fix” cache by silently mutating it; prefer regenerate.
+**C1** — Cache is an optimization, never truth. If it is invalid or oversized, an agent MUST
+warn, MUST proceed without it, and MUST ensure report metadata reflects that the cache was
+unused. An agent MUST NOT repair a cache by mutating it; regeneration is the only permitted
+remedy.
 
 ---
 
 ## 6) Reports and explainability
 
-Reports come in:
+**MCP1 — MCP boundary.** MCP MUST stay read-only with respect to repository source, baselines,
+canonical and generated reports, and analysis cache. Bounded local state is permitted **only**
+through its owning contract: session-local runs and review markers · workspace intent
+coordination · optional audit evidence · governed memory drafts and projection metadata · opt-in
+observability telemetry. None of these MAY alter canonical report identity, baseline
+admissibility, cache compatibility, findings, gates, or edit authorization. MCP MUST NOT
+re-synthesize design findings from raw metrics; it MUST read the canonical findings group.
 
-- HTML (`--html`)
-- JSON (`--json`)
-- Markdown (`--md`)
-- SARIF (`--sarif`)
-- Text (`--text`)
+**RP1 — Report invariants.** Ordering MUST be deterministic. Provenance MUST be consistent across
+every format: baseline admissibility and context status, fingerprint and schema versions,
+generator version, cache location and whether it was used — recorded as a **repository-relative
+logical path**, never an absolute or machine-local one (`PR1`). SARIF line hashes MUST remain
+stable across line-only shifts for the same finding identity.
 
-MCP is a separate optional interface, not a report format. It must remain
-read-only with respect to repository source, baselines, canonical reports,
-generated reports, and analysis cache. Explicit controller/developer contracts
-may maintain bounded local state:
+A SARIF run automation identifier MUST be classified explicitly, and the classification MUST be
+consistent across formats and releases:
 
-- session-local runs and review markers;
-- ephemeral workspace intent coordination;
-- optional controller audit evidence;
-- governed Engineering Memory drafts and projection metadata;
-- opt-in Platform Observability telemetry.
+- **either** it is derived deterministically from the run's semantic identity — in which case two
+  runs with identical semantic inputs share it, and it MAY enter canonical semantic bytes;
+- **or** it varies per execution — in which case it is **volatile provenance**, MUST be excluded
+  from canonical semantic bytes, and MUST NOT affect any digest (`P2`).
 
-These writes must use their owning controller, memory, audit, projection, or
-observability contract. They must never alter canonical report identity,
-baseline trust, cache compatibility, findings, gates, or edit authorization.
-Workspace intent registry files under `.codeclone/intents/` are advisory
-coordination state only, not analysis cache or report truth.
+An agent MUST NOT leave the classification implicit.
 
-For file edits, agents should prefer the workflow tools
-`start_controlled_change` and `finish_controlled_change` — they aggregate
-workspace check, intent declaration, blast radius, budget, verification,
-receipt, and cleanup into two calls. Use `dirty_scope_policy="continue_own_wip"`
-when resuming own uncommitted scope without foreign dirty overlap. Atomic change
-control tools (`manage_change_intent`, `get_blast_radius`, `check_patch_contract`,
-`validate_review_claims`, `create_review_receipt`) remain available for
-queue/promote/recover operations, deep inspection, and backward
-compatibility with older MCP servers. Pass `patch_health_delta` to
-`validate_review_claims` when using the atomic verify path.
+**RP2 — Absence MUST be distinguishable from emptiness.** A zero count that conflates "this lane
+did not run" with "this lane ran and found nothing" is a forbidden third state: the consumer
+cannot recover the difference and the digest will not move (`G4`, `B8`).
 
-### Report invariants
-
-- Ordering must be deterministic (stable sort keys).
-- All provenance fields must be consistent across formats:
-    - baseline loaded / status
-    - baseline fingerprint + schema versions
-    - baseline generator version
-    - cache path / cache used
-- SARIF `partialFingerprints.primaryLocationLineHash` must remain stable across
-  line-only shifts for the same finding identity.
-- SARIF `automationDetails.id` must be unique per run; result `kind` should be
-  explicit when emitted.
-
-### Explainability contract (core owns facts)
-
-For each clone group (especially block clones), the **core** should be able to provide factual fields such as:
-
-- `match_rule`
-- `signature_kind`
-- `window_size` (block size) / `segment_size`
-- `merged_regions` flag and counts
-- `stmt_type_sequence` (normalized)
-- `stmt_type_histogram`
-- `has_control_flow` (if/for/while/try/match)
-- ratios (assert / assign / call)
-- `max_consecutive_<type>` (e.g., consecutive asserts)
-
-UI can show **hints** only when the predicate is **formal & exact** (100% confidence), e.g.:
-
-- `assert_only_block` (assert_ratio == 1.0 and consecutive_asserts == block_len)
-- `repeated_stmt_hash` (single stmt hash repeated across window)
-
-No UI-only heuristics that affect gating.
+**RP3 — Explainability boundary.** The core supplies factual fields per clone group — match rule,
+signature kind, window or segment size, merged-region flag and counts, normalized statement-type
+sequence and histogram, control-flow presence, statement ratios, maximum consecutive counts. A
+renderer MAY show a hint **only when the predicate is formal and exact**. No presentation-only
+heuristic MAY affect gating (`P3`).
 
 ---
 
-## 7) Noise policy (what is and isn’t a “fix”)
+## 7) Noise policy
 
-### Acceptable fixes
-
-- Merge/report-layer improvements (e.g., merge sliding windows into maximal regions) **without changing gating**.
-- Better evidence surfaced in HTML to explain matches.
-
-### Not acceptable as a “quick fix”
-
-- Weakening detection rules to hide noisy test patterns, unless:
-    - it is configurable
-    - default remains honest
-    - the change is justified by real-world repos
-    - it includes tests for false-negative risk
-
-### Preferred remediation for test-only FPs
-
-- Refactor tests to avoid long repetitive statement sequences:
-    - replace chains of `assert "... in html"` with loops or aggregated checks.
+**N1** — An agent MUST NOT weaken detection to hide noisy patterns unless the weakening is
+configurable, the default stays honest, it is justified against real-world repositories, and it
+ships tests for false-negative risk. Merge- and report-layer improvements that do not change
+gating, and better evidence surfaced to explain a match, are acceptable. For test-only false
+positives an agent SHOULD refactor the tests to avoid long repetitive statement sequences rather
+than weaken detection.
 
 ---
 
-## 8) How to propose changes (agent workflow)
+## 8) Reporting a change
 
-For repository edits, follow `CLAUDE.md` / the active CodeClone change-control
-skill first. No edit begins until `start_controlled_change` returns
-`edit_allowed=true`. Retrieve relevant memory after scope authorization, keep
-the patch inside declared boundaries, verify with the profile selected by
-`finish_controlled_change`, and leave a receipt. This section describes what to
-report around that controlled change, not a replacement workflow.
-
-When you implement something:
-
-1. **State the intent** (what user-visible issue does it solve?)
-2. **Declare allowed files, related context, and forbidden paths.**
-3. **Inspect blast radius, review context, and do-not-touch boundaries.**
-4. **List actual files touched** and why.
-5. **Call out contracts affected**:
-    - baseline / cache / report schema
-    - controller / memory / observability / MCP payloads
-    - CLI exit codes / messages / integration surfaces
-6. **Add/adjust tests** for:
-    - normal-mode behavior
-    - CI gating behavior
-    - determinism (identical output on rerun)
-    - legacy/untrusted scenarios where applicable
-7. **Run**:
-    - `ruff`, `mypy`, `pytest`
-8. **Request substantive human review** of the complete diff. Automated
-   analysis, agent review, receipts, and green CI are evidence, not approval.
-
-Avoid changing unrelated files (locks, roadmap) unless required.
+**RPT1** — Around the controlled-change workflow (`P7`), an agent MUST report: the intent and the
+user-visible problem it solves · allowed files, related context, forbidden paths · blast radius
+and boundaries as inspected · the files actually touched and why each · contracts affected · tests
+added or adjusted per `CR1` · every gate with its exit code (`E5`) · the **verification matrix**
+when `E8` applies · **what was not done** (`X8`). An agent MUST NOT touch unrelated files unless
+required.
 
 ---
 
 ## 9) CLI behavior and exit codes
 
-Agents must preserve these semantics:
+**CLI1** — These semantics MUST be preserved.
 
-- **0** — success (including “new clones detected” in non-gating mode)
-- **2** — baseline gating failure (untrusted/missing baseline when CI requires trusted baseline; invalid output
-  extension, etc.)
-- **3** — analysis gating failure (e.g., `--fail-threshold` exceeded or new clones in `--ci` as designed)
-- **5** — internal error (unexpected exception escaped top-level CLI handling)
+| Code | Meaning                                                                                                     |
+|------|-------------------------------------------------------------------------------------------------------------|
+| 0    | success, including new findings in non-gating mode                                                          |
+| 2    | baseline gating failure — inadmissible or context-incompatible container under CI, invalid output extension |
+| 3    | analysis gating failure — threshold exceeded, or new findings under CI as designed                          |
+| 5    | internal error — an unexpected exception escaped top-level handling                                         |
 
-Changed-scope flags are contract-sensitive:
+Changed-scope flags are contract-sensitive: changed-only mode keeps the canonical analysis and
+report full while applying summary and threshold evaluation to the changed-file projection; the
+diff-comparison flag requires it; the git-diff path flag implies it. The authoritative flag
+inventory is the option specification module and the CLI help contract snapshot. A new exit reason
+MUST be documented and tested.
 
-- `--changed-only` keeps the canonical analysis/report full, but applies clone
-  summary/threshold evaluation to the changed-files projection.
-- `--diff-against` requires `--changed-only`.
-- `--paths-from-git-diff` implies `--changed-only`.
-
-Controller and workspace query flags (terminal-only; authoritative sources:
-`tests/fixtures/contract_snapshots/cli_help.txt`, `codeclone/config/spec.py`;
-published CLI docs **TBD** during migration):
-
-- `--blast-radius`, `--patch-verify`, `--strictness` — patch/blast-radius query
-- `--session-stats`, `--audit`, `--audit-json` — workspace/audit query (read-only;
-  `--audit` requires `audit_enabled=true` in effective config)
-
-Full flag inventory and combination rules: `codeclone/config/spec.py` and
-`tests/fixtures/contract_snapshots/cli_help.txt` (published docs **TBD**).
-
-If you introduce a new exit reason, document it and add tests.
+A typed outcome MUST ship with help and an executable next step, and MUST NOT name a parameter the
+tool does not expose: **an instruction the user cannot follow is a defect, not a message.**
 
 ---
 
-## 10) Release hygiene (for agent-assisted releases)
+## 10) Release hygiene
 
-Before cutting a release:
-
-- Confirm baseline schema compatibility is unchanged, or properly versioned.
-- Ensure changelog has:
-    - user-facing changes
-    - migration notes if any
-- Validate `twine check dist/*` for built artifacts.
-- Smoke test install in a clean venv:
-    - `uv pip install dist/*.whl`
-    - `codeclone --version`
-    - `codeclone . --ci` in a sample repo with baseline.
+**REL1** — Before a release an agent MUST confirm baseline schema compatibility is unchanged or
+properly versioned, MUST ensure the changelog carries user-facing changes and migration notes,
+MUST validate built artifacts, and MUST smoke test a clean install.
 
 ---
 
-## 11) “Don’t do this” list
+## 11) Prohibited
 
-- Don’t add hidden behavior differences between report formats.
-- Don’t make baseline compatibility depend on package patch/minor version.
-- Don’t add project-root hashes or unstable machine-local fields to baseline.
-- Don’t embed suppressions into baseline unless explicitly designed as a versioned contract.
-- Don’t introduce nondeterministic ordering (dict iteration, set ordering, filesystem traversal without sort).
-- Don’t make the base `codeclone` install depend on optional MCP runtime packages.
-- Don’t edit before the controller authorizes the declared scope when the
-  change-control surface is available.
-- Don’t let MCP mutate source files, baselines, canonical reports, generated
-  reports, or analysis cache data. Bounded controller, memory, projection,
-  audit, and observability state is allowed only through explicit owning
-  contracts.
-- Don’t let MCP re-synthesize design findings from raw metrics; read canonical `findings.groups.design` only.
-- Don’t let Engineering Memory, trajectories, Experiences, or Platform
-  Observability authorize edits or override canonical report facts.
-- Don’t describe agent review, receipts, or automated checks as the mandatory
-  human review required for merge.
-- Don’t conflate `codeclone setup apply` with MCP change control — setup never
-  declares intent, never returns `edit_allowed`, and must not write baselines,
-  analysis cache, or canonical reports.
+**PR1** — An agent **MUST NOT**:
+
+- introduce hidden behavior differences between report formats;
+- make baseline compatibility depend on the package patch or minor version;
+- add project-root hashes or machine-local fields to the baseline;
+- embed suppressions into the baseline unless designed as a versioned contract;
+- introduce nondeterministic ordering;
+- make the base install depend on optional MCP runtime packages;
+- let memory, trajectories, experiences, or observability authorize edits or override canonical
+  facts;
+- conflate the setup CLI with change control;
+- emit **absolute or machine-local filesystem paths, usernames, or machine identifiers** into any
+  public surface — published artifacts, issues, pull requests, marketplace metadata. Outgoing text
+  MUST be scanned before posting. Repository-relative logical paths are permitted and are the
+  required form for provenance (`RP1`).
+
+Related prohibitions live with their owners: `P7` · `MCP1` · `P5` · `P8`.
 
 ---
 
-## 12) Repository architecture
+## 12) Architecture and routing
 
-Architecture is layered, but grounded in current code (not aspirational diagrams):
+*Non-normative routing map (`AUTH1.1`). Boundary obligations are owned by `DD1`.*
 
-- **Structural Change Controller** (`codeclone/surfaces/mcp/_session_workflow_mixin.py`,
-  intent/blast-radius/patch-contract/receipt helpers under
-  `codeclone/surfaces/mcp/`, `codeclone/workspace_intent/*`,
-  `codeclone/analysis/blast_radius.py`, `codeclone/budget/*`) owns pre-edit scope
-  authorization, deterministic blast radius, patch verification, claim validation,
-  and review receipts over canonical report facts.
-- **CLI entry + orchestration surface** (`codeclone/main.py`, `codeclone/surfaces/cli/*`, `codeclone/ui_messages/*`)
-  owns argument parsing, runtime/config resolution, summaries, report writes, and exit routing.
-  User-facing copy lives in `ui_messages/` submodules (`help`, `labels`, `runtime`,
-  `markers`, `formatters`, `controller`, `styling`, `setup`).
-- **Setup readiness CLI** (`codeclone/surfaces/cli/setup/*`, lazy-loaded from
-  `workflow.main()` when `sys.argv[1] == "setup"`) owns capability discovery,
-  `SetupSnapshot` / `SetupPlan` projections, Rich human rendering, bounded
-  `pyproject.toml` round-trip merges (`codeclone/config/pyproject_writer.py`), and
-  optional `.gitignore` append. Runs on base install without `surfaces.mcp.*`;
-  apply is not Structural Change Controller authorization.
-- **Config layer** (`codeclone/config/*`) is the single source of truth for option specs, parser construction,
-  `pyproject.toml` loading, and CLI > pyproject > defaults resolution.
-- **Core orchestration** (`codeclone/core/*`) owns bootstrap → discovery → worker processing → project metrics →
-  report/gate integration. It does not own shell UX.
-- **Analysis layer** (`codeclone/analysis/*`, `codeclone/blocks/*`, `codeclone/paths/*`, `codeclone/qualnames/*`,
-  `codeclone/scanner/*`) parses source, normalizes AST/CFG facts, extracts units, and prepares deterministic analysis
-  inputs.
-- **Clone/finding derivation layer** (`codeclone/findings/*`, `codeclone/metrics/*`,
-  `codeclone/meta_markers/*`) groups clones and computes structural and quality
-  signals from already-extracted facts.
-- **Domain/contracts layer** (`codeclone/models.py`, `codeclone/contracts/*`, `codeclone/domain/*`) defines typed
-  entities, enums, schema/version constants, and typed exceptions used across layers.
-- **Persistence contracts** (`codeclone/baseline/*`, `codeclone/cache/*`) store trusted comparison state and
-  optimization state. They are contracts, not analysis truth.
-- **Canonical report + projections** (`codeclone/report/document/*`, `codeclone/report/gates/*`,
-  `codeclone/report/renderers/*`, `codeclone/report/*.py`) converts analysis facts into deterministic report payloads
-  and deterministic projections.
-- **HTML/UI rendering** (`codeclone/report/html/*`) renders views from canonical report/meta
-  facts. HTML is render-only.
-- **MCP agent interface** (`codeclone/surfaces/mcp/*`, `codeclone/surfaces/mcp/messages/*`)
-  exposes the same pipeline/report contracts as a deterministic MCP surface for AI agents and MCP-capable clients,
-  read-only with respect to source/baseline/report/cache artifacts and stateful
-  only through explicit controller, memory, projection, audit, and observability
-  contracts.
-- **Engineering Memory** (`codeclone/memory/*`, `codeclone/config/memory*.py`)
-  owns the local evidence-linked store, FTS/semantic retrieval, staleness,
-  governance, trajectory and Patch Trail projection, Experience distillation,
-  and coalesced projection jobs. It guides agents but never authorizes edits.
-- **Platform Observability** (`codeclone/observability/*`) owns opt-in local
-  operation/span telemetry, normalized SQL fingerprints, bounded query
-  projections, and self-contained JSON/HTML diagnostics for CodeClone
-  development. It is never repository quality truth or a gate input.
-- **Corpus Analytics** (`codeclone/analytics/*`, lazy-loaded `codeclone analytics`
-  CLI route in `codeclone/surfaces/cli/analytics.py`) owns the corpus clustering
-  store, export/representation contracts, and maintainer analytics projections.
-  It is separate from Engineering Memory and repository-quality gates.
-- **Controller insights** (`codeclone/controller_insights/*`) owns shared
-  session-stat and audit-trail projections used by CLI and IDE-only MCP tools.
-- **Audit trail** (`codeclone/audit/*`) stores optional passive evidence (SQLite by default via
-  `codeclone/surfaces/cli/audit.py` / MCP audit emit). It must not affect canonical report digests, baseline trust,
-  cache compatibility, or finding identity.
-- **Patch budget helpers** (`codeclone/budget/*`) provide shared budget estimation for CLI/MCP patch-verify flows.
-- **Documentation/publishing surface** (`docs/`, `zensical.toml`, `.github/workflows/docs.yml`,
-  `scripts/build_docs_example_report.py`) builds the docs site and sample report.
-  Published contract-page inventory is **TBD** during migration.
-- **Developer/release scripts** (`scripts/lint_admonitions.py`,
-  `scripts/sync_integrations.py`, `scripts/integration_dist/*`,
-  `scripts/launch_mcp`) provide docs hygiene, storefront synchronization, and
-  launcher adapters. They must remain thin and contract-tested.
-- **GitHub Action surface** (`.github/actions/codeclone/*`) packages the public
-  composite Action over the same CLI contracts; shell inputs, timeouts, outputs,
-  and exit behavior are contract-sensitive.
-- **VS Code extension surface** (`extensions/vscode-codeclone/*`) is a native, workspace-only IDE client over
-  `codeclone-mcp`, with baseline-aware, triage-first, source-first review UX.
-- **Claude Desktop bundle surface** (`extensions/claude-desktop-codeclone/*`) is a native `.mcpb` install wrapper for
-  Claude Desktop that launches the same local `codeclone-mcp` server via local `stdio`.
-- **Claude Code plugin surface** (`plugins/claude-code-codeclone/*`,
-  `scripts/integration_dist/marketplace.claude-code.json`) is a native
-  marketplace plugin over `codeclone-mcp`, with bundled skills and MCP
-  configuration synchronized to `orenlab/codeclone-claude-code`.
-- **Codex plugin surface** (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`) is a native local Codex plugin
-  over `codeclone-mcp`, with repo-local discovery metadata and bundled skills under `plugins/codeclone/skills/`.
-- **Cursor plugin surface** (`plugins/cursor-codeclone/*`) is a native local Cursor plugin over `codeclone-mcp` with
-  bundled skills, rules, hooks, and an agent definition.
-- **Tests-as-spec** (`tests/`) lock behavior, contracts, determinism, and architecture boundaries.
-
-Non-negotiable interpretation:
-
-- The Controller begins before the diff; intent/scope/blast radius are not
-  post-hoc review annotations.
-- Core produces facts; renderers present facts.
-- Baseline/cache are persistence contracts, not analysis truth.
-- UI/report must not invent gating semantics.
-- MCP reuses pipeline/report contracts and must not create a second analysis truth path.
-- Engineering Memory, trajectories, Experiences, and Patch Trail are
-  evidence/context layers, not edit authorization or analysis truth.
-- Platform Observability describes CodeClone execution cost, not repository
-  quality, vulnerabilities, or permission.
-- The VS Code extension is a guided IDE view over MCP and must not introduce a second analysis or truth path.
-- The Claude Desktop bundle is a local setup surface over `codeclone-mcp` and must not introduce a second server or
-  truth path.
-- The Claude Code plugin is a discovery and guidance surface over
-  `codeclone-mcp` and must not introduce a second analyzer, MCP server, or
-  truth path.
-- The Codex plugin is a local discovery and guidance surface over `codeclone-mcp` and must not introduce a second
-  analyzer, MCP server, or truth path.
-- The Cursor plugin is a local discovery and guidance surface over `codeclone-mcp` and must not introduce a second
-  analyzer, MCP server, or truth path.
-- `codeclone setup` is a human onboarding CLI over canonical config/audit/memory
-  **probes**; it is not an MCP surface and does not grant edit permission for
-  governed repository patches.
-
-## 13) Module map
-
-Use this map to route changes to the right owner module.
-
-- `codeclone/main.py` — public CLI entrypoint only. Keep it tiny.
-- `codeclone/analysis/blast_radius.py` — deterministic dependency/blast-radius
-  graph core shared by CLI/MCP controller projections; keep it independent from
-  MCP session policy.
-- `codeclone/surfaces/cli/workflow.py` — top-level CLI orchestration and exit routing. Add CLI control flow here, not
-  in `main.py`; lazy-load `memory`, `analytics`, `observability`, and `setup` argv routes here only.
-- `codeclone/surfaces/cli/setup/*` — setup readiness CLI (`status`, `doctor`, `plan`, `apply`, `wizard`); discover/plan
-  engines, Rich renderers, wizard hub. Must not import `codeclone.surfaces.mcp.*`.
-- `codeclone/config/pyproject_writer.py` — round-trip `[tool.codeclone]` merge via `tomlkit` for setup apply.
-- `codeclone/utils/atomic_write.py` — shared atomic file replace for setup apply and pyproject writer.
-- `codeclone/paths/gitignore.py` — gitignore coverage helpers shared by setup plan/apply and tips.
-- `codeclone/surfaces/cli/*` — CLI support slices (startup, runtime, execution, post-run handling, summaries,
-  reports, changed-scope logic, baseline state, audit rendering, console helpers). Keep them orchestration/UX-focused.
-- `codeclone/config/*` — parser construction, option specs/defaults, pyproject loading, config resolution. Do not
-  duplicate option semantics elsewhere.
-- `codeclone/core/*` — canonical runtime pipeline and payload plumbing. Change integration flow here; do not move shell
-  UX or HTML-only logic here.
-- `codeclone/analysis/*` — AST parsing, CFG/fingerprint preparation, declaration/reference collection, and unit
-  extraction (`units.py`, `_module_walk.py`). Change parsing/extraction semantics here; keep it independent from
-  CLI/report/baseline UX.
-- `codeclone/scanner/*` — Python file discovery helpers and module-name resolution used by core discovery.
-- `codeclone/findings/clones/grouping.py` + `codeclone/blocks/*` — clone grouping and block/segment mechanics.
-- `codeclone/meta_markers/*` — meta-marker derivation used by metrics/report joins.
-- `codeclone/findings/structural/detectors.py` — structural finding extraction/normalization policy; keep it factual
-  and deterministic.
-- `codeclone/metrics/*` — metric computations and dead-code/dependency/health logic; change metric math and thresholds
-  here; do not make metrics depend on renderer/UI concerns.
-- `codeclone/analysis/suppressions.py` — inline `# codeclone: ignore[...]` parse/bind/index logic; keep it
-  declaration-scoped and deterministic.
-- `codeclone/findings/clones/golden_fixtures.py` — golden-fixture clone exclusion policy and suppressed-clone bucket
-  shaping; keep it clone-derivation-only and deterministic.
-- `codeclone/baseline/clone_baseline.py` + `codeclone/baseline/trust.py` — clone baseline schema/trust/integrity/
-  compatibility contract; all clone-baseline format changes go here with explicit contract process.
-- `codeclone/baseline/metrics_baseline.py` + `codeclone/baseline/_metrics_baseline_*` — metrics-baseline schema,
-  validation, payload hashing, and unified-baseline merge logic.
-- `codeclone/cache/store.py`, `codeclone/cache/versioning.py`, `codeclone/cache/integrity.py`,
-  `codeclone/cache/_wire_*`, `codeclone/cache/projection.py` — cache schema/status/profile compatibility, canonical
-  JSON/signing, wire encoding/decoding, and segment projection persistence. Cache remains optimization-only.
-- `codeclone/report/document/*` — canonical report schema builder and integrity payload. Any JSON contract shape change
-  belongs here.
-- `codeclone/report/renderers/*` — deterministic text/markdown/SARIF/JSON projections over the canonical report.
-- `codeclone/report/html/*` — actual HTML assembly, context shaping, tabs, sections, widgets, CSS/JS/escaping, and
-  snippets. Change report layout and interactive HTML UX here, not in report builders.
-- `codeclone/report/gates/*` — metric-gate reason derivation over canonical metrics state.
-- `codeclone/report/*.py` (other modules) — deterministic report support slices such as explainability, suggestions,
-  merge, overview, findings helpers, and source-kind routing.
-- `codeclone/memory/*` — Engineering Memory persistence, ingest, scoped
-  retrieval, semantic sidecar, governance, trajectories, Patch Trail,
-  Experiences, and projection jobs. Memory mutations go through explicit memory
-  tools/workflows only — never the general source-edit workflow.
-- `codeclone/workspace_intent/*` — ephemeral workspace intent registry/schema and
-  coordination helpers shared by MCP, CLI, and plugins. Coordination state only,
-  never analysis truth.
-- `codeclone/analytics/*` — Corpus Analytics store, clustering, export, and
-  reporting. CLI entry: `codeclone/surfaces/cli/analytics.py`.
-- `codeclone/surfaces/mcp/service.py` — typed, in-process MCP service over the current pipeline/report contracts;
-  keep source/baseline/report/cache access read-only. Local mutations are
-  limited to documented controller, memory, projection, audit, and
-  observability contracts.
-- `codeclone/surfaces/mcp/server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
-  registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
-- `codeclone/surfaces/mcp/messages/*` — MCP user-facing copy (tool/resource descriptions, help topics, workflow and
-  intent messages, parameter Field docs, patch-contract hints, verification copy, remediation shapes). Keep message
-  policy centralized like `ui_messages/`.
-- `codeclone/audit/*` — audit event schema, validation, writer/reader; passive evidence only.
-- `codeclone/budget/*` — patch/token budget estimation shared by CLI and MCP surfaces.
-- `codeclone/controller_insights/*` — shared session-stats and audit-trail
-  collectors; CLI and IDE projections must reuse these rather than duplicating
-  insight semantics.
-- `codeclone/observability/*` — developer-only instrumentation, local telemetry
-  persistence, bounded query views, and JSON/HTML rendering. It must remain
-  independent from findings, gates, baselines, memory facts, and authorization.
-- `tests/test_mcp_service.py`, `tests/test_mcp_server.py` — MCP contract and integration tests; run these when
-  touching any MCP surface.
-- `codeclone/contracts/*` — version constants, schema types, exit enum, URLs, and typed exceptions. Treat as contract
-  surface.
-- `codeclone/models.py` — shared typed models crossing modules; keep model changes contract-aware.
-- `codeclone/domain/*.py` — centralized domain taxonomies/IDs (families, categories, source scopes, risk/severity
-  levels); use these constants in pipeline/report/UI instead of scattering raw literals.
-- `codeclone/ui_messages/*` — CLI text/marker/help constants and formatter helpers. Keep message policy centralized.
-- `codeclone/report/messages/*` — report-layer user copy (glossary, suggestions,
-  explainability, overview, security, chrome, text/markdown/sarif projections,
-  gate prefixes).
-- `docs/`, `zensical.toml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py` — docs-site source,
-  publication workflow, and live sample-report generation. Published contract-page routing is **TBD** during
-  migration; keep code/tests/CHANGELOG aligned with contracts.
-- `scripts/lint_admonitions.py` — deterministic MkDocs admonition/details
-  indentation validator/fixer used by pre-commit.
-- `scripts/sync_integrations.py` + `scripts/integration_dist/*` — guarded
-  storefront synchronization and distribution overlays. Dry-run first; test
-  with `tests/test_sync_integrations.py`.
-- `scripts/launch_mcp` — monorepo adapter to the shared Codex plugin launcher,
-  not an independent launcher implementation.
-- `.github/actions/codeclone/*` — composite GitHub Action surface; pass inputs
-  through `env:`, keep subprocess timeouts explicit, and preserve documented
-  CLI/output semantics.
-- `extensions/vscode-codeclone/*` — stable VS Code extension surface; keep it baseline-aware, triage-first,
-  source-first, and faithful to MCP/canonical report semantics rather than building a second analyzer or report model.
-- `extensions/claude-desktop-codeclone/*` — stable Claude Desktop bundle surface; keep it local-stdio-only,
-  launcher-focused, and faithful to `codeclone-mcp` rather than re-implementing MCP semantics in the bundle layer.
-- `plugins/claude-code-codeclone/*` — stable Claude Code plugin source; keep it
-  Claude-native, marketplace-installable, skills-guided, and faithful to
-  `codeclone-mcp` rather than inventing plugin-only analysis logic.
-- `plugins/codeclone/*`, `.agents/plugins/marketplace.json` — stable Codex plugin surface; keep it Codex-native,
-  conservative-first, skills-guided, and faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
-- `plugins/cursor-codeclone/*` — stable Cursor plugin surface; keep it Cursor-native, skills/rules/hooks-guided, and
-  faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
-- `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
-
-## 14) Dependency direction
-
-Dependency direction is enforceable and partially test-guarded (`tests/test_architecture.py`):
-
-- `codeclone.report.*` must not import `codeclone.ui_messages`, `codeclone.surfaces.cli`, or HTML consumers outside
-  `codeclone.report.html.*`.
-- `codeclone.baseline` and `codeclone.cache` must not import `codeclone.surfaces.cli`, `codeclone.ui_messages`, or
-  `codeclone.report.html`.
-- `codeclone.core` must not import `codeclone.surfaces.*` or `codeclone.config`.
-- `codeclone.analysis`, `codeclone.findings`, and `codeclone.metrics` must not import `codeclone.surfaces.*`; analysis
-  and findings must also stay independent from config/report-builder wiring.
-- `codeclone.models` may import only `codeclone.contracts` from local modules.
-- `codeclone.domain.*` must remain leaf domain modules.
-- `codeclone.memory.*` may import `codeclone.contracts`, `codeclone.utils`, blast-radius helpers under
-  `codeclone/analysis/`, and report document types as needed for ingestion. It must NOT import `codeclone.surfaces.*`
-  or `codeclone.ui_messages`.
-- `codeclone.observability.*` is diagnostics-only and must not become a
-  dependency that changes analysis, findings, gates, baselines, memory facts,
-  or authorization.
-
-Operational rules:
-
-- Core/domain code must not depend on HTML/UI or MCP.
-- Renderers depend on canonical report payload/model; canonical report builders must not depend on renderer/UI.
-- Metrics/report layers must not recompute or invent core facts in UI.
-- CLI support modules under `codeclone/surfaces/cli/*` must orchestrate/format, not own domain semantics.
-- Persistence semantics (baseline/cache trust/integrity) must stay in persistence/domain modules, not in render/UI
-  layers.
-- MCP may depend on pipeline/report/contracts, but core/persistence/report layers must not depend on MCP modules.
-- Controller insights are shared projections; CLI/MCP render them but must not
-  fork their collection semantics.
-
-## 15) Suppression policy
-
-Inline suppressions are explicit local policy, not analysis truth.
-
-- Supported syntax is `# codeclone: ignore[rule-id,...]` via `codeclone/analysis/suppressions.py`.
-- Binding scope is declaration-only (`def`, `async def`, `class`) using:
-    - leading comment on the line immediately before declaration
-    - inline comment on the declaration header start line
-    - inline comment on the declaration header closing line for multiline signatures
-- Binding is target-specific (`filepath`, `qualname`, declaration span, kind). No file-wide/global implicit scope.
-- Unknown/malformed directives are ignored safely; analysis must not fail because of suppression syntax issues.
-- Current active semantic effect is dead-code suppression (`dead-code`) through
-  `codeclone/analysis/_module_walk.py` → `DeadCandidate.suppressed_rules` → `codeclone/metrics/dead_code.py`.
-- Suppressed dead-code findings are excluded from active dead-code findings and health impact, but remain observable in
-  report surfaces where implemented (JSON summary/details, text/markdown/html, CLI counters).
-- Suppressions must not silently alter unrelated finding families.
-
-Prefer explicit inline suppressions for runtime/dynamic false positives instead of broad framework heuristics.
-
-## 16) Change routing
-
-If you change a contract-sensitive zone, route docs/tests/approval deliberately.
-
-Published contract documentation is **TBD** during the docs-site migration (`docs/`).
-Until replacement pages land, prioritize **code**, **tests**, `CHANGELOG.md`,
-`README.md`, and surface-local READMEs/plugin skills over legacy `docs/book/**`
-or `docs/guide/**` paths.
-
-| Change zone                                                                                                                                                                                                   | Must update docs                                                                                                                                                                             | Must update tests                                                                                                                                                                                                                                                                                                                    | Explicit approval required when                                                                                                 | Contract-change trigger                                                                                               |
-|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| Baseline schema/trust/integrity (`codeclone/baseline/clone_baseline.py`, `codeclone/baseline/trust.py`)                                                                                                       | `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                             | `tests/test_baseline.py`, CI/CLI behavior tests (`tests/test_cli_inprocess.py`, `tests/test_cli_unit.py`)                                                                                                                                                                                                                            | schema/trust semantics, compatibility windows, payload integrity logic change                                                   | baseline key layout/status semantics/compat rules change                                                              |
-| Cache schema/profile/integrity (`codeclone/cache/store.py`, `codeclone/cache/versioning.py`, `codeclone/cache/integrity.py`)                                                                                  | `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                             | `tests/test_cache.py`, pipeline/CLI cache integration tests                                                                                                                                                                                                                                                                          | cache schema/status/profile compatibility semantics change                                                                      | cache payload/version/status semantics change                                                                         |
-| Canonical report JSON shape (`codeclone/report/document/*`, report projections)                                                                                                                               | `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                               | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`, relevant report-format tests                                                                                                                                                                                             | finding/meta/summary schema changes                                                                                             | stable JSON fields/meaning/order guarantees change                                                                    |
-| CLI flags/help/exit behavior (`codeclone/main.py`, `codeclone/surfaces/cli/*`, `codeclone/config/*`, `codeclone/contracts/*`)                                                                                 | `README.md`, `CHANGELOG.md`; verify against `codeclone/config/spec.py` and `tests/fixtures/contract_snapshots/cli_help.txt`; published contract pages **TBD**                              | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`, `tests/test_cli_smoke.py`                                                                                                                                                                                                                                                   | exit-code semantics, script-facing behavior, flag contracts change                                                              | user-visible CLI contract changes                                                                                     |
-| Setup readiness CLI (`codeclone/surfaces/cli/setup/*`, `codeclone/config/pyproject_writer.py`, `codeclone/paths/gitignore.py`, `codeclone/ui_messages/setup.py`)                                              | `README.md`, plugin `codeclone-setup` skill, `CHANGELOG.md`; published contract pages **TBD**                                                                                                | `tests/test_cli_setup.py`, `tests/test_pyproject_writer.py`, golden `tests/fixtures/contract_snapshots/setup_snapshot_v1.json` when wire schema changes                                                                                                                                                                              | lazy-load boundary (I-07), snapshot/plan JSON shape, apply bounded-write semantics, wizard TTY contract, exit codes on apply    | `SetupSnapshot` / `SetupPlan` / apply result payloads, probe matrix, or pyproject merge behavior change               |
-| Structural Change Controller (intent, blast radius, patch contract, hygiene, claims, receipts, Patch Trail)                                                                                                   | `README.md`, MCP/plugin skills, `CHANGELOG.md`; published contract pages **TBD**                                                                                                               | Controller/intent/verification/claim/receipt tests in `tests/test_mcp_service.py`, `tests/test_mcp_server.py`, `tests/test_verification_profile.py`, `tests/test_patch_trail_*.py`, plus tool-schema snapshots when payloads change                                                                                                  | edit authorization, scope/hygiene, verification profile, claim semantics, receipt or Patch Trail contract changes               | workflow tool payloads, status transitions, permission signals, verification/receipt schemas change                   |
-| Fingerprint-adjacent analysis (`codeclone/analysis/units.py`, `codeclone/analysis/_module_walk.py`, `codeclone/analysis/cfg.py`, `codeclone/analysis/normalizer.py`, `codeclone/findings/clones/grouping.py`) | `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                             | `tests/test_fingerprint.py`, `tests/test_extractor.py`, `tests/test_cfg.py`, golden tests (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`)                                                                                                                                                                               | always (see Section 1.6)                                                                                                        | clone identity / NEW-vs-KNOWN / fingerprint inputs change                                                             |
-| Suppression semantics/reporting (`codeclone/analysis/suppressions.py`, `codeclone/analysis/_module_walk.py` dead-code wiring, report/UI counters)                                                             | `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                               | `tests/test_suppressions.py`, `tests/test_extractor.py`, `tests/test_metrics_modules.py`, `tests/test_pipeline_metrics.py`, report/html/cli tests                                                                                                                                                                                    | declaration scope semantics, rule effect, or contract-visible counters/fields change                                            | suppression changes alter active finding output or contract-visible report payload                                    |
-| MCP interface (`codeclone/surfaces/mcp/*`, packaging extra/launcher)                                                                                                                                          | `README.md`, `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                | `tests/test_mcp_service.py`, `tests/test_mcp_server.py`, `tests/fixtures/contract_snapshots/mcp_tool_schemas.json`, plus CLI/package tests if launcher/install semantics change                                                                                                                                                      | tool/resource shapes, workflow tool payloads, repository-read-only semantics, optional-dependency packaging behavior change     | public MCP tool names, workflow tool payloads, resource URIs, launcher/install behavior, or response semantics change |
-| Engineering Memory, semantic retrieval, trajectories, Experiences, projection jobs (`codeclone/memory/*`, `codeclone/config/memory*.py`)                                                                      | plugin skills, `CHANGELOG.md`; published contract pages **TBD**                                                                                                                              | Applicable `tests/test_memory_*.py`, `tests/test_semantic_*.py`, projection/trajectory/Experience tests, MCP memory tests, and tool-schema snapshots when payloads change                                                                                                                                                            | schema/governance transitions, retrieval/fusion semantics, trajectory quality, Experience promotion, or worker lifecycle change | memory/semantic/projection versions, SQLite DDL, CLI/MCP payloads, ranking/filter/governance semantics change         |
-| Platform Observability (`codeclone/observability/*`, CLI trace, MCP bounded slicer, worker instrumentation)                                                                                                   | `CHANGELOG.md` when user-visible; published contract pages **TBD**                                                                                                                            | `tests/test_observability_*.py`, plus worker/memory/MCP tests for changed instrumentation boundaries                                                                                                                                                                                                                                 | privacy/trust boundary, persisted schema, correlation, payload-size, SQL fingerprint, or public projection changes              | `PLATFORM_OBSERVABILITY_SCHEMA_VERSION`, CLI/MCP section payloads, persistence or collection semantics change         |
-| Controller audit and insights (`codeclone/audit/*`, `codeclone/controller_insights/*`, CLI/MCP session/audit surfaces)                                                                                        | `CHANGELOG.md` when public; published contract pages **TBD**                                                                                                                               | `tests/test_audit_*.py`, `tests/test_controller_insights.py`, CLI/MCP projection tests                                                                                                                                                                                                                                               | audit event core/schema, retention, token/payload footprint, or shared collector semantics change                               | audit schema/event core, `--audit`/`--session-stats`, IDE-only insight payloads change                                |
-| Corpus Analytics (`codeclone/analytics/*`, `codeclone/surfaces/cli/analytics.py`)                                                                                                                             | `CHANGELOG.md`; published contract pages **TBD**                                                                                                                                             | `tests/test_analytics_*.py`, `tests/test_config_analytics.py`                                                                                                                                                                                                                                                                      | store/export/representation contract semantics change                                                                           | corpus schema/export/representation versions, CLI payloads, or clustering semantics change                            |
-| VS Code extension surface (`extensions/vscode-codeclone/*`)                                                                                                                                                   | `README.md`, extension README, `CHANGELOG.md`; published docs **TBD**                                                                                                                        | `node --check extensions/vscode-codeclone/src/support.js`, `node --check extensions/vscode-codeclone/src/mcpClient.js`, `node --check extensions/vscode-codeclone/src/extension.js`, `node --test extensions/vscode-codeclone/test/*.test.js`, plus local extension-host smoke and package smoke when surface/manifest/assets change | command/view UX, trust/runtime model, source-first review flow, or packaging metadata change                                    | documented commands/views/setup/trust behavior, packaged assets, or publish metadata change                           |
-| Claude Desktop bundle surface (`extensions/claude-desktop-codeclone/*`)                                                                                                                                       | extension README, `CHANGELOG.md`; published docs **TBD**                                                                                                                                     | `node --check extensions/claude-desktop-codeclone/server/index.js`, `node --check extensions/claude-desktop-codeclone/src/launcher.js`, `node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs`, `node --test extensions/claude-desktop-codeclone/test/*.test.js`, plus `.mcpb` build smoke                        | bundle install/runtime model, launcher UX, local-stdio constraints, or bundle metadata change                                   | documented Claude Desktop install/setup/runtime behavior or packaged bundle semantics change                          |
-| Claude Code plugin surface (`plugins/claude-code-codeclone/*`, `scripts/integration_dist/marketplace.claude-code.json`)                                                                                       | plugin README, `CHANGELOG.md`; published docs **TBD**                                                                                                                                        | `python3 -m json.tool plugins/claude-code-codeclone/.claude-plugin/plugin.json`, `python3 -m json.tool plugins/claude-code-codeclone/.mcp.json`, `python3 -m json.tool scripts/integration_dist/marketplace.claude-code.json`, `claude plugin validate plugins/claude-code-codeclone`, `tests/test_claude_code_plugin.py`            | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, launcher behavior, or marketplace metadata change   | documented Claude Code install/discovery/runtime behavior or plugin manifest/marketplace semantics change             |
-| Codex plugin surface (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`)                                                                                                                              | plugin README, `CHANGELOG.md`; published docs **TBD**                                                                                                                                        | `python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json`, `python3 -m json.tool plugins/codeclone/.mcp.json`, `python3 -m json.tool .agents/plugins/marketplace.json`, `tests/test_codex_plugin.py`                                                                                                                        | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, or plugin metadata change                           | documented Codex plugin install/discovery/runtime behavior or plugin manifest/marketplace semantics change            |
-| Cursor plugin surface (`plugins/cursor-codeclone/*`)                                                                                                                                                          | plugin README, `CHANGELOG.md`; published docs **TBD**                                                                                                                                        | `tests/test_cursor_plugin.py`, `tests/test_cursor_plugin_hooks.py`                                                                                                                                                                                                                                                                   | plugin discovery/runtime model, bundled MCP config, bundled skill/rule/hook behavior, or plugin metadata change                 | documented Cursor plugin install/discovery/runtime behavior or plugin manifest semantics change                       |
-| GitHub Action surface (`.github/actions/codeclone/*`)                                                                                                                                                         | Action README, `README.md`, `CHANGELOG.md` when user-visible; published docs **TBD**                                                                                                          | `tests/test_github_action_helpers.py`, shell/action smoke for changed workflow behavior                                                                                                                                                                                                                                              | input interpolation, command construction, timeout, output, or exit behavior changes                                            | public action inputs/outputs/runtime behavior changes                                                                 |
-| Storefront sync and distribution overlays (`scripts/sync_integrations.py`, `scripts/integration_dist/*`, launcher copy rules)                                                                                 | affected integration READMEs, `CHANGELOG.md` when publish behavior changes; published docs **TBD**                                                                                           | `tests/test_sync_integrations.py`, then target-native package/test smoke after sync                                                                                                                                                                                                                                                  | deletion/copy boundary, target layout, launcher override, denylist, manifest provenance, or dirty-source policy changes         | distribution layout, copied source set, `SYNC_MANIFEST.json`, storefront launcher/metadata semantics change           |
-| Docs site / sample report publication (`docs/`, `zensical.toml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`)                                                                        | `docs/index.md`, `docs/examples/report.md`, and any pages touched; published routing **TBD**; `CHANGELOG.md` when user-visible behavior changes                                              | `zensical build --clean --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                                                                                                                                                                                        | published docs navigation, sample-report generation, or Pages workflow semantics change                                         | published documentation behavior or sample-report generation contract changes                                         |
-
-Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,
-and approved.
-
-## 17) Testing taxonomy
-
-Treat tests as specification with explicit intent:
-
-- **Unit tests** — module-level behavior and edge conditions (e.g., `tests/test_cfg.py`, `tests/test_normalize.py`,
-  `tests/test_metrics_modules.py`, `tests/test_suppressions.py`).
-- **Contract tests** — controller, baseline/cache/report/CLI/MCP/Memory public
-  semantics (e.g., `tests/test_mcp_service.py`, `tests/test_baseline.py`,
-  `tests/test_cache.py`, `tests/test_report_contract_coverage.py`,
-  `tests/test_memory_compact_contract.py`).
-- **Golden tests** — snapshot sentinels for stable outputs (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`).
-- **Determinism/invariant tests** — ordering, branch-path invariants, and canonical stability (e.g.,
-  `tests/test_report_branch_invariants.py`, `tests/test_core_branch_coverage.py`,
-  `tests/test_semantic_determinism_gate.py`).
-- **Scenario/regression tests** — multi-step integration and process-level behavior (e.g.,
-  `tests/test_cli_inprocess.py`, `tests/test_pipeline_process.py`,
-  `tests/test_memory_projection_jobs.py`, `tests/test_sync_integrations.py`).
-- **Developer diagnostics tests** — observer configuration, correlation,
-  persistence, query, rendering, MCP, and worker chain behavior
-  (`tests/test_observability_*.py`).
-
-Policy:
-
-- Expand the closest taxonomy bucket when changing behavior.
-- If a change touches a public surface, include/adjust contract tests, not only unit tests.
-- Goldens validate intended contract shifts; they are not a substitute for reasoning or routing.
-- Put tests in the owning behavior module. Do not create generic
-  coverage-uplift or miscellaneous dumping-ground test files.
-- Coverage is a guardrail, not a reason to execute lines without asserting
-  behavior.
-
-### Mutation evidence (mandatory law)
-
-Red-first proves a test was red once; **mutation** proves the test dies when the exact behavior it pins breaks. This is a
-binding project law (see §1.9), part of the red-first / standing evidence discipline. For every load-bearing fix or
-claim:
-
-- **Every load-bearing pin ships mutation evidence.** Revert or corrupt the exact production behavior the test pins →
-  the pinning test MUST turn red, verbatim, on that mutation. A mutant that survives (the test stays green) is a hollow
-  test; strengthen it until it dies.
-- **Comprehensive = both boundaries.** Where a fix corrects a value or classification, mutate in BOTH directions — each
-  opposite error reds under a different test. A suite that catches only one side of an error is incomplete.
-
-**What does the test actually hold?** Named hollow-test classes to mutate against:
-
-- **Relative-invariant hole — mutate the CONSTANT itself.** A set of relative-invariant tests (`prose ≤ its measure`,
-  `A > B`) stays green for ANY value of the underlying constant, so the constant's justification can silently drift.
-  Where a number is derived from a stated rule but the derivation lives only in a comment, that comment is an unexecuted
-  engineering claim that will rot. Pin the **derivation rule** (re-derive / re-measure the number from its stated basis)
-  — not a literal `assert x == 780`, which merely moves the magic number into the test. Mutating the literal constant
-  MUST red the rule-pin. Precedents: a measure constant changed to a wrong value that survived 1000+ green tests; a cache
-  decode tolerance; a silently dropped run-summary counter.
-- **Guard unreachable in every configuration.** The most extreme hollow test is not "returns empty" but a guard whose
-  protected path CANNOT fire in ANY configuration — structurally dead, not merely misplaced. Mutation reveals it: if
-  reverting the guarded behavior changes nothing observable, the guard never ran, in no configuration. Example: a
-  secret-tier deny rule that could only match a secret INSIDE the working grant, while the gate inspects only calls
-  OUTSIDE the grant — so it could never fire, once, in any setup. Analogues here: a decode tolerance dead-by-gate; an
-  under-guarded lane whose version input was never wired. Duty: when you add a guard, prove by mutation that SOME input
-  reaches and trips it — a guard no input can reach is theater.
-- **Success masked by a sibling.** A run looks green not because the thing under test worked, but because a
-  parallel/sibling mechanism did the work. Isolate and probe the mechanism ALONE. Example: a `Write`-class rule silently
-  ignored while an `Edit`-class rule rode alongside and did the actual work — the aggregate passed; probing `Edit` alone
-  exposed it. Analogue here: a contaminated benchmark series where an orphaned first run mutated the same target as the
-  second, so a "surviving mutant" may have been reverted by its sibling before the build — re-run solo. Duty: a passing
-  set that exercises ≥2 mechanisms MUST isolate each; "the batch was green" is not "this rule fired".
-
-**"Informal" scope.** Targeted manual mutations, not (necessarily) a mutation-testing framework — revert-the-behavior
-probes covering the defect class. A full mutation runner (mutmut / cosmic-ray) as a gate is a later candidate; manual
-targeted mutation is mandatory now, for agents and for the controller's merge audit. A fix delivery report carries a
-**mutation evidence** section for its load-bearing pins.
-
-### Score-change independent benchmark (mandatory law)
-
-A recalibrated scale that "looks fine on our own repo" has been validated only on the object that produced it — a very
-precise micrometer for exactly one part. This is a binding project law (see §1.10), a sibling to "Mutation evidence"
-above: it governs **acceptance** of any change that moves a number or verdict CodeClone reports to a user.
-
-- **What it covers.** Any parameter whose movement changes a user-facing score or verdict: the health score and its
-  dimensions (complexity, coupling, cohesion, dead_code, coverage, dependencies, clones), reference permilles / bands,
-  health weights, gate thresholds (`fail_*`), severity mappings, and outlier terms. Purely factual, categorical facts
-  without an evaluative scale (identity; tri-state novelty as a fact) are NOT covered — but the interpretation of a fact
-  into a score IS.
-- **Acceptance is an independent benchmark AFTER the recalibration — mandatory, not "nice to have".** A **blind** agent
-  is given the measurement protocol, not the goal — a lab technician, not an advocate for the change. The benchmark runs
-  on **≥5 frozen external repositories** spanning orders of magnitude (tiny → very large) and Python styles, each pinned
-  to a commit SHA recorded before the first run. The **same** pinned measurement is used, thresholds are left
-  **unchanged**, and raw distributions (percentiles, bands, outliers, determinism) are reported first. The external
-  projects must try to **refute** the calibration, not re-fit it.
-- **Self-repo validation alone is not acceptance.** A scale calibrated on the self repo measures the self repo's
-  morphology; general fitness is an external-validity claim and requires external evidence.
-- **If external validity fails, that is a new fact — never a tuning signal.** "Pinned self-calibration failed external
-  validity" is a finding that requires a reference-population redesign as a **separate** task (for example a fixed
-  multi-project corpus). Re-fitting thresholds against the benchmark repositories is the same grinding-to-the-scale, just
-  external, and is forbidden. A floor or policy threshold is revised only from an **independent policy basis** (a
-  historical contract or reference process), never from the current self-score.
-
-## 18) Public vs internal surfaces
-
-### Public / contract-sensitive surfaces
-
-- Structural Change Controller intent, permission, scope/hygiene, blast-radius,
-  verification-profile, claim, receipt, and Patch Trail semantics.
-- CLI flags, defaults, exit codes, and stable script-facing messages.
-- `codeclone setup` argv route: subcommands, `--json` stdout projections
-  (`setup_snapshot`, `setup_plan`, apply result), lazy-load isolation, bounded
-  apply scope (`pyproject.toml`, `.gitignore` only), and wizard TTY semantics.
-  Not MCP; no `edit_allowed`.
-- Baseline schema/trust semantics/integrity compatibility (`BASELINE_SCHEMA_VERSION` contract family).
-- Cache schema/status/profile compatibility/integrity (`CACHE_VERSION` contract family).
-- Canonical report JSON schema/payload semantics (`REPORT_SCHEMA_VERSION` contract family).
-- Documented report projections and their machine/user-facing semantics (HTML/Markdown/SARIF/Text).
-- Documented MCP launcher/install behavior, tool names, resource URIs, and
-  repository-read-only semantics.
-- Documented MCP workflow tools, verification profiles, workspace intent
-  coordination, queue/promote semantics, and review receipt payloads.
-- Engineering Memory schema, governance transitions, retrieval/filter/ranking
-  semantics, semantic sidecar format, trajectory quality, Experience promotion,
-  projection jobs, and CLI/MCP payloads.
-- Platform Observability environment contract, local schema/privacy boundary,
-  CLI trace output, bounded MCP sections, and correlation behavior.
-- Controller audit/event-core and shared session/audit insight payloads.
-- Session-local MCP review state semantics (`mark_finding_reviewed`, `exclude_reviewed`) as documented public behavior.
-- Documented VS Code extension behavior: commands, views, setup guidance, trusted-workspace model, and its
-  baseline-aware triage workflow over MCP.
-- Documented Claude Desktop, Claude Code, Codex, Cursor, GitHub Action, and
-  storefront-sync install/runtime/package semantics.
-- Documented finding families/kinds/ids and suppression-facing report fields.
-- Metrics baseline schema/compatibility where used by CI/gating.
-- Corpus Analytics store/export/representation contracts and `codeclone analytics` CLI behavior.
-- Workspace intent registry wire schema and coordination semantics (`codeclone/workspace_intent/*`).
-- Benchmark schema/outputs if consumed as a reproducible contract surface.
-
-### Internal implementation surfaces
-
-- Local helpers and formatting utilities (`codeclone/report/html/widgets/*`,
-  `codeclone/report/html/primitives/*`, many private `_as_*` normalizers, local transformers).
-- Internal orchestration decomposition inside `codeclone/surfaces/cli/*`.
-- Private utility refactors that do not change public payloads, exit semantics, ordering, or trust rules.
-
-If classification is ambiguous, treat it as contract-sensitive and add tests/docs before merging.
-
-## 19) Python language + typing rules (3.10 → 3.14)
-
-These rules are **repo policy**. If you need to violate one, you must explain why in the PR.
-
-### Supported Python versions
-
-- **Must run on Python 3.10, 3.11, 3.12, 3.13, 3.14**.
-- Do not rely on behavior that is new to only the latest version unless you provide a fallback.
-- Prefer **standard library** features that exist in 3.10+.
-
-### Modern syntax (allowed / preferred)
-
-Use modern syntax when it stays compatible with 3.10+:
-
-- `X | Y` unions, `list[str]` / `dict[str, int]` generics (PEP 604 / PEP 585)
-- `from __future__ import annotations` is allowed, but keep behavior consistent across 3.10–3.14.
-- `match/case` (PEP 634) is allowed, but only if it keeps determinism/readability.
-- `typing.Self` (3.11+) **avoid** in public APIs unless you gate it with `typing_extensions`.
-- Prefer `pathlib.Path` over `os.path` for new code (but keep hot paths pragmatic).
-
-### Typing standards
-
-- **Type hints are required** for all public functions, core pipeline surfaces, and any code that touches:
-  baseline, cache, fingerprints, report models, serialization, CLI exit behavior.
-- Keep **`Any` to an absolute minimum**:
-    - `Any` is allowed only at IO boundaries (JSON parsing, `argparse`, `subprocess`) and must be
-      *narrowed immediately* into typed structures (dataclasses / TypedDict / Protocol / enums).
-    - If `Any` appears in “core/domain” code, add a comment: `# Any: <reason>` and a TODO to remove.
-- Prefer **`Literal` / enums** for finite sets (e.g., status codes, kinds).
-- Prefer **`dataclasses`** (frozen where reasonable) for data models; keep models JSON‑serializable.
-- Use `collections.abc` types (`Iterable`, `Sequence`, `Mapping`) for inputs where appropriate.
-- Avoid `cast()` unless you also add an invariant check nearby.
-
-### Dataclasses / models
-
-- Models that cross module boundaries should be:
-    - explicitly typed
-    - immutable when possible (`frozen=True`)
-    - validated at construction (or via a dedicated `validate_*` function) if they are user‑provided.
-
-### Error handling
-
-- Prefer explicit, typed error types over stringly‑typed errors.
-- Exit codes are part of the public contract; do not change them without updating tests + docs.
-
-### Determinism requirements (language-level)
-
-- Never iterate over unordered containers (`set`, `dict`) without sorting first when it affects:
-  hashes, IDs, report ordering, baseline payloads, or UI output.
-- Use stable formatting (sorted keys, stable ordering) in JSON output.
-
-### Key PEPs to keep in mind
-
-- PEP 8, PEP 484 (typing), PEP 526 (variable annotations)
-- PEP 563 / PEP 649 (annotation evaluation changes across versions) — avoid relying on evaluation timing
-- PEP 585 (built-in generics), PEP 604 (X | Y unions)
-- PEP 634 (structural pattern matching)
-- PEP 612 (ParamSpec) / PEP 646 (TypeVarTuple) — only if it clearly helps, don’t overcomplicate
-
-Prefer these rules:
-
-- **Domain / contracts / enums** live near the domain owner (baseline statuses in baseline domain).
-- If a module becomes an “overloaded module”, split by:
-    - model (types)
-    - io/serialization
-    - rules/validation
-    - ui rendering
-
-Avoid deep package hierarchies unless they clearly reduce coupling.
+| Layer                            | Path                                                                                                                                         |
+|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| Structural Change Controller     | controller mixins and intent/blast/patch/receipt helpers under `surfaces/mcp/`, `workspace_intent/*`, `analysis/blast_radius.py`, `budget/*` |
+| CLI entry and orchestration      | `main.py` (minimal), `surfaces/cli/*`, `ui_messages/*`                                                                                       |
+| Setup readiness CLI              | `surfaces/cli/setup/*` and its config, gitignore, atomic-write helpers                                                                       |
+| Config                           | `config/*` — option specs, parsing, loading, precedence                                                                                      |
+| Core orchestration               | `core/*` — bootstrap, discovery, workers, metrics, report and gate integration                                                               |
+| Analysis                         | `analysis/*`, `blocks/*`, `paths/*`, `qualnames/*`, `scanner/*`                                                                              |
+| Finding derivation               | `findings/*`, `metrics/*`, `meta_markers/*`                                                                                                  |
+| Domain and contracts             | `models.py`, `contracts/*`, `domain/*`                                                                                                       |
+| Persistence contracts            | `baseline/*`, `cache/*`                                                                                                                      |
+| Canonical report and projections | `report/document/*`, `report/gates/*`, `report/renderers/*`                                                                                  |
+| HTML rendering                   | `report/html/*` — render-only                                                                                                                |
+| MCP interface                    | `surfaces/mcp/*`                                                                                                                             |
+| Engineering Memory               | `memory/*`                                                                                                                                   |
+| Platform Observability           | `observability/*`                                                                                                                            |
+| Corpus Analytics                 | `analytics/*`                                                                                                                                |
+| Controller insights              | `controller_insights/*`                                                                                                                      |
+| Audit trail                      | `audit/*`                                                                                                                                    |
+| Scripts and CI action            | `scripts/*`, action directory                                                                                                                |
+| Client surfaces                  | extensions and plugins — governed by `SUR1`                                                                                                  |
+| Tests                            | `tests/` — executable specification                                                                                                          |
 
 ---
 
-## 20) Agent safety rules
+## 13) Dependency direction
 
-These rules exist because of real incidents in this repo. They are non-negotiable.
+**DD1** — These boundaries MUST hold; they are partially enforced by architecture tests.
 
-### Scope discipline
+- The report layer MUST NOT import UI message modules, CLI surfaces, or HTML consumers outside the
+  HTML package.
+- Baseline and cache MUST NOT import CLI surfaces, UI messages, or HTML.
+- Core MUST NOT import surfaces or config.
+- Analysis, findings, and metrics MUST NOT import surfaces; analysis and findings MUST also stay
+  independent of config and report-builder wiring.
+- Shared models MAY import only contracts locally; domain modules MUST stay leaves.
+- Memory MAY import contracts, utilities, blast-radius helpers, and report document types for
+  ingestion; it MUST NOT import surfaces or UI messages.
+- Observability is diagnostics-only and MUST NOT become a dependency that changes analysis,
+  findings, gates, baselines, memory facts, or authorization.
+- Core and domain MUST NOT depend on presentation or MCP. Renderers depend on the canonical
+  payload; the canonical layers MUST NOT depend on renderers. Presentation MUST NOT recompute core
+  facts (`P3`). Persistence semantics MUST stay in persistence and domain modules. MCP MAY depend
+  on pipeline, report, and contracts; those layers MUST NOT depend on MCP.
 
-- Touch only files directly related to your current task.
-- Do not "clean up", reformat, or refactor code in files outside your task scope.
-- Do not delete functions, classes, blocks, or whole files written by other contributors unless
-  deletion is the explicit goal of your task.
-- If you discover unrelated issues, report them in your final message — do not fix them silently.
-- Before starting work, run `git status` and review uncommitted/untracked changes. They may belong
-  to a parallel agent or to the maintainer; do not delete or overwrite them without explicit approval.
-
-### Human review boundary
-
-- Agents may author substantial contributions, but they do not own merge
-  approval.
-- A human contributor must inspect and understand the complete diff, verify
-  tests/contracts/security/licensing/provenance, and accept maintenance
-  responsibility.
-- Material agent assistance must be disclosed in the pull request.
-- Never describe agent review, CodeClone findings, receipts, or CI as a
-  substitute for substantive human review.
-
-### Documentation hygiene
-
-- During the docs-site migration, do not cite deleted `docs/book/**` or `docs/guide/**`
-  paths; mark published contract pages **TBD** and verify claims against code and tests.
-- Every doc claim about code (schema version, module path, function name, MCP tool count, exit code,
-  CLI flag) must be verified against the **current** code before writing or editing.
-- Always read version constants from `codeclone/contracts/__init__.py` (see Section 4 table), never from
-  another doc.
-- When updating a file that mentions schema versions, verify **every** version reference in that
-  file — not only the one you came to change.
-- Do not remove narrative content from docs you did not author. Add or correct only.
-- Do not replace a multi-section doc with a "pointer" stub unless the maintainer explicitly asks for it.
-- Do not create new `*.md` design specs ("PROPOSED", "FUTURE", "RFC") inside `docs/`. Use the
-  maintainer's planning channel instead — orphaned specs become stale and misleading.
-
-### Audit completeness
-
-- When the maintainer asks to audit "all" of something, list every file you actually opened in your
-  final report. Selective audits silently skip the most error-prone files.
-- Prefer parallel `Explore` agents partitioned by file group over a single sequential pass —
-  coverage is the contract, not effort.
-
-### Shared helpers
-
-- HTML/UI helpers (`codeclone/report/html/widgets/*`, `codeclone/report/html/primitives/*`,
-  `codeclone/report/html/assets/*`) are imported, not duplicated locally inside
-  `codeclone/report/html/sections/*`.
-  If you need a helper that doesn't exist, add it to the shared module.
-- Glossary term definitions live in `codeclone/report/messages/glossary.py`;
-  `codeclone/report/html/widgets/glossary.py` renders HTML tooltips from that
-  catalog. Adding a new stat-card label without a glossary entry is a contract gap.
-
-### Conflict avoidance
-
-- Do not force-push, `git reset --hard`, or `git checkout --` over uncommitted work without
-  explicit maintainer approval.
-- If your changes conflict with recent commits or other agents' work, rebase or merge cleanly —
-  never silently drop the other side.
-- Never use `--no-verify` to bypass pre-commit hooks; fix the underlying issue.
-
-### Verification before "done"
-
-- A task that touches HTML rendering is not complete until
-  `pytest tests/test_html_report.py -x -q` is green.
-- A task that touches MCP is not complete until
-  `pytest tests/test_mcp_service.py tests/test_mcp_server.py -x -q` is green.
-- A task that touches docs schema/version claims is not complete until you have grep'd the whole
-  file for *all* version-shaped strings and verified each against `codeclone/contracts/__init__.py`.
-  During the docs migration, defer broken `docs/book/**` and `docs/guide/**` paths unless a
-  maintainer assigns a replacement page (**TBD**).
-- A load-bearing fix is not complete until each pin it relies on has been shown to die under a targeted mutation of the
-  exact behavior it guards (revert-the-behavior probe; both error directions where a value or classification was
-  corrected). A pin that stays green when its behavior is reverted is not evidence. See §1.9 and §17 "Mutation evidence
-  (mandatory law)".
-- A change that moves a user-facing score or verdict (health or a dimension, reference permilles/bands, health weights,
-  a `fail_*` gate threshold, a severity mapping, an outlier term) is not complete until an independent benchmark accepted
-  it after the recalibration: a blind agent, ≥5 frozen external repositories pinned to commit SHAs, the same pinned
-  measurement, thresholds unchanged, raw distributions first. Self-repo validation alone is not acceptance; if external
-  validity fails, redesign the reference population — do not re-fit thresholds. See §1.10 and §17 "Score-change
-  independent benchmark (mandatory law)".
+Placement is a structural fact, not a preference: where a ring boundary and a cohesion signal
+disagree, an agent SHOULD extract rather than force either one.
 
 ---
 
-## 21) Minimal checklist for PRs (agents)
+## 14) Suppression policy
 
-- [ ] Intent and scope were declared before editing; `edit_allowed=true` was observed when available.
-- [ ] Actual changed files match declared scope; required verification and receipt completed.
-- [ ] Change is deterministic.
-- [ ] Contracts preserved or versioned.
-- [ ] Tests were added to the owning test module for new behavior.
-- [ ] Pre-commit and pre-push/coverage validation are green.
-- [ ] CLI messages remain helpful and stable (don’t break scripts).
-- [ ] Reports contain provenance fields and reflect trust model correctly.
-- [ ] Golden snapshots were **not** updated just to satisfy failing tests.
-- [ ] If any golden snapshot changed, the corresponding contract change is intentional, documented, and approved.
-- [ ] Each load-bearing pin was shown to die under a targeted mutation of the behavior it guards; surviving mutants were
-      eliminated (both error directions where a value or classification was corrected). See §17 "Mutation evidence".
-- [ ] Any change that moves a user-facing score or verdict was accepted by an independent post-recalibration benchmark
-      (blind agent, ≥5 frozen external repositories pinned to commit SHAs, same measurement, thresholds unchanged, raw
-      distributions first); self-repo validation alone was not treated as acceptance. See §17 "Score-change independent
-      benchmark".
-- [ ] Material agent assistance is disclosed.
-- [ ] A human reviewed and understood the complete diff before merge.
+**SUP1** — Inline suppressions are explicit local policy, not analysis truth. Binding scope MUST
+be declaration-only; there is no file-wide or implicit global scope. Binding MUST be
+target-specific (path, qualified name, declaration span, kind). Unknown or malformed directives
+MUST be ignored safely — analysis MUST NOT fail on suppression syntax. Suppressed findings MUST be
+excluded from active findings and health impact while remaining observable in report surfaces.
+Suppressions MUST NOT alter unrelated finding families.
 
 ---
 
-If you are an AI agent and something here conflicts with an instruction from a maintainer in the PR/issue thread, **ask
-for clarification in the thread** and default to this document until resolved.
+## 15) Change routing
+
+**CR1 — Tests, documentation, and approval per zone.**
+
+An agent MUST update `CHANGELOG.md` for every user-visible change.
+
+An agent MUST **add or change** tests in a zone's listed modules when the change alters
+**observable contract behavior** or leaves new behavior uncovered. An agent MUST NOT edit a test
+that already correctly covers the changed behavior merely to demonstrate activity — the obligation
+to *run* the zone's tests is owned by `V1`, and editing a correct test to satisfy a checklist is
+process theater.
+
+An agent MUST obtain explicit maintainer approval where the trigger column applies.
+
+| Change zone                                                                  | Owning test modules                                                                   | Approval required when                                                                                            |
+|------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Baseline schema, admissibility, context compatibility, lane trust, integrity | baseline tests plus CI/CLI behavior tests                                             | schema, admissibility, or trust semantics, compatibility windows, payload integrity                               |
+| Cache schema, profile, integrity                                             | cache tests plus pipeline/CLI integration                                             | schema, status, or profile compatibility                                                                          |
+| Canonical report JSON shape                                                  | report contract coverage, branch invariants, format tests                             | finding, meta, or summary schema                                                                                  |
+| CLI flags, help, exit behavior                                               | CLI unit, in-process, smoke tests, verified against the option spec and help snapshot | exit-code semantics, script-facing behavior, flag contracts                                                       |
+| Setup readiness CLI                                                          | setup and config-writer tests plus the snapshot golden                                | lazy-load boundary, snapshot or plan shape, apply semantics, TTY contract, exit codes                             |
+| Structural Change Controller                                                 | controller, verification-profile, patch-trail tests plus tool-schema snapshots        | edit authorization, scope or hygiene, verification profile, claims, receipt or patch-trail contract               |
+| Fingerprint-adjacent analysis                                                | fingerprint, extractor, CFG, golden tests                                             | **always** (`P6`)                                                                                                 |
+| Suppression semantics and reporting                                          | suppression, extractor, metrics, pipeline, report tests                               | declaration scope, rule effect, contract-visible counters                                                         |
+| MCP interface                                                                | MCP service and server tests plus the tool-schema snapshot                            | tool or resource shapes, workflow payloads, read-only semantics, packaging                                        |
+| Memory, retrieval, trajectories, experiences, projections                    | memory, semantic, projection, MCP memory tests plus schema snapshots                  | schema or governance transitions, retrieval semantics, trajectory quality, experience promotion, worker lifecycle |
+| Platform Observability                                                       | observability tests plus boundary tests                                               | privacy or trust boundary, persisted schema, correlation, payload size, public projections                        |
+| Audit and controller insights                                                | audit and insight projection tests                                                    | event core or schema, retention, payload footprint, collector semantics                                           |
+| Corpus Analytics                                                             | analytics and config tests                                                            | store, export, representation contract semantics                                                                  |
+| Client surfaces                                                              | that surface's commands from `V1`                                                     | discovery or runtime model, bundled configuration, bundled skill behavior, packaging metadata                     |
+| CI action                                                                    | action helper tests plus an action smoke                                              | input interpolation, command construction, timeout, output, exit behavior                                         |
+| Integration sync and distribution                                            | sync tests, then target-native smoke                                                  | deletion or copy boundary, target layout, launcher override, denylist, manifest provenance                        |
+| Docs site and sample report                                                  | strict documentation build plus report tests if embeds change                         | published navigation, sample-report generation, publishing workflow                                               |
+
+---
+
+## 16) Public versus internal surfaces
+
+**PS1 — Classification rule.** A surface is contract-sensitive when its shape, semantics,
+ordering, exit behavior, or trust rules are observable outside this repository. **Where
+classification is ambiguous, an agent MUST treat the surface as contract-sensitive** and MUST add
+tests before merging.
+
+*Contract-sensitive (non-exhaustive):* controller intent, permission, scope and hygiene, blast
+radius, verification profile, claims, receipts, patch trail · CLI flags, defaults, exit codes,
+stable script-facing messages · setup CLI subcommands, machine-readable projections, lazy-load
+isolation, bounded apply scope, TTY semantics · baseline schema, admissibility, context
+compatibility, lane compatibility, comparison availability, integrity · cache schema, status,
+profile · canonical report JSON schema and documented projections · documented MCP install
+behavior, tool names, resource URIs, read-only semantics, workflow payloads, verification profiles,
+workspace coordination, queue and promote semantics, receipts · memory schema, governance,
+retrieval and ranking semantics, sidecar format, trajectory quality, experience promotion,
+projection jobs · observability environment contract, local schema and privacy boundary, bounded
+sections, correlation · audit event core and shared insight payloads · session-local review state ·
+documented client-surface behavior · documented finding families, kinds, ids, suppression-facing
+fields · metrics baseline schema where consumed by CI · corpus analytics contracts · workspace
+intent wire schema · benchmark schema and outputs when consumed as a reproducible contract.
+
+*Internal:* local helpers and formatting utilities, private normalizers, orchestration
+decomposition inside CLI support modules, and private refactors that change no public payload, exit
+semantics, ordering, or trust rule.
+
+---
+
+## 17) Testing and the acceptance laws
+
+**T1 — Taxonomy and placement.** Buckets: Unit · Contract · Golden · Determinism and invariant ·
+Scenario and regression · Diagnostics. An agent MUST expand the closest bucket when changing
+behavior, MUST include contract tests (not only unit tests) for a public-surface change, and MUST
+place tests in the owning behavior module rather than a coverage-uplift dumping ground. Goldens
+validate intended shifts and MUST NOT substitute for reasoning. Coverage is a guardrail and MUST
+NOT be treated as a reason to execute lines without asserting behavior.
+
+### 17.1 Evidence law
+
+**E1 — A green test proves nothing.** Red-first proves a test was red once. Only **mutation**
+proves it dies when the exact pinned behavior breaks. An agent MUST revert or corrupt that
+behavior and observe the pinning test fail on its intended assertion. A surviving mutant is a
+hollow test and MUST be strengthened until it dies.
+
+**E2 — Both boundaries where a boundary exists.** Where a change corrects a value or a
+classification, an agent MUST mutate in **both** directions.
+
+**E3 — Semantic witness.** Each row of the verification matrix MUST be observable through a
+**witness** — the concrete semantic difference the failure or probe reports, in the form
+*expected X, observed Y*.
+
+The witness, not the set of failing test names, is the normative signature. Failing-test identity
+is unstable (an unrelated regression test changes it without changing evidentiary power) and
+gameable (one narrow test per mutation). The witness is neither.
+
+**A witness MUST be a natural observation of the contract under test.** An agent MUST NOT author
+distinguishing error messages, add assertion text, or shape failure output for the purpose of
+making witnesses differ. A manufactured witness is fabricated evidence and is the successor form of
+the hollow test this law exists to prevent.
+
+**Where witnesses MUST differ** is set by the profile in `E8`, not asserted universally: uniqueness
+is required precisely where **the contract itself distinguishes those states**. Two implementation
+mutants that legitimately violate one public invariant in the same way MAY share a witness — that is
+a well-pinned contract test that does not localize the internal cause, and localization is not
+always the contract's job.
+
+**E4 — Direction of redness.** Where the profile requires it, restoring a defect and breaking the
+same behavior **deeper** MUST produce different witnesses. Identical witnesses under that profile
+mean the suite pins the shape of the code, not its behavior.
+
+**E5 — A count without its exit code is not a result.** A crashed run truncates its own totals
+plausibly. *No tests collected*, *usage error* (including a nonexistent path — the guard message may
+still print), and *build error* each produce a plausible-looking run that is neither a pass nor a
+kill. An agent MUST record the exit code alongside any count it reports, and MUST NOT
+treat a run that did not execute as either a pass or a kill.
+
+**E6 — Measure in the right scope.** A count taken at the wrong scope reads as a fact and can refute
+a true finding. An agent MUST state the scope alongside the number.
+
+**E7 — What is NOT proof.** An agent MUST NOT offer any of the following as evidence: a passing suite · an agent's account of why something failed · a stale
+artifact that was not regenerated · pattern-matching a dangerous sink without a runtime reproduction
+· "it looks fine on this repository" for anything that moves a reported score.
+
+**E8 — Required artifact: the verification matrix.**
+
+*Scope.* A change is **load-bearing** — and requires a matrix — when it changes observable behavior
+of a surface classified contract-sensitive under `PS1`, fixes a defect, adds or modifies a guard, or
+changes a classification, threshold, or identity input. A change is **not** load-bearing when it
+alters only comments, formatting, or naming with no observable behavior change. `E8` is the sole
+owner of this scope; other sections MUST reference it rather than restate it.
+
+*Profile.* The implementer MUST declare the profile; the reviewer MUST check the declaration; where
+the class is unclear the strictest applicable profile MUST be used.
+
+| Profile                         | Required rows                                                                                                               | Witness uniqueness                                                                                                                    |
+|---------------------------------|-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| **Value or classification fix** | defect restored · opposite error · broken deeper — all `mutation-kill`                                                      | **mandatory across all three** — the contract distinguishes these states, which is where the requirement was earned                   |
+| **New or modified guard**       | guard bypassed (`mutation-kill`) · guard reached and tripped (`reachability-probe`) · sibling isolation (`isolation-probe`) | required between the bypass kill and the reachability probe                                                                           |
+| **Generic contract fix**        | defect restored · an independent deeper corruption — both `mutation-kill`                                                   | required between the two                                                                                                              |
+| **New capability**              | each declared guarantee negated in turn — all `mutation-kill`                                                               | required only between guarantees the contract itself distinguishes; there is no "defect restored" row for behavior that never existed |
+
+*Artifact.* Each row MUST record:
+
+| field           | content                                                                                                       |
+|-----------------|---------------------------------------------------------------------------------------------------------------|
+| `row kind`      | `mutation-kill` · `reachability-probe` · `isolation-probe`                                                    |
+| `operation`     | for a kill: the exact production mutation. For a probe: the exact distinguishing input or isolation performed |
+| `failure class` | `semantic` · `collection` · `import` · `syntax` · `usage` · `timeout` · `fixture` · `build`                   |
+| `witness`       | expected → observed                                                                                           |
+| `test path`     | the executed path                                                                                             |
+| `exit code`     | the recorded code                                                                                             |
+
+*Acceptance.* The matrix is accepted only when all hold:
+
+1. **Every `mutation-kill` row is a semantic kill** — the relevant test path executed and failed on
+   its intended semantic assertion or contract. Collection, import, syntax, usage, timeout,
+   fixture-construction, and build failures are **NOT kills**: such a row is **void** and MUST be
+   re-run, not counted. This criterion outranks the exit code — a plausible exit code on a crashed
+   path is not evidence (`E5`).
+2. **Every probe row demonstrates its claim.** A `reachability-probe` is accepted only if the guard
+   demonstrably **executed and tripped** on the stated input; a `isolation-probe` is accepted only
+   if the alternative mechanism was demonstrably **inactive** while the mechanism under test was
+   observed. A probe that cannot fail is not evidence.
+3. **Every row required by the declared profile is present.**
+4. **Witness uniqueness holds wherever the profile requires it** (`E3`, `E4`), computed **among the
+   rows the profile names**.
+5. **Every row records its operation, failure class, test path, and exit code.**
+
+Where a profile requires two or more `mutation-kill` rows and they yield a single distinct witness,
+the change has one pin and no signature; an agent MUST state that explicitly rather than presenting
+it as comprehensive.
+
+*Scope of "informal".* Targeted manual mutations and probes, not necessarily a mutation-testing
+framework. A full runner as a gate is a later candidate; the targeted manual form is mandatory now,
+for implementers and reviewers alike.
+
+### 17.2 Named hollow-test classes
+
+**H1 — Relative-invariant hole: mutate the CONSTANT itself.** A set of relative invariants stays
+green for **any** value of the underlying constant, so its justification silently drifts. Where a
+number is derived from a stated rule but the derivation lives only in a comment, that comment is an
+unexecuted engineering claim that will rot. An agent MUST pin the **derivation rule** — re-derive or
+re-measure from its stated basis — and MUST NOT substitute a literal equality assertion, which
+merely moves the magic number into the test. Mutating the constant MUST produce a witness.
+
+**H2 — A guard that may be unreachable.** The most extreme hollow test is a guard whose protected
+path cannot fire in **any** configuration — structurally dead, not merely misplaced.
+
+An agent MUST NOT overstate the inference: if reverting the guarded behavior produces no observable
+change, that proves only that **the mutation produced no distinguishing observation**.
+Unreachability and masking (`H3`) remain **separate hypotheses** — the guard may have executed while
+a sibling mechanism, a later overwrite, a fallback, or a lossy projection erased its effect.
+Establishing unreachability MUST rest on reachability evidence: instrumentation, a trace, or
+isolation of every alternative mechanism.
+
+When adding a guard, an agent MUST exhibit an input that demonstrably reaches and trips it (`E8`
+reachability-probe). A guard nothing can be shown to reach is theater.
+
+**H3 — Success masked by a sibling.** A run may look green because a parallel mechanism did the
+work. An agent MUST isolate and probe each mechanism alone. "The batch was green" is not "this rule
+fired".
+
+**H4 — A fixture in the reader's dialect.** A fixture written to match the consumer makes a **wrong**
+consumer look right, and the suite stays green indefinitely. When fixing a consumer, an agent MUST
+fix its fixture in the same change. Where a compatibility shim already exists elsewhere, that is
+evidence the divergence was known and never propagated.
+
+### 17.3 Change acceptance — three paths, never merged
+
+**S1 — Classification is mandatory and explicit.** An agent MUST classify any change that moves a
+reported number or verdict; an unclassified change is unaccepted by default, and a mixed change MUST
+be split.
+
+| Class                     | What it is                                                    | Acceptance |
+|---------------------------|---------------------------------------------------------------|------------|
+| **Empirical calibration** | a value derived from measurement of a population              | `S2`       |
+| **Normative policy**      | a value chosen as a decision, not derived                     | `S3`       |
+| **Correctness**           | a defect in how a value, delta, or classification is computed | `S6`       |
+
+**S2 — Empirical calibration: blind external benchmark, after the recalibration.** A **blind** agent
+MUST be given the measurement protocol, not the goal. It MUST run on **at least five frozen external
+repositories** spanning orders of magnitude and coding styles, each pinned to a commit recorded
+before the first run, using the **same** pinned measurement, with thresholds **unchanged**, reporting
+raw distributions first. The external projects MUST attempt to **refute** the calibration, not re-fit
+it. Self-repository validation alone MUST NOT be treated as acceptance: a self-calibrated scale
+measures the morphology of the object that produced it.
+
+**S3 — Normative policy: authority plus impact, never validation.** A benchmark **cannot sanction** a
+normative decision; it can only show consequences. A policy change MUST carry explicit maintainer
+authority as its source of correctness **and** an impact measurement as a mandatory witness of what
+the decision does. An agent MUST NOT present a benchmark as evidence that a policy is *right*, and
+MUST NOT adopt a policy without the impact witness.
+
+**S4 — If external validity fails, that is a new fact, never a tuning signal.** It MUST be handled as
+a reference-population redesign in a **separate** task. Re-fitting thresholds against the benchmark
+repositories is forbidden.
+
+**S5 — A policy threshold MUST be revised only from an independent policy basis**, never from the
+current self-score.
+
+**S6 — Correctness path.** A correctness change MUST carry a red test and a verification matrix
+(`E8`), not a benchmark. An agent MUST NOT invoke `S2` to stall a correctness fix, and MUST NOT route
+a calibration or policy change through the correctness path.
+
+### 17.4 Inventory law
+
+**I1 — Text search cannot establish completeness.** For a dialect defect it is **systematically blind
+by construction**: searching for the producer's key finds every correct reader and never finds the
+broken one, because the broken one spells it differently. Also invisible to text search: access
+through a loop or runtime variable, aliasing, and reads through an intermediate mapping. Text search
+MAY support an inventory; it MUST NOT be its source.
+
+**I2 — Completeness is relative to TWO declared contracts.** An inventory is complete only within a
+declared **structural-candidate contract** *S* and a declared **access-analysis contract** *A*. Both
+MUST be named in the report. A claim of completeness that names neither is unbounded and MUST NOT be
+made.
+
+**I3 — Stages.**
+
+```
+1. producer            enumerate the keys and structures actually published
+2. structural          candidate consumers, WITHIN structural contract S
+3. structural-unresolved   wiring S cannot resolve: dynamic import, registry and plugin
+                           lookup, reflection, generated wiring, runtime dispatch
+4. access extraction   field- and key-level read sites in each candidate, WITHIN contract A
+5. access-unresolved   sites A cannot resolve: computed attribute access, wrapper and
+                       helper indirection, reflective reads
+6. complement          classify everything in 3 and 5, and everything deliberately excluded
+```
+
+An agent MUST run these stages in order and MUST NOT skip one silently; a stage not
+reached is reported as not reached (`I5`).
+
+**I4 — A dependency graph yields candidates, not readers, and not all candidates.** Stage 2 alone
+cannot prove that a module reads a specific field, and it cannot see a consumer wired dynamically. A
+consumer missed at stage 2 never reaches stage 4 and so can never be declared unresolved. **An agent
+MUST NOT treat stage 2 as complete**; whatever *S* cannot resolve MUST be enumerated at stage 3.
+Treating either contract as total makes this law theater by `H2`.
+
+**I5 — Permitted claims are bounded by the stage actually reached.**
+
+| Reached                                                                                | The only phrasing permitted                                                      |
+|----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
+| 1–2                                                                                    | "producer-derived **candidate** inventory within *S*; completeness **unproven**" |
+| 1–3                                                                                    | "candidates within *S*; *N* structurally unresolved wiring sites outstanding"    |
+| 1–4                                                                                    | "reader inventory within *S* and *A*; unresolved sites not yet enumerated"       |
+| 1–5                                                                                    | "reader inventory within *S* and *A*; *N* unresolved sites outstanding"          |
+| 1–6 with **zero relevant unresolved sites**, or each one excluded by a proven argument | "class closed" **is permitted**                                                  |
+
+An agent MUST NOT write "the class is closed" otherwise. Where tooling for stage 3 or stage 4 does
+not exist for the case at hand, the agent MUST say so and MUST stop at the permitted phrasing —
+building the missing analysis is a separate, nameable task, not an assumption.
+
+**I6 — Audit the complement.** An audit that examines only what **is** written is half an audit. An
+agent MUST ask what is **not** written — the missing lane, the unwired input, the guard nobody
+reaches, the case no fixture covers — and MUST build that list mechanically from the code, not from
+recall.
+
+**I7 — Unresolved is a reported quantity, not a silence.** Unresolved sites MUST be carried into the
+report as a count and a list. An inventory that omits them presents a bounded search as a complete
+one.
+
+### 17.5 Product invariants
+
+**G1 — Presentation never recomputes.** Two computations of one number will diverge, and the user
+will be shown the wrong one. A renderer MUST NOT compute what the canonical report already states.
+
+**G2 — One signal, one place, one interpretation.** A fact classified in one layer and re-derived in
+another produces two semantics for one thing, and they will drift apart. An agent MUST NOT
+re-derive in one layer a fact that another layer already classifies. This applies to this
+document as well (`AUTH1`).
+
+**G3 — Two trust authorities over one artifact is a defect class.** Where a pessimistic gate declines
+to compare, a downstream consumer MUST NOT evaluate the still-attached input independently and
+publish a confident answer about a comparison that never ran (`B8`, `B9`).
+
+**G4 — Absence MUST be distinguishable from emptiness.** A consumer MUST be able to tell
+"did not run" from "ran and found nothing"; the obligation on report payloads is owned by
+`RP2`.
+
+**G5 — Bind identity to complete semantic-input identity, never to a lossy projection.** An identity
+computed over a projection is an identity **of the projection**: inputs the identity contract is
+defined to distinguish will collide whenever the projection maps them together (`P2`). Size is not
+the property that matters — a small manifest may be lossy and a large one complete. The permitted
+construction is:
+
+```
+exact input state  →  deterministic snapshot identity  →  compact complete witness  →  digest chain
+```
+
+An agent MUST NOT substitute a convenient projection for the snapshot identity at the base of that
+chain.
+
+---
+
+## 18) Language and typing rules
+
+**L1** — Repository policy; an agent MUST justify any violation in the pull request.
+
+Code MUST run on every supported Python version in the declared range, with no reliance on
+latest-version-only behavior without a fallback. Type hints are required for public functions, core
+pipeline surfaces, and anything touching baseline, cache, fingerprints, report models,
+serialization, or exit behavior. An untyped escape is permitted **only** at IO boundaries and MUST be
+narrowed immediately into typed structures; an untyped value in core or domain code MUST carry a
+reason comment and a removal note. Models crossing module boundaries MUST be explicitly typed,
+immutable where possible, and validated at construction when user-provided. Exit codes are public
+contract. An agent MUST NOT iterate an unordered container without sorting where it affects hashes,
+identifiers, report ordering, baseline payloads, or output, and JSON output MUST use stable
+formatting. Annotation evaluation semantics differ across versions; an agent MUST NOT rely on
+evaluation timing.
+
+*Non-normative preferences:* literal types and enums for finite sets; frozen, JSON-serializable
+dataclasses for data models; abstract collection types for inputs; typed errors over string-typed
+errors; avoiding unchecked casts without a nearby invariant check; splitting an overloaded module by
+model, serialization, rules, and rendering.
+
+---
+
+## 19) Agent safety rules
+
+### 19.1 Scope discipline
+
+**SC1** — An agent MUST touch only files directly related to the current task.
+**SC2** — An agent MUST NOT clean up, reformat, or refactor outside task scope.
+**SC3** — An agent MUST NOT delete functions, classes, blocks, or files written by others unless
+deletion is the explicit goal of the task.
+**SC4** — An agent MUST report unrelated issues in its final message and MUST NOT fix them silently.
+**SC5** — An agent MUST inspect the working tree before starting; uncommitted or untracked changes
+MAY belong to a parallel agent or to the maintainer.
+**SC6** — An agent MUST NOT delete what it did not create. Ownership MUST be *proven*, never inferred
+from resemblance — a neighbouring project may share this language and layout. Foreign working
+directories MUST be excluded from every inventory and cleanup.
+
+### 19.2 Workspace protocol
+
+**W1 — One change, one worktree.** An agent MUST use a detached worktree, MUST NOT create a branch,
+MUST integrate fast-forward only, and MUST remove the tree afterward. Worktrees an agent creates are
+its own temporary artifacts under `P4`.
+
+**W2 — Change-control agents MUST be serialized.** An agent MUST NOT run two against one repository
+root: they share run state, and the second silently destroys the first's intent.
+
+**W3** — An agent MUST NOT run a tree-wide restore or clean in a shared checkout.
+
+**W4 — The stash is repository-global.** It is visible from every worktree; an agent MUST check it
+from the root before declaring a tree clean.
+
+**W5 — Integration history and current containment are different questions.**
+
+*Historical integration.* A source range counts as historically integrated when **every patch id in
+that range is present in the target's history**. Branch-merged listings miss cherry-picks and MUST
+NOT be used alone. A failed patch-id predicate is **never** evidence that work was lost: rework — a
+branch revised before landing — changes the patch id while the work is present.
+
+*Current containment.* **Historical integration does NOT prove the work is present now.** A patch may
+be integrated and later reverted, overwritten, or refactored away. Any claim that work "is present"
+or "was lost" is a statement about the **current tree** and MUST be established by content review of
+the current tree, never by patch identity alone.
+
+An agent MUST NOT delete a branch, worktree, or artifact on the patch-id predicate alone, in either
+direction.
+
+**W6 — Verify the server build before accepting its numbers.** Two servers with similar names can be
+different processes running different builds. An agent MUST compare the reported code digest first,
+and MUST terminate only processes in its own parent chain.
+
+**W7** — A long-running analysis server against a changed engine produces corrupt runs. That is not a
+code regression: an agent MUST restart and reproduce in a fresh process before flagging.
+
+**W8** — An agent MUST NOT force-push, hard-reset, or check out over uncommitted work without explicit
+maintainer approval. On conflict it MUST rebase or merge cleanly and MUST NOT silently drop the other
+side.
+
+**W9 — Every gate green, or it is a blocker.** An agent MUST treat a single red gate as a
+blocker and MUST NOT integrate on a partially green run. There is no "mostly green".
+
+**W10 — Run the full suite AFTER each merge.** An agent MUST run the full suite after every
+merge. Two green branches with zero textual conflicts can produce a red merged tree. Textual mergeability is not semantic mergeability.
+
+### 19.3 Documentation hygiene
+
+**D1** — An agent MUST verify every documentation claim about code against **current** code before
+writing it.
+**D2** — Version constants MUST be read from the contracts module (`B1`); every version-shaped string
+in an edited file MUST be verified, not only the one being changed.
+**D3** — An agent MUST NOT remove narrative content it did not author; it MAY add or correct.
+**D4** — An agent MUST NOT replace a multi-section document with a pointer stub unless explicitly
+asked.
+**D5** — An agent MUST NOT create speculative design documents inside the published documentation
+tree.
+
+### 19.4 Audit completeness
+
+**AU1** — When asked to audit "all" of something, an agent MUST list every file it actually opened.
+**AU2** — An agent MAY partition and parallelize where tooling allows. Coverage is the
+contract, not effort: an agent MUST NOT present partial coverage as completeness.
+**AU3** — An audit MUST include the complement (`I6`) and MUST state which inventory stage it reached
+and under which contracts (`I2`, `I5`).
+
+### 19.5 Shared helpers
+
+**SH1** — Presentation helpers MUST be imported, never duplicated inside consuming modules; a missing
+helper MUST be added to the shared module. Glossary terms live in the message catalog and the
+renderer draws tooltips from it — a new labelled value without a catalog entry is a contract gap.
+
+---
+
+## 20) Roles
+
+### 20.1 Architect / Orchestrator
+
+**The reviewer's own measurement is the evidence; the implementer's report is an input to be checked,
+never a substitute for a step.** Steps run in order.
+
+**AP1 — Fix the base.** The reviewer MUST name the exact tree under review and MUST confirm it is the
+**merged** tree (`W10`).
+
+**AP2 — Read every hunk, including tests and fixtures.** A fixture or test hunk MUST receive the same
+scrutiny as production code — that is where a wrong reader is made to look right (`H4`).
+
+**AP3 — Name the invariant for every hunk.** A hunk with no named invariant is an unreviewed hunk and
+MUST NOT be approved. A pure-move hunk still requires the invariant "behavior unchanged", and that
+claim MUST be checked, not assumed.
+
+**AP4 — Check the change complement. Always.** The reviewer MUST determine what the diff omitted that
+its own change implies — adjacent call sites, the paired branch, the missing test, the documentation
+the change invalidates — and MUST build this from the blast radius, never from the diff, which cannot
+show what is missing from it.
+
+**AP5 — Build the producer-derived consumer inventory only when it applies.** It is REQUIRED when the
+review claims consumer completeness, closes a dialect or reader class, or the change alters a producer
+contract or a published key. Where required, the stage and both contracts MUST be stated (`I2`, `I5`).
+A local fix that makes no completeness claim MUST NOT be required to produce a field-level inventory.
+
+**AP6 — Re-run the verification matrix yourself when `E8` applies.** The reviewer MUST re-run
+it on the merged tree and MUST verify that each kill row is semantic and not void and that
+each probe row demonstrates its claim.
+
+**AP7 — Run every gate yourself.** The reviewer MUST execute every gate itself and MUST
+record each exit code (`V1`, `E5`).
+
+**AP8 — Check claims against the evidence profile, then rule.** Baseline novelty is never patch-local
+proof (`B7`); comparison availability is never inferred (`B8`); phrasing is bounded by the inventory
+stage (`I5`). The verdict MUST name what remains unverified. If any step could not be completed, the
+outcome MUST be **BLOCKED** or **UNVERIFIED** with the exact missing step, and MUST NOT be a verdict
+with a caveat attached.
+
+**A1 — Never manufacture authority.** An orchestrator MUST NOT record as sanctioned anything the
+maintainer did not sanction. The controller does not create permissions.
+
+**A2 — Direction is not a launch order; a decision is not an open question.** An orchestrator MUST NOT
+dispatch work on a statement of direction, and MUST NOT re-open as a question something already
+decided. Where cost or irreversibility is involved it MUST require the explicit word.
+
+**A3 — Arguing on facts is an obligation.** An orchestrator MUST raise an observed problem; silence is
+a violation, not tact. Agreement MUST also be argued — a bare "correct" is worth zero.
+
+**A4 — A ratified decision reopens on new reproducible evidence, not on preference.** A
+**quantitative** claim requires a new measurement. A **structural** claim requires a new distinguishing
+witness — a discovered consumer, a missing field, an unreachable remediation, an unaccounted producer
+path, a counterexample, a violated type or domain law. A structural witness needs no number to
+bind. An orchestrator MUST NOT reopen a ratified decision on preference alone, and MUST
+produce the evidence it reopens on.
+
+**A5 — A cause is a hypothesis until independently established.** An orchestrator MUST NOT relay an
+implementer's explanation of a cause as fact. A cause becomes established by measurement **or** by a
+distinguishing structural or causal witness (`A4`) — the two are equally admissible, and neither may
+be replaced by an account.
+
+**A6 — External audits are evidence, not findings.** An orchestrator MUST verify the cheapest claims
+itself first, because they calibrate the author's method. Convergence between **independent methods**
+is corroboration; repeated runs of one model MUST NOT be treated as independent auditors, because
+they share their own blind spots.
+
+**A7 — A brief MUST be dispatchable without rebuilding context.** It MUST carry the measured defect
+with locations, the sanction verbatim, what to build, the ratchet specification, the protocol, what is
+explicitly out of scope, and any correction that must not be smoothed over.
+
+**A8 — Escalate only on boundaries.** An orchestrator MUST escalate scope expansion, protected
+paths, a live foreign intent, baselines or generated state, and another agent's intent — and
+MUST NOT escalate routine controller work.
+
+**A9 — Report faithfully.** A failed gate MUST be reported with its output. A skipped step MUST be
+named. An acceptance carrying external changes MUST be reported as an advisory and MUST NOT be
+described as fully clean.
+
+### 20.2 Implementer
+
+**X1** — An agent MUST produce a red test before the fix for every claimed defect. A test written
+after the fix and green on its first run is not evidence.
+
+**X2** — An agent MUST stop at the scope boundary. If files outside declared scope are needed it MUST
+stop before touching them and report. A preflight stop is a valued outcome, not a failure.
+
+**X3** — An agent MUST stop when the brief encodes a false assumption. If a prescribed test would
+encode the defect as an expectation, the agent MUST say so instead of implementing it.
+
+**X4** — An agent MUST ship the verification matrix when `E8` applies, with its profile declared.
+
+**X5** — An agent MUST NOT satisfy a guard by choosing what it cannot detect. It MUST either redesign
+so the guarded thing does not exist, or take the honest heavy path.
+
+**X6** — An agent MUST NOT refresh a golden snapshot to make a test pass (`P5`).
+
+**X7** — An agent MUST report BLOCKED or UNVERIFIED with the exact missing step and the intent
+identifier.
+
+**X8** — An agent MUST name what it did not do: unverified assumptions, untested paths, skipped
+checks.
+
+### 20.3 Memory
+
+**MEM1** — Conversation is not memory. Chat text is ephemeral across context compaction, new sessions,
+and new processes; durable facts MUST be written to the governed store.
+
+**MEM2** — An agent MUST record a constraint or trade-off at the moment of decision, not at the end of
+the task.
+
+**MEM3** — An agent MUST record rejected approaches together with their reasons.
+
+**MEM4** — Memory grants nothing: it MUST NOT be used to authorize an edit, expand scope, or override
+a finding. Draft and inferred records MUST NOT be treated as established facts.
+
+**MEM5** — An agent MUST verify that a remembered file, function, or flag still exists before acting
+on it.
+
+---
+
+## 21) Pull request checklist
+
+*Non-normative (`AUTH1.1`). Each item cites its owner.*
+
+- [ ] Intent and scope declared before editing; permission observed; receipt persisted; intent cleared (`P7`).
+- [ ] Detached worktree; fast-forward-only integration (`W1`).
+- [ ] Determinism holds in the sense of `P2`; contracts preserved or versioned (`P1`).
+- [ ] Tests placed per `T1`; added or changed per `CR1`; **every gate reported with its exit code** (`V1`, `E5`).
+- [ ] If within `E8` scope: verification matrix delivered with its profile declared, every kill row semantic and not
+  void, every probe row demonstrating its claim, witness uniqueness where the profile requires it.
+- [ ] Every diff hunk carries a named behavioral invariant (`AP3`).
+- [ ] Change complement checked (`AP4`); consumer inventory built with stage and both contracts stated **if** a
+  completeness claim is made (`AP5`, `I2`, `I5`).
+- [ ] Any change moving a reported number classified (`S1`) and accepted through its class path.
+- [ ] Golden snapshots not updated to satisfy failing tests (`P5`).
+- [ ] Reports distinguish comparison-unavailable from empty (`RP2`, `B9`); no absolute or machine-local paths emitted (
+  `PR1`).
+- [ ] What was not done is stated explicitly (`X8`).
+- [ ] Material agent assistance disclosed; a human reviewed the complete diff (`P8`).
+
+---
+
+*Conflicts between this document and a maintainer instruction are resolved by `AUTH3`.*

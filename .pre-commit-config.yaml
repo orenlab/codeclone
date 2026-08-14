@@ -69,6 +69,14 @@ repos:
         files: ^docs/.*\.md$
         stages: [ pre-commit ]
 
+      - id: lint-agents-authority
+        name: Lint AGENTS.md authority model
+        entry: uv run scripts/lint_agents_authority.py AGENTS.md
+        language: system
+        pass_filenames: false
+        files: ^AGENTS\.md$
+        stages: [ pre-commit ]
+
       - id: ty-prod-scope
         name: Ty check production scope
         entry: bash -c 'uv run ty check codeclone .github/actions benchmarks'
