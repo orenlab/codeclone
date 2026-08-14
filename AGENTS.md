@@ -15,6 +15,12 @@ a stable id (`P1`, `E3`, `W5`, `AP4`, …). A rule id MAY own a multi-sentence b
 2. **Every normative obligation MUST be expressed with RFC-2119 uppercase modality**
    (**MUST**, **MUST NOT**, **MAY**). An imperative without that modality is not an
    obligation, regardless of tone.
+   **SHOULD** and **SHOULD NOT** are recognised, and they are **non-normative**: they mark a
+   preference this project holds, they never constitute an obligation, and an agent MUST NOT
+   treat them as one. A block whose only modality is SHOULD therefore states no obligation and
+   is reported as such — that report is correct, and an agent MUST NOT resolve it by promoting
+   the preference to MUST, which would silently widen what agents are bound by. Give the block
+   its real obligation, or move the preference into a block that already carries one.
 3. A summary MUST NOT state an obligation its owner does not contain. Where a summary and its
    owner disagree, an agent MUST follow the owner **and MUST report the divergence as a defect
    in this document** — silently following either side reproduces, inside our own governance,
