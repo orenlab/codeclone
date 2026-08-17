@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import Final, Literal
 
+from ...api.finding_groups import suppressed_clone_groups
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils.coerce import as_mapping as _as_mapping
@@ -427,14 +428,16 @@ def _numbered_decisions(
 
 
 def _suppressed_clone_count(report_document: Mapping[str, object]) -> int:
-    findings = _as_mapping(report_document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get("clones"))
-    suppressed = _as_mapping(clones.get("suppressed"))
-    return sum(
-        len(_as_sequence(suppressed.get(kind)))
-        for kind in ("function", "block", "segment")
-    )
+    """Count the suppressed clone groups the document actually publishes.
+
+    Counted through the owner rather than by re-spelling the producer's bucket
+    keys here: this counter spelled them in the singular against a container
+    that spells them in the plural, so it returned zero for every document that
+    had anything to count, and the receipt then declined to make a claim it had
+    every reason to make.
+    """
+
+    return suppressed_clone_groups(report_document).count
 
 
 def _inline_paths(value: object) -> str:

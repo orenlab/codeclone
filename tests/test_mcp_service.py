@@ -441,15 +441,26 @@ def _blast_radius_report_document(digest: str = "digest-a") -> dict[str, object]
                     ],
                     "blocks": [],
                     "segments": [],
+                    # Bucket keys are plural, as the producer publishes them,
+                    # and the group inside carries its kind in the singular.
+                    # This fixture used to spell the buckets in the singular,
+                    # which is the dialect of the reader that was wrong: it
+                    # made a counter looking for "function" count one group on
+                    # a document that publishes none under that key (`H4`).
                     "suppressed": {
-                        "function": [
+                        "functions": [
                             {
                                 "id": "clone:function:fixture",
+                                "family": "clone",
+                                "category": "function",
+                                "kind": "clone_group",
+                                "clone_kind": "function",
+                                "count": 2,
                                 "items": [{"relative_path": "tests/test_a.py"}],
                             }
                         ],
-                        "block": [],
-                        "segment": [],
+                        "blocks": [],
+                        "segments": [],
                     },
                 },
                 "design": {"groups": []},
@@ -14797,11 +14808,19 @@ def test_implementation_context_baseline_sensitive_and_contract_role(
         report_document={
             "findings": {
                 "groups": {
-                    "clone": {
-                        "function": [
+                    # The family is "clones" and the bucket is "functions", as
+                    # the producer publishes them; the group carries its own
+                    # category. The fixture used to name the family "clone" and
+                    # the bucket "function" -- spellings that made a projection
+                    # reporting the container key as the finding's category
+                    # look right, because there the two happened to agree.
+                    "clones": {
+                        "functions": [
                             {
                                 "id": "clone-1",
-                                "kind": "function",
+                                "family": "clone",
+                                "category": "function",
+                                "kind": "clone_group",
                                 "severity": "medium",
                                 "novelty": "new",
                                 "items": [{"relative_path": "pkg/mod.py"}],

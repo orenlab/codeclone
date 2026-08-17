@@ -11,6 +11,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
+from codeclone.api.finding_groups import (
+    suppressed_clone_groups,
+    suppressed_group_items,
+)
 from codeclone.findings.ids import clone_group_id
 from codeclone.utils import coerce as _coerce
 
@@ -28,6 +32,11 @@ from ...messages.clone_health import (
 )
 from ...messages.explain import plural_word
 from ...suggestions import classify_clone_type
+
+# Imported, never re-derived: the active clone projection turns a document
+# ``relative_path`` into a presentation path with this helper, and a second
+# copy here would be a second way to render one location (`SH1`, `G1`).
+from .._context import _absolute_presentation_path
 from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html
 from ..primitives.filters import CLONE_TYPE_OPTIONS, SPREAD_OPTIONS, _render_select
@@ -191,28 +200,30 @@ def _render_group_explanation(meta: Mapping[str, object]) -> str:
 def _flatten_suppressed_clone_groups(
     ctx: ReportContext,
 ) -> tuple[Mapping[str, object], ...]:
-    findings = _as_mapping(ctx.report_document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get("clones"))
-    suppressed = _as_mapping(clones.get("suppressed"))
-    flattened: list[Mapping[str, object]] = []
-    for bucket_key in ("functions", "blocks", "segments"):
-        for group in _as_sequence(suppressed.get(bucket_key)):
-            group_mapping = _as_mapping(group)
-            if group_mapping:
-                flattened.append(group_mapping)
-    return tuple(flattened)
+    """Read the suppressed lane through its owner, in the owner's order."""
+
+    return suppressed_clone_groups(ctx.report_document).groups
 
 
 def _suppressed_group_label(
     group: Mapping[str, object],
     ctx: ReportContext,
 ) -> tuple[str, str]:
-    items = _as_sequence(group.get("items"))
-    first_item = _as_mapping(items[0]) if items else {}
-    filepath = str(first_item.get("filepath", ""))
+    """Return the row's label and the path to show in the File column.
+
+    Suppressed items are projected the same way active clone items are: the
+    document carries ``relative_path``, and the presentation path is derived
+    from it here. Asking the item for ``filepath`` — the key the active clone
+    projection *produces* — left this column empty on every row of every
+    report, because a suppressed item never passes through that projection.
+    """
+
+    items = suppressed_group_items(group)
+    first_item = items[0] if items else {}
     qualname = str(first_item.get("qualname", ""))
-    label = qualname or str(first_item.get("relative_path", ""))
+    relative_path = str(first_item.get("relative_path", ""))
+    filepath = _absolute_presentation_path(relative_path, scan_root=ctx.scan_root)
+    label = qualname or relative_path
     if not label:
         label = str(group.get("id", ""))
     return label, filepath

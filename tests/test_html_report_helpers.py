@@ -166,6 +166,7 @@ def test_html_fallback_helpers_cover_empty_label_and_review_text() -> None:
     ctx = SimpleNamespace(
         bare_qualname=lambda _qualname, _filepath: "",
         relative_path=lambda _filepath: "",
+        scan_root="",
         metrics_map={"coverage_join": {"summary": {"status": "ok"}}},
         overloaded_modules_map={
             "summary": {"candidates": 1},
@@ -2076,17 +2077,30 @@ def _parse_report_tables(
 def _suppressed_clone_groups() -> list[dict[str, object]]:
     """The thirteen suppressed groups this repository actually reports.
 
-    Read off the self-repo document: seven Block groups render byte-identically
-    because the label comes from the first item's qualname, one rule value
-    covers every row, and no group carries a filepath at all.
+    Read off the self-repo document, in the shape the producer publishes: an
+    item carries ``relative_path`` and ``qualname``, never ``filepath``, which
+    is a key the *active* clone projection produces for presentation. Seven
+    Block groups render byte-identically because they share both a qualname and
+    a path, and one rule value covers every row.
+
+    This fixture used to give its items a qualname alone and recorded "no group
+    carries a filepath at all" as a fact of the document. That was a fact of
+    the fixture: written in the reader's dialect, it made a reader asking items
+    for the wrong key look right, and no test could red (`H4`).
     """
 
     def group(
-        kind: str, qualname: str, clone_type: str, count: int, pattern: str
+        kind: str,
+        qualname: str,
+        relative_path: str,
+        clone_type: str,
+        count: int,
+        pattern: str,
     ) -> dict[str, object]:
         return {
             "clone_kind": kind,
-            "items": [{"qualname": qualname}],
+            "category": kind,
+            "items": [{"qualname": qualname, "relative_path": relative_path}],
             "clone_type": clone_type,
             "count": count,
             "suppression_rule": "golden_fixture",
@@ -2094,59 +2108,60 @@ def _suppressed_clone_groups() -> list[dict[str, object]]:
             "matched_patterns": [pattern],
         }
 
+    # Stated as one table rather than six near-identical calls: a run of
+    # repetitive statements here is itself detected as a clone, and the honest
+    # remedy for a test-only match is to refactor the test (`N1`).
     tiers = "tests/fixtures/clone_tiers"
-    golden = "tests/fixtures/golden_*"
-    groups = [
-        group(
-            "function",
+    function_rows = (
+        (
             "tests.fixtures.golden_project.alpha:transform_alpha",
-            "Type-2",
+            "tests/fixtures/golden_project/alpha.py",
             4,
-            golden,
+            "tests/fixtures/golden_*",
         ),
-        group(
-            "function",
+        (
             "tests.fixtures.clone_tiers.pairs:authorize_refund",
-            "Type-2",
+            f"{tiers}/pairs.py",
             2,
             tiers,
         ),
-        group(
-            "function",
+        (
             "tests.fixtures.design_metrics.original.acme.complexity_cases:branchy",
-            "Type-2",
+            "tests/fixtures/design_metrics/original/acme/complexity_cases.py",
             2,
             "tests/fixtures/design_metrics",
         ),
-        group(
-            "function",
+        (
             "tests.fixtures.clone_tiers.pairs:positive_sum_loop",
-            "Type-2",
+            f"{tiers}/pairs.py",
             2,
             tiers,
         ),
-        group(
-            "function",
+        (
             "tests.fixtures.clone_tiers.pairs_renamed:permit_credit",
-            "Type-2",
+            f"{tiers}/pairs_renamed.py",
             2,
             tiers,
         ),
-        group(
-            "function",
+        (
             "tests.fixtures.clone_tiers.pairs:positive_sum_comprehension",
-            "Type-2",
+            f"{tiers}/pairs.py",
             2,
             tiers,
         ),
+    )
+    groups = [
+        group("function", qualname, path, "Type-2", count, pattern)
+        for qualname, path, count, pattern in function_rows
     ]
     groups += [
         group(
             "block",
             "tests.fixtures.golden_project.alpha:transform_alpha",
+            "tests/fixtures/golden_project/alpha.py",
             "Type-4",
             4,
-            golden,
+            "tests/fixtures/golden_*",
         )
         for _ in range(7)
     ]
@@ -2156,25 +2171,53 @@ def _suppressed_clone_groups() -> list[dict[str, object]]:
 def _suppressed_clone_panel() -> str:
     from codeclone.report.html.sections._clones import _render_suppressed_clone_panel
 
-    ctx = cast(Any, SimpleNamespace(relative_path=lambda value: value))
+    ctx = cast(
+        Any,
+        SimpleNamespace(relative_path=lambda value: value, scan_root=""),
+    )
     return _render_suppressed_clone_panel(ctx, _suppressed_clone_groups())
 
 
-def test_suppressed_clone_table_drops_what_it_cannot_show() -> None:
+def test_rows_table_drops_a_column_that_is_empty_in_every_row() -> None:
     """A column that is empty in every row renders nothing, not a header.
 
-    On the self-repo document the File column is empty in all thirteen rows --
-    no suppressed group carries a filepath -- yet it still claimed a column and
-    a header. An all-empty column states nothing; it is removed.
+    This used to be pinned through the suppressed clone panel, whose File
+    column was empty in every row. That emptiness turned out to be a defect in
+    the panel's reader rather than a property of the document, so the invariant
+    is pinned here directly, on a column that is genuinely empty.
+    """
+
+    html = _demo_table(
+        headers=("Kind", "Note"),
+        rows=[("Function", ""), ("Block", "")],
+    )
+    headers, _widths, rows = _parse_report_tables(html)[0]
+
+    assert "Note" not in headers, (
+        f"the all-empty Note column still claims a header: {headers}"
+    )
+    for row in rows:
+        assert len(row) == len(headers), "a row no longer matches its header count"
+
+
+def test_suppressed_clone_table_shows_the_path_the_document_carries() -> None:
+    """The File column states a path for every suppressed row.
+
+    Suppressed items carry ``relative_path``; the panel asked them for
+    ``filepath``, the key only the active clone projection produces, so the
+    column was empty in every row of every report and was then dropped as
+    "nothing to show". The document had the paths all along.
     """
 
     headers, _widths, rows = _parse_report_tables(_suppressed_clone_panel())[0]
 
-    assert "File" not in headers, (
-        f"the all-empty File column still claims a header: {headers}"
+    assert "File" in headers, (
+        f"the File column is missing while the document carries paths: {headers}"
     )
-    for row in rows:
-        assert len(row) == len(headers), "a row no longer matches its header count"
+    file_idx = headers.index("File")
+    paths = [row[file_idx] for row in rows]
+    assert all(paths), f"a suppressed row still shows no path: {paths}"
+    assert "tests/fixtures/golden_project/alpha.py" in paths
 
 
 def test_suppressed_clone_table_lifts_its_provenance_out_of_the_rows() -> None:

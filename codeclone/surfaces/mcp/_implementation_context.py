@@ -16,6 +16,7 @@ from typing import Final, cast
 
 import orjson
 
+from ...api.finding_groups import iter_finding_groups
 from ...models import RelationshipRecord
 from ...paths import classify_source_kind
 from ...utils.coerce import as_mapping as _as_mapping
@@ -1207,32 +1208,36 @@ def _baseline_sensitive_findings(
     *,
     relevant_paths: frozenset[str],
 ) -> tuple[dict[str, object], ...]:
-    findings = _as_mapping(record.report_document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
     rows: list[dict[str, object]] = []
-    for family, family_payload in sorted(groups.items()):
-        for category, category_payload in sorted(_as_mapping(family_payload).items()):
-            for raw_group in _as_sequence(category_payload):
-                group = _as_mapping(raw_group)
-                paths = _finding_paths(group)
-                novelty = str(group.get("novelty", "")).strip()
-                if not relevant_paths.intersection(paths) or novelty not in {
-                    "known",
-                    "new",
-                }:
-                    continue
-                rows.append(
-                    {
-                        "id": str(group.get("id", "")).strip(),
-                        "family": str(family),
-                        "category": str(category),
-                        "kind": str(group.get("kind", "")).strip(),
-                        "severity": str(group.get("severity", "")).strip(),
-                        "novelty": novelty,
-                        "paths": list(paths),
-                        "evidence": "structural",
-                    }
-                )
+    # Walked through the owner. The clone family nests its suppressed groups a
+    # level below its sibling lists, so coercing each container to a sequence
+    # here silently yielded nothing for them; and every other family holds its
+    # groups under a "groups" key, so taking the category from the container
+    # key labelled every design and structural finding "groups". A group's
+    # category is a fact the group carries (`G2`).
+    for ref in iter_finding_groups(record.report_document):
+        group = ref.group
+        paths = _finding_paths(group)
+        novelty = str(group.get("novelty", "")).strip()
+        # A suppressed group carries no novelty term and is declined here on
+        # that fact, not missed on its shape (`B9`).
+        if not relevant_paths.intersection(paths) or novelty not in {
+            "known",
+            "new",
+        }:
+            continue
+        rows.append(
+            {
+                "id": str(group.get("id", "")).strip(),
+                "family": ref.family,
+                "category": ref.category,
+                "kind": str(group.get("kind", "")).strip(),
+                "severity": str(group.get("severity", "")).strip(),
+                "novelty": novelty,
+                "paths": list(paths),
+                "evidence": "structural",
+            }
+        )
     return tuple(
         sorted(
             rows,

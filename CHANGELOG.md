@@ -207,6 +207,21 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **Suppressed clone groups are read through one owner, so the report stops stating two numbers for one fact.** The
+  canonical document nests `findings.groups.clones.suppressed` one level deeper than its sibling lists, and three
+  consumers each re-derived that shape from the raw document with a different idea of it. The review receipt spelled the
+  bucket keys in the singular against a container that spells them in the plural and counted **zero** suppressed groups
+  on a document publishing **seventeen**, so it never recorded that it had not checked suppressed clones for regression.
+  The implementation-context projection ran a sequence coercion over that mapping, silently got nothing, and could not
+  see a suppressed group at all. The HTML suppressed panel asked items for `filepath` — a key only the *active* clone
+  projection produces — so its File column was empty in every row of every report, and was then dropped as having
+  nothing to show. All three now read `codeclone.api.finding_groups`, which answers on the group's own terms: bucket keys
+  are read structurally rather than by name, so a consumer cannot lose groups by mis-spelling one, and an absent
+  container stays distinguishable from an empty one. The same walk also fixes the category every finding is reported
+  under: it was taken from the JSON key holding the groups, so every design and structural finding in the
+  implementation-context projection was labelled `groups` rather than `complexity`, `coupling`, or
+  `duplicated_branches`. Suppressed groups remain excluded from active findings, health, and gates; they carry no
+  baseline comparison term and so are still, correctly, not reported as baseline-sensitive.
 - **The declared configuration-delivery contract is now enforced, and the surface it named but never wired goes through
   it.** The contract listed four delivery surfaces, and the `codeclone memory init` analysis path was one of them — yet
   that path read `pyproject.toml` and applied it through the canonical owners directly, bypassing its own declaration on

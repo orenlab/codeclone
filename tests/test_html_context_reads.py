@@ -117,8 +117,6 @@ _DYNAMIC_KEY_READS: dict[str, tuple[str, ...]] = {
     "codeclone/report/html/sections/_clones.py": (
         # Per-clone-group display facts, keyed by group key.
         "block_group_facts",
-        # The suppressed-clone buckets, keyed by clone kind.
-        "report_document.findings.groups.clones.suppressed",
     ),
     "codeclone/report/html/sections/_overview.py": (
         # Directory hotspots, keyed by source-kind bucket.
