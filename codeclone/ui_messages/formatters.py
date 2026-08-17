@@ -45,6 +45,7 @@ from .runtime import (
     ERR_REPORT_WRITE_FAILED,
     ERR_UNREADABLE_SOURCE_IN_GATING,
     INFO_PROCESSING_CHANGED,
+    NOTE_BASELINE_FOREIGN_INTERPRETER,
     NOTE_COHESION_LCOM4_2_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION,
@@ -230,6 +231,20 @@ def fmt_legacy_repo_workspace_warning(*, legacy_dir: Path, new_dir: Path) -> str
 
 def fmt_invalid_baseline(error: object) -> str:
     return ERR_INVALID_BASELINE.format(error=error)
+
+
+def fmt_baseline_foreign_interpreter(*, baseline_tag: str, runtime_tag: str) -> str:
+    """Report a usable baseline's foreign interpreter as origin, not as distrust.
+
+    The wording is deliberately not a warning: the run proceeds, the comparison
+    ran, and novelty is real. It is placed beside the other baseline notes so the
+    operator sees the provenance without being told to regenerate anything.
+    """
+
+    return NOTE_BASELINE_FOREIGN_INTERPRETER.format(
+        baseline_tag=baseline_tag,
+        runtime_tag=runtime_tag,
+    )
 
 
 def fmt_baseline_lanes_opaque(lanes: Iterable[object]) -> str:

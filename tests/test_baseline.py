@@ -140,10 +140,19 @@ def test_baseline_missing_and_invalid_inputs_are_typed(tmp_path: Path) -> None:
     assert oversize_error.value.status == BaselineStatus.TOO_LARGE
 
 
-def test_baseline_scope_and_runtime_mismatches_are_untrusted(
+def test_baseline_scope_mismatch_is_untrusted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A container from a different input universe is not comparable at all.
+
+    The interpreter half of this assertion used to live here too, and the two
+    were checked in one test. They are now separate tests because the contract
+    separates them: scope decides *what the artifact describes*, and only that
+    still condemns the container. One test asserting both would go red on either
+    mutation and so could not tell them apart.
+    """
+
     baseline = Baseline(_write_container(tmp_path, monkeypatch))
     baseline.load()
 
@@ -154,12 +163,33 @@ def test_baseline_scope_and_runtime_mismatches_are_untrusted(
         )
     assert scope_error.value.status == BaselineStatus.MISMATCH_SCOPE_ID
 
-    with pytest.raises(BaselineValidationError) as python_error:
-        baseline.verify_compatibility(
+
+def test_baseline_foreign_interpreter_tag_is_compatible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clone half of the all-or-nothing contract accepts a foreign tag.
+
+    ``verify_compatibility`` is the strict, whole-container gate its callers
+    depend on, and it used to raise ``MISMATCH_PYTHON_VERSION`` here. It must
+    now return, because the tag says where the artifact was produced and not
+    whether its lanes describe this run (`B4`).
+    """
+
+    baseline = Baseline(_write_container(tmp_path, monkeypatch))
+    baseline.load()
+
+    baseline.verify_compatibility(
+        current_python_tag="cp313",
+        baseline_scope_id=_SCOPE_ID,
+    )
+    assert (
+        baseline.unavailable_lanes(
             current_python_tag="cp313",
             baseline_scope_id=_SCOPE_ID,
         )
-    assert python_error.value.status == BaselineStatus.MISMATCH_PYTHON_VERSION
+        == ()
+    )
 
 
 def test_baseline_schema_and_fingerprint_guards_remain_explicit(

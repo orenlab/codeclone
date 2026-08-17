@@ -106,6 +106,9 @@ def _build_catalog() -> dict[str, str]:
             legacy_dir=_PINNED_PATH, new_dir=_PINNED_PATH
         ),
         "fmt_invalid_baseline": ui.fmt_invalid_baseline("bad JSON"),
+        "fmt_baseline_foreign_interpreter": ui.fmt_baseline_foreign_interpreter(
+            baseline_tag="cp313", runtime_tag="cp314"
+        ),
         "fmt_baseline_lanes_opaque": ui.fmt_baseline_lanes_opaque(
             ["clones:schema_mismatch"]
         ),

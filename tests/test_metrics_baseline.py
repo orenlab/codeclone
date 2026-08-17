@@ -213,12 +213,9 @@ def test_metrics_baseline_rejects_invalid_and_incompatible_state(
             runtime_python_tag="cp314",
             baseline_scope_id=_SCOPE_ID,
         )
-    baseline.schema_version = "3.0"
-    with pytest.raises(BaselineValidationError):
-        baseline.verify_compatibility(
-            runtime_python_tag="cp313",
-            baseline_scope_id=_SCOPE_ID,
-        )
+    # The interpreter-tag stanza that used to follow here was removed with the
+    # behaviour it asserted; the positive contract now lives in
+    # ``test_metrics_baseline_accepts_a_foreign_interpreter_tag``.
 
     empty = MetricsBaseline(tmp_path / "missing.json")
     with pytest.raises(BaselineValidationError):
@@ -372,11 +369,11 @@ def test_stale_metrics_baseline_presents_as_incompatible_metrics_contract(
     assert baseline.snapshot is None
 
 
-def test_incompatible_metrics_contract_does_not_swallow_identity_mismatches(
+def test_incompatible_metrics_contract_does_not_swallow_scope_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scope and interpreter mismatches keep their own statuses."""
+    """A scope mismatch keeps its own status instead of reading as contract drift."""
 
     baseline = MetricsBaseline(_write_container(tmp_path, monkeypatch))
     baseline.load()
@@ -388,12 +385,36 @@ def test_incompatible_metrics_contract_does_not_swallow_identity_mismatches(
         )
     assert scope_error.value.status == MetricsBaselineStatus.MISMATCH_SCOPE_ID
 
-    with pytest.raises(BaselineValidationError) as python_error:
-        baseline.verify_compatibility(
+
+def test_metrics_baseline_accepts_a_foreign_interpreter_tag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The harder of the two tag sites, pinned on both of its methods.
+
+    The lane projection merely degraded lanes; this half *raised*, so a metrics
+    baseline stamped by another interpreter took the whole run down even when
+    every clone lane was comparable. Two methods carried a tag term -- the strict
+    ``verify_compatibility`` and, separately, the ``version_checks`` tuple inside
+    ``unavailable_lanes``, which the clone twin never had. Both are exercised
+    here, because fixing only one leaves a run that passes the gate it asks and
+    fails the gate it does not.
+    """
+
+    baseline = MetricsBaseline(_write_container(tmp_path, monkeypatch))
+    baseline.load()
+
+    baseline.verify_compatibility(
+        runtime_python_tag="cp313",
+        baseline_scope_id=_SCOPE_ID,
+    )
+    assert (
+        baseline.unavailable_lanes(
             runtime_python_tag="cp313",
             baseline_scope_id=_SCOPE_ID,
         )
-    assert python_error.value.status == MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
+        == ()
+    )
 
 
 def test_metrics_baseline_unloaded_inspection_and_root_states_fail_closed(
@@ -585,18 +606,19 @@ def test_metrics_baseline_required_contract_reason_is_schema_mismatch(
         )
     assert error.value.status == MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
 
+    # With every lane compatible, a stored tag that matches no interpreter at all
+    # is still not a refusal: the tag is provenance, and this method's remaining
+    # whole-container term is the schema version.
     baseline.python_tag = "future"
     monkeypatch.setattr(
         container_trust_mod,
         "evaluate_lane_trust",
         lambda *_args, **_kwargs: TrustVector(root_verified=True, lanes=()),
     )
-    with pytest.raises(BaselineValidationError) as python_error:
-        baseline.verify_compatibility(
-            runtime_python_tag="cp314",
-            baseline_scope_id=_SCOPE_ID,
-        )
-    assert python_error.value.status == MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
+    baseline.verify_compatibility(
+        runtime_python_tag="cp314",
+        baseline_scope_id=_SCOPE_ID,
+    )
 
 
 def _class_metric(qualname: str, *, cbo: int, lcom4: int, methods: int) -> ClassMetrics:

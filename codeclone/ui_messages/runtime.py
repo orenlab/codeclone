@@ -126,6 +126,13 @@ WARN_BASELINE_IGNORED = (
     "[dim]Baseline-relative novelty is unavailable for this run.[/dim]\n"
     f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
+NOTE_BASELINE_FOREIGN_INTERPRETER = (
+    "[dim]Baseline was taken on [bold]{baseline_tag}[/bold]; "
+    "this run is [bold]{runtime_tag}[/bold].[/dim]\n"
+    "[dim]Observations are interpreter-independent, so the baseline is used "
+    "and its novelty is comparable. This note is about where the reference "
+    "came from, not about whether it is trusted.[/dim]"
+)
 WARN_BASELINE_LANES_OPAQUE = (
     "[warning]Baseline lanes are opaque for this run: [bold]{lanes}[/bold][/warning]\n"
     "[dim]No active gate reads them, so the run continues. "

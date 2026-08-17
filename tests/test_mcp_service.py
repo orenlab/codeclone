@@ -2965,10 +2965,21 @@ def test_mcp_session_renew_requires_active_intent() -> None:
         service.manage_change_intent(action="renew")
 
 
-def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
+def test_mcp_service_summary_reports_baseline_interpreter_as_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """MCP publishes both tags and keeps the baseline trusted (`B4`, `G4`).
+
+    This test formerly required ``mismatch_python_version`` and
+    ``trusted: False`` here. The measurement refuted the premise: a container
+    stamped by another interpreter carries byte-identical lane payloads, so
+    declining to compare it rejected good data on a property the data does not
+    hold. The surface's provenance duty is discharged by publishing both tags --
+    which it already did, and which is what makes the difference reportable
+    without a status that says "do not trust this".
+    """
+
     _write_clone_fixture(tmp_path)
     mismatch_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
     monkeypatch.setattr(
@@ -2987,12 +2998,15 @@ def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
     )
 
     baseline_payload = cast("dict[str, object]", summary["baseline"])
-    assert baseline_payload["status"] == "mismatch_python_version"
-    assert baseline_payload["trusted"] is False
-    assert baseline_payload["compared_without_valid_baseline"] is True
+    assert baseline_payload["status"] == "ok"
+    assert baseline_payload["trusted"] is True
+    assert baseline_payload["compared_without_valid_baseline"] is False
+    # The provenance itself, still published and still distinguishable: the
+    # consumer can see the two interpreters differ without being told the
+    # artifact is untrustworthy.
     assert baseline_payload["baseline_python_tag"] == mismatch_tag
     assert baseline_payload["runtime_python_tag"] == current_python_tag()
-    assert any(
+    assert not any(
         "python_tag" in warning.casefold()
         for warning in cast("list[str]", summary["warnings"])
     )
@@ -18687,12 +18701,58 @@ def test_mcp_context_incompatible_container_is_condemned_as_a_whole(
 ) -> None:
     """A container that does not describe this run is not "partly stale" (`B4`).
 
-    Comparison-*context* compatibility -- scope id, interpreter tag -- has one
-    answer for the whole container, and ``unavailable_lanes`` happens to report it
-    as a row per lane. Degrading it per lane the way genuine lane staleness is
-    degraded would publish a trusted baseline for a run the artifact does not
-    describe, which is the same collapse of `B4`'s four levels that this wave
-    exists to undo -- relocated into the provenance instead of the novelty.
+    Comparison-*context* compatibility has one answer for the whole container,
+    and ``unavailable_lanes`` happens to report it as a row per lane. Degrading it
+    per lane the way genuine lane staleness is degraded would publish a trusted
+    baseline for a run the artifact does not describe.
+
+    This test used to forge the interpreter tag. It now forges the **scope id**,
+    because only one of the two properties it originally covered turned out to be
+    a context question: the scope id says which input universe the artifact
+    describes, while the tag says only where it was produced. Retargeted rather
+    than deleted, so this surface keeps a whole-container witness for the half
+    that is still true -- and so the tag case, which is now the opposite
+    assertion, cannot ride on this one's name.
+    """
+
+    target = tmp_path / "foreign-scope.baseline.json"
+    target.write_bytes(settlement_baseline_without_clone.read_bytes())
+    lane_degradation.rescope_container(
+        target,
+        scope_id=lane_degradation.FOREIGN_SCOPE_ID,
+    )
+
+    _document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+    baseline = _mapping_child(summary, "baseline")
+
+    assert baseline["status"] == "mismatch_scope_id"
+    assert baseline["trusted"] is False
+    assert baseline["compared_without_valid_baseline"] is True
+
+
+def test_mcp_foreign_interpreter_container_stays_trusted(
+    settlement_tree: Path,
+    settlement_baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """The tag half, now the opposite assertion, on its own witness.
+
+    Deliberately a separate test from the scope case above: the two must fail on
+    opposite mutations. Restoring the tag gate must red here and leave the scope
+    test green; removing the scope gate must red there and leave this one green.
+    A single test covering both context properties could not tell the two apart,
+    and the contract does.
+
+    The novelty assertion is what gives this test power over the *lane* mechanism
+    as well as the surface one. Two independent mechanisms used to condemn a
+    foreign tag here -- the lane projection in ``baseline.container_trust`` and
+    the ``CONTEXT_INCOMPATIBLE_REASONS`` set this surface reads -- and restoring
+    the lane one alone leaves this summary status ``ok`` while silently taking the
+    comparison away, because no active gate reads the degraded lanes. Asserting
+    only on the status would therefore have missed half the class; measured, that
+    mutation left this test green until the line below was added. The clone is in
+    the tree and not in the baseline, so a comparison that really ran must call it
+    ``new`` -- untrusted lanes would report ``unavailable`` instead (`B8`).
     """
 
     mismatch_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
@@ -18700,12 +18760,14 @@ def test_mcp_context_incompatible_container_is_condemned_as_a_whole(
     target.write_bytes(settlement_baseline_without_clone.read_bytes())
     lane_degradation.retag_container_python(target, python_tag=mismatch_tag)
 
-    _document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+    document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
     baseline = _mapping_child(summary, "baseline")
 
-    assert baseline["status"] == "mismatch_python_version"
-    assert baseline["trusted"] is False
-    assert baseline["compared_without_valid_baseline"] is True
+    assert baseline["status"] == "ok"
+    assert baseline["trusted"] is True
+    assert baseline["compared_without_valid_baseline"] is False
+    assert baseline["baseline_python_tag"] == mismatch_tag
+    assert _sole_mcp_function_clone(document)["novelty"] == "new"
 
 
 def test_mcp_publishes_adoption_and_api_comparison_availability(

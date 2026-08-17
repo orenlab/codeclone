@@ -3229,6 +3229,12 @@ BaselinePublishFailureReason = Literal[
     # removed on the next complete run.
     "truncated_run",
 ]
+#: Why one lane of an authenticated container is not comparable. There is no
+#: ``python_tag`` member: the interpreter a baseline was taken on is provenance,
+#: not a lane fact, and it is measured not to change any lane payload across
+#: CPython 3.10-3.14 (see ``baseline.container_trust._lane_trust``). Keeping an
+#: unproducible member here would leave every ``reason == "python_tag"``
+#: comparison downstream as a branch nothing can reach.
 LaneTrustReason = Literal[
     "algorithm_revision",
     "baseline_scope_id",
@@ -3238,7 +3244,6 @@ LaneTrustReason = Literal[
     "lane_digest_mismatch",
     "payload_schema",
     "payload_schema_outdated",
-    "python_tag",
     "required_contract",
     "root_digest_mismatch",
     "runtime_lane_unknown",

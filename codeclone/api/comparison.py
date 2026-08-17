@@ -54,10 +54,19 @@ CLONE_BLOCK_LANE = "clones.blocks"
 #: compatibility asks whether this artifact applies to this run, and there is one
 #: answer for the whole container (`B4`). ``unavailable_lanes`` reports it as a
 #: row per lane because that is the shape it returns, but a container belonging to
-#: a different scope or interpreter is not "partly stale": nothing in it is
-#: comparable, and degrading it per lane would report a trusted baseline for a run
-#: the artifact does not describe.
-CONTEXT_INCOMPATIBLE_REASONS = frozenset({"baseline_scope_id", "python_tag"})
+#: a different scope is not "partly stale": nothing in it is comparable, and
+#: degrading it per lane would report a trusted baseline for a run the artifact
+#: does not describe.
+#:
+#: This set once also held ``python_tag``, and that half was wrong. Scope is a
+#: statement about *which input universe* the artifact describes; the interpreter
+#: tag is a statement about *where the artifact was taken*, and the measurement
+#: (CPython 3.10-3.14: all ten lane payloads byte-identical, zero observational
+#: fields differing) shows the second changes nothing this door decides. Rejecting
+#: on it condemned every lane of an authentic container over a property the lanes
+#: do not carry. The tag survives as provenance, reported by
+#: ``foreign_interpreter_provenance`` below, and no longer as a verdict.
+CONTEXT_INCOMPATIBLE_REASONS = frozenset({"baseline_scope_id"})
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -165,9 +174,41 @@ def lane_opacity_warning(unavailable: Sequence[LaneTrust]) -> str:
 
 
 def runtime_python_tag() -> str:
-    """The interpreter tag a baseline is judged against."""
+    """The interpreter tag a baseline is stamped with when it is published."""
 
     return current_python_tag()
+
+
+def foreign_interpreter_provenance(
+    *,
+    baseline_python_tag: str | None,
+    runtime_python_tag: str,
+) -> str | None:
+    """The interpreter a usable baseline was taken on, when it was not this one.
+
+    A remark about origin, never a verdict about trust. The tag stopped gating
+    comparability because it is measured not to change any lane payload across
+    CPython 3.10-3.14, but it remains a true and useful fact about the artifact:
+    the operator is entitled to know that the reference they are being compared
+    against was produced somewhere else, and staying silent about a fact we hold
+    would trade one `G4` failure for another.
+
+    ``None`` means there is no remark to make -- either no tag is known (no
+    baseline was loaded, or it carried none) or the baseline was taken on this
+    very interpreter. Both are the absence of a *difference*, which is the only
+    thing this function reports; whether a baseline loaded at all is a separate
+    fact its caller already holds and must not re-derive from this one (`G2`).
+
+    Computed here, in the one ring both the CLI and MCP may reach, so the two
+    surfaces cannot drift into two answers about one artifact (`G3`). Callers
+    render it; they do not recompute it (`P3`, `G1`).
+    """
+
+    if not baseline_python_tag:
+        return None
+    if baseline_python_tag == runtime_python_tag:
+        return None
+    return baseline_python_tag
 
 
 def build_comparison_context(
@@ -237,6 +278,7 @@ __all__ = [
     "ComparisonContext",
     "blocking_lanes",
     "build_comparison_context",
+    "foreign_interpreter_provenance",
     "lane_is_trusted",
     "lane_opacity_warning",
     "required_gate_lanes",

@@ -128,8 +128,6 @@ class Baseline:
         if unavailable:
             if any(item.reason == "baseline_scope_id" for item in unavailable):
                 status = BaselineStatus.MISMATCH_SCOPE_ID
-            elif any(item.reason == "python_tag" for item in unavailable):
-                status = BaselineStatus.MISMATCH_PYTHON_VERSION
             elif any(item.reason == "required_contract" for item in unavailable):
                 status = BaselineStatus.MISMATCH_FINGERPRINT_VERSION
             else:

@@ -207,8 +207,6 @@ class MetricsBaseline:
             reasons = ", ".join(f"{item.name}:{item.reason}" for item in unavailable)
             if any(item.reason == "baseline_scope_id" for item in unavailable):
                 status = MetricsBaselineStatus.MISMATCH_SCOPE_ID
-            elif any(item.reason == "python_tag" for item in unavailable):
-                status = MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
             elif all(item.reason in _METRICS_CONTRACT_REASONS for item in unavailable):
                 status = MetricsBaselineStatus.INCOMPATIBLE_METRICS_CONTRACT
             else:
@@ -222,11 +220,12 @@ class MetricsBaseline:
                 "Metrics baseline schema mismatch.",
                 status=MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION,
             )
-        if self.python_tag != runtime_python_tag:
-            raise BaselineValidationError(
-                "Metrics baseline Python tag mismatch.",
-                status=MetricsBaselineStatus.MISMATCH_PYTHON_VERSION,
-            )
+        # No interpreter-tag check follows. This method was the harder of the two
+        # tag sites: the lane projection merely degraded lanes, while this raised
+        # outright, so a metrics baseline from another interpreter took the whole
+        # run down even when the clone lanes were comparable. The tag is
+        # provenance and is reported as such; it is not a compatibility term
+        # (see ``baseline.container_trust._lane_trust`` for the measurement).
 
     def unavailable_lanes(
         self,
@@ -238,6 +237,13 @@ class MetricsBaseline:
 
         The clone-lane twin of this method carries the full rationale; the
         contract is identical. ``verify_compatibility`` is left alone.
+
+        The whole-container version checks below no longer include the
+        interpreter tag. This was a third tag site, distinct from the lane
+        projection and from ``verify_compatibility``, and it was asymmetric: the
+        clone twin's ``version_checks`` never carried a tag term, so the two
+        halves of one container disagreed about whether the tag was a
+        compatibility question at all. Both now agree that it is not.
         """
 
         return unavailable_lanes_after_version_checks(
@@ -254,12 +260,6 @@ class MetricsBaseline:
                     BASELINE_SCHEMA_VERSION,
                     "Metrics baseline schema mismatch.",
                     MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION,
-                ),
-                (
-                    self.python_tag,
-                    runtime_python_tag,
-                    "Metrics baseline Python tag mismatch.",
-                    MetricsBaselineStatus.MISMATCH_PYTHON_VERSION,
                 ),
             ),
         )

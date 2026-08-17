@@ -72,17 +72,37 @@ def _semantic_reason(
 def _lane_trust(
     lane: BaselineLane,
     runtime: RuntimeContracts,
-    *,
-    python_matches: bool,
 ) -> LaneTrust:
+    """Project one lane's trust from its digest and its own contract terms.
+
+    The interpreter tag is deliberately absent from this decision. It was once
+    checked here, ahead of every semantic term, and a single tag difference
+    therefore made all ten lanes unavailable at once -- a whole authentic,
+    root-verified container condemned on a property its lane payloads do not
+    carry (`B4`, `B5`).
+
+    That the payloads do not carry it is measured, not assumed. Across CPython
+    3.10 through 3.14 the phase-39 wire normalises the interpreter differences
+    away: one wire hash over 6171 symbols on all five, all ten lane digests and
+    all ten lane payloads byte-identical, and 3 of 163179 container leaf fields
+    differing -- ``created_at``, ``python_tag``, and the root digest the tag
+    feeds. Substituting the tag alone into a cp310 container reproduces the
+    exact root digest of cp311, cp312, cp313 and cp314, so the tag is the whole
+    of the difference and none of the observation.
+
+    The genuine cross-version hazard -- a newer grammar an older interpreter
+    cannot parse -- is caught by a different guard that keys on what was
+    actually read (``publish_baseline``'s ``truncated_run``), never on this
+    string. The tag stays in ``meta`` and in the root-digest input as
+    provenance; ``api.comparison.foreign_interpreter_provenance`` reports it.
+    """
+
     if not hmac.compare_digest(compute_lane_digest(lane).value, lane.digest.value):
         return LaneTrust(
             name=lane.name,
             status="unavailable",
             reason="lane_digest_mismatch",
         )
-    if not python_matches:
-        return LaneTrust(name=lane.name, status="unavailable", reason="python_tag")
     reason = _semantic_reason(lane, runtime)
     return LaneTrust(
         name=lane.name,
@@ -114,6 +134,10 @@ def evaluate_lane_trust(
             trust_span.set_counter("baseline_root_verification_fail", 1)
             trust_span.set_counter("baseline_compatibility_fail", len(lanes))
             return TrustVector(root_verified=False, lanes=lanes)
+        # The scope id stays a whole-container verdict, and that half was never
+        # under question: a container describing a different input universe
+        # describes nothing about this run, and no lane of it is comparable.
+        # Only the interpreter tag left this gate.
         scope_matches = container.baseline_scope_id == runtime.baseline_scope_id
         if not scope_matches:
             lanes = tuple(
@@ -126,10 +150,8 @@ def evaluate_lane_trust(
             )
             trust_span.set_counter("baseline_compatibility_fail", len(lanes))
             return TrustVector(root_verified=True, lanes=lanes)
-        python_matches = container.meta.python_tag == runtime.python_tag
         lanes = tuple(
-            _lane_trust(lane, runtime, python_matches=python_matches)
-            for _name, lane in container.lanes.rows
+            _lane_trust(lane, runtime) for _name, lane in container.lanes.rows
         )
         trusted_count = sum(item.status == "trusted" for item in lanes)
         trust_span.set_counter("baseline_root_verification_pass", 1)

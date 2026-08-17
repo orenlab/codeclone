@@ -117,6 +117,28 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Changed
 
+- **A baseline published on one CPython version is now usable on another.** The interpreter tag stopped being a
+  condition of baseline trust. Previously any difference between the tag stamped in `meta.python_tag` and the running
+  interpreter made all ten lanes unavailable at once, printed `Invalid baseline file.` for an artifact that was
+  authentic and root-verified, and exited `2` under a baseline-aware gate — so a team on mixed 3.10–3.14 machines could
+  not share one baseline. Measured across CPython 3.10, 3.11, 3.12, 3.13 and 3.14 on the same bytes: all ten lane
+  digests and all ten lane payloads are byte-identical, and 3 of 163179 container leaf fields differ — `created_at`,
+  `python_tag`, and the root digest the tag feeds. No observational field differs, because the analysis wire normalizes
+  the interpreters' AST differences away. Substituting the tag alone into a 3.10 container reproduces the exact root
+  digest of each of the other four, which is what identifies the tag as the whole of the difference. On this
+  repository's own package, cross-reading a baseline restored all 148 `known` recognitions that the tag check was
+  rejecting, and the run's novelty distribution became identical to the same-interpreter run.
+  - The tag is **not** removed: it stays in `meta.python_tag` and stays an input to the root digest, so it remains
+    signed provenance that cannot be rewritten without breaking authentication.
+  - Where a usable baseline came from is now reported instead of being silently dropped: the CLI prints
+    `Baseline was taken on cp313; this run is cp314.` as a note about origin, not about trust, and the report and MCP
+    payload continue to publish `baseline_python_tag` beside the runtime tag.
+  - **`baseline_scope_id` is unchanged** and still condemns a whole container: it says which input universe the
+    artifact describes, which is a different question from where it was produced.
+  - **The real cross-version protection is unchanged.** A run that could not read every file it found is still refused
+    publication (`truncated_run`), unconditionally. That guard keys on what was actually read rather than on a version
+    string, which is why it — and not the tag comparison — is what protects against an older interpreter failing to
+    parse newer syntax.
 - **Dependency cycles are reported with their kind split beside the total.** The CLI metrics line reads
   `Cycles  2 detected (1 import, 1 deferred)` and the compact line
   `cycles=2(import=1,deferred=1)`, because the total alone no longer predicts the exit code. A deferred-only run is

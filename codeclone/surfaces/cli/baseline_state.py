@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from ... import ui_messages as ui
+from ...api.comparison import foreign_interpreter_provenance
 from ...baseline import (
     BASELINE_UNTRUSTED_STATUSES,
     Baseline,
@@ -103,6 +104,35 @@ def gate_blocking_lanes(
     """
 
     return tuple(sorted({item.name for item in unavailable} & required_lanes))
+
+
+def _print_foreign_interpreter_note(
+    baseline: Baseline,
+    *,
+    console: _PrinterLike,
+) -> None:
+    """Say where a usable baseline came from, when it came from elsewhere.
+
+    Only reached once the container is loaded and trusted, so the note can never
+    read as a reason to distrust it. The decision is the shared owner's
+    (``api.comparison``); this surface renders and does not re-derive it (`P3`).
+    Silence when the interpreters agree is correct: there is no difference to
+    report, which is a different thing from having nothing to say about trust.
+    """
+
+    runtime_tag = current_python_tag()
+    foreign = foreign_interpreter_provenance(
+        baseline_python_tag=baseline.python_tag,
+        runtime_python_tag=runtime_tag,
+    )
+    if foreign is None:
+        return
+    console.print(
+        ui.fmt_baseline_foreign_interpreter(
+            baseline_tag=foreign,
+            runtime_tag=runtime_tag,
+        )
+    )
 
 
 def _clone_opaque_lanes(
@@ -237,6 +267,7 @@ def resolve_clone_baseline_state(
                     baseline_trusted_for_diff = True
                     if opaque_lanes:
                         console.print(ui.fmt_baseline_lanes_opaque(opaque_lanes))
+                    _print_foreign_interpreter_note(baseline, console=console)
     elif not args.update_baseline:
         console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
 

@@ -53,8 +53,26 @@ from codeclone.models import (
 )
 
 _SCOPE_ID = "3f2b8c1e-7a41-4d90-9c62-5b0e8a7d4f13"
+#: A different input universe: the half of context compatibility that stays a
+#: whole-container verdict.
+FOREIGN_SCOPE_ID = "9d41c0a7-2e18-4f6b-8a35-6c7d1e94b028"
 _LIMIT_BYTES = 64 * 1024 * 1024
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _foreign_python_tag() -> str:
+    """An interpreter tag that is certainly not the one running the suite.
+
+    Derived from the runtime rather than hard-coded, so the fixture stays foreign
+    whichever interpreter the suite runs on. A literal would silently become the
+    *native* tag on that interpreter, and every assertion about a foreign tag
+    would then pass while testing the native case.
+    """
+
+    return "cp313" if current_python_tag() != "cp313" else "cp312"
+
+
+_FOREIGN_TAG = _foreign_python_tag()
 
 _MODULE_SOURCE = '''"""One module so the run has real observations."""
 
@@ -170,6 +188,24 @@ def retag_container_python(baseline_path: Path, *, python_tag: str) -> None:
     def _mutate(container: BaselineContainerV3) -> BaselineContainerV3:
         assert container.meta.python_tag != python_tag
         return replace(container, meta=replace(container.meta, python_tag=python_tag))
+
+    _rewrite_container(baseline_path, _mutate)
+
+
+def rescope_container(baseline_path: Path, *, scope_id: str) -> None:
+    """Rewrite ``baseline_scope_id`` and re-authenticate the root digest.
+
+    The deliberate twin of ``retag_container_python``: same forgery technique,
+    same re-signing, one different field. It exists so the two halves of the old
+    context-incompatibility rule can be mutated independently -- the interpreter
+    tag, which stopped being a trust term, and the scope id, which did not. A
+    single fixture covering both would let one test stand in for two contract
+    states, and then one mutation would red what the contract distinguishes.
+    """
+
+    def _mutate(container: BaselineContainerV3) -> BaselineContainerV3:
+        assert str(container.baseline_scope_id) != scope_id
+        return replace(container, baseline_scope_id=UUID(scope_id))
 
     _rewrite_container(baseline_path, _mutate)
 
@@ -474,6 +510,208 @@ def degraded_without_clone(baseline_without_clone: Path, tmp_path: Path) -> Path
     target.write_bytes(baseline_without_clone.read_bytes())
     downgrade_api_surface_lane(target)
     return target
+
+
+@pytest.fixture
+def foreign_interpreter_without_clone(
+    baseline_without_clone: Path, tmp_path: Path
+) -> Path:
+    """The same intact baseline, restamped with another interpreter's tag.
+
+    Root-authentic: ``retag_container_python`` re-signs the root digest, so this
+    artifact really carries a foreign tag and really authenticates. Nothing else
+    about it moves -- every lane digest and every lane payload is the byte the
+    publisher wrote.
+    """
+
+    target = tmp_path / "foreign-interpreter.baseline.json"
+    target.write_bytes(baseline_without_clone.read_bytes())
+    retag_container_python(target, python_tag=_FOREIGN_TAG)
+    return target
+
+
+def test_a_foreign_interpreter_tag_changes_no_finding(
+    settlement_tree: Path,
+    baseline_without_clone: Path,
+    foreign_interpreter_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """An authentic baseline from another interpreter must answer identically.
+
+    The interpreter tag was the last remaining reason to refuse a comparison the
+    data supports. Measured across CPython 3.10-3.14: all ten lane digests and
+    all ten lane payloads byte-identical, and 3 of 163179 container leaf fields
+    differing -- ``created_at``, ``python_tag``, and the root digest the tag
+    feeds. So a foreign tag may change the provenance and *nothing else*.
+
+    Pinned as an equality between two runs rather than against stored expected
+    values: a literal would be a magic number that gets refreshed the first time
+    it moves (`H1`, `P5`). The intact baseline and the retagged one differ in
+    exactly one string, so any reintroduction of a tag term anywhere in the trust
+    projection, in either baseline half, or in the context-incompatibility set
+    breaks this equality.
+
+    Before the fix this run printed ``Invalid baseline file.``, reported every
+    lane unavailable on ``python_tag``, and turned all 7 recognitions in this
+    fixture into ``unavailable`` while exiting 2 (`B4`, `B5`).
+    """
+
+    intact = cli_document(
+        settlement_tree,
+        baseline=baseline_without_clone,
+        out=tmp_path / "cli-intact-tag.json",
+    )
+    foreign = cli_document(
+        settlement_tree,
+        baseline=foreign_interpreter_without_clone,
+        out=tmp_path / "cli-foreign-tag.json",
+    )
+
+    def _canonical(value: object) -> str:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+    assert _canonical(intact["findings"]) == _canonical(foreign["findings"])
+    assert _canonical(intact["derived"]) == _canonical(foreign["derived"])
+    # And the answer itself, so the equality above cannot be satisfied by two
+    # matching wrong words: the clone is in the tree and not in the baseline, so
+    # a comparison that actually ran must call it new -- never "unavailable".
+    assert _sole_function_clone(foreign)["novelty"] == "new"
+
+
+def test_a_foreign_interpreter_tag_is_reported_as_origin_not_as_distrust(
+    settlement_tree: Path,
+    foreign_interpreter_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """The run proceeds, and it says where the reference came from (`G4`).
+
+    Two separate obligations, both checked here because dropping either one
+    reintroduces a defect this wave exists to remove. The container must stop
+    being called invalid -- admissibility and context compatibility are
+    different levels and the message must not conflate them (`B4`). And the
+    difference must not become silence: we hold the fact, so withholding it
+    trades a false refusal for an unreported one.
+    """
+
+    result = _run_cli(
+        str(settlement_tree),
+        "--baseline",
+        str(foreign_interpreter_without_clone),
+        "--api-surface",
+        "--json",
+        str(tmp_path / "cli-foreign-note.json"),
+        "--ci",
+        "--fail-on-new",
+        "--no-progress",
+    )
+
+    # The gate verdict on new clones, reached because the comparison ran at all.
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "Invalid baseline file" not in result.stdout
+    assert "python_tag" not in result.stdout
+    assert f"Baseline was taken on {_FOREIGN_TAG}" in result.stdout
+    assert f"this run is {current_python_tag()}" in result.stdout
+
+
+def test_a_matching_interpreter_tag_says_nothing_about_provenance(
+    settlement_tree: Path,
+    baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """The note is about a difference, so no difference means no note.
+
+    The opposite direction of the case above. Without it, a formatter that
+    printed the origin unconditionally would satisfy the provenance obligation
+    while adding a line to every ordinary run.
+    """
+
+    result = _run_cli(
+        str(settlement_tree),
+        "--baseline",
+        str(baseline_without_clone),
+        "--api-surface",
+        "--json",
+        str(tmp_path / "cli-native-note.json"),
+        "--no-progress",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Baseline was taken on" not in result.stdout
+
+
+def test_a_foreign_scope_id_still_condemns_the_whole_container(
+    settlement_tree: Path,
+    baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """The half that was never under question, pinned on its own witness.
+
+    Scope and interpreter were once one rule, and only one half of it was wrong.
+    The scope id says which input universe the artifact describes; a container
+    describing a different one describes nothing about this run, so no lane of it
+    is comparable and degrading it per lane would publish a trusted baseline for
+    a run the artifact is not about (`B4`, `G3`).
+
+    Kept in its own test, with its own forgery and its own witness, so that
+    removing the surviving half cannot be mistaken for passing: this test and
+    ``test_a_foreign_interpreter_tag_changes_no_finding`` must fail on opposite
+    mutations, and one test covering both would hide exactly that.
+    """
+
+    target = tmp_path / "foreign-scope.baseline.json"
+    target.write_bytes(baseline_without_clone.read_bytes())
+    rescope_container(target, scope_id=FOREIGN_SCOPE_ID)
+
+    result = _run_cli(
+        str(settlement_tree),
+        "--baseline",
+        str(target),
+        "--api-surface",
+        "--ci",
+        "--fail-on-new",
+        "--no-progress",
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Invalid baseline file" in result.stdout
+    assert "baseline_scope_id" in result.stdout
+
+    baseline = Baseline(target)
+    baseline.load(max_size_bytes=_LIMIT_BYTES)
+    unavailable = baseline.unavailable_lanes(
+        current_python_tag=current_python_tag(),
+        baseline_scope_id=UUID(_SCOPE_ID),
+    )
+    assert unavailable, "a foreign-scope container must report no comparable lane"
+    assert {item.reason for item in unavailable} == {"baseline_scope_id"}
+
+
+def test_python_tag_stays_a_root_digest_input(
+    baseline_without_clone: Path,
+) -> None:
+    """The tag left the trust decision; it must not leave the signature (`G5`).
+
+    Provenance that no digest covers is provenance an editor can rewrite without
+    detection, and the artifact would then authenticate while lying about where
+    it came from. The point of this wave is that the tag is honest metadata --
+    which is only true while it is signed.
+
+    Pinned as the derivation, by recomputing the product's own root digest over a
+    container that differs in the tag alone, rather than by asserting a stored
+    hex string (`H1`).
+    """
+
+    result = read_container_v3(baseline_without_clone, limit_bytes=_LIMIT_BYTES)
+    assert isinstance(result, ContainerReadSuccess)
+    container = result.container
+    assert container.meta.python_tag != _FOREIGN_TAG
+
+    retagged = replace(
+        container,
+        meta=replace(container.meta, python_tag=_FOREIGN_TAG),
+    )
+
+    assert compute_root_digest(retagged) != compute_root_digest(container)
 
 
 def test_cli_findings_are_untouched_by_an_opaque_non_clone_lane(

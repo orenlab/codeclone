@@ -1231,12 +1231,19 @@ def test_lane_trust_projects_each_compatibility_reason_independently(
         )
         assert api_reason(runtime) == expected_reason
 
+    # The interpreter tag is NOT one of the reasons above, and this row is the
+    # inversion of a pin that used to require it. A tag difference is provenance:
+    # measured across CPython 3.10-3.14, every lane digest and every lane payload
+    # is byte-identical, so a lane whose own contract terms all agree is
+    # comparable no matter which interpreter stamped the container (`B4`, `B5`).
+    # Reinstating a tag term anywhere in the projection turns this back into
+    # "python_tag" and fails here.
     wrong_python = RuntimeContracts(
         python_tag="cp313",
         baseline_scope_id=_SCOPE_ID,
         lane_descriptors=descriptors,
     )
-    assert api_reason(wrong_python) == "python_tag"
+    assert api_reason(wrong_python) == "compatible"
 
     bad_digest_lane = replace(
         api_lane,
