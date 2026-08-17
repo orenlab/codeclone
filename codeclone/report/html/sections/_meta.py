@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from codeclone import __version__
+from codeclone.api.comparison import foreign_interpreter_provenance
 from codeclone.utils import coerce as _coerce
 
 from .._context import _meta_pick
@@ -57,6 +58,13 @@ _HASH_LABELS = frozenset(
     }
 )
 
+#: Identity of the row that carries the baseline's interpreter tag. The
+#: provenance cell is routed by this symbol and never by the text it holds: the
+#: panel used to branch on the literal ``"Baseline Python tag"``, so renaming
+#: the row -- a presentation edit -- would have dropped the badge with nothing
+#: red anywhere. A displayed string is a human signature, not a dispatch key.
+_BASELINE_PYTHON_TAG_LABEL = "Baseline Python tag"
+
 
 def _truncate_middle(value: str, head: int, tail: int) -> str:
     """Shorten *value* with a middle ellipsis when it exceeds head+tail+1."""
@@ -80,6 +88,49 @@ def _prov_badge_html(label: str | None, value: str, color: str) -> str:
         f"{label_html}"
         "</span>"
     )
+
+
+def _baseline_interpreter_cell(
+    *,
+    baseline_python_tag: object,
+    runtime_python_tag: object,
+) -> str:
+    """The baseline's interpreter tag beside the owner's verdict on it.
+
+    Whether two interpreter tags name one runtime is decided by
+    ``api.comparison.foreign_interpreter_provenance`` and only rendered here
+    (`P3`, `G1`, `G2`). This site used to decide it again, comparing
+    ``value.strip()`` against a pre-stripped runtime tag, so a baseline tag
+    differing only in surrounding whitespace was published as "matches runtime"
+    while the owner called the same artifact foreign -- two answers about one
+    fact, which is the defect class, not a formatting preference.
+
+    The tags reach the owner exactly as the document carries them. Normalising
+    them here would ask a narrower question than the CLI and MCP ask of the
+    same artifact and answer it differently, which is how the divergence got in.
+
+    An empty string means there is nothing to say. Two tags on record are the
+    owner's precondition, not its rule: it reads a whitespace-only string as a
+    tag and calls it foreign, and MCP guards the same precondition before
+    asking. Silence is a third state here, distinct from "matches runtime" and
+    from a named foreign runtime, so absence is never rendered as sameness
+    (`G4`).
+    """
+
+    if not isinstance(baseline_python_tag, str) or not baseline_python_tag.strip():
+        return ""
+    if not isinstance(runtime_python_tag, str) or not runtime_python_tag.strip():
+        return ""
+    foreign = foreign_interpreter_provenance(
+        baseline_python_tag=baseline_python_tag,
+        runtime_python_tag=runtime_python_tag,
+    )
+    badge = (
+        _prov_badge_html(None, "matches runtime", "green")
+        if foreign is None
+        else _prov_badge_html(None, f"runtime {runtime_python_tag}", "amber")
+    )
+    return f"{_escape_html(baseline_python_tag)} {badge}"
 
 
 def build_topbar_provenance_summary(ctx: ReportContext) -> tuple[str, str, str]:
@@ -218,7 +269,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Baseline loaded", _bl_loaded),
         ("Baseline fingerprint", _bl_fp_ver),
         ("Baseline schema", _bl_schema_ver),
-        ("Baseline Python tag", _bl_py_tag),
+        (_BASELINE_PYTHON_TAG_LABEL, _bl_py_tag),
         ("Baseline generator name", _bl_gen_name),
         ("Baseline generator version", _bl_gen_ver),
         ("Baseline payload sha256", _bl_sha256),
@@ -368,7 +419,14 @@ def render_meta_panel(ctx: ReportContext) -> str:
     )
     _prov_badge = _prov_badge_html
 
-    runtime_python_tag = str(python_tag_value or "").strip()
+    # Decided once, by the owner of the fact, and keyed by the row it belongs
+    # to rather than by the text that row happens to display.
+    _owned_cells = {
+        _BASELINE_PYTHON_TAG_LABEL: _baseline_interpreter_cell(
+            baseline_python_tag=_bl_py_tag,
+            runtime_python_tag=python_tag_value,
+        ),
+    }
 
     def _val_html(label: str, value: object) -> str:
         if label in _BOOL_LABELS and isinstance(value, bool):
@@ -419,18 +477,10 @@ def render_meta_panel(ctx: ReportContext) -> str:
                 '<path d="M3 11V3.5C3 2.7 3.7 2 4.5 2H11"/></svg>'
                 "</button>"
             )
-        # Runtime-match badge for baseline python tag
-        if (
-            label == "Baseline Python tag"
-            and isinstance(value, str)
-            and runtime_python_tag
-        ):
-            text = _escape_html(value)
-            if value.strip() == runtime_python_tag:
-                badge = _prov_badge(None, "matches runtime", "green")
-            else:
-                badge = _prov_badge(None, f"runtime {runtime_python_tag}", "amber")
-            return f"{text} {badge}"
+        # Rows whose cell a fact owner already decided, rendered as decided.
+        owned = _owned_cells.get(label, "")
+        if owned:
+            return owned
         return _escape_html(_meta_display(value))
 
     _SECTION_ICONS: dict[str, str] = {

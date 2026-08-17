@@ -14,8 +14,10 @@ from typing import Any, cast
 import pytest
 
 import codeclone.report.html.assemble as assemble_mod
+import codeclone.report.html.sections._meta as meta_section
 import codeclone.report.html.sections._suggestions as suggestions_section
 import codeclone.ui_messages as ui
+from codeclone.api.comparison import foreign_interpreter_provenance
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff, ReportLocation, Suggestion
@@ -927,6 +929,126 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
     assert f'<span class="prov-badge-val">runtime {runtime_tag}</span>' in meta_html
     assert '<span class="prov-badge-val">verified</span>' in meta_html
     assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html
+
+
+def _meta_panel_with_tags(baseline_tag: object, runtime_tag: object) -> str:
+    """The provenance panel for one pair of interpreter tags, nothing else set."""
+
+    return render_meta_panel(
+        cast(
+            Any,
+            SimpleNamespace(
+                meta={"python_tag": runtime_tag},
+                baseline_meta={"python_tag": baseline_tag},
+                cache_meta={},
+                metrics_baseline_meta={},
+                runtime_meta={},
+                integrity_map={},
+                report_schema_version=REPORT_SCHEMA_VERSION,
+                report_generated_at="2026-04-15T12:00:00Z",
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("baseline_tag", "runtime_tag"),
+    [
+        ("cp313 ", "cp313"),
+        (" cp313", "cp313"),
+        ("cp313", "cp313 "),
+        ("cp313", "cp313"),
+        ("cp310", "cp313"),
+    ],
+)
+def test_meta_panel_publishes_the_interpreter_owner_verdict_not_its_own(
+    baseline_tag: str,
+    runtime_tag: str,
+) -> None:
+    """The panel may not decide whether two interpreter tags name one runtime.
+
+    ``api.comparison.foreign_interpreter_provenance`` is the sole owner of that
+    difference (`G1`, `G2`, `P3`); the CLI and MCP already consume it. This
+    panel used to compare ``value.strip()`` against a pre-stripped runtime tag,
+    so a baseline tag differing from the runtime tag only in surrounding
+    whitespace was published as "matches runtime" while the owner called the
+    same artifact foreign. The owner is the oracle here precisely because the
+    defect was a second opinion about one fact.
+    """
+
+    foreign = foreign_interpreter_provenance(
+        baseline_python_tag=baseline_tag,
+        runtime_python_tag=runtime_tag,
+    )
+    meta_html = _meta_panel_with_tags(baseline_tag, runtime_tag)
+
+    if foreign is None:
+        assert '<span class="prov-badge-val">matches runtime</span>' in meta_html
+    else:
+        assert f'<span class="prov-badge-val">runtime {runtime_tag}</span>' in meta_html
+        assert '<span class="prov-badge-val">matches runtime</span>' not in meta_html
+
+
+def test_meta_panel_never_calls_two_different_interpreters_a_match() -> None:
+    """The opposite boundary: a match declared where the owner sees none.
+
+    Kept apart from the whitespace case above so the two errors cannot share a
+    witness: this one is a green "matches runtime" on tags that are not the
+    same string by any reading, which tells an operator the reference was taken
+    here when it was taken elsewhere.
+    """
+
+    meta_html = _meta_panel_with_tags("cp310", "cp313")
+
+    assert '<span class="prov-badge-val">matches runtime</span>' not in meta_html
+    assert '<span class="prov-badge-val">runtime cp313</span>' in meta_html
+    assert 'class="prov-badge prov-badge--amber prov-badge--inline"' in meta_html
+
+
+@pytest.mark.parametrize(
+    ("baseline_tag", "runtime_tag"),
+    [
+        ("cp313", "   "),
+        ("   ", "cp313"),
+        ("cp313", None),
+    ],
+)
+def test_meta_panel_says_nothing_when_a_tag_is_not_on_record(
+    baseline_tag: object,
+    runtime_tag: object,
+) -> None:
+    """A blank tag is a third state, and it is not "matches runtime" (`G4`).
+
+    The owner needs two tags to compare; it reads a whitespace-only string as a
+    tag on record and calls it foreign, which is why MCP guards the same
+    precondition before asking. The panel does the same and stays silent, so
+    absence is never rendered as sameness. What it must never do is what the
+    old block did on a tag that *is* on record: strip it and answer for itself.
+    """
+
+    meta_html = _meta_panel_with_tags(baseline_tag, runtime_tag)
+
+    assert '<span class="prov-badge-val">matches runtime</span>' not in meta_html
+    assert 'prov-badge-val">runtime ' not in meta_html
+
+
+def test_interpreter_badge_survives_renaming_the_row_it_labels() -> None:
+    """The badge is routed by row identity, never by the text on screen.
+
+    The panel used to branch on ``label == "Baseline Python tag"``, so renaming
+    the row would have dropped the provenance badge with no test red anywhere:
+    the dispatch key was a human signature. Renaming the displayed text is the
+    distinguishing input for that defect.
+    """
+
+    renamed = "Interpreter of record"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(meta_section, "_BASELINE_PYTHON_TAG_LABEL", renamed)
+        meta_html = _meta_panel_with_tags("cp310", "cp313")
+
+    assert renamed in meta_html
+    assert "Baseline Python tag" not in meta_html
+    assert '<span class="prov-badge-val">runtime cp313</span>' in meta_html
 
 
 def test_badge_vocabulary_helpers_cover_typed_cell_branches() -> None:

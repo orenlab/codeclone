@@ -207,6 +207,17 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **The HTML provenance panel reads the interpreter-provenance owner instead of deciding again.** The panel rendered a
+  green "matches runtime" badge beside the baseline's Python tag by comparing that tag — stripped — against a stripped
+  runtime tag of its own. `api.comparison.foreign_interpreter_provenance` already owns that difference and is what the
+  CLI note and the MCP run summary publish, and it does not strip: on a baseline tag differing from the runtime tag only
+  in surrounding whitespace the panel told the operator the reference was taken here while the owner called the same
+  artifact foreign. Measured across eleven tag pairs, the panel and the owner disagreed on nine; the three
+  whitespace-bearing cases are now the owner's answer, and the panel and the MCP surface agree on all eleven. The badge
+  itself is unchanged — same wording, same colours, same three states, with silence still meaning "no two tags on
+  record" rather than "same". Separately, the badge was dispatched on the row's displayed label text, so renaming the
+  row would have removed it with nothing red; it is now routed by row identity.
+
 - **An unreadable baseline lane no longer publishes a health comparison that never ran.** Health is derived from seven
   lanes, and the report keyed its `baseline_diff_available` on `risk_observations` alone. When any of the other six was
   opaque — authentic bytes recorded under a payload schema this release no longer parses — the reader turned the

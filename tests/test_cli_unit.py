@@ -270,6 +270,53 @@ def test_baseline_state_recovery_and_invalid_scope_are_typed(
     assert "baseline_scope_id" in "\n".join(printer.lines)
 
 
+def test_cli_names_the_interpreter_a_usable_baseline_came_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A baseline taken elsewhere is reported as origin, on a run that proceeds.
+
+    The tag stopped gating comparability once its payloads were measured
+    identical across CPython 3.10-3.14, but the operator is still entitled to
+    know the reference was produced somewhere else. Half of that change was
+    pinned on the MCP surface; this is the console half, which had no test at
+    all until now.
+    """
+
+    monkeypatch.setattr(cli_baselines_mod, "current_python_tag", lambda: "cp313")
+    printer = _RecordingPrinter()
+
+    cli_baselines_mod._print_foreign_interpreter_note(
+        cast(Any, SimpleNamespace(python_tag="cp310")),
+        console=printer,
+    )
+
+    printed = "\n".join(printer.lines)
+    assert "cp310" in printed
+    assert "cp313" in printed
+
+
+def test_cli_stays_silent_when_the_baseline_is_from_this_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The opposite boundary: no note when there is no difference to report.
+
+    Silence here is a decision, not an omission. The note is printed on every
+    healthy baseline-aware run, so a version that spoke whenever a tag existed
+    would put an origin remark on runs whose origin is this very interpreter,
+    and operators would learn to skip the line that matters.
+    """
+
+    monkeypatch.setattr(cli_baselines_mod, "current_python_tag", lambda: "cp313")
+    printer = _RecordingPrinter()
+
+    cli_baselines_mod._print_foreign_interpreter_note(
+        cast(Any, SimpleNamespace(python_tag="cp313")),
+        console=printer,
+    )
+
+    assert printer.lines == []
+
+
 @pytest.mark.parametrize("console_kind", ["rich", "plain"])
 def test_missing_scope_id_error_keeps_config_table_name(
     tmp_path: Path,
