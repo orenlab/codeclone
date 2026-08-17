@@ -45,12 +45,17 @@ from codeclone.baseline.container_digest import (
     compute_lane_digest,
     compute_root_digest,
 )
+from codeclone.baseline.lanes import lane_payload_is_opaque
+from codeclone.baseline.metrics_baseline import _lane_payload, _snapshot
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     BaselineContainerV3,
     BaselineLaneIndex,
+    CloneObservationPayload,
     ContainerReadSuccess,
+    ObservationLaneName,
 )
+from codeclone.report.gates.evaluator import HEALTH_INPUT_LANES
 
 _SCOPE_ID = "3f2b8c1e-7a41-4d90-9c62-5b0e8a7d4f13"
 #: A different input universe: the half of context compatibility that stays a
@@ -138,26 +143,34 @@ def _rewrite_container(
     baseline_path.write_bytes(canonical_container_bytes(changed) + b"\n")
 
 
-def downgrade_api_surface_lane(baseline_path: Path) -> None:
-    """Move only the api_surface lane payload schema 3 -> 2, re-authenticating.
+def downgrade_lane_payload_schema(
+    baseline_path: Path,
+    *,
+    lane_name: ObservationLaneName,
+    payload_schema: str,
+) -> None:
+    """Move one lane's recorded payload schema, re-authenticating the container.
 
-    The container stays root-authentic; exactly one lane becomes semantically
-    outdated against the current runtime contract.
+    Generalised from the api_surface case below so that a lane feeding *health*
+    can be made opaque by the same technique. Only the schema label moves: the
+    payload bytes and the observation digest stay exactly as the publisher wrote
+    them, so the reader keeps the bytes authenticated and reports the lane
+    opaque rather than failing integrity (`B5`, `B6`).
     """
 
     def _mutate(container: BaselineContainerV3) -> BaselineContainerV3:
-        assert container.lanes["api_surface"].descriptor.payload_schema == "3"
+        assert container.lanes[lane_name].descriptor.payload_schema != payload_schema
         descriptor = replace(
-            container.lanes["api_surface"].descriptor,
-            payload_schema="2",
+            container.lanes[lane_name].descriptor,
+            payload_schema=payload_schema,
         )
-        lane = replace(container.lanes["api_surface"], descriptor=descriptor)
+        lane = replace(container.lanes[lane_name], descriptor=descriptor)
         lane = replace(lane, digest=compute_lane_digest(lane))
         changed = replace(
             container,
             lanes=BaselineLaneIndex(
                 rows=tuple(
-                    (key, lane if key == "api_surface" else existing)
+                    (key, lane if key == lane_name else existing)
                     for key, existing in container.lanes.rows
                 )
             ),
@@ -167,13 +180,27 @@ def downgrade_api_surface_lane(baseline_path: Path) -> None:
             observation_contract=replace(
                 changed.observation_contract,
                 descriptors=tuple(
-                    descriptor if item.name == "api_surface" else item
+                    descriptor if item.name == lane_name else item
                     for item in changed.observation_contract.descriptors
                 ),
             ),
         )
 
     _rewrite_container(baseline_path, _mutate)
+
+
+def downgrade_api_surface_lane(baseline_path: Path) -> None:
+    """Move only the api_surface lane payload schema 3 -> 2, re-authenticating.
+
+    The container stays root-authentic; exactly one lane becomes semantically
+    outdated against the current runtime contract.
+    """
+
+    downgrade_lane_payload_schema(
+        baseline_path,
+        lane_name="api_surface",
+        payload_schema="2",
+    )
 
 
 def retag_container_python(baseline_path: Path, *, python_tag: str) -> None:
@@ -510,6 +537,205 @@ def degraded_without_clone(baseline_without_clone: Path, tmp_path: Path) -> Path
     target.write_bytes(baseline_without_clone.read_bytes())
     downgrade_api_surface_lane(target)
     return target
+
+
+def _degraded_copy(
+    source: Path,
+    target: Path,
+    *,
+    lane_name: ObservationLaneName,
+) -> Path:
+    target.write_bytes(source.read_bytes())
+    downgrade_lane_payload_schema(target, lane_name=lane_name, payload_schema="0")
+    return target
+
+
+@pytest.fixture
+def opaque_module_identity_baseline(
+    baseline_without_clone: Path, tmp_path: Path
+) -> Path:
+    """The intact baseline with only ``module_identity`` made stale.
+
+    ``module_identity`` is the lane the baseline's health projection reads its
+    file counts from, so this is the shape in which the *producer* of the health
+    number has no population to compute it over.
+    """
+
+    return _degraded_copy(
+        baseline_without_clone,
+        tmp_path / "opaque-module-identity.baseline.json",
+        lane_name="module_identity",
+    )
+
+
+def _health_summary(document: Mapping[str, object]) -> Mapping[str, object]:
+    metrics = document["metrics"]
+    assert isinstance(metrics, Mapping)
+    summary = metrics["summary"]
+    assert isinstance(summary, Mapping)
+    health = summary["health"]
+    assert isinstance(health, Mapping)
+    return health
+
+
+def test_a_transparent_container_keeps_the_real_health_comparison(
+    settlement_tree: Path,
+    baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: no lane is opaque, so the comparison must run.
+
+    Refusing health whenever *any* lane were untrusted, or whenever the tree
+    differs from the baseline, would satisfy every assertion in the two tests
+    below while destroying the product. This pins the healthy run: the tree
+    carries a clone the baseline does not, so a real comparison exists and its
+    number must be published as available.
+    """
+
+    document = cli_document(
+        settlement_tree,
+        baseline=baseline_without_clone,
+        out=tmp_path / "transparent.json",
+    )
+    health = _health_summary(document)
+
+    assert health["baseline_diff_available"] is True
+    # A real difference, not merely an available flag over a zero.
+    assert health["delta"] != 0
+
+
+@pytest.mark.parametrize(
+    "lane_name",
+    ["module_identity", "dead_code"],
+)
+def test_an_opaque_health_input_lane_withholds_the_health_comparison(
+    settlement_tree: Path,
+    baseline_without_clone: Path,
+    tmp_path: Path,
+    lane_name: ObservationLaneName,
+) -> None:
+    """Health is fed by seven lanes, so one lane cannot answer for the set.
+
+    Two lanes, because the same opacity moves the published number in opposite
+    directions and a single case would leave half the class unproven.
+    ``module_identity`` is where the stored health reads its population, so the
+    baseline half of the subtraction collapses to nothing and the run reports a
+    large improvement. ``dead_code`` leaves the population intact and empties
+    one dimension, so the baseline reads *better* than it was and the run
+    reports a regression no code caused. Publishing either announces a
+    comparison that never ran (`B8`, `G3`): the report already states which
+    lanes health consumes, in ``contracts.evaluation.health_input_lanes``, and
+    then contradicted itself by keying availability on ``risk_observations``
+    alone.
+    """
+
+    degraded = _degraded_copy(
+        baseline_without_clone,
+        tmp_path / f"opaque-{lane_name}.baseline.json",
+        lane_name=lane_name,
+    )
+    health = _health_summary(
+        cli_document(
+            settlement_tree,
+            baseline=degraded,
+            out=tmp_path / f"opaque-{lane_name}.json",
+        )
+    )
+
+    assert health["baseline_diff_available"] is False, lane_name
+    assert health["delta"] == 0, lane_name
+
+
+def test_an_empty_health_lane_is_not_an_opaque_one(
+    baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """Zero observations and unreadable observations are different facts (`G4`).
+
+    The baseline is published from the tree *before* the routine was copied, so
+    its ``clones.functions`` lane decodes correctly and legitimately carries zero
+    clone groups -- a real, best-possible clones dimension inside the stored
+    health number. Making that same lane opaque leaves the reader holding zero
+    groups as well, and it must not reach the same conclusion.
+
+    This is the row that catches the tempting cheap fix: refusing when the
+    decoded rows are empty, rather than when the lane was never decoded, passes
+    every other test in this module and silently withholds health from every
+    clean repository.
+    """
+
+    intact = read_container_v3(baseline_without_clone, limit_bytes=_LIMIT_BYTES)
+    assert isinstance(intact, ContainerReadSuccess)
+    payload = _lane_payload(intact.container, "clones.functions")
+    assert isinstance(payload, CloneObservationPayload)
+    assert payload.items == ()
+    assert _snapshot(intact.container).health_score is not None
+
+    target = _degraded_copy(
+        baseline_without_clone,
+        tmp_path / "opaque-clones.baseline.json",
+        lane_name="clones.functions",
+    )
+    opaque = read_container_v3(target, limit_bytes=_LIMIT_BYTES)
+    assert isinstance(opaque, ContainerReadSuccess)
+    assert lane_payload_is_opaque(opaque.container.lanes["clones.functions"])
+    assert _snapshot(opaque.container).health_score is None
+
+
+def test_the_baseline_snapshot_carries_the_health_refusal(
+    opaque_module_identity_baseline: Path,
+) -> None:
+    """The producer seam, pinned where the refusal is actually dropped.
+
+    ``compute_health`` already withholds the number honestly and says which
+    absence it was in ``population``. The snapshot then read ``health.total``
+    through a field typed ``int``, which cannot say "not measured", so the
+    refusal arrived downstream as a measured zero and an F grade -- and every
+    consumer of ``MetricsDiff.health_delta`` that does not consult lane trust
+    (the gate summary, the MCP run summary, the review receipt) saw a fabricated
+    improvement. Pinning only the report would leave that half live.
+    """
+
+    result = read_container_v3(
+        opaque_module_identity_baseline, limit_bytes=_LIMIT_BYTES
+    )
+    assert isinstance(result, ContainerReadSuccess)
+    container = result.container
+    assert lane_payload_is_opaque(container.lanes["module_identity"])
+
+    snapshot = _snapshot(container)
+
+    assert snapshot.health_score is None
+    assert snapshot.health_grade is None
+
+
+def test_every_health_input_lane_withholds_the_snapshot_health(
+    baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """Reachability across the whole declared manifest, not one lucky lane.
+
+    ``HEALTH_INPUT_LANES`` is the versioned statement of what health consumes.
+    Each of its members is made opaque in turn and must reach the refusal; a
+    guard that only fires for ``module_identity`` would be theater for the other
+    six (`H2`). The intact container is checked in the same test so the loop
+    cannot pass by refusing unconditionally.
+    """
+
+    intact = read_container_v3(baseline_without_clone, limit_bytes=_LIMIT_BYTES)
+    assert isinstance(intact, ContainerReadSuccess)
+    assert _snapshot(intact.container).health_score is not None
+
+    for index, lane_name in enumerate(HEALTH_INPUT_LANES):
+        target = _degraded_copy(
+            baseline_without_clone,
+            tmp_path / f"opaque-{index}.baseline.json",
+            lane_name=lane_name,
+        )
+        result = read_container_v3(target, limit_bytes=_LIMIT_BYTES)
+        assert isinstance(result, ContainerReadSuccess)
+        assert lane_payload_is_opaque(result.container.lanes[lane_name])
+        assert _snapshot(result.container).health_score is None, lane_name
 
 
 @pytest.fixture

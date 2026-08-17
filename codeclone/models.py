@@ -2737,8 +2737,14 @@ class MetricsSnapshot:
     dependency_cycles: tuple[DependencyCycleFact, ...]
     dependency_max_depth: int
     dead_code_items: tuple[str, ...]
-    health_score: int
-    health_grade: Literal["A", "B", "C", "D", "F"]
+    #: ``None`` means this snapshot carries no health number, and carrying that
+    #: is the whole reason the field is optional. An ``int`` cannot say "not
+    #: measured", so a refusal by ``compute_health`` — or a lane health reads
+    #: that arrived authenticated but unreadable — used to reach every consumer
+    #: as a measured zero, and ``health_delta = current - 0`` then published a
+    #: large false improvement as though a comparison had run (`G4`, `B8`).
+    health_score: int | None
+    health_grade: Literal["A", "B", "C", "D", "F"] | None
     typing_param_permille: int = 0
     typing_return_permille: int = 0
     docstring_permille: int = 0

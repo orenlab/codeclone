@@ -207,6 +207,20 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **An unreadable baseline lane no longer publishes a health comparison that never ran.** Health is derived from seven
+  lanes, and the report keyed its `baseline_diff_available` on `risk_observations` alone. When any of the other six was
+  opaque — authentic bytes recorded under a payload schema this release no longer parses — the reader turned the
+  unreadable lane into *zero observations*, the baseline's stored health was recomputed over evidence nobody had, and
+  the difference against it was published as an available comparison. Measured end to end: with `module_identity`
+  opaque, a run that had genuinely improved by **2** points reported **+96**, because the baseline half of the
+  subtraction had collapsed to `0`; with `dead_code` opaque, the same run reported a **−4** regression that no code
+  caused. Both are now reported as `baseline_diff_available: false` with a `0` delta — the shape the other metric
+  families already use for a comparison that did not run. The refusal also travels through `MetricsSnapshot`, whose
+  health fields became optional, so the gate summary, the MCP run summary, the review receipt and Claim Guard — none of
+  which consult lane trust — stop seeing a fabricated improvement. Lane authenticity is unchanged: an opaque lane is
+  still authenticated by its own digest, and only what is *reported about* it moved. No weight, band, reference or
+  threshold moved.
+
 - **Suppressed clone groups are read through one owner, so the report stops stating two numbers for one fact.** The
   canonical document nests `findings.groups.clones.suppressed` one level deeper than its sibling lists, and three
   consumers each re-derived that shape from the raw document with a different idea of it. The review receipt spelled the

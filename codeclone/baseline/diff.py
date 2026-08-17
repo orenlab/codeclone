@@ -101,6 +101,22 @@ def _diff_cycles(
     )
 
 
+def _health_delta(*, baseline: int | None, current: int | None) -> int:
+    """Subtract two health scores, or report no movement when one is absent.
+
+    A missing score on either side means no health comparison happened, so
+    there is no difference to state. Zero is what this repository already
+    publishes for a comparison that did not run -- the report writes it beside
+    ``baseline_diff_available: false``, which is the fact that keeps it apart
+    from "compared, unchanged" (`RP2`, `G4`). Subtracting against an absent
+    score instead would manufacture the whole of the present score as movement.
+    """
+
+    if baseline is None or current is None:
+        return 0
+    return current - baseline
+
+
 def diff_metrics(
     *,
     baseline_snapshot: MetricsSnapshot | None,
@@ -164,7 +180,10 @@ def diff_metrics(
         new_deferred_cycles=cycle_diff.new_deferred_cycles,
         cycle_kind_changes=cycle_diff.cycle_kind_changes,
         new_dead_code=new_dead_code,
-        health_delta=current_snapshot.health_score - snapshot.health_score,
+        health_delta=_health_delta(
+            baseline=snapshot.health_score,
+            current=current_snapshot.health_score,
+        ),
         typing_param_permille_delta=(
             current_snapshot.typing_param_permille - snapshot.typing_param_permille
         ),

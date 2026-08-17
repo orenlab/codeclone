@@ -15,7 +15,7 @@ from ..baseline.trust import current_python_tag
 from ..contracts import DEFAULT_COVERAGE_MIN
 from ..models import BaselineContainerV3, MetricsDiff, TrustVector
 from ..observability import span
-from ..report.gates.evaluator import GateResult, GateState
+from ..report.gates.evaluator import HEALTH_INPUT_LANES, GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
 from ..report.gates.evaluator import (
     active_gate_lane_requirements as _active_gate_lane_requirements,
@@ -206,23 +206,31 @@ def _metrics_for_report(
         and baseline_trust.root_verified
         and item.status == "trusted"
     }
-    comparison_rows = (
+    # Each row names *every* lane its comparison consumes, not a representative
+    # one. Health is why: it is derived from seven lanes, and keying it on
+    # ``risk_observations`` alone published a delta as available while one of
+    # the other six was opaque -- the baseline half of that subtraction had
+    # never been recovered. The report already states the seven in
+    # ``contracts.evaluation.health_input_lanes`` and the gate matrix already
+    # requires all of them, so this reads that same manifest instead of a
+    # third opinion about what health consumes (`G2`, `G3`, `B8`).
+    comparison_rows: tuple[tuple[str, tuple[str, ...], str, int], ...] = (
         (
             (
                 "complexity",
-                "risk_observations",
+                ("risk_observations",),
                 "new_high_risk",
                 len(validated_metrics_diff.new_high_risk_functions),
             ),
             (
                 "coupling",
-                "coupling_cohesion_observations",
+                ("coupling_cohesion_observations",),
                 "new_high_risk",
                 len(validated_metrics_diff.new_high_coupling_classes),
             ),
             (
                 "dependencies",
-                "dependencies",
+                ("dependencies",),
                 "new_cycles",
                 len(validated_metrics_diff.new_cycles),
             ),
@@ -231,25 +239,25 @@ def _metrics_for_report(
             # new cycles can actually break an import.
             (
                 "dependencies",
-                "dependencies",
+                ("dependencies",),
                 "new_import_cycles",
                 len(validated_metrics_diff.new_import_cycles),
             ),
             (
                 "dependencies",
-                "dependencies",
+                ("dependencies",),
                 "new_deferred_cycles",
                 len(validated_metrics_diff.new_deferred_cycles),
             ),
             (
                 "dead_code",
-                "dead_code",
+                ("dead_code",),
                 "new_items",
                 len(validated_metrics_diff.new_dead_code),
             ),
             (
                 "health",
-                "risk_observations",
+                HEALTH_INPUT_LANES,
                 "delta",
                 validated_metrics_diff.health_delta,
             ),
@@ -257,11 +265,12 @@ def _metrics_for_report(
         if validated_metrics_diff is not None
         else ()
     )
-    for family_name, lane, value_key, value in comparison_rows:
+    for family_name, lanes, value_key, value in comparison_rows:
         family = dict(_as_mapping(enriched.get(family_name)))
         summary = dict(_as_mapping(family.get("summary")))
-        summary["baseline_diff_available"] = lane in trusted_lanes
-        summary[value_key] = value if lane in trusted_lanes else 0
+        available = trusted_lanes.issuperset(lanes)
+        summary["baseline_diff_available"] = available
+        summary[value_key] = value if available else 0
         family["summary"] = summary
         enriched[family_name] = family
     return enriched

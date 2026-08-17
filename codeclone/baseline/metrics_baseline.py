@@ -59,6 +59,7 @@ from ..models import (
     cycle_kind_counts,
 )
 from ..observations.projection import glued_observation_identity
+from ..report.gates.evaluator import HEALTH_INPUT_LANES
 from ._metrics_baseline_contract import (
     MAX_METRICS_BASELINE_SIZE_BYTES,
     MetricsBaselineStatus,
@@ -78,6 +79,7 @@ from .lanes import (
     decode_dependency_lane,
     decode_integer_lane,
     decode_module_identity_lane,
+    lane_payload_is_opaque,
 )
 from .trust import current_python_tag
 
@@ -348,6 +350,33 @@ def _entity_identity_rows(
     )
 
 
+def _health_evidence_is_readable(container: BaselineContainerV3) -> bool:
+    """Whether every lane the stored health number is derived from decoded.
+
+    Reads ``HEALTH_INPUT_LANES`` -- the versioned manifest this repository
+    already publishes as ``contracts.evaluation.health_input_lanes`` and that
+    the gate-to-lane matrix already keys on -- instead of restating the set
+    here, so the report's answer and the gate's answer cannot become two
+    semantics for one fact (`G2`).
+
+    Without this, the ``isinstance`` guards in ``_snapshot`` below turn an
+    opaque lane into zero observations. Zero observations is a different fact,
+    and a flattering one: the lane's dimension then scores as clean, the stored
+    health reads better or worse than it was, and the delta measured against it
+    is fabricated. An opaque lane is authentic and unreadable, never empty
+    (`G4`, `RP2`, `B8`).
+    """
+
+    for name in HEALTH_INPUT_LANES:
+        try:
+            lane = container.lanes[name]
+        except KeyError:
+            return False
+        if lane_payload_is_opaque(lane):
+            return False
+    return True
+
+
 def _average(values: tuple[int, ...], population: int) -> float:
     """Average over the observed population: absence is zero, so sums are complete."""
 
@@ -512,6 +541,22 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
             dead_code_items=len(dead),
         )
     )
+    # The snapshot must carry the absence rather than a plausible integer:
+    # ``health_delta`` is measured against this field, and a zero here becomes a
+    # comparison the run never made (`B8`, `G4`).
+    #
+    # Only the lane predicate is consulted, deliberately. Adding
+    # ``population_carries_score(health.population)`` beside it was tried and
+    # removed: no admissible container can reach it. Both constructions were
+    # attempted against ``read_container_v3`` -- an empty identity table, and a
+    # registry whose every row is ``known_internal_not_analyzed`` -- and both are
+    # refused upstream as ``inconsistent_container`` ("analysis scope digest does
+    # not match module_identity"). ``files_found`` and ``files_analyzed_or_cached``
+    # are also the same counter here, so the population of a *readable* container
+    # is always ``complete_nonempty``. A guard nothing can be shown to reach is
+    # theater (`H2`); the reachable cause of a scoreless baseline health is the
+    # opaque lane, and that is what this reads.
+    health_measured = _health_evidence_is_readable(container)
     return MetricsSnapshot(
         max_complexity=max(complexities, default=0),
         high_risk_functions=high_risk,
@@ -522,8 +567,8 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
         dependency_cycles=cycle_facts,
         dependency_max_depth=graph_depth,
         dead_code_items=tuple(sorted(dead)),
-        health_score=health.total,
-        health_grade=health.grade,
+        health_score=health.total if health_measured else None,
+        health_grade=health.grade if health_measured else None,
         typing_param_permille=_permille(typing_params),
         typing_return_permille=_permille(typing_returns),
         docstring_permille=_permille(docstrings),
