@@ -7,14 +7,18 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 from pathlib import Path
 
+from codeclone.api import config_delivery as delivery
+from codeclone.config import resolver as config_resolver
 from codeclone.contracts import REPORT_RUN_IDENTITY_TIER
 from tests._import_graph import (
     _iter_import_edges,
     _iter_local_imports,
     _module_name_from_path,
+    _resolve_import,
 )
 
 _BOUNDARY_ALLOWLIST_PATH = Path(__file__).with_name(
@@ -838,3 +842,287 @@ def test_the_run_identity_tier_is_named_by_the_contract_in_every_reader() -> Non
     )
     assert "codeclone/utils/run_identity.py" in readers
     assert "codeclone/surfaces/mcp/_session_helpers.py" in readers
+
+
+# --------------------------------------------------------------------------------------
+# The configuration-delivery ratchet
+#
+# ``api/config_delivery.py`` declares which surfaces deliver repository
+# configuration into an analysis run and how. A declaration nothing checks is a
+# claim about coverage, not coverage: the door shipped with a surface that was
+# declared, named in the door's own docstring, and wired past it on both edges,
+# and nothing went red because no withholding existed for it yet. These tests
+# make non-participation impossible to reach silently, in both directions.
+#
+# The predicate is computed, never listed. A module is a *delivery site* exactly
+# when it reaches one of the resolver's entry points that write repository
+# configuration onto an ``args`` namespace. That is what separates delivery from
+# the many modules that merely read ``pyproject.toml`` for their own purposes --
+# analytics, memory, the pyproject writer, controller insights, the audit
+# runtime and setup discovery all load configuration and none of them deliver
+# it into a run.
+# --------------------------------------------------------------------------------------
+
+_CONFIG_DELIVERY_DOOR_MODULE = "codeclone.api.config_delivery"
+_CANONICAL_CONFIG_PACKAGE = "codeclone.config"
+
+#: What a surface routed through the door must spell to actually use it: read
+#: through the door, project through its own declaration, apply through the
+#: door. Dropping the projection is the failure that leaves a declared
+#: withholding inert while every other edge still looks wired.
+_DOOR_EDGES = frozenset(
+    {
+        "load_repository_config",
+        "delivered_config_values",
+        "apply_repository_config",
+    }
+)
+
+
+def _resolver_delivery_entry_points() -> frozenset[str]:
+    """Resolver entry points that write repository configuration onto a namespace.
+
+    Derived from the producer's published signatures, never restated. Listing
+    the names here would move the magic constant into the guard and leave it
+    green after the resolver grew a fourth way in; taking them from
+    ``__all__`` plus the ``args`` parameter re-derives the rule every run.
+    """
+
+    return frozenset(
+        name
+        for name in config_resolver.__all__
+        if "args" in inspect.signature(getattr(config_resolver, name)).parameters
+    )
+
+
+def _imported_symbols(path: Path) -> frozenset[str]:
+    """Every symbol a module reaches from outside itself, however it spelled it.
+
+    Text search is blind here by construction: ``workflow`` binds the resolver
+    through an attribute assignment, ``_session_state_mixin`` imports the door
+    through a sibling's re-export, and ``session_stats`` imports inside function
+    bodies. Import aliases, attribute access and re-exported names all reach the
+    same symbol, so all three shapes are collected.
+
+    Bare ``Name`` nodes are deliberately **not** collected. Reaching a symbol
+    defined elsewhere requires an import or an attribute, so a bare name is a
+    local binding -- and ``memory.application`` binds a local ``resolve_config``
+    for an unrelated function, which a name-only scan reports as a delivery site
+    that does not exist.
+    """
+
+    tree = ast.parse(path.read_text("utf-8"))
+    symbols: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                symbols.add(alias.name.rsplit(".", 1)[-1])
+                if alias.asname:
+                    symbols.add(alias.asname)
+        elif isinstance(node, ast.Attribute):
+            symbols.add(node.attr)
+    return frozenset(symbols)
+
+
+def _modules_reaching_the_resolver(root: Path) -> frozenset[str]:
+    """Every production module that delivers configuration onto a namespace.
+
+    The canonical ``config`` package is excluded whole, not just the resolver
+    module: it is the producer. Its own ``__init__`` re-exports ``resolve_config``
+    as package API, which is publication, not delivery, and a surface cannot hide
+    inside it -- r2 cannot import a surface at all.
+    """
+
+    entry_points = _resolver_delivery_entry_points()
+    return frozenset(
+        module_name
+        for module_name, path in _iter_codeclone_modules(root)
+        if not module_name.startswith(f"{_CANONICAL_CONFIG_PACKAGE}.")
+        and _imported_symbols(path) & entry_points
+    )
+
+
+def _module_path(root: Path, module_name: str) -> Path:
+    return root / Path(*module_name.split(".")).with_suffix(".py")
+
+
+def test_delivery_sites_are_exactly_the_door_and_its_declared_exemptions() -> None:
+    """The ratchet: a delivery surface may not reach the resolver past the door.
+
+    Red in both directions on purpose. A module that reaches the resolver
+    without being declared is a surface delivering configuration nobody
+    governs; a declared resolver-direct module that stops reaching it is a
+    declaration that has outlived its subject. Both are lies about coverage,
+    so both fail the same equality.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    entry_points = _resolver_delivery_entry_points()
+
+    # A detector that matches nothing would pass this over an empty scan.
+    assert "apply_pyproject_config_overrides" in entry_points
+    assert "collect_explicit_cli_dests" not in entry_points
+
+    reaching = _modules_reaching_the_resolver(root)
+    declared = delivery.delivery_modules(delivery.DeliveryRoute.RESOLVER_DIRECT)
+    expected = declared | {_CONFIG_DELIVERY_DOOR_MODULE}
+
+    assert reaching == expected, (
+        "modules delivering repository configuration must be the door plus its "
+        f"declared resolver-direct surfaces: expected {sorted(expected)}, "
+        f"reached {sorted(reaching)}"
+    )
+
+
+def test_every_door_routed_surface_spells_all_three_door_edges() -> None:
+    """A surface declared to use the door must use it to read, project and apply.
+
+    Reaching the door for one edge and the canonical owner for another is how
+    a declaration stays green while its withholdings never apply: the door's
+    projection is the only place a surface's declared withholding is enforced,
+    so a site that skips it delivers everything and still looks wired.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    entry_points = _resolver_delivery_entry_points()
+    routed = delivery.delivery_modules(delivery.DeliveryRoute.THROUGH_THE_DOOR)
+
+    assert routed, "no surface is declared to use the door"
+
+    missing: dict[str, list[str]] = {}
+    bypassing: dict[str, list[str]] = {}
+    for module_name in sorted(routed):
+        symbols = _imported_symbols(_module_path(root, module_name))
+        if absent := sorted(_DOOR_EDGES - symbols):
+            missing[module_name] = absent
+        if past := sorted(symbols & (entry_points | {"load_pyproject_config"})):
+            bypassing[module_name] = past
+
+    assert missing == {}, f"door-routed surfaces missing a door edge: {missing}"
+    assert bypassing == {}, (
+        f"door-routed surfaces reaching a canonical owner directly: {bypassing}"
+    )
+
+
+def _explicit_dests_arguments(path: Path, entry_points: frozenset[str]) -> list[str]:
+    """How each resolver call in ``path`` spells its ``explicit_cli_dests``."""
+
+    tree = ast.parse(path.read_text("utf-8"))
+    return [
+        _expression_name(keyword.value) or ast.dump(keyword.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _expression_name(node.func).split(".")[-1] in entry_points
+        for keyword in node.keywords
+        if keyword.arg == "explicit_cli_dests"
+    ]
+
+
+def test_a_resolver_direct_surface_passes_its_own_explicit_cli_dests() -> None:
+    """The exemption is a rule, so it has to be kept, not merely declared.
+
+    ``explicit_cli_dests`` is the entire reason the CLI does not use the door.
+    A resolver-direct surface that hands the resolver an empty set has taken
+    the exemption without the obligation, and repository configuration then
+    overwrites the flags the user typed -- the exact outcome the exemption
+    exists to prevent.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    entry_points = _resolver_delivery_entry_points()
+    empty = {"set", "frozenset"}
+
+    inert: dict[str, list[str]] = {}
+    for module_name in sorted(
+        delivery.delivery_modules(delivery.DeliveryRoute.RESOLVER_DIRECT)
+    ):
+        arguments = _explicit_dests_arguments(
+            _module_path(root, module_name), entry_points
+        )
+        assert arguments, f"{module_name} declares resolver_direct and calls nothing"
+        if supplied := [value for value in arguments if value in empty]:
+            inert[module_name] = supplied
+
+    assert inert == {}, (
+        "resolver-direct surfaces passing an empty explicit_cli_dests, which "
+        f"lets repository configuration beat a command-line flag: {inert}"
+    )
+
+
+def _called_symbols(path: Path) -> frozenset[str]:
+    """Every symbol a module actually calls.
+
+    Importing a name is not using it. ``_session_shared`` re-exports the whole
+    door for its siblings, so an import-level scan counts that re-export as a
+    consumer and a wrapper whose only real caller went back to the canonical
+    owner still looks wired -- the sibling doing the work while the mechanism
+    under test does nothing.
+    """
+
+    tree = ast.parse(path.read_text("utf-8"))
+    return frozenset(
+        _expression_name(node.func).split(".")[-1]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    )
+
+
+def _door_wrappers(module_name: str, path: Path) -> frozenset[str]:
+    """Door functions that call a canonical ``config`` owner on the way through.
+
+    These are the door's two-sided halves. A half whose production side is not
+    wired keeps working in tests against the door while production takes the
+    canonical owner directly, and the two paths then drift with nothing red.
+    """
+
+    tree = ast.parse(path.read_text("utf-8"))
+    canonical: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and _resolve_import(
+            module_name, node
+        ).startswith(_CANONICAL_CONFIG_PACKAGE):
+            canonical.update(alias.asname or alias.name for alias in node.names)
+
+    wrappers: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and _expression_name(inner.func).split(".")[-1] in canonical
+            ):
+                wrappers.add(node.name)
+    return frozenset(wrappers)
+
+
+def test_no_door_wrapper_lives_only_on_its_tests() -> None:
+    """Every half of the door has a production caller, or it is a second path.
+
+    ``load_repository_config`` was a pure pass-through to the canonical loader
+    with three test callers and no production caller, while production loaded
+    through the canonical owner directly. Behaviour identical today, so nothing
+    could see it -- and behaviour added to either side afterwards would have
+    reached only one of them.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    door = _module_path(root, _CONFIG_DELIVERY_DOOR_MODULE)
+    wrappers = _door_wrappers(_CONFIG_DELIVERY_DOOR_MODULE, door)
+
+    assert "apply_repository_config" in wrappers
+
+    orphans = sorted(
+        wrapper
+        for wrapper in wrappers
+        if not any(
+            module_name != _CONFIG_DELIVERY_DOOR_MODULE
+            and wrapper in _called_symbols(path)
+            for module_name, path in _iter_codeclone_modules(root)
+        )
+    )
+
+    assert orphans == [], (
+        "these door halves wrap a canonical config owner and have no production "
+        f"caller, so only tests take the door's path: {orphans}"
+    )

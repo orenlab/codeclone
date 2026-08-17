@@ -207,6 +207,16 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **The declared configuration-delivery contract is now enforced, and the surface it named but never wired goes through
+  it.** The contract listed four delivery surfaces, and the `codeclone memory init` analysis path was one of them — yet
+  that path read `pyproject.toml` and applied it through the canonical owners directly, bypassing its own declaration on
+  both edges. Nothing failed, because no key was withheld from that surface yet: the declaration decided nothing, so a
+  withholding added for it would simply not have applied. The memory-init path and the MCP loader now both go through
+  the door, and an architecture ratchet computes which modules deliver repository configuration into a run and fails
+  when that set and the declaration disagree in either direction — an undeclared delivery site and a declaration whose
+  surface stopped delivering are the same lie about coverage. The CLI keeps resolving directly, because it must pass the
+  flags the user actually typed; that exemption is now declared as a rule carrying its reason rather than left as an
+  absence. No analysis result changes: every surface delivers exactly what it delivered before.
 - **A baseline taken on another interpreter says so again, and the run summary publishes that as a fact.** Dropping the
   interpreter tag as a trust condition also dropped the only signal the VS Code extension used to decide whether to show
   the tags at all: it gated them on `compared_without_valid_baseline`, which is `false` for a trusted cross-interpreter

@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Literal
 
 from ... import __version__
+from ...api.config_delivery import (
+    DeliverySurface,
+    apply_repository_config,
+    delivered_config_values,
+    load_repository_config,
+)
 from ...api.report import (
     ReportArtifactFailure,
     ReportArtifactRef,
@@ -18,8 +24,6 @@ from ...api.report import (
 )
 from ...cache.store import Cache
 from ...config.argparse_builder import build_parser
-from ...config.pyproject_loader import load_pyproject_config
-from ...config.resolver import apply_pyproject_config_overrides
 from ...contracts import DEFAULT_JSON_REPORT_PATH
 from ...core.bootstrap import bootstrap
 from ...core.discovery import discover
@@ -104,11 +108,17 @@ def load_report_for_memory_init(
 def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
     ap = build_parser(__version__)
     args = ap.parse_args([str(root_path), "--quiet", "--no-progress"])
-    pyproject_config = load_pyproject_config(root_path)
-    apply_pyproject_config_overrides(
+    # This surface has no argv of its own, so it is a door surface: it declares
+    # CLI_MEMORY and honours whatever that declaration withholds. Reaching the
+    # loader and the resolver directly is what left the declaration inert --
+    # a withholding added for CLI_MEMORY would never have been applied.
+    pyproject_config = load_repository_config(root_path)
+    apply_repository_config(
         args=args,
-        config_values=pyproject_config,
-        explicit_cli_dests=set(),
+        config_values=delivered_config_values(
+            surface=DeliverySurface.CLI_MEMORY,
+            config_values=pyproject_config,
+        ),
         # Without the root the resolver cannot autodetect source_roots, so this
         # site mounted "." while the main CLI mounted "src" for the same
         # repository -- one repository, two module identities.

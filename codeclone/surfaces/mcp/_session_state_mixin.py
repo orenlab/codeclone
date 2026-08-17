@@ -79,7 +79,7 @@ from ._session_shared import (
     _json_text_payload,
     apply_repository_config,
     delivered_config_values,
-    load_pyproject_config,
+    load_repository_config,
     paginate,
 )
 from ._workspace_drift import compute_drift
@@ -329,7 +329,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             allow_external_artifacts=request.allow_external_artifacts,
         )
         try:
-            config_values = load_pyproject_config(root_path)
+            config_values = load_repository_config(root_path)
         except ConfigValidationError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         surface = (

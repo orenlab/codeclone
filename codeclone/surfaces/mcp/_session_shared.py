@@ -24,14 +24,12 @@ from ...api.config_delivery import (
     DeliverySurface,
     apply_repository_config,
     delivered_config_values,
+    load_repository_config,
 )
 from ...baseline import Baseline
 from ...cache.store import Cache
 from ...cache.versioning import CacheStatus
-from ...config.pyproject_loader import (
-    ConfigValidationError,
-    load_pyproject_config,
-)
+from ...config.pyproject_loader import ConfigValidationError
 from ...config.spec import (
     DEFAULT_BASELINE_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -1110,7 +1108,7 @@ __all__ = [
     "bootstrap",
     "delivered_config_values",
     "discover",
-    "load_pyproject_config",
+    "load_repository_config",
     "paginate",
     "process",
     "report",

@@ -4553,7 +4553,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
 
     monkeypatch.setattr(
         mcp_state_mod,
-        "load_pyproject_config",
+        "load_repository_config",
         lambda _root: {
             "min_loc": 12,
             "baseline": "conf-baseline.json",
@@ -4579,7 +4579,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
 
     monkeypatch.setattr(
         mcp_state_mod,
-        "load_pyproject_config",
+        "load_repository_config",
         lambda _root: (_ for _ in ()).throw(ConfigValidationError("bad config")),
     )
     with pytest.raises(MCPServiceContractError):
@@ -4605,7 +4605,7 @@ def test_mcp_service_build_args_loads_governance_config_without_pyproject_profil
     service = CodeCloneMCPService(history_limit=4)
     monkeypatch.setattr(
         mcp_state_mod,
-        "load_pyproject_config",
+        "load_repository_config",
         lambda _root: {
             "min_loc": 12,
             "golden_fixture_paths": ("tests/fixtures/golden_*",),
@@ -5007,7 +5007,7 @@ def test_mcp_service_build_args_defers_process_count_to_runtime(
 
     monkeypatch.setattr(
         mcp_state_mod,
-        "load_pyproject_config",
+        "load_repository_config",
         lambda _root: {"processes": 3},
     )
     args = service._build_args(
@@ -5044,7 +5044,7 @@ def test_mcp_service_caps_process_count_from_request_and_config(
 
     monkeypatch.setattr(
         mcp_state_mod,
-        "load_pyproject_config",
+        "load_repository_config",
         lambda _root: {"processes": 999},
     )
     args_from_config = service._build_args(

@@ -23,10 +23,13 @@ which edge broke rather than only that something did.
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from pathlib import Path
 
 import pytest
 
+import codeclone.surfaces.cli.workflow as cli_workflow
 from codeclone.api import config_delivery as delivery
 from codeclone.api.config_delivery import DeliveryMode, DeliverySurface
 from codeclone.surfaces.cli.memory_analysis import run_memory_analysis_report
@@ -127,21 +130,77 @@ def test_every_declaration_carries_a_non_empty_reason(surface: DeliverySurface) 
             {"withheld": (delivery.Withholding("min_loc", "irrelevant"),)},
             "deliver_only declares no withheld keys",
         ),
+        (
+            DeliveryMode.DELIVER_ALL_EXCEPT,
+            {"module": "   "},
+            "a delivery declares the module performing it",
+        ),
+        (
+            DeliveryMode.DELIVER_ALL_EXCEPT,
+            {"route": delivery.DeliveryRoute.RESOLVER_DIRECT},
+            "resolver_direct declares why it is not a hole",
+        ),
+        (
+            DeliveryMode.DELIVER_ALL_EXCEPT,
+            {"route_reason": "no route needs this"},
+            "through_the_door declares no route reason",
+        ),
     ],
 )
-def test_a_declaration_mixing_both_shapes_is_rejected(
+def test_a_declaration_the_ratchet_cannot_read_is_rejected(
     mode: DeliveryMode,
-    kwargs: dict[str, tuple[delivery.Withholding, ...]],
+    kwargs: dict[str, object],
     expected: str,
 ) -> None:
-    """Reachability: each shape guard has an input that trips it.
+    """Reachability: every declaration guard has an input that trips it.
 
     The two shapes answer different questions, so a declaration carrying both
     lists has no single reading. A guard nothing can be shown to reach is
     theatre, so exhibit the input rather than trusting the branch.
+
+    The route guards are here for the same reason. An unnamed module is a
+    declaration the ratchet cannot resolve to code; a resolver-direct route
+    with no reason is an exemption without the rule that earns it; and a reason
+    attached to a route that needs none is dead contract content.
     """
+    declaration: dict[str, object] = {
+        "module": "codeclone.surfaces.mcp._session_state_mixin",
+        **kwargs,
+    }
     with pytest.raises(ValueError, match=expected):
-        delivery.SurfaceDelivery(DeliverySurface.MCP, mode, **kwargs)
+        delivery.SurfaceDelivery(DeliverySurface.MCP, mode, **declaration)  # type: ignore[arg-type]
+
+
+def test_every_surface_declares_the_module_that_performs_it() -> None:
+    """The declaration names code, or the ratchet has nothing to check.
+
+    ``DeliverySurface.CLI`` was declared and consumed by nothing: no production
+    caller, and no guard reading the declaration either. A surface that appears
+    only in an enum claims coverage it does not have.
+    """
+    for surface in DeliverySurface:
+        assert delivery.DELIVERIES[surface].module.startswith("codeclone.")
+
+
+def test_the_cli_declares_why_it_does_not_use_this_door() -> None:
+    """The one sanctioned exemption, stated as a rule rather than an absence.
+
+    The CLI resolves through ``config.resolver`` directly because it must pass
+    its own ``explicit_cli_dests``; this door has none. That is why it is not a
+    hole, and it is declared so the ratchet can tell a sanctioned exemption
+    from a surface that simply never got wired.
+    """
+    cli = delivery.DELIVERIES[DeliverySurface.CLI]
+
+    assert cli.route is delivery.DeliveryRoute.RESOLVER_DIRECT
+    assert "explicit_cli_dests" in cli.route_reason
+    assert delivery.delivery_modules(delivery.DeliveryRoute.RESOLVER_DIRECT) == {
+        "codeclone.surfaces.cli.workflow"
+    }
+    assert delivery.delivery_modules(delivery.DeliveryRoute.THROUGH_THE_DOOR) == {
+        "codeclone.surfaces.cli.memory_analysis",
+        "codeclone.surfaces.mcp._session_state_mixin",
+    }
 
 
 def test_mcp_withholds_exactly_the_declared_set() -> None:
@@ -539,3 +598,74 @@ def test_memory_analysis_mounts_the_autodetected_source_root(tmp_path: Path) -> 
     # The finding id is what the user is shown; the mount is why it says that.
     assert _field(dead_code_groups[0], "id") == "dead_code:pkg.mod:f"
     assert [_field(mount, "path") for mount in mounts] == ["src"]
+
+
+def _repository_setting_min_loc(root: Path, value: int) -> Path:
+    """A repository whose only configured key is one the report echoes back."""
+    (root / "src" / "pkg").mkdir(parents=True)
+    (root / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "src" / "pkg" / "mod.py").write_text(
+        "def f():\n    return 1\n", encoding="utf-8"
+    )
+    (root / "pyproject.toml").write_text(
+        f"[tool.codeclone]\nmin_loc = {value}\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_memory_analysis_delivers_repository_configuration_through_the_door(
+    tmp_path: Path,
+) -> None:
+    """CLI_MEMORY honours the repository, and it does so through its declaration.
+
+    This is the reachability half of the CLI_MEMORY declaration. The surface
+    read the loader and the resolver directly, so its declaration decided
+    nothing: a withholding added for CLI_MEMORY was silently not applied, and
+    no test could tell, because with no withholdings declared the two paths
+    delivered the same values. Withhold ``min_loc`` from CLI_MEMORY and this
+    assertion must move -- that is what proves an input reaches the door.
+    """
+    root = _repository_setting_min_loc((tmp_path / "repo").resolve(), 33)
+
+    document = run_memory_analysis_report(root_path=root)
+
+    profile = _field(_field(document, "meta"), "analysis_profile")
+
+    assert _field(profile, "min_loc") == 33
+
+
+def test_the_cli_keeps_an_explicit_flag_against_repository_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The opposite boundary: the terminal surface must not over-deliver.
+
+    ``CLI_MEMORY`` failing to honour the repository and the CLI honouring it
+    too much are different defects. The CLI passes its own ``explicit_cli_dests``
+    precisely so a value typed on the command line survives; routing it through
+    this door would supply an empty set and let ``pyproject.toml`` win, which
+    no projection test can see.
+    """
+    root = _repository_setting_min_loc((tmp_path / "repo").resolve(), 33)
+    report_path = tmp_path / "report.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "codeclone",
+            str(root),
+            "--min-loc",
+            "7",
+            "--json",
+            str(report_path),
+            "--quiet",
+            "--no-progress",
+        ],
+    )
+    cli_workflow.main()
+
+    document = json.loads(report_path.read_text(encoding="utf-8"))
+    profile = _field(_field(document, "meta"), "analysis_profile")
+
+    assert _field(profile, "min_loc") == 7

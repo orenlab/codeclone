@@ -40,6 +40,20 @@ decision, not for making it.
 It lives here, and not under ``config/``, because a door is what keeps an R4
 surface out of R2: the declaration is consumed by surfaces, while the loader,
 the specs and the resolver it reads stay canonical owners behind it.
+
+A declaration also states **where** it happens and **by which route**. Naming
+the module is what makes the contract checkable without asking a human: the
+ratchet reads :data:`DELIVERIES`, computes which production modules actually
+reach the resolver, and reds when the two disagree in either direction. A
+surface declared here that no longer delivers is as much a lie about coverage
+as a delivery nobody declared, so both are the same failure.
+
+:class:`DeliveryRoute` exists because one surface legitimately does not use this
+door. A surface with real command-line flags MUST pass its own
+``explicit_cli_dests``, and this door has none to pass; routing it through here
+would hand the resolver an empty set and let ``pyproject.toml`` overwrite a
+value the user typed. That is a rule, so it is declared as one rather than left
+as an absence -- an undeclared absence is exactly the silence this door removes.
 """
 
 from __future__ import annotations
@@ -94,6 +108,13 @@ class DeliveryMode(str, Enum):
     DELIVER_ONLY = "deliver_only"
 
 
+class DeliveryRoute(str, Enum):
+    """How a surface reaches the canonical resolver behind this door."""
+
+    THROUGH_THE_DOOR = "through_the_door"
+    RESOLVER_DIRECT = "resolver_direct"
+
+
 @dataclass(frozen=True)
 class Withholding:
     """One key a surface does not deliver, and the rule that requires that."""
@@ -104,22 +125,52 @@ class Withholding:
 
 @dataclass(frozen=True)
 class SurfaceDelivery:
-    """A surface's declared relationship to repository configuration."""
+    """A surface's declared relationship to repository configuration.
+
+    ``module`` is the production module that performs this surface's delivery.
+    It is what turns the declaration from prose into something a guard can
+    check: without it "which surfaces exist" is answerable only by a human
+    reading the code, and a declaration nobody can check is decoration.
+    """
 
     surface: DeliverySurface
     mode: DeliveryMode
+    module: str
+    route: DeliveryRoute = DeliveryRoute.THROUGH_THE_DOOR
+    route_reason: str = ""
     withheld: tuple[Withholding, ...] = ()
     required: tuple[Withholding, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.mode is DeliveryMode.DELIVER_ALL_EXCEPT and self.required:
-            raise ValueError(
-                f"{self.surface.value}: deliver_all_except declares no required keys"
-            )
-        if self.mode is DeliveryMode.DELIVER_ONLY and self.withheld:
-            raise ValueError(
-                f"{self.surface.value}: deliver_only declares no withheld keys"
-            )
+        # A table, not a branch ladder: these are five declaration rules, and
+        # adding the sixth should cost a row rather than another decision.
+        rules: tuple[tuple[bool, str], ...] = (
+            (
+                self.mode is DeliveryMode.DELIVER_ALL_EXCEPT and bool(self.required),
+                "deliver_all_except declares no required keys",
+            ),
+            (
+                self.mode is DeliveryMode.DELIVER_ONLY and bool(self.withheld),
+                "deliver_only declares no withheld keys",
+            ),
+            (
+                not self.module.strip(),
+                "a delivery declares the module performing it",
+            ),
+            (
+                self.route is DeliveryRoute.RESOLVER_DIRECT
+                and not self.route_reason.strip(),
+                "resolver_direct declares why it is not a hole",
+            ),
+            (
+                self.route is DeliveryRoute.THROUGH_THE_DOOR
+                and bool(self.route_reason.strip()),
+                "through_the_door declares no route reason",
+            ),
+        )
+        for broken, rule in rules:
+            if broken:
+                raise ValueError(f"{self.surface.value}: {rule}")
 
 
 _REPORT_WRITE_RULE: Final = (
@@ -139,6 +190,12 @@ _IDENTITY_STILL_REQUIRED_RULE: Final = (
     "baseline identity and comparability, so dropping it would silently change "
     "what is compared"
 )
+_CLI_HAS_ITS_OWN_EXPLICIT_DESTS_RULE: Final = (
+    "the terminal surface has real command-line flags, so it must pass its own "
+    "explicit_cli_dests to the resolver; this door has none to pass, and routing "
+    "the CLI through it would let pyproject.toml overwrite a value the user typed "
+    "on the command line"
+)
 
 _MCP_WITHHELD: Final = (
     Withholding("html_out", _REPORT_WRITE_RULE),
@@ -155,11 +212,22 @@ _MCP_WITHHELD: Final = (
 )
 
 _DELIVERIES: Final[tuple[SurfaceDelivery, ...]] = (
-    SurfaceDelivery(DeliverySurface.CLI, DeliveryMode.DELIVER_ALL_EXCEPT),
-    SurfaceDelivery(DeliverySurface.CLI_MEMORY, DeliveryMode.DELIVER_ALL_EXCEPT),
+    SurfaceDelivery(
+        DeliverySurface.CLI,
+        DeliveryMode.DELIVER_ALL_EXCEPT,
+        module="codeclone.surfaces.cli.workflow",
+        route=DeliveryRoute.RESOLVER_DIRECT,
+        route_reason=_CLI_HAS_ITS_OWN_EXPLICIT_DESTS_RULE,
+    ),
+    SurfaceDelivery(
+        DeliverySurface.CLI_MEMORY,
+        DeliveryMode.DELIVER_ALL_EXCEPT,
+        module="codeclone.surfaces.cli.memory_analysis",
+    ),
     SurfaceDelivery(
         DeliverySurface.MCP,
         DeliveryMode.DELIVER_ALL_EXCEPT,
+        module="codeclone.surfaces.mcp._session_state_mixin",
         withheld=_MCP_WITHHELD,
     ),
     # Autodetection is deliberately NOT a withholding here. ``source_roots`` is
@@ -171,6 +239,7 @@ _DELIVERIES: Final[tuple[SurfaceDelivery, ...]] = (
     SurfaceDelivery(
         DeliverySurface.MCP_PYPROJECT_DECLINED,
         DeliveryMode.DELIVER_ONLY,
+        module="codeclone.surfaces.mcp._session_state_mixin",
         required=(
             Withholding("baseline_scope_id", _IDENTITY_STILL_REQUIRED_RULE),
             Withholding("golden_fixture_paths", _IDENTITY_STILL_REQUIRED_RULE),
@@ -194,6 +263,18 @@ def configurable_keys() -> frozenset[str]:
     to make impossible.
     """
     return frozenset(CONFIG_KEY_SPECS) | NESTED_TABLE_KEYS
+
+
+def delivery_modules(route: DeliveryRoute) -> frozenset[str]:
+    """Production modules declared to deliver configuration by ``route``.
+
+    Two surfaces may share one module -- ``respect_pyproject`` picks between the
+    MCP declarations inside a single call site -- so this is a set of modules,
+    not a per-surface listing.
+    """
+    return frozenset(
+        delivery.module for delivery in _DELIVERIES if delivery.route is route
+    )
 
 
 def required_keys(surface: DeliverySurface) -> frozenset[str]:
@@ -297,12 +378,14 @@ __all__ = [
     "DELIVERIES",
     "NESTED_TABLE_KEYS",
     "DeliveryMode",
+    "DeliveryRoute",
     "DeliverySurface",
     "SurfaceDelivery",
     "Withholding",
     "apply_repository_config",
     "configurable_keys",
     "delivered_config_values",
+    "delivery_modules",
     "load_repository_config",
     "required_keys",
     "withheld_keys",
