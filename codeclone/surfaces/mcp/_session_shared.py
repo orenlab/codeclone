@@ -20,6 +20,11 @@ from typing import TYPE_CHECKING, Final, Literal, TypeVar
 import orjson
 
 from ... import __version__
+from ...api.config_delivery import (
+    DeliverySurface,
+    apply_repository_config,
+    delivered_config_values,
+)
 from ...baseline import Baseline
 from ...cache.store import Cache
 from ...cache.versioning import CacheStatus
@@ -194,33 +199,12 @@ _HEALTH_SCOPE_REPOSITORY: Final[HealthScope] = "repository"
 _FOCUS_REPOSITORY: Final[SummaryFocus] = "repository"
 _FOCUS_PRODUCTION: Final[SummaryFocus] = "production"
 _FOCUS_CHANGED_PATHS: Final[SummaryFocus] = "changed_paths"
-_MCP_GOVERNANCE_CONFIG_KEYS = frozenset(
-    {
-        "baseline_scope_id",
-        "golden_fixture_paths",
-    }
-)
-_MCP_CONFIG_KEYS = frozenset(
-    {
-        "min_loc",
-        "min_stmt",
-        "block_min_loc",
-        "block_min_stmt",
-        "segment_min_loc",
-        "segment_min_stmt",
-        "processes",
-        "cache_path",
-        "max_cache_size_mb",
-        "baseline",
-        "baseline_scope_id",
-        "max_baseline_size_mb",
-        "metrics_baseline",
-        "api_surface",
-        "coverage_xml",
-        "coverage_min",
-        "golden_fixture_paths",
-    }
-)
+# Which configuration this surface consumes is declared by the R3 door
+# ``api.config_delivery``, which also applies it through the canonical resolver.
+# The hand-maintained key allowlists that used to live here were a second
+# delivery path: they bypassed the resolver, so autodetection, normalization and
+# precedence never ran on MCP, and a key was absent either by policy or because
+# nobody had added its name.
 _RESOURCE_SECTION_MAP: Final[dict[str, ReportSection]] = {
     "report.json": "all",
     "summary": "meta",
@@ -1043,8 +1027,6 @@ __all__ = [
     "_HEALTH_SCOPE_REPOSITORY",
     "_HELP_TOPIC_SPECS",
     "_HOTLIST_REPORT_KEYS",
-    "_MCP_CONFIG_KEYS",
-    "_MCP_GOVERNANCE_CONFIG_KEYS",
     "_METRICS_DETAIL_FAMILY_ALIASES",
     "_NOVELTY_WEIGHT",
     "_REPORT_DUMMY_PATH",
@@ -1076,6 +1058,7 @@ __all__ = [
     "CodeCloneMCPRunStore",
     "ComparisonFocus",
     "ConfigValidationError",
+    "DeliverySurface",
     "DetailLevel",
     "FindingFamilyFilter",
     "FindingNoveltyFilter",
@@ -1123,7 +1106,9 @@ __all__ = [
     "_suggestion_finding_id_payload",
     "_summarize_metrics_diff",
     "analyze",
+    "apply_repository_config",
     "bootstrap",
+    "delivered_config_values",
     "discover",
     "load_pyproject_config",
     "paginate",

@@ -28,8 +28,6 @@ from ._session_shared import (
     _FOCUS_REPOSITORY,
     _HEALTH_SCOPE_REPOSITORY,
     _HELP_TOPIC_SPECS,
-    _MCP_CONFIG_KEYS,
-    _MCP_GOVERNANCE_CONFIG_KEYS,
     _METRICS_DETAIL_FAMILY_ALIASES,
     _VALID_COMPARISON_FOCUS,
     _VALID_HELP_DETAILS,
@@ -57,6 +55,7 @@ from ._session_shared import (
     CodeCloneMCPRunStore,
     ComparisonFocus,
     ConfigValidationError,
+    DeliverySurface,
     GatingResult,
     HelpDetail,
     HelpTopic,
@@ -78,6 +77,8 @@ from ._session_shared import (
     _as_int,
     _evaluate_report_gates,
     _json_text_payload,
+    apply_repository_config,
+    delivered_config_values,
     load_pyproject_config,
     paginate,
 )
@@ -331,13 +332,24 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             config_values = load_pyproject_config(root_path)
         except ConfigValidationError as exc:
             raise MCPServiceContractError(str(exc)) from exc
-        if request.respect_pyproject:
-            config_keys = _MCP_CONFIG_KEYS
-        else:
-            config_keys = _MCP_GOVERNANCE_CONFIG_KEYS
-        for key in sorted(config_keys.intersection(config_values)):
-            setattr(args, key, config_values[key])
+        surface = (
+            DeliverySurface.MCP
+            if request.respect_pyproject
+            else DeliverySurface.MCP_PYPROJECT_DECLINED
+        )
+        apply_repository_config(
+            args=args,
+            config_values=delivered_config_values(
+                surface=surface,
+                config_values=config_values,
+            ),
+            # Without the root the resolver cannot autodetect source_roots, and
+            # the import mount silently differs from every other surface.
+            root_path=root_path,
+        )
 
+        # Ordering is part of the contract: repository configuration is
+        # delivered first, then the caller's own request fields win over it.
         self._apply_request_overrides(args=args, root_path=root_path, request=request)
 
         if isinstance(args.processes, int):

@@ -109,6 +109,10 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
         args=args,
         config_values=pyproject_config,
         explicit_cli_dests=set(),
+        # Without the root the resolver cannot autodetect source_roots, so this
+        # site mounted "." while the main CLI mounted "src" for the same
+        # repository -- one repository, two module identities.
+        root_path=root_path,
     )
     cli_state.set_console(PlainConsole())
     printer = require_status_console(cli_state.get_console())
