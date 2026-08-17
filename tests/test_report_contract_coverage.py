@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
@@ -118,6 +119,7 @@ from codeclone.report.renderers.text import (
 from codeclone.utils import coerce as _coerce
 from tests._assertions import assert_contains_all, assert_mapping_entries
 from tests._report_fixtures import build_test_report_document as build_report_document
+from tests._report_fixtures import single_module_baseline_container
 
 
 def _rich_report_document() -> dict[str, object]:
@@ -3720,3 +3722,261 @@ def test_dependency_group_matches_the_arrow_joined_cycle_identity() -> None:
     cycles = [group for group in groups if str(group.get("category")) == "dependency"]
 
     assert [str(group.get("novelty")) for group in cycles] == ["new"]
+
+
+# ---------------------------------------------------------------------------
+# Comparison availability at the report-document API. The wire already carried
+# the distinction -- ``_build_clone_groups`` keeps ``None`` apart from an empty
+# set -- and the classifier destroyed it at the last step, reading "not
+# compared" as "compared, nothing new". Absence must stay distinguishable from
+# emptiness (`RP2`, `G4`) because the two answers are opposite (`B8`, `B9`).
+# ---------------------------------------------------------------------------
+
+_CLONE_LANE_TRUST = TrustVector(
+    root_verified=True,
+    lanes=(
+        LaneTrust(
+            name=cast(Any, "clones.functions"),
+            status="trusted",
+            reason="compatible",
+        ),
+    ),
+)
+
+_CLONE_GROUPS: Mapping[str, Any] = {
+    "fn-key": [
+        {
+            "qualname": "pkg.mod:settle",
+            "filepath": "pkg/mod.py",
+            "start_line": 4,
+            "end_line": 22,
+        },
+        {
+            "qualname": "pkg.other:settle",
+            "filepath": "pkg/other.py",
+            "start_line": 4,
+            "end_line": 22,
+        },
+    ]
+}
+
+
+def _clone_group_novelty(new_keys: object) -> tuple[str, object]:
+    document = build_report_document(
+        func_groups=dict(_CLONE_GROUPS),
+        block_groups={},
+        segment_groups={},
+        baseline_trust=_CLONE_LANE_TRUST,
+        new_function_group_keys=cast(Any, new_keys),
+    )
+    groups = cast(
+        Any,
+        document["findings"],
+    )["groups"]["clones"]["functions"]
+    assert len(groups) == 1, groups
+    return str(groups[0]["novelty"]), groups[0]["novelty_reason"]
+
+
+def test_trusted_lane_without_a_comparison_is_unavailable() -> None:
+    """A comparable lane and no comparison: the guard's reachable input.
+
+    Every parameter here is one a caller of this API can pass today, and the
+    answer used to be ``known`` -- a trusted baseline's acceptance asserted for
+    a fingerprint no baseline had been asked about.
+    """
+
+    assert _clone_group_novelty(None) == ("unavailable", "comparison_unavailable")
+
+
+def test_trusted_lane_with_an_empty_comparison_is_known() -> None:
+    """The opposite boundary: a comparison that ran and found nothing.
+
+    Same lane trust, same empty difference set, opposite meaning. If this
+    answered ``unavailable`` the fix would have traded a false ``known`` for a
+    false ``unavailable`` and lost real baseline debt.
+    """
+
+    assert _clone_group_novelty(frozenset()) == ("known", None)
+
+
+def test_trusted_lane_with_the_group_in_the_difference_is_new() -> None:
+    """The third state, so the pin covers the whole vocabulary."""
+
+    assert _clone_group_novelty({"fn-key"}) == ("new", None)
+
+
+def test_untrusted_lane_reason_stays_lane_unavailable() -> None:
+    """Two absences, two reasons: incomparable lane, versus no comparison run.
+
+    A reader that cannot tell them apart cannot tell "regenerate the baseline"
+    from "nothing was compared" (`B4`).
+    """
+
+    document = build_report_document(
+        func_groups=dict(_CLONE_GROUPS),
+        block_groups={},
+        segment_groups={},
+        baseline_trust=TrustVector(
+            root_verified=True,
+            lanes=(
+                LaneTrust(
+                    name=cast(Any, "clones.functions"),
+                    status="unavailable",
+                    reason="payload_schema_outdated",
+                ),
+            ),
+        ),
+        new_function_group_keys=None,
+    )
+    groups = cast(Any, document["findings"])["groups"]["clones"]["functions"]
+    assert (groups[0]["novelty"], groups[0]["novelty_reason"]) == (
+        "unavailable",
+        "lane_unavailable",
+    )
+
+
+#: A real fp-v2 clone identity. The domain model rejects anything else in the
+#: observation bundle, and rightly: a made-up key would let this fixture pin a
+#: shape the producer cannot emit.
+_OBSERVED_GROUP_KEY = (
+    "c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19"
+)
+
+
+def _clone_document_with_observed_key(new_keys: object) -> dict[str, object]:
+    """One document where both novelty writers have the same identity to judge.
+
+    ``sorted_novelty_facts`` draws identities from the observation bundle, so a
+    fixture that leaves the bundle's clone keys empty gives that writer nothing
+    to decide and hides whatever it decides with. The container is real and the
+    clone lane is trusted, so the only thing missing is the comparison itself.
+    """
+
+    return build_report_document(
+        func_groups={_OBSERVED_GROUP_KEY: list(_CLONE_GROUPS["fn-key"])},
+        block_groups={},
+        segment_groups={},
+        baseline_container=single_module_baseline_container(
+            UUID("8a2d1c44-6f0b-4f2a-9b7e-1d5c3a90e7b2")
+        ),
+        baseline_trust=_CLONE_LANE_TRUST,
+        observed_function_clone_keys=(_OBSERVED_GROUP_KEY,),
+        new_function_group_keys=cast(Any, new_keys),
+    )
+
+
+def _projection_novelty(document: Mapping[str, object]) -> dict[str, str]:
+    facts = cast(Any, document["baseline"])["sorted_novelty_facts"]
+    return {
+        str(fact["identity"]): str(fact["novelty"])
+        for fact in facts
+        if fact["lane"] == "clones.functions"
+    }
+
+
+def _findings_novelty(document: Mapping[str, object]) -> dict[str, str]:
+    groups = cast(Any, document["findings"])["groups"]["clones"]["functions"]
+    return {str(group["facts"]["group_key"]): str(group["novelty"]) for group in groups}
+
+
+@pytest.mark.parametrize(
+    ("new_keys", "expected"),
+    [
+        (None, "unavailable"),
+        (frozenset(), "known"),
+        (frozenset({_OBSERVED_GROUP_KEY}), "new"),
+    ],
+    ids=["not-compared", "compared-empty", "compared-new"],
+)
+def test_both_novelty_writers_answer_the_same_word(
+    new_keys: object,
+    expected: str,
+) -> None:
+    """``baseline.sorted_novelty_facts`` and the findings groups are one writer.
+
+    Parametrised across the whole vocabulary on purpose: the two writers agree
+    by accident on the two compared cases -- ``identity in new_keys`` is the same
+    test either way -- and diverge only on the absent comparison, which is
+    exactly the case the projection's inline re-derivation folded into ``known``.
+    A pin that omitted the ``None`` row stayed green while the projection
+    decided on its own (`G2`, `E1`).
+    """
+
+    document = _clone_document_with_observed_key(new_keys)
+
+    assert _findings_novelty(document) == {_OBSERVED_GROUP_KEY: expected}
+    assert _projection_novelty(document) == {_OBSERVED_GROUP_KEY: expected}
+
+
+#: The novelty-reason vocabulary as published under a given report schema
+#: version. Same pairing, and the same reason, as
+#: ``_POPULATION_WIRE_CONTRACT`` in ``tests/test_report_honest_population.py``.
+#:
+#: ``novelty_reason`` sits beside ``novelty`` on every clone and design finding,
+#: and it is the field telling a reader *which* absence it holds: a lane not
+#: comparable under current contracts, versus a lane comparable and not compared.
+#: 3.1 -> 3.2 is what ``comparison_unavailable`` forced -- before it that second
+#: case was answered ``known``, asserting a comparison that never ran, so the
+#: value set a consumer could switch on did not cover the honest answer.
+#:
+#: Members are read off the producing module rather than retyped, so a constant
+#: added there cannot ship without this pair moving.
+_NOVELTY_REASON_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
+    "3.2",
+    (
+        "comparison_unavailable",
+        "entity_not_compared",
+        "lane_unavailable",
+        "not_baseline_governed",
+    ),
+)
+
+
+def _live_novelty_reason_vocabulary() -> tuple[str, ...]:
+    """Read the published reason values off their producer, not off a list here.
+
+    ``report.document._common`` owns the vocabulary as ``NOVELTY_REASON_*``
+    constants and is the only module that classifies these absences. Reading the
+    names back means a constant added there moves this vocabulary without anyone
+    remembering to update a literal -- the difference between a pin and a
+    restatement.
+    """
+
+    return tuple(
+        sorted(
+            value
+            for name, value in vars(document_common_mod).items()
+            if name.startswith("NOVELTY_REASON_") and isinstance(value, str)
+        )
+    )
+
+
+def test_the_novelty_reason_vocabulary_cannot_move_without_the_schema_version() -> None:
+    """The reason vocabulary and the schema version are one fact.
+
+    Both directions red: a new reason without a bump, and a bump without
+    recording the vocabulary it went out with. Publishing
+    ``comparison_unavailable`` under 3.1 would leave the new value merely beside
+    the new version instead of bound to it, which is the whole point of the pair.
+
+    Deliberately not ``assert REPORT_SCHEMA_VERSION == "3.2"``: that moves the
+    magic number into the test and asserts nothing about why the version has that
+    value (`H1`).
+
+    Scope, stated rather than implied: this pins the ``NOVELTY_REASON_*``
+    vocabulary of the report-document classifier. One reason string is written
+    inline elsewhere -- ``semantic_authority_comparison_unavailable`` in
+    ``report.document.findings`` -- and is outside this pin. An inventory of
+    inline literals cannot be established by text search without being blind by
+    construction (`I1`), so the gap is named here rather than papered over.
+    """
+
+    live = (REPORT_SCHEMA_VERSION, _live_novelty_reason_vocabulary())
+
+    assert live == _NOVELTY_REASON_WIRE_CONTRACT, (
+        "The novelty_reason vocabulary and REPORT_SCHEMA_VERSION are one wire "
+        "contract. If the reasons changed, bump REPORT_SCHEMA_VERSION and record "
+        "the new pair here. If the version changed for another reason, record the "
+        f"unchanged vocabulary against the new version. Live: {live}. "
+        f"Recorded: {_NOVELTY_REASON_WIRE_CONTRACT}."
+    )

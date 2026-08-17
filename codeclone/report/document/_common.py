@@ -193,14 +193,29 @@ def _clone_novelty(
     group_key: str,
     lane_trusted: bool,
     new_keys: Collection[str] | None,
-) -> str:
+) -> tuple[str, str | None]:
+    """Return ``(novelty, novelty_reason)`` for one clone-lane identity.
+
+    Sole owner of the clone novelty word. Two of the three states are absences
+    and they are different absences, so they carry different reasons: the lane
+    itself is not comparable under current contracts (`B4` per-lane
+    compatibility), or the lane is comparable but no comparison was executed
+    for it in this run (`B4` comparison availability).
+
+    ``new_keys is None`` is the second one, and it is the reason this returns a
+    tuple rather than a word. Folding ``None`` into the empty set read an
+    absent comparison as "compared, nothing new" and answered ``known`` --
+    asserting a comparison that never ran (`B8`, `B9`). An empty difference set
+    is only evidence of sameness when a comparison produced it.
+    """
+
     if not lane_trusted:
-        return CLONE_NOVELTY_UNAVAILABLE
-    return (
-        CLONE_NOVELTY_NEW
-        if group_key in frozenset(new_keys or ())
-        else CLONE_NOVELTY_KNOWN
-    )
+        return CLONE_NOVELTY_UNAVAILABLE, NOVELTY_REASON_LANE_UNAVAILABLE
+    if new_keys is None:
+        return CLONE_NOVELTY_UNAVAILABLE, NOVELTY_REASON_COMPARISON_UNAVAILABLE
+    if group_key in frozenset(new_keys):
+        return CLONE_NOVELTY_NEW, None
+    return CLONE_NOVELTY_KNOWN, None
 
 
 # Novelty domains whose per-entity difference the baseline actually computes
@@ -220,6 +235,10 @@ BASELINE_GOVERNED_ENTITY_DOMAINS: Final = (
 NOVELTY_REASON_LANE_UNAVAILABLE: Final = "lane_unavailable"
 NOVELTY_REASON_NOT_GOVERNED: Final = "not_baseline_governed"
 NOVELTY_REASON_ENTITY_NOT_COMPARED: Final = "entity_not_compared"
+#: The lane is comparable, and no comparison was executed for it in this run.
+#: Distinct from ``lane_unavailable`` on purpose: a reader that cannot tell the
+#: two apart cannot tell "regenerate the baseline" from "nothing was compared".
+NOVELTY_REASON_COMPARISON_UNAVAILABLE: Final = "comparison_unavailable"
 
 _ENTITY_NOVELTY_COMPARED_KEY: Final = "compared"
 _ENTITY_NOVELTY_NEW_KEY: Final = "new"
@@ -375,7 +394,7 @@ def _entity_novelty(
     )
     if identity not in compared:
         return CLONE_NOVELTY_UNAVAILABLE, NOVELTY_REASON_ENTITY_NOT_COMPARED
-    novelty = _clone_novelty(
+    return _clone_novelty(
         group_key=identity,
         lane_trusted=True,
         new_keys=frozenset(
@@ -383,7 +402,6 @@ def _entity_novelty(
             for value in _as_sequence(domain_facts.get(_ENTITY_NOVELTY_NEW_KEY))
         ),
     )
-    return novelty, None
 
 
 def _item_sort_key(item: Mapping[str, object]) -> tuple[str, int, int, str]:

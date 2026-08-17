@@ -525,10 +525,14 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         baseline_state: CloneBaselineState,
         metrics_baseline_state: MetricsBaselineState,
         cache_status: CacheStatus,
-        new_func: Sequence[str] | set[str],
-        new_block: Sequence[str] | set[str],
-        #: False when the caller never ran a clone comparison, so ``new_func``
-        #: and ``new_block`` are "not measured" rather than "measured empty".
+        #: ``None`` for a lane the caller did not compare -- "not measured",
+        #: never "measured empty". A comparison that ran and found nothing
+        #: passes an empty collection.
+        new_func: Sequence[str] | frozenset[str] | set[str] | None,
+        new_block: Sequence[str] | frozenset[str] | set[str] | None,
+        #: False when no clone lane was compared at all. Carried in rather than
+        #: re-derived from baseline trust: the surface that decided whether to
+        #: compare is the only one that knows the answer.
         clone_novelty_available: bool,
         metrics_diff: MetricsDiff | None,
         warnings: Sequence[str],
@@ -596,18 +600,24 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "inventory": dict(inventory),
             "findings_summary": dict(summary),
             "health": dict(_helpers._as_mapping(metrics_summary.get("health"))),
-            # Null, not zero, when no clone lane was compared: the canonical
-            # report document already reports that novelty as "unavailable",
-            # and a count here would contradict it inside one payload.
+            # Null, not zero, when no clone lane was compared. The canonical
+            # report document reports that novelty as "unavailable" for the same
+            # reason and from the same fact -- both read the comparison the
+            # producer actually ran, so a count here cannot contradict a word
+            # there. That agreement is a property of the shared owner in
+            # ``core.comparison``, not of this comment: before it existed the
+            # document said "known" beside this null, inside one payload.
             "baseline_diff": {
                 "new_function_clone_groups": (
-                    len(new_func) if clone_novelty_available else None
+                    len(new_func or ()) if clone_novelty_available else None
                 ),
                 "new_block_clone_groups": (
-                    len(new_block) if clone_novelty_available else None
+                    len(new_block or ()) if clone_novelty_available else None
                 ),
                 "new_clone_groups_total": (
-                    len(new_func) + len(new_block) if clone_novelty_available else None
+                    len(new_func or ()) + len(new_block or ())
+                    if clone_novelty_available
+                    else None
                 ),
             },
             "metrics_diff": _helpers._metrics_diff_payload(metrics_diff),

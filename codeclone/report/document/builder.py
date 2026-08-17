@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ..gates.evaluator import GateResult, MetricGateConfig
 
 from ._common import (
+    _clone_novelty,
     _collect_report_file_list,
     _entity_novelty_facts,
     _lane_is_trusted,
@@ -241,30 +242,34 @@ def _baseline_projection(
         if all_lanes_trusted
         else "untrusted"
     )
-    new_functions = frozenset(new_function_group_keys or ())
-    new_blocks = frozenset(new_block_group_keys or ())
+    # One owner for the novelty word. This projection used to re-derive it
+    # inline, and an inline re-derivation folds the absent-comparison case into
+    # ``known`` -- so the same document carried ``state: "untrusted"`` beside
+    # ``novelty: "known"`` for a clone nothing had compared (`G2`, `G3`).
     novelty_facts = [
         {
             "lane": lane,
             "identity": identity,
-            "novelty": (
-                "unavailable"
-                if not _lane_is_trusted(trust, lane)
-                else "new"
-                if identity in new_keys
-                else "known"
-            ),
+            "novelty": _clone_novelty(
+                group_key=identity,
+                lane_trusted=_lane_is_trusted(trust, lane),
+                new_keys=new_keys,
+            )[0],
         }
         for lane, identities, new_keys in (
             (
                 "clones.blocks",
                 bundle.structural.block_clone_keys,
-                new_blocks,
+                None
+                if new_block_group_keys is None
+                else frozenset(new_block_group_keys),
             ),
             (
                 "clones.functions",
                 bundle.structural.function_clone_keys,
-                new_functions,
+                None
+                if new_function_group_keys is None
+                else frozenset(new_function_group_keys),
             ),
         )
         for identity in identities

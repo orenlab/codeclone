@@ -273,8 +273,10 @@ def build_report_body_for_analysis(
     processing: ProcessingResult,
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
-    new_func: Collection[str],
-    new_block: Collection[str],
+    # ``None`` means that lane was not compared -- it is not "compared, nothing
+    # new". Callers that ran a comparison pass a (possibly empty) collection.
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
     metrics_diff: object | None = None,
     coverage_adoption_diff_available: bool = False,
     api_surface_diff_available: bool = False,
@@ -345,8 +347,10 @@ def report(
     processing: ProcessingResult,
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
-    new_func: Collection[str],
-    new_block: Collection[str],
+    #: ``None`` means the lane was not compared (`RP2`); an empty collection
+    #: means a comparison ran and produced nothing.
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
     html_builder: Callable[..., str] | None = None,
     metrics_diff: object | None = None,
     coverage_adoption_diff_available: bool = False,
@@ -553,8 +557,8 @@ def gate_with_config(
     *,
     boot: BootstrapResult,
     analysis: AnalysisResult,
-    new_func: Collection[str],
-    new_block: Collection[str],
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
     metrics_diff: MetricsDiff | None,
     clone_threshold_total: int | None = None,
     baseline_trust: TrustVector | None = None,
@@ -562,7 +566,10 @@ def gate_with_config(
     files_skipped: int = 0,
 ) -> tuple[MetricGateConfig, GatingResult]:
     config = gate_config if gate_config is not None else _gate_config(boot)
-    clone_new_count = len(tuple(new_func)) + len(tuple(new_block))
+    # An uncompared lane contributes no new clones to count. It must not
+    # therefore read as "clean": the lane-trust vector below is what makes the
+    # clone gate fail closed when the lane it reads is not comparable.
+    clone_new_count = len(tuple(new_func or ())) + len(tuple(new_block or ()))
     clone_total = (
         analysis.func_clones_count + analysis.block_clones_count
         if clone_threshold_total is None
@@ -605,8 +612,8 @@ def gate(
     *,
     boot: BootstrapResult,
     analysis: AnalysisResult,
-    new_func: Collection[str],
-    new_block: Collection[str],
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
     metrics_diff: MetricsDiff | None,
     baseline_trust: TrustVector | None = None,
 ) -> GatingResult:

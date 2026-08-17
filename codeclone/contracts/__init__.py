@@ -305,7 +305,7 @@ CACHE_VERSION: Final = "3.7"
 # stored 3.0 report is refused rather than silently misread against the new
 # value set. ``tests/test_report_honest_population.py`` pins the coupling —
 # the enum cannot move again without this constant moving with it.
-REPORT_SCHEMA_VERSION: Final = "3.1"
+REPORT_SCHEMA_VERSION: Final = "3.2"
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
 # be described as one: no code branches on it. Whether a stored artifact may be

@@ -14,6 +14,9 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID
 
+from ...api.comparison import build_comparison_context as _build_comparison_context
+from ...api.comparison import required_gate_lanes as _required_gate_lanes
+from ...api.comparison import resolve_baseline_trust as _resolve_baseline_trust
 from ...audit import AuditEvent, AuditWriter, repo_root_digest
 from ...audit.runtime import open_audit_writer_for_root
 from ...cache.store import resolve_cache_status
@@ -357,11 +360,19 @@ class MCPSession(
         baseline_scope_id = (
             UUID(raw_scope_id) if isinstance(raw_scope_id, str) else None
         )
+        # Which lanes an active gate reads, from the one owner of gate policy.
+        # A lane no gate reads may degrade; a lane a gate reads keeps the run
+        # fail-closed (`B5`).
+        baseline_required_lanes = _required_gate_lanes(
+            args=args,
+            enabled_lanes=analysis_result.observation_bundle.contract.enabled_lanes,
+        )
         clone_baseline_state = resolve_clone_baseline_state(
             baseline_path=baseline_path,
             baseline_exists=baseline_exists,
             max_baseline_size_mb=_as_int(args.max_baseline_size_mb, 0),
             baseline_scope_id=baseline_scope_id,
+            required_lanes=baseline_required_lanes,
         )
         metrics_baseline_state = resolve_metrics_baseline_state(
             metrics_baseline_path=metrics_baseline_path,
@@ -369,6 +380,7 @@ class MCPSession(
             max_baseline_size_mb=_as_int(args.max_baseline_size_mb, 0),
             skip_metrics=bool(args.skip_metrics),
             baseline_scope_id=baseline_scope_id,
+            required_lanes=baseline_required_lanes,
         )
 
         cache_status, cache_schema_version = resolve_cache_status(cache)
@@ -437,26 +449,37 @@ class MCPSession(
             report_generated_at_utc=_current_report_timestamp_utc(),
         )
 
-        # An untrusted or missing baseline means no comparison ran. Diffing
-        # against a fresh empty Baseline instead turned every clone group into
-        # a "new" one, while the CLI reported none of them -- one repository
-        # state, two contradictory verdicts. Not compared is neither.
-        clone_novelty_available = clone_baseline_state.trusted_for_diff
-        new_func: tuple[str, ...] | set[str] = ()
-        new_block: tuple[str, ...] | set[str] = ()
-        if clone_novelty_available:
-            new_func, new_block = clone_baseline_state.baseline.diff(
-                analysis_result.func_groups,
-                analysis_result.block_groups,
-            )
-        metrics_diff = None
-        if (
-            analysis_result.project_metrics is not None
-            and metrics_baseline_state.trusted_for_diff
-        ):
-            metrics_diff = metrics_baseline_state.baseline.diff(
-                analysis_result.project_metrics
-            )
+        # The trust vector is resolved here, before the comparison, rather than
+        # left for ``report`` to resolve on its own: the surface that decides
+        # whether to compare and the document that classifies the result must read
+        # one vector, or they answer differently about one container (`G3`). The
+        # comparison decision itself belongs to nobody here -- it is the shared
+        # R3 door's, and the CLI reads the same answer.
+        baseline_trust = _resolve_baseline_trust(
+            clone_baseline_state.baseline.container,
+            baseline_scope_id=(
+                None if baseline_scope_id is None else str(baseline_scope_id)
+            ),
+        )
+        comparison = _build_comparison_context(
+            func_groups=analysis_result.func_groups,
+            block_groups=analysis_result.block_groups,
+            project_metrics=analysis_result.project_metrics,
+            clone_baseline=clone_baseline_state.baseline,
+            clone_trusted_for_diff=clone_baseline_state.trusted_for_diff,
+            metrics_baseline=metrics_baseline_state.baseline,
+            metrics_trusted_for_diff=metrics_baseline_state.trusted_for_diff,
+            baseline_trust=baseline_trust,
+        )
+        # ``None``, not an empty tuple, when a lane was not compared. The report
+        # document's classifier reads an empty difference set as "compared,
+        # nothing new" and answers ``known`` -- so flattening the absent case into
+        # ``()`` made this surface assert a comparison that never happened, beside
+        # its own ``trusted: false`` (`B8`, `B9`, `RP2`).
+        new_func = comparison.new_func
+        new_block = comparison.new_block
+        clone_novelty_available = comparison.clone_novelty_available
+        metrics_diff = comparison.metrics_diff
 
         cache.release_loaded_entries()
         with span(name="pipeline.report"):
@@ -470,8 +493,18 @@ class MCPSession(
                 new_func=new_func,
                 new_block=new_block,
                 metrics_diff=metrics_diff,
+                # Both were left at their ``False`` defaults, so this surface
+                # reported "no comparison available" for the adoption and API
+                # lanes on every run, including runs whose baseline was fully
+                # trusted and whose diff had just been computed. The CLI publishes
+                # the same two facts; one fact must not have two answers (`G2`).
+                coverage_adoption_diff_available=(
+                    comparison.coverage_adoption_diff_available
+                ),
+                api_surface_diff_available=comparison.api_surface_diff_available,
                 include_report_document=True,
                 baseline_container=clone_baseline_state.baseline.container,
+                baseline_trust=baseline_trust,
                 baseline_scope_id=(
                     None if baseline_scope_id is None else str(baseline_scope_id)
                 ),
@@ -537,8 +570,8 @@ class MCPSession(
             project_metrics=analysis_result.project_metrics,
             coverage_join=analysis_result.coverage_join,
             suggestions=analysis_result.suggestions,
-            new_func=frozenset(new_func),
-            new_block=frozenset(new_block),
+            new_func=frozenset(new_func or ()),
+            new_block=frozenset(new_block or ()),
             metrics_diff=metrics_diff,
             manifest=run_manifest,
             dirty_snapshot=run_dirty_snapshot,
@@ -571,8 +604,8 @@ class MCPSession(
             project_metrics=analysis_result.project_metrics,
             coverage_join=analysis_result.coverage_join,
             suggestions=analysis_result.suggestions,
-            new_func=frozenset(new_func),
-            new_block=frozenset(new_block),
+            new_func=frozenset(new_func or ()),
+            new_block=frozenset(new_block or ()),
             metrics_diff=metrics_diff,
             manifest=run_manifest,
             dirty_snapshot=run_dirty_snapshot,

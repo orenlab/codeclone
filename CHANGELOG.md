@@ -7,6 +7,14 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Breaking changes
 
+- **Report schema advanced to `3.2`.** `novelty_reason` — carried beside `novelty` on every clone and design finding —
+  gained the value `comparison_unavailable`, for a lane that is comparable under current contracts and was not compared
+  in this run. Before it, that case was answered `known`, which asserted a comparison that never ran, so the value set a
+  consumer could see did not cover the honest answer. A consumer switching on `novelty_reason` must treat
+  `comparison_unavailable` as "no comparison was executed for this family" and keep `lane_unavailable` as "this lane is
+  not comparable at all" — the two are different absences and the report no longer conflates them. A report written by
+  an earlier release is refused by `codeclone memory init --from-report`, which applies an exact schema policy; re-run
+  the analysis to regenerate it.
 - **Report schema advanced to `3.1`.** The health population fact —
   `metrics.families.health.summary.population`, and the `data-health-population` attribute in the HTML report — changed
   its value set: `complete` became `complete_nonempty`, and `complete_empty` joined it. One word was carrying two
@@ -177,6 +185,35 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **A clone whose lane was never compared is no longer reported as known baseline debt.** `novelty="known"` means a
+  trusted baseline accepted that fingerprint; the report document derived it from an empty difference set, which is the
+  same value a comparison that never ran produces. The MCP surface hit exactly that: after it declined to trust a
+  baseline container it still handed the container to the report, passed an empty difference set, and the classifier
+  answered `known` for clones the baseline had never seen — beside its own `trusted: false` and a null clone diff in the
+  same payload. Absence and emptiness are now different values on that wire: a lane that was not compared reports
+  `novelty="unavailable"` with the new `novelty_reason="comparison_unavailable"`, which is distinct from
+  `lane_unavailable` (the lane itself is not comparable under current contracts) so a reader can tell "regenerate the
+  baseline" from "nothing was compared". A comparison that ran and found nothing still reports `known`.
+- **The novelty word has one owner in the report document.** `baseline.sorted_novelty_facts` decided it inline, in
+  parallel with the findings groups, and an inline re-derivation folds the absent-comparison case into `known` — so one
+  artifact could carry `state: "untrusted"` beside `novelty: "known"` for the same clone. Both projections now read the
+  same classifier, and the per-finding `novelty_reason` comes from it rather than from a third copy of the rule.
+- **MCP reports the adoption and API-surface baseline comparisons it actually ran.** Both families were published as
+  `baseline_diff_available: false` on every MCP run, including runs against a fully trusted baseline whose metrics diff
+  had just been computed, because the surface never passed those two availability facts to the report builder. The CLI
+  passed them all along, so one fact had two answers.
+- **One stale baseline lane no longer takes the MCP run's other comparisons with it.** MCP resolved the baseline
+  container all-or-nothing, so a single outdated lane — `api_surface`, say — made the whole container untrusted for
+  diffing: the clone comparison was skipped and six metric families (`complexity`, `coupling`, `coverage_adoption`,
+  `dead_code`, `dependencies`, `health`) reported `baseline_diff_available: false` for comparisons that were
+  legitimately available. It now degrades per lane, as the CLI already did: the opaque lane is named in the run
+  warnings and takes only its own family, while a lane an active gate depends on still fails the run closed. A
+  container that does not describe this run at all — different `baseline_scope_id`, different interpreter tag — is
+  still condemned as a whole, because comparison-*context* compatibility has one answer for the whole container rather
+  than one per lane.
+- **Both surfaces now decide "was this compared" in one place.** The comparison decision moved to a new typed door,
+  `codeclone.api.comparison`, which the CLI and MCP both read; each used to decide on its own terms, which is how one
+  degraded lane came to produce opposite novelty for the same clone on the two surfaces in the same repository state.
 - **Dependency cycles are classified by import binding time instead of being uniformly critical.** Every import edge
   now carries when it binds — `import_time` (top level, class body, module-scope dynamic load), `deferred_function`
   (function or method body), `deferred_getattr` (module-level PEP 562 `__getattr__`), `type_checking`

@@ -58,6 +58,7 @@ if TYPE_CHECKING:
 from ...findings.ids import clone_group_id, dead_code_group_id, structural_group_id
 from ._common import (
     ENTITY_NOVELTY_DOMAIN_DEAD_CODE,
+    NOVELTY_REASON_NOT_GOVERNED,
     _clone_novelty,
     _contract_report_location_path,
     _entity_novelty,
@@ -181,7 +182,7 @@ def _build_clone_groups(
             count=len(items),
             clone_type=clone_type,
         )
-        novelty = _clone_novelty(
+        novelty, novelty_reason = _clone_novelty(
             group_key=group_key,
             lane_trusted=lane_trusted,
             new_keys=new_key_set,
@@ -227,12 +228,12 @@ def _build_clone_groups(
                 "clone_kind": kind,
                 "clone_type": clone_type,
                 "novelty": novelty,
+                # Segments carry no baseline comparison term at all, so their
+                # reason is a property of the family rather than of this run.
+                # Every other reason comes from the novelty owner, which is the
+                # only place that knows which of the two absences applies.
                 "novelty_reason": (
-                    "not_baseline_governed"
-                    if kind == "segment"
-                    else None
-                    if lane_trusted
-                    else "lane_unavailable"
+                    NOVELTY_REASON_NOT_GOVERNED if kind == "segment" else novelty_reason
                 ),
                 "count": len(items),
                 "source_scope": source_scope,

@@ -27,7 +27,7 @@ This runbook covers:
 | `HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER` | float | 2.0 |
 | `HEALTH_DEPENDENCY_DEPTH_P95_MARGIN` | int | 1 |
 | `DEFAULT_HEALTH_THRESHOLD` | int | 60 |
-| `REPORT_SCHEMA_VERSION` | str | 3.1 |
+| `REPORT_SCHEMA_VERSION` | str | 3.2 |
 
 Risk thresholds (independent from weights):
 - `COMPLEXITY_RISK_LOW_MAX`: 10

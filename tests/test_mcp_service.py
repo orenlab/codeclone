@@ -65,7 +65,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
-from codeclone.models import DigestObject, FileStat, MetricsDiff
+from codeclone.models import DigestObject, FileStat, LaneTrust, MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     CachePolicy,
@@ -80,6 +80,7 @@ from codeclone.surfaces.mcp.session import (
     MCPServiceError,
 )
 from codeclone.utils import coerce as _coerce
+from tests import test_baseline_lane_degradation as lane_degradation
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests._report_access import _dict_at
 from tests.memory_fixtures import cli_memory_repo, tool_calls_named_in
@@ -843,6 +844,14 @@ def _assert_loaded_mcp_baseline_state(
     expected_size_mb: int,
     state: mcp_baseline_mod.CloneBaselineState | mcp_baseline_mod.MetricsBaselineState,
 ) -> None:
+    """The resolver reads per-lane trust, and only that, on the clean path.
+
+    ``verify_compatibility`` condemns the whole container over any one lane, so a
+    resolver that reaches it unconditionally cannot honour `B5`. The absent
+    ``verify`` key below is the load-bearing part of this assertion: it says the
+    all-or-nothing reader was not consulted when no gate needed it.
+    """
+
     assert calls == {
         "max_size_bytes": expected_size_mb * 1024 * 1024,
         "python_tag": current_python_tag(),
@@ -904,16 +913,26 @@ def test_mcp_clone_baseline_state_loads_existing_baseline(
     ) -> None:
         calls["max_size_bytes"] = max_size_bytes
 
+    def fake_unavailable_lanes(
+        self: Baseline,
+        *,
+        current_python_tag: str,
+        baseline_scope_id: UUID,
+    ) -> tuple[LaneTrust, ...]:
+        calls["python_tag"] = current_python_tag
+        calls["scope_id"] = baseline_scope_id
+        return ()
+
     def fake_verify(
         self: Baseline,
         *,
         current_python_tag: str,
         baseline_scope_id: UUID,
     ) -> None:
-        calls["python_tag"] = current_python_tag
-        calls["scope_id"] = baseline_scope_id
+        calls["verify"] = True
 
     monkeypatch.setattr(Baseline, "load", fake_load)
+    monkeypatch.setattr(Baseline, "unavailable_lanes", fake_unavailable_lanes)
     monkeypatch.setattr(Baseline, "verify_compatibility", fake_verify)
 
     state = mcp_baseline_mod.resolve_clone_baseline_state(
@@ -921,6 +940,7 @@ def test_mcp_clone_baseline_state_loads_existing_baseline(
         baseline_exists=True,
         max_baseline_size_mb=2,
         baseline_scope_id=_TEST_BASELINE_SCOPE_ID,
+        required_lanes=frozenset(),
     )
 
     _assert_loaded_mcp_baseline_state(
@@ -943,16 +963,30 @@ def test_mcp_metrics_baseline_state_loads_existing_baseline(
     ) -> None:
         calls["max_size_bytes"] = max_size_bytes
 
+    def fake_unavailable_lanes(
+        self: MetricsBaseline,
+        *,
+        runtime_python_tag: str,
+        baseline_scope_id: UUID,
+    ) -> tuple[LaneTrust, ...]:
+        calls["python_tag"] = runtime_python_tag
+        calls["scope_id"] = baseline_scope_id
+        return ()
+
     def fake_verify(
         self: MetricsBaseline,
         *,
         runtime_python_tag: str,
         baseline_scope_id: UUID,
     ) -> None:
-        calls["python_tag"] = runtime_python_tag
-        calls["scope_id"] = baseline_scope_id
+        calls["verify"] = True
 
     monkeypatch.setattr(MetricsBaseline, "load", fake_load)
+    monkeypatch.setattr(
+        MetricsBaseline,
+        "unavailable_lanes",
+        fake_unavailable_lanes,
+    )
     monkeypatch.setattr(MetricsBaseline, "verify_compatibility", fake_verify)
 
     state = mcp_baseline_mod.resolve_metrics_baseline_state(
@@ -961,6 +995,7 @@ def test_mcp_metrics_baseline_state_loads_existing_baseline(
         max_baseline_size_mb=3,
         skip_metrics=False,
         baseline_scope_id=_TEST_BASELINE_SCOPE_ID,
+        required_lanes=frozenset(),
     )
 
     _assert_loaded_mcp_baseline_state(
@@ -982,6 +1017,7 @@ def test_mcp_baseline_scope_is_required_for_both_projections(
         baseline_exists=True,
         max_baseline_size_mb=10,
         baseline_scope_id=None,
+        required_lanes=frozenset(),
     )
     metrics_state = mcp_baseline_mod.resolve_metrics_baseline_state(
         metrics_baseline_path=tmp_path / "baseline.json",
@@ -989,6 +1025,7 @@ def test_mcp_baseline_scope_is_required_for_both_projections(
         max_baseline_size_mb=10,
         skip_metrics=False,
         baseline_scope_id=None,
+        required_lanes=frozenset(),
     )
 
     assert clone_state.status is BaselineStatus.MISMATCH_SCOPE_ID
@@ -7880,6 +7917,7 @@ def test_mcp_session_helper_private_edges(
         max_baseline_size_mb=1,
         skip_metrics=False,
         baseline_scope_id=None,
+        required_lanes=frozenset(),
     )
     assert baseline_state.loaded is False
     assert baseline_state.status == MetricsBaselineStatus.INVALID_JSON
@@ -18383,3 +18421,321 @@ def test_pr_summary_with_changed_scope_claims_changed_files(tmp_path: Path) -> N
     assert payload["changed_files"] == 1
     assert payload["findings_scope"] == "changed_files"
     assert "### New findings in changed files (1)" in content
+
+
+# ---------------------------------------------------------------------------
+# Comparison availability on the MCP surface. The fixture helpers live in
+# tests/test_baseline_lane_degradation.py, which reaches into codeclone.baseline
+# internals to forge a degraded container; importing an r4 surface beside those
+# imports reclassifies every one of them under the architecture ratchet, so the
+# MCP half of that doctrine is tested from here instead.
+# ---------------------------------------------------------------------------
+
+
+def _settlement_mcp_document(
+    root: Path,
+    *,
+    baseline: Path,
+) -> tuple[dict[str, object], Mapping[str, object]]:
+    session = mcp_session_mod.MCPSession(history_limit=4)
+    summary = session.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root),
+            baseline_path=str(baseline),
+            api_surface=True,
+            cache_policy="off",
+            allow_external_artifacts=True,
+        )
+    )
+    record = session._runs.get_for_root(str(summary["run_id"]), root=root)
+    document = record.report_document
+    assert isinstance(document, dict)
+    return document, summary
+
+
+def _sole_mcp_function_clone(document: Mapping[str, object]) -> Mapping[str, object]:
+    rows = _mapping_child(_mapping_child(document, "findings"), "groups")
+    clones = cast("dict[str, object]", rows["clones"])
+    functions = cast("list[dict[str, object]]", clones["functions"])
+    assert len(functions) == 1, functions
+    return functions[0]
+
+
+@pytest.fixture
+def settlement_tree(tmp_path: Path) -> Path:
+    return lane_degradation.settlement_repository(
+        tmp_path,
+        with_clone=True,
+        name="settlement",
+    )
+
+
+@pytest.fixture
+def settlement_baseline_without_clone(tmp_path: Path) -> Path:
+    staging = lane_degradation.settlement_repository(
+        tmp_path,
+        with_clone=False,
+        name="settlement-before-the-copy",
+    )
+    target = tmp_path / "without-clone.baseline.json"
+    lane_degradation.publish_baseline(staging, target)
+    return target
+
+
+@pytest.fixture
+def settlement_degraded_baseline(
+    settlement_baseline_without_clone: Path,
+    tmp_path: Path,
+) -> Path:
+    target = tmp_path / "degraded.baseline.json"
+    target.write_bytes(settlement_baseline_without_clone.read_bytes())
+    lane_degradation.downgrade_api_surface_lane(target)
+    return target
+
+
+def test_mcp_never_calls_a_clone_known_without_a_comparison(
+    settlement_tree: Path,
+    settlement_degraded_baseline: Path,
+) -> None:
+    """One stale non-clone lane must not turn an uncompared clone into debt.
+
+    Measured end to end before the fix: this exact input produced
+    ``novelty="known"`` for a clone the baseline had never seen, in the same
+    payload that reported ``trusted: false`` and a null clone diff. ``known``
+    asserts that a trusted baseline accepted the fingerprint (`B7`), and no
+    comparison of the clone lane produced that acceptance (`B9`).
+
+    The clone lanes are per-lane compatible here, so the comparison is available
+    and the honest answer is the CLI's: ``new``. The stale lane is reported opaque
+    and takes nothing but its own family with it (`B5`).
+    """
+
+    document, summary = _settlement_mcp_document(
+        settlement_tree,
+        baseline=settlement_degraded_baseline,
+    )
+    group = _sole_mcp_function_clone(document)
+
+    assert group["novelty"] != "known", group
+    assert group["novelty"] == "new", group
+    assert group["novelty_reason"] is None, group
+    # The summary's clone track read null while the document said "known" -- one
+    # payload, two answers. Both now report the comparison that actually ran.
+    assert _mapping_child(summary, "diff")["new_clones"] == 1
+    # The opacity is still named rather than swallowed (`RP2`).
+    warnings = cast("list[str]", summary["warnings"])
+    assert any("api_surface:payload_schema_outdated" in item for item in warnings), (
+        warnings
+    )
+
+
+def test_mcp_clone_absent_from_an_intact_baseline_is_new(
+    settlement_tree: Path,
+    settlement_baseline_without_clone: Path,
+) -> None:
+    """Discriminating power of the fixture: nothing degraded, answer is ``new``."""
+
+    document, summary = _settlement_mcp_document(
+        settlement_tree,
+        baseline=settlement_baseline_without_clone,
+    )
+    assert _sole_mcp_function_clone(document)["novelty"] == "new"
+    assert _mapping_child(summary, "diff")["new_clones"] == 1
+
+
+def test_mcp_clone_present_in_the_baseline_is_legitimately_known(
+    settlement_tree: Path,
+    tmp_path: Path,
+) -> None:
+    """The opposite error is a defect too: real baseline debt must stay ``known``.
+
+    Published from the tree that contains the clone, so a trusted baseline really
+    did accept this fingerprint. Zero here, not null: the comparison ran and
+    found nothing new, and the two must stay tellable apart (`RP2`).
+    """
+
+    target = tmp_path / "with-clone.baseline.json"
+    lane_degradation.publish_baseline(settlement_tree, target)
+    document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+
+    assert _sole_mcp_function_clone(document)["novelty"] == "known"
+    assert _mapping_child(summary, "diff")["new_clones"] == 0
+
+
+def test_mcp_missing_container_is_comparison_unavailable(
+    settlement_tree: Path,
+    tmp_path: Path,
+) -> None:
+    """No container at all: the honest path, and it must stay honest.
+
+    The reason distinguishes this from the case above it: no lane to compare
+    against, rather than a comparable lane nobody compared (`B4`).
+    """
+
+    document, summary = _settlement_mcp_document(
+        settlement_tree,
+        baseline=tmp_path / "absent.baseline.json",
+    )
+    group = _sole_mcp_function_clone(document)
+    assert group["novelty"] == "unavailable"
+    assert group["novelty_reason"] == "lane_unavailable"
+    assert _mapping_child(summary, "baseline")["status"] == "missing"
+
+
+def test_mcp_root_digest_mismatch_is_comparison_unavailable(
+    settlement_tree: Path,
+    settlement_baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """An inauthentic container makes every lane's own digest meaningless (`B6`).
+
+    The boundary on the other side of the defect: the false ``known`` needed a
+    root-authentic container, and this run has none.
+    """
+
+    target = tmp_path / "root-broken.baseline.json"
+    payload = json.loads(settlement_baseline_without_clone.read_text("utf-8"))
+    payload["meta"]["root_digest"]["value"] = "0" * 64
+    target.write_text(json.dumps(payload), "utf-8")
+
+    document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+    assert _sole_mcp_function_clone(document)["novelty"] == "unavailable"
+    assert _mapping_child(summary, "baseline")["status"] == "integrity_failed"
+
+
+def test_mcp_keeps_every_other_family_comparison_when_one_lane_is_opaque(
+    settlement_tree: Path,
+    settlement_degraded_baseline: Path,
+) -> None:
+    """One opaque lane may only take its own family's comparison (`B5`).
+
+    The CLI half of this rule was already pinned in
+    ``tests/test_baseline_lane_degradation.py``; MCP condemned the whole
+    container, so six families lost a comparison that was legitimately available.
+    Same container, same lane, opposite direction of error from the clone novelty
+    above -- and both branches came from one all-or-nothing check.
+    """
+
+    document, _summary = _settlement_mcp_document(
+        settlement_tree,
+        baseline=settlement_degraded_baseline,
+    )
+    summary = _mapping_child(_mapping_child(document, "metrics"), "summary")
+
+    assert (
+        cast("dict[str, object]", summary["api_surface"])["baseline_diff_available"]
+        is False
+    )
+    for family in (
+        "complexity",
+        "coupling",
+        "coverage_adoption",
+        "dead_code",
+        "dependencies",
+        "health",
+    ):
+        block = cast("dict[str, object]", summary[family])
+        assert block["baseline_diff_available"] is True, family
+
+
+def test_mcp_and_cli_agree_on_one_degraded_baseline(
+    settlement_tree: Path,
+    settlement_degraded_baseline: Path,
+    tmp_path: Path,
+) -> None:
+    """One tree, one baseline file, two surfaces, one comparison layer.
+
+    The two surfaces observed the same source and derived the same analysis facts
+    while publishing opposite novelty for the same clone; the comparison digest is
+    the field that separated them. Comparing the digests rather than only the
+    words keeps the pin on the whole comparison projection instead of on the one
+    value that happened to be read first.
+    """
+
+    mcp_document, _summary = _settlement_mcp_document(
+        settlement_tree,
+        baseline=settlement_degraded_baseline,
+    )
+    cli_document = lane_degradation.cli_document(
+        settlement_tree,
+        baseline=settlement_degraded_baseline,
+        out=tmp_path / "cli-degraded.json",
+    )
+
+    def _digest(document: Mapping[str, object], kind: str) -> object:
+        digests = _mapping_child(_mapping_child(document, "integrity"), "digests")
+        return _mapping_child(digests, kind)["value"]
+
+    # Same observations and same analysis facts: the surfaces are looking at one
+    # repository state, so a divergence below is a divergence of judgement.
+    assert _digest(mcp_document, "observation") == _digest(cli_document, "observation")
+    assert _digest(mcp_document, "analysis_facts") == _digest(
+        cli_document, "analysis_facts"
+    )
+    assert _digest(mcp_document, "comparison") == _digest(cli_document, "comparison")
+    assert (
+        _sole_mcp_function_clone(mcp_document)["novelty"]
+        == _sole_mcp_function_clone(cli_document)["novelty"]
+        == "new"
+    )
+
+
+def test_mcp_context_incompatible_container_is_condemned_as_a_whole(
+    settlement_tree: Path,
+    settlement_baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """A container that does not describe this run is not "partly stale" (`B4`).
+
+    Comparison-*context* compatibility -- scope id, interpreter tag -- has one
+    answer for the whole container, and ``unavailable_lanes`` happens to report it
+    as a row per lane. Degrading it per lane the way genuine lane staleness is
+    degraded would publish a trusted baseline for a run the artifact does not
+    describe, which is the same collapse of `B4`'s four levels that this wave
+    exists to undo -- relocated into the provenance instead of the novelty.
+    """
+
+    mismatch_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
+    target = tmp_path / "foreign-interpreter.baseline.json"
+    target.write_bytes(settlement_baseline_without_clone.read_bytes())
+    lane_degradation.retag_container_python(target, python_tag=mismatch_tag)
+
+    _document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+    baseline = _mapping_child(summary, "baseline")
+
+    assert baseline["status"] == "mismatch_python_version"
+    assert baseline["trusted"] is False
+    assert baseline["compared_without_valid_baseline"] is True
+
+
+def test_mcp_publishes_adoption_and_api_comparison_availability(
+    settlement_tree: Path,
+    tmp_path: Path,
+) -> None:
+    """A trusted baseline's adoption and API comparisons must be reported as run.
+
+    This surface never passed the two availability facts to the report builder,
+    so both families said ``baseline_diff_available: false`` on every MCP run --
+    including runs whose baseline was fully trusted and whose metrics diff had
+    just been computed. The CLI passed them all along; one fact with two answers
+    is the defect class (`G2`), and here the MCP answer was the false one.
+    """
+
+    target = tmp_path / "trusted.baseline.json"
+    lane_degradation.publish_baseline(settlement_tree, target)
+    document, _summary = _settlement_mcp_document(settlement_tree, baseline=target)
+
+    summary = _mapping_child(_mapping_child(document, "metrics"), "summary")
+    baseline_projection = _mapping_child(document, "baseline")
+    assert baseline_projection["state"] == "trusted"
+    for family in (
+        "api_surface",
+        "complexity",
+        "coupling",
+        "coverage_adoption",
+        "dead_code",
+        "dependencies",
+        "health",
+    ):
+        block = cast("dict[str, object]", summary[family])
+        assert block["baseline_diff_available"] is True, family

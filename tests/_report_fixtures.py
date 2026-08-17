@@ -281,6 +281,8 @@ def build_test_report_document(
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
     baseline_container: BaselineContainerV3 | None = None,
     baseline_trust: TrustVector | None = None,
+    observed_function_clone_keys: Sequence[str] = (),
+    observed_block_clone_keys: Sequence[str] = (),
     gate_exit_code: int = 0,
     gate_reasons: tuple[str, ...] = (),
 ) -> dict[str, object]:
@@ -292,6 +294,12 @@ def build_test_report_document(
     the other two states: ``trusted``/``untrusted`` are only reachable when a
     container exists, and a test that hand-writes the state string instead
     would be pinning its own guess rather than the builder's projection.
+
+    ``observed_*_clone_keys`` populate the observation bundle's structural
+    facts, which is where ``baseline.sorted_novelty_facts`` draws its identities
+    from. Left empty -- as every earlier caller left them -- that projection has
+    nothing to classify, so its novelty decision was exercised by no test at all
+    and a mutation of it survived. Pass the group keys to reach it.
     """
 
     _source, registry = module_registry_context(
@@ -299,7 +307,10 @@ def build_test_report_document(
         module_name="pkg.module",
     )
     observation_bundle = build_observation_bundle(
-        scan_root=Path("."), module_registry=registry
+        scan_root=Path("."),
+        module_registry=registry,
+        function_clone_keys=observed_function_clone_keys,
+        block_clone_keys=observed_block_clone_keys,
     )
     gate_config = MetricGateConfig(
         fail_complexity=-1,

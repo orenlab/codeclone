@@ -816,9 +816,15 @@ def test_population_rides_every_surface_even_when_measured() -> None:
 #: Updating one side alone reds. Updating both is a two-line acknowledgement,
 #: and the acknowledgement is the point.
 _POPULATION_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.1",
+    "3.2",
     ("complete_empty", "complete_nonempty", "partial", "unmeasured"),
 )
+
+#: The sibling pin for ``novelty_reason`` lives in
+#: ``tests/test_report_contract_coverage.py``: same pairing, same reasoning, and
+#: it has to live there because this module holds no frozen import edge to the
+#: classifier that owns that vocabulary, and the architecture boundary ledger is
+#: shrink-only.
 
 
 def _health_block(population: str) -> dict[str, object]:

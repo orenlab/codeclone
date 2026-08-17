@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ... import ui_messages as ui
+from ...api.comparison import build_comparison_context
 from ...core._types import AnalysisResult
 from ...models import MetricsDiff, TrustVector
 from .baseline_state import CloneBaselineState, MetricsBaselineState
@@ -41,58 +42,37 @@ def build_diff_context(
     metrics_baseline_state: MetricsBaselineState,
     baseline_trust: TrustVector | None = None,
 ) -> DiffContext:
+    """Adapt the sole comparison owner to this surface's local shape.
+
+    The decision itself is not made here. It used to be, and MCP made the same
+    decision on different terms, so one degraded lane was enough for the two
+    surfaces to publish opposite novelty for one clone in one repository state.
+    The R3 door owns it now and both surfaces read the same answer.
+
+    The optional lanes are flattened to sets for this surface's local consumers,
+    which count them behind ``clone_novelty_available``; the honest optional
+    values travel to the report document from the owner itself.
+    """
+
     _ = baseline_path
-    function_lane_trusted = (
-        baseline_state.trusted_for_diff
-        if baseline_trust is None
-        else baseline_trust.root_verified
-        and any(
-            item.name == "clones.functions" and item.status == "trusted"
-            for item in baseline_trust.lanes
-        )
+    comparison = build_comparison_context(
+        func_groups=analysis.func_groups,
+        block_groups=analysis.block_groups,
+        project_metrics=analysis.project_metrics,
+        clone_baseline=baseline_state.baseline,
+        clone_trusted_for_diff=baseline_state.trusted_for_diff,
+        metrics_baseline=metrics_baseline_state.baseline,
+        metrics_trusted_for_diff=metrics_baseline_state.trusted_for_diff,
+        baseline_trust=baseline_trust,
     )
-    block_lane_trusted = (
-        baseline_state.trusted_for_diff
-        if baseline_trust is None
-        else baseline_trust.root_verified
-        and any(
-            item.name == "clones.blocks" and item.status == "trusted"
-            for item in baseline_trust.lanes
-        )
-    )
-    raw_new_func: set[str] = set()
-    raw_new_block: set[str] = set()
-    if function_lane_trusted or block_lane_trusted:
-        diff_func, diff_block = baseline_state.baseline.diff(
-            analysis.func_groups,
-            analysis.block_groups,
-        )
-        if function_lane_trusted:
-            raw_new_func = set(diff_func)
-        if block_lane_trusted:
-            raw_new_block = set(diff_block)
-    metrics_diff = None
-    if analysis.project_metrics is not None and metrics_baseline_state.trusted_for_diff:
-        metrics_diff = metrics_baseline_state.baseline.diff(analysis.project_metrics)
     return DiffContext(
-        new_func=raw_new_func,
-        new_block=raw_new_block,
-        new_clones_count=len(raw_new_func) + len(raw_new_block),
-        clone_novelty_available=function_lane_trusted or block_lane_trusted,
-        metrics_diff=metrics_diff,
-        coverage_adoption_diff_available=bool(
-            metrics_baseline_state.trusted_for_diff
-            and getattr(
-                metrics_baseline_state.baseline,
-                "has_coverage_adoption_snapshot",
-                False,
-            )
-        ),
-        api_surface_diff_available=bool(
-            metrics_baseline_state.trusted_for_diff
-            and getattr(metrics_baseline_state.baseline, "api_surface_snapshot", None)
-            is not None
-        ),
+        new_func=set(comparison.new_func or ()),
+        new_block=set(comparison.new_block or ()),
+        new_clones_count=comparison.new_clones_count,
+        clone_novelty_available=comparison.clone_novelty_available,
+        metrics_diff=comparison.metrics_diff,
+        coverage_adoption_diff_available=comparison.coverage_adoption_diff_available,
+        api_surface_diff_available=comparison.api_surface_diff_available,
     )
 
 
