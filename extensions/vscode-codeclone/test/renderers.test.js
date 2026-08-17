@@ -60,6 +60,10 @@ test("renderTriageMarkdown surfaces baseline mismatch context compactly", () => 
                 status: "mismatch_python_version",
                 trusted: false,
                 compared_without_valid_baseline: true,
+                // The producer publishes the provenance state alongside the tags;
+                // a fixture carrying the tags without it would be written in the
+                // reader's old dialect and would make a wrong reader look right.
+                interpreter_provenance: "foreign",
                 baseline_python_tag: "cp313",
                 runtime_python_tag: "cp314",
             },
@@ -87,6 +91,67 @@ test("renderTriageMarkdown surfaces baseline mismatch context compactly", () => 
         /Baseline: mismatch_python_version · untrusted · comparing without valid baseline/
     );
     assert.match(markdown, /Baseline tags: baseline cp313 · runtime cp314/);
+});
+
+function triageStateWithBaseline(baseline) {
+    return {
+        currentRunId: "abcd1234",
+        folder: {name: "demo"},
+        latestSummary: {
+            baseline,
+            health_scope: "repository",
+            health: {score: 90, grade: "A"},
+            findings: {
+                total: 1,
+                production: 1,
+                new_by_source_kind: {},
+            },
+        },
+        latestTriage: {
+            focus: "production",
+            findings: {
+                outside_focus: 0,
+                by_source_kind: {production: 1},
+            },
+            top_hotspots: {items: []},
+            top_suggestions: {items: []},
+        },
+    };
+}
+
+test("renderTriageMarkdown reports provenance for a trusted foreign-interpreter baseline", () => {
+    // The wave-2 regression in one line: this baseline is trusted, so
+    // `compared_without_valid_baseline` is false, and gating the row on it hid the
+    // provenance exactly where it became the only thing left to say.
+    const markdown = renderTriageMarkdown(
+        triageStateWithBaseline({
+            status: "ok",
+            trusted: true,
+            compared_without_valid_baseline: false,
+            interpreter_provenance: "foreign",
+            baseline_python_tag: "cp313",
+            runtime_python_tag: "cp314",
+        })
+    );
+
+    assert.match(markdown, /- Baseline: ok · trusted\n/);
+    assert.match(markdown, /- Baseline tags: baseline cp313 · runtime cp314/);
+});
+
+test("renderTriageMarkdown adds no interpreter row when the interpreters agree", () => {
+    const markdown = renderTriageMarkdown(
+        triageStateWithBaseline({
+            status: "ok",
+            trusted: true,
+            compared_without_valid_baseline: false,
+            interpreter_provenance: "same",
+            baseline_python_tag: "cp314",
+            runtime_python_tag: "cp314",
+        })
+    );
+
+    assert.doesNotMatch(markdown, /Baseline tags/);
+    assert.doesNotMatch(markdown, /cp314 · runtime cp314/);
 });
 
 test("renderSecuritySurfaceMarkdown keeps report-only security posture explicit", () => {

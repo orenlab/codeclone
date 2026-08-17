@@ -53,6 +53,7 @@ import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
+from codeclone.api.comparison import foreign_interpreter_provenance
 from codeclone.audit import DEFAULT_AUDIT_PATH, resolve_audit_path
 from codeclone.audit.events import AuditEvent
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
@@ -18753,6 +18754,13 @@ def test_mcp_foreign_interpreter_container_stays_trusted(
     mutation left this test green until the line below was added. The clone is in
     the tree and not in the baseline, so a comparison that really ran must call it
     ``new`` -- untrusted lanes would report ``unavailable`` instead (`B8`).
+
+    The provenance assertion belongs on this artifact rather than on a second one
+    built the same way: trust and origin being orthogonal is the whole claim, and
+    one container answering ``trusted`` and ``foreign`` at once is the direct
+    witness of it. Wave 2 removed the tag as a verdict and left every consumer
+    with only ``trusted`` to read, which is how the VS Code reader went silent
+    about a baseline it was right to trust.
     """
 
     mismatch_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
@@ -18766,8 +18774,135 @@ def test_mcp_foreign_interpreter_container_stays_trusted(
     assert baseline["status"] == "ok"
     assert baseline["trusted"] is True
     assert baseline["compared_without_valid_baseline"] is False
+    assert baseline["interpreter_provenance"] == "foreign"
     assert baseline["baseline_python_tag"] == mismatch_tag
+    assert baseline["runtime_python_tag"] == current_python_tag()
     assert _sole_mcp_function_clone(document)["novelty"] == "new"
+
+
+def _mcp_baseline_state_payload(
+    *,
+    baseline_python_tag: str | None,
+    runtime_python_tag: str,
+) -> Mapping[str, object]:
+    """The baseline summary payload this surface publishes for one tag pair."""
+
+    return mcp_helpers_mod._summary_trusted_state_payload(
+        {
+            "baseline": {
+                "loaded": True,
+                "status": "ok",
+                "trusted_for_diff": True,
+                "python_tag": baseline_python_tag,
+            },
+            "python_tag": runtime_python_tag,
+        },
+        key="baseline",
+    )
+
+
+@pytest.mark.parametrize(
+    ("baseline_python_tag", "runtime_python_tag", "expected"),
+    [
+        ("cp313", "cp314", "foreign"),
+        ("cp314", "cp314", "same"),
+        (None, "cp314", "unknown"),
+        ("", "cp314", "unknown"),
+        ("   ", "cp314", "unknown"),
+        ("cp313", "", "unknown"),
+    ],
+)
+def test_mcp_interpreter_provenance_keeps_same_apart_from_unknown(
+    baseline_python_tag: str | None,
+    runtime_python_tag: str,
+    expected: str,
+) -> None:
+    """ "The interpreters agree" and "no interpreter is known" stay apart (`G4`).
+
+    Both are the absence of a remark, and collapsing them reports a baseline
+    whose origin is known and identical as one whose origin nobody recorded. A
+    run that knows no runtime tag cannot compare either, so it is unknown rather
+    than foreign -- naming a difference against an unknown side would invent one.
+    """
+
+    payload = _mcp_baseline_state_payload(
+        baseline_python_tag=baseline_python_tag,
+        runtime_python_tag=runtime_python_tag,
+    )
+
+    assert payload["interpreter_provenance"] == expected
+
+
+def test_mcp_interpreter_provenance_answers_with_the_shared_owner() -> None:
+    """One artifact, one provenance answer, whichever surface is asked (`G3`).
+
+    ``api.comparison.foreign_interpreter_provenance`` is the sole owner, and the
+    CLI renders its answer verbatim. Case folding is the probe: the owner
+    compares tags exactly, so a surface that normalised on its own would call
+    ``CP313`` against ``cp313`` the same interpreter while the CLI prints the
+    remark -- one input, two answers about one artifact.
+
+    Scoped to pairs where both interpreters are on record, which is the owner's
+    precondition rather than its rule; the blank-tag case is pinned separately
+    below because there the answers legitimately differ.
+    """
+
+    pairs: tuple[tuple[str | None, str], ...] = (
+        ("cp313", "cp314"),
+        ("cp314", "cp314"),
+        ("CP313", "cp313"),
+        ("cp313 ", "cp313"),
+        (None, "cp314"),
+        ("", "cp314"),
+    )
+    for baseline_python_tag, runtime_python_tag in pairs:
+        owner_remark = foreign_interpreter_provenance(
+            baseline_python_tag=baseline_python_tag,
+            runtime_python_tag=runtime_python_tag,
+        )
+        payload = _mcp_baseline_state_payload(
+            baseline_python_tag=baseline_python_tag,
+            runtime_python_tag=runtime_python_tag,
+        )
+        observed = payload["interpreter_provenance"]
+        if owner_remark is None:
+            assert observed != "foreign", (baseline_python_tag, runtime_python_tag)
+        else:
+            assert observed == "foreign", (baseline_python_tag, runtime_python_tag)
+            assert payload["baseline_python_tag"] == owner_remark
+
+
+def test_mcp_interpreter_provenance_needs_a_tag_before_it_names_a_difference() -> None:
+    """A blank interpreter tag is no interpreter, and this surface says so.
+
+    ``BaselineMeta`` refuses an empty python tag and admits a whitespace-only
+    one, so a container carrying ``"   "`` is admissible. The owner compares what
+    it is handed and reports that blank as a difference; this surface does not
+    ask it, because the same blankness already keeps ``baseline_python_tag`` out
+    of the payload. Publishing ``foreign`` there would announce a difference with
+    no tag to show for it -- a remark naming nothing, which is a defect rather
+    than a message (`CLI1`).
+
+    A deliberate divergence from the owner, therefore, and pinned here so it
+    stays deliberate: it is the owner's precondition, not a second copy of its
+    rule, and every case where both tags are on record still answers with the
+    owner above.
+    """
+
+    payload = _mcp_baseline_state_payload(
+        baseline_python_tag="   ",
+        runtime_python_tag="cp314",
+    )
+
+    assert payload["interpreter_provenance"] == "unknown"
+    assert "baseline_python_tag" not in payload
+    assert (
+        foreign_interpreter_provenance(
+            baseline_python_tag="   ",
+            runtime_python_tag="cp314",
+        )
+        == "   "
+    )
 
 
 def test_mcp_publishes_adoption_and_api_comparison_availability(

@@ -19,6 +19,7 @@ moduleInternals._load = function patchedLoad(request, parent, isMain) {
 };
 
 const {
+    baselineProvenanceDetails,
     coverageJoinPayload,
     coverageJoinReviewItemCount,
     formatCoverageJoinMeasuredUnits,
@@ -40,6 +41,52 @@ const {
 } = require("../src/formatters");
 
 moduleInternals._load = originalLoad;
+
+test("baseline provenance rows render the published fact, not the trust verdict", () => {
+    // The producer publishes `interpreter_provenance` from the single owner,
+    // `api.comparison.foreign_interpreter_provenance`. This reader renders it and
+    // derives nothing: a trusted baseline taken elsewhere still has provenance to
+    // report, so `compared_without_valid_baseline` must not gate the row.
+    assert.deepEqual(
+        baselineProvenanceDetails({
+            status: "ok",
+            trusted: true,
+            compared_without_valid_baseline: false,
+            interpreter_provenance: "foreign",
+            baseline_python_tag: "cp313",
+            runtime_python_tag: "cp314",
+        }),
+        [{label: "Baseline tags", value: "baseline cp313 · runtime cp314"}]
+    );
+});
+
+test("baseline provenance rows stay silent when there is no difference to report", () => {
+    // "The interpreters agree" and "no interpreter is known" are different states
+    // upstream, and neither is a remark: printing `cp314 · cp314` on every healthy
+    // run would report presence where the fact is difference.
+    assert.deepEqual(
+        baselineProvenanceDetails({
+            status: "ok",
+            trusted: true,
+            compared_without_valid_baseline: false,
+            interpreter_provenance: "same",
+            baseline_python_tag: "cp314",
+            runtime_python_tag: "cp314",
+        }),
+        []
+    );
+    assert.deepEqual(
+        baselineProvenanceDetails({
+            status: "missing",
+            trusted: false,
+            compared_without_valid_baseline: true,
+            interpreter_provenance: "unknown",
+        }),
+        []
+    );
+    assert.deepEqual(baselineProvenanceDetails({}), []);
+    assert.deepEqual(baselineProvenanceDetails(null), []);
+});
 
 test("coverage join formatters render joined summary from canonical metrics facts", () => {
     const payload = {

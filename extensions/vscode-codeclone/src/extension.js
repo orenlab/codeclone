@@ -20,6 +20,7 @@ const {
     TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
 } = require("./constants");
 const {
+    baselineProvenanceDetails,
     capitalize,
     compactDecimal,
     coverageJoinPayload,
@@ -29,7 +30,6 @@ const {
     findingIcon,
     firstNormalizedLocation,
     focusModeSpec,
-    formatBaselineTags,
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,
@@ -3767,7 +3767,6 @@ class CodeCloneController {
         if (node.id === "overview.run") {
             const inventory = safeObject(state.latestSummary.inventory);
             const baseline = safeObject(state.latestSummary.baseline);
-            const baselineTags = formatBaselineTags(baseline);
             const launch = this.connectionInfo.launchSpec;
             return [
                 this.detailNode("Workspace", state.folder.name),
@@ -3799,11 +3798,17 @@ class CodeCloneController {
                 this.detailNode("Callables", number(inventory.functions)),
                 this.detailNode("Classes", number(inventory.classes)),
                 this.detailNode("Baseline", formatBaselineState(baseline)),
-                ...(baseline.compared_without_valid_baseline &&
-                baselineTags !== "unknown"
-                    ? [this.detailNode("Baseline tags", baselineTags)]
-                    : []),
-                ...(baseline.compared_without_valid_baseline && launch
+                // Same published fact, same shared reader as the triage markdown:
+                // two surfaces deciding this separately is how they came to
+                // disagree about one baseline.
+                ...baselineProvenanceDetails(baseline).map((detail) =>
+                    this.detailNode(detail.label, detail.value)
+                ),
+                // Which launcher this extension resolved. Nothing about the
+                // baseline can make it more or less true, so no baseline fact
+                // gates it — only whether a runtime was started at all. The
+                // session view already reports it on exactly those terms.
+                ...(launch
                     ? [this.detailNode("Runtime source", launchSpecOrigin(launch))]
                     : []),
                 this.detailNode(

@@ -207,6 +207,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **A baseline taken on another interpreter says so again, and the run summary publishes that as a fact.** Dropping the
+  interpreter tag as a trust condition also dropped the only signal the VS Code extension used to decide whether to show
+  the tags at all: it gated them on `compared_without_valid_baseline`, which is `false` for a trusted cross-interpreter
+  baseline, so the provenance went silent exactly where it became the only thing worth saying. The MCP run summary's
+  `baseline` object now carries an additive `interpreter_provenance` field, computed by the same owner the CLI note
+  already uses — `foreign` when the baseline was taken elsewhere (its tag stays in `baseline_python_tag`), `same` when it
+  was taken on this interpreter, and `unknown` when one of the two tags is not on record. `same` and `unknown` are
+  deliberately different words: both mean "no remark", but one says the origin is known and identical while the other
+  says nobody recorded it. Consumers render the published state instead of deriving provenance from a verdict about
+  trust, so a healthy run reports no interpreter row rather than repeating `cp314 · cp314`.
+- **The VS Code overview stops gating the resolved MCP runtime source on baseline trust.** Which launcher the extension
+  resolved is a fact about its own connection; it was shown only while a baseline was untrusted — a condition unrelated
+  to it, which hid the row on healthy runs while the session view reported the same fact unconditionally.
 - **A clone whose lane was never compared is no longer reported as known baseline debt.** `novelty="known"` means a
   trusted baseline accepted that fingerprint; the report document derived it from an empty difference set, which is the
   same value a comparison that never ran produces. The MCP surface hit exactly that: after it declined to trust a

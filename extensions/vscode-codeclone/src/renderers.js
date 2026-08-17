@@ -6,10 +6,10 @@ const {
 } = require("./support");
 
 const {
+    baselineProvenanceDetails,
     capitalize,
     compactDecimal,
     decimal,
-    formatBaselineTags,
     formatBaselineState,
     formatCoverageJoinLocation,
     formatCoverageJoinReviewSignal,
@@ -217,7 +217,6 @@ function renderTriageMarkdown(state) {
     );
     const items = safeArray(topHotspots.items);
     const suggestions = safeArray(topSuggestions.items);
-    const baselineTags = formatBaselineTags(baseline);
     const lines = [
         "# CodeClone Production Triage",
         "",
@@ -230,8 +229,8 @@ function renderTriageMarkdown(state) {
         `- New findings: ${formatSourceKindSummary(findings.new_by_source_kind)}`,
         `- Source kinds: ${formatSourceKindSummary(triageFindings.by_source_kind)}`,
     ];
-    if (baseline.compared_without_valid_baseline && baselineTags !== "unknown") {
-        lines.push(`- Baseline tags: ${baselineTags}`);
+    for (const detail of baselineProvenanceDetails(baseline)) {
+        lines.push(`- ${detail.label}: ${detail.value}`);
     }
     if (items.length > 0) {
         lines.push(

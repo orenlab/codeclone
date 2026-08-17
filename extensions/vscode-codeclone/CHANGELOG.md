@@ -2,6 +2,13 @@
 
 ## 0.3.0
 
+- baseline interpreter provenance is rendered from the server's published
+  `interpreter_provenance` state instead of being gated on
+  `compared_without_valid_baseline`: a trusted baseline taken on another
+  interpreter now reports its tags in both the triage markdown and the overview
+  tree, and a run whose interpreters agree reports no row at all
+- **Runtime source** in the overview no longer appears only while a baseline is
+  untrusted; it reports the resolved launcher whenever one was started
 - add **Show Trajectory Dashboard** — secure read-only webview over MCP
   `query_engineering_memory(mode=trajectory_dashboard)` with stored trajectory
   counts, per-agent aggregation, and anomaly highlights

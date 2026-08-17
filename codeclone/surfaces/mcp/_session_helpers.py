@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import os
+from typing import Literal
 
+from ...api.comparison import foreign_interpreter_provenance
 from ...cache.store import Cache
 from ...contracts import REPORT_RUN_IDENTITY_TIER, REPORT_SCHEMA_VERSION
 from ...domain.findings import (
@@ -78,6 +80,12 @@ from ._session_shared import (
 from .messages import remediation as remediation_msgs
 from .messages.facts import SECURITY_SURFACES_SUMMARY_NOTE
 from .payloads import short_id
+
+#: Where a loaded baseline was taken, relative to the interpreter running now.
+#: ``unknown`` is not a third kind of difference: it says the two interpreters
+#: could not be compared at all, which is a different absence from ``same``
+#: (`G4`). The difference itself is owned by ``api.comparison``.
+InterpreterProvenance = Literal["foreign", "same", "unknown"]
 
 _MCP_MAX_PROCESS_COUNT = 64
 
@@ -777,6 +785,40 @@ def _summary_analysis_profile_payload(summary: Mapping[str, object]) -> dict[str
     return {key: value for key, value in payload.items() if value >= 0}
 
 
+def _interpreter_provenance_state(
+    *,
+    baseline_python_tag: str,
+    runtime_python_tag: str,
+) -> InterpreterProvenance:
+    """Name where a baseline was taken, as a fact a consumer can render.
+
+    Three states, because two of them are different absences (`G4`). ``unknown``
+    means no comparison of interpreters was possible -- one of the two tags is
+    not on record -- and ``same`` means it was possible and found no difference.
+    A consumer that received one word for both would report a baseline whose
+    origin is known and identical as one whose origin nobody wrote down.
+
+    The difference itself is decided by ``api.comparison`` and only rendered
+    here: the CLI already publishes that owner's answer, and a second
+    implementation on this side would be two authorities over one artifact
+    (`G2`, `G3`, `P3`). This function supplies the owner's precondition -- two
+    tags to compare -- and never its rule.
+
+    The tags reach the owner exactly as the artifact carries them. Whether two
+    tags name one interpreter is the owner's comparison, so normalising them on
+    the way in would be this surface deciding a narrower question than the CLI
+    asks and answering it differently for the same artifact.
+    """
+
+    if not baseline_python_tag.strip() or not runtime_python_tag.strip():
+        return "unknown"
+    foreign = foreign_interpreter_provenance(
+        baseline_python_tag=baseline_python_tag,
+        runtime_python_tag=runtime_python_tag,
+    )
+    return "same" if foreign is None else "foreign"
+
+
 def _summary_trusted_state_payload(
     summary: Mapping[str, object],
     *,
@@ -793,10 +835,22 @@ def _summary_trusted_state_payload(
         payload["compared_without_valid_baseline"] = not trusted
         baseline_python_tag = baseline.get("python_tag")
         runtime_python_tag = summary.get("python_tag")
-        if isinstance(baseline_python_tag, str) and baseline_python_tag.strip():
+        baseline_tag = (
+            baseline_python_tag if isinstance(baseline_python_tag, str) else ""
+        )
+        runtime_tag = runtime_python_tag if isinstance(runtime_python_tag, str) else ""
+        if baseline_tag.strip():
             payload["baseline_python_tag"] = baseline_python_tag
-        if isinstance(runtime_python_tag, str) and runtime_python_tag.strip():
+        if runtime_tag.strip():
             payload["runtime_python_tag"] = runtime_python_tag
+        # Published unconditionally, because the provenance of a baseline is a
+        # fact about the artifact and not a consequence of trusting it. Gating it
+        # on the trust verdict is what left the VS Code reader silent about a
+        # trusted cross-interpreter baseline.
+        payload["interpreter_provenance"] = _interpreter_provenance_state(
+            baseline_python_tag=baseline_tag,
+            runtime_python_tag=runtime_tag,
+        )
     return payload
 
 

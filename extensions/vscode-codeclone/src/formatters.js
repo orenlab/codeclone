@@ -87,6 +87,28 @@ function formatBaselineTags(payload) {
     return parts.length > 0 ? parts.join(" · ") : "unknown";
 }
 
+/**
+ * Detail rows for a baseline whose origin the server has something to say about.
+ *
+ * The server publishes `interpreter_provenance` — `foreign`, `same` or `unknown`
+ * — computed by the single owner of that question, `api.comparison`. This reader
+ * renders that answer and decides nothing: it must not gate provenance on
+ * `compared_without_valid_baseline`, which reports trust, nor re-derive the
+ * difference from the two tags, which would put a second authority next to the
+ * server's. `same` and `unknown` are different states upstream and neither is a
+ * remark, so both yield no row.
+ *
+ * @param {unknown} payload baseline state payload from the run summary
+ * @returns {Array<{label: string, value: string}>}
+ */
+function baselineProvenanceDetails(payload) {
+    const entry = safeObject(payload);
+    if (String(entry.interpreter_provenance || "").trim() !== "foreign") {
+        return [];
+    }
+    return [{label: "Baseline tags", value: formatBaselineTags(entry)}];
+}
+
 function formatCacheSummary(payload) {
     const entry = safeObject(payload);
     const usage = entry.used ? "used" : "fresh";
@@ -590,6 +612,7 @@ function treeAccessibilityInformation(node) {
 }
 
 module.exports = {
+    baselineProvenanceDetails,
     capitalize,
     compactDecimal,
     decimal,
