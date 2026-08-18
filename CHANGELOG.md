@@ -5,6 +5,12 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The MCP context envelope names its own shape.** Dropping the invariant capability and drill-down
+  tables from every response changed the envelope's key set while `contract_version` still said
+  `1.0`. Both readers compare that field by exact equality and fall back to their own estimator when
+  it differs, so two shapes under one version could not be told apart by the only consumer that
+  reads it. The version is now `1.1`, and the published key set is pinned beside it: changing the
+  shape reds, and the increment stays a human decision.
 ### Breaking changes
 
 - **Report schema advanced to `3.2`.** `novelty_reason` — carried beside `novelty` on every clone and design finding —

@@ -671,3 +671,38 @@ def test_enforcing_envelope_never_claims_a_budget_it_did_not_hold() -> None:
     assert envelope["mandatory_overflow"] is True
     assert enforcement["response_budget"] is False
     assert blocked["response_budget"] == ["response_exceeds_limit_after_packing"]
+
+
+def test_envelope_shape_and_contract_version_move_together() -> None:
+    """The published key set is the shape the contract version names.
+
+    ``payloads._payload_context_units`` and ``_valid_context_envelope`` both
+    compare ``contract_version`` by **exact equality**: an envelope whose version
+    does not match is not trusted for its own estimate. So two different shapes
+    published under one version cannot be told apart by the only consumer that
+    reads the field, and the observer would trust an estimate produced by a
+    shape it no longer knows.
+
+    Changing the emitted keys therefore reds here, and whoever fixes it has to
+    look at the version on the line below. The increment stays a human decision
+    -- a machine cannot tell a shape reduction from an addition -- but going
+    unnoticed is what this removes.
+    """
+
+    envelope = cast(
+        "dict[str, object]",
+        attach_passive_context_governance({"status": "accepted"})["context_governance"],
+    )
+
+    assert governance_mod.CONTEXT_GOVERNANCE_CONTRACT_VERSION == "1.1"
+    assert set(envelope) == {
+        "contract_version",
+        "estimator",
+        "limit",
+        "estimated",
+        "truncated",
+        "mandatory_overflow",
+        "mode",
+        "enforcement",
+        "enforcement_blocked",
+    }

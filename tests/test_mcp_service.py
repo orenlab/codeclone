@@ -12327,7 +12327,11 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "truncated": context_governance["truncated"],
         "mandatory_overflow": context_governance["mandatory_overflow"],
     } == {
-        "contract_version": "1.0",
+        # Read from the owner, not restated: a literal here is a second place
+        # the envelope's contract version lives, and it goes stale silently.
+        "contract_version": (
+            mcp_context_governance_mod.CONTEXT_GOVERNANCE_CONTRACT_VERSION
+        ),
         "estimator": "utf8_bytes_div_4_v1",
         "mode": "partial_enforce",
         "truncated": False,

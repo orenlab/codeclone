@@ -22,7 +22,14 @@ import orjson
 
 from ...utils.payload_narrow import is_record_mapping
 
-CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.0"
+#: The version the envelope publishes for its own shape. Both readers --
+#: ``payloads._payload_context_units`` and ``_valid_context_envelope`` -- compare
+#: it by **exact equality** and fall back to their own estimator when it differs,
+#: so an envelope carrying a shape this version no longer describes would be
+#: trusted for an estimate the reader cannot interpret. 1.1 drops the invariant
+#: capability and drill-down tables from the per-response payload; the routes now
+#: ride the omitted lane that needs them.
+CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.1"
 CONTEXT_GOVERNANCE_DIGEST_VERSION: Final = "1"
 CONTEXT_GOVERNANCE_ESTIMATOR: Final = "utf8_bytes_div_4_v1"
 DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2200
