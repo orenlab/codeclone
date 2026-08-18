@@ -512,7 +512,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     # (`G4`).
     suppressed = suppressed_clone_groups(payload)
     if suppressed.present:
-        lines.append("#### Suppressed Golden Fixture Clone Groups")
+        lines.append(f"#### {md_msgs.MD_SUPPRESSED_CLONE_GROUPS_HEADING}")
         lines.append("")
         _append_suppressed_clone_findings(lines, groups=suppressed.groups)
 

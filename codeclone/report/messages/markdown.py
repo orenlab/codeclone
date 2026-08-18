@@ -59,6 +59,11 @@ MD_MORE_OCCURRENCES: Final = "... and {count} more occurrence(s)"
 
 MD_NONE: Final = "_None._"
 MD_SUPPRESSED_CLONE_GROUP: Final = "Suppressed clone group"
+# The section heading above the per-group headings on the line before it.
+# Both are copy this projection prints, and copy lives here: spelled into
+# the renderer instead, one file said the same kind of thing two ways and
+# only one of them could be translated, glossed or reworded (`SH1`).
+MD_SUPPRESSED_CLONE_GROUPS_HEADING: Final = "Suppressed Golden Fixture Clone Groups"
 
 MD_HEADING_CLONE: Final = "{category} clone group{suffix}"
 MD_HEADING_STRUCTURAL: Final = "Structural finding: {category}"

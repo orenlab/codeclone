@@ -123,6 +123,12 @@ def test_capability_declaration_is_read_from_its_owner_not_from_responses() -> N
 
     It says what this server can do, not what this answer contains, so it is
     read from its owner instead of being restated in every envelope.
+
+    The accessor that used to serve it here had no production caller: the
+    envelope deliberately does not carry the table, and no tool published it
+    either, so the only readers were this assertion and one in the MCP service
+    suite. The declaration itself stays and is pinned directly; the wrapper
+    around it was removed rather than kept alive by its own tests.
     """
     envelope = cast(
         "dict[str, object]",
@@ -131,7 +137,7 @@ def test_capability_declaration_is_read_from_its_owner_not_from_responses() -> N
 
     assert "capabilities" not in envelope
     assert "drill_down" not in envelope
-    assert governance_mod.passive_context_capabilities() == {
+    assert governance_mod._PASSIVE_CAPABILITIES == {
         "typed_receipt_alias": True,
         "durable_receipt_lookup": True,
         "durable_patch_trail_lookup": True,

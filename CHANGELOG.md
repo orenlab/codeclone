@@ -5,6 +5,11 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **`passive_context_capabilities()` is gone from `codeclone.surfaces.mcp._context_governance`.** The
+  accessor served the observe-mode capability table, which the envelope stopped carrying when the
+  envelope named its own shape; no tool published it afterwards and no production code called it.
+  The declaration itself is unchanged — only the unused accessor around it was removed. Nothing in
+  the MCP tool contract, the response envelope or the CLI referenced it.
 - **The MCP context envelope names its own shape.** Dropping the invariant capability and drill-down
   tables from every response changed the envelope's key set while `contract_version` still said
   `1.0`. Both readers compare that field by exact equality and fall back to their own estimator when

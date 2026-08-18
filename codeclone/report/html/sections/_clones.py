@@ -15,6 +15,11 @@ from codeclone.api.finding_groups import (
     suppressed_clone_groups,
     suppressed_group_items,
 )
+from codeclone.contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+)
 from codeclone.findings.ids import clone_group_id
 from codeclone.utils import coerce as _coerce
 
@@ -58,10 +63,14 @@ _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
 _HEX_SET = frozenset("0123456789abcdefABCDEF")
+# The key is the vocabulary and comes from its owner; the wording is this
+# panel's own presentation and stays here. Spelling the key too made the panel
+# a second authority over a value it only displays -- a rename of the kind
+# would have left every row labelled "Clone" and nothing would have failed.
 _SUPPRESSED_KIND_LABELS = {
-    "function": "Function",
-    "block": "Block",
-    "segment": "Segment",
+    CLONE_KIND_FUNCTION: "Function",
+    CLONE_KIND_BLOCK: "Block",
+    CLONE_KIND_SEGMENT: "Segment",
 }
 
 
@@ -437,10 +446,10 @@ def _clone_kind_for_section(
     section_id: str,
 ) -> Literal["function", "block", "segment"]:
     if section_id == "functions":
-        return "function"
+        return CLONE_KIND_FUNCTION
     if section_id == "blocks":
-        return "block"
-    return "segment"
+        return CLONE_KIND_BLOCK
+    return CLONE_KIND_SEGMENT
 
 
 def _build_group_data_attrs(

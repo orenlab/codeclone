@@ -9,7 +9,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from ..contracts import DEFAULT_COVERAGE_MIN, DEFAULT_MIN_LOC, DEFAULT_MIN_STMT
+from ..contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    DEFAULT_COVERAGE_MIN,
+    DEFAULT_MIN_LOC,
+    DEFAULT_MIN_STMT,
+)
 from ..findings.clones.golden_fixtures import (
     build_suppressed_clone_groups,
     split_clone_groups_for_golden_fixtures,
@@ -266,19 +273,19 @@ def analyze(
     )
     func_split = split_clone_groups_for_golden_fixtures(
         groups=build_groups(clone_lane_units),
-        kind="function",
+        kind=CLONE_KIND_FUNCTION,
         golden_fixture_paths=golden_fixture_paths,
         scan_root=str(boot.root),
     )
     block_split = split_clone_groups_for_golden_fixtures(
         groups=build_block_groups(processing.blocks),
-        kind="block",
+        kind=CLONE_KIND_BLOCK,
         golden_fixture_paths=golden_fixture_paths,
         scan_root=str(boot.root),
     )
     segment_split = split_clone_groups_for_golden_fixtures(
         groups=build_segment_groups(processing.segments),
-        kind="segment",
+        kind=CLONE_KIND_SEGMENT,
         golden_fixture_paths=golden_fixture_paths,
         scan_root=str(boot.root),
     )
@@ -327,17 +334,17 @@ def analyze(
         suppressed_segment_groups_report = {}
     suppressed_clone_groups = (
         *build_suppressed_clone_groups(
-            kind="function",
+            kind=CLONE_KIND_FUNCTION,
             groups=func_split.suppressed_groups,
             matched_patterns=func_split.matched_patterns,
         ),
         *build_suppressed_clone_groups(
-            kind="block",
+            kind=CLONE_KIND_BLOCK,
             groups=suppressed_block_groups_report,
             matched_patterns=block_split.matched_patterns,
         ),
         *build_suppressed_clone_groups(
-            kind="segment",
+            kind=CLONE_KIND_SEGMENT,
             groups=suppressed_segment_groups_report,
             matched_patterns=segment_split.matched_patterns,
         ),

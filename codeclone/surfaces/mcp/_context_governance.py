@@ -187,12 +187,6 @@ def context_governance_digest(kind: str, payload: object) -> dict[str, str]:
     }
 
 
-def passive_context_capabilities() -> dict[str, object]:
-    """Return response-governance capabilities advertised in observe mode."""
-
-    return dict(_PASSIVE_CAPABILITIES)
-
-
 def passive_drill_down_reachability() -> dict[str, dict[str, object]]:
     """Return exact drill-down routes and blocked continuations for observe mode."""
 
@@ -585,7 +579,6 @@ __all__ = [
     "attach_start_context_governance",
     "context_governance_digest",
     "estimate_response_context_units",
-    "passive_context_capabilities",
     "passive_drill_down_reachability",
     "passive_enforcement_blockers",
 ]

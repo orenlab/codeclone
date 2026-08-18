@@ -12427,8 +12427,7 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     }
     assert "capabilities" not in context_governance
     assert (
-        mcp_context_governance_mod.passive_context_capabilities()["typed_receipt_alias"]
-        is True
+        mcp_context_governance_mod._PASSIVE_CAPABILITIES["typed_receipt_alias"] is True
     )
     assert isinstance(context_governance["estimated"], int)
 

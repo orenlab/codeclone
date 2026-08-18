@@ -46,6 +46,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
+from codeclone import contracts as vocabulary_owner
 from codeclone.api.finding_groups import (
     SUPPRESSED_KIND_ORDER,
     iter_finding_groups,
@@ -1159,3 +1162,384 @@ def test_the_scan_universe_is_what_git_tracks_not_what_the_tree_holds() -> None:
         assert "codeclone/_untracked_probe.py" not in _tracked_python_sources()
     finally:
         untracked.unlink()
+
+
+# --------------------------------------------------------------------------------------
+# The vocabulary restatement ratchet
+#
+# The authority ratchet above asks who *declares* the vocabulary. This one asks
+# who *spells its values* -- which is the second authority the relocation left
+# standing. ``mut-2`` of wave 11 found it: the producer stamped every clone
+# group with ``kind="function"``, the wire type restated the same three words
+# as a ``Literal``, and the HTML panel keyed its labels off a fourth copy. Move
+# the owner and none of them follow; change one of them and the runtime stays
+# byte-identical until the day the two spellings mean different things.
+#
+# PEP 586 does not accept a constant inside ``Literal[...]``, so the type
+# declaration cannot borrow and the second spelling is not removable. What is
+# removable is its **right to diverge**: the values are checked against the
+# owner instead of being trusted to a comment. Every other site can borrow, and
+# must.
+#
+# The hard part is telling the clone vocabulary apart from the words it shares.
+# ``"function"`` is also an ``ApiSymbolKind``, a ``DeadCodeCandidateKind``, a
+# ``RuntimeReachabilityTargetKind`` and a lexical scope kind. Those are other
+# contracts that happen to spell one value alike, and binding them to this
+# owner would be the same defect as binding the baseline's lane names to it:
+# one value under two contracts, and a bump meant for one moves the other.
+# So the value-set is the discriminator, foreign shapes are registered by
+# their own shape with the contract they belong to, and the scan for bare
+# restatements governs only modules that already borrow from this owner --
+# which no foreign vocabulary does.
+# --------------------------------------------------------------------------------------
+
+#: The kind names, taken from the register the authority ratchet already
+#: protects rather than restated, so a rename has exactly one place to fail.
+_CLONE_KIND_NAMES = frozenset(
+    name for name in _CLONE_VOCABULARY if name.startswith("CLONE_KIND_")
+)
+
+#: The values themselves, read off the owner by those names. Not the door's
+#: ``SUPPRESSED_KIND_ORDER``: that is a presentation contract which happens to
+#: carry the same three values, and a guard that quoted it would be measuring
+#: the display order's agreement with itself.
+_OWNED_CLONE_KINDS = frozenset(
+    getattr(vocabulary_owner, name) for name in _CLONE_KIND_NAMES
+)
+
+#: Vocabularies that spell one of the clone kinds and mean something else,
+#: keyed by their own sorted value set and named by the contract they belong
+#: to. Two-sided: an unregistered overlapping shape fails as a new second
+#: authority, and a registered shape that no longer occurs fails as a stale
+#: entry, so the register cannot quietly become a permit for a dead spelling.
+_FOREIGN_KIND_VOCABULARIES: dict[tuple[str, ...], str] = {
+    ("class", "comprehension", "function", "lambda", "module"): (
+        "lexical scope kinds -- codeclone.analysis.binding._ScopeKind"
+    ),
+    ("class", "constant", "function", "method"): (
+        "public API symbol kinds -- codeclone.models.ApiSymbolKind"
+    ),
+    ("class", "function", "import", "method"): (
+        "dead-code candidate kinds -- codeclone.models.DeadCodeCandidateKind"
+    ),
+    ("class", "function", "method"): (
+        "declaration kinds -- codeclone.analysis.suppressions.DeclarationKind and "
+        "codeclone.models.RuntimeReachabilityTargetKind"
+    ),
+    ("function", "method"): (
+        "the dead-candidate function/method split -- "
+        "codeclone.analysis._module_walk._dead_candidate_kind"
+    ),
+}
+
+#: Modules required to take the clone kinds from the owner, with the reason
+#: each one needs them. The pairing matters: the restatement scan below only
+#: governs modules that borrow, so without this half a module could revert to
+#: literals and drop the import in the same edit and escape both guards.
+_CLONE_VOCABULARY_BORROWERS: dict[str, str] = {
+    "codeclone/core/pipeline.py": (
+        "the producer stamps every clone group and every suppressed clone group "
+        "with its kind"
+    ),
+    "codeclone/report/html/sections/_clones.py": (
+        "the panel keys its kind labels and maps a section id onto a kind"
+    ),
+}
+
+#: Borrowers that still restate a value elsewhere in the same module, with what
+#: blocks each one. A work queue with a deadline, not a permit: a new offender
+#: fails as growth and a repaired one fails as a stale entry.
+_VOCABULARY_RESTATED_PENDING: dict[str, str] = {
+    "codeclone/report/document/_findings_groups.py": (
+        'five ``match kind: case "function"`` value patterns. A match pattern '
+        "cannot bind a bare imported name -- it would capture, not compare -- so "
+        "routing these through the owner needs dotted value patterns and a "
+        "different import shape than every other consumer uses"
+    ),
+    "codeclone/report/document/findings.py": (
+        "three suppressed-bucket lookups keyed by the singular kind"
+    ),
+    "codeclone/surfaces/mcp/_session_shared.py": (
+        "the clone short-id alias table keys off the kind"
+    ),
+}
+
+
+def _parsed_tracked_sources() -> dict[str, ast.Module]:
+    """Every tracked source under the scanned trees, parsed once.
+
+    Shares ``_UNPARSABLE_SOURCES`` with the container scan for the same reason
+    it exists there: a source this scanner cannot read is an unresolved site
+    that must be named, not an absence of one (`I5`).
+    """
+
+    parsed: dict[str, ast.Module] = {}
+    for relative in _tracked_python_sources():
+        tree = _parsed_or_named_unreadable(relative)
+        if tree is not None:
+            parsed[relative] = tree
+    return parsed
+
+
+def _parsed_or_named_unreadable(relative: str) -> ast.Module | None:
+    """Parse one tracked source, naming it instead of dying when it cannot be."""
+
+    try:
+        return ast.parse((_REPO_ROOT / relative).read_text("utf-8"))
+    except SyntaxError:
+        _UNPARSABLE_SOURCES.add(relative)
+        return None
+
+
+def _subscript_base_name(node: ast.Subscript) -> str | None:
+    base = node.value
+    if isinstance(base, ast.Name):
+        return base.id
+    if isinstance(base, ast.Attribute):
+        return base.attr
+    return None
+
+
+def _literal_kind_vocabularies(tree: ast.AST) -> list[tuple[int, tuple[str, ...]]]:
+    """Every ``Literal[...]`` whose string arguments touch the clone kinds."""
+
+    found: list[tuple[int, tuple[str, ...]]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript) or _subscript_base_name(node) != (
+            "Literal"
+        ):
+            continue
+        arguments = (
+            node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        )
+        values = tuple(
+            argument.value
+            for argument in arguments
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str)
+        )
+        if set(values) & _OWNED_CLONE_KINDS:
+            found.append((node.lineno, values))
+    return found
+
+
+def _kind_constants_outside_a_literal(tree: ast.AST) -> tuple[tuple[int, str], ...]:
+    """Clone-kind strings spelled as ordinary constants, not as a type.
+
+    ``Literal[...]`` arguments are excluded because they are the one form that
+    cannot borrow; they are governed by value against the owner instead.
+    """
+
+    typed: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and _subscript_base_name(node) == "Literal":
+            typed.update(id(argument) for argument in ast.walk(node.slice))
+    return tuple(
+        sorted(
+            (node.lineno, node.value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in _OWNED_CLONE_KINDS
+            and id(node) not in typed
+        )
+    )
+
+
+def _clone_kinds_borrowed_by(tree: ast.AST) -> tuple[str, ...]:
+    """The owner's kind constants this module imports or reads by attribute."""
+
+    borrowed: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            borrowed.update(
+                alias.name for alias in node.names if alias.name in _CLONE_KIND_NAMES
+            )
+        elif isinstance(node, ast.Attribute) and node.attr in _CLONE_KIND_NAMES:
+            borrowed.add(node.attr)
+    return tuple(sorted(borrowed))
+
+
+def test_every_literal_kind_is_the_owners_vocabulary_or_a_declared_foreign_one() -> (
+    None
+):
+    """A type that spells the clone kinds is checked against the owner.
+
+    This is the form the relocation could not reach. ``Literal`` takes values,
+    never constants, so the wire type restates the three words no matter where
+    the owner lives -- and a restatement that drifts is byte-identical at
+    runtime until a consumer switches on the value that moved. Checking beats
+    the comment that used to carry this claim, because a comment does not run.
+    """
+
+    offenders: dict[str, tuple[str, ...]] = {}
+    seen_foreign: set[tuple[str, ...]] = set()
+    for relative, tree in _parsed_tracked_sources().items():
+        for lineno, values in _literal_kind_vocabularies(tree):
+            shape = tuple(sorted(values))
+            if set(values) == _OWNED_CLONE_KINDS:
+                continue
+            if shape in _FOREIGN_KIND_VOCABULARIES:
+                seen_foreign.add(shape)
+                continue
+            offenders[f"{relative}:{lineno}"] = values
+
+    stale = sorted(set(_FOREIGN_KIND_VOCABULARIES) - seen_foreign)
+
+    assert offenders == {}, (
+        "these Literal declarations spell part of the clone vocabulary and "
+        f"disagree with its owner {sorted(_OWNED_CLONE_KINDS)}; either they are "
+        "the same contract and must carry the same values, or they are a "
+        "different one and belong in _FOREIGN_KIND_VOCABULARIES with the "
+        f"contract they name: {offenders}"
+    )
+    assert stale == [], (
+        "these foreign vocabularies no longer occur; shrink "
+        f"_FOREIGN_KIND_VOCABULARIES: {stale}"
+    )
+
+
+def test_the_literal_guard_sees_a_vocabulary_that_drifted_from_its_owner() -> None:
+    """Reachability: the detector fires on a drifted type declaration.
+
+    A guard nothing can be shown to reach is theater (`H2`). The probe source
+    is assembled from the owner's own values with one of them misspelled, so
+    it follows a rename instead of pinning today's three words.
+    """
+
+    kept, drifted = sorted(_OWNED_CLONE_KINDS)[:2], sorted(_OWNED_CLONE_KINDS)[2]
+    probe = ", ".join(repr(value) for value in [*kept, f"{drifted}s"])
+    tree = ast.parse(f"Kind = Literal[{probe}]\n")
+
+    seen = _literal_kind_vocabularies(tree)
+
+    assert seen != [], (
+        "the guard cannot see a Literal that dropped one of the owner's values, "
+        "so a type declaration drifting away from the vocabulary would never be "
+        f"reported: {probe}"
+    )
+    assert {tuple(sorted(values)) for _line, values in seen}.isdisjoint(
+        _FOREIGN_KIND_VOCABULARIES
+    ), "the drifted probe was absorbed by a registered foreign vocabulary"
+
+
+def test_the_foreign_kind_vocabularies_are_a_different_contract() -> None:
+    """The words overlap; the contracts do not.
+
+    ``ApiSymbolKind``, ``DeadCodeCandidateKind`` and their neighbours each
+    spell ``function`` and mean a different thing. Pulling one of them under
+    this owner would put two contracts on one value -- the same defect the
+    baseline lane names are kept away from -- so each registered shape must
+    stay distinguishable from the clone vocabulary by its own values.
+    """
+
+    indistinguishable = sorted(
+        shape
+        for shape in _FOREIGN_KIND_VOCABULARIES
+        if set(shape) == _OWNED_CLONE_KINDS
+    )
+
+    assert indistinguishable == [], (
+        "these vocabularies are registered as foreign yet carry exactly the "
+        "clone kinds, so the guard can no longer tell the two contracts apart: "
+        f"{indistinguishable}"
+    )
+
+
+def test_the_producer_and_the_panel_take_the_clone_kinds_from_the_owner() -> None:
+    """The sites that stamp and label a kind borrow it; they do not spell it.
+
+    Half of the pair below. Without it a module could revert to literals and
+    drop the import in one edit, and the restatement scan -- which governs
+    borrowers -- would go quiet exactly when it mattered.
+    """
+
+    parsed = _parsed_tracked_sources()
+    missing: dict[str, list[str]] = {}
+    for relative in sorted(_CLONE_VOCABULARY_BORROWERS):
+        borrowed = set(_clone_kinds_borrowed_by(parsed[relative]))
+        if borrowed != _CLONE_KIND_NAMES:
+            missing[relative] = sorted(_CLONE_KIND_NAMES - borrowed)
+
+    assert missing == {}, (
+        "these modules must read every clone kind from its owner and do not; "
+        f"they need them because: {_CLONE_VOCABULARY_BORROWERS}. Missing: "
+        f"{missing}"
+    )
+
+
+def test_a_module_that_borrows_the_clone_vocabulary_never_restates_it() -> None:
+    """One authority per module: borrow the value or spell it, never both.
+
+    A module holding the imported constant beside a hand-written copy of the
+    same word has two authorities, and only one of them follows the owner.
+    Foreign vocabularies are outside this scan by construction -- they never
+    import from this owner -- so the guard cannot mistake an ``ApiSymbolKind``
+    for a clone kind.
+    """
+
+    restating: dict[str, tuple[tuple[int, str], ...]] = {}
+    for relative, tree in _parsed_tracked_sources().items():
+        if not _clone_kinds_borrowed_by(tree):
+            continue
+        spelled = _kind_constants_outside_a_literal(tree)
+        if spelled:
+            restating[relative] = spelled
+
+    offenders = {
+        relative: spelled
+        for relative, spelled in restating.items()
+        if relative not in _VOCABULARY_RESTATED_PENDING
+    }
+    stale = sorted(set(_VOCABULARY_RESTATED_PENDING) - set(restating))
+
+    assert offenders == {}, (
+        "these modules borrow the clone vocabulary from its owner and spell one "
+        "of its values themselves as well, which is two authorities over one "
+        f"word: {offenders}"
+    )
+    assert stale == [], (
+        "these modules no longer restate the vocabulary; shrink "
+        f"_VOCABULARY_RESTATED_PENDING: {stale}"
+    )
+
+
+def test_the_restatement_guard_sees_a_literal_beside_the_borrowed_name() -> None:
+    """Reachability: the detector fires on a borrower that also spells a kind.
+
+    Built from the owner's own name and value, so the probe follows a rename
+    (`H2`).
+    """
+
+    name = sorted(_CLONE_KIND_NAMES)[0]
+    value = getattr(vocabulary_owner, name)
+    tree = ast.parse(
+        f"from codeclone.contracts import {name}\n"
+        f"labels = {{{name}: 'A', {value!r}: 'B'}}\n"
+    )
+
+    assert _clone_kinds_borrowed_by(tree) == (name,)
+    assert _kind_constants_outside_a_literal(tree) == ((2, value),)
+
+
+def test_the_markdown_suppressed_heading_comes_from_the_message_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The heading is copy, and copy has one home in this renderer.
+
+    The neighbouring per-group heading three lines above already read from the
+    catalog while this one was spelled into the renderer, so one file said the
+    same kind of thing two ways (`SH1`). Comparing the rendered heading with
+    the catalog entry would prove nothing -- two copies of one string agree
+    until they do not. Moving the catalog entry does prove it: a renderer
+    holding its own copy keeps printing the old words.
+    """
+
+    monkeypatch.setattr(
+        md_msgs,
+        "MD_SUPPRESSED_CLONE_GROUPS_HEADING",
+        "Relocated Suppressed Heading",
+    )
+
+    rendered = render_markdown_report_document(_live_shaped_document())
+
+    assert "#### Relocated Suppressed Heading" in rendered
