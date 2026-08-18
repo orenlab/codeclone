@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -801,16 +802,58 @@ def _modules_addressing_the_suppressed_container() -> dict[str, tuple[str, ...]]
 
     owned = _owned_container_path()
     found: dict[str, set[str]] = {}
-    for tree in _SCANNED_TREES:
-        root = _REPO_ROOT / tree
-        if not root.exists():
+    for relative in _tracked_python_sources():
+        module = _REPO_ROOT / relative
+        try:
+            reads = report_document_reads(module.read_text("utf-8"))
+        except SyntaxError:
+            # A source this scanner cannot parse is an unresolved site, not a
+            # reason to answer nothing about every other file. Dying here made
+            # the whole ratchet silent: one vendored Python 2 helper under a
+            # build directory, and the guard reported on none of the sources it
+            # exists to watch.
+            _UNPARSABLE_SOURCES.add(relative)
             continue
-        for module in sorted(root.rglob("*.py")):
-            relative = module.relative_to(_REPO_ROOT).as_posix()
-            for _line, path in report_document_reads(module.read_text("utf-8")):
-                if path == owned or path.startswith(f"{owned}."):
-                    found.setdefault(relative, set()).add(path)
+        for _line, path in reads:
+            if path == owned or path.startswith(f"{owned}."):
+                found.setdefault(relative, set()).add(path)
     return {module: tuple(sorted(paths)) for module, paths in sorted(found.items())}
+
+
+#: Sources the scanner could not parse on the last pass. Named rather than
+#: dropped: an inventory that silently skips what it cannot read reports a
+#: coverage it does not have (`I5`).
+_UNPARSABLE_SOURCES: set[str] = set()
+
+
+def _tracked_python_sources() -> tuple[str, ...]:
+    """Every tracked ``.py`` under the scanned trees, in path order.
+
+    The universe is what git tracks, not what the working tree happens to hold.
+    A checkout also carries build output, IDE sandboxes and vendored third-party
+    code -- measured here, 2979 ``.py`` files on disk against 567 tracked -- and
+    none of it is source this ratchet governs. Reading it invites both a crash
+    on code written for another Python and a false offender from a vendored file
+    that happens to spell the same attribute chain.
+    """
+
+    completed = subprocess.run(
+        # Directory pathspecs, not globs: ``tree/**/*.py`` silently drops the
+        # files directly under each tree -- measured at 545 against 548 for
+        # ``codeclone`` alone, ``__init__.py`` among the three it lost.
+        ["git", "ls-files", "-z", "--", *_SCANNED_TREES],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return tuple(
+        sorted(
+            item
+            for item in completed.stdout.split("\0")
+            if item and item.endswith(".py")
+        )
+    )
 
 
 def _access_form_sources() -> dict[str, str]:
@@ -1066,3 +1109,53 @@ def test_the_baseline_lane_names_are_not_bound_to_the_findings_vocabulary() -> N
         f"{_BASELINE_LANE_OWNER} takes its lane names from the findings "
         f"vocabulary, which puts two contracts under one value: {borrowed}"
     )
+
+
+def test_the_scan_names_a_source_it_cannot_parse_instead_of_skipping_it() -> None:
+    """An unreadable source is an unresolved site, not an absence of one.
+
+    The scan used to die on the first file it could not parse, so one vendored
+    Python 2 helper made the ratchet silent about every source it guards. Not
+    dying is half the fix; the other half is that a file the scanner could not
+    read must be *named*, because an inventory that quietly drops what it cannot
+    parse reports a coverage it does not have (`I5`).
+    """
+
+    unreadable = _REPO_ROOT / "codeclone" / "_unparsable_probe.py"
+    unreadable.write_text("idents = [`ident` for ident in x]\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", str(unreadable)], cwd=_REPO_ROOT, check=True)
+    try:
+        _UNPARSABLE_SOURCES.clear()
+        _modules_addressing_the_suppressed_container()
+
+        assert "codeclone/_unparsable_probe.py" in _UNPARSABLE_SOURCES
+    finally:
+        subprocess.run(
+            ["git", "rm", "--cached", "--quiet", str(unreadable)],
+            cwd=_REPO_ROOT,
+            check=False,
+        )
+        unreadable.unlink()
+        _UNPARSABLE_SOURCES.clear()
+
+
+def test_the_scan_universe_is_what_git_tracks_not_what_the_tree_holds() -> None:
+    """An untracked source is not source this ratchet governs.
+
+    A checkout carries build output, IDE sandboxes and vendored third-party
+    code: measured here, 2979 ``.py`` files on disk against 567 tracked. Reading
+    them invites a false offender from a vendored file that happens to spell the
+    same attribute chain, and it made the scan die on Python 2 helpers under a
+    build directory.
+
+    Tolerating an unparsable file hides that defect rather than fixing it -- the
+    scan stops crashing and quietly reads five times what it governs -- so the
+    universe needs a pin of its own.
+    """
+
+    untracked = _REPO_ROOT / "codeclone" / "_untracked_probe.py"
+    untracked.write_text("value = 1\n", encoding="utf-8")
+    try:
+        assert "codeclone/_untracked_probe.py" not in _tracked_python_sources()
+    finally:
+        untracked.unlink()
