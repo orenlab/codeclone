@@ -10,15 +10,15 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 from ...contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
     NEAR_MISS_ALGORITHM_REVISION,
     NEAR_MISS_MAX_EDIT_STATEMENTS,
     RENAMED_STRUCTURE_ALGORITHM_REVISION,
     STATEMENT_REACHABILITY_POLICY_VERSION,
 )
 from ...domain.findings import (
-    CLONE_KIND_BLOCK,
-    CLONE_KIND_FUNCTION,
-    CLONE_KIND_SEGMENT,
     FAMILY_CLONE,
     FAMILY_DEAD_CODE,
     FAMILY_STRUCTURAL,

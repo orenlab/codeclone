@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from codeclone.contracts import FAMILY_CLONES
 from codeclone.domain.findings import (
     CATEGORY_CLONE,
     CATEGORY_COHESION,
@@ -19,7 +20,6 @@ from codeclone.domain.findings import (
     CATEGORY_DEAD_CODE,
     CATEGORY_DEPENDENCY,
     CATEGORY_STRUCTURAL,
-    FAMILY_CLONES,
     FAMILY_METRICS,
     FAMILY_STRUCTURAL,
 )

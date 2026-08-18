@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from ..contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    FAMILY_CLONES,
+)
 from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -19,12 +25,8 @@ from ..domain.findings import (
     CATEGORY_COVERAGE,
     CATEGORY_DEAD_CODE,
     CATEGORY_DEPENDENCY,
-    CLONE_KIND_BLOCK,
-    CLONE_KIND_FUNCTION,
-    CLONE_KIND_SEGMENT,
     FAMILY_AUTHORITY,
     FAMILY_CLONE,
-    FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
     FAMILY_METRICS,

@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from ..contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    FAMILY_CLONES,
+)
 from ..domain.findings import (
     CATEGORY_CLONE,
     CATEGORY_COHESION,
@@ -16,10 +22,6 @@ from ..domain.findings import (
     CATEGORY_DEAD_CODE,
     CATEGORY_DEPENDENCY,
     CATEGORY_STRUCTURAL,
-    CLONE_KIND_BLOCK,
-    CLONE_KIND_FUNCTION,
-    CLONE_KIND_SEGMENT,
-    FAMILY_CLONES,
     FAMILY_METRICS,
     FAMILY_STRUCTURAL,
 )

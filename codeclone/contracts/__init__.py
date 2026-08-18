@@ -306,6 +306,34 @@ CACHE_VERSION: Final = "3.7"
 # value set. ``tests/test_report_honest_population.py`` pins the coupling —
 # the enum cannot move again without this constant moving with it.
 REPORT_SCHEMA_VERSION: Final = "3.2"
+# The clone vocabulary of the report wire: what the document calls the family
+# and what a clone group calls its kind. These are facts about the payload, not
+# a layer's opinion about it, and they live here because of who has to read
+# them: the producer of the document is in the analysis ring and the renderers
+# are in the presentation ring, and the only rings both may import are this one
+# and utils. Declared beside a producer or a door, the vocabulary is reachable
+# from one side only, and the other side restates it — which is how one
+# document came to state both "seventeen suppressed" and "zero".
+#
+# These names are NOT the baseline's lane identities. ``clones.functions`` and
+# ``clones.blocks`` in ``baseline/lanes.py`` are spelled alike, feed the
+# container digest, and are versioned on their own; deriving one from the other
+# would put two contracts under one value.
+CLONE_KIND_FUNCTION: Final = "function"
+CLONE_KIND_BLOCK: Final = "block"
+CLONE_KIND_SEGMENT: Final = "segment"
+FAMILY_CLONES: Final = "clones"
+# The key under which the clone family nests its suppressed buckets, and the
+# full document path of that container. This is the single site in the codebase
+# that spells either: a consumer navigating there takes the address from here
+# instead of restating it, so a rename moves every reader at once.
+SUPPRESSED_CONTAINER_KEY: Final = "suppressed"
+SUPPRESSED_CONTAINER_PATH: Final[tuple[str, ...]] = (
+    "findings",
+    "groups",
+    FAMILY_CLONES,
+    SUPPRESSED_CONTAINER_KEY,
+)
 # Human-readable provenance stamp for a metrics artifact, reported to the
 # operator and nothing more. It is NOT the compatibility authority and must not
 # be described as one: no code branches on it. Whether a stored artifact may be
@@ -650,6 +678,9 @@ __all__ = [
     "BASELINE_ROOT_DIGEST_DOMAIN",
     "BASELINE_SCHEMA_VERSION",
     "CACHE_VERSION",
+    "CLONE_KIND_BLOCK",
+    "CLONE_KIND_FUNCTION",
+    "CLONE_KIND_SEGMENT",
     "COHESION_RISK_MEDIUM_MAX",
     "COMPLEXITY_ALGORITHM_REVISION",
     "COMPLEXITY_RISK_LOW_MAX",
@@ -694,6 +725,7 @@ __all__ = [
     "DOCS_URL",
     "ENGINEERING_MEMORY_SCHEMA_VERSION",
     "EXPERIENCE_DISTILLATION_VERSION",
+    "FAMILY_CLONES",
     "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION",
     "GATE_LANE_MATRIX_VERSION",
     "HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE",
@@ -748,6 +780,8 @@ __all__ = [
     "SOURCE_KIND_POLICY_VERSION",
     "STATEMENT_REACHABILITY_POLICY_VERSION",
     "STRUCTURAL_FINDINGS_CATALOG_VERSION",
+    "SUPPRESSED_CONTAINER_KEY",
+    "SUPPRESSED_CONTAINER_PATH",
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",

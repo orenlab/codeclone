@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from ...domain.findings import (
+from ...contracts import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,

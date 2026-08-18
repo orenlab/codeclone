@@ -11,9 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Final
 
+from ...contracts import FAMILY_CLONES
 from ...domain.findings import (
     FAMILY_AUTHORITY,
-    FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_STRUCTURAL,
 )

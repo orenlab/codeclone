@@ -5715,6 +5715,65 @@ def test_mcp_service_blast_radius_cache_is_bounded(
     assert len(service._blast_radius_cache) == 2
 
 
+def _rekeyed_suppressed_bucket_run_record(root: Path, bucket: str) -> MCPRunRecord:
+    """The blast-radius run with its suppressed groups under one other bucket.
+
+    The container's owner reads bucket keys **structurally** -- every list
+    inside the container holds suppressed clone groups -- because the producer
+    spells them plural while the groups inside carry their kind in the
+    singular, and no consumer should have to know which. A document that names
+    its bucket anything else is therefore still a document publishing that
+    group, and the review surface owes it the same row.
+
+    A consumer that instead hedges across a fixed list of spellings answers
+    "nothing suppressed" here and silently drops the row -- which is the shape
+    of the defect that had one document stating both "seventeen suppressed"
+    and "zero".
+    """
+
+    document = copy.deepcopy(_blast_radius_report_document())
+    groups = cast("dict[str, object]", document["findings"])["groups"]
+    clones = cast("dict[str, object]", cast("dict[str, object]", groups)["clones"])
+    suppressed = cast("dict[str, object]", clones["suppressed"])
+    clones["suppressed"] = {bucket: suppressed["functions"]}
+    record = _dummy_run_record(root, "abcdef1234567890")
+    return replace(record, report_document=document)
+
+
+def test_blast_radius_reads_the_suppressed_container_through_one_law(
+    tmp_path: Path,
+) -> None:
+    """The review surface reaches every group the container publishes.
+
+    ``golden_fixture_surface`` is fed from the suppressed clone container, and
+    the blast-radius computation lives in a ring that cannot reach the r3 door.
+    It must still answer with the owner's law rather than with its own reading
+    of the shape, or one document has two authorities over what "suppressed"
+    means.
+    """
+
+    service = CodeCloneMCPService(history_limit=2)
+    service._runs.register(_rekeyed_suppressed_bucket_run_record(tmp_path, "merged"))
+
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="abcdef12",
+        scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": ["tests/test_a.py"],
+        },
+        intent="adjust pkg.a behavior",
+    )
+
+    assert [
+        (item["path"], item["category"])
+        for item in cast("list[dict[str, str]]", declared["review_context"])
+    ] == [
+        ("pkg/b.py", "report_only_context"),
+        ("tests/test_a.py", "golden_fixture_surface"),
+    ]
+
+
 def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=2)
     record = _blast_radius_run_record(tmp_path)

@@ -347,11 +347,8 @@ def _findings_payload(
     dead_code: tuple[dict[str, Any], ...] = (),
     design: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
-    from codeclone.domain.findings import (
-        FAMILY_CLONES,
-        FAMILY_DEAD_CODE,
-        FAMILY_STRUCTURAL,
-    )
+    from codeclone.contracts import FAMILY_CLONES
+    from codeclone.domain.findings import FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 
     return {
         "groups": {
@@ -364,8 +361,8 @@ def _findings_payload(
 
 
 def test_build_derived_review_queue_projects_findings_across_families() -> None:
+    from codeclone.contracts import CLONE_KIND_FUNCTION
     from codeclone.domain.findings import (
-        CLONE_KIND_FUNCTION,
         FAMILY_CLONE,
         FAMILY_DEAD_CODE,
         FAMILY_DESIGN,
@@ -448,11 +445,8 @@ def test_review_queue_never_claims_known_without_baseline_evidence() -> None:
     A finding the baseline never compared is neither new nor known; claiming
     either is a claim the baseline cannot support.
     """
-    from codeclone.domain.findings import (
-        CLONE_KIND_FUNCTION,
-        FAMILY_CLONE,
-        FAMILY_STRUCTURAL,
-    )
+    from codeclone.contracts import CLONE_KIND_FUNCTION
+    from codeclone.domain.findings import FAMILY_CLONE, FAMILY_STRUCTURAL
     from codeclone.report.document.derived import _build_derived_review_queue
 
     absent = _finding_group(

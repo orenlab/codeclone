@@ -13,8 +13,8 @@ the groups inside carry their kind in the singular. Three consumers each
 re-derived that shape from the raw document and each got it wrong in its own
 way, so one document could state both "seventeen suppressed" and "zero".
 
-This module is the one place that knows the container's shape. It answers on
-terms a consumer cannot mis-spell:
+This module is the **service** the presentation ring reads through. It answers
+on terms a consumer cannot mis-spell:
 
 * a group's ``category`` comes from the **group**, never from the JSON key that
   happens to hold it — a container key is a container key, not a finding's
@@ -24,6 +24,18 @@ terms a consumer cannot mis-spell:
 * an absent ``suppressed`` container is distinguishable from an empty one
   (`G4`, `RP2`), because the producer omits the key entirely when nothing was
   suppressed and "did not run" must not read as "ran and found nothing".
+
+It is not, however, the *only* reader any more, and that was a placement
+defect rather than a virtue. The blast-radius computation feeds review context
+from the same container and lives in a ring that may not import this one, so
+while the shape lived here it had no choice but to re-derive it — a second
+authority in the exact place the first was meant to remove. The parts both
+sides need moved to the rings both can reach: the container address and the
+clone vocabulary to ``codeclone.contracts``, and the reading law — navigate,
+then take every list inside the container as suppressed groups — to
+``codeclone.utils.suppressed_clone_groups``. What stays here is what only a
+surface with readers needs: which kinds are shown, in what order, and where an
+unclassified group is placed.
 
 This is a reader. It classifies nothing the canonical report has not already
 classified, and it computes no finding facts (`P3`, `G1`).
@@ -35,39 +47,28 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-# The three clone kinds are re-exported from here, not restated downstream. A
-# renderer keying its own presentation by kind has to name a kind, and the
-# domain module that declares them sits in a ring no presentation layer may
-# import; spelling them again there would put one vocabulary in two places and
-# hand every reader a second chance to spell it differently (`G2`).
-from ..domain.findings import (
+from ..contracts import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
     FAMILY_CLONES,
+    SUPPRESSED_CONTAINER_KEY,
 )
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
-
-#: The key under which the clone family nests its suppressed buckets. This is
-#: the single site in the codebase that spells it: that is the point.
-SUPPRESSED_CONTAINER_KEY: Final = "suppressed"
-
-#: The full document path of that container, declared rather than spelled at
-#: the point of use. Navigation reads it below, so it is load-bearing and
-#: cannot rot into a decorative constant; a guard that wants to know which
-#: address only this module may spell takes it from here instead of restating
-#: it, which is how a guard survives the key being renamed.
-SUPPRESSED_CONTAINER_PATH: Final[tuple[str, ...]] = (
-    "findings",
-    "groups",
-    FAMILY_CLONES,
-    SUPPRESSED_CONTAINER_KEY,
+from ..utils.suppressed_clone_groups import (
+    suppressed_clone_container as _suppressed_clone_container,
+)
+from ..utils.suppressed_clone_groups import (
+    suppressed_clone_groups_in as _suppressed_clone_groups_in,
 )
 
 #: Canonical presentation order for suppressed clone kinds. The HTML panel
-#: declares this order to its readers in prose, so it is a contract of the
-#: owner rather than an accident of mapping iteration.
+#: declares this order to its readers in prose, so it is a contract of this
+#: surface rather than an accident of mapping iteration — and it deliberately
+#: did not move down with the reading law: the analysis ring renders nothing
+#: and has no order to honour, so handing it one would be a dependency on a
+#: display policy it cannot use.
 SUPPRESSED_KIND_ORDER: Final[tuple[str, ...]] = (
     CLONE_KIND_FUNCTION,
     CLONE_KIND_BLOCK,
@@ -129,44 +130,29 @@ def _groups_in(payload: object) -> tuple[Mapping[str, object], ...]:
     )
 
 
-def _suppressed_container(document: Mapping[str, object]) -> object | None:
-    *ancestors, container_key = SUPPRESSED_CONTAINER_PATH
-    current: Mapping[str, object] = document
-    for segment in ancestors:
-        current = _as_mapping(current.get(segment))
-    if container_key not in current:
-        return None
-    return current[container_key]
-
-
 def suppressed_clone_groups(
     document: Mapping[str, object],
 ) -> SuppressedCloneGroups:
     """Return every suppressed clone group the document publishes.
 
-    Bucket keys are read structurally, not by name: every list inside the
-    container holds suppressed clone groups. A consumer therefore cannot lose
-    groups by spelling a bucket key the way it wishes the producer had spelled
-    it — the failure mode that had the review receipt counting zero against a
-    document publishing seventeen.
+    Navigation and collection come from the shared law, so this surface and the
+    blast-radius computation cannot disagree about which groups a document
+    publishes; what is added here is presentation — the kinds this surface
+    shows, in the order it declares to its readers.
 
     Ordering is by declared kind, then document order within a kind, so the
-    order a consumer renders is a property of this owner rather than of JSON
+    order a consumer renders is a property of this surface rather than of JSON
     mapping iteration.
     """
 
-    container = _suppressed_container(document)
+    container = _suppressed_clone_container(document)
     if container is None:
         empty: dict[str, tuple[Mapping[str, object], ...]] = dict.fromkeys(
             SUPPRESSED_KIND_ORDER, ()
         )
         return SuppressedCloneGroups(present=False, groups=(), by_kind=empty)
 
-    collected: list[Mapping[str, object]] = []
-    for _bucket_key, bucket in sorted(
-        _as_mapping(container).items(), key=lambda item: str(item[0])
-    ):
-        collected.extend(_groups_in(bucket))
+    collected = list(_suppressed_clone_groups_in(container))
 
     by_kind: dict[str, tuple[Mapping[str, object], ...]] = {}
     for kind in SUPPRESSED_KIND_ORDER:
@@ -244,11 +230,6 @@ def suppressed_group_items(
 
 
 __all__ = [
-    "CLONE_KIND_BLOCK",
-    "CLONE_KIND_FUNCTION",
-    "CLONE_KIND_SEGMENT",
-    "SUPPRESSED_CONTAINER_KEY",
-    "SUPPRESSED_CONTAINER_PATH",
     "SUPPRESSED_KIND_ORDER",
     "FindingGroupRef",
     "SuppressedCloneGroups",

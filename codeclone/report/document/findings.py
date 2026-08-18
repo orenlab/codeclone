@@ -9,15 +9,17 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from ...domain.findings import (
+from ...contracts import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
+    FAMILY_CLONES,
+)
+from ...domain.findings import (
     CLONE_NOVELTY_KNOWN,
     CLONE_NOVELTY_NEW,
     CLONE_NOVELTY_UNAVAILABLE,
     FAMILY_AUTHORITY,
-    FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_STRUCTURAL,
     FINDING_KIND_AUTHORITY_VIOLATION,

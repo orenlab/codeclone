@@ -17,6 +17,12 @@ from ..paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
 from ..utils.mapping_paths import sections
+from ..utils.suppressed_clone_groups import (
+    suppressed_clone_container as _suppressed_clone_container,
+)
+from ..utils.suppressed_clone_groups import (
+    suppressed_clone_groups_in as _suppressed_clone_groups_in,
+)
 
 BlastRadiusDepth = Literal["direct", "transitive"]
 
@@ -278,23 +284,17 @@ def _clone_group_buckets(
 def _suppressed_clone_buckets(
     report_document: Mapping[str, object],
 ) -> tuple[Mapping[str, object], ...]:
-    findings = _as_mapping(report_document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get("clones"))
-    suppressed = _as_mapping(clones.get("suppressed"))
-    buckets: list[Mapping[str, object]] = []
-    for bucket_name in (
-        "function",
-        "block",
-        "segment",
-        "functions",
-        "blocks",
-        "segments",
-    ):
-        buckets.extend(
-            _as_mapping(item) for item in _as_sequence(suppressed.get(bucket_name))
-        )
-    return tuple(buckets)
+    """Every suppressed clone group the document publishes.
+
+    Read through the shared law rather than here. This module used to navigate
+    to the container and hedge across the singular *and* the plural bucket
+    spelling, which is one document with two authorities over what "suppressed"
+    means -- and a hedge is only ever as wide as the spellings its author knew.
+    The report door cannot be called from this ring, so the reading moved to
+    the ring both can reach instead.
+    """
+
+    return _suppressed_clone_groups_in(_suppressed_clone_container(report_document))
 
 
 def _compute_clone_cohort_members(

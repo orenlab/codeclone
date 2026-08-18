@@ -39,18 +39,18 @@ The tests name the layer they hold:
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from codeclone.api import finding_groups as owner_mod
 from codeclone.api.finding_groups import (
-    SUPPRESSED_CONTAINER_PATH,
     SUPPRESSED_KIND_ORDER,
     iter_finding_groups,
     suppressed_clone_groups,
 )
+from codeclone.contracts import SUPPRESSED_CONTAINER_PATH
 from codeclone.report.html.sections import _clones as html_clones_mod
 from codeclone.report.html.sections._clones import (
     _flatten_suppressed_clone_groups,
@@ -63,14 +63,14 @@ from codeclone.report.renderers.text import render_text_report_document
 from codeclone.surfaces.mcp import _implementation_context as impl_context_mod
 from codeclone.surfaces.mcp import _review_receipt as receipt_mod
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
+from codeclone.utils import suppressed_clone_groups as law_mod
 
 from ._report_fixtures import build_maximal_report_document
 from .test_report_document_reads import report_document_reads
 
-# Reached through the R3 door rather than imported from ``codeclone.domain``:
-# this module's subject ring is r4, and an r4 test reaching r2 directly is a
-# boundary violation the Phase 39S ratchet counts. Unpacking also pins the
-# order the owner declares, which the HTML panel states to its readers.
+# Unpacked from the door's declared order rather than imported one by one:
+# that binds every fixture below to the order the HTML panel states to its
+# readers, so a change to either has to answer for the other.
 CLONE_KIND_FUNCTION, CLONE_KIND_BLOCK, CLONE_KIND_SEGMENT = SUPPRESSED_KIND_ORDER
 
 
@@ -762,27 +762,23 @@ def test_consumer_renderers_distinguish_an_absent_container_from_an_empty_one() 
 
 #: The one module allowed to address the container, named rather than left to
 #: be the only match. The name is checked against the module that actually
-#: declares the path, so the exemption cannot outlive its subject.
-_SUPPRESSED_CONTAINER_OWNER = "codeclone/api/finding_groups.py"
+#: navigates the path, so the exemption cannot outlive its subject.
+_SUPPRESSED_CONTAINER_OWNER = "codeclone/utils/suppressed_clone_groups.py"
 
 #: Sites that address the container and cannot be routed through the owner,
 #: with the reason each one is blocked. Two-sided on purpose: a new offender
 #: fails as growth, and a repaired one fails as a stale entry, so the register
 #: is a work queue with a deadline and not a permit.
 #:
-#: ``codeclone/analysis/blast_radius.py`` was not on the wave 6 list and was
-#: found by this guard: it feeds ``golden_fixture_surface`` review entries and
-#: reads the container itself, hedging across the singular *and* the plural
-#: bucket spelling. That hedge is a compatibility shim, which is evidence the
-#: divergence was known and never propagated (`H4`). It cannot be repaired
-#: here: ``codeclone.analysis`` is r2 and the door is r3, a direction the
-#: architecture ratchet does not allow at all, so routing it is a placement
-#: decision about where the owner lives rather than a change to this consumer.
-_CONTAINER_READERS_BLOCKED_BY_A_RING: dict[str, str] = {
-    "codeclone/analysis/blast_radius.py": (
-        "r2 cannot import the r3 door; the owner would have to move"
-    ),
-}
+#: Emptied by the authority relocation: ``codeclone/analysis/blast_radius.py``
+#: was registered here because it read the container itself -- hedging the
+#: singular *and* the plural bucket spelling -- and could not be routed through
+#: an r3 door from r2. The register said "the owner would have to move", and it
+#: did: the container address and the normalization law now live in the rings
+#: r2 and r4 can both reach, so the consumer holds no shape knowledge left to
+#: register. Add an entry only for a reader another live branch already owns,
+#: and delete it the moment that branch lands.
+_CONTAINER_READERS_BLOCKED_BY_A_RING: dict[str, str] = {}
 
 #: Trees scanned for consumers. ``tests/`` is deliberately outside: a test that
 #: describes the container is the pin, not a second reader. Measured on this
@@ -879,7 +875,7 @@ def test_the_ratchet_takes_its_address_from_the_owner_not_from_a_literal() -> No
     emits, a rename that the producer did not follow fails here by name.
     """
 
-    owner_module = Path(str(owner_mod.__file__)).resolve()
+    owner_module = Path(str(law_mod.__file__)).resolve()
     assert owner_module.relative_to(_REPO_ROOT).as_posix() == (
         _SUPPRESSED_CONTAINER_OWNER
     )
@@ -928,4 +924,145 @@ def test_only_the_owner_addresses_the_suppressed_clone_container() -> None:
     assert stale == [], (
         "these registered readers no longer address the container; shrink "
         f"_CONTAINER_READERS_BLOCKED_BY_A_RING: {stale}"
+    )
+
+
+# --------------------------------------------------------------------------------------
+# The authority ratchet
+#
+# The ratchet above asks who *navigates* to the container. This one asks who
+# *declares* the vocabulary the container is spelled in, and it is the guard
+# the relocation earns: moving a constant leaves every byte of output where it
+# was, so a suite that only compares values stays green whether the vocabulary
+# has one owner or three. Restating one of these names anywhere else would be
+# invisible to every behavioural test in this file and would hand the next
+# reader a second place to spell it -- which is how one document came to state
+# both "seventeen suppressed" and "zero".
+#
+# The scan is over module-level *declarations*, resolved from the AST, not over
+# occurrences of the text: an import of the owner's name is a consumer and must
+# stay legal, while an assignment of the same name is a second authority. A
+# text scan cannot tell those apart (`I1`).
+# --------------------------------------------------------------------------------------
+
+#: The ring the vocabulary had to reach: the producer of the document is r2 and
+#: the renderers are r4, and the only rings both may import are r0 and r1. The
+#: names below are wire facts -- what the document says -- so they belong to
+#: the contracts module rather than to any layer that reads or writes them.
+_CLONE_VOCABULARY_OWNER = "codeclone/contracts/__init__.py"
+
+_CLONE_VOCABULARY = frozenset(
+    {
+        "CLONE_KIND_BLOCK",
+        "CLONE_KIND_FUNCTION",
+        "CLONE_KIND_SEGMENT",
+        "FAMILY_CLONES",
+        "SUPPRESSED_CONTAINER_KEY",
+        "SUPPRESSED_CONTAINER_PATH",
+    }
+)
+
+#: The presentation order is not a wire fact. The HTML panel states it to its
+#: readers in prose, so it is a contract of the surface that publishes it, and
+#: it stays with that surface: pushed down beside the vocabulary it would hand
+#: the analysis layer a dependency on a display policy it has no use for.
+_PRESENTATION_ORDER_OWNER = "codeclone/api/finding_groups.py"
+
+#: The baseline's lane names are a different contract with a different owner.
+#: ``clones.functions`` and ``clones.blocks`` are lane identities that feed the
+#: container digest; they are spelled similarly to the findings vocabulary and
+#: mean something else. Deriving one from the other would put two contracts
+#: under one value, and a bump meant for one would silently move the other.
+_BASELINE_LANE_OWNER = "codeclone/baseline/lanes.py"
+
+
+def _module_level_declarations(names: frozenset[str]) -> dict[str, tuple[str, ...]]:
+    """Every module under ``codeclone/`` that assigns one of ``names``."""
+
+    found: dict[str, set[str]] = {}
+    for module in sorted((_REPO_ROOT / "codeclone").rglob("*.py")):
+        relative = module.relative_to(_REPO_ROOT).as_posix()
+        tree = ast.parse(module.read_text("utf-8"))
+        for node in tree.body:
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets = [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in names:
+                    found.setdefault(relative, set()).add(target.id)
+    return {module: tuple(sorted(hit)) for module, hit in sorted(found.items())}
+
+
+def _names_borrowed_by(module_path: str, names: frozenset[str]) -> tuple[str, ...]:
+    """The names of ``names`` that ``module_path`` imports or reads by attribute."""
+
+    tree = ast.parse((_REPO_ROOT / module_path).read_text("utf-8"))
+    borrowed: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            borrowed.update(alias.name for alias in node.names if alias.name in names)
+        elif isinstance(node, ast.Attribute) and node.attr in names:
+            borrowed.add(node.attr)
+    return tuple(sorted(borrowed))
+
+
+def test_the_clone_vocabulary_is_declared_in_exactly_one_place() -> None:
+    """One vocabulary, one declaring module, reachable from every real reader.
+
+    A second declaration is byte-identical at runtime while it agrees, which
+    is precisely why no output test can see it. It becomes visible only when
+    the two spellings drift -- by which time both are load-bearing.
+    """
+
+    declarers = _module_level_declarations(_CLONE_VOCABULARY)
+
+    assert _CLONE_VOCABULARY_OWNER in declarers, (
+        f"{_CLONE_VOCABULARY_OWNER} declares none of the clone vocabulary, so "
+        f"the name this guard protects has moved or gone: {sorted(declarers)}"
+    )
+    assert sorted(declarers) == [_CLONE_VOCABULARY_OWNER], (
+        "the clone vocabulary is declared outside its owner "
+        f"{_CLONE_VOCABULARY_OWNER}; a consumer imports these names, it does "
+        f"not restate them: {declarers}"
+    )
+    owned = set(declarers[_CLONE_VOCABULARY_OWNER])
+    assert owned == set(_CLONE_VOCABULARY), (
+        "the owner no longer declares the whole vocabulary this guard names; "
+        f"missing: {sorted(_CLONE_VOCABULARY - owned)}"
+    )
+
+
+def test_the_presentation_order_stays_with_the_surface_that_publishes_it() -> None:
+    """The display order is the door's contract, not a wire fact.
+
+    Pushed down into the contracts module it would be reachable -- and then
+    depended on -- by the analysis layer, which renders nothing and has no
+    order to honour. That is the reverse boundary of the relocation: the test
+    that the substrate stayed minimal.
+    """
+
+    declarers = _module_level_declarations(frozenset({"SUPPRESSED_KIND_ORDER"}))
+
+    assert sorted(declarers) == [_PRESENTATION_ORDER_OWNER], (
+        "the suppressed-kind presentation order must be declared by "
+        f"{_PRESENTATION_ORDER_OWNER} and nowhere else: {declarers}"
+    )
+
+
+def test_the_baseline_lane_names_are_not_bound_to_the_findings_vocabulary() -> None:
+    """Two contracts that look alike must not become one value.
+
+    ``clones.functions`` is a baseline lane identity that enters the container
+    digest; ``FAMILY_CLONES`` is what the report document calls a family. They
+    are spelled alike and versioned apart, and binding the first to the second
+    would make a findings-vocabulary edit move a digest nobody meant to move.
+    """
+
+    borrowed = _names_borrowed_by(_BASELINE_LANE_OWNER, _CLONE_VOCABULARY)
+
+    assert borrowed == (), (
+        f"{_BASELINE_LANE_OWNER} takes its lane names from the findings "
+        f"vocabulary, which puts two contracts under one value: {borrowed}"
     )

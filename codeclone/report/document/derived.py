@@ -10,21 +10,23 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Final
 
+from ...contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    FAMILY_CLONES,
+)
 from ...domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
     CATEGORY_DEAD_CODE,
     CATEGORY_DEPENDENCY,
-    CLONE_KIND_BLOCK,
-    CLONE_KIND_FUNCTION,
-    CLONE_KIND_SEGMENT,
     CLONE_NOVELTY_KNOWN,
     CLONE_NOVELTY_NEW,
     CLONE_NOVELTY_UNAVAILABLE,
     FAMILY_AUTHORITY,
     FAMILY_CLONE,
-    FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
     FAMILY_STRUCTURAL,

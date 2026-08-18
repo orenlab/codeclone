@@ -10,13 +10,11 @@ from collections.abc import Mapping, Sequence
 from typing import Final
 
 from ...api.finding_groups import (
-    CLONE_KIND_BLOCK,
-    CLONE_KIND_FUNCTION,
-    CLONE_KIND_SEGMENT,
     SUPPRESSED_KIND_ORDER,
     SuppressedCloneGroups,
     suppressed_clone_groups,
 )
+from ...contracts import CLONE_KIND_BLOCK, CLONE_KIND_FUNCTION, CLONE_KIND_SEGMENT
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
 from ...utils.mapping_paths import sections

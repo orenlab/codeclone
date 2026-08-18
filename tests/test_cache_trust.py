@@ -571,6 +571,25 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "TRAJECTORY_PROJECTION_VERSION": (_LANE_NONE, "memory projection"),
     "TRAJECTORY_PROJECTION_VERSION_V1": (_LANE_NONE, "memory projection"),
     "TRAJECTORY_QUALITY_SCORE_VERSION": (_LANE_NONE, "memory projection"),
+    # ── no stored output: report-wire vocabulary, spelled into a document the
+    #    report layer builds after the cache is read. The cache stores units,
+    #    blocks, segments and semantic facts; which family a group belongs to
+    #    and which kind it declares are decided when the report document is
+    #    assembled, so none of these names reaches a stored payload.
+    "CLONE_KIND_BLOCK": (_LANE_NONE, "report-wire clone kind, post-cache"),
+    "CLONE_KIND_FUNCTION": (_LANE_NONE, "report-wire clone kind, post-cache"),
+    "CLONE_KIND_SEGMENT": (_LANE_NONE, "report-wire clone kind, post-cache"),
+    "FAMILY_CLONES": (_LANE_NONE, "report-wire family name, post-cache"),
+    "SUPPRESSED_CONTAINER_KEY": (
+        _LANE_NONE,
+        "report-wire container key: it names where the report document nests "
+        "suppressed clone groups, and suppression is applied to the assembled "
+        "document, never to a cached unit",
+    ),
+    "SUPPRESSED_CONTAINER_PATH": (
+        _LANE_NONE,
+        "report-wire container address, built from the two names above",
+    ),
     # ── no stored output: not read by any production code today
     "PORTABLE_PATH_PROFILE_VERSION": (_LANE_NONE, "dead constant, no producer"),
     "SOURCE_KIND_POLICY_VERSION": (

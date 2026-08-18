@@ -13,18 +13,21 @@ from pathlib import Path
 
 import orjson
 
-from ...contracts import DOCS_URL, REPOSITORY_URL
+from ...contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    DOCS_URL,
+    FAMILY_CLONES,
+    REPOSITORY_URL,
+)
 from ...domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
     CATEGORY_COVERAGE,
     CATEGORY_DEPENDENCY,
-    CLONE_KIND_BLOCK,
-    CLONE_KIND_FUNCTION,
     FAMILY_AUTHORITY,
     FAMILY_CLONE,
-    FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
     FAMILY_STRUCTURAL,
