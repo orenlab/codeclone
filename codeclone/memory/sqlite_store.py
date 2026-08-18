@@ -1282,11 +1282,20 @@ class SqliteEngineeringMemoryStore:
             (status, updated_before_utc),
         ).fetchall()
         ids = [str(row["id"]) for row in rows]
+        # The search index has no triggers; it is maintained by hand. Deleting
+        # only the record leaves its index row behind as an orphan that keeps
+        # growing the store and still counts in the bm25 corpus.
+        fts_available = self._fts_available()
         for record_id in ids:
             self._conn.execute(
                 "DELETE FROM memory_records WHERE id=?",
                 (record_id,),
             )
+            if fts_available:
+                self._conn.execute(
+                    "DELETE FROM memory_records_fts WHERE memory_id=?",
+                    (record_id,),
+                )
         if commit:
             self._conn.commit()
         return len(ids)

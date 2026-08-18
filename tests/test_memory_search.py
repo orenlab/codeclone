@@ -127,3 +127,51 @@ def test_search_like_fallback_when_fts_unavailable(tmp_path: Path) -> None:
             )
     assert hits
     assert hits[0].statement.startswith("like fallback")
+
+
+def test_retention_keeps_the_surviving_record_searchable(tmp_path: Path) -> None:
+    """Retention MUST remove index rows only for the records it deleted.
+
+    The opposite boundary of index-orphan cleanup: a deletion pass that
+    over-reaches drops live records out of search while they are still stored.
+    """
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        survivor = seed_document_link(
+            store,
+            project_id=project.id,
+            doc_file="docs/guide/retention.md",
+            ref_path="codeclone/memory/vacuum.py",
+            statement="retention keeps the surviving quarkbeam document link",
+        )
+        expired = seed_document_link(
+            store,
+            project_id=project.id,
+            doc_file="docs/guide/expired.md",
+            ref_path="codeclone/memory/sqlite_store.py",
+            statement="expired quarkbeam document link awaiting retention",
+        )
+        store.mark_stale(expired.id, reason="retention probe")
+        store.rebuild_project_fts(project.id)
+
+        removed = store.delete_records_older_than(
+            status="stale",
+            updated_before_utc="9999-01-01T00:00:00Z",
+        )
+        assert removed == 1
+
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="search",
+            query="quarkbeam",
+            filters={"match_mode": "all"},
+        )
+
+    payload = result["payload"]
+    assert isinstance(payload, dict)
+    records = payload.get("records")
+    assert isinstance(records, list)
+    assert [record["id"] for record in records] == [survivor.id]

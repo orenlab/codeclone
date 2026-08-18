@@ -3154,7 +3154,6 @@ def test_mcp_context_governance_adds_top_level_continuation_pointer() -> None:
             "tool": "get_memory_projection_page",
             "cursor_path": "continuation.lanes.records.page.cursor",
             "snapshot_identity": "memory projection cursor",
-            "cursor": "cursor-records-1",
         }
     ]
 
@@ -12363,10 +12362,9 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "receipt_retrieval_blocked": True,
         "patch_trail_retrieval_blocked": True,
     }
+    assert "capabilities" not in context_governance
     assert (
-        cast("dict[str, object]", context_governance["capabilities"])[
-            "typed_receipt_alias"
-        ]
+        mcp_context_governance_mod.passive_context_capabilities()["typed_receipt_alias"]
         is True
     )
     assert isinstance(context_governance["estimated"], int)
@@ -15941,12 +15939,8 @@ def test_memory_retrieval_governance_helper_edges() -> None:
     assert response["tool"] == "get_relevant_memory"
 
     assert (
-        mem_mod._rebased_memory_lane_page(
-            lane="records",
-            offset=1,
-            original_continuation={},
-        )
-        is None
+        mem_mod._memory_lane_base_cursors({}, lane_items={}, projection_request=None)
+        == {}
     )
 
 
@@ -16140,7 +16134,18 @@ def test_pack_compact_memory_response_shrinks_lanes_to_fit_budget() -> None:
 
     statement = "memory " * 120
     records = [{"id": f"rec-{index}", "statement": statement} for index in range(12)]
+    request: dict[str, object] = {
+        "scope_paths": ["pkg/mod.py"],
+        "symbols": [],
+        "blast_dependents": [],
+        "scope_resolved_from": "explicit",
+        "include_stale": False,
+        "include_drafts": True,
+        "include_routine": False,
+        "detail_level": "compact",
+    }
     payload: dict[str, object] = {
+        "project_id": "proj-pack",
         "records": records,
         "record_count": len(records),
         "trajectories": [],
@@ -16161,6 +16166,7 @@ def test_pack_compact_memory_response_shrinks_lanes_to_fit_budget() -> None:
         detail_level="compact",
         max_records=len(records),
         limit=80,
+        projection_request=request,
     )
     assert cast("int", packed["record_count"]) < len(records)
 
@@ -16233,7 +16239,7 @@ def test_memory_governance_helpers_skip_invalid_continuation_fields() -> None:
         mem_mod._next_reducible_memory_lane(
             shown,
             floor=0,
-            original_continuation={},
+            lane_cursors={},
         )
         is None
     )
@@ -16346,13 +16352,8 @@ def test_context_governance_helper_edges() -> None:
         },
     )
     assert lane is not None
-    assert lane["cursor"] == "lane-2"
-
-    assert mcp_context_governance_mod._resolve_dotted_path({}, "..bad") is None
-    assert (
-        mcp_context_governance_mod._resolve_dotted_path({"items": []}, "items.id")
-        is None
-    )
+    assert lane["cursor_path"] == "nested.cursor"
+    assert "cursor" not in lane
 
     assert mcp_context_governance_mod._continuation_payload({}, {}) is None
 
@@ -17722,13 +17723,12 @@ def test_memory_continuation_requests_require_plain_dict_payloads() -> None:
     from types import MappingProxyType
 
     service = CodeCloneMCPService(history_limit=2)
-    published = service._publish_memory_continuation_request(
+    service._register_memory_continuation_request(
         {
             "project_id": "proj-x",
             "_memory_projection_request": MappingProxyType({"mode": "search"}),
         }
     )
-    assert "_memory_projection_request" not in published
     assert service._memory_continuation_requests == {}
 
 
@@ -18955,3 +18955,73 @@ def test_mcp_publishes_adoption_and_api_comparison_availability(
     ):
         block = cast("dict[str, object]", summary[family])
         assert block["baseline_diff_available"] is True, family
+
+
+def test_compact_memory_response_returns_records_within_the_response_budget() -> None:
+    """A response that can be made to fit MUST be made to fit, with records in it.
+
+    Records exist and a one-record answer is well inside the limit, so the
+    packer owes the caller both halves: a non-empty lane and an estimate
+    within the limit. A lane the retrieval returned in full is still a lane
+    the response packer has to be able to shed.
+    """
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+
+    records = [
+        {
+            "id": f"mem-{index:04d}",
+            "type": "change_rationale",
+            "status": "active",
+            "statement": f"budgeted memory record {index} " + "s" * 160,
+        }
+        for index in range(40)
+    ]
+    payload: dict[str, object] = {
+        "project_id": "proj-budget",
+        "records": records,
+        "trajectories": [],
+        "experiences": [],
+        "record_count": len(records),
+        "trajectory_count": 0,
+        "experience_count": 0,
+        "truncated": False,
+        "trajectories_truncated": False,
+        "_memory_projection_request": {
+            "scope_paths": ["pkg/mod.py"],
+            "symbols": [],
+            "blast_dependents": [],
+            "scope_resolved_from": "explicit",
+            "include_stale": False,
+            "include_drafts": True,
+            "include_routine": False,
+            "detail_level": "compact",
+        },
+    }
+
+    governed = mem_mod._attach_budgeted_memory_retrieval_context(
+        payload,
+        detail_level="compact",
+        max_records=40,
+    )
+    governance = cast("dict[str, object]", governed["context_governance"])
+    estimated = governance["estimated"]
+    limit = governance["limit"]
+    record_count = governed["record_count"]
+
+    assert isinstance(estimated, int)
+    assert isinstance(limit, int)
+    assert isinstance(record_count, int)
+    assert record_count > 0
+    assert estimated <= limit
+    page = _nested_mapping(governed, "continuation", "lanes", "records", "page")
+    assert page["offset"] == record_count
+    assert "_memory_projection_request" not in governed
+
+
+def _nested_mapping(payload: object, *keys: str) -> dict[str, object]:
+    current: object = payload
+    for key in keys:
+        assert isinstance(current, dict)
+        current = current[key]
+    assert isinstance(current, dict)
+    return current

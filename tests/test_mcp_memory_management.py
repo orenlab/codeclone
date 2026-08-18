@@ -559,7 +559,7 @@ def test_mcp_get_relevant_memory_compact_enforces_response_budget(
                 record_type="change_rationale",
                 subject_path="pkg/mod.py",
                 max_candidates=20,
-                statement=f"budgeted memory record {index}",
+                statement=f"budgeted memory record {index} " + "s" * 400,
             )
         service = CodeCloneMCPService(history_limit=2)
         payload = service.get_relevant_memory(

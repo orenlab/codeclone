@@ -26,6 +26,7 @@ CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.0"
 CONTEXT_GOVERNANCE_DIGEST_VERSION: Final = "1"
 CONTEXT_GOVERNANCE_ESTIMATOR: Final = "utf8_bytes_div_4_v1"
 DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2200
+RESPONSE_BUDGET_NOT_ENFORCED_REASON: Final = "response_exceeds_limit_after_packing"
 IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2600
 FINISH_RESPONSE_PROJECTION_KIND: Final = "finish_projection_v1"
 BLAST_ARTIFACT_PROJECTION_KIND: Final = "blast_artifact_projection_v1"
@@ -312,18 +313,39 @@ def _attach_context_governance(
         "mode": mode,
         "enforcement": dict(enforcement),
         "enforcement_blocked": passive_enforcement_blockers(),
-        "capabilities": passive_context_capabilities(),
-        "drill_down": passive_drill_down_reachability(),
     }
     _attach_omission_context(result, context_governance, evidence_omitted)
     context_governance.update(response_context)
     result["context_governance"] = context_governance
     governance = result["context_governance"]
     assert isinstance(governance, dict)
-    governance["estimated"] = estimate_response_context_units(result)
-    if mode != "observe" and governance["estimated"] > limit:
-        governance["mandatory_overflow"] = True
+    estimated = estimate_response_context_units(result)
+    governance["estimated"] = estimated
+    if mode != "observe" and estimated > limit:
+        _withdraw_budget_enforcement_claim(governance, enforcement=enforcement)
+        governance["estimated"] = estimate_response_context_units(result)
     return result
+
+
+def _withdraw_budget_enforcement_claim(
+    governance: dict[str, object],
+    *,
+    enforcement: Mapping[str, bool],
+) -> None:
+    """Report an enforcing response that did not fit as unenforced, not enforced.
+
+    The flag alone announced an overflow while the enforcement claim beside it
+    still said the response budget held. One fact, two answers, and the claim
+    was the one that lied. The overflow observation stays; the claim it
+    contradicts is withdrawn and the reason is named.
+    """
+
+    governance["mandatory_overflow"] = True
+    governance["enforcement"] = {**dict(enforcement), "response_budget": False}
+    governance["enforcement_blocked"] = {
+        **passive_enforcement_blockers(),
+        "response_budget": [RESPONSE_BUDGET_NOT_ENFORCED_REASON],
+    }
 
 
 def _attach_omission_context(
@@ -416,12 +438,6 @@ def _continuation_lane(
                 "page_size",
             ),
         )
-        cursor_path = str(drill_down.get("cursor_path", "")).strip()
-        if cursor_path:
-            cursor = _resolve_dotted_path(payload, cursor_path)
-            if cursor not in (None, ""):
-                lane_payload["cursor"] = cursor
-
     return lane_payload
 
 
@@ -440,19 +456,6 @@ def _as_mapping_or_none(value: object) -> Mapping[str, object] | None:
     if is_record_mapping(value):
         return value
     return None
-
-
-def _resolve_dotted_path(payload: Mapping[str, object], dotted_path: str) -> object:
-    current: object = payload
-    for raw_part in dotted_path.split("."):
-        part = raw_part.strip()
-        if not part:
-            return None
-        if isinstance(current, Mapping):
-            current = current.get(part)
-            continue
-        return None
-    return current
 
 
 def attach_finish_context_governance(
@@ -565,6 +568,7 @@ __all__ = [
     "IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND",
     "MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND",
     "PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND",
+    "RESPONSE_BUDGET_NOT_ENFORCED_REASON",
     "REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND",
     "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",

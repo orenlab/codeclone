@@ -207,6 +207,34 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
 
 ### Fixed
 
+- **A scoped memory retrieval that fits now fits, and comes back with records in it.** Every MCP response carried the
+  same invariant drill-down table and capability declaration inside `context_governance` — 491 estimated context units,
+  22% of the 2200-unit budget, identical in every answer. On top of that the top-level `_continuation` index restated
+  the base64 continuation cursor that `continuation.lanes.*.page.cursor` already owned, so one fact arrived twice with
+  two authorities that could drift. The two together crowded out the payload they were describing: measured on this
+  repository's own memory store, `get_relevant_memory` scoped to four files estimated 3209 units against a 2200 limit
+  while showing **zero** of 59 available records — it had shed every lane to nothing and still overflowed. The static
+  tables have left the envelope: the drill-down table remains the single owner of the routes and now projects the exact
+  continuation route onto each omitted lane, where a consumer actually needs it, and `_continuation` points at the
+  cursor by `cursor_path` instead of copying it. The same retrieval now estimates 2115 units and returns records.
+  `context_governance.capabilities` and `context_governance.drill_down` are no longer present in responses; read them
+  from the omitted lane's `drill_down` entry, which carries `tool`, `route` and `cursor_path`.
+- **A memory lane the retrieval returned in full is no longer incompressible by accident.** The response packer could
+  only shed a lane that already had a continuation cursor, and a lane returned complete has none — nothing was omitted
+  at retrieval time. Such a response could not be made to fit at all: it was returned whole, over the limit. The packer
+  now mints that lane's cursor from the same projection request the retrieval registered, so a lane can be paged
+  whenever its tail stays reachable, and refuses to shed a lane whose tail it cannot address.
+- **An over-budget response no longer reports its budget as enforced.** `context_governance` raised
+  `mandatory_overflow` on an enforcing response that exceeded its limit while `enforcement.response_budget` beside it
+  still said `true` — one fact with two answers, and the claim was the one that lied. The overflow observation stays;
+  the enforcement claim is now withdrawn to `false` and `enforcement_blocked.response_budget` names
+  `response_exceeds_limit_after_packing`.
+- **Memory retention no longer leaves orphan rows in the search index.** `memory_records_fts` has no triggers and is
+  maintained by hand, and the retention delete touched only `memory_records`. Every retired record left its index row
+  behind: search results stayed correct because the query joins back to `memory_records`, but the store kept growing
+  and the orphans still counted in the bm25 corpus that ranks scoped retrieval. Retention now removes the index row
+  with the record it deletes, and only for the records it deletes.
+
 - **The HTML provenance panel reads the interpreter-provenance owner instead of deciding again.** The panel rendered a
   green "matches runtime" badge beside the baseline's Python tag by comparing that tag — stripped — against a stripped
   runtime tag of its own. `api.comparison.foreign_interpreter_provenance` already owns that difference and is what the

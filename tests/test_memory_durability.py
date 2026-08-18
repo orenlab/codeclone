@@ -488,3 +488,54 @@ def test_audit_reader_missing_db_and_connect_errors(
     )
     with pytest.raises(AuditReadError, match="cannot read audit database"):
         read_audit_summary(db_path=audit_db, limit=5)
+
+
+def _indexed_memory_ids(db_path: Path) -> list[str]:
+    """Read the committed search-index rows without going through the store."""
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT memory_id FROM memory_records_fts ORDER BY memory_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [str(row[0]) for row in rows]
+
+
+def _stored_memory_ids(db_path: Path) -> list[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute("SELECT id FROM memory_records ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    return [str(row[0]) for row in rows]
+
+
+def test_retention_delete_removes_the_search_index_row_with_the_record(
+    tmp_path: Path,
+) -> None:
+    """Retention MUST NOT leave the deleted record's row in the search index.
+
+    The index is maintained by hand (there are no FTS triggers), so a delete
+    that touches only ``memory_records`` leaves an orphan behind: the index
+    keeps growing and the orphan still contributes to the bm25 corpus.
+    """
+    with memory_store(tmp_path) as (_root, project, store, db_path):
+        record = record_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            statement="retention probe record about scope path normalization",
+            subject_path="codeclone/memory/paths.py",
+            max_candidates=10,
+        )
+        store.mark_stale(record.id, reason="retention probe")
+
+        removed = store.delete_records_older_than(
+            status="stale",
+            updated_before_utc="9999-01-01T00:00:00Z",
+        )
+
+        assert removed == 1
+        assert _stored_memory_ids(db_path) == []
+        assert _indexed_memory_ids(db_path) == []

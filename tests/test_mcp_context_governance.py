@@ -11,6 +11,7 @@ import re
 from typing import cast
 
 import orjson
+import pytest
 
 import codeclone.surfaces.mcp._context_governance as governance_mod
 from codeclone.surfaces.mcp._context_governance import (
@@ -113,16 +114,32 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     assert "immutable_blast_artifact" not in blocked["response_budget"]
     assert "memory_tail_continuation" not in blocked["nested_budget"]
     assert "implementation_context_artifact_pages" not in blocked["nested_budget"]
-    capabilities = cast("dict[str, object]", envelope["capabilities"])
-    assert capabilities["typed_receipt_alias"] is True
-    assert capabilities["durable_receipt_lookup"] is True
-    assert capabilities["durable_patch_trail_lookup"] is True
-    assert capabilities["immutable_blast_artifact"] is True
-    assert capabilities["memory_tail_continuation"] is True
-    assert capabilities["implementation_context_artifact_pages"] is True
-    assert capabilities["omitted_evidence_continuation"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
+
+
+def test_capability_declaration_is_read_from_its_owner_not_from_responses() -> None:
+    """The capability declaration is a contract fact, invariant per response.
+
+    It says what this server can do, not what this answer contains, so it is
+    read from its owner instead of being restated in every envelope.
+    """
+    envelope = cast(
+        "dict[str, object]",
+        attach_passive_context_governance({"status": "accepted"})["context_governance"],
+    )
+
+    assert "capabilities" not in envelope
+    assert "drill_down" not in envelope
+    assert governance_mod.passive_context_capabilities() == {
+        "typed_receipt_alias": True,
+        "durable_receipt_lookup": True,
+        "durable_patch_trail_lookup": True,
+        "immutable_blast_artifact": True,
+        "memory_tail_continuation": True,
+        "implementation_context_artifact_pages": True,
+        "omitted_evidence_continuation": True,
+    }
 
 
 def test_finish_context_governance_marks_whole_response_projection() -> None:
@@ -318,9 +335,7 @@ def test_implementation_context_governance_enforces_compact_budget() -> None:
 
 
 def test_context_governance_declares_drill_down_reachability() -> None:
-    payload = attach_passive_context_governance({"status": "accepted"})
-    envelope = cast("dict[str, object]", payload["context_governance"])
-    drill_down = cast("dict[str, dict[str, object]]", envelope["drill_down"])
+    drill_down = governance_mod.passive_drill_down_reachability()
 
     assert {
         "memory_record_lookup": drill_down["memory_record"]["object_lookup"],
@@ -512,3 +527,147 @@ def test_context_governance_has_no_tokenizer_dependency() -> None:
 
     assert "tiktoken" not in source
     assert "tokenizer" not in source.lower()
+
+
+def test_response_envelope_cost_is_independent_of_the_static_contract_tables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Static contract text MUST NOT be charged to the per-response budget.
+
+    Pins the derivation rule rather than a literal size: growing the static
+    tables MUST NOT grow what a response costs. A response pays for what it
+    says about itself, never for an invariant table repeated in every answer.
+    """
+    payload = {"status": "accepted"}
+    baseline = estimate_response_context_units(
+        attach_passive_context_governance(payload)
+    )
+
+    monkeypatch.setitem(
+        governance_mod._PASSIVE_DRILL_DOWN,
+        "probe_lane",
+        {
+            "object_lookup": "available",
+            "route": "probe_tool(probe_argument=...)" + "x" * 400,
+            "continuation": "blocked",
+        },
+    )
+    monkeypatch.setitem(
+        governance_mod._PASSIVE_CAPABILITIES,
+        "probe_capability_" + "y" * 400,
+        True,
+    )
+
+    assert (
+        estimate_response_context_units(attach_passive_context_governance(payload))
+        == baseline
+    )
+
+
+def test_omitted_lane_carries_an_executable_continuation_route() -> None:
+    """A consumer MUST be able to learn how to reach evidence left out.
+
+    The opposite boundary of taking the static table out of the budget: the
+    routes may leave the envelope, they may not leave the response.
+    """
+    governed = attach_memory_retrieval_context_governance(
+        {
+            "records": [{"id": "mem-1"}],
+            "continuation": {
+                "lanes": {
+                    "records": {
+                        "page": {"cursor": "cursor-records-1"},
+                    }
+                }
+            },
+        },
+        detail_level="compact",
+        max_records=20,
+        evidence_omitted={
+            "records": {
+                "total": 3,
+                "shown": 1,
+                "omitted": 2,
+                "reason": "response_budget",
+                "drill_down": {
+                    "tool": "get_memory_projection_page",
+                    "route": "get_memory_projection_page(cursor=...)",
+                    "cursor_path": "continuation.lanes.records.page.cursor",
+                },
+            }
+        },
+    )
+    continuation = cast("dict[str, object]", governed["_continuation"])
+    lanes = cast("list[dict[str, object]]", continuation["lanes"])
+    records_lane = lanes[0]
+
+    assert records_lane["tool"] == "get_memory_projection_page"
+    assert records_lane["route"] == "get_memory_projection_page(cursor=...)"
+    assert records_lane["cursor_path"] == "continuation.lanes.records.page.cursor"
+
+
+def test_continuation_cursor_has_exactly_one_authoritative_representation() -> None:
+    """One continuation fact MUST be stated once.
+
+    The lane projection owns the cursor; the governance index points at it by
+    path. Restating the value gives one fact two authorities that can drift.
+    """
+    cursor = "cursor-records-" + "z" * 64
+    governed = attach_memory_retrieval_context_governance(
+        {
+            "records": [{"id": "mem-1"}],
+            "continuation": {
+                "lanes": {
+                    "records": {
+                        "page": {"cursor": cursor},
+                    }
+                }
+            },
+        },
+        detail_level="compact",
+        max_records=20,
+        evidence_omitted={
+            "records": {
+                "total": 3,
+                "shown": 1,
+                "omitted": 2,
+                "reason": "response_budget",
+                "drill_down": {
+                    "tool": "get_memory_projection_page",
+                    "cursor_path": "continuation.lanes.records.page.cursor",
+                },
+            }
+        },
+    )
+    body = orjson.dumps(governed, option=orjson.OPT_SORT_KEYS).decode()
+
+    assert body.count(cursor) == 1
+
+
+def test_enforcing_envelope_never_claims_a_budget_it_did_not_hold() -> None:
+    """An envelope MUST NOT publish an enforcement claim it did not deliver.
+
+    Announcing an overflow while still reporting the response budget as
+    enforced is one fact with two answers; the claim is the one that lies.
+    """
+    governed = attach_memory_retrieval_context_governance(
+        {
+            "records": [
+                {"id": f"mem-{index}", "statement": "s" * 400} for index in range(30)
+            ]
+        },
+        detail_level="compact",
+        max_records=30,
+    )
+    envelope = cast("dict[str, object]", governed["context_governance"])
+    enforcement = cast("dict[str, bool]", envelope["enforcement"])
+    blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
+    estimated = envelope["estimated"]
+    limit = envelope["limit"]
+
+    assert isinstance(estimated, int)
+    assert isinstance(limit, int)
+    assert estimated > limit
+    assert envelope["mandatory_overflow"] is True
+    assert enforcement["response_budget"] is False
+    assert blocked["response_budget"] == ["response_exceeds_limit_after_packing"]

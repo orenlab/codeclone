@@ -41,6 +41,7 @@ from ...memory.retrieval import (
     query_engineering_memory,
 )
 from ...memory.retrieval.continuation import (
+    build_memory_continuation_cursor,
     memory_projection_request_digest,
     rebase_memory_continuation_cursor,
 )
@@ -56,6 +57,7 @@ from ._context_governance import (
     MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND,
     attach_memory_retrieval_context_governance,
     attach_passive_context_governance,
+    passive_drill_down_reachability,
 )
 from ._intent import IntentRecord
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
@@ -109,6 +111,11 @@ _MEMORY_RESPONSE_REDUCTION_ORDER: tuple[str, ...] = (
     "trajectories",
     "records",
 )
+_MEMORY_LANE_DRILL_DOWN_KEYS: Final[dict[str, str]] = {
+    "records": "memory_record",
+    "trajectories": "trajectory",
+    "experiences": "experience",
+}
 
 
 def _blast_session(session: _MCPSessionMemoryMixin) -> _MCPSessionBlastRadiusMixin:
@@ -205,7 +212,7 @@ class _MCPSessionMemoryMixin:
             )
             if memory_sync is not None:
                 result["memory_sync"] = memory_sync
-            result = self._publish_memory_continuation_request(result)
+            self._register_memory_continuation_request(result)
             return _attach_budgeted_memory_retrieval_context(
                 result,
                 detail_level=detail_level,
@@ -845,13 +852,18 @@ class _MCPSessionMemoryMixin:
             return frozenset()
         return frozenset(result.direct_dependents)
 
-    def _publish_memory_continuation_request(
+    def _register_memory_continuation_request(
         self,
         payload: Mapping[str, object],
-    ) -> dict[str, object]:
-        published = dict(payload)
-        internal = published.pop("_memory_projection_request", None)
-        project_id = published.get("project_id")
+    ) -> None:
+        """Register the projection request so continuation cursors can resolve.
+
+        The request stays on the payload: the response packer needs it to mint
+        a cursor for a lane it decides to shed, and the packer is the stage
+        that removes the internal key before the response is published.
+        """
+        internal = payload.get("_memory_projection_request")
+        project_id = payload.get("project_id")
         if isinstance(project_id, str) and is_record_mapping(internal):
             internal_mapping = internal
             digest = memory_projection_request_digest(internal_mapping)
@@ -860,7 +872,6 @@ class _MCPSessionMemoryMixin:
                 self._memory_continuation_requests[
                     self._memory_continuation_request_key(project_id, digest_value)
                 ] = dict(internal_mapping)
-        return published
 
     def _resolve_memory_continuation_request(
         self,
@@ -885,18 +896,21 @@ def _attach_budgeted_memory_retrieval_context(
 ) -> dict[str, object]:
     effective_limit = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT if limit is None else limit
     normalized_detail = "full" if detail_level == "full" else "compact"
+    publishable = dict(payload)
+    projection_request = publishable.pop("_memory_projection_request", None)
     if normalized_detail == "full":
         return attach_memory_retrieval_context_governance(
-            payload,
+            publishable,
             detail_level=detail_level,
             max_records=max_records,
             limit=effective_limit,
         )
     packed, omitted = _pack_compact_memory_response(
-        payload,
+        publishable,
         detail_level=detail_level,
         max_records=max_records,
         limit=effective_limit,
+        projection_request=projection_request,
     )
     return attach_memory_retrieval_context_governance(
         packed,
@@ -913,18 +927,23 @@ def _pack_compact_memory_response(
     detail_level: str,
     max_records: int,
     limit: int,
+    projection_request: object = None,
 ) -> tuple[dict[str, object], dict[str, object] | None]:
     lane_items = _memory_lane_items(payload)
     totals = _memory_lane_totals(payload, lane_items)
     original_shown = {lane: len(items) for lane, items in lane_items.items()}
     shown = dict(original_shown)
-    original_continuation = _memory_continuation_lanes(payload)
+    lane_cursors = _memory_lane_base_cursors(
+        payload,
+        lane_items=lane_items,
+        projection_request=projection_request,
+    )
     packed = _memory_response_with_shown_counts(
         payload,
         lane_items=lane_items,
         totals=totals,
         shown=shown,
-        original_continuation=original_continuation,
+        lane_cursors=lane_cursors,
     )
     omitted = _memory_governance_omitted(packed, original_shown=original_shown)
     if (
@@ -941,9 +960,7 @@ def _pack_compact_memory_response(
     for floor in (1, 0):
         while True:
             lane = _next_reducible_memory_lane(
-                shown,
-                floor=floor,
-                original_continuation=original_continuation,
+                shown, floor=floor, lane_cursors=lane_cursors
             )
             if lane is None:
                 break
@@ -953,7 +970,7 @@ def _pack_compact_memory_response(
                 lane_items=lane_items,
                 totals=totals,
                 shown=shown,
-                original_continuation=original_continuation,
+                lane_cursors=lane_cursors,
             )
             omitted = _memory_governance_omitted(
                 packed,
@@ -1025,7 +1042,7 @@ def _memory_response_with_shown_counts(
     lane_items: Mapping[str, Sequence[Mapping[str, object]]],
     totals: Mapping[str, int],
     shown: Mapping[str, int],
-    original_continuation: Mapping[str, Mapping[str, object]],
+    lane_cursors: Mapping[str, str],
 ) -> dict[str, object]:
     result = dict(payload)
     for lane, count_key in _MEMORY_RESPONSE_LANES:
@@ -1037,7 +1054,7 @@ def _memory_response_with_shown_counts(
     continuation = _rebuilt_memory_continuation(
         totals=totals,
         shown=shown,
-        original_continuation=original_continuation,
+        lane_cursors=lane_cursors,
     )
     if continuation:
         result["continuation"] = continuation
@@ -1050,19 +1067,16 @@ def _rebuilt_memory_continuation(
     *,
     totals: Mapping[str, int],
     shown: Mapping[str, int],
-    original_continuation: Mapping[str, Mapping[str, object]],
+    lane_cursors: Mapping[str, str],
 ) -> dict[str, object]:
     lanes: dict[str, object] = {}
     for lane, _count_key in _MEMORY_RESPONSE_LANES:
         shown_count = shown[lane]
         total = totals[lane]
         omitted = max(0, total - shown_count)
-        if omitted > 0:
-            page = _rebased_memory_lane_page(
-                lane,
-                offset=shown_count,
-                original_continuation=original_continuation,
-            )
+        cursor = lane_cursors.get(lane)
+        if omitted > 0 and cursor is not None:
+            page = rebase_memory_continuation_cursor(cursor, offset=shown_count)
             if page is not None:
                 lanes[lane] = {
                     "status": "available",
@@ -1079,20 +1093,6 @@ def _rebuilt_memory_continuation(
         "cursor_policy": "digest_bound_recompute_or_fail_closed",
         "lanes": lanes,
     }
-
-
-def _rebased_memory_lane_page(
-    lane: str,
-    *,
-    offset: int,
-    original_continuation: Mapping[str, Mapping[str, object]],
-) -> dict[str, object] | None:
-    original_lane = original_continuation.get(lane)
-    page = original_lane.get("page") if original_lane is not None else None
-    cursor = page.get("cursor") if isinstance(page, Mapping) else None
-    if not isinstance(cursor, str):
-        return None
-    return rebase_memory_continuation_cursor(cursor, offset=offset)
 
 
 def _memory_continuation_lanes(
@@ -1137,22 +1137,75 @@ def _memory_governance_omitted(
             "reason": reason,
             "drill_down": {
                 "tool": "get_memory_projection_page",
+                "route": _memory_lane_continuation_route(lane),
                 "cursor_path": f"continuation.lanes.{lane}.page.cursor",
             },
         }
     return omitted or None
 
 
+def _memory_lane_continuation_route(lane: str) -> str:
+    """Project the declared continuation route for one omitted lane.
+
+    The drill-down table is a contract fact, invariant across responses, so it
+    is no longer restated in every envelope. It is still the single owner of
+    the routes: a lane that omits evidence carries the route from here, where
+    the consumer actually needs it.
+    """
+    reachability = passive_drill_down_reachability()
+    entry = reachability.get(_MEMORY_LANE_DRILL_DOWN_KEYS.get(lane, ""), {})
+    route = entry.get("continuation_route")
+    return route if isinstance(route, str) else ""
+
+
 def _next_reducible_memory_lane(
     shown: Mapping[str, int],
     *,
     floor: int,
-    original_continuation: Mapping[str, Mapping[str, object]],
+    lane_cursors: Mapping[str, str],
 ) -> str | None:
+    """A lane may be shed only while its tail stays reachable by cursor."""
     for lane in _MEMORY_RESPONSE_REDUCTION_ORDER:
-        if shown[lane] > floor and lane in original_continuation:
+        if shown[lane] > floor and lane in lane_cursors:
             return lane
     return None
+
+
+def _memory_lane_base_cursors(
+    payload: Mapping[str, object],
+    *,
+    lane_items: Mapping[str, Sequence[Mapping[str, object]]],
+    projection_request: object,
+) -> dict[str, str]:
+    """Return one rebasable cursor per lane the response packer may shed.
+
+    A lane the retrieval returned in full carries no cursor, because nothing
+    was omitted at retrieval time. The response packer answers to a different
+    limit and may still have to shed such a lane, so it mints that lane's
+    cursor from the same projection request the retrieval registered. Without
+    it a full lane is incompressible by accident and the whole response
+    overflows instead of paging.
+    """
+    original_continuation = _memory_continuation_lanes(payload)
+    project_id = payload.get("project_id")
+    mintable = isinstance(project_id, str) and bool(project_id)
+    cursors: dict[str, str] = {}
+    for lane, _count_key in _MEMORY_RESPONSE_LANES:
+        original_lane = original_continuation.get(lane)
+        page = original_lane.get("page") if original_lane is not None else None
+        cursor = page.get("cursor") if isinstance(page, Mapping) else None
+        if isinstance(cursor, str):
+            cursors[lane] = cursor
+        elif mintable and is_record_mapping(projection_request):
+            minted = build_memory_continuation_cursor(
+                project_id=cast("str", project_id),
+                lane=lane,
+                request=projection_request,
+                items=lane_items.get(lane, ()),
+                offset=0,
+            )["cursor"]
+            cursors[lane] = cast("str", minted)
+    return cursors
 
 
 __all__ = ["_MCPSessionMemoryMixin"]

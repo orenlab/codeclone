@@ -841,7 +841,10 @@ def get_relevant_memory(
     )
     if continuation:
         payload["continuation"] = continuation
-        payload["_memory_projection_request"] = projection_request
+    # Internal, never published: the MCP response packer answers to its own
+    # response budget and may have to shed a lane the retrieval returned in
+    # full, which needs this request to mint that lane's first cursor.
+    payload["_memory_projection_request"] = projection_request
     return payload
 
 
