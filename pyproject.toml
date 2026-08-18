@@ -114,7 +114,7 @@ dev = [
     "jsonschema>=4.23.0",
     "types-PyYAML>=6.0.12.20260724",
     "types-jsonschema>=4.23.0.20250516",
-    "ckdn[mcp]>=1.0.0; python_version > '3.11'",
+    "ckdn[mcp]>=1.3.2; python_version > '3.11'",
 ]
 
 [project.scripts]
