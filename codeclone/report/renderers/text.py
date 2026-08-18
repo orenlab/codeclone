@@ -7,7 +7,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import Final
 
+from ...api.finding_groups import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    SUPPRESSED_KIND_ORDER,
+    SuppressedCloneGroups,
+    suppressed_clone_groups,
+)
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
 from ...utils.mapping_paths import sections
@@ -18,6 +27,19 @@ from ..messages import projections as proj
 _as_int = as_int
 _as_mapping = as_mapping
 _as_sequence = as_sequence
+
+#: Section title and item metric for each suppressed clone kind, keyed by the
+#: kind the owner declares. Which kinds exist and in what order they print is
+#: the owner's answer; the wording of a heading and the name of the metric a
+#: location line shows are presentation and stay here (`P3`). The active clone
+#: loop below carries a similar-looking tuple for a different container -- flat
+#: sibling lists keyed by the producer's plural bucket names -- and the two are
+#: deliberately not merged.
+_SUPPRESSED_CLONE_PRESENTATION: Final[Mapping[str, tuple[str, str]]] = {
+    CLONE_KIND_FUNCTION: (proj.TEXT_SECTION_SUPPRESSED_FUNCTION_CLONES, "loc"),
+    CLONE_KIND_BLOCK: (proj.TEXT_SECTION_SUPPRESSED_BLOCK_CLONES, "size"),
+    CLONE_KIND_SEGMENT: (proj.TEXT_SECTION_SUPPRESSED_SEGMENT_CLONES, "size"),
+}
 
 
 def format_meta_text_value(value: object) -> str:
@@ -658,7 +680,7 @@ def _append_findings_sections(
     *,
     findings_groups: Mapping[str, object],
     clone_groups: Mapping[str, object],
-    suppressed_clone_groups: Mapping[str, object],
+    suppressed: SuppressedCloneGroups,
     metrics_families: Mapping[str, object],
 ) -> None:
     for title, group_key, metric_name in (
@@ -692,17 +714,17 @@ def _append_findings_sections(
             metric_name=metric_name,
         )
 
-    if suppressed_clone_groups:
-        for title, group_key, metric_name in (
-            (proj.TEXT_SECTION_SUPPRESSED_FUNCTION_CLONES, "functions", "loc"),
-            (proj.TEXT_SECTION_SUPPRESSED_BLOCK_CLONES, "blocks", "size"),
-            (proj.TEXT_SECTION_SUPPRESSED_SEGMENT_CLONES, "segments", "size"),
-        ):
+    # ``present``, not truthiness: a container the producer omitted because
+    # nothing was suppressed is a different document from one it published
+    # empty, and printing nothing for both would make them the same (`G4`).
+    if suppressed.present:
+        for kind in SUPPRESSED_KIND_ORDER:
+            title, metric_name = _SUPPRESSED_CLONE_PRESENTATION[kind]
             lines.append("")
             _append_suppressed_clone_section(
                 lines,
                 title=title,
-                groups=_as_sequence(suppressed_clone_groups.get(group_key)),
+                groups=suppressed.by_kind[kind],
                 metric_name=metric_name,
             )
 
@@ -776,7 +798,6 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         digest,
         findings_groups,
         clone_groups,
-        suppressed_clone_groups,
         runtime_meta,
     ) = sections(
         payload,
@@ -804,7 +825,6 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         "integrity.digests.envelope",
         "findings.groups",
         "findings.groups.clones",
-        "findings.groups.clones.suppressed",
         "meta.runtime",
     )
     suggestions_payload = _as_sequence(derived.get("suggestions"))
@@ -970,7 +990,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         lines,
         findings_groups=findings_groups,
         clone_groups=clone_groups,
-        suppressed_clone_groups=suppressed_clone_groups,
+        suppressed=suppressed_clone_groups(payload),
         metrics_families=metrics_families,
     )
     lines.extend(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from ...api.finding_groups import suppressed_clone_groups
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
@@ -267,7 +268,6 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         findings_summary,
         findings_groups,
         clone_groups,
-        suppressed_clone_groups,
         overview,
         hotlists,
         metrics_families,
@@ -289,7 +289,6 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         "findings.summary",
         "findings.groups",
         "findings.groups.clones",
-        "findings.groups.clones.suppressed",
         "derived.overview",
         "derived.hotlists",
         "metrics.families",
@@ -504,17 +503,18 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             *_as_sequence(clone_groups.get("segments")),
         ],
     )
-    if suppressed_clone_groups:
+    # Read through the owner, which knows that the suppressed container sits a
+    # level deeper than its sibling lists and keys its buckets in the plural
+    # while the groups inside declare their kind in the singular. Spelling
+    # those keys here is what made this renderer a second description of one
+    # shape; ``present`` is asked rather than truthiness so that a container
+    # the producer omitted stays distinguishable from one it published empty
+    # (`G4`).
+    suppressed = suppressed_clone_groups(payload)
+    if suppressed.present:
         lines.append("#### Suppressed Golden Fixture Clone Groups")
         lines.append("")
-        _append_suppressed_clone_findings(
-            lines,
-            groups=[
-                *_as_sequence(suppressed_clone_groups.get("functions")),
-                *_as_sequence(suppressed_clone_groups.get("blocks")),
-                *_as_sequence(suppressed_clone_groups.get("segments")),
-            ],
-        )
+        _append_suppressed_clone_findings(lines, groups=suppressed.groups)
 
     _append_anchor(lines, *_anchor("structural-findings"))
     _append_findings_section(

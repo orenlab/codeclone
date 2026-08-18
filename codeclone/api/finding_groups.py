@@ -35,6 +35,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
+# The three clone kinds are re-exported from here, not restated downstream. A
+# renderer keying its own presentation by kind has to name a kind, and the
+# domain module that declares them sits in a ring no presentation layer may
+# import; spelling them again there would put one vocabulary in two places and
+# hand every reader a second chance to spell it differently (`G2`).
 from ..domain.findings import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
@@ -47,6 +52,18 @@ from ..utils.coerce import as_sequence as _as_sequence
 #: The key under which the clone family nests its suppressed buckets. This is
 #: the single site in the codebase that spells it: that is the point.
 SUPPRESSED_CONTAINER_KEY: Final = "suppressed"
+
+#: The full document path of that container, declared rather than spelled at
+#: the point of use. Navigation reads it below, so it is load-bearing and
+#: cannot rot into a decorative constant; a guard that wants to know which
+#: address only this module may spell takes it from here instead of restating
+#: it, which is how a guard survives the key being renamed.
+SUPPRESSED_CONTAINER_PATH: Final[tuple[str, ...]] = (
+    "findings",
+    "groups",
+    FAMILY_CLONES,
+    SUPPRESSED_CONTAINER_KEY,
+)
 
 #: Canonical presentation order for suppressed clone kinds. The HTML panel
 #: declares this order to its readers in prose, so it is a contract of the
@@ -113,12 +130,13 @@ def _groups_in(payload: object) -> tuple[Mapping[str, object], ...]:
 
 
 def _suppressed_container(document: Mapping[str, object]) -> object | None:
-    findings = _as_mapping(document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get(FAMILY_CLONES))
-    if SUPPRESSED_CONTAINER_KEY not in clones:
+    *ancestors, container_key = SUPPRESSED_CONTAINER_PATH
+    current: Mapping[str, object] = document
+    for segment in ancestors:
+        current = _as_mapping(current.get(segment))
+    if container_key not in current:
         return None
-    return clones[SUPPRESSED_CONTAINER_KEY]
+    return current[container_key]
 
 
 def suppressed_clone_groups(
@@ -226,7 +244,11 @@ def suppressed_group_items(
 
 
 __all__ = [
+    "CLONE_KIND_BLOCK",
+    "CLONE_KIND_FUNCTION",
+    "CLONE_KIND_SEGMENT",
     "SUPPRESSED_CONTAINER_KEY",
+    "SUPPRESSED_CONTAINER_PATH",
     "SUPPRESSED_KIND_ORDER",
     "FindingGroupRef",
     "SuppressedCloneGroups",
