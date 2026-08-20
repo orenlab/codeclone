@@ -1241,28 +1241,28 @@ _CLONE_VOCABULARY_BORROWERS: dict[str, str] = {
         "the producer stamps every clone group and every suppressed clone group "
         "with its kind"
     ),
+    "codeclone/report/document/_findings_groups.py": (
+        "the group builders dispatch on the kind and bucket the suppressed "
+        "groups by it; the match arms read the owner through dotted value "
+        "patterns because a bare imported name in a case pattern captures "
+        "instead of comparing"
+    ),
+    "codeclone/report/document/findings.py": (
+        "the summary reads the suppressed-clone buckets by the singular kind"
+    ),
     "codeclone/report/html/sections/_clones.py": (
         "the panel keys its kind labels and maps a section id onto a kind"
+    ),
+    "codeclone/surfaces/mcp/_session_shared.py": (
+        "the clone short-id alias table keys off the kind parsed from a "
+        "canonical id; the rendered aliases stay short-id presentation"
     ),
 }
 
 #: Borrowers that still restate a value elsewhere in the same module, with what
 #: blocks each one. A work queue with a deadline, not a permit: a new offender
 #: fails as growth and a repaired one fails as a stale entry.
-_VOCABULARY_RESTATED_PENDING: dict[str, str] = {
-    "codeclone/report/document/_findings_groups.py": (
-        'five ``match kind: case "function"`` value patterns. A match pattern '
-        "cannot bind a bare imported name -- it would capture, not compare -- so "
-        "routing these through the owner needs dotted value patterns and a "
-        "different import shape than every other consumer uses"
-    ),
-    "codeclone/report/document/findings.py": (
-        "three suppressed-bucket lookups keyed by the singular kind"
-    ),
-    "codeclone/surfaces/mcp/_session_shared.py": (
-        "the clone short-id alias table keys off the kind"
-    ),
-}
+_VOCABULARY_RESTATED_PENDING: dict[str, str] = {}
 
 
 def _parsed_tracked_sources() -> dict[str, ast.Module]:

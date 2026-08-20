@@ -201,9 +201,13 @@ def _findings_summary(
             source_scope_counts[impact_scope] += 1
     clone_groups = [*clone_functions, *clone_blocks, *clone_segments]
     clone_suppressed_map = _as_mapping(suppressed_clone_groups)
-    suppressed_functions = len(_as_sequence(clone_suppressed_map.get("function")))
-    suppressed_blocks = len(_as_sequence(clone_suppressed_map.get("block")))
-    suppressed_segments = len(_as_sequence(clone_suppressed_map.get("segment")))
+    suppressed_functions = len(
+        _as_sequence(clone_suppressed_map.get(CLONE_KIND_FUNCTION))
+    )
+    suppressed_blocks = len(_as_sequence(clone_suppressed_map.get(CLONE_KIND_BLOCK)))
+    suppressed_segments = len(
+        _as_sequence(clone_suppressed_map.get(CLONE_KIND_SEGMENT))
+    )
     suppressed_clone_total = (
         suppressed_functions + suppressed_blocks + suppressed_segments
     )

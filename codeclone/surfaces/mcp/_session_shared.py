@@ -42,6 +42,8 @@ from ...config.spec import (
     DEFAULT_SEGMENT_MIN_STMT,
 )
 from ...contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
     DEFAULT_COVERAGE_MIN,
     DEFAULT_JSON_REPORT_PATH,
@@ -414,7 +416,7 @@ def _clone_short_id_entry_payload(canonical_id: str) -> _CloneShortIdEntry:
     _prefix, _, remainder = canonical_id.partition(":")
     clone_kind, _, group_key = remainder.partition(":")
     hashes = [part for part in group_key.split("|") if part]
-    if clone_kind == "function":
+    if clone_kind == CLONE_KIND_FUNCTION:
         fingerprint = hashes[0] if hashes else group_key
         bucket = ""
         if "|" in group_key:
@@ -425,7 +427,9 @@ def _clone_short_id_entry_payload(canonical_id: str) -> _CloneShortIdEntry:
             token=fingerprint,
             suffix=bucket,
         )
-    alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
+    alias = {CLONE_KIND_BLOCK: "blk", CLONE_KIND_SEGMENT: "seg"}.get(
+        clone_kind, "clone"
+    )
     combined = "|".join(hashes) if hashes else group_key
     token = hashlib.sha256(combined.encode()).hexdigest()
     return _CloneShortIdEntry(

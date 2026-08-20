@@ -111,7 +111,7 @@ run falls back to cold analysis until the cap is raised or the cache shrinks.
 | `update_baseline` | bool | `false` | `--update-baseline` | Overwrite the baseline with current results |
 | `semantic_authority` | bool | `false` | `--semantic-authority` | Collect report-only semantic authority candidates and provenance facts |
 | `ci` | bool | `false` | `--ci` | CI preset: implies `fail_on_new`, `no_color`, and `quiet` |
-| `api_surface` | bool | `false` | `--api-surface` | Compute public API surface facts |
+| `api_surface` | bool | `false` | `--api-surface` | Compute API surface facts (contract-visible exports) |
 | `coverage_xml` | str | unset | `--coverage` | External Cobertura XML coverage file to join |
 
 ### Quality gates
@@ -133,7 +133,7 @@ value applies the built-in threshold shown in parentheses.
 | `fail_health` | int | `-1` (disabled) | `--fail-health` | Exit nonzero if health score is below the threshold, 0–100 (bare flag: `60`) |
 | `fail_on_typing_regression` | bool | `false` | `--fail-on-typing-regression` | Exit nonzero if typing coverage regresses |
 | `fail_on_docstring_regression` | bool | `false` | `--fail-on-docstring-regression` | Exit nonzero if docstring coverage regresses |
-| `fail_on_api_break` | bool | `false` | `--fail-on-api-break` | Exit nonzero on public API removals |
+| `fail_on_api_break` | bool | `false` | `--fail-on-api-break` | Exit nonzero on contract-visible API removals |
 | `fail_on_authority_violation` | bool | `false` | `--fail-on-authority-violation` | Exit nonzero on an authority violation in a governed contract |
 | `fail_on_untested_hotspots` | bool | `false` | `--fail-on-untested-hotspots` | Exit nonzero if risk-level functions have insufficient coverage (needs `coverage_xml`) |
 | `min_typing_coverage` | int | `-1` (disabled) | `--min-typing-coverage` | Minimum parameter typing coverage (%) |

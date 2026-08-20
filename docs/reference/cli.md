@@ -60,9 +60,14 @@ Baseline update and baseline-relative gating both require a stable
 | `--patch-verify` | Verify current patch against baseline budget |
 | `--strictness LEVEL` | Strictness profile: `ci`, `strict`, or `relaxed`. Default: `ci` |
 | `--ci` | Enable CI preset (`--fail-on-new --no-color --quiet`) |
-| `--api-surface` | Collect public API surface facts for compatibility review |
+| `--api-surface` | Collect API surface facts (contract-visible exports) for compatibility review |
 | `--semantic-authority` | Collect report-only semantic authority candidates and provenance facts |
 | `--coverage FILE` | Join external Cobertura XML line coverage |
+
+CodeClone treats names listed in `__all__` as contract-visible exports for
+API-break accounting. An explicit `__all__` remains authoritative even in an
+underscore-prefixed module — existing policy, not a claim that Python prevents
+external imports.
 
 ### Quality gates (fail on violation)
 
@@ -80,7 +85,7 @@ Baseline update and baseline-relative gating both require a stable
 | `--fail-health [SCORE_MIN]` | Exit 3 if health score below threshold. Default if enabled: 60 |
 | `--fail-on-typing-regression` | Exit 3 if typing coverage regresses |
 | `--fail-on-docstring-regression` | Exit 3 if docstring coverage regresses |
-| `--fail-on-api-break` | Exit 3 if public API removals detected |
+| `--fail-on-api-break` | Exit 3 if contract-visible API removals detected |
 | `--fail-on-authority-violation` | Exit 3 on an authority violation in a governed semantic contract. Requires a reviewed `[[tool.codeclone.authority]]` entry |
 | `--fail-on-untested-hotspots` | Exit 3 if risk-level functions have insufficient coverage. Requires `--coverage` |
 | `--min-typing-coverage PERCENT` | Exit 3 if parameter typing coverage below threshold |

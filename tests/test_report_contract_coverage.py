@@ -17,7 +17,12 @@ import pytest
 
 import codeclone.report.document._common as document_common_mod
 from codeclone.baseline.trust import current_python_tag
-from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    REPORT_SCHEMA_VERSION,
+)
 from codeclone.models import (
     DeadItem,
     HealthScore,
@@ -49,6 +54,7 @@ from codeclone.report.document._common import (
 )
 from codeclone.report.document._design_groups import _build_design_groups
 from codeclone.report.document._findings_groups import (
+    _build_clone_group_facts,
     _build_dead_code_groups,
     _build_structural_groups,
     _clone_group_assessment,
@@ -1190,6 +1196,50 @@ def test_json_contract_private_helpers_cover_edge_cases(tmp_path: Path) -> None:
         scan_root="/repo/codeclone",
     )
     assert design_groups == []
+
+
+def test_a_kind_arm_compares_the_owner_value_and_never_captures() -> None:
+    """The match arms take the owner through dotted value patterns.
+
+    ``case contracts.CLONE_KIND_BLOCK`` compares by value. The bare-name
+    "simplification" is a capture pattern -- it matches ANY kind -- and the
+    one arm where it even compiles is the guarded block arm, because the
+    guard keeps Python from rejecting the capture for making later patterns
+    unreachable. The colliding key below reaches that guard on purpose:
+    under a capture, a segment group whose key collides with the block-facts
+    table walks out wearing block machine facts.
+    """
+
+    colliding_key = "a1b2|2"
+    block_facts = {colliding_key: {"block_size": "7", "match_rule": "exact"}}
+    items: list[dict[str, object]] = [
+        {"loc_bucket": "11-20"},
+        {"loc_bucket": "21-40"},
+    ]
+
+    function_facts, _function_display = _build_clone_group_facts(
+        group_key=colliding_key,
+        kind=CLONE_KIND_FUNCTION,
+        items=items,
+        block_facts=block_facts,
+    )
+    block_built, _block_display = _build_clone_group_facts(
+        group_key=colliding_key,
+        kind=CLONE_KIND_BLOCK,
+        items=items,
+        block_facts=block_facts,
+    )
+    segment_facts, segment_display = _build_clone_group_facts(
+        group_key=colliding_key,
+        kind=CLONE_KIND_SEGMENT,
+        items=items,
+        block_facts=block_facts,
+    )
+
+    assert function_facts["loc_buckets"] == ["11-20", "21-40"]
+    assert block_built["block_size"] == 7
+    assert segment_facts == {"group_key": colliding_key, "group_arity": 2}
+    assert segment_display == {}
 
 
 def test_coerce_helper_numeric_branches() -> None:

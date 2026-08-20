@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
+import codeclone.contracts as contracts
+
 from ...contracts import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
@@ -98,7 +100,7 @@ def _build_clone_group_facts(
     }
     display_facts: dict[str, str] = {}
     match kind:
-        case "function":
+        case contracts.CLONE_KIND_FUNCTION:
             loc_buckets = sorted(
                 {
                     str(item.get("loc_bucket", ""))
@@ -107,7 +109,7 @@ def _build_clone_group_facts(
                 }
             )
             base["loc_buckets"] = loc_buckets
-        case "block" if group_key in block_facts:
+        case contracts.CLONE_KIND_BLOCK if group_key in block_facts:
             typed_facts, block_display_facts = _normalize_block_machine_facts(
                 group_key=group_key,
                 group_arity=len(items),
@@ -136,7 +138,7 @@ def _clone_item_payload(
         "end_line": _as_int(item.get("end_line", 0)),
     }
     match kind:
-        case "function":
+        case contracts.CLONE_KIND_FUNCTION:
             payload.update(
                 {
                     "loc": _as_int(item.get("loc", 0)),
@@ -151,7 +153,7 @@ def _clone_item_payload(
                     "raw_hash": str(item.get("raw_hash", "")),
                 }
             )
-        case "block":
+        case contracts.CLONE_KIND_BLOCK:
             payload["size"] = _as_int(item.get("size", 0))
         case _:
             payload.update(
@@ -233,7 +235,9 @@ def _build_clone_groups(
                 # Every other reason comes from the novelty owner, which is the
                 # only place that knows which of the two absences applies.
                 "novelty_reason": (
-                    NOVELTY_REASON_NOT_GOVERNED if kind == "segment" else novelty_reason
+                    NOVELTY_REASON_NOT_GOVERNED
+                    if kind == CLONE_KIND_SEGMENT
+                    else novelty_reason
                 ),
                 "count": len(items),
                 "source_scope": source_scope,
