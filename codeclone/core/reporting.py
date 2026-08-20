@@ -15,6 +15,7 @@ from ..baseline.trust import current_python_tag
 from ..contracts import DEFAULT_COVERAGE_MIN
 from ..models import BaselineContainerV3, MetricsDiff, TrustVector
 from ..observability import span
+from ..report.document._common import health_verdict_withheld
 from ..report.gates.evaluator import HEALTH_INPUT_LANES, GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
 from ..report.gates.evaluator import (
@@ -206,6 +207,15 @@ def _metrics_for_report(
         and baseline_trust.root_verified
         and item.status == "trusted"
     }
+    # The current half of the health availability question. Lane trust can
+    # only vouch for the baseline term of the subtraction; a run whose own
+    # population carries no health number made no health comparison however
+    # trusted the stored lanes are, and publishing ``delta: 0`` beside
+    # ``baseline_diff_available: true`` would state "compared, unchanged"
+    # about a comparison that never ran (`B8`, `G4`). Read through the one
+    # reader the document tree already uses, not a second ``score is None``
+    # derivation (`G2`).
+    health_withheld = health_verdict_withheld(_as_mapping(enriched.get("health")))
     # Each row names *every* lane its comparison consumes, not a representative
     # one. Health is why: it is derived from seven lanes, and keying it on
     # ``risk_observations`` alone published a delta as available while one of
@@ -269,6 +279,8 @@ def _metrics_for_report(
         family = dict(_as_mapping(enriched.get(family_name)))
         summary = dict(_as_mapping(family.get("summary")))
         available = trusted_lanes.issuperset(lanes)
+        if family_name == "health" and health_withheld:
+            available = False
         summary["baseline_diff_available"] = available
         summary[value_key] = value if available else 0
         family["summary"] = summary

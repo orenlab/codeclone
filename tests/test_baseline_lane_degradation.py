@@ -34,26 +34,33 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import pytest
 
 from codeclone.baseline import Baseline, current_python_tag
+from codeclone.baseline._metrics_baseline_payload import snapshot_from_project_metrics
 from codeclone.baseline.container import read_container_v3
 from codeclone.baseline.container_digest import (
     canonical_container_bytes,
     compute_lane_digest,
     compute_root_digest,
 )
+from codeclone.baseline.diff import diff_metrics
 from codeclone.baseline.lanes import lane_payload_is_opaque
 from codeclone.baseline.metrics_baseline import _lane_payload, _snapshot
+from codeclone.contracts import HealthPopulation
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     BaselineContainerV3,
     BaselineLaneIndex,
     CloneObservationPayload,
     ContainerReadSuccess,
+    HealthScore,
+    MetricsSnapshot,
     ObservationLaneName,
+    ProjectMetrics,
 )
 from codeclone.report.gates.evaluator import HEALTH_INPUT_LANES
 
@@ -736,6 +743,178 @@ def test_every_health_input_lane_withholds_the_snapshot_health(
         assert isinstance(result, ContainerReadSuccess)
         assert lane_payload_is_opaque(result.container.lanes[lane_name])
         assert _snapshot(result.container).health_score is None, lane_name
+
+
+# ---------------------------------------------------------------------------
+# The CURRENT half of the same disease. Wave 7 taught the baseline half above
+# to carry the refusal; ``snapshot_from_project_metrics`` builds the other term
+# of the same subtraction, and it read ``health.total`` through the same
+# ``int`` that cannot say "not measured". An empty or unread CURRENT run
+# against a good baseline then published ``health_delta = 0 - good`` -- a
+# regression no code caused, the mirror image of the false improvement the
+# wave 7 tests pin.
+# ---------------------------------------------------------------------------
+
+
+def _project_metrics_with_health(health: HealthScore) -> ProjectMetrics:
+    """The smallest metrics object whose only interesting fact is health."""
+
+    return ProjectMetrics(
+        complexity_avg=0.0,
+        complexity_max=0,
+        high_risk_functions=(),
+        coupling_avg=0.0,
+        coupling_max=0,
+        high_risk_classes=(),
+        cohesion_avg=0.0,
+        cohesion_max=0,
+        low_cohesion_classes=(),
+        dependency_modules=0,
+        dependency_edges=0,
+        dependency_edge_list=(),
+        dependency_cycles=(),
+        dependency_max_depth=0,
+        dependency_longest_chains=(),
+        dead_code=(),
+        health=health,
+    )
+
+
+def _current_half_snapshot(
+    health_score: int | None,
+    health_grade: Literal["A", "B", "C", "D", "F"] | None,
+) -> MetricsSnapshot:
+    """A hand-built snapshot for exercising one health term of the diff."""
+
+    return MetricsSnapshot(
+        max_complexity=0,
+        high_risk_functions=(),
+        max_coupling=0,
+        high_coupling_classes=(),
+        max_cohesion=0,
+        low_cohesion_classes=(),
+        dependency_cycles=(),
+        dependency_max_depth=0,
+        dead_code_items=(),
+        health_score=health_score,
+        health_grade=health_grade,
+    )
+
+
+@pytest.mark.parametrize("population", ["unmeasured", "complete_empty"])
+def test_the_current_snapshot_carries_the_health_refusal(
+    population: HealthPopulation,
+) -> None:
+    """The producer seam of the current half, pinned where the refusal drops.
+
+    ``compute_health`` refuses both non-carrying populations honestly and its
+    zero total is a placeholder, not a measurement. Converting it with
+    ``int()`` re-manufactures the measured zero wave 7 removed from the other
+    half, and every consumer of ``MetricsDiff.health_delta`` that does not
+    consult the current run's population -- the gate summary, the MCP run
+    summary, the review receipt -- then sees the whole baseline score as a
+    regression. Both refusing states must reach the refusal: a guard that
+    fired for one absence would be theater for the other (`H2`).
+    """
+
+    snapshot = snapshot_from_project_metrics(
+        _project_metrics_with_health(
+            HealthScore(total=0, grade="F", dimensions={}, population=population)
+        )
+    )
+
+    assert snapshot.health_score is None, population
+    assert snapshot.health_grade is None, population
+
+
+@pytest.mark.parametrize("population", ["complete_nonempty", "partial"])
+def test_a_measured_population_keeps_the_current_snapshot_health(
+    population: HealthPopulation,
+) -> None:
+    """The opposite boundary: a population that carries a score keeps it.
+
+    ``partial`` is deliberately here and not above: a truncated run measured
+    something, and naming the truncation is a different job from withholding
+    the number (`population_carries_score`). Refusing it -- or refusing
+    unconditionally -- would satisfy the refusal tests while withholding
+    health from every legitimately measured run.
+    """
+
+    snapshot = snapshot_from_project_metrics(
+        _project_metrics_with_health(
+            HealthScore(
+                total=87,
+                grade="B",
+                dimensions={"clones": 100},
+                population=population,
+            )
+        )
+    )
+
+    assert snapshot.health_score == 87, population
+    assert snapshot.health_grade == "B", population
+
+
+def test_diff_metrics_does_not_subtract_against_an_absent_current_health() -> None:
+    """The comparison seam: no current term, no health movement.
+
+    Wave 7 wrote ``_health_delta`` to refuse on either absent side, but until
+    the current snapshot could actually carry ``None`` this branch was
+    unreachable from production inputs. Both directions are pinned in one
+    place so the guard cannot rot back into a one-sided check: an absent
+    current term reports no movement, and two present terms still subtract.
+    """
+
+    withheld = diff_metrics(
+        baseline_snapshot=_current_half_snapshot(96, "A"),
+        current_snapshot=_current_half_snapshot(None, None),
+        baseline_api_surface=None,
+        current_api_surface=None,
+    )
+    assert withheld.health_delta == 0
+
+    measured = diff_metrics(
+        baseline_snapshot=_current_half_snapshot(96, "A"),
+        current_snapshot=_current_half_snapshot(90, "A"),
+        baseline_api_surface=None,
+        current_api_surface=None,
+    )
+    assert measured.health_delta == -6
+
+
+def test_an_empty_current_scope_withholds_the_health_comparison(
+    baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """End to end: an emptied CURRENT tree against a good baseline.
+
+    The same input universe -- the scope id matches -- with no source file
+    left in it. The run's own health is withheld honestly (``score: null``,
+    ``population: complete_empty``); the comparison must not then subtract a
+    number the run never measured and publish the whole baseline score as a
+    regression beside ``baseline_diff_available: true``, which is the exact
+    shape wave 7 removed from the opaque-lane direction (`B8`, `G4`).
+    """
+
+    root = tmp_path / "settlement-emptied"
+    root.mkdir()
+    (root / "pyproject.toml").write_text(
+        f'[tool.codeclone]\nbaseline_scope_id = "{_SCOPE_ID}"\n',
+        "utf-8",
+    )
+
+    health = _health_summary(
+        cli_document(
+            root,
+            baseline=baseline_without_clone,
+            out=tmp_path / "emptied.json",
+        )
+    )
+
+    assert health["score"] is None
+    assert health["population"] == "complete_empty"
+    assert health["delta"] == 0
+    assert health["baseline_diff_available"] is False
 
 
 @pytest.fixture

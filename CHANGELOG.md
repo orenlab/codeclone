@@ -257,6 +257,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   record" rather than "same". Separately, the badge was dispatched on the row's displayed label text, so renaming the
   row would have removed it with nothing red; it is now routed by row identity.
 
+- **An unmeasured current run no longer publishes the stored health score as a regression.** The current half of the
+  defect fixed for unreadable baseline lanes below: `compute_health` honestly withholds the number over a population
+  that carries no score — an empty analysis scope, or a run that read no file — but the current-run snapshot converted
+  that refusal through a field typed `int`, so it arrived at the comparison as a measured `0`. Against a good baseline
+  the report then published the whole stored score as movement — measured end to end: an emptied tree against a
+  baseline of **96** reported a **−96** health delta beside `baseline_diff_available: true`, with the run's own health
+  honestly withheld as `score: null` in the same summary block. The snapshot now carries the refusal (`None`, the same
+  mechanism as the baseline half), the diff reports no movement against an absent current term, and the health family's
+  `baseline_diff_available` reads `false` for such a run — lane trust can only vouch for the baseline term of the
+  subtraction, and `delta: 0` beside `true` would state "compared, unchanged" about a comparison that never ran. The
+  metric gates were already protected by the population refusal and are unchanged. No weight, band, reference or
+  threshold moved.
+
 - **An unreadable baseline lane no longer publishes a health comparison that never ran.** Health is derived from seven
   lanes, and the report keyed its `baseline_diff_available` on `risk_observations` alone. When any of the other six was
   opaque — authentic bytes recorded under a payload schema this release no longer parses — the reader turned the

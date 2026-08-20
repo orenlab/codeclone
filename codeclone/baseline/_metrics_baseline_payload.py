@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from ..contracts import population_carries_score
 from ..models import DependencyCycleFact, MetricsSnapshot, ProjectMetrics
 
 
@@ -39,6 +40,15 @@ def _cycle_facts(
 
 
 def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSnapshot:
+    # The current half of the refusal wave 7 taught the baseline half to
+    # carry (``metrics_baseline._snapshot``): ``compute_health`` withholds the
+    # number over a population that carries none, and its zero total is a
+    # placeholder, not a measurement. Converting it with ``int()`` here turned
+    # the refusal back into a measured zero, so an empty or unread current run
+    # against a good baseline published ``health_delta = 0 - good`` -- the
+    # whole stored score as a regression no code caused (`B8`, `G4`). The
+    # population owner answers the yes/no; this module adds no second one.
+    health_measured = population_carries_score(project_metrics.health.population)
     return MetricsSnapshot(
         max_complexity=int(project_metrics.complexity_max),
         high_risk_functions=tuple(sorted(set(project_metrics.high_risk_functions))),
@@ -51,8 +61,8 @@ def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSna
         dead_code_items=tuple(
             sorted({item.qualname for item in project_metrics.dead_code})
         ),
-        health_score=int(project_metrics.health.total),
-        health_grade=project_metrics.health.grade,
+        health_score=(int(project_metrics.health.total) if health_measured else None),
+        health_grade=project_metrics.health.grade if health_measured else None,
         typing_param_permille=_permille(
             project_metrics.typing_param_annotated,
             project_metrics.typing_param_total,
