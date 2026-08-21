@@ -317,6 +317,14 @@ def build_context(
     )
 
     metric_families = section(document, "metrics.families")
+    # ``meta.computed_metric_families`` has three key states, each with its
+    # own filter (RP2: absence must stay distinguishable from emptiness).
+    # Key presence — never the truthiness of the coerced value — separates a
+    # legacy document that never declared (keep every family) from a run
+    # that honestly declared it computed nothing (keep none, or the zeros
+    # the payload always carries render as measurements). A non-empty
+    # declaration filters strictly to the declared names.
+    declaration_present = "computed_metric_families" in meta
     computed_metric_families = frozenset(
         str(name)
         for name in _as_sequence(meta.get("computed_metric_families"))
@@ -325,7 +333,7 @@ def build_context(
     presentation_families = {
         str(name): payload
         for name, payload in metric_families.items()
-        if not computed_metric_families or str(name) in computed_metric_families
+        if not declaration_present or str(name) in computed_metric_families
     }
     metric_families_view = {
         str(name): _metric_family_projection(payload, scan_root=scan_root)

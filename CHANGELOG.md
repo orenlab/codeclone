@@ -5,6 +5,20 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **A skip-metrics HTML report says metrics were skipped instead of rendering zeros as
+  measurements.** A `--skip-metrics` run (and the implicit clones-only run a bare invocation
+  falls into without a metrics flag or metrics baseline) honestly declares
+  `meta.computed_metric_families: []` while `metrics.families` still carries every family
+  filled with zeros. The HTML context reader filtered families by declaration *truthiness*,
+  so the honest empty declaration read the same as a legacy document with no declaration at
+  all — keep everything — and the report presented fabricated figures (`Cycles: 0; avg
+  depth: n/a`, `0 candidates total; 0 high-confidence items`, `High-complexity: 0`) for
+  metrics that never ran, while the five "Metrics are skipped for this run." insights were
+  unreachable from any real document. The reader now distinguishes the three declaration
+  states by key presence: key absent (legacy document) keeps every family, a non-empty
+  declaration filters strictly to the declared names (unchanged), and a declared-empty run
+  keeps none — so `metrics_available` turns false and all five sections speak the absence
+  sentence. Metrics runs are unchanged byte-for-byte.
 - **The two multi-site section absence sentences get one vocabulary owner each.** "Metrics are
   skipped for this run." was spelled at five HTML section sites — three inline literals
   (quality, dependencies, dead code) and two independent private `_METRICS_SKIPPED` constants

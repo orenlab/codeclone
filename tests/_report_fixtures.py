@@ -24,6 +24,9 @@ from codeclone.observations.projection import build_observation_bundle
 from codeclone.report.document.builder import (
     build_report_document as _build_report_document_v3,
 )
+from codeclone.report.document.metrics import (
+    _build_metrics_payload as _fixture_metrics_payload,
+)
 from codeclone.report.gates.evaluator import (
     GateResult,
     MetricGateConfig,
@@ -321,6 +324,23 @@ def build_test_report_document(
         fail_health=-1,
         fail_on_new_metrics=False,
     )
+    meta_map = dict(meta or {})
+    if "metrics_computed" not in meta_map:
+        # The real producer always declares what it computed — the emitted
+        # payload is the source of truth (``codeclone.report.meta``). A
+        # fixture document that populates families while declaring none
+        # models a document no producer emits, and that dialect kept the
+        # HTML reader's declared-empty/absent conflation green. Deriving
+        # the declaration from the same normalized payload the builder
+        # embeds keeps every fixture document producer-consistent by
+        # construction; a caller that needs another declaration state says
+        # so through ``meta["metrics_computed"]``.
+        meta_map["metrics_computed"] = sorted(
+            section(
+                _fixture_metrics_payload(metrics, scan_root=""),
+                "families",
+            )
+        )
     return _build_report_document_v3(
         observation_bundle=observation_bundle,
         baseline_container=baseline_container,
@@ -330,7 +350,7 @@ def build_test_report_document(
         func_groups=func_groups,
         block_groups=block_groups,
         segment_groups=segment_groups,
-        meta=meta,
+        meta=meta_map,
         inventory=inventory,
         block_facts=block_facts,
         new_function_group_keys=new_function_group_keys,

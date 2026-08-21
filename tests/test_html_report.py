@@ -40,6 +40,7 @@ from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import (
     build_html_report as _core_build_html_report,
 )
+from codeclone.report.html._context import build_context
 from codeclone.report.html.assemble import (
     HTML_BUILD_COUNTER_KEYS,
     HTML_BUILD_SPAN_NAMES,
@@ -4500,9 +4501,10 @@ def test_metrics_skipped_insight_spoken_by_owner_in_every_section() -> None:
     literal, so renaming ``METRICS_SKIPPED`` at the owner reddens exactly the
     site that failed to move with it instead of leaving a silent orphan. The
     sections are rendered directly on a skipped-metrics context — the same
-    construction as the module-map pin above — because a canonical document
-    always publishes every metric family, so ``build_context`` cannot reach
-    ``metrics_available=False`` from a full render.
+    construction as the module-map pin above — so each section's absence site
+    is probed in isolation. The path that reaches this state from a real
+    document (a declared-empty ``computed_metric_families``) is pinned by the
+    declaration-state tests below and the skip-metrics CLI test.
     """
 
     empty_ctx_fields: dict[str, object] = {
@@ -4528,6 +4530,71 @@ def test_metrics_skipped_insight_spoken_by_owner_in_every_section() -> None:
     for name, renderer in renderers.items():
         html = renderer(cast(Any, SimpleNamespace(**empty_ctx_fields)))
         assert METRICS_SKIPPED in html, name
+
+
+def _declaration_state_document() -> dict[str, object]:
+    """A canonical document whose metric families are all populated by default."""
+
+    return build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+
+
+def test_context_declared_empty_families_project_nothing() -> None:
+    """A present-but-empty declaration keeps no family (RP2: empty != absent).
+
+    The real producer emits this state on ``--skip-metrics`` runs: the
+    declaration is honestly empty while ``metrics.families`` still carries
+    every family filled with zeros. Filtering by declaration truthiness reads
+    that state as "keep everything" and the zeros render as measurements.
+    """
+
+    document = _declaration_state_document()
+    meta = cast(dict[str, object], document["meta"])
+    meta["computed_metric_families"] = []
+
+    ctx = build_context(report_document=document, file_cache=_FileCache())
+
+    assert ctx.metrics_map == {}
+    assert ctx.metrics_available is False
+    assert ctx.dependencies_map == {}
+    assert ctx.dead_code_map == {}
+    assert ctx.health_map == {}
+
+
+def test_context_partial_declaration_projects_only_declared_families() -> None:
+    """A non-empty declaration filters strictly to the declared families."""
+
+    document = _declaration_state_document()
+    meta = cast(dict[str, object], document["meta"])
+    meta["computed_metric_families"] = ["cohesion"]
+
+    ctx = build_context(report_document=document, file_cache=_FileCache())
+
+    assert set(ctx.metrics_map) == {"cohesion"}
+    assert ctx.metrics_available is True
+    assert ctx.dependencies_map == {}
+
+
+def test_context_without_declaration_key_projects_every_family() -> None:
+    """A document without the declaration key keeps every family it carries.
+
+    Legacy documents predate the declaration; compatibility is pinned, not
+    assumed. Key absence, not coercion truthiness, is what separates this
+    state from the declared-empty one above.
+    """
+
+    document = _declaration_state_document()
+    meta = cast(dict[str, object], document["meta"])
+    families = cast(dict[str, object], document["metrics"])["families"]
+    meta.pop("computed_metric_families", None)
+
+    ctx = build_context(report_document=document, file_cache=_FileCache())
+
+    assert set(ctx.metrics_map) == set(cast(dict[str, object], families))
+    assert ctx.metrics_available is True
 
 
 def test_dependencies_panel_empty_graph_message_spoken_by_owner() -> None:

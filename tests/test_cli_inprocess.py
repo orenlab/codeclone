@@ -45,6 +45,7 @@ from codeclone.core._types import FileProcessResult as CliFileProcessResult
 from codeclone.core.parallelism import _parallel_min_files
 from codeclone.models import DigestObject, Unit
 from codeclone.report.gates.reasons import parse_metric_reason_entry
+from codeclone.report.messages.sections import METRICS_SKIPPED
 from tests._assertions import (
     assert_contains_all,
     assert_contains_none,
@@ -4829,6 +4830,72 @@ def test_cli_declares_no_families_without_metrics(
     )
 
     assert cast(dict[str, object], payload["meta"])["computed_metric_families"] == []
+
+
+def test_cli_skip_metrics_html_speaks_absence_not_fabricated_zeros(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A declared-empty run renders five absence insights, never zero figures.
+
+    End-to-end on the real producer: a ``--skip-metrics`` run honestly declares
+    ``computed_metric_families: []`` while ``metrics.families`` still carries
+    every family filled with zeros. A reader that filters by declaration
+    truthiness instead of key presence keeps them all, and the report presents
+    "Cycles: 0" and "0 candidates" as measured facts for metrics that never
+    ran.
+    """
+
+    _write_python_module(tmp_path, "a.py")
+    html_out = tmp_path / "report.html"
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--skip-metrics",
+            "--html",
+            str(html_out),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    declared = cast(dict[str, object], payload["meta"])["computed_metric_families"]
+    assert declared == [], "the producer under test must declare no families"
+    html = html_out.read_text("utf-8")
+
+    assert html.count(METRICS_SKIPPED) == 5
+    assert "Cycles: 0; avg depth: n/a" not in html
+    assert "candidates total; 0 high-confidence items" not in html
+    assert "High-complexity: 0; high-coupling: 0" not in html
+
+
+def test_cli_full_run_html_renders_figures_without_absence_phrases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reverse boundary: a metrics run keeps its figures and no absence line.
+
+    On a metrics run "Cycles: 0" is an honest measured zero, so its presence
+    here and its absence on the skip run is exactly the distinction the
+    declaration carries. ``--fail-cycles`` forces the metrics lane: without a
+    metrics flag or a metrics baseline the CLI quietly runs clones-only
+    (``runtime._apply_metrics_skips``) and would land in the skip state this
+    test is the boundary of.
+    """
+
+    _write_python_module(tmp_path, "a.py")
+    html_out = tmp_path / "report.html"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [str(tmp_path), "--fail-cycles", "--html", str(html_out), "--no-progress"],
+    )
+    html = html_out.read_text("utf-8")
+
+    assert METRICS_SKIPPED not in html
+    assert "Cycles: 0" in html
 
 
 def _count_report_body_builds(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
