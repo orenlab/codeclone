@@ -5,6 +5,20 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The audit `analysis.completed` row carries the full novelty tristate.** The durable
+  forensic row stored `findings_total` + `findings_new` and dropped `known`/`unavailable`,
+  so a trail reading `total=26, new=0` later read as "no regressions" when all 26 findings
+  were never compared against a baseline. Both payload builders and the compaction now
+  carry `known` and `unavailable` under the exact names the run-summary producer publishes
+  (additive keys; from-report rows record `null` for all three, the same absence rule the
+  existing `new: null` already followed). Absence stays legible as absence: legacy rows
+  are not backfilled and every reader keeps a missing counter as unknown, never 0 — the
+  session-stats cockpit prints the counters when a row carries them and worded unknowns
+  when it does not, and the session-stats JSON payload gains `findings_new` /
+  `findings_known` / `findings_unavailable` with `null` meaning unknown. An arithmetic
+  pin derived from the novelty vocabulary owner holds `total == new + known +
+  unavailable` on full rows and reds without test edits if the vocabulary ever grows a
+  fourth value.
 - **The clone-health arithmetic reads the metric-family declaration through its owner,
   not past it.** The clones panel's health-points card, its arithmetic note, and the
   radar legend's contribution sentence (`report/messages/clone_health.py`) read

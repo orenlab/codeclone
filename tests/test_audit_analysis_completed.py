@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+from codeclone.api.novelty import CLONE_NOVELTY_VALUES
 from codeclone.audit.analysis_completed import (
     ANALYSIS_SOURCE_CLI,
     ANALYSIS_SOURCE_MCP,
@@ -18,7 +19,11 @@ from codeclone.audit.analysis_completed import (
     emit_analysis_completed,
     emit_analysis_completed_from_report,
 )
-from codeclone.audit.events import EVENT_ANALYSIS_COMPLETED, event_summary
+from codeclone.audit.events import (
+    EVENT_ANALYSIS_COMPLETED,
+    compact_payload_for_event,
+    event_summary,
+)
 from codeclone.audit.reader import read_latest_analysis_run
 from codeclone.audit.schema import open_audit_db
 from codeclone.audit.writer import SqliteAuditWriter
@@ -77,6 +82,17 @@ def _fetch_first_event_row(db_path: Path, sql: str) -> tuple[object, ...] | None
     finally:
         conn.close()
     return None if row is None else tuple(row)
+
+
+def _stored_payload(db_path: Path) -> dict[str, object]:
+    """The payload of the single stored event, parsed off the wire."""
+
+    row = _fetch_first_event_row(
+        db_path,
+        "SELECT payload_json FROM controller_events LIMIT 1",
+    )
+    assert row is not None
+    return cast(dict[str, object], json.loads(str(row[0])))
 
 
 def test_analysis_completed_summary() -> None:
@@ -401,12 +417,117 @@ def test_emitted_cli_analysis_row_carries_the_documents_file_count(
         new_block_count=0,
     )
 
-    row = _fetch_first_event_row(
-        tmp_path / ".codeclone/db/audit.sqlite3",
-        "SELECT payload_json FROM controller_events LIMIT 1",
-    )
-    assert row is not None
-    payload = json.loads(str(row[0]))
+    payload = _stored_payload(tmp_path / ".codeclone/db/audit.sqlite3")
     assert payload["files"] == 37
     assert payload["health_score"] == 74
     assert payload["mode"] == "changed_paths"
+
+
+def test_analysis_completed_payload_carries_producer_novelty_tristate() -> None:
+    """The builder keeps every novelty counter the run summary publishes.
+
+    The MCP summary counts three novelty states under ``total``/``new``/
+    ``known``/``unavailable``. A payload that keeps only total+new turns
+    "26 findings, none compared" into "26 findings, no regressions" -- a
+    forensic row that cannot be recomputed after the fact.
+    """
+
+    payload = analysis_completed_payload(
+        summary={
+            **_default_analysis_summary(),
+            "findings": {"total": 26, "new": 0, "known": 0, "unavailable": 26},
+        },
+        source=ANALYSIS_SOURCE_MCP,
+    )
+
+    assert payload["findings"] == {
+        "total": 26,
+        "new": 0,
+        "known": 0,
+        "unavailable": 26,
+    }
+
+
+def test_row_with_unavailable_findings_stores_the_tristate(tmp_path: Path) -> None:
+    """Forensic pin: the stored compact row keeps known and unavailable.
+
+    ``total=26, new=0`` alone reads later as "no regressions" when all 26
+    findings were never compared against a baseline. The wire row is the
+    durable evidence, so the tristate must survive the whole path.
+    """
+
+    db_path = _write_analysis_completed_event(
+        tmp_path,
+        summary={
+            **_default_analysis_summary(),
+            "findings": {"total": 26, "new": 0, "known": 0, "unavailable": 26},
+        },
+    )
+
+    payload = _stored_payload(db_path)
+    assert payload["findings_total"] == 26
+    assert payload["findings_new"] == 0
+    assert payload["findings_known"] == 0
+    assert payload["findings_unavailable"] == 26
+
+
+def test_from_report_payload_records_novelty_rollup_absence_as_null(
+    tmp_path: Path,
+) -> None:
+    """A from-report row records the rollup's absence, never an invented zero.
+
+    The canonical document publishes novelty per finding and a clone-lane
+    rollup, but no cross-family totals -- the same reason the existing
+    ``new`` is recorded as null. ``known`` and ``unavailable`` follow the
+    same rule: the key is present and the value states the absence.
+    """
+
+    payload = analysis_completed_payload_from_report(
+        report_document=_document_with_distinct_figures(tmp_path),
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=0,
+        new_block_count=0,
+    )
+
+    findings = cast(dict[str, object], payload["findings"])
+    assert "new" in findings and findings["new"] is None
+    assert "known" in findings and findings["known"] is None
+    assert "unavailable" in findings and findings["unavailable"] is None
+
+
+def test_compact_row_novelty_counters_cover_the_vocabulary() -> None:
+    """Arithmetic pin over the novelty vocabulary, derived from its owner.
+
+    One stored counter per vocabulary value, and the counters sum to the
+    stored total. ``CLONE_NOVELTY_VALUES`` is derived from the domain owner
+    inside the R3 door, so a fourth vocabulary value reaches this pin -- and
+    reds it -- without any test edit (wave-22 ratchet inheritance).
+    """
+
+    vocabulary = sorted(CLONE_NOVELTY_VALUES)
+    counts = {value: index + 1 for index, value in enumerate(vocabulary)}
+    total = sum(counts.values())
+
+    compact = compact_payload_for_event(
+        event_type=EVENT_ANALYSIS_COMPLETED,
+        payload=analysis_completed_payload(
+            summary={
+                **_default_analysis_summary(),
+                "findings": {"total": total, **counts},
+            },
+            source=ANALYSIS_SOURCE_MCP,
+        ),
+    )
+
+    stored: dict[str, int] = {}
+    for value in vocabulary:
+        counter_name = f"findings_{value}"
+        assert counter_name in compact, (
+            f"novelty value {value!r} has no stored counter on the audit row"
+        )
+        counter = compact[counter_name]
+        assert isinstance(counter, int), counter_name
+        stored[value] = counter
+    assert stored == counts
+    assert compact["findings_total"] == total
+    assert sum(stored.values()) == total

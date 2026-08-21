@@ -10,6 +10,11 @@ import time
 from pathlib import Path
 
 from ... import ui_messages as ui
+from ...api.novelty import (
+    CLONE_NOVELTY_KNOWN,
+    CLONE_NOVELTY_NEW,
+    CLONE_NOVELTY_UNAVAILABLE,
+)
 from ...contracts import ExitCode
 from ...controller_insights.session_stats import (
     SessionSnapshot as _SessionSnapshot,
@@ -96,11 +101,7 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             if snapshot.latest_run_health is not None
             else ""
         )
-        findings_part = (
-            f", findings={snapshot.latest_run_findings}"
-            if snapshot.latest_run_findings is not None
-            else ""
-        )
+        findings_part = _findings_text(snapshot)
         source_part = _latest_run_source_suffix(snapshot)
         console.print(
             f"  {ui.SESSION_STATS_LATEST_RUN:<{_PLAIN_LABEL_WIDTH}}"
@@ -334,13 +335,41 @@ def _latest_run_text(snapshot: _SessionSnapshot) -> str:
     parts = [f"{snapshot.latest_run_id} ({age_str}"]
     if snapshot.latest_run_health is not None:
         parts.append(f", health={snapshot.latest_run_health}")
-    if snapshot.latest_run_findings is not None:
-        parts.append(f", findings={snapshot.latest_run_findings}")
+    parts.append(_findings_text(snapshot))
     source_part = _latest_run_source_suffix(snapshot)
     if source_part:
         parts.append(source_part)
     parts.append(")")
     return "".join(parts)
+
+
+def _findings_text(snapshot: _SessionSnapshot) -> str:
+    """The findings fragment of the latest-run line, novelty included.
+
+    One fragment for the plain and rich renderers, so the two cannot drift.
+    An absent counter is worded, never rendered as 0: a zero would assert a
+    baseline comparison the recorded row never made. The counter labels come
+    from the novelty vocabulary door, never respelled here. Parentheses, not
+    square brackets: the rich renderer reads ``[...]`` as markup and would
+    silently swallow the whole novelty fragment.
+    """
+
+    if snapshot.latest_run_findings is None:
+        return ""
+    counters = (
+        (CLONE_NOVELTY_NEW, snapshot.latest_run_findings_new),
+        (CLONE_NOVELTY_KNOWN, snapshot.latest_run_findings_known),
+        (CLONE_NOVELTY_UNAVAILABLE, snapshot.latest_run_findings_unavailable),
+    )
+    if all(count is None for _label, count in counters):
+        novelty = ui.SESSION_STATS_NOVELTY_UNKNOWN
+    else:
+        novelty = ", ".join(
+            f"{label}="
+            f"{ui.SESSION_STATS_NOVELTY_VALUE_UNKNOWN if count is None else count}"
+            for label, count in counters
+        )
+    return f", findings={snapshot.latest_run_findings} ({novelty})"
 
 
 def _latest_run_source_suffix(snapshot: _SessionSnapshot) -> str:

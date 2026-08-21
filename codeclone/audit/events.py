@@ -576,7 +576,13 @@ def _compact_analysis_completed_payload(
         # no grade, and an audit row must not record an absence as a value.
         "health_grade": str(health.get("grade") or ""),
         "findings_total": _int_or_none(findings.get("total")),
+        # All three novelty counters, or None where the source published no
+        # count. A row storing only total+new reads later as "no regressions"
+        # when the comparison never ran; a zero here would invent that
+        # comparison. Legacy rows without these keys stay unknown, never 0.
         "findings_new": _int_or_none(findings.get("new")),
+        "findings_known": _int_or_none(findings.get("known")),
+        "findings_unavailable": _int_or_none(findings.get("unavailable")),
         "files": _int_or_none(inventory.get("files")),
     }
 

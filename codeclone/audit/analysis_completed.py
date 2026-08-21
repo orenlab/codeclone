@@ -51,8 +51,14 @@ def analysis_completed_payload(
             "grade": health.get("grade"),
         },
         "findings": {
+            # One counter per novelty state, spelled exactly as the summary
+            # producer publishes them. A row that keeps only total+new turns
+            # "N findings, none compared" into "N findings, no regressions",
+            # and the forensic row cannot be recomputed after the fact.
             "total": findings.get("total"),
             "new": findings.get("new"),
+            "known": findings.get("known"),
+            "unavailable": findings.get("unavailable"),
         },
         "inventory": {
             "files": inventory.get("files"),
@@ -112,10 +118,13 @@ def analysis_completed_payload_from_report(
         "findings": {
             "total": findings_summary.get("total"),
             # The document publishes novelty per finding and a clone-lane
-            # rollup, but no cross-family "new" total. Counting the groups here
-            # would be a second counter of a fact the document does not claim,
-            # so the row records the absence instead.
+            # rollup, but no cross-family novelty totals. Counting the groups
+            # here would be a second counter of a fact the document does not
+            # claim, so the row records the absence instead -- for all three
+            # novelty states, not only "new".
             "new": None,
+            "known": None,
+            "unavailable": None,
         },
         "inventory": {
             "files": inventory_files.get("total_found"),

@@ -230,6 +230,51 @@ def test_analysis_completed_summary_and_projection_supplement() -> None:
     assert supplement == {}
 
 
+def test_compact_analysis_row_stores_novelty_counters() -> None:
+    """Compaction keeps known/unavailable beside total/new (forensic pin)."""
+
+    analysis = compact_payload_for_event(
+        event_type=EVENT_ANALYSIS_COMPLETED,
+        payload={
+            "source": "mcp",
+            "mode": "full",
+            "health": {"score": 90, "grade": "A"},
+            "findings": {"total": 26, "new": 0, "known": 0, "unavailable": 26},
+            "inventory": {"files": 10},
+        },
+    )
+
+    assert analysis["findings_total"] == 26
+    assert analysis["findings_new"] == 0
+    assert analysis["findings_known"] == 0
+    assert analysis["findings_unavailable"] == 26
+
+
+def test_compact_analysis_row_keeps_novelty_absence_as_none() -> None:
+    """An absent counter stays None in the compact row; zero would invent it.
+
+    A from-report payload carries ``known``/``unavailable`` as null and a
+    foreign payload may lack the keys entirely; both are the same absence and
+    must be stored as None -- ``_int_or_none`` semantics, never a zero.
+    """
+
+    analysis = compact_payload_for_event(
+        event_type=EVENT_ANALYSIS_COMPLETED,
+        payload={
+            "source": "cli",
+            "mode": "full",
+            "health": {"score": 88, "grade": "B"},
+            "findings": {"total": 3, "new": 1},
+            "inventory": {"files": 10},
+        },
+    )
+
+    assert analysis["findings_total"] == 3
+    assert analysis["findings_new"] == 1
+    assert analysis["findings_known"] is None
+    assert analysis["findings_unavailable"] is None
+
+
 def test_normalize_audit_surface_and_scope_truncation_branches() -> None:
     assert normalize_audit_surface(None, payload={"source": "cli"}) == "cli"
     assert normalize_audit_surface(None, payload={"source": "mcp"}) == "mcp"

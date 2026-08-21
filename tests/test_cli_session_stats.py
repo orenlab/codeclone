@@ -376,6 +376,44 @@ def _write_audit_pyproject(
     (tmp_path / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_audit_analysis_row(
+    root: Path,
+    *,
+    findings: dict[str, int],
+    run_id: str = "runaudit1234567890",
+) -> Path:
+    """Enable audit for ``root`` and store one analysis row with ``findings``.
+
+    One writer for every audit-sourced latest-run test, so the summary shape
+    is spelled once and each test states only the findings block it is about.
+    """
+
+    from codeclone.audit.analysis_completed import ANALYSIS_SOURCE_MCP
+
+    from .audit_fixtures import write_compact_analysis_completed_event
+
+    _write_audit_pyproject(root)
+    db_path = root / ".codeclone/db/audit.sqlite3"
+    write_compact_analysis_completed_event(
+        root,
+        db_path=db_path,
+        summary={
+            "mode": "full",
+            "health": {"score": 93, "grade": "A"},
+            "findings": findings,
+            "inventory": {"files": 11, "lines": 1, "functions": 1},
+            "diff": {"new_clones": 0, "health_delta": None},
+        },
+        source=ANALYSIS_SOURCE_MCP,
+        report_digest="a" * 64,
+        run_id=run_id,
+        agent_pid=1,
+        agent_start_epoch=1,
+        agent_label="mcp/test",
+    )
+    return db_path
+
+
 def _snapshot_with_audit_and_run(
     *,
     health: int = 88,
@@ -566,6 +604,134 @@ def test_default_config_reports_the_run_its_disk_report_names(tmp_path: Path) ->
     assert _document_run_id(document) in line
     assert f"health={_document_health(document)}" in line
     assert f"findings={_document_findings_total(document)}" in line
+
+
+def _plain_latest_run_line(snapshot: SessionSnapshot) -> str:
+    """The latest-run line the plain renderer prints for one snapshot."""
+
+    printer = _RecordingPrinter()
+    exit_code = session_stats_mod._render_verbose(cast(PrinterLike, printer), snapshot)
+    assert exit_code == int(ExitCode.SUCCESS)
+    return _latest_run_line(printer.text)
+
+
+def test_latest_run_line_renders_novelty_tristate() -> None:
+    """A tristate audit row reaches the user as three labelled counters."""
+
+    line = _plain_latest_run_line(
+        replace(
+            _snapshot(
+                latest_run_id="run1234567890",
+                latest_run_health=90,
+                latest_run_findings=141,
+                latest_run_age_seconds=12,
+            ),
+            latest_run_findings_new=0,
+            latest_run_findings_known=115,
+            latest_run_findings_unavailable=26,
+        )
+    )
+    assert "findings=141" in line
+    assert "new=0" in line
+    assert "known=115" in line
+    assert "unavailable=26" in line
+
+
+def test_latest_run_line_words_unknown_novelty_never_zero() -> None:
+    """A row without novelty counters renders the word, not a zero.
+
+    A zero here would assert a comparison the row never recorded -- the
+    trail cannot be recomputed, so absence must stay legible as absence.
+    """
+
+    line = _plain_latest_run_line(
+        _snapshot(
+            latest_run_id="run1234567890",
+            latest_run_health=90,
+            latest_run_findings=26,
+            latest_run_age_seconds=12,
+        )
+    )
+    assert "findings=26" in line
+    assert ui.SESSION_STATS_NOVELTY_UNKNOWN in line
+    assert "new=0" not in line
+    assert "known=0" not in line
+    assert "unavailable=0" not in line
+
+
+def test_latest_run_line_words_partial_novelty_unknown() -> None:
+    """A legacy row (total+new only) words the two missing counters.
+
+    ``new=0`` beside a worded unknown is exactly the honest reading: the row
+    counted zero regressions but never said whether a comparison ran.
+    """
+
+    line = _plain_latest_run_line(
+        replace(
+            _snapshot(
+                latest_run_id="run1234567890",
+                latest_run_health=90,
+                latest_run_findings=11,
+                latest_run_age_seconds=12,
+            ),
+            latest_run_findings_new=0,
+        )
+    )
+    assert "new=0" in line
+    assert f"known={ui.SESSION_STATS_NOVELTY_VALUE_UNKNOWN}" in line
+    assert f"unavailable={ui.SESSION_STATS_NOVELTY_VALUE_UNKNOWN}" in line
+    assert "known=0" not in line
+    assert "unavailable=0" not in line
+
+
+def test_rich_latest_run_shows_novelty_tristate() -> None:
+    """The rich cockpit and the plain one print the same tristate facts."""
+
+    text = _render_rich_snapshot(
+        replace(
+            _snapshot(
+                latest_run_id="run1234567890",
+                latest_run_health=90,
+                latest_run_findings=141,
+                latest_run_age_seconds=12,
+            ),
+            latest_run_findings_new=0,
+            latest_run_findings_known=115,
+            latest_run_findings_unavailable=26,
+        )
+    )
+    assert "findings=141" in text
+    assert "new=0" in text
+    assert "known=115" in text
+    assert "unavailable=26" in text
+
+
+def test_session_snapshot_payload_carries_novelty_tristate() -> None:
+    """The machine payload carries the counters, null meaning unknown."""
+
+    payload = insights_mod.session_snapshot_to_payload(
+        replace(
+            _snapshot(
+                latest_run_id="run1234567890",
+                latest_run_findings=141,
+            ),
+            latest_run_findings_new=0,
+            latest_run_findings_known=115,
+            latest_run_findings_unavailable=26,
+        )
+    )
+    latest_run = cast(Mapping[str, object], payload["latest_run"])
+    assert latest_run["findings_new"] == 0
+    assert latest_run["findings_known"] == 115
+    assert latest_run["findings_unavailable"] == 26
+
+    unknown_payload = insights_mod.session_snapshot_to_payload(
+        _snapshot(latest_run_id="run1234567890", latest_run_findings=26)
+    )
+    unknown_latest = cast(Mapping[str, object], unknown_payload["latest_run"])
+    assert unknown_latest["findings_new"] is None
+    assert unknown_latest["findings_known"] is None
+    assert unknown_latest["findings_unavailable"] is None
 
 
 def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
@@ -1659,29 +1825,7 @@ def test_read_audit_token_footprint_uses_summary_totals_without_footprint(
 
 
 def test_collect_session_snapshot_prefers_audit_latest_run(tmp_path: Path) -> None:
-    from codeclone.audit.analysis_completed import ANALYSIS_SOURCE_MCP
-
-    from .audit_fixtures import write_compact_analysis_completed_event
-
-    _write_audit_pyproject(tmp_path)
-    db_path = tmp_path / ".codeclone/db/audit.sqlite3"
-    write_compact_analysis_completed_event(
-        tmp_path,
-        db_path=db_path,
-        summary={
-            "mode": "full",
-            "health": {"score": 93, "grade": "A"},
-            "findings": {"total": 2, "new": 0},
-            "inventory": {"files": 11, "lines": 1, "functions": 1},
-            "diff": {"new_clones": 0, "health_delta": None},
-        },
-        source=ANALYSIS_SOURCE_MCP,
-        report_digest="a" * 64,
-        run_id="runaudit1234567890",
-        agent_pid=1,
-        agent_start_epoch=1,
-        agent_label="mcp/test",
-    )
+    _write_audit_analysis_row(tmp_path, findings={"total": 2, "new": 0})
     document = _write_report(tmp_path, files=99)
 
     # The audit row only proves it wins while the report on disk would have
@@ -1698,6 +1842,73 @@ def test_collect_session_snapshot_prefers_audit_latest_run(tmp_path: Path) -> No
         findings=2,
         files=11,
     )
+
+
+def test_collect_session_snapshot_transports_novelty_tristate(
+    tmp_path: Path,
+) -> None:
+    """The counters survive the whole path from the trail row to the snapshot.
+
+    The reader tests prove the reader; this pin proves the plumbing between
+    the reader and the cockpit does not drop the two new counters the way the
+    audit row itself used to.
+    """
+
+    _write_audit_analysis_row(
+        tmp_path,
+        findings={"total": 26, "new": 0, "known": 0, "unavailable": 26},
+    )
+
+    snapshot = collect_session_snapshot(tmp_path)
+    assert snapshot.latest_run_findings == 26
+    assert snapshot.latest_run_findings_new == 0
+    assert snapshot.latest_run_findings_known == 0
+    assert snapshot.latest_run_findings_unavailable == 26
+
+
+def test_legacy_audit_row_renders_worded_unknown_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """A legacy trail row reaches the screen with words, not invented zeros.
+
+    The snapshot-level pins feed the renderer directly; this one walks the
+    whole path -- stored legacy row, reader, plumbing, renderer -- so a
+    coercion anywhere along it is caught at the line the user reads.
+    """
+
+    # The writer of this build stores the tristate, so a legacy row -- one
+    # written before the counters existed -- is made by dropping them from
+    # the stored payload, exactly what backfill-less history holds.
+    db_path = _write_audit_analysis_row(
+        tmp_path,
+        findings={"total": 26, "new": 0},
+        run_id="runlegacy12345678",
+    )
+    import sqlite3 as _sqlite3
+
+    conn = _sqlite3.connect(db_path)
+    try:
+        stored = conn.execute(
+            "SELECT payload_json FROM controller_events LIMIT 1"
+        ).fetchone()
+        payload = json.loads(str(stored[0]))
+        payload.pop("findings_known")
+        payload.pop("findings_unavailable")
+        conn.execute(
+            "UPDATE controller_events SET payload_json = ?",
+            (json.dumps(payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    line = _latest_run_line(_render_session_stats_text(tmp_path, quiet=False))
+    assert "findings=26" in line
+    assert "new=0" in line
+    assert f"known={ui.SESSION_STATS_NOVELTY_VALUE_UNKNOWN}" in line
+    assert f"unavailable={ui.SESSION_STATS_NOVELTY_VALUE_UNKNOWN}" in line
+    assert "known=0" not in line
+    assert "unavailable=0" not in line
 
 
 def test_the_disk_report_answers_only_where_the_audit_trail_cannot(

@@ -31,7 +31,13 @@ _ArtifactT = TypeVar("_ArtifactT")
 
 @dataclass(frozen=True, slots=True)
 class AnalysisRunSnapshot:
-    """Latest persisted analysis run summary from the audit trail."""
+    """Latest persisted analysis run summary from the audit trail.
+
+    The three novelty counters are ``None`` when the stored row never
+    recorded them -- legacy rows and from-report rows. That absence is
+    "unknown", never zero: a zero would assert a comparison the row never
+    recorded, and the trail cannot be recomputed after the fact.
+    """
 
     run_id: str | None
     health: int | None
@@ -39,6 +45,9 @@ class AnalysisRunSnapshot:
     files: int | None
     age_seconds: int | None
     source: str
+    findings_new: int | None = None
+    findings_known: int | None = None
+    findings_unavailable: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,7 +585,8 @@ def read_latest_analysis_run(
     health = _int_or_none(_mapping(payload.get("health")).get("score"))
     if health is None:
         health = _int_or_none(payload.get("health_score"))
-    findings = _int_or_none(_mapping(payload.get("findings")).get("total"))
+    findings_map = _mapping(payload.get("findings"))
+    findings = _int_or_none(findings_map.get("total"))
     if findings is None:
         findings = _int_or_none(payload.get("findings_total"))
     files = _int_or_none(_mapping(payload.get("inventory")).get("files"))
@@ -590,7 +600,29 @@ def read_latest_analysis_run(
         files=files,
         age_seconds=age_seconds,
         source=source,
+        findings_new=_novelty_counter(payload, findings_map, "new"),
+        findings_known=_novelty_counter(payload, findings_map, "known"),
+        findings_unavailable=_novelty_counter(payload, findings_map, "unavailable"),
     )
+
+
+def _novelty_counter(
+    payload: Mapping[str, object],
+    findings_map: Mapping[str, object],
+    state: str,
+) -> int | None:
+    """One novelty counter from either stored shape; absence stays None.
+
+    Full rows nest the counter under ``findings``; compact rows flatten it to
+    ``findings_<state>``. A row carrying neither never recorded the counter,
+    and coercing that absence into 0 would assert a comparison the row never
+    made -- the misreading the tristate exists to stop.
+    """
+
+    nested = _int_or_none(findings_map.get(state))
+    if nested is not None:
+        return nested
+    return _int_or_none(payload.get(f"findings_{state}"))
 
 
 def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:

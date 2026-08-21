@@ -82,6 +82,12 @@ class SessionSnapshot:
     mcp_token_encoding: str | None = None
     mcp_token_event_count: int = 0
     top_workflows: tuple[WorkflowFootprintSnapshot, ...] = ()
+    #: Novelty counters of the latest run. ``None`` means the source never
+    #: recorded the counter (legacy audit rows, disk reports) -- unknown,
+    #: never zero.
+    latest_run_findings_new: int | None = None
+    latest_run_findings_known: int | None = None
+    latest_run_findings_unavailable: int | None = None
 
 
 def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
@@ -171,6 +177,7 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
         latest_run_age_seconds,
         latest_run_source,
         cache_present,
+        latest_run_novelty,
     ) = _resolve_latest_run(root_path, audit_enabled=audit_enabled)
 
     workspace_health = _classify_workspace_health(
@@ -208,6 +215,9 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
         mcp_token_encoding=mcp_enc,
         mcp_token_event_count=mcp_count,
         top_workflows=top_workflows,
+        latest_run_findings_new=latest_run_novelty[0],
+        latest_run_findings_known=latest_run_novelty[1],
+        latest_run_findings_unavailable=latest_run_novelty[2],
     )
 
 
@@ -282,7 +292,15 @@ def _resolve_latest_run(
     int | None,
     str | None,
     bool,
+    tuple[int | None, int | None, int | None],
 ]:
+    """Latest run facts plus the novelty triple ``(new, known, unavailable)``.
+
+    The triple is all-``None`` for disk reports and for audit rows that never
+    recorded the counters: the disk document publishes no cross-family
+    novelty rollup, so unknown is the honest answer there, not zero.
+    """
+
     disk = _read_disk_report(root_path)
     if audit_enabled:
         audit_run = _read_audit_latest_run(root_path)
@@ -295,10 +313,15 @@ def _resolve_latest_run(
                 audit_run.age_seconds,
                 audit_run.source,
                 disk[5],
+                (
+                    audit_run.findings_new,
+                    audit_run.findings_known,
+                    audit_run.findings_unavailable,
+                ),
             )
     if disk[0] is not None:
-        return (*disk[:5], "disk_report", disk[5])
-    return None, None, None, None, None, None, disk[5]
+        return (*disk[:5], "disk_report", disk[5], (None, None, None))
+    return None, None, None, None, None, None, disk[5], (None, None, None)
 
 
 def _read_audit_latest_run(root_path: Path) -> AnalysisRunSnapshot | None:
@@ -623,6 +646,11 @@ def session_snapshot_to_payload(snapshot: SessionSnapshot) -> dict[str, object]:
             "run_id": snapshot.latest_run_id,
             "health": snapshot.latest_run_health,
             "findings": snapshot.latest_run_findings,
+            # Novelty counters; null means the source never recorded the
+            # counter (unknown), which is not the same fact as zero.
+            "findings_new": snapshot.latest_run_findings_new,
+            "findings_known": snapshot.latest_run_findings_known,
+            "findings_unavailable": snapshot.latest_run_findings_unavailable,
             "files": snapshot.latest_run_files,
             "age_seconds": snapshot.latest_run_age_seconds,
             "source": snapshot.latest_run_source,

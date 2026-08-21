@@ -75,6 +75,12 @@ SESSION_STATS_LATEST_RUN_NONE: Final = "none"
 SESSION_STATS_LATEST_RUN_SOURCE_DISK: Final = "persisted report (CLI)"
 SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_MCP: Final = "MCP session (audit)"
 SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_CLI: Final = "CLI run (audit)"
+#: Whole-suffix wording when a run's novelty counters were never recorded
+#: (legacy audit rows, disk reports). Words, never a zero: a zero would
+#: assert a baseline comparison the source never recorded.
+SESSION_STATS_NOVELTY_UNKNOWN: Final = "novelty unknown"
+#: Per-counter wording when only some novelty counters were recorded.
+SESSION_STATS_NOVELTY_VALUE_UNKNOWN: Final = "unknown"
 SESSION_STATS_CACHE: Final = "Cache:"
 SESSION_STATS_LIVE_AGENTS: Final = "Live agents:"
 SESSION_STATS_ACTIVE_INTENTS: Final = "Active edit intents:"

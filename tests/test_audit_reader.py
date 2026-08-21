@@ -183,6 +183,59 @@ def test_read_latest_analysis_run_compact_payload_fallbacks(tmp_path: Path) -> N
     assert snapshot.files == 10
 
 
+def test_read_latest_analysis_run_reads_novelty_tristate(tmp_path: Path) -> None:
+    """The snapshot carries all three novelty counters from a tristate row."""
+
+    db_path = write_compact_analysis_completed_event(
+        tmp_path,
+        summary={
+            "mode": "full",
+            "health": {"score": 88, "grade": "A"},
+            "findings": {"total": 26, "new": 0, "known": 0, "unavailable": 26},
+            "inventory": {"files": 10, "lines": 100, "functions": 5},
+            "diff": {"new_clones": 0, "health_delta": None},
+        },
+        source=ANALYSIS_SOURCE_CLI,
+        report_digest="c" * 64,
+        run_id="runtristate12345",
+        agent_pid=100,
+        agent_start_epoch=999,
+        agent_label="codeclone-cli/test",
+    )
+
+    snapshot = read_latest_analysis_run(db_path=db_path, repo_root=tmp_path)
+    assert snapshot is not None
+    assert snapshot.findings == 26
+    assert snapshot.findings_new == 0
+    assert snapshot.findings_known == 0
+    assert snapshot.findings_unavailable == 26
+
+
+def test_read_latest_analysis_run_keeps_legacy_novelty_unknown(
+    tmp_path: Path,
+) -> None:
+    """A legacy row without novelty counters reads as unknown, never zero.
+
+    Backfill does not exist: rows written before the tristate stay as they
+    are. A reader that coerces the absence into 0 asserts a comparison the
+    row never recorded -- the exact misreading the tristate exists to stop.
+    """
+
+    legacy_payload = {
+        "source": "cli",
+        "health_score": 72,
+        "findings_total": 11,
+        "findings_new": 0,
+        "files": 42,
+    }
+    snapshot = _read_latest_analysis_run_with_payload(tmp_path, legacy_payload)
+    assert snapshot is not None
+    assert snapshot.findings == 11
+    assert snapshot.findings_new == 0
+    assert snapshot.findings_known is None
+    assert snapshot.findings_unavailable is None
+
+
 def test_read_latest_analysis_run_top_level_metric_fallbacks(tmp_path: Path) -> None:
     legacy_payload = {
         "source": "cli",
