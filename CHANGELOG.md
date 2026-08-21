@@ -5,6 +5,23 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **A run that did not observe its whole input universe no longer publishes an API surface
+  comparison.** `api_surface_diff_available` asked only whether the metrics baseline was trusted
+  and carried an API snapshot; the current run's own population was not part of the question. The
+  API comparison is a set-membership diff, and membership manufactures facts from absence: an
+  `unmeasured` run (files found, none read) published every public symbol of the stored baseline
+  as `change_kind: "removed"` breaking changes beside `baseline_diff_available: true`, and a
+  `partial` run fabricated the same removal pointwise for each unread module. The availability
+  owner (`codeclone.api.comparison.build_comparison_context`) now consults
+  `population_universe_observed` — a new named owner in `codeclone.contracts` beside
+  `population_carries_score`, collapsing the four population states to "was everything there
+  observed": `complete_nonempty` and `complete_empty` publish, `partial` and `unmeasured` withhold
+  (`baseline_diff_available: false`, zero counts, no fabricated rows). `complete_empty` staying
+  available is the other boundary, not an accident: a scope that genuinely holds no source file
+  anymore has really torn down the API the baseline remembers, and that signal survives. This is
+  a different question from the score-existence satellite the adoption family gained earlier —
+  `partial` keeps its health score and its adoption deltas by design and loses only the
+  set-theoretic API comparison.
 - **A refusal run no longer publishes adoption permille deltas, and the compact summary line stops
   grading it.** A current run that observed nothing (empty scope, or files present and none read)
   against a good baseline published `param_delta`/`return_delta`/`docstring_delta` of `-1000` in

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..baseline.trust import current_python_tag
+from ..contracts import population_universe_observed
 from ..core.reporting import gate_required_lanes, resolve_report_baseline_trust
 
 if TYPE_CHECKING:
@@ -258,6 +259,20 @@ def build_comparison_context(
     # with no baseline term did not run (`B8`).
     has_adoption = getattr(metrics_baseline, "has_coverage_adoption_snapshot", False)
     api_snapshot = getattr(metrics_baseline, "api_surface_snapshot", None)
+    # The API comparison additionally needs the *current* term's universe
+    # observed. It is a set-membership diff, and membership manufactures facts
+    # from absence: the current surface is collected only from modules
+    # actually read, so an unread module's symbols are indistinguishable from
+    # removed ones — an ``unmeasured`` run fabricates the whole baseline API
+    # as torn down, a ``partial`` run fabricates each unread module pointwise,
+    # both beside ``baseline_diff_available: true`` (`B8`, `G4`). The
+    # population fact has one owner in the contract ring; ``complete_empty``
+    # stays available there because a genuinely emptied scope really did
+    # remove what the baseline remembers, and that signal must survive.
+    api_universe_observed = (
+        project_metrics is not None
+        and population_universe_observed(project_metrics.health.population)
+    )
     return ComparisonContext(
         new_func=new_func,
         new_block=new_block,
@@ -266,7 +281,9 @@ def build_comparison_context(
             metrics_trusted_for_diff and has_adoption
         ),
         api_surface_diff_available=bool(
-            metrics_trusted_for_diff and api_snapshot is not None
+            metrics_trusted_for_diff
+            and api_snapshot is not None
+            and api_universe_observed
         ),
     )
 

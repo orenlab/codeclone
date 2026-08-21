@@ -13,6 +13,8 @@ from typing import cast
 
 import pytest
 
+from codeclone.api.comparison import build_comparison_context
+from codeclone.baseline import Baseline, MetricsBaseline
 from codeclone.cache.reuse import binding_context_digest, source_content_digest
 from codeclone.core._types import (
     AnalysisResult,
@@ -2142,6 +2144,282 @@ def test_metrics_for_report_keeps_adoption_comparison_on_a_measured_run() -> Non
         "return_delta": 0,
         "docstring_delta": -333,
     }
+
+
+def _api_symbol(qualname: str) -> PublicSymbol:
+    return PublicSymbol(
+        qualname=qualname,
+        kind="function",
+        start_line=10,
+        end_line=12,
+        params=(
+            ApiParamSpec(
+                name="value",
+                kind="pos_or_kw",
+                has_default=False,
+                annotation_hash="int",
+            ),
+        ),
+        returns_hash="int",
+    )
+
+
+def _api_module(module: str, *qualnames: str) -> ModuleApiSurface:
+    return ModuleApiSurface(
+        module=module,
+        filepath=f"{module.replace('.', '/')}.py",
+        symbols=tuple(_api_symbol(qualname) for qualname in qualnames),
+    )
+
+
+def _api_comparison_published(
+    project_metrics: ProjectMetrics,
+    *,
+    baseline_api: ApiSurfaceSnapshot,
+) -> dict[str, object]:
+    """One observation of what the report publishes for the API family.
+
+    Driven end to end from the availability owner: ``build_comparison_context``
+    computes the flag and the diff on real inputs, and the report enrichment
+    publishes beside that flag. Nothing here re-decides availability — the
+    surfaces under test must read the owner's one answer (`G2`).
+    """
+
+    metrics_baseline = MetricsBaseline("metrics-baseline-never-loaded.json")
+    metrics_baseline.api_surface_snapshot = baseline_api
+    comparison = build_comparison_context(
+        func_groups={},
+        block_groups={},
+        project_metrics=project_metrics,
+        # Never consulted: both clone lanes are declared untrusted below, and
+        # the clone diff only runs for a trusted lane.
+        clone_baseline=cast(Baseline, object()),
+        clone_trusted_for_diff=False,
+        metrics_baseline=metrics_baseline,
+        metrics_trusted_for_diff=True,
+        baseline_trust=None,
+    )
+    enriched = _metrics_for_report(
+        analysis=AnalysisResult(
+            func_groups={},
+            block_groups={},
+            block_groups_report={},
+            segment_groups={},
+            suppressed_segment_groups=0,
+            block_group_facts={},
+            func_clones_count=0,
+            block_clones_count=0,
+            segment_clones_count=0,
+            files_analyzed_or_cached=0,
+            project_metrics=project_metrics,
+            metrics_payload=build_metrics_report_payload(
+                module_registry=_TEST_MODULE_REGISTRY,
+                project_metrics=project_metrics,
+                units=(),
+                class_metrics=(),
+                suppressed_dead_code=(),
+            ),
+            suggestions=(),
+            segment_groups_raw_digest="",
+            observation_bundle=TEST_OBSERVATION_BUNDLE,
+        ),
+        metrics_diff=comparison.metrics_diff,
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=comparison.api_surface_diff_available,
+    )
+    assert enriched is not None
+    api_surface = cast("dict[str, object]", enriched["api_surface"])
+    summary = cast("dict[str, object]", api_surface["summary"])
+    items = cast("list[dict[str, object]]", api_surface["items"])
+    return {
+        "baseline_diff_available": summary["baseline_diff_available"],
+        "added": summary["added"],
+        "breaking": summary["breaking"],
+        "breaking_rows": sorted(
+            (str(item.get("qualname")), str(item.get("change_kind")))
+            for item in items
+            if item.get("record_kind") == "breaking_change"
+        ),
+    }
+
+
+def test_api_comparison_is_withheld_on_an_unmeasured_run() -> None:
+    """A run that observed nothing must not publish an API comparison.
+
+    The current half of the set-theoretic subtraction is the run's own API
+    surface, collected only from modules actually read. On an ``unmeasured``
+    run that set is empty for the worst reason — files were found and none
+    were read — so every baseline symbol reads as "removed" and the whole
+    stored API is fabricated as a teardown beside
+    ``baseline_diff_available: true`` (`B8`, `G4`).
+    """
+
+    unmeasured = replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=0,
+            grade="F",
+            dimensions={},
+            population="unmeasured",
+        ),
+    )
+
+    published = _api_comparison_published(
+        unmeasured,
+        baseline_api=ApiSurfaceSnapshot(
+            modules=(
+                _api_module("pkg.mod", "pkg.mod:run"),
+                _api_module("pkg.unread", "pkg.unread:helper"),
+            )
+        ),
+    )
+
+    assert published == {
+        "baseline_diff_available": False,
+        "added": 0,
+        "breaking": 0,
+        "breaking_rows": [],
+    }
+
+
+def test_api_comparison_is_withheld_on_a_truncated_run() -> None:
+    """A partially observed universe fabricates pointwise removals.
+
+    ``partial`` carries the health score by design (the wave-18 acceptance
+    satellite must not fire here), but a set-theoretic comparison is a
+    different question: a module that went unread is absent from the current
+    surface, and its symbols would each be published as a removed API. The
+    availability owner must refuse the comparison outright — not approximate
+    it over the symbols that happened to be read.
+    """
+
+    truncated = replace(
+        _project_metrics_with_adoption_and_api(),
+        health=HealthScore(
+            total=50,
+            grade="D",
+            dimensions={},
+            population="partial",
+        ),
+    )
+
+    published = _api_comparison_published(
+        truncated,
+        baseline_api=ApiSurfaceSnapshot(
+            modules=(
+                _api_module("pkg.mod", "pkg.mod:run"),
+                _api_module("pkg.unread", "pkg.unread:helper"),
+            )
+        ),
+    )
+
+    assert published == {
+        "baseline_diff_available": False,
+        "added": 0,
+        "breaking": 0,
+        "breaking_rows": [],
+    }
+
+
+def test_api_comparison_survives_on_a_fully_observed_run() -> None:
+    """The opposite boundary: a comparison that ran must keep publishing.
+
+    ``complete_nonempty`` is an observed universe, and the removal it reports
+    here is real — the baseline symbol is genuinely absent from a fully read
+    current surface. Withholding this one would silence an executed
+    comparison, which is the same `G4` failure in the other direction.
+    """
+
+    published = _api_comparison_published(
+        _project_metrics_with_adoption_and_api(),
+        baseline_api=ApiSurfaceSnapshot(
+            modules=(
+                _api_module("pkg.mod", "pkg.mod:run"),
+                _api_module("pkg.gone", "pkg.gone:helper"),
+            )
+        ),
+    )
+
+    assert published == {
+        "baseline_diff_available": True,
+        "added": 0,
+        "breaking": 1,
+        "breaking_rows": [("pkg.gone:helper", "removed")],
+    }
+
+
+def test_api_teardown_still_publishes_on_a_genuinely_emptied_scope() -> None:
+    """``complete_empty`` is an observed universe too — an empty one.
+
+    A scope that really holds no source file anymore has really torn down
+    every API the baseline remembers. The current surface is identical to the
+    unmeasured case — ``None`` — and only the population fact tells the two
+    apart; silencing this one would mute a true signal exactly where the
+    operator most needs it (`RP2`).
+    """
+
+    emptied = replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=0,
+            grade="F",
+            dimensions={},
+            population="complete_empty",
+        ),
+    )
+
+    published = _api_comparison_published(
+        emptied,
+        baseline_api=ApiSurfaceSnapshot(
+            modules=(
+                _api_module("pkg.mod", "pkg.mod:run"),
+                _api_module("pkg.unread", "pkg.unread:helper"),
+            )
+        ),
+    )
+
+    assert published == {
+        "baseline_diff_available": True,
+        "added": 0,
+        "breaking": 2,
+        "breaking_rows": [
+            ("pkg.mod:run", "removed"),
+            ("pkg.unread:helper", "removed"),
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("population", "universe_observed"),
+    [
+        ("complete_nonempty", True),
+        ("complete_empty", True),
+        ("partial", False),
+        ("unmeasured", False),
+    ],
+)
+def test_population_universe_observed_pins_each_state(
+    population: str,
+    universe_observed: bool,
+) -> None:
+    """Every row of the binary owner's decision table, pinned by value.
+
+    The second collapse of the four population states, beside
+    ``population_carries_score``: a set-theoretic comparison needs the whole
+    universe observed, not merely a score to exist. The two collapses answer
+    different questions and disagree on ``partial`` and ``complete_empty`` —
+    which is why each has its own named owner in the contract ring.
+    """
+
+    from codeclone.contracts import (
+        HealthPopulation,
+        population_universe_observed,
+    )
+
+    assert (
+        population_universe_observed(cast("HealthPopulation", population))
+        is universe_observed
+    )
 
 
 def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:

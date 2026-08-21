@@ -666,6 +666,37 @@ def population_carries_score(population: HealthPopulation) -> bool:
     return population in _POPULATIONS_WITH_A_SCORE
 
 
+#: The states in which the run observed its whole input universe. The second
+#: binary collapse of the four population states, and a different one:
+#: ``population_carries_score`` asks whether a number exists over what was
+#: read, this asks whether what was read is everything there was. The two
+#: disagree on ``partial`` and on ``complete_empty``, which is why each
+#: collapse carries its own named owner instead of a surface inferring one
+#: from the other.
+_POPULATIONS_WITH_AN_OBSERVED_UNIVERSE: Final[frozenset[str]] = frozenset(
+    {"complete_nonempty", "complete_empty"}
+)
+
+
+def population_universe_observed(population: HealthPopulation) -> bool:
+    """True when the run observed every member of the population it found.
+
+    One owner for the question a set-theoretic comparison must ask before it
+    runs. A membership diff manufactures facts from absence: a member that
+    went unobserved is indistinguishable from a member that was removed, so a
+    ``partial`` run reads each unread module as a torn-down API and an
+    ``unmeasured`` run reads the whole baseline that way (`B8`, `G4`).
+
+    ``complete_empty`` is included, and that is the other boundary, not an
+    accident: a scope that genuinely holds no source file anymore has really
+    removed what the baseline remembers, and withholding that comparison
+    would silence a true signal. Absence of observation and observation of
+    absence are different facts; only ``population`` tells them apart.
+    """
+
+    return population in _POPULATIONS_WITH_AN_OBSERVED_UNIVERSE
+
+
 __all__ = [
     "ADOPTION_COVERAGE_POLICY_VERSION",
     "API_SURFACE_SIGNATURE_VERSION",
@@ -789,4 +820,5 @@ __all__ = [
     "ExitCode",
     "HealthPopulation",
     "cli_help_epilog",
+    "population_universe_observed",
 ]
