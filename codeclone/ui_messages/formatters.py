@@ -659,6 +659,11 @@ def fmt_metrics_adoption(
 #: pattern: the fact is stated in words, never as fabricated zeros.
 _API_SURFACE_DIFF_ABSENCE: Final = "baseline comparison unavailable"
 
+#: The metrics line's absence term for a coverage join that never ran.
+#: Same role, same register: the fact is stated in words by a named owner,
+#: so the spelling cannot drift apart from the tests that pin it.
+_COVERAGE_JOIN_ABSENCE: Final = "join unavailable"
+
 
 def fmt_metrics_api_surface(
     *,
@@ -699,7 +704,7 @@ def fmt_metrics_coverage_join(
     source_label: str,
 ) -> str:
     if status != "ok":
-        parts = ["join unavailable"]
+        parts = [_COVERAGE_JOIN_ABSENCE]
         if source_label:
             parts.append(source_label)
         return (

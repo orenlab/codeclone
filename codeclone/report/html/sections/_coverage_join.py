@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
 from ..primitives.escape import _escape_html
 from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
@@ -76,7 +77,7 @@ def render_coverage_join_panel(ctx: ReportContext) -> str:
                 f'<code class="tab-empty-reason">{_escape_html(invalid_reason)}</code>'
             )
         return _tab_empty_info(
-            "Coverage Join is unavailable for this run.",
+            COVERAGE_JOIN_UNAVAILABLE,
             detail_html="<br>".join(detail_parts) if detail_parts else None,
         )
 

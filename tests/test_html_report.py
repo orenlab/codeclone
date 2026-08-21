@@ -65,6 +65,7 @@ from codeclone.report.html.widgets.snippets import (
     _render_code_block,
     _try_pygments,
 )
+from codeclone.report.messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
 from codeclone.report.renderers.json import render_json_report_document
 from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
@@ -2895,16 +2896,22 @@ def test_html_report_quality_coverage_join_empty_and_invalid_states() -> None:
     _assert_html_contains(
         invalid_html,
         'data-clone-tab="coverage-join"',
-        "Coverage Join is unavailable for this run.",
         "Source: coverage.xml",
         "broken xml",
-        "Coverage join unavailable.",
     )
+    # Ownership pins: both sites state the withheld join through the one
+    # vocabulary owner, and each pin reads only its own region so the
+    # sibling site cannot answer for the one under test.
     invalid_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
-    invalid_panel = invalid_panel.split(
-        '<div class="tab-panel" id="panel-module-map"',
+    invalid_panel = invalid_panel.split("data-clone-panel=", 1)[0]
+    assert COVERAGE_JOIN_UNAVAILABLE in invalid_panel
+    quality_answer = invalid_html.split(
+        "Are there quality hotspots in the codebase?",
         1,
-    )[0]
+    )[1]
+    quality_answer = quality_answer.split('<div class="insight-answer">', 1)[1]
+    quality_answer = quality_answer.split("</div>", 1)[0]
+    assert COVERAGE_JOIN_UNAVAILABLE in quality_answer
     assert "Nothing to report - keep up the good work." not in invalid_panel
 
     metrics["coverage_join"] = {
@@ -3072,18 +3079,18 @@ def test_html_report_coverage_join_location_falls_back_to_filepath() -> None:
 
 def test_tab_empty_info_description_and_empty_variants() -> None:
     desc_html = _tab_empty_info(
-        "Coverage Join is unavailable for this run.",
+        COVERAGE_JOIN_UNAVAILABLE,
         description="Run with --coverage to populate this section.",
     )
     _assert_html_contains(
         desc_html,
-        "Coverage Join is unavailable for this run.",
+        COVERAGE_JOIN_UNAVAILABLE,
         "Run with --coverage to populate this section.",
         "tab-empty-desc-detail",
     )
 
-    empty_html = _tab_empty_info("Coverage Join is unavailable for this run.")
-    _assert_html_contains(empty_html, "Coverage Join is unavailable for this run.")
+    empty_html = _tab_empty_info(COVERAGE_JOIN_UNAVAILABLE)
+    _assert_html_contains(empty_html, COVERAGE_JOIN_UNAVAILABLE)
     assert "tab-empty-desc" not in empty_html
 
 

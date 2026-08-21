@@ -45,7 +45,9 @@ def test_fmt_metrics_coverage_join_unavailable_with_source() -> None:
         threshold_percent=80,
         source_label="none",
     )
-    assert "join unavailable" in text
+    # Ownership pin: the expectation is read from the named owner, so the
+    # compact line cannot drift apart from its vocabulary.
+    assert formatters._COVERAGE_JOIN_ABSENCE in text
     assert "none" in text
 
 
@@ -58,8 +60,8 @@ def test_fmt_metrics_coverage_join_unavailable_without_source() -> None:
         threshold_percent=80,
         source_label="",
     )
-    assert "join unavailable" in text
-    assert " · " not in text.split("join unavailable", 1)[-1]
+    assert formatters._COVERAGE_JOIN_ABSENCE in text
+    assert " · " not in text.split(formatters._COVERAGE_JOIN_ABSENCE, 1)[-1]
 
 
 def test_fmt_summary_parsed_returns_none_when_all_zero() -> None:

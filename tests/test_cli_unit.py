@@ -2269,7 +2269,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     )
     assert_contains_all(
         coverage_join_unavailable,
-        "join unavailable",
+        ui.formatters._COVERAGE_JOIN_ABSENCE,
         "coverage.xml",
     )
     changed_paths = ui.fmt_changed_scope_paths(count=45)

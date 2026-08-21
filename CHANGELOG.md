@@ -5,6 +5,17 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The "coverage join did not run" fact gets one vocabulary owner per register.** The same
+  absence was spelled three ways in three files: the HTML coverage-join panel said "Coverage
+  Join is unavailable for this run.", the quality insight one panel over respelled it as
+  "Coverage join unavailable.", and the CLI metrics line carried `join unavailable` as a bare
+  literal with no named constant. The HTML wording now lives in one owner
+  (`report/messages/coverage_join.py: COVERAGE_JOIN_UNAVAILABLE`) read by both the
+  coverage-join panel and the quality insight, and the CLI term gets a named owner
+  (`_COVERAGE_JOIN_ABSENCE`) beside its API-surface sibling; the tests that pin these
+  surfaces import the owners instead of respelling the substring. One visible change: the
+  quality insight's sentence converges to the canonical "Coverage Join is unavailable for
+  this run." — every other surface is unchanged byte-for-byte.
 - **The changed-scope summary stops swallowing the third novelty state.** The changed-scope
   counting owner (`_changed_clone_gate_from_report`) counted only `novelty == "new"` and
   `"known"`, so a run whose findings carry the third contractual value `unavailable` printed

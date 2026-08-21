@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
 from ..widgets.badges import _micro_badges, _render_chain_flow, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
@@ -291,7 +292,9 @@ def render_quality_panel(ctx: ReportContext) -> str:
                     f"scope gaps: {coverage_scope_gaps}."
                 )
             else:
-                answer += " Coverage join unavailable."
+                # The absence sentence is borrowed from the vocabulary owner,
+                # never respelled: one fact, one wording, on every surface.
+                answer += f" {COVERAGE_JOIN_UNAVAILABLE}"
         if coupling_high_risk > 0 and cohesion_low > 0:
             tone = "risk"
         elif (
