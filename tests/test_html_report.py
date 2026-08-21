@@ -48,7 +48,11 @@ from codeclone.report.html.primitives.location import (
     location_file_target,
     relative_location_path,
 )
+from codeclone.report.html.sections._coupling import render_quality_panel
+from codeclone.report.html.sections._dead_code import render_dead_code_panel
+from codeclone.report.html.sections._dependencies import render_dependencies_panel
 from codeclone.report.html.sections._module_map import render_module_map_panel
+from codeclone.report.html.sections._review import render_review_panel
 from codeclone.report.html.sections._security_surfaces import (
     _coverage_join_review_text,
     _coverage_review_cues,
@@ -66,6 +70,11 @@ from codeclone.report.html.widgets.snippets import (
     _try_pygments,
 )
 from codeclone.report.messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
+from codeclone.report.messages.overview import ADOPTION_API_DIFF_UNAVAILABLE
+from codeclone.report.messages.sections import (
+    DEPENDENCY_GRAPH_UNAVAILABLE,
+    METRICS_SKIPPED,
+)
 from codeclone.report.renderers.json import render_json_report_document
 from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
@@ -2321,7 +2330,9 @@ def test_html_report_api_surface_pronounces_a_withheld_baseline_comparison() -> 
         "Public API surface",
         "Public symbols",
         "Modules",
-        "Baseline comparison is unavailable for this run.",
+        # Ownership pin: the expectation is read from the named owner, so the
+        # page cannot drift apart from its vocabulary.
+        ADOPTION_API_DIFF_UNAVAILABLE,
     )
     assert "Breaking changes" not in html
     assert "Added symbols" not in html
@@ -2358,7 +2369,9 @@ def test_html_report_api_surface_stays_silent_about_absence_when_compared() -> N
     html = _render_metrics_html(metrics)
 
     _assert_html_contains(html, "Breaking changes", "Added symbols")
-    assert "Baseline comparison is unavailable for this run." not in html
+    # Ownership pin: read from the owner, so a shifted spelling cannot make
+    # this negative guard vacuously green.
+    assert ADOPTION_API_DIFF_UNAVAILABLE not in html
 
 
 def test_html_report_quality_includes_coverage_join_subtab() -> None:
@@ -4460,7 +4473,7 @@ def test_module_map_panel_unavailable_when_skipped() -> None:
     metrics.pop("overloaded_modules", None)
     html = _render_module_map_report(_module_map_unavailable_payload(), metrics=metrics)
     panel = _module_map_panel_slice(html)
-    assert "Dependency graph is not available." in panel
+    assert DEPENDENCY_GRAPH_UNAVAILABLE in panel
     assert "dep-graph-svg" not in panel
     assert 'data-subtab-group="module-map-zoom"' not in panel
     assert "Overloaded Modules" not in panel
@@ -4476,8 +4489,68 @@ def test_module_map_panel_metrics_skipped_insight() -> None:
         ),
     )
     html = render_module_map_panel(ctx)
-    assert "Metrics are skipped for this run." in html
-    assert "Dependency graph is not available." in html
+    assert METRICS_SKIPPED in html
+    assert DEPENDENCY_GRAPH_UNAVAILABLE in html
+
+
+def test_metrics_skipped_insight_spoken_by_owner_in_every_section() -> None:
+    """All five metrics-skipped sites speak through the one vocabulary owner.
+
+    Each section is pinned through the imported owner, never a respelled
+    literal, so renaming ``METRICS_SKIPPED`` at the owner reddens exactly the
+    site that failed to move with it instead of leaving a silent orphan. The
+    sections are rendered directly on a skipped-metrics context — the same
+    construction as the module-map pin above — because a canonical document
+    always publishes every metric family, so ``build_context`` cannot reach
+    ``metrics_available=False`` from a full render.
+    """
+
+    empty_ctx_fields: dict[str, object] = {
+        "derived_map": {},
+        "overloaded_modules_map": {},
+        "metrics_map": {},
+        "complexity_map": {},
+        "coupling_map": {},
+        "cohesion_map": {},
+        "dependencies_map": {},
+        "dead_code_map": {},
+        "security_surfaces_map": {},
+        "health_map": {},
+        "metrics_available": False,
+    }
+    renderers = {
+        "quality": render_quality_panel,
+        "module_map": render_module_map_panel,
+        "dependencies": render_dependencies_panel,
+        "dead_code": render_dead_code_panel,
+        "review": render_review_panel,
+    }
+    for name, renderer in renderers.items():
+        html = renderer(cast(Any, SimpleNamespace(**empty_ctx_fields)))
+        assert METRICS_SKIPPED in html, name
+
+
+def test_dependencies_panel_empty_graph_message_spoken_by_owner() -> None:
+    """An edgeless dependency graph pronounces its absence via the owner.
+
+    Metrics are available and only the graph is empty, so the sentence in the
+    dependencies slice comes from this panel's own empty-state site — isolated
+    from the module map's sibling site and from the skipped-metrics insight.
+    """
+
+    html = _render_metrics_html(
+        _dependency_metrics_payload(
+            edge_list=[],
+            longest_chains=[],
+            dep_cycles=[],
+            dep_max_depth=0,
+        )
+    )
+    panel = html.split('id="panel-dependencies"', 1)[1].split(
+        'id="panel-dead-code"', 1
+    )[0]
+    assert DEPENDENCY_GRAPH_UNAVAILABLE in panel
+    assert METRICS_SKIPPED not in panel
 
 
 def test_module_map_panel_modules_zoom_and_limited_population() -> None:
@@ -4495,7 +4568,7 @@ def test_module_map_panel_modules_zoom_and_limited_population() -> None:
     assert "No unwind candidates detected." in panel
     # modules graph (active) renders an SVG; empty packages graph shows the message
     assert "dep-graph-svg" in panel
-    assert "Dependency graph is not available." in panel
+    assert DEPENDENCY_GRAPH_UNAVAILABLE in panel
 
 
 def _review_queue_payload(*, with_items: bool = True) -> dict[str, object]:

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.sections import DEPENDENCY_GRAPH_UNAVAILABLE, METRICS_SKIPPED
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty
 from ..widgets.components import Tone, insight_block
 from ..widgets.dep_graph_layout import (
@@ -55,7 +56,6 @@ _OVERLOADED_TABLE_CAP = 50
 #: How the document ordered this family, in the band's own words.
 _OVERLOADED_ORDER = "candidates first, by score"
 _OVERLOADED_HEADING = "Overloaded Modules"
-_EMPTY_GRAPH_MESSAGE = "Dependency graph is not available."
 #: An empty panel must separate a clean result from a measurement that
 #: never ran, so it says what would draw a graph here.
 _EMPTY_GRAPH_DESC = (
@@ -63,7 +63,6 @@ _EMPTY_GRAPH_DESC = (
     "one another, so a single module or a skipped metrics run leaves it empty."
 )
 _OVERLOADED_EMPTY_MESSAGE = "Overloaded-module profiling is not available."
-_METRICS_SKIPPED = "Metrics are skipped for this run."
 
 # Mandatory honesty copy (spec §11): report-only, sampled SVG, and what the
 # tables below really hold. "Overload table lists the full codebase" was false
@@ -129,7 +128,7 @@ def _mm_node_style(node: Mapping[str, object], *, hub_threshold: int) -> BlockNo
 def _render_module_map_svg(graph: Mapping[str, object]) -> str:
     nodes = [_as_mapping(node) for node in _as_sequence(graph.get("nodes"))]
     if not nodes:
-        return _tab_empty(_EMPTY_GRAPH_MESSAGE, description=_EMPTY_GRAPH_DESC)
+        return _tab_empty(DEPENDENCY_GRAPH_UNAVAILABLE, description=_EMPTY_GRAPH_DESC)
     node_ids = [str(node.get("id")) for node in nodes]
     by_id = {str(node.get("id")): node for node in nodes}
     edge_rows = [_as_mapping(edge) for edge in _as_sequence(graph.get("edges"))]
@@ -400,7 +399,7 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
 def _render_graph_block(ctx: ReportContext, module_map: Mapping[str, object]) -> str:
     summary = _as_mapping(module_map.get("summary"))
     if not module_map or not bool(summary.get("available")):
-        return _tab_empty(_EMPTY_GRAPH_MESSAGE, description=_EMPTY_GRAPH_DESC)
+        return _tab_empty(DEPENDENCY_GRAPH_UNAVAILABLE, description=_EMPTY_GRAPH_DESC)
 
     default_zoom = str(module_map.get("default_zoom") or "packages")
     graph_packages = _as_mapping(module_map.get("graph_packages"))
@@ -420,7 +419,7 @@ def _render_graph_block(ctx: ReportContext, module_map: Mapping[str, object]) ->
 def render_module_map_panel(ctx: ReportContext) -> str:
     module_map = _as_mapping(ctx.derived_map.get("module_map"))
 
-    answer = _MODULE_MAP_INSIGHT if ctx.metrics_available else _METRICS_SKIPPED
+    answer = _MODULE_MAP_INSIGHT if ctx.metrics_available else METRICS_SKIPPED
     tone: Tone = "info"
     insight = insight_block(
         question="Where should refactoring unwind dependencies?",

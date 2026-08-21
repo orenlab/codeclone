@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from codeclone.metrics.dependencies import select_dependency_graph_nodes
 from codeclone.utils import coerce as _coerce
 
+from ...messages.sections import DEPENDENCY_GRAPH_UNAVAILABLE, METRICS_SKIPPED
 from ..primitives.escape import _escape_html
 from ..widgets.badges import (
     _micro_badges,
@@ -83,7 +84,7 @@ def _render_dep_svg(
     longest_chains: Sequence[object],
 ) -> str:
     if not edges:
-        return _tab_empty("Dependency graph is not available.")
+        return _tab_empty(DEPENDENCY_GRAPH_UNAVAILABLE)
 
     nodes, filtered_edges = _select_dep_nodes(
         edges,
@@ -249,7 +250,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     answer: str
     tone: Tone
     if not ctx.metrics_available:
-        answer, tone = "Metrics are skipped for this run.", "info"
+        answer, tone = METRICS_SKIPPED, "info"
     else:
         answer = (
             f"Cycles: {cycle_count}; avg depth: {dep_avg_depth_label}; "

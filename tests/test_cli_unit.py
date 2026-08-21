@@ -2790,7 +2790,8 @@ def test_print_metrics_rich_api_line_pronounces_a_withheld_comparison(
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Public API", "3 symbols", "2 modules")
-    assert_contains_all(out, "baseline comparison unavailable")
+    # Ownership pin: read from the named owner, never a respelled literal.
+    assert_contains_all(out, ui.formatters._API_SURFACE_DIFF_ABSENCE)
     assert_contains_none(out, "breaking", "added")
 
 
@@ -2812,7 +2813,9 @@ def test_print_metrics_rich_api_line_stays_silent_about_absence_when_compared(
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Public API", "1 breaking", "4 added")
-    assert_contains_none(out, "baseline comparison unavailable")
+    # Ownership pin: read from the owner, so a shifted spelling cannot make
+    # this negative guard vacuously green.
+    assert_contains_none(out, ui.formatters._API_SURFACE_DIFF_ABSENCE)
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(

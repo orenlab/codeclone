@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ...messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
+from ...messages.sections import METRICS_SKIPPED
 from ..widgets.badges import _micro_badges, _render_chain_flow, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
@@ -273,7 +274,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
     answer: str
     tone: Tone
     if not ctx.metrics_available:
-        answer = "Metrics are skipped for this run."
+        answer = METRICS_SKIPPED
         tone = "info"
     else:
         answer = (

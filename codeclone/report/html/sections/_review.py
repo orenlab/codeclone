@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.sections import METRICS_SKIPPED
 from ..primitives.escape import _escape_html
 from ..primitives.filters import _render_filter_chips
 from ..widgets.badges import _tab_empty
@@ -39,7 +40,6 @@ _EMPTY_DESC = (
     "The queue fills with findings from the clone, structural and metric "
     "families as they are detected, so it is empty when none were."
 )
-_METRICS_SKIPPED = "Metrics are skipped for this run."
 _REVIEW_INSIGHT = (
     "Findings to review, highest priority first. Mark items reviewed as you go — "
     "progress is saved in your browser. Report-only triage: verify in source "
@@ -146,7 +146,7 @@ def render_review_panel(ctx: ReportContext) -> str:
     summary = _as_mapping(queue.get("summary"))
     items = [_as_mapping(item) for item in _as_sequence(queue.get("items"))]
 
-    answer = _REVIEW_INSIGHT if ctx.metrics_available else _METRICS_SKIPPED
+    answer = _REVIEW_INSIGHT if ctx.metrics_available else METRICS_SKIPPED
     tone: Tone = "info"
     insight = insight_block(
         question="What needs review, and in what order?",

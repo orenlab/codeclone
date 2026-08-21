@@ -185,7 +185,9 @@ def test_fmt_metrics_api_surface_pronounces_a_withheld_comparison() -> None:
         breaking=0,
         diff_available=False,
     )
-    assert "baseline comparison unavailable" in text
+    # Ownership pin: the expectation is read from the named owner, so the
+    # compact line cannot drift apart from its vocabulary.
+    assert formatters._API_SURFACE_DIFF_ABSENCE in text
     assert "breaking" not in text
     assert "added" not in text
 

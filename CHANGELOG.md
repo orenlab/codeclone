@@ -5,6 +5,16 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The two multi-site section absence sentences get one vocabulary owner each.** "Metrics are
+  skipped for this run." was spelled at five HTML section sites — three inline literals
+  (quality, dependencies, dead code) and two independent private `_METRICS_SKIPPED` constants
+  (module map, review) — and "Dependency graph is not available." at two (a dependencies
+  inline literal and the module map's private `_EMPTY_GRAPH_MESSAGE`). Renaming any one owner
+  left the sibling sites silently behind. Both sentences now live in one cross-section owner
+  each (`report/messages/sections.py`: `METRICS_SKIPPED`, `DEPENDENCY_GRAPH_UNAVAILABLE`),
+  the private duplicates are deleted, all seven sites read the owners by import, and the tests
+  that pin these surfaces import the owners instead of respelling the substrings. Visible
+  output is unchanged byte-for-byte.
 - **The "coverage join did not run" fact gets one vocabulary owner per register.** The same
   absence was spelled three ways in three files: the HTML coverage-join panel said "Coverage
   Join is unavailable for this run.", the quality insight one panel over respelled it as

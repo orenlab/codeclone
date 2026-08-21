@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.sections import METRICS_SKIPPED
 from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
@@ -180,7 +181,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     answer: str
     tone: Tone
     if not ctx.metrics_available:
-        answer, tone = "Metrics are skipped for this run.", "info"
+        answer, tone = METRICS_SKIPPED, "info"
     else:
         answer = (
             f"{dead_total} candidates total; "
