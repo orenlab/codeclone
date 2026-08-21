@@ -4898,6 +4898,96 @@ def test_cli_full_run_html_renders_figures_without_absence_phrases(
     assert "Cycles: 0" in html
 
 
+def _run_report_formats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *flags: str
+) -> dict[str, str]:
+    """One real producer run, read back as every text-family artifact."""
+
+    _write_python_module(tmp_path, "a.py")
+    extensions = {"text": "txt", "md": "md", "json": "json"}
+    outputs = {flag: tmp_path / f"report.{ext}" for flag, ext in extensions.items()}
+    args = [str(tmp_path), *flags]
+    for flag, path in outputs.items():
+        args += [f"--{flag}", str(path)]
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [*args, "--no-progress"])
+    return {flag: path.read_text("utf-8") for flag, path in outputs.items()}
+
+
+def _run_skip_metrics_text_and_markdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str]:
+    """One ``--skip-metrics`` producer run rendered as text and markdown."""
+
+    rendered = _run_report_formats(tmp_path, monkeypatch, "--skip-metrics")
+    payload = json.loads(rendered["json"])
+    declared = cast(dict[str, object], payload["meta"])["computed_metric_families"]
+    assert declared == [], "the producer under test must declare no families"
+    return rendered["text"], rendered["md"]
+
+
+def test_cli_skip_metrics_text_speaks_absence_not_fabricated_zeros(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A declared-empty run renders one absence line, never zero figures.
+
+    End-to-end on the real producer: a ``--skip-metrics`` run honestly declares
+    ``computed_metric_families: []`` while ``metrics.families`` still carries
+    every family filled with zeros. The text renderer read the families
+    container without consulting the declaration, so ``health: score=0`` and
+    ``dependencies: ... cycles=0`` rendered as measured facts for metrics that
+    never ran.
+    """
+
+    text, _ = _run_skip_metrics_text_and_markdown(tmp_path, monkeypatch)
+
+    assert METRICS_SKIPPED in text
+    assert "health: score=0" not in text
+    assert "dependencies: modules=0" not in text
+    assert "complexity: total=0" not in text
+    assert "OVERLOADED MODULES (top 10)" not in text
+    assert "SECURITY SURFACES (top 10)" not in text
+    assert "SUPPRESSED DEAD CODE (items=0)" not in text
+
+
+def test_cli_skip_metrics_markdown_speaks_absence_not_fabricated_zeros(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The markdown metrics block carries the absence line, no family sections."""
+
+    _, markdown = _run_skip_metrics_text_and_markdown(tmp_path, monkeypatch)
+
+    assert METRICS_SKIPPED in markdown
+    assert "- score: 0" not in markdown
+    assert "- cycles: 0" not in markdown
+    assert "### Complexity" not in markdown
+    assert "### Dependencies" not in markdown
+    assert "### Suppressed Dead Code" not in markdown
+
+
+def test_cli_full_run_text_and_markdown_render_figures_without_absence_phrases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reverse boundary: a metrics run keeps its figures and no absence line.
+
+    ``--fail-cycles`` forces the metrics lane for the same reason as the HTML
+    boundary pin above: without a metrics flag or a metrics baseline the CLI
+    quietly runs clones-only and would land in the declared-empty state this
+    test is the boundary of.
+    """
+
+    rendered = _run_report_formats(tmp_path, monkeypatch, "--fail-cycles")
+    text = rendered["text"]
+    markdown = rendered["md"]
+
+    assert METRICS_SKIPPED not in text
+    assert "dependencies: modules=" in text
+    assert "health: score=" in text
+    assert METRICS_SKIPPED not in markdown
+    assert "### Dependencies" in markdown
+    assert "- cycles: 0" in markdown
+
+
 def _count_report_body_builds(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
     """Patch the report-body builder and hand back a live call counter."""
 

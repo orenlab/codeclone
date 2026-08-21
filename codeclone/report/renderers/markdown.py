@@ -9,6 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from ...api.finding_groups import suppressed_clone_groups
+from ...api.metric_families import (
+    presentation_metric_families,
+    withheld_metric_families,
+)
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
@@ -18,6 +22,7 @@ from ..messages.projections import (
     HEALTH_NOT_MEASURED,
     PROJECTION_NONE,
 )
+from ..messages.sections import METRICS_SKIPPED
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
@@ -547,6 +552,16 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     )
 
     _append_anchor(lines, *_anchor("metrics"))
+    # One owner interprets the declaration's three key states; this renderer
+    # only asks its two projections — what survived the filter, and what was
+    # withheld from the container (`G2`). A declared-empty run speaks one
+    # absence sentence instead of family sections whose zeros would read as
+    # measurements.
+    families_view = presentation_metric_families(meta, metrics_families)
+    withheld_families = withheld_metric_families(meta, metrics_families)
+    if not families_view:
+        lines.append(METRICS_SKIPPED)
+        lines.append("")
     for anchor_id, title, summary_keys, item_keys in (
         ("health", "Health", ("score", "grade", "population"), ()),
         (
@@ -656,7 +671,9 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         if family_key == "security-surfaces":
             family_key = "security_surfaces"
         family_payload = _as_mapping(metrics_families.get(family_key))
-        if not family_payload and family_key == "coverage_join":
+        if family_key in withheld_families or (
+            not family_payload and family_key == "coverage_join"
+        ):
             continue
         family_summary_map = _as_mapping(family_payload.get("summary"))
         _append_anchor(lines, anchor_id, title, 3)
@@ -670,13 +687,14 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             key_order=item_keys,
         )
 
-    dead_code_family_payload = _as_mapping(metrics_families.get("dead_code"))
-    _append_anchor(lines, *_anchor("dead-code-suppressed"))
-    _append_metric_items(
-        lines,
-        items=_as_sequence(dead_code_family_payload.get("suppressed_items")),
-        key_order=("kind", "confidence", "suppression_rule", "suppression_source"),
-    )
+    if "dead_code" not in withheld_families:
+        dead_code_family_payload = _as_mapping(metrics_families.get("dead_code"))
+        _append_anchor(lines, *_anchor("dead-code-suppressed"))
+        _append_metric_items(
+            lines,
+            items=_as_sequence(dead_code_family_payload.get("suppressed_items")),
+            key_order=("kind", "confidence", "suppression_rule", "suppression_source"),
+        )
 
     _append_anchor(lines, *_anchor("integrity"))
     _append_kv_bullets(

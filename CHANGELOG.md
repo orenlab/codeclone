@@ -5,6 +5,19 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **Text and markdown reports honor the metric-family declaration, and its interpretation
+  gets one owner.** The wave that fixed the HTML reader left the text and markdown renderers
+  reading `metrics.families` raw, so a `--skip-metrics` run (and the implicit clones-only run
+  a bare invocation falls into) still printed every zero-filled family as measured facts —
+  `health: score=0`, `dependencies: ... cycles=0` in text, `### Health` / `- cycles: 0`
+  sections in markdown. The three-state law of `meta.computed_metric_families` (key absent
+  keeps every family, non-empty filters strictly, declared-empty keeps none) also lived
+  inline in the HTML context, one dialect away from every next consumer. The interpretation
+  now has a single owner (`codeclone/api/metric_families.py: presentation_metric_families`);
+  the HTML context, text renderer, and markdown renderer all filter through it, and a
+  declared-empty run renders one absence sentence — the existing `METRICS_SKIPPED` owner
+  ("Metrics are skipped for this run.") — instead of family sections. Metrics runs are
+  unchanged byte-for-byte on all three surfaces.
 - **A skip-metrics HTML report says metrics were skipped instead of rendering zeros as
   measurements.** A `--skip-metrics` run (and the implicit clones-only run a bare invocation
   falls into without a metrics flag or metrics baseline) honestly declares

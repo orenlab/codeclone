@@ -14,6 +14,10 @@ from ...api.finding_groups import (
     SuppressedCloneGroups,
     suppressed_clone_groups,
 )
+from ...api.metric_families import (
+    presentation_metric_families,
+    withheld_metric_families,
+)
 from ...contracts import CLONE_KIND_BLOCK, CLONE_KIND_FUNCTION, CLONE_KIND_SEGMENT
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
@@ -21,6 +25,7 @@ from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import explain as explain_msgs
 from ..messages import projections as proj
+from ..messages.sections import METRICS_SKIPPED
 
 _as_int = as_int
 _as_mapping = as_mapping
@@ -530,6 +535,7 @@ def _append_metrics_summary_lines(
     lines: list[str],
     *,
     metrics_summary: Mapping[str, object],
+    withheld_families: frozenset[str],
 ) -> None:
     for family_name in (
         "complexity",
@@ -542,6 +548,12 @@ def _append_metrics_summary_lines(
         "dead_code",
         "health",
     ):
+        # The declaration owner names what it withheld from the container; a
+        # withheld family prints no summary line, or its zeros read as
+        # measurements. Families the document never carried keep their
+        # pre-declaration stub behavior.
+        if family_name in withheld_families:
+            continue
         family_summary = _as_mapping(metrics_summary.get(family_name))
         if family_name == "coverage_join" and not family_summary:
             continue
@@ -619,9 +631,10 @@ def _append_metric_family_sections(
     lines: list[str],
     *,
     metrics_families: Mapping[str, object],
+    withheld_families: frozenset[str],
 ) -> None:
     coverage_join_family = _as_mapping(metrics_families.get("coverage_join"))
-    if coverage_join_family:
+    if coverage_join_family and "coverage_join" not in withheld_families:
         _append_top_metric_family(
             lines,
             title=proj.TEXT_SECTION_COVERAGE_JOIN,
@@ -638,39 +651,45 @@ def _append_metric_family_sections(
             ),
         )
 
-    overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
-    _append_top_metric_family(
-        lines,
-        title=proj.TEXT_SECTION_OVERLOADED_MODULES,
-        items=_as_sequence(overloaded_modules_family.get("items")),
-        key_order=(
-            "module",
-            "relative_path",
-            "source_kind",
-            "score",
-            "candidate_status",
-            "loc",
-            "fan_in",
-            "fan_out",
-            "complexity_total",
-        ),
-    )
+    if "overloaded_modules" not in withheld_families:
+        overloaded_modules_family = _as_mapping(
+            metrics_families.get("overloaded_modules")
+        )
+        _append_top_metric_family(
+            lines,
+            title=proj.TEXT_SECTION_OVERLOADED_MODULES,
+            items=_as_sequence(overloaded_modules_family.get("items")),
+            key_order=(
+                "module",
+                "relative_path",
+                "source_kind",
+                "score",
+                "candidate_status",
+                "loc",
+                "fan_in",
+                "fan_out",
+                "complexity_total",
+            ),
+        )
 
-    security_surfaces_family = _as_mapping(metrics_families.get("security_surfaces"))
-    _append_top_metric_family(
-        lines,
-        title=proj.TEXT_SECTION_SECURITY_SURFACES,
-        items=_as_sequence(security_surfaces_family.get("items")),
-        key_order=(
-            "category",
-            "capability",
-            "source_kind",
-            "evidence_symbol",
-            "relative_path",
-            "qualname",
-            "location_scope",
-        ),
-    )
+    if "security_surfaces" not in withheld_families:
+        security_surfaces_family = _as_mapping(
+            metrics_families.get("security_surfaces")
+        )
+        _append_top_metric_family(
+            lines,
+            title=proj.TEXT_SECTION_SECURITY_SURFACES,
+            items=_as_sequence(security_surfaces_family.get("items")),
+            key_order=(
+                "category",
+                "capability",
+                "source_kind",
+                "evidence_symbol",
+                "relative_path",
+                "qualname",
+                "location_scope",
+            ),
+        )
 
 
 def _append_findings_sections(
@@ -680,6 +699,7 @@ def _append_findings_sections(
     clone_groups: Mapping[str, object],
     suppressed: SuppressedCloneGroups,
     metrics_families: Mapping[str, object],
+    withheld_families: frozenset[str],
 ) -> None:
     for title, group_key, metric_name in (
         (proj.TEXT_SECTION_FUNCTION_CLONES, "functions", "loc"),
@@ -740,12 +760,13 @@ def _append_findings_sections(
         ),
         fact_keys=("kind", "confidence"),
     )
-    lines.append("")
-    dead_code_family = _as_mapping(metrics_families.get("dead_code"))
-    _append_suppressed_dead_code_items(
-        lines,
-        items=_as_sequence(dead_code_family.get("suppressed_items")),
-    )
+    if "dead_code" not in withheld_families:
+        lines.append("")
+        dead_code_family = _as_mapping(metrics_families.get("dead_code"))
+        _append_suppressed_dead_code_items(
+            lines,
+            items=_as_sequence(dead_code_family.get("suppressed_items")),
+        )
     lines.append("")
     _append_single_item_findings(
         lines,
@@ -976,8 +997,26 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             proj.TEXT_SECTION_METRICS_SUMMARY,
         ]
     )
-    _append_metrics_summary_lines(lines, metrics_summary=metrics_summary)
-    _append_metric_family_sections(lines, metrics_families=metrics_families)
+    # One owner interprets the declaration's three key states; this renderer
+    # only asks its two projections — what survived the filter, and what was
+    # withheld from the container (`G2`). A declared-empty run speaks one
+    # absence sentence instead of family sections whose zeros would read as
+    # measurements.
+    families_view = presentation_metric_families(meta_payload, metrics_families)
+    withheld_families = withheld_metric_families(meta_payload, metrics_families)
+    if families_view:
+        _append_metrics_summary_lines(
+            lines,
+            metrics_summary=metrics_summary,
+            withheld_families=withheld_families,
+        )
+        _append_metric_family_sections(
+            lines,
+            metrics_families=metrics_families,
+            withheld_families=withheld_families,
+        )
+    else:
+        lines.append(METRICS_SKIPPED)
 
     lines.append("")
     _append_overview(lines, overview, hotlists)
@@ -990,6 +1029,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         clone_groups=clone_groups,
         suppressed=suppressed_clone_groups(payload),
         metrics_families=metrics_families,
+        withheld_families=withheld_families,
     )
     lines.extend(
         [

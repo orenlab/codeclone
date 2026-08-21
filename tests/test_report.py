@@ -48,6 +48,7 @@ from codeclone.report.html.sections._structural import (
     build_structural_findings_html_panel,
 )
 from codeclone.report.html.widgets.snippets import _FileCache
+from codeclone.report.messages.sections import METRICS_SKIPPED
 from codeclone.report.overview import materialize_report_overview
 from codeclone.report.renderers.json import render_json_report_document
 from codeclone.report.renderers.markdown import render_markdown_report_document
@@ -3479,6 +3480,78 @@ def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> Non
     markdown = render_markdown_report_document(payload)
     assert '<a id="dead-code-suppressed"></a>' in markdown
     assert "suppression_rule=dead-code" in markdown
+
+
+def _declared_families_document(
+    metrics_computed: list[str] | None,
+) -> dict[str, object]:
+    """A populated-families document with an explicit declaration override.
+
+    The builder normalizes every family into the payload, so the only thing
+    the override changes is the declaration — exactly the axis these pins
+    probe (RP2: absence must stay distinguishable from emptiness).
+    """
+
+    meta: dict[str, object] = {"scan_root": "/root"}
+    if metrics_computed is not None:
+        meta["metrics_computed"] = metrics_computed
+    return build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta=meta,
+    )
+
+
+def test_text_declared_empty_families_speak_absence_not_zeros() -> None:
+    """Declared-empty text renders one absence line and no family section."""
+
+    text = render_text_report_document(_declared_families_document([]))
+
+    assert METRICS_SKIPPED in text
+    assert "health: score=0" not in text
+    assert "dependencies: modules=0" not in text
+    assert "OVERLOADED MODULES (top 10)" not in text
+    assert "SECURITY SURFACES (top 10)" not in text
+    assert "SUPPRESSED DEAD CODE (items=0)" not in text
+
+
+def test_text_partial_declaration_prints_only_declared_families() -> None:
+    """A non-empty declaration filters text sections strictly to its names."""
+
+    text = render_text_report_document(_declared_families_document(["cohesion"]))
+
+    assert METRICS_SKIPPED not in text
+    assert "cohesion: total=0" in text
+    assert "complexity: total=0" not in text
+    assert "dependencies: modules=0" not in text
+    assert "SUPPRESSED DEAD CODE (items=0)" not in text
+
+
+def test_markdown_declared_empty_families_speak_absence_not_zeros() -> None:
+    """Declared-empty markdown renders one absence line and no family section."""
+
+    markdown = render_markdown_report_document(_declared_families_document([]))
+
+    assert METRICS_SKIPPED in markdown
+    assert "- score: 0" not in markdown
+    assert "- cycles: 0" not in markdown
+    assert "### Complexity" not in markdown
+    assert "### Suppressed Dead Code" not in markdown
+
+
+def test_markdown_partial_declaration_prints_only_declared_families() -> None:
+    """A non-empty declaration filters markdown sections strictly to its names."""
+
+    markdown = render_markdown_report_document(
+        _declared_families_document(["cohesion"])
+    )
+
+    assert METRICS_SKIPPED not in markdown
+    assert "### Cohesion" in markdown
+    assert "### Complexity" not in markdown
+    assert "### Dependencies" not in markdown
+    assert "### Suppressed Dead Code" not in markdown
 
 
 def test_text_and_markdown_report_include_suppressed_golden_fixture_clones() -> None:
