@@ -38,6 +38,7 @@ import codeclone.utils.run_identity as run_identity_mod
 from codeclone import __version__
 from codeclone import ui_messages as ui
 from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.api.novelty import CLONE_NOVELTY_VALUES
 from codeclone.cache.store import Cache
 from codeclone.config.argparse_builder import build_parser
 from codeclone.config.pyproject_loader import ConfigValidationError
@@ -1533,6 +1534,107 @@ def test_changed_clone_gate_from_report_filters_changed_scope() -> None:
     assert gate.findings_known == 1
 
 
+def _novelty_only_report(novelties: list[str]) -> dict[str, Any]:
+    """Changed-scope report fixture with one structural finding per novelty."""
+
+    return {
+        "findings": {
+            "groups": {
+                "clones": {"functions": [], "blocks": [], "segments": []},
+                "structural": {
+                    "groups": [
+                        {
+                            "id": f"structural:{index}:{novelty}",
+                            "family": "structural",
+                            "novelty": novelty,
+                            "items": [{"relative_path": "pkg/dup.py"}],
+                        }
+                        for index, novelty in enumerate(novelties)
+                    ]
+                },
+                "dead_code": {"groups": []},
+                "design": {"groups": []},
+            }
+        }
+    }
+
+
+def _clone_novelty_vocabulary() -> list[str]:
+    """Full novelty vocabulary via the R3 door, never restated by hand.
+
+    ``CLONE_NOVELTY_VALUES`` is derived from the domain owner inside the
+    door, so a fourth vocabulary value reaches this list — and reds the
+    ratchet below — without any test edit.
+    """
+
+    return sorted(CLONE_NOVELTY_VALUES)
+
+
+def test_changed_clone_gate_counts_unavailable_explicitly() -> None:
+    gate = cli_changed_scope._changed_clone_gate_from_report(
+        _novelty_only_report(["new", "known", "unavailable", "unavailable"]),
+        changed_paths=("pkg/dup.py",),
+    )
+    assert gate.findings_total == 4
+    assert gate.findings_new == 1
+    assert gate.findings_known == 1
+    assert gate.findings_unavailable == 2
+
+
+def test_changed_clone_gate_counters_cover_the_novelty_vocabulary() -> None:
+    vocabulary = _clone_novelty_vocabulary()
+    gate = cli_changed_scope._changed_clone_gate_from_report(
+        _novelty_only_report(vocabulary),
+        changed_paths=("pkg/dup.py",),
+    )
+    counters: dict[str, int] = {}
+    for value in vocabulary:
+        counter_name = f"findings_{value}"
+        assert hasattr(gate, counter_name), (
+            f"novelty value {value!r} has no explicit counter on ChangedCloneGate"
+        )
+        counters[value] = getattr(gate, counter_name)
+    assert counters == dict.fromkeys(vocabulary, 1)
+    assert sum(counters.values()) == gate.findings_total
+
+
+def test_changed_clone_gate_does_not_absorb_a_foreign_novelty_value() -> None:
+    vocabulary = _clone_novelty_vocabulary()
+    foreign = "wave22-foreign-novelty"
+    assert foreign not in vocabulary
+    gate = cli_changed_scope._changed_clone_gate_from_report(
+        _novelty_only_report([*vocabulary, foreign]),
+        changed_paths=("pkg/dup.py",),
+    )
+    counters = {value: getattr(gate, f"findings_{value}") for value in vocabulary}
+    assert counters == dict.fromkeys(vocabulary, 1)
+    assert sum(counters.values()) == gate.findings_total - 1
+
+
+def test_changed_scope_snapshot_transports_unavailable_from_gate() -> None:
+    observed: dict[str, Any] = {}
+    cli_post_run.maybe_print_changed_scope_snapshot(
+        args=cast(Any, Namespace(quiet=True)),
+        changed_clone_gate=cli_changed_scope.ChangedCloneGate(
+            changed_paths=("pkg/dup.py",),
+            new_func=frozenset(),
+            new_block=frozenset(),
+            total_clone_groups=0,
+            findings_total=7,
+            findings_new=2,
+            findings_known=1,
+            findings_unavailable=4,
+        ),
+        console=cast(Any, SimpleNamespace(print=lambda *a, **k: None)),
+        print_changed_scope_fn=lambda **kwargs: observed.update(kwargs),
+    )
+    snapshot = cast(cli_summary.ChangedScopeSnapshot, observed["changed_scope"])
+    assert snapshot.findings_total == 7
+    assert snapshot.findings_new == 2
+    assert snapshot.findings_known == 1
+    assert snapshot.findings_unavailable == 4
+
+
 def test_run_analysis_stages_requires_rich_console_when_progress_ui_is_enabled(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2225,6 +2327,69 @@ def test_print_changed_scope_uses_compact_line_in_quiet_mode(
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Changed", "paths=45", "findings=7", "new=2", "known=5")
+
+
+@pytest.mark.parametrize(
+    ("quiet", "total", "unavailable", "present", "absent"),
+    [
+        pytest.param(
+            True,
+            10,
+            3,
+            ("Changed", "findings=10", "new=2", "known=5", "unavailable=3"),
+            (),
+            id="compact-names-unavailable",
+        ),
+        pytest.param(
+            True,
+            7,
+            0,
+            ("findings=7", "new=2", "known=5"),
+            ("unavailable",),
+            id="compact-omits-at-zero",
+        ),
+        pytest.param(
+            False,
+            10,
+            3,
+            ("10 total", "2 new", "5 known", "3 unavailable"),
+            (),
+            id="rich-names-unavailable",
+        ),
+        pytest.param(
+            False,
+            7,
+            0,
+            ("7 total", "2 new", "5 known"),
+            ("unavailable",),
+            id="rich-omits-at-zero",
+        ),
+    ],
+)
+def test_print_changed_scope_pronounces_unavailable_only_above_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    quiet: bool,
+    total: int,
+    unavailable: int,
+    present: tuple[str, ...],
+    absent: tuple[str, ...],
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_changed_scope(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=quiet,
+        changed_scope=cli_summary.ChangedScopeSnapshot(
+            paths_count=45,
+            findings_total=total,
+            findings_new=2,
+            findings_known=5,
+            findings_unavailable=unavailable,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, *present)
+    assert_contains_none(out, *absent)
 
 
 def test_print_metrics_in_quiet_mode_includes_overloaded_modules(

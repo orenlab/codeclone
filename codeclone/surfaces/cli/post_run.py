@@ -131,6 +131,7 @@ def maybe_print_changed_scope_snapshot(
             findings_total=changed_clone_gate.findings_total,
             findings_new=changed_clone_gate.findings_new,
             findings_known=changed_clone_gate.findings_known,
+            findings_unavailable=changed_clone_gate.findings_unavailable,
         ),
     )
 

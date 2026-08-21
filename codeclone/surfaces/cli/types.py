@@ -36,6 +36,9 @@ class ChangedCloneGate:
     findings_total: int
     findings_new: int
     findings_known: int
+    #: Explicit counter for the third novelty state. Counted by value at the
+    #: counting owner, never derived as ``total - new - known`` (`G4`).
+    findings_unavailable: int = 0
 
 
 @runtime_checkable

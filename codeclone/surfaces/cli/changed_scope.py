@@ -12,6 +12,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ... import ui_messages as ui
+from ...api.novelty import (
+    CLONE_NOVELTY_KNOWN,
+    CLONE_NOVELTY_NEW,
+    CLONE_NOVELTY_UNAVAILABLE,
+)
 from ...contracts import ExitCode
 from ...utils import coerce as _coerce
 from ...utils.git_diff import validate_git_diff_ref
@@ -202,19 +207,32 @@ def _changed_clone_gate_from_report(
         str(finding.get("id", ""))
         for finding in clone_findings
         if str(finding.get("category", "")).strip() == "function"
-        and str(finding.get("novelty", "")).strip() == "new"
+        and str(finding.get("novelty", "")).strip() == CLONE_NOVELTY_NEW
     )
     new_block = frozenset(
         str(finding.get("id", ""))
         for finding in clone_findings
         if str(finding.get("category", "")).strip() == "block"
-        and str(finding.get("novelty", "")).strip() == "new"
+        and str(finding.get("novelty", "")).strip() == CLONE_NOVELTY_NEW
     )
+    # Every counter matches its own vocabulary value explicitly. The third
+    # state is never derived as ``total - new - known``: a remainder would
+    # silently absorb any future vocabulary value, and a new novelty value is
+    # a contract change that must fail loudly, not be swallowed (`G4`).
     findings_new = sum(
-        1 for finding in findings if str(finding.get("novelty", "")).strip() == "new"
+        1
+        for finding in findings
+        if str(finding.get("novelty", "")).strip() == CLONE_NOVELTY_NEW
     )
     findings_known = sum(
-        1 for finding in findings if str(finding.get("novelty", "")).strip() == "known"
+        1
+        for finding in findings
+        if str(finding.get("novelty", "")).strip() == CLONE_NOVELTY_KNOWN
+    )
+    findings_unavailable = sum(
+        1
+        for finding in findings
+        if str(finding.get("novelty", "")).strip() == CLONE_NOVELTY_UNAVAILABLE
     )
     return ChangedCloneGate(
         changed_paths=tuple(changed_paths),
@@ -224,4 +242,5 @@ def _changed_clone_gate_from_report(
         findings_total=len(findings),
         findings_new=findings_new,
         findings_known=findings_known,
+        findings_unavailable=findings_unavailable,
     )

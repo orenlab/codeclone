@@ -740,12 +740,24 @@ def fmt_changed_scope_paths(*, count: int) -> str:
     return f"  {'Paths':<{_L}}{_v(count, STYLE_COUNT_NEUTRAL)} from git diff"
 
 
-def fmt_changed_scope_findings(*, total: int, new: int, known: int) -> str:
+def fmt_changed_scope_findings(
+    *,
+    total: int,
+    new: int,
+    known: int,
+    unavailable: int = 0,
+) -> str:
+    # The third novelty state is named only when it exists: at zero the
+    # arithmetic ``new + known == total`` already says everything, while a
+    # nonzero count kept silent reads as "nothing new" for findings whose
+    # comparison never ran (`G4`). The word has one owner.
     parts = [
         f"{_v(total, STYLE_EMPHASIS)} total",
         f"{_v(new, STYLE_COUNT_NEUTRAL)} new",
         f"{_v(known)} known",
     ]
+    if unavailable > 0:
+        parts.append(f"{_v(unavailable)} {CLONE_NOVELTY_UNAVAILABLE_TEXT}")
     separator = f" {GLYPH_SEP} "
     return f"  {'Findings':<{_L}}{separator.join(parts)}"
 
@@ -756,13 +768,19 @@ def fmt_changed_scope_compact(
     findings: int,
     new: int,
     known: int,
+    unavailable: int = 0,
 ) -> str:
-    return SUMMARY_COMPACT_CHANGED_SCOPE.format(
+    line = SUMMARY_COMPACT_CHANGED_SCOPE.format(
         paths=paths,
         findings=findings,
         new=new,
         known=known,
     )
+    # Same boundary as the rich line: the term appears only above zero, so
+    # the two surfaces of this one fact cannot disagree about when it exists.
+    if unavailable > 0:
+        line = f"{line}  {CLONE_NOVELTY_UNAVAILABLE_TEXT}={unavailable}"
+    return line
 
 
 def fmt_blast_radius_compact(

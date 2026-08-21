@@ -82,6 +82,9 @@ class ChangedScopeSnapshot:
     findings_total: int
     findings_new: int
     findings_known: int
+    #: Transported verbatim from ``ChangedCloneGate``; never derived here
+    #: (`G2`). Zero prints no term — the arithmetic already says everything.
+    findings_unavailable: int = 0
 
 
 class _Printer(Protocol):
@@ -508,6 +511,7 @@ def _print_changed_scope(
                 findings=changed_scope.findings_total,
                 new=changed_scope.findings_new,
                 known=changed_scope.findings_known,
+                unavailable=changed_scope.findings_unavailable,
             )
         )
         return
@@ -522,5 +526,6 @@ def _print_changed_scope(
             total=changed_scope.findings_total,
             new=changed_scope.findings_new,
             known=changed_scope.findings_known,
+            unavailable=changed_scope.findings_unavailable,
         )
     )

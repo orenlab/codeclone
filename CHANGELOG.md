@@ -5,6 +5,17 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The changed-scope summary stops swallowing the third novelty state.** The changed-scope
+  counting owner (`_changed_clone_gate_from_report`) counted only `novelty == "new"` and
+  `"known"`, so a run whose findings carry the third contractual value `unavailable` printed
+  `findings=N new=0 known=0` on the compact line and `N total · 0 new · 0 known` on the rich
+  block — a breakdown whose sum silently disagreed with its own total, readable as "nothing
+  new" for comparisons that never ran. `ChangedCloneGate` and `ChangedScopeSnapshot` now carry
+  `findings_unavailable`, counted explicitly by vocabulary value (never as the
+  `total - new - known` remainder, which would silently absorb any future novelty value), and
+  both CLI surfaces name the term — `unavailable=N` / `N unavailable` — exactly when the count
+  is above zero. At zero both lines are unchanged byte-for-byte, and the `--fail-on-*` gate
+  semantics (`new_func`/`new_block`) are untouched.
 - **Every surface can now say that the API-surface baseline comparison did not run.** The
   availability fact existed (`api_surface.summary.baseline_diff_available`) but no surface could
   pronounce it: the quiet (non-TTY) summary printed `breaking=0  added=0` for a withheld

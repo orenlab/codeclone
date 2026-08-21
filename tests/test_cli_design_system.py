@@ -259,8 +259,14 @@ def _build_catalog() -> dict[str, str]:
         "fmt_changed_scope_findings": ui.fmt_changed_scope_findings(
             total=5, new=1, known=4
         ),
+        "fmt_changed_scope_findings_unavailable": ui.fmt_changed_scope_findings(
+            total=5, new=1, known=1, unavailable=3
+        ),
         "fmt_changed_scope_compact": ui.fmt_changed_scope_compact(
             paths=4, findings=5, new=1, known=4
+        ),
+        "fmt_changed_scope_compact_unavailable": ui.fmt_changed_scope_compact(
+            paths=4, findings=5, new=1, known=1, unavailable=3
         ),
         "fmt_blast_radius_compact": ui.fmt_blast_radius_compact(
             level="medium", dependents=3, cohorts=0, cycles=0, do_not_touch=3
