@@ -742,6 +742,7 @@ def _verify_scope_contract_case(
         complexity=before_complexity,
         health=90,
         request=request,
+        complexity_path=complexity_path,
     )
     after = _patch_contract_run_record(
         root,
@@ -7068,6 +7069,138 @@ def test_mcp_service_verify_external_worsened_symbol_is_context(
     assert verified["contract_violations"] == []
 
 
+def test_mcp_service_verify_intent_advisory_worsening_keeps_gate_flag_false(
+    tmp_path: Path,
+) -> None:
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforeadviso123",
+        after_run_id="afteradviso1234",
+        include_regression=False,
+        before_complexity=6,
+        after_complexity=8,
+        complexity_path="pkg/a.py",
+    )
+
+    assert verified["status"] == "accepted"
+    before_gate = cast("dict[str, object]", verified["before_gate"])
+    after_gate = cast("dict[str, object]", verified["gate_preview"])
+    assert before_gate["would_fail"] is False
+    assert after_gate["would_fail"] is False
+    intent_worsened = cast("list[dict[str, object]]", verified["intent_worsened"])
+    assert intent_worsened[0]["path"] == "pkg/a.py"
+    assert verified["intent_caused_gate_failure"] is False
+
+
+def test_mcp_service_verify_intent_attributed_gate_failure_lights_flag(
+    tmp_path: Path,
+) -> None:
+    request = MCPAnalysisRequest(
+        root=str(tmp_path),
+        respect_pyproject=False,
+        complexity_threshold=10,
+    )
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforeintgate12",
+        after_run_id="afterintgate123",
+        include_regression=False,
+        before_complexity=6,
+        after_complexity=25,
+        complexity_path="pkg/a.py",
+        request=request,
+    )
+
+    assert verified["gate_worsened"] is True
+    assert verified["intent_caused_gate_failure"] is True
+    assert "gate_failures" in cast("list[str]", verified["contract_violations"])
+    assert verified["status"] == "violated"
+
+
+@pytest.mark.parametrize(
+    (
+        "before_complexity",
+        "after_complexity",
+        "complexity_path",
+        "include_regression",
+        "expected_field",
+        "expected_gate_worsened",
+        "expect_gate_failures",
+        "expected_status",
+    ),
+    [
+        pytest.param(
+            6, 6, "pkg/b.py", False, False, False, False, "accepted", id="B0-A0-T0"
+        ),
+        pytest.param(
+            6, 8, "pkg/a.py", False, False, False, False, "accepted", id="B0-A0-T1"
+        ),
+        pytest.param(
+            6,
+            25,
+            "pkg/b.py",
+            False,
+            False,
+            True,
+            False,
+            "accepted_with_external_changes",
+            id="B0-A1-T0",
+        ),
+        pytest.param(
+            6, 25, "pkg/a.py", False, True, True, True, "violated", id="B0-A1-T1"
+        ),
+        pytest.param(
+            25, 6, "pkg/b.py", False, False, False, False, "accepted", id="B1-A0-T0"
+        ),
+        pytest.param(
+            25, 6, "pkg/a.py", True, False, False, False, "violated", id="B1-A0-T1"
+        ),
+        pytest.param(
+            25, 25, "pkg/b.py", False, False, False, False, "accepted", id="B1-A1-T0"
+        ),
+        pytest.param(
+            25, 30, "pkg/a.py", False, True, False, False, "accepted", id="B1-A1-T1"
+        ),
+    ],
+)
+def test_mcp_service_verify_gate_flag_truth_table(
+    tmp_path: Path,
+    before_complexity: int,
+    after_complexity: int,
+    complexity_path: str,
+    include_regression: bool,
+    expected_field: bool,
+    expected_gate_worsened: bool,
+    expect_gate_failures: bool,
+    expected_status: str,
+) -> None:
+    request = MCPAnalysisRequest(
+        root=str(tmp_path),
+        respect_pyproject=False,
+        complexity_threshold=10,
+    )
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforetable1234",
+        after_run_id="aftertable12345",
+        include_regression=include_regression,
+        before_complexity=before_complexity,
+        after_complexity=after_complexity,
+        complexity_path=complexity_path,
+        request=request,
+    )
+
+    before_gate = cast("dict[str, object]", verified["before_gate"])
+    after_gate = cast("dict[str, object]", verified["gate_preview"])
+    assert before_gate["would_fail"] is (before_complexity > 10)
+    assert after_gate["would_fail"] is (after_complexity > 10)
+    assert verified["gate_worsened"] is expected_gate_worsened
+    assert verified["intent_caused_gate_failure"] is expected_field
+    violations = cast("list[str]", verified["contract_violations"])
+    assert ("gate_failures" in violations) is expect_gate_failures
+    assert verified["status"] == expected_status
+
+
 def test_mcp_service_verify_without_intent_keeps_workspace_global_gate_behavior(
     tmp_path: Path,
 ) -> None:
@@ -7086,6 +7219,7 @@ def test_mcp_service_verify_without_intent_keeps_workspace_global_gate_behavior(
         "structural_regressions",
         "gate_failures",
     ]
+    assert verified["intent_caused_gate_failure"] is True
 
 
 def test_mcp_patch_contract_helper_edges(

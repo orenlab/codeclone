@@ -5,6 +5,17 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **`intent_caused_gate_failure` stops lighting without a failed gate preview.** With a
+  live intent, the patch-contract verify payload published bare attribution — any
+  advisory in-scope worsening (a CC +2) set `intent_caused_gate_failure: true` while both
+  gate previews said `would_fail: false`, so a finish over a green gate read as "your
+  intent broke the gate". The published value now requires the after-preview to actually
+  fail and the failure to be attributed to the intent; the field name and payload shape
+  are unchanged. The derived facts already carried the missing conjunct themselves
+  (`gate_worsened` implies a failing after-preview by construction), so
+  `contract_violations`, statuses, and external-failure classification are byte-identical
+  across the whole input table. Advisory attribution stays visible where it was already
+  published (`intent_worsened`, `intent_regressions`).
 - **Set-diff metric families stop claiming "0 new" over an unobserved universe.** The four
   set-diff families (`complexity`, `coupling`, `dependencies`, `dead_code`) published
   `baseline_diff_available: true` beside zeros on a run whose own population was never

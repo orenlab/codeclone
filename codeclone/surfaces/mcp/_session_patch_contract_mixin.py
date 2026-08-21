@@ -1076,7 +1076,7 @@ class _MCPSessionPatchContractMixin:
         intent_caused_gate_failure = (
             after_gate_fails
             if intent is None
-            else bool(intent_regressions or intent_worsened)
+            else after_gate_fails and bool(intent_regressions or intent_worsened)
         )
         gate_contract_failure = (
             after_gate_fails
