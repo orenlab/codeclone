@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ...api.metric_families import presentation_metric_families
 from ...contracts import HEALTH_WEIGHTS
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -51,9 +52,19 @@ def _number(value: float) -> str:
 
 
 def clone_health_score(document: Mapping[str, object]) -> int | None:
-    """Return the clones dimension score, or ``None`` when it was not computed."""
+    """Return the clones dimension score, or ``None`` when it was not computed.
 
-    families = _as_mapping(_as_mapping(document.get("metrics")).get("families"))
+    The health family is read through the declaration owner
+    (:func:`presentation_metric_families`), never straight off the raw payload:
+    a run that declared no computed families publishes no score here, whatever
+    numbers the payload beside the declaration still carries. Every published
+    clone-health figure flows through this one read (`G2`).
+    """
+
+    families = presentation_metric_families(
+        _as_mapping(document.get("meta")),
+        _as_mapping(_as_mapping(document.get("metrics")).get("families")),
+    )
     summary = _as_mapping(_as_mapping(families.get("health")).get("summary"))
     dimensions = _as_mapping(summary.get("dimensions"))
     if CLONES_DIMENSION not in dimensions:

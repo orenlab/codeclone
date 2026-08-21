@@ -5,6 +5,18 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The clone-health arithmetic reads the metric-family declaration through its owner,
+  not past it.** The clones panel's health-points card, its arithmetic note, and the
+  radar legend's contribution sentence (`report/messages/clone_health.py`) read
+  `metrics.families.health.summary.dimensions` straight off the raw document, past the
+  declaration owner every other renderer consults (`presentation_metric_families`). The
+  channel was honest only by producer accident: today's skip-run document carries
+  `dimensions: null`, but a document whose payload disagreed with its declaration would
+  have rendered a score the declaration withholds. The health family is now read through
+  the owner inside `clone_health_score` — the single read every published clone-health
+  figure flows through — so a declared-empty run publishes no clone-health digits
+  whatever the raw payload carries. Measured runs and legacy documents (no declaration
+  key) render byte-identically.
 - **`intent_caused_gate_failure` stops lighting without a failed gate preview.** With a
   live intent, the patch-contract verify payload published bare attribution — any
   advisory in-scope worsening (a CC +2) set `intent_caused_gate_failure: true` while both

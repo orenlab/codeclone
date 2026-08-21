@@ -5138,6 +5138,120 @@ def test_clone_health_note_sentences_omit_unavailable_facts() -> None:
     assert not any("Accepted groups" in sentence for sentence in sentences)
 
 
+def _clone_health_declaration_document(
+    declaration: list[str] | None,
+) -> dict[str, object]:
+    """One raw payload, three declaration states: the authority-path fixture.
+
+    The raw ``metrics.families.health.summary.dimensions`` is always populated;
+    only ``meta.computed_metric_families`` varies. ``None`` models the legacy
+    document whose meta never carried the declaration key.
+    """
+
+    meta: dict[str, object] = {"scan_root": "."}
+    if declaration is not None:
+        meta["computed_metric_families"] = declaration
+    return {
+        "meta": meta,
+        "metrics": {
+            "families": {"health": {"summary": {"dimensions": {"clones": 40}}}}
+        },
+        "findings": {
+            "summary": {"clones": {"functions": 1, "blocks": 0, "instances": 2}},
+            "groups": {"clones": {}},
+        },
+        "inventory": {"files": {"analyzed": 4}},
+    }
+
+
+def test_clone_health_withheld_when_declaration_is_declared_empty() -> None:
+    """A declared-empty run publishes no clone-health score, whatever the raw
+    payload beside the declaration still carries.
+
+    The document is deliberately contradictory -- no producer emits populated
+    dimensions under an empty declaration -- because the pin must prove the
+    authority path itself, not the producer's current honesty on skip runs.
+    """
+
+    from codeclone.report.messages.clone_health import (
+        clone_health_note_sentences,
+        clone_health_points,
+        clone_health_score,
+        clone_health_summary_sentence,
+    )
+
+    document = _clone_health_declaration_document([])
+
+    assert clone_health_score(document) is None
+    assert clone_health_points(document) == ("", "")
+    assert clone_health_note_sentences(document) == ()
+    assert clone_health_summary_sentence(document) == ""
+
+
+def test_clone_health_published_when_declaration_carries_health() -> None:
+    """A measured run -- health declared and populated -- publishes the score."""
+
+    from codeclone.report.messages.clone_health import (
+        clone_health_points,
+        clone_health_score,
+    )
+
+    document = _clone_health_declaration_document(["health"])
+    weight = HEALTH_WEIGHTS["clones"]
+
+    assert clone_health_score(document) == 40
+    assert clone_health_points(document) == (f"{40 * weight:g}", f"{100 * weight:g}")
+
+
+def test_clone_health_published_for_legacy_document_without_declaration() -> None:
+    """A legacy document that never declared keeps every family it carries."""
+
+    from codeclone.report.messages.clone_health import clone_health_score
+
+    assert clone_health_score(_clone_health_declaration_document(None)) == 40
+
+
+def test_html_report_clone_health_withheld_on_declared_empty_run(
+    tmp_path: Path,
+) -> None:
+    """No section renders clone-health digits when the run declared no
+    computed families, even though the raw payload still carries them."""
+
+    item = _clone_health_item
+    report_document = build_report_document(
+        func_groups={
+            "g1": [
+                item(tmp_path, module="a", qualname="pkg.a:f1", fingerprint="fp1"),
+                item(tmp_path, module="b", qualname="pkg.b:f1", fingerprint="fp1"),
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(tmp_path), "metrics_computed": []},
+        inventory={
+            "files": {
+                "total_found": 12,
+                "analyzed": 8,
+                "cached": 2,
+                "skipped": 2,
+                "source_io_skipped": 0,
+            }
+        },
+        metrics=_clone_health_metrics_payload(clones_score=97),
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": str(tmp_path)},
+        report_document=report_document,
+    )
+
+    assert "Clone groups" in html
+    assert "Health points" not in html
+    assert "Clones health" not in html
+
+
 def test_html_report_authority_panel_reports_the_configured_registry(
     tmp_path: Path,
 ) -> None:
