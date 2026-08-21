@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast, get_args
 
 from ...contracts import (
     DEFAULT_COVERAGE_MIN,
@@ -947,6 +947,16 @@ def _gate_state_from_report_document(
     dead_code_family = _as_mapping(families.get("dead_code"))
     dead_code_summary = _as_mapping(dead_code_family.get("summary"))
     health_summary = _as_mapping(_as_mapping(families.get("health")).get("summary"))
+    # The document publishes the population beside the score; leaving the
+    # state at its constructor default answered every gate over a population
+    # nobody measured, diverging from the project-metrics road (`G3`). A
+    # document from before the fact keeps today's behaviour exactly.
+    published_population = str(health_summary.get("population", "")).strip()
+    health_population: HealthPopulation = (
+        cast("HealthPopulation", published_population)
+        if published_population in get_args(HealthPopulation)
+        else "complete_nonempty"
+    )
     coverage_adoption_summary = _as_mapping(
         _as_mapping(families.get("coverage_adoption")).get("summary")
     )
@@ -962,6 +972,7 @@ def _gate_state_from_report_document(
     diff_summary = summarize_metrics_diff(metrics_diff) or {}
     prefer_diff_summary = metrics_diff is not None
     return GateState(
+        health_population=health_population,
         clone_new_count=max(
             clone_new_count if clone_new_count is not None else derived_clone_new_count,
             0,

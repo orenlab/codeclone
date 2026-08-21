@@ -5333,6 +5333,154 @@ def test_cli_gates_refuse_an_unmeasured_run_instead_of_passing_it(
     assert_contains_all(capsys.readouterr().out, "unmeasured population")
 
 
+def _publish_probe_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+    root: Path,
+) -> Path:
+    """One trusted baseline for the comparison-gate roads below."""
+
+    baseline = root / "codeclone.baseline.json"
+    _run_main(
+        monkeypatch,
+        [str(root), "--no-progress", "--update-baseline", "--baseline", str(baseline)],
+    )
+    return baseline
+
+
+def test_cli_clone_gate_refuses_an_unmeasured_run_without_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--skip-metrics --fail-on-new`` passed a run that read nothing.
+
+    The clone comparison's current term never existed — files were found and
+    none were parsed — yet the enabled comparison gate read sets that were
+    empty by construction and exited 0, while the identical run with metrics
+    enabled was refused with the unmeasured-population reason. The population
+    fact rode ``project_metrics.health`` only, so ``--skip-metrics`` runs
+    never delivered it to the gate state (`B8`, `G3`).
+    """
+
+    root = _repo_with(tmp_path, "repo", {"good.py": _GOOD_MODULE})
+    baseline = _publish_probe_baseline(monkeypatch, root)
+    (root / "good.py").write_text(_BROKEN_MODULE, "utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(root),
+                "--no-progress",
+                "--skip-metrics",
+                "--fail-on-new",
+                "--baseline",
+                str(baseline),
+            ],
+        )
+
+    assert exc.value.code == 3
+    assert_contains_all(capsys.readouterr().out, "unmeasured population")
+
+
+def test_cli_clone_gate_refuses_an_emptied_scope_without_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The sibling boundary keeps its own wording on the metrics-off road."""
+
+    root = _repo_with(tmp_path, "repo", {"good.py": _GOOD_MODULE})
+    baseline = _publish_probe_baseline(monkeypatch, root)
+    (root / "good.py").unlink()
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(root),
+                "--no-progress",
+                "--skip-metrics",
+                "--fail-on-new",
+                "--baseline",
+                str(baseline),
+            ],
+        )
+
+    assert exc.value.code == 3
+    assert_contains_all(capsys.readouterr().out, "empty analysis scope")
+
+
+def test_cli_clone_gate_still_passes_a_healthy_run_without_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The opposite boundary: a fully observed metrics-off run is untouched."""
+
+    root = _repo_with(tmp_path, "repo", {"good.py": _GOOD_MODULE})
+    baseline = _publish_probe_baseline(monkeypatch, root)
+
+    _run_main(
+        monkeypatch,
+        [
+            str(root),
+            "--no-progress",
+            "--skip-metrics",
+            "--fail-on-new",
+            "--baseline",
+            str(baseline),
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert_contains_none(out, "unmeasured population", "empty analysis scope")
+
+
+def test_cli_report_withholds_set_diff_comparisons_on_an_unmeasured_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report half of the same root: no family may claim "0 new".
+
+    A trusted baseline vouches for the stored term only. On a run that read
+    none of the files it found, the four set-diff families used to publish
+    ``baseline_diff_available: true`` beside zeros that counted nothing
+    (`B8`, `G4`); health one summary over already refused.
+    """
+
+    root = _repo_with(tmp_path, "repo", {"good.py": _GOOD_MODULE})
+    baseline = _publish_probe_baseline(monkeypatch, root)
+    (root / "good.py").write_text(_BROKEN_MODULE, "utf-8")
+    report_path = tmp_path / "report-unmeasured.json"
+
+    _run_main(
+        monkeypatch,
+        [
+            str(root),
+            "--no-progress",
+            "--baseline",
+            str(baseline),
+            "--json",
+            str(report_path),
+        ],
+    )
+
+    document = json.loads(report_path.read_text("utf-8"))
+    families = document["metrics"]["families"]
+    assert families["health"]["summary"]["population"] == "unmeasured"
+    for family, keys in (
+        ("complexity", ("new_high_risk",)),
+        ("coupling", ("new_high_risk",)),
+        ("dependencies", ("new_cycles", "new_import_cycles", "new_deferred_cycles")),
+        ("dead_code", ("new_items",)),
+    ):
+        summary = families[family]["summary"]
+        assert summary["baseline_diff_available"] is False, family
+        for key in keys:
+            assert summary[key] == 0, (family, key)
+
+
 def test_cli_coverage_threshold_stops_blaming_an_unread_population(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

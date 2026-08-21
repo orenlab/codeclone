@@ -531,6 +531,16 @@ def _main_impl() -> None:
             args=args,
             enabled_lanes=analysis_result.observation_bundle.contract.enabled_lanes,
         )
+        # Read through the one computer, not recounted here and not taken
+        # from ``project_metrics.health``: the health lane does not run
+        # under ``--skip-metrics``, and both the publisher's empty-scope rule
+        # and the gate refusals must hold for those runs too. The rule itself
+        # lives in the dependency-free contract ring precisely so this
+        # surface can ask without reaching into the model store.
+        analysis_population = observed_population(
+            files_found=discovery_result.files_found,
+            files_analyzed_or_cached=analysis_result.files_analyzed_or_cached,
+        )
         baseline_state = _resolve_clone_baseline_state(
             args=args,
             baseline_path=baseline_inputs.baseline_path,
@@ -538,16 +548,7 @@ def _main_impl() -> None:
             analysis=analysis_result,
             required_lanes=baseline_required_lanes,
             files_skipped=processing_result.files_skipped,
-            # Read through the one computer, not recounted here and not taken
-            # from ``project_metrics.health``: the health lane does not run
-            # under ``--skip-metrics``, and the publisher's empty-scope rule
-            # must hold for those runs too. The rule itself lives in the
-            # dependency-free contract ring precisely so this surface can ask
-            # without reaching into the model store.
-            analysis_population=observed_population(
-                files_found=discovery_result.files_found,
-                files_analyzed_or_cached=analysis_result.files_analyzed_or_cached,
-            ),
+            analysis_population=analysis_population,
         )
         metrics_baseline_state = _resolve_metrics_baseline_state(
             args=args,
@@ -693,6 +694,10 @@ def _main_impl() -> None:
                 baseline_trust=baseline_trust,
                 gate_config=patch_gate_config,
                 files_skipped=processing_result.files_skipped,
+                # The same fact the baseline resolver consumed above; without
+                # it a ``--skip-metrics`` run answers every gate over a
+                # population nobody measured (`B8`, `G3`).
+                analysis_population=analysis_population,
             )
             report_artifacts = report(
                 boot=boot,

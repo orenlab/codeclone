@@ -336,6 +336,10 @@ def enforce_gating(
             else "Required gate evidence is unavailable."
         )
         printer.print(ui.fmt_contract_error(detail))
+        # A typed refusal ships an executable next step (`CLI1`): the remedy
+        # for an unavailable lane is the one the sibling baseline refusals
+        # already spell out — regenerate the trusted baseline.
+        printer.print(ui.ACTION_UPDATE_BASELINE)
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     if bool_attr(args, "fail_on_untested_hotspots"):

@@ -16,6 +16,7 @@ import pytest
 from codeclone.api.comparison import build_comparison_context
 from codeclone.baseline import Baseline, MetricsBaseline
 from codeclone.cache.reuse import binding_context_digest, source_content_digest
+from codeclone.contracts import HealthPopulation
 from codeclone.core._types import (
     AnalysisResult,
     _as_sorted_str_tuple,
@@ -83,6 +84,7 @@ from codeclone.models import (
     DigestObject,
     FunctionRelationshipFactsDict,
     HealthScore,
+    LaneTrust,
     LiveRootReason,
     MetricsDiff,
     ModuleApiSurface,
@@ -93,6 +95,7 @@ from codeclone.models import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverage,
     ModuleTypingCoverageDict,
+    ObservationLaneName,
     ProjectMetrics,
     PublicSymbol,
     PublicSymbolDict,
@@ -102,6 +105,7 @@ from codeclone.models import (
     SecuritySurfaceDict,
     SemanticFileFacts,
     StructuralFindingGroupDict,
+    TrustVector,
     UnitCoverageFact,
     UnreachableStatementItem,
     UnresolvedOverrideItem,
@@ -2412,7 +2416,6 @@ def test_population_universe_observed_pins_each_state(
     """
 
     from codeclone.contracts import (
-        HealthPopulation,
         population_universe_observed,
     )
 
@@ -2420,6 +2423,224 @@ def test_population_universe_observed_pins_each_state(
         population_universe_observed(cast("HealthPopulation", population))
         is universe_observed
     )
+
+
+#: The four set-diff families beside the API one, each with the lane its
+#: comparison consumes and the summary keys the loop publishes. The witnesses
+#: below are these published values, never the flag alone.
+_SET_DIFF_FAMILY_KEYS: tuple[tuple[str, ObservationLaneName, tuple[str, ...]], ...] = (
+    ("complexity", "risk_observations", ("new_high_risk",)),
+    ("coupling", "coupling_cohesion_observations", ("new_high_risk",)),
+    (
+        "dependencies",
+        "dependencies",
+        ("new_cycles", "new_import_cycles", "new_deferred_cycles"),
+    ),
+    ("dead_code", "dead_code", ("new_items",)),
+)
+
+_SET_DIFF_LANES: tuple[ObservationLaneName, ...] = tuple(
+    lane for _family, lane, _keys in _SET_DIFF_FAMILY_KEYS
+)
+
+
+def _nonzero_set_diff() -> MetricsDiff:
+    """A diff whose every set-diff value is nonzero, so muting is observable."""
+
+    return MetricsDiff(
+        new_high_risk_functions=("pkg.mod:hot",),
+        new_high_coupling_classes=("pkg.mod:Service",),
+        new_cycles=(("pkg.a", "pkg.b"), ("pkg.c", "pkg.d")),
+        new_import_cycles=(("pkg.a", "pkg.b"),),
+        new_deferred_cycles=(("pkg.c", "pkg.d"),),
+        new_dead_code=("pkg.mod:gone",),
+        health_delta=0,
+    )
+
+
+def _set_diff_trust(*, untrusted: tuple[str, ...] = ()) -> TrustVector:
+    return TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(
+                name=lane,
+                status="unavailable" if lane in untrusted else "trusted",
+                reason="algorithm_revision" if lane in untrusted else "compatible",
+            )
+            for lane in _SET_DIFF_LANES
+        ),
+    )
+
+
+def _set_diff_families_published(
+    project_metrics: ProjectMetrics,
+    *,
+    untrusted: tuple[str, ...] = (),
+) -> dict[str, dict[str, object]]:
+    """What the report publishes for the four set-diff families."""
+
+    enriched = _metrics_for_report(
+        analysis=AnalysisResult(
+            func_groups={},
+            block_groups={},
+            block_groups_report={},
+            segment_groups={},
+            suppressed_segment_groups=0,
+            block_group_facts={},
+            func_clones_count=0,
+            block_clones_count=0,
+            segment_clones_count=0,
+            files_analyzed_or_cached=0,
+            project_metrics=project_metrics,
+            metrics_payload=build_metrics_report_payload(
+                module_registry=_TEST_MODULE_REGISTRY,
+                project_metrics=project_metrics,
+                units=(),
+                class_metrics=(),
+                suppressed_dead_code=(),
+            ),
+            suggestions=(),
+            segment_groups_raw_digest="",
+            observation_bundle=TEST_OBSERVATION_BUNDLE,
+        ),
+        metrics_diff=_nonzero_set_diff(),
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
+        baseline_trust=_set_diff_trust(untrusted=untrusted),
+    )
+    assert enriched is not None
+    published: dict[str, dict[str, object]] = {}
+    for family, _lane, keys in _SET_DIFF_FAMILY_KEYS:
+        summary = cast(
+            "dict[str, object]",
+            cast("dict[str, object]", enriched[family])["summary"],
+        )
+        published[family] = {
+            "baseline_diff_available": summary["baseline_diff_available"],
+            **{key: summary[key] for key in keys},
+        }
+    return published
+
+
+def _population_metrics(population: str) -> ProjectMetrics:
+    return replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=50 if population in {"complete_nonempty", "partial"} else 0,
+            grade="D" if population in {"complete_nonempty", "partial"} else "F",
+            dimensions={},
+            population=cast("HealthPopulation", population),
+        ),
+    )
+
+
+_SET_DIFF_MUTED: dict[str, dict[str, object]] = {
+    "complexity": {"baseline_diff_available": False, "new_high_risk": 0},
+    "coupling": {"baseline_diff_available": False, "new_high_risk": 0},
+    "dependencies": {
+        "baseline_diff_available": False,
+        "new_cycles": 0,
+        "new_import_cycles": 0,
+        "new_deferred_cycles": 0,
+    },
+    "dead_code": {"baseline_diff_available": False, "new_items": 0},
+}
+
+_SET_DIFF_PUBLISHED: dict[str, dict[str, object]] = {
+    "complexity": {"baseline_diff_available": True, "new_high_risk": 1},
+    "coupling": {"baseline_diff_available": True, "new_high_risk": 1},
+    "dependencies": {
+        "baseline_diff_available": True,
+        "new_cycles": 2,
+        "new_import_cycles": 1,
+        "new_deferred_cycles": 1,
+    },
+    "dead_code": {"baseline_diff_available": True, "new_items": 1},
+}
+
+
+@pytest.mark.parametrize("family", [row[0] for row in _SET_DIFF_FAMILY_KEYS])
+def test_set_diff_comparison_is_withheld_on_an_unmeasured_run(
+    family: str,
+) -> None:
+    """A run that observed nothing must not publish a set-diff comparison.
+
+    Lane trust vouches only for the baseline term of the subtraction. On an
+    ``unmeasured`` run the current term of each set diff is empty for the
+    worst reason — files were found and none were read — so every count is
+    zero by construction, and publishing it beside
+    ``baseline_diff_available: true`` states "compared, nothing new" about a
+    comparison whose current half never existed (`B8`, `G4`).
+    """
+
+    published = _set_diff_families_published(_population_metrics("unmeasured"))
+
+    assert published[family] == _SET_DIFF_MUTED[family]
+
+
+@pytest.mark.parametrize("family", [row[0] for row in _SET_DIFF_FAMILY_KEYS])
+def test_set_diff_comparison_is_withheld_on_a_truncated_run(
+    family: str,
+) -> None:
+    """``partial`` keeps the health score but not a set-membership diff.
+
+    An unread module's high-risk functions, cycles and dead items are
+    indistinguishable from removed ones, so a truncated universe can only
+    undercount — and an undercount published as a completed comparison is the
+    same `B8` claim with a smaller lie.
+    """
+
+    published = _set_diff_families_published(_population_metrics("partial"))
+
+    assert published[family] == _SET_DIFF_MUTED[family]
+
+
+@pytest.mark.parametrize("family", [row[0] for row in _SET_DIFF_FAMILY_KEYS])
+def test_set_diff_comparison_survives_on_a_fully_observed_run(
+    family: str,
+) -> None:
+    """The opposite boundary: a comparison that ran must keep its values."""
+
+    published = _set_diff_families_published(_population_metrics("complete_nonempty"))
+
+    assert published[family] == _SET_DIFF_PUBLISHED[family]
+
+
+@pytest.mark.parametrize("family", [row[0] for row in _SET_DIFF_FAMILY_KEYS])
+def test_set_diff_comparison_still_publishes_on_a_genuinely_emptied_scope(
+    family: str,
+) -> None:
+    """``complete_empty`` is an observed universe too — an empty one.
+
+    A scope that really holds no source file anymore really removed the
+    carriers the baseline remembers; the comparison ran over a complete
+    (empty) current term and must keep publishing (`RP2`). The diff values
+    here are synthetic and nonzero on purpose: the pin proves the muting
+    mechanism leaves this state alone, not what a real empty-scope diff
+    contains — that belongs to the diff producer's own tests.
+    """
+
+    published = _set_diff_families_published(_population_metrics("complete_empty"))
+
+    assert published[family] == _SET_DIFF_PUBLISHED[family]
+
+
+def test_set_diff_comparison_still_requires_lane_trust() -> None:
+    """The universe term joins lane trust; it must not replace it.
+
+    A fully observed run with one opaque lane keeps that family — and only
+    that family — unavailable, exactly as before the universe term existed.
+    """
+
+    published = _set_diff_families_published(
+        _population_metrics("complete_nonempty"),
+        untrusted=("dead_code",),
+    )
+
+    assert published["dead_code"] == _SET_DIFF_MUTED["dead_code"]
+    assert published["complexity"] == _SET_DIFF_PUBLISHED["complexity"]
+    assert published["coupling"] == _SET_DIFF_PUBLISHED["coupling"]
+    assert published["dependencies"] == _SET_DIFF_PUBLISHED["dependencies"]
 
 
 def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:

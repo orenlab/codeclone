@@ -12,7 +12,12 @@ from uuid import UUID
 
 from ..baseline.container_trust import evaluate_container_trust
 from ..baseline.trust import current_python_tag
-from ..contracts import DEFAULT_COVERAGE_MIN
+from ..contracts import (
+    DEFAULT_COVERAGE_MIN,
+    HealthPopulation,
+    observed_population,
+    population_universe_observed,
+)
 from ..models import BaselineContainerV3, MetricsDiff, TrustVector
 from ..observability import span
 from ..report.document._common import health_verdict_withheld
@@ -206,6 +211,20 @@ def _metrics_for_report(
     health_withheld = health_verdict_withheld(
         _as_mapping(analysis.metrics_payload.get("health"))
     )
+    # The universe term of the four set-diff families below, read from the
+    # same owner the API family already consults (`api.comparison`): a
+    # set-membership diff needs the whole current universe observed, not
+    # merely a score to exist. ``partial`` and ``unmeasured`` therefore mute
+    # the four — an unread module's carriers are indistinguishable from
+    # removed ones — while ``complete_empty`` keeps publishing, because a
+    # genuinely emptied scope really removed what the baseline remembers.
+    # This is deliberately not ``health_withheld``: the two binary collapses
+    # of the population disagree on ``partial`` and on ``complete_empty``,
+    # and each has its own named owner in the contract ring (`G2`).
+    universe_observed = (
+        analysis.project_metrics is not None
+        and population_universe_observed(analysis.project_metrics.health.population)
+    )
     enriched = _enrich_metrics_report_payload(
         metrics_payload=analysis.metrics_payload,
         metrics_diff=validated_metrics_diff,
@@ -288,7 +307,16 @@ def _metrics_for_report(
         family = dict(_as_mapping(enriched.get(family_name)))
         summary = dict(_as_mapping(family.get("summary")))
         available = trusted_lanes.issuperset(lanes)
-        if family_name == "health" and health_withheld:
+        if family_name == "health":
+            if health_withheld:
+                available = False
+        elif not universe_observed:
+            # The set-diff families: lane trust vouches for the baseline term
+            # only, and on an unobserved universe the current term is empty by
+            # construction — publishing "0 new" beside ``available: true``
+            # would state "compared" about a comparison whose current half
+            # never existed (`B8`, `G4`). Health stays on its own reader
+            # above: a truncated run still carries an honest score delta.
             available = False
         summary["baseline_diff_available"] = available
         summary[value_key] = value if available else 0
@@ -441,6 +469,13 @@ def report(
                 metrics_diff=_coerce_metrics_diff(metrics_diff),
                 baseline_trust=resolved_baseline_trust,
                 files_skipped=processing.files_skipped,
+                # Computed here, from the one owner, because this fallback is
+                # the only gate constructor in this path that cannot read it
+                # off ``project_metrics`` when metrics were skipped.
+                analysis_population=observed_population(
+                    files_found=discovery.files_found,
+                    files_analyzed_or_cached=analysis.files_analyzed_or_cached,
+                ),
             )
         # Sealing hashes the whole document, so it is a heavyweight stage in
         # its own right and needs to be visible next to build and render.
@@ -594,6 +629,14 @@ def gate_with_config(
     baseline_trust: TrustVector | None = None,
     gate_config: MetricGateConfig | None = None,
     files_skipped: int = 0,
+    #: The run's population fact from its sole owner (``observed_population``),
+    #: consulted only when metrics did not run: with ``project_metrics``
+    #: present the health family carries the same fact and stays the sole
+    #: authority for that branch (`G2`). Without this parameter the
+    #: metrics-off gate state defaulted to ``complete_nonempty``, so
+    #: ``--skip-metrics`` runs answered every gate over a population nobody
+    #: measured — the identical run with metrics enabled was refused.
+    analysis_population: HealthPopulation = "complete_nonempty",
 ) -> tuple[MetricGateConfig, GatingResult]:
     config = gate_config if gate_config is not None else _gate_config(boot)
     # An uncompared lane contributes no new clones to count. It must not
@@ -610,6 +653,7 @@ def gate_with_config(
             clone_new_count=clone_new_count,
             clone_total=clone_total,
             files_skipped=max(files_skipped, 0),
+            health_population=analysis_population,
         )
     else:
         state = _gate_state_from_metrics(
@@ -646,6 +690,7 @@ def gate(
     new_block: Collection[str] | None,
     metrics_diff: MetricsDiff | None,
     baseline_trust: TrustVector | None = None,
+    analysis_population: HealthPopulation = "complete_nonempty",
 ) -> GatingResult:
     _config, result = gate_with_config(
         boot=boot,
@@ -654,5 +699,6 @@ def gate(
         new_block=new_block,
         metrics_diff=metrics_diff,
         baseline_trust=baseline_trust,
+        analysis_population=analysis_population,
     )
     return result

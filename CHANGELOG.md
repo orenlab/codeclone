@@ -5,6 +5,27 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **Set-diff metric families stop claiming "0 new" over an unobserved universe.** The four
+  set-diff families (`complexity`, `coupling`, `dependencies`, `dead_code`) published
+  `baseline_diff_available: true` beside zeros on a run whose own population was never
+  observed — lane trust vouches only for the stored baseline term, and on an `unmeasured`
+  or `partial` run the current term of each membership diff is empty or truncated by
+  construction. The four families now consult the same universe owner the API family
+  already reads (`population_universe_observed`): `partial` and `unmeasured` withhold the
+  comparison (`baseline_diff_available: false`, zeroed counts, the existing withheld
+  shape), while `complete_empty` keeps publishing — a genuinely emptied scope really
+  removed what the baseline remembers. Fully observed runs are unchanged byte-for-byte.
+- **Comparison gates refuse a run that measured nothing instead of passing it, on every
+  road.** The gate evaluator's ratified population refusals (`unmeasured` /
+  `complete_empty`) fired only when the population fact rode `project_metrics.health`, so
+  a `--skip-metrics --fail-on-new` run over a root whose every file failed to parse read
+  empty-by-construction novelty sets and exited 0 — while the identical run with metrics
+  enabled was refused. The run's population fact (from its sole owner,
+  `observed_population`) now reaches the gate state on the metrics-off CLI road and in the
+  report-document gate reader (`evaluate_gates`), so enabled gates refuse with the existing
+  typed reasons and exit code 3 on both roads. Healthy runs and `partial` runs gate exactly
+  as before. The unavailable-lanes contract error additionally names its executable next
+  step (`Run: codeclone . --update-baseline`).
 - **A never-computed health family serializes the honest withheld shape instead of zeros.**
   The canonical report document already withheld the health verdict for the two population
   refusals (`score: null`, `grade: null`, `dimensions: null`), but the third absence — a

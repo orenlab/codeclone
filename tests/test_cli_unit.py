@@ -1827,6 +1827,45 @@ def test_enforce_gating_exits_two_for_required_unavailable_lane() -> None:
     assert exc.value.code == 2
 
 
+def test_enforce_gating_names_the_next_step_for_unavailable_lanes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A typed refusal must ship an executable next step (`CLI1`).
+
+    The unavailable-lanes contract error named the lanes and stopped; an
+    operator was left to guess that regenerating the baseline is the remedy
+    the sibling refusals already spell out.
+    """
+
+    cli.console = cli._make_console(no_color=True)
+    with pytest.raises(SystemExit):
+        cli._enforce_gating(
+            args=Namespace(
+                fail_on_untested_hotspots=False,
+                fail_threshold=-1,
+                verbose=False,
+            ),
+            analysis=cast(Any, SimpleNamespace(coverage_join=None)),
+            processing=cast(Any, Namespace(source_read_failures=[])),
+            source_read_contract_failure=False,
+            baseline_failure_code=None,
+            metrics_baseline_failure_code=None,
+            new_func=set(),
+            new_block=set(),
+            gate_result=GatingResult(
+                exit_code=2,
+                reasons=("lane:unavailable:clones.functions",),
+                required_lanes=("clones.functions",),
+                unavailable_lanes=("clones.functions",),
+            ),
+            html_report_path=None,
+        )
+
+    out = capsys.readouterr().out
+    assert "clones.functions" in out
+    assert "Run: codeclone . --update-baseline" in out
+
+
 def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

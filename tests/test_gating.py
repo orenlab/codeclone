@@ -8,11 +8,12 @@ from __future__ import annotations
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 
 from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.contracts import HealthPopulation
 from codeclone.core._types import AnalysisResult, BootstrapResult, OutputPaths
 from codeclone.core.reporting import gate as cli_gate
 from codeclone.models import (
@@ -36,6 +37,7 @@ from codeclone.report.gates.evaluator import (
     gate_lane_contract_versions,
     gate_state_from_project_metrics,
 )
+from codeclone.report.messages import gates as gate_msgs
 from codeclone.surfaces.cli.summary import build_metrics_snapshot
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
@@ -1036,3 +1038,169 @@ def test_gate_state_carries_the_skipped_file_count() -> None:
     )
 
     assert state.files_skipped == 29
+
+
+def _cli_gate_without_metrics(
+    *,
+    tmp_path: Path,
+    population: str,
+    args: Namespace,
+) -> GateResult:
+    """The ``--skip-metrics`` shape: no project metrics, no metrics payload.
+
+    ``analysis_population`` is the run's own population fact from its sole
+    owner (``observed_population``); with no ``project_metrics`` to carry it,
+    this parameter is the only road it has into the gate state.
+    """
+
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=args,
+        output_paths=OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    analysis = AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        suppressed_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=0,
+        project_metrics=None,
+        metrics_payload=None,
+        suggestions=(),
+        segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+    )
+    return cli_gate(
+        boot=boot,
+        analysis=analysis,
+        new_func=set(),
+        new_block=set(),
+        metrics_diff=None,
+        baseline_trust=TrustVector(
+            root_verified=True,
+            lanes=tuple(
+                LaneTrust(name=lane, status="trusted", reason="compatible")
+                for lane in TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
+            ),
+        ),
+        analysis_population=cast("HealthPopulation", population),
+    )
+
+
+def test_cli_gate_without_metrics_refuses_an_unmeasured_population(
+    tmp_path: Path,
+) -> None:
+    """The clone gate must not pass a comparison whose current term is absent.
+
+    With ``--skip-metrics`` there is no ``project_metrics`` to carry the
+    population, so the hand-built gate state defaulted to
+    ``complete_nonempty`` and ``--fail-on-new`` passed an unmeasured run on
+    sets that were empty by construction — while the identical run with
+    metrics enabled was refused. One run, one population, two verdicts
+    (`G3`); the trusted-lane vector above is what proves lane trust alone
+    cannot close this road: it guards the baseline term, not the current one.
+    """
+
+    result = _cli_gate_without_metrics(
+        tmp_path=tmp_path,
+        population="unmeasured",
+        args=_gating_args(fail_on_new=True),
+    )
+
+    _assert_gate(
+        result,
+        exit_code=3,
+        reasons=(f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}",),
+    )
+
+
+def test_cli_gate_without_metrics_refuses_an_emptied_scope(
+    tmp_path: Path,
+) -> None:
+    """The sibling refusal keeps its own wording on the metrics-off road."""
+
+    result = _cli_gate_without_metrics(
+        tmp_path=tmp_path,
+        population="complete_empty",
+        args=_gating_args(fail_on_new=True),
+    )
+
+    _assert_gate(
+        result,
+        exit_code=3,
+        reasons=(f"metric:{gate_msgs.GATE_REASON_EMPTY_ANALYSIS_SCOPE}",),
+    )
+
+
+def test_cli_gate_without_metrics_keeps_a_measured_run_clean(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: a fully observed metrics-off run still passes."""
+
+    result = _cli_gate_without_metrics(
+        tmp_path=tmp_path,
+        population="complete_nonempty",
+        args=_gating_args(fail_on_new=True),
+    )
+
+    _assert_gate(result, exit_code=0, reasons=())
+
+
+def test_report_document_gate_reads_the_population_it_already_carries() -> None:
+    """The document publishes the population; its gate reader must consult it.
+
+    ``evaluate_gates`` rebuilt its state from the family summaries and left
+    ``health_population`` at the constructor default, so a stored unmeasured
+    document answered every gate the way a measured clean one would — the
+    exact divergence from the project-metrics road that `G3` forbids.
+    """
+
+    def _document(population: str) -> dict[str, object]:
+        return {
+            "metrics": {
+                "families": {
+                    "health": {
+                        "summary": {
+                            "score": None if population == "unmeasured" else 82,
+                            "population": population,
+                        }
+                    }
+                }
+            },
+            "source_facts": {
+                "observation_contract": {"enabled_lanes": ["dependencies"]}
+            },
+        }
+
+    config = MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=True,
+        fail_dead_code=False,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+    )
+
+    refused = evaluate_gates(
+        report_document=_document("unmeasured"),
+        config=config,
+    )
+    _assert_gate(
+        refused,
+        exit_code=3,
+        reasons=(f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}",),
+    )
+
+    measured = evaluate_gates(
+        report_document=_document("complete_nonempty"),
+        config=config,
+    )
+    _assert_gate(measured, exit_code=0, reasons=())
