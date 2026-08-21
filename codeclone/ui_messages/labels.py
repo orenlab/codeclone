@@ -41,12 +41,15 @@ SUMMARY_COMPACT_CLONES = (
 )
 # ``cycles`` keeps the total; the parenthesised split says how many of them can
 # actually fail an import, which is the only part --fail-cycles reads.
+# ``health`` receives a pre-rendered value: ``85(B)`` for a measured run, or
+# the same absence sentence the rich health line prints when the population
+# carries no score — the formatter reads one owner table for both branches.
 SUMMARY_COMPACT_METRICS = (
     "Metrics  cc={cc_avg}/{cc_max}  cbo={cbo_avg}/{cbo_max}"
     "  lcom4={lcom_avg}/{lcom_max}"
     "  cycles={cycles}(import={import_cycles},deferred={deferred_cycles})"
     "  dead_code={dead}"
-    "  health={health}({grade})  overloaded_modules={overloaded_modules}"
+    "  health={health}  overloaded_modules={overloaded_modules}"
 )
 SUMMARY_COMPACT_DEPENDENCIES = (
     "Dependencies  avg={avg_depth}  p95={p95_depth}  max={max_depth}"

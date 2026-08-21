@@ -48,7 +48,12 @@ def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSna
     # against a good baseline published ``health_delta = 0 - good`` -- the
     # whole stored score as a regression no code caused (`B8`, `G4`). The
     # population owner answers the yes/no; this module adds no second one.
-    health_measured = population_carries_score(project_metrics.health.population)
+    #
+    # The permilles below ride the same answer. They are ratios over the same
+    # unobserved population, so a run that carries no health verdict carried
+    # no adoption measurement either; leaving them ``int`` published 0‰ and
+    # every permille delta subtracted a whole good baseline from it (-1000).
+    measured = population_carries_score(project_metrics.health.population)
     return MetricsSnapshot(
         max_complexity=int(project_metrics.complexity_max),
         high_risk_functions=tuple(sorted(set(project_metrics.high_risk_functions))),
@@ -61,19 +66,31 @@ def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSna
         dead_code_items=tuple(
             sorted({item.qualname for item in project_metrics.dead_code})
         ),
-        health_score=(int(project_metrics.health.total) if health_measured else None),
-        health_grade=project_metrics.health.grade if health_measured else None,
-        typing_param_permille=_permille(
-            project_metrics.typing_param_annotated,
-            project_metrics.typing_param_total,
+        health_score=(int(project_metrics.health.total) if measured else None),
+        health_grade=project_metrics.health.grade if measured else None,
+        typing_param_permille=(
+            _permille(
+                project_metrics.typing_param_annotated,
+                project_metrics.typing_param_total,
+            )
+            if measured
+            else None
         ),
-        typing_return_permille=_permille(
-            project_metrics.typing_return_annotated,
-            project_metrics.typing_return_total,
+        typing_return_permille=(
+            _permille(
+                project_metrics.typing_return_annotated,
+                project_metrics.typing_return_total,
+            )
+            if measured
+            else None
         ),
-        docstring_permille=_permille(
-            project_metrics.docstring_public_documented,
-            project_metrics.docstring_public_total,
+        docstring_permille=(
+            _permille(
+                project_metrics.docstring_public_documented,
+                project_metrics.docstring_public_total,
+            )
+            if measured
+            else None
         ),
         typing_any_count=int(project_metrics.typing_any_count),
     )

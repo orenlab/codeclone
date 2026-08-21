@@ -117,6 +117,21 @@ def _health_delta(*, baseline: int | None, current: int | None) -> int:
     return current - baseline
 
 
+def _permille_delta(*, baseline: int | None, current: int | None) -> int:
+    """The permille twin of ``_health_delta``, under the same law.
+
+    ``None`` on either side means that half carried no adoption measurement —
+    a refusal current run, or a baseline whose adoption lane was unreadable.
+    Subtracting against it published the whole stored permille as movement:
+    a fully typed baseline read as a ``-1000`` regression on a run that
+    measured nothing (`B8`, `G4`).
+    """
+
+    if baseline is None or current is None:
+        return 0
+    return current - baseline
+
+
 def diff_metrics(
     *,
     baseline_snapshot: MetricsSnapshot | None,
@@ -136,9 +151,12 @@ def diff_metrics(
         dead_code_items=(),
         health_score=0,
         health_grade="F",
-        typing_param_permille=0,
-        typing_return_permille=0,
-        docstring_permille=0,
+        # An absent baseline carries no permille measurement, so the absent
+        # placeholder says so; a literal 0 here would be a fabricated 0‰ the
+        # deltas below subtract against (`B8`).
+        typing_param_permille=None,
+        typing_return_permille=None,
+        docstring_permille=None,
         typing_any_count=0,
     )
 
@@ -184,14 +202,17 @@ def diff_metrics(
             baseline=snapshot.health_score,
             current=current_snapshot.health_score,
         ),
-        typing_param_permille_delta=(
-            current_snapshot.typing_param_permille - snapshot.typing_param_permille
+        typing_param_permille_delta=_permille_delta(
+            baseline=snapshot.typing_param_permille,
+            current=current_snapshot.typing_param_permille,
         ),
-        typing_return_permille_delta=(
-            current_snapshot.typing_return_permille - snapshot.typing_return_permille
+        typing_return_permille_delta=_permille_delta(
+            baseline=snapshot.typing_return_permille,
+            current=current_snapshot.typing_return_permille,
         ),
-        docstring_permille_delta=(
-            current_snapshot.docstring_permille - snapshot.docstring_permille
+        docstring_permille_delta=_permille_delta(
+            baseline=snapshot.docstring_permille,
+            current=current_snapshot.docstring_permille,
         ),
         new_api_symbols=added_api_symbols,
         new_api_breaking_changes=api_breaking_changes,

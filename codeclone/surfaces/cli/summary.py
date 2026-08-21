@@ -333,6 +333,10 @@ def _print_metrics(
                 health=metrics.health_total,
                 grade=metrics.health_grade,
                 overloaded_modules=metrics.overloaded_modules_candidates,
+                # The verdict owner rides along, exactly as the rich branch
+                # below passes it to ``fmt_metrics_health``: the formatter,
+                # not this call site, decides whether a verdict exists.
+                population=metrics.health_population,
             )
         )
         console.print(

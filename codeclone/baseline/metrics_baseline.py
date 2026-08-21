@@ -30,6 +30,7 @@ from ..metrics.dependencies import (
 from ..metrics.health import HealthInputs, compute_health
 from ..models import (
     AdoptionColumnarPayload,
+    AdoptionCount,
     AdoptionObservationPayload,
     ApiParamSpec,
     ApiSurfaceColumnarPayload,
@@ -475,10 +476,19 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
         if isinstance(dead_payload, DeadCodeObservationPayload)
         else ()
     )
+    # The baseline half of the permille refusal. An adoption lane that is
+    # missing or arrived authentic-but-unreadable is not an empty one: reading
+    # it as zero observations manufactured 0‰ for every adoption dimension,
+    # and the diff then subtracted that fabricated zero (`B5`, `RP2`, `G4`).
+    # A readable lane with no rows stays a measurement — nothing to count is
+    # a fact, not a failure to observe.
     adoption = _lane_payload(container, "adoption_counts")
-    adoption_rows = (
-        adoption.counts if isinstance(adoption, AdoptionObservationPayload) else ()
-    )
+    if isinstance(adoption, AdoptionObservationPayload):
+        adoption_readable = True
+        adoption_rows: tuple[AdoptionCount, ...] = adoption.counts
+    else:
+        adoption_readable = False
+        adoption_rows = ()
     typing_params = tuple(
         (item.numerator, item.denominator)
         for item in adoption_rows
@@ -569,9 +579,11 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
         dead_code_items=tuple(sorted(dead)),
         health_score=health.total if health_measured else None,
         health_grade=health.grade if health_measured else None,
-        typing_param_permille=_permille(typing_params),
-        typing_return_permille=_permille(typing_returns),
-        docstring_permille=_permille(docstrings),
+        typing_param_permille=(_permille(typing_params) if adoption_readable else None),
+        typing_return_permille=(
+            _permille(typing_returns) if adoption_readable else None
+        ),
+        docstring_permille=_permille(docstrings) if adoption_readable else None,
         typing_any_count=0,
     )
 

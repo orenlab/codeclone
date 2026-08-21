@@ -194,10 +194,28 @@ def _metrics_for_report(
     validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
     if analysis.metrics_payload is None:
         return None
+    # The current half of the availability question, for health and for the
+    # adoption family alike. Lane trust can only vouch for the baseline term
+    # of the subtraction; a run whose own population carries no verdict made
+    # no comparison however trusted the stored lanes are, and publishing a
+    # delta beside ``baseline_diff_available: true`` would state "compared"
+    # about a comparison that never ran (`B8`, `G4`). Read through the one
+    # reader the document tree already uses, not a second ``score is None``
+    # derivation (`G2`). Computed from the same health family the enrichment
+    # copies unchanged, so both consumers below read one fact.
+    health_withheld = health_verdict_withheld(
+        _as_mapping(analysis.metrics_payload.get("health"))
+    )
     enriched = _enrich_metrics_report_payload(
         metrics_payload=analysis.metrics_payload,
         metrics_diff=validated_metrics_diff,
-        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        # The adoption permilles are ratios over the same unobserved
+        # population, so the withheld current half silences their satellite
+        # too: the enrichment then writes ``baseline_diff_available: false``
+        # and zeroes the deltas, mirroring the health family below.
+        coverage_adoption_diff_available=(
+            coverage_adoption_diff_available and not health_withheld
+        ),
         api_surface_diff_available=api_surface_diff_available,
     )
     trusted_lanes = {
@@ -207,15 +225,6 @@ def _metrics_for_report(
         and baseline_trust.root_verified
         and item.status == "trusted"
     }
-    # The current half of the health availability question. Lane trust can
-    # only vouch for the baseline term of the subtraction; a run whose own
-    # population carries no health number made no health comparison however
-    # trusted the stored lanes are, and publishing ``delta: 0`` beside
-    # ``baseline_diff_available: true`` would state "compared, unchanged"
-    # about a comparison that never ran (`B8`, `G4`). Read through the one
-    # reader the document tree already uses, not a second ``score is None``
-    # derivation (`G2`).
-    health_withheld = health_verdict_withheld(_as_mapping(enriched.get("health")))
     # Each row names *every* lane its comparison consumes, not a representative
     # one. Health is why: it is derived from seven lanes, and keying it on
     # ``risk_observations`` alone published a delta as available while one of

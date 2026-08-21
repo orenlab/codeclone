@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import pytest
@@ -17,6 +18,7 @@ import codeclone.baseline.container_trust as container_trust_mod
 import codeclone.baseline.metrics_baseline as metrics_mod
 from codeclone.baseline.container import build_container, read_container_v3
 from codeclone.baseline.container_digest import canonical_container_bytes
+from codeclone.baseline.diff import diff_metrics
 from codeclone.baseline.metrics_baseline import (
     MetricsBaseline,
     MetricsBaselineStatus,
@@ -31,6 +33,8 @@ from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     ApiSurfaceObservationPayload,
     ApiSymbolObservation,
+    BaselineContainerV3,
+    BaselineLaneIndex,
     ClassMetrics,
     ContainerInspectionResult,
     DeadItem,
@@ -41,6 +45,8 @@ from codeclone.models import (
     IntegerColumnarPayload,
     IntegerObservationPayload,
     LaneTrust,
+    ModuleDocstringCoverage,
+    ModuleTypingCoverage,
     ObservationBundle,
     ObservationContract,
     ObservationLaneDescriptor,
@@ -48,6 +54,9 @@ from codeclone.models import (
     ResolvedSourceIdentity,
     TrustVector,
 )
+
+if TYPE_CHECKING:
+    from codeclone.contracts import HealthPopulation
 from codeclone.observations.contracts import build_observation_contract
 from codeclone.observations.lanes import _encode_api_surface_lane
 from codeclone.observations.projection import build_observation_bundle
@@ -254,6 +263,223 @@ def test_snapshot_from_project_metrics_is_deterministic() -> None:
     assert metrics_mod._current_snapshot(duplicate) == snapshot
     assert snapshot.typing_param_permille == 750
     assert snapshot.docstring_permille == 667
+
+
+def _refusal_project_metrics(population: str) -> ProjectMetrics:
+    """A current run that observed nothing: the adoption counters are empty
+    and the population owner says the run carries no verdict."""
+
+    return replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=0,
+            grade="F",
+            dimensions={},
+            population=cast("HealthPopulation", population),
+        ),
+        typing_param_total=0,
+        typing_param_annotated=0,
+        typing_return_total=0,
+        typing_return_annotated=0,
+        docstring_public_total=0,
+        docstring_public_documented=0,
+    )
+
+
+@pytest.mark.parametrize("population", ["unmeasured", "complete_empty"])
+def test_current_snapshot_withholds_permilles_when_population_carries_no_score(
+    population: str,
+) -> None:
+    """A refusal run must not convert its permilles into measured zeros.
+
+    Wave 14 taught the current half to carry the health refusal as ``None``;
+    the permille fields beside it still read ``int``, so an empty or unread
+    current run published 0 and the diff subtracted a whole good baseline
+    from it — a fabricated -1000 regression (`G4`, `B8`).
+    """
+
+    snapshot = metrics_mod._current_snapshot(_refusal_project_metrics(population))
+
+    assert snapshot.health_score is None
+    assert snapshot.typing_param_permille is None
+    assert snapshot.typing_return_permille is None
+    assert snapshot.docstring_permille is None
+
+
+def test_current_snapshot_keeps_permilles_for_a_partial_population() -> None:
+    """The opposite boundary: a truncated run measured something real.
+
+    ``partial`` carries a score by the population owner's own table; painting
+    ``None`` over it would be the same defect wearing the other sign.
+    """
+
+    project = replace(
+        _project_metrics(),
+        health=HealthScore(
+            total=70,
+            grade="C",
+            dimensions={"health": 70},
+            population="partial",
+        ),
+    )
+
+    snapshot = metrics_mod._current_snapshot(project)
+
+    assert snapshot.typing_param_permille == 750
+    assert snapshot.typing_return_permille == 1000
+    assert snapshot.docstring_permille == 667
+
+
+def _bundle_with_adoption() -> ObservationBundle:
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    return build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=registry,
+        typing_modules=(
+            ModuleTypingCoverage(
+                module="pkg.mod",
+                filepath="pkg/mod.py",
+                callable_count=2,
+                params_total=4,
+                params_annotated=4,
+                returns_total=2,
+                returns_annotated=2,
+                any_annotation_count=0,
+            ),
+        ),
+        docstring_modules=(
+            ModuleDocstringCoverage(
+                module="pkg.mod",
+                filepath="pkg/mod.py",
+                public_symbol_total=3,
+                public_symbol_documented=3,
+            ),
+        ),
+    )
+
+
+def _container_with_adoption(monkeypatch: pytest.MonkeyPatch) -> BaselineContainerV3:
+    monkeypatch.setattr(container_mod, "current_python_tag", lambda: "cp314")
+    monkeypatch.setattr(container_mod, "_utc_now_z", lambda: "2026-07-20T00:00:00Z")
+    return build_container(_bundle_with_adoption(), _SCOPE_ID)
+
+
+def _with_opaque_adoption_lane(
+    container: BaselineContainerV3,
+) -> BaselineContainerV3:
+    """The adoption lane as the reader leaves it when it cannot decode it.
+
+    ``lane_payload_is_opaque`` defines the opaque shape as a raw ``dict`` —
+    this forgery reproduces exactly that reader state, not a convenient one.
+    """
+
+    lane = replace(container.lanes["adoption_counts"], payload={"counts": []})
+    return replace(
+        container,
+        lanes=BaselineLaneIndex(
+            rows=tuple(
+                (key, lane if key == "adoption_counts" else existing)
+                for key, existing in container.lanes.rows
+            )
+        ),
+    )
+
+
+def test_baseline_snapshot_reads_permilles_from_a_readable_adoption_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = metrics_mod._snapshot(_container_with_adoption(monkeypatch))
+
+    assert snapshot.typing_param_permille == 1000
+    assert snapshot.typing_return_permille == 1000
+    assert snapshot.docstring_permille == 1000
+
+
+def test_baseline_snapshot_withholds_permilles_when_adoption_lane_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The baseline half of the same refusal: an opaque or absent lane is not
+    an empty one (`B5`, `RP2`).
+
+    Wave 7 taught this half to withhold ``health_score`` over unreadable
+    evidence; the permilles beside it kept reading an opaque adoption lane as
+    zero observations — a flattering, fabricated measurement.
+    """
+
+    opaque = _with_opaque_adoption_lane(_container_with_adoption(monkeypatch))
+    snapshot = metrics_mod._snapshot(opaque)
+
+    assert snapshot.typing_param_permille is None
+    assert snapshot.typing_return_permille is None
+    assert snapshot.docstring_permille is None
+
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    without_metrics = build_container(
+        build_observation_bundle(
+            scan_root=Path("."),
+            module_registry=registry,
+            collect_metrics=False,
+        ),
+        _SCOPE_ID,
+    )
+    missing = metrics_mod._snapshot(without_metrics)
+
+    assert missing.typing_param_permille is None
+    assert missing.typing_return_permille is None
+    assert missing.docstring_permille is None
+
+
+def test_diff_withholds_permille_deltas_for_a_refusal_current_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The subtraction must not run against an absent half.
+
+    Before this wave the refusal current run read 0‰ against a fully typed
+    baseline and every permille delta published -1000: the refusal itself
+    became a measured regression (`B8`, `G4`).
+    """
+
+    baseline_snapshot = metrics_mod._snapshot(_container_with_adoption(monkeypatch))
+    current_snapshot = metrics_mod._current_snapshot(
+        _refusal_project_metrics("complete_empty")
+    )
+
+    diff = diff_metrics(
+        baseline_snapshot=baseline_snapshot,
+        current_snapshot=current_snapshot,
+        baseline_api_surface=None,
+        current_api_surface=None,
+    )
+
+    assert diff.typing_param_permille_delta == 0
+    assert diff.typing_return_permille_delta == 0
+    assert diff.docstring_permille_delta == 0
+
+
+def test_diff_keeps_real_permille_deltas_for_a_measured_current_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The opposite boundary: a real regression on a measured run survives."""
+
+    baseline_snapshot = metrics_mod._snapshot(_container_with_adoption(monkeypatch))
+    current_snapshot = metrics_mod._current_snapshot(_project_metrics())
+
+    diff = diff_metrics(
+        baseline_snapshot=baseline_snapshot,
+        current_snapshot=current_snapshot,
+        baseline_api_surface=None,
+        current_api_surface=None,
+    )
+
+    assert diff.typing_param_permille_delta == -250
+    assert diff.typing_return_permille_delta == 0
+    assert diff.docstring_permille_delta == -333
 
 
 def test_metrics_baseline_compares_lane_descriptors_to_current_runtime(

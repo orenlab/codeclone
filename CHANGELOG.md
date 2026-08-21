@@ -5,6 +5,21 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **A refusal run no longer publishes adoption permille deltas, and the compact summary line stops
+  grading it.** A current run that observed nothing (empty scope, or files present and none read)
+  against a good baseline published `param_delta`/`return_delta`/`docstring_delta` of `-1000` in
+  `metrics.families.coverage_adoption.summary` beside `baseline_diff_available: true` — the refusal
+  itself became a measured regression, and `--fail-on-typing-regression` /
+  `--fail-on-docstring-regression` failed the build on it. The typing and docstring permilles now
+  carry the refusal the way the health score has since the symmetric-health fix: absent rather than
+  zero, on both halves — a run whose population carries no verdict measures no permille, and a
+  baseline whose adoption lane arrived unreadable is no longer read as 0‰. The deltas are never
+  subtracted against an absent half, and the adoption family's `baseline_diff_available` flips to
+  `false` when the current half withheld its verdict. The quiet (non-TTY) `Metrics` summary line
+  printed `health=0(F)` for the same refusal run while the rich line honestly said "not measured";
+  it now prints the same absence sentence as its rich twin, from the same wording table (for
+  example `health=not measured (no source file in scope)`). Measured runs are unchanged: real
+  deltas and the `health=98(A)` form survive byte-identically.
 - **`passive_context_capabilities()` is gone from `codeclone.surfaces.mcp._context_governance`.** The
   accessor served the observe-mode capability table, which the envelope stopped carrying when the
   envelope named its own shape; no tool published it afterwards and no production code called it.

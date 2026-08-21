@@ -2745,9 +2745,15 @@ class MetricsSnapshot:
     #: large false improvement as though a comparison had run (`G4`, `B8`).
     health_score: int | None
     health_grade: Literal["A", "B", "C", "D", "F"] | None
-    typing_param_permille: int = 0
-    typing_return_permille: int = 0
-    docstring_permille: int = 0
+    #: Same refusal contract as ``health_score`` above, for the same reason:
+    #: an ``int`` cannot say "not measured". A refusal current run (no file
+    #: read, or nothing to read) and a baseline whose adoption lane arrived
+    #: unreadable both used to surface here as a measured ``0``, and the
+    #: permille deltas then subtracted a whole good baseline from it —
+    #: publishing ``-1000`` about a comparison that never ran (`G4`, `B8`).
+    typing_param_permille: int | None = 0
+    typing_return_permille: int | None = 0
+    docstring_permille: int | None = 0
     typing_any_count: int = 0
 
 

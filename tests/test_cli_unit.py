@@ -2248,6 +2248,80 @@ def test_print_metrics_in_quiet_mode_includes_overloaded_modules(
     assert_contains_none(out, "Public API")
 
 
+@pytest.mark.parametrize(
+    ("population", "absence"),
+    [
+        ("unmeasured", "health=not measured (no file was read)"),
+        ("complete_empty", "health=not measured (no source file in scope)"),
+    ],
+)
+def test_print_metrics_quiet_line_refuses_the_health_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    population: str,
+    absence: str,
+) -> None:
+    """The compact line must mirror its rich twin's refusal, absence for absence.
+
+    ``fmt_metrics_health`` withholds the grade over a population that carries
+    no score; the quiet branch kept printing ``health=0(F)`` for the same run
+    — a verdict about code nobody read, published to every non-TTY consumer.
+    The wording is read from the same owner table as the rich line, so the two
+    branches cannot drift apart (`G1`, `G2`).
+    """
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=cli_summary.MetricsSnapshot(
+            complexity_avg=0.0,
+            complexity_max=0,
+            high_risk_count=0,
+            coupling_avg=0.0,
+            coupling_max=0,
+            cohesion_avg=0.0,
+            cohesion_max=0,
+            cycles_count=0,
+            dead_code_count=0,
+            health_total=0,
+            health_grade="F",
+            health_population=population,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, absence)
+    assert_contains_none(out, "health=0(F)")
+
+
+def test_print_metrics_quiet_line_keeps_the_verdict_for_a_measured_population(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The opposite boundary: a measured run keeps its compact verdict."""
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=cli_summary.MetricsSnapshot(
+            complexity_avg=2.8,
+            complexity_max=20,
+            high_risk_count=0,
+            coupling_avg=0.5,
+            coupling_max=9,
+            cohesion_avg=1.2,
+            cohesion_max=4,
+            cycles_count=0,
+            dead_code_count=0,
+            health_total=85,
+            health_grade="B",
+            health_population="partial",
+        ),
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "health=85(B)")
+
+
 def test_print_metrics_in_quiet_mode_includes_security_surfaces(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

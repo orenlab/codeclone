@@ -15,6 +15,7 @@ import pytest
 
 from codeclone.cache.reuse import binding_context_digest, source_content_digest
 from codeclone.core._types import (
+    AnalysisResult,
     _as_sorted_str_tuple,
     _class_metric_sort_key,
     _module_dep_sort_key,
@@ -54,6 +55,7 @@ from codeclone.core.metrics_payload import (
 )
 from codeclone.core.parallelism import _should_use_parallel
 from codeclone.core.pipeline import _with_export_root_reasons, compute_project_metrics
+from codeclone.core.reporting import _metrics_for_report
 from codeclone.metrics import overloaded_modules as overloaded_modules_mod
 from codeclone.metrics.overloaded_modules import (
     _percentile_rank,
@@ -110,6 +112,7 @@ from codeclone.report.gates.evaluator import (
 from codeclone.utils.coerce import as_int as _as_int
 from codeclone.utils.coerce import as_str as _as_str
 from tests._ast_metrics_helpers import module_registry_context
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 _TEST_MODULE_REGISTRY = module_registry_context(
     filepath="pkg/mod.py",
@@ -2026,6 +2029,119 @@ def test_enrich_metrics_report_payload_hides_api_diff_without_api_baseline() -> 
     assert api_summary["added"] == 0
     assert api_summary["breaking"] == 0
     assert not any(item.get("record_kind") == "breaking_change" for item in api_items)
+
+
+def _permille_diff(param: int, returns: int, docstring: int) -> MetricsDiff:
+    return MetricsDiff(
+        new_high_risk_functions=(),
+        new_high_coupling_classes=(),
+        new_cycles=(),
+        new_dead_code=(),
+        health_delta=0,
+        typing_param_permille_delta=param,
+        typing_return_permille_delta=returns,
+        docstring_permille_delta=docstring,
+    )
+
+
+def _adoption_comparison_published(
+    project_metrics: ProjectMetrics,
+    metrics_diff: MetricsDiff,
+) -> dict[str, object]:
+    """One observation of what the report publishes for the adoption family."""
+
+    enriched = _metrics_for_report(
+        analysis=AnalysisResult(
+            func_groups={},
+            block_groups={},
+            block_groups_report={},
+            segment_groups={},
+            suppressed_segment_groups=0,
+            block_group_facts={},
+            func_clones_count=0,
+            block_clones_count=0,
+            segment_clones_count=0,
+            files_analyzed_or_cached=0,
+            project_metrics=project_metrics,
+            metrics_payload=build_metrics_report_payload(
+                module_registry=_TEST_MODULE_REGISTRY,
+                project_metrics=project_metrics,
+                units=(),
+                class_metrics=(),
+                suppressed_dead_code=(),
+            ),
+            suggestions=(),
+            segment_groups_raw_digest="",
+            observation_bundle=TEST_OBSERVATION_BUNDLE,
+        ),
+        metrics_diff=metrics_diff,
+        coverage_adoption_diff_available=True,
+        api_surface_diff_available=False,
+    )
+    assert enriched is not None
+    summary = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", enriched["coverage_adoption"])["summary"],
+    )
+    return {
+        key: summary[key]
+        for key in (
+            "baseline_diff_available",
+            "param_delta",
+            "return_delta",
+            "docstring_delta",
+        )
+    }
+
+
+def test_metrics_for_report_withholds_adoption_comparison_on_a_refusal_run() -> None:
+    """A withheld current half must flip the adoption availability satellite.
+
+    Lane trust vouches only for the baseline term of the subtraction. A run
+    whose own population carries no verdict made no adoption comparison
+    however trusted the stored lane is; publishing ``param_delta: -1000``
+    beside ``baseline_diff_available: true`` states a comparison that never
+    ran (`B8`, `G4`) — the exact defect wave 14 removed from the health
+    family sitting one summary over.
+    """
+
+    refusal = replace(
+        _project_metrics_with_adoption_and_api(),
+        health=HealthScore(
+            total=0,
+            grade="F",
+            dimensions={},
+            population="complete_empty",
+        ),
+    )
+
+    published = _adoption_comparison_published(
+        refusal,
+        _permille_diff(-1000, -1000, -1000),
+    )
+
+    assert published == {
+        "baseline_diff_available": False,
+        "param_delta": 0,
+        "return_delta": 0,
+        "docstring_delta": 0,
+    }
+
+
+def test_metrics_for_report_keeps_adoption_comparison_on_a_measured_run() -> None:
+    """The opposite boundary: a measured run's real deltas must survive."""
+
+    published = _adoption_comparison_published(
+        _project_metrics_with_adoption_and_api(),
+        _permille_diff(-250, 0, -333),
+    )
+
+    assert published == {
+        "baseline_diff_available": True,
+        "param_delta": -250,
+        "return_delta": 0,
+        "docstring_delta": -333,
+    }
 
 
 def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:

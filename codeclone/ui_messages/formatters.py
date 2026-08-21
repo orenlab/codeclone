@@ -366,7 +366,14 @@ def fmt_summary_compact_metrics(
     health: int,
     grade: str,
     overloaded_modules: int,
+    population: str = "complete_nonempty",
 ) -> str:
+    # The compact mirror of ``fmt_metrics_health``: the same owner table
+    # decides whether a verdict exists, and the same sentence words the
+    # absence, so the quiet and rich branches cannot drift apart (`G1`).
+    # Printing ``0(F)`` here for a population that carries no score was a
+    # verdict about code nobody read.
+    absence = _HEALTH_ABSENCE_LINE.get(population)
     return SUMMARY_COMPACT_METRICS.format(
         cc_avg=f"{cc_avg:.1f}",
         cc_max=cc_max,
@@ -378,8 +385,7 @@ def fmt_summary_compact_metrics(
         import_cycles=import_cycles,
         deferred_cycles=deferred_cycles,
         dead=dead,
-        health=health,
-        grade=grade,
+        health=absence if absence is not None else f"{health}({grade})",
         overloaded_modules=overloaded_modules,
     )
 
