@@ -439,13 +439,17 @@ def _normalize_metrics_families(
     # 0/"F" verdict this document exists to stop repeating — and ``str(None)``
     # would write the grade as "None".
     #
-    # ``bool(health)`` stays in front, and is a different question: a
-    # clones-only run brings no health block at all and keeps its historical
-    # empty shape. "Health was not computed" is a third fact, distinct from
-    # both "computed over a population of nothing" and "computed over a
-    # population nobody read", and only the last two are refusals.
+    # A clones-only run brings no health block at all. "Health was not
+    # computed" is a third fact, distinct from both "computed over a
+    # population of nothing" and "computed over a population nobody read" —
+    # and it is an absence too, so it gets the same withheld shape rather
+    # than the historical zeros, which read as a measured verdict to any
+    # direct consumer of the document. The one reader already answers for
+    # the missing block from the producer's own signal (no score to
+    # project); the empty population is what keeps this cause apart from a
+    # refusal, which always names its population state.
     health_population = str(health.get("population", ""))
-    health_unmeasured = bool(health) and health_verdict_withheld(health)
+    health_unmeasured = health_verdict_withheld(health)
     health_dimensions: dict[str, int] | None = (
         None
         if health_unmeasured

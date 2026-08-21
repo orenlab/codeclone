@@ -4832,6 +4832,36 @@ def test_cli_declares_no_families_without_metrics(
     assert cast(dict[str, object], payload["meta"])["computed_metric_families"] == []
 
 
+def test_cli_skip_metrics_document_withholds_the_health_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skip document itself carries no fabricated health verdict.
+
+    End-to-end on the real producer: the renderers stopped reading the health
+    family on a declared-empty run, but the canonical JSON document is a public
+    surface of its own, and ``metrics.families.health.summary`` still said
+    ``score: 0`` for a run that never computed health — indistinguishable from
+    a measured zero for any direct reader of the document. The withheld shape
+    is the one the population refusals already ship; the empty population is
+    what keeps "never computed" apart from both refusal causes.
+    """
+
+    _write_python_module(tmp_path, "a.py")
+
+    payload = _run_json_report(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, extra_args=("--skip-metrics",)
+    )
+
+    metrics = cast(dict[str, object], payload["metrics"])
+    families = cast(dict[str, object], metrics["families"])
+    health = cast(dict[str, object], families["health"])
+    summary = cast(dict[str, object], health["summary"])
+    assert summary["score"] is None
+    assert summary["grade"] is None
+    assert summary["dimensions"] is None
+    assert summary["population"] == ""
+
+
 def test_cli_skip_metrics_html_speaks_absence_not_fabricated_zeros(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

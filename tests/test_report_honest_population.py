@@ -97,6 +97,16 @@ COMPLETE_HEALTH: dict[str, object] = {
     "population": "complete_nonempty",
 }
 
+#: The third absence: the run never computed health at all (a clones-only run
+#: brings no health block). Same withheld shape as the two refusals above; the
+#: empty population is the fact that keeps this cause apart from both of them.
+NEVER_COMPUTED_HEALTH: dict[str, object] = {
+    "score": None,
+    "grade": None,
+    "dimensions": None,
+    "population": "",
+}
+
 
 def _mapping_at(payload: Mapping[str, object], *path: str) -> dict[str, object]:
     current: object = payload
@@ -118,6 +128,21 @@ def _document(
         segment_groups={},
         metrics={"health": dict(health)},
         inventory=inventory,
+    )
+
+
+def _document_without_health() -> dict[str, object]:
+    """A document from a run that never computed metrics — no health block.
+
+    ``--skip-metrics`` hands the builder no metrics payload at all; this is
+    that shape, not a health block whose fields are empty.
+    """
+
+    return build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics=None,
     )
 
 
@@ -232,6 +257,46 @@ def test_derived_overview_keeps_the_health_verdict_on_a_complete_run() -> None:
     assert snapshot["grade"] == "B"
     assert snapshot["population"] == "complete_nonempty"
     assert snapshot["strongest_dimension"] == "coverage"
+
+
+def test_report_document_withholds_the_verdict_when_health_was_not_computed() -> None:
+    """The third absence gets the same honest shape as the two refusals.
+
+    A clones-only run brings no health block, and the family serialized that
+    third fact through the historical empty shape: ``_as_int({}.get("score"))``
+    published ``score: 0``, ``grade: ""``, ``dimensions: {}`` — a measured-bad
+    verdict about a measurement that never ran. The number is withheld exactly
+    as for the refusals; the empty population is already the fact that names
+    this absence apart from both of them.
+    """
+
+    summary = _health_summary(_document_without_health())
+
+    assert summary == {
+        **NEVER_COMPUTED_HEALTH,
+        "baseline_diff_available": False,
+        "delta": 0,
+    }
+
+
+def test_metrics_summary_mirror_withholds_the_never_computed_verdict() -> None:
+    """The second address of the same block must not disagree on the third fact."""
+
+    document = _document_without_health()
+
+    assert _mapping_at(document, "metrics", "summary", "health") == _health_summary(
+        document
+    )
+
+
+def test_derived_overview_withholds_the_verdict_when_health_was_not_computed() -> None:
+    snapshot = _health_snapshot(_document_without_health())
+
+    assert snapshot["score"] is None
+    assert snapshot["grade"] is None
+    assert snapshot["population"] == ""
+    assert snapshot["strongest_dimension"] is None
+    assert snapshot["weakest_dimension"] is None
 
 
 # ── Markdown ────────────────────────────────────────────────────────

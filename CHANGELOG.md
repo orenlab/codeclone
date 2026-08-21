@@ -5,6 +5,20 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **A never-computed health family serializes the honest withheld shape instead of zeros.**
+  The canonical report document already withheld the health verdict for the two population
+  refusals (`score: null`, `grade: null`, `dimensions: null`), but the third absence — a
+  `--skip-metrics` / clones-only run that never computed health at all — still serialized
+  the historical empty shape: `metrics.families.health.summary` said `score: 0`,
+  `grade: ""`, `dimensions: {}`, indistinguishable from a measured zero for any direct
+  reader of the JSON document (renderers already skip the family on a declared-empty run).
+  The never-computed family, its `metrics.summary.health` mirror, and the
+  `derived.overview.health_snapshot` now carry the same withheld shape as the refusals;
+  `population` stays `""` — a run that never computed health has no population fact — which
+  is exactly what keeps "never computed" distinguishable from both refusal causes, since a
+  refusal always names its population state. Measured runs and refusal runs are unchanged
+  byte-for-byte; the report schema is unchanged (`score`/`grade`/`dimensions` already admit
+  `null`).
 - **Text and markdown reports honor the metric-family declaration, and its interpretation
   gets one owner.** The wave that fixed the HTML reader left the text and markdown renderers
   reading `metrics.families` raw, so a `--skip-metrics` run (and the implicit clones-only run
