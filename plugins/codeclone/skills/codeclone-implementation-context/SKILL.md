@@ -87,8 +87,9 @@ Engineering Memory keyword search → `codeclone-engineering-memory`.
 - `freshness.status:"drifted"` → verify live source; no re-analyze loop.
 - truncated/omitted summaries, unresolved call edges → incomplete evidence, not absence.
 - For compact/normal detail, `context_governance.mode="partial_enforce"` means
-  large facet lanes may be omitted with exact drill-down in
-  `context_governance.omitted`; mandatory subject/freshness facts remain inline.
+  large facet lanes may be omitted: `context_governance.omitted` records what
+  was omitted and why, and `_continuation.lanes[]` carries the exact drill-down
+  route; mandatory subject/freshness facts remain inline.
 - When `analysis.context_page_retrieval` is present, use
   `get_implementation_context_page(root=<abs>, context_projection_digest=analysis.context_projection_digest, facet=...)`
   for exact facet continuation. This is session-local to MCP run history and

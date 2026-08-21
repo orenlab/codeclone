@@ -16,6 +16,19 @@ gets honest about control flow. Upgrading requires action — see the "Upgrading
   it differs, so two shapes under one version could not be told apart by the only consumer that
   reads it. The version is now `1.1`, and the published key set is pinned beside it: changing the
   shape reds, and the increment stays a human decision.
+- **The MCP response envelope states each continuation fact once (`contract_version` `1.2`).** A
+  heavy `finish_controlled_change` cycle measured end-to-end still overflowed its own budget after
+  packing (2422 estimated units against the 2200 limit) because every omitted lane restated its
+  retrieval route in `context_governance.omitted` while `_continuation.lanes[]` carried the same
+  route, and the embedded verify payload restated the top-level `scope_check` — a strict
+  fact-superset of the embedded copy — inside `verification`. Omission records now keep their facts
+  (counts, reason, field); the executable drill-down rides the `_continuation` index once, and a
+  finish response carries one authoritative `scope_check`. The same measurement caught the envelope
+  claiming `patch_trail_retrieval_unavailable` for a packed patch trail whose durable audit route it
+  published in the same response — the blocker now answers retrievability, not lane reducibility.
+  Re-measured on the same heavy cycle after the change: the default finish delivers 2191 of 2200
+  units with nothing omitted and the enforcement claim intact (it delivered 2422 with the claim
+  withdrawn before), and the full-detail finish packs 3135 raw units to 2149.
 ### Breaking changes
 
 - **Report schema advanced to `3.2`.** `novelty_reason` — carried beside `novelty` on every clone and design finding —

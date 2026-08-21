@@ -28,8 +28,10 @@ from ...utils.payload_narrow import is_record_mapping
 #: so an envelope carrying a shape this version no longer describes would be
 #: trusted for an estimate the reader cannot interpret. 1.1 drops the invariant
 #: capability and drill-down tables from the per-response payload; the routes now
-#: ride the omitted lane that needs them.
-CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.1"
+#: ride the omitted lane that needs them. 1.2 keeps each omission record to its
+#: facts (counts, reason, field); the retrieval/drill-down routes ride the
+#: ``_continuation`` index once instead of being restated per omitted lane.
+CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.2"
 CONTEXT_GOVERNANCE_DIGEST_VERSION: Final = "1"
 CONTEXT_GOVERNANCE_ESTIMATOR: Final = "utf8_bytes_div_4_v1"
 DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2200
@@ -356,10 +358,33 @@ def _attach_omission_context(
 ) -> None:
     if not evidence_omitted:
         return
-    context_governance["omitted"] = dict(evidence_omitted)
+    context_governance["omitted"] = {
+        str(lane): _omission_facts(omission)
+        for lane, omission in evidence_omitted.items()
+    }
     continuation = _continuation_payload(payload, evidence_omitted)
     if continuation:
         payload["_continuation"] = continuation
+
+
+def _omission_facts(omission: object) -> object:
+    """Project an omission record to its facts.
+
+    The omission record answers what was omitted and why; the tool, route,
+    and identity for reaching the evidence ride the ``_continuation`` index
+    once (the cursor precedent: the index points, it does not restate).
+    Restating ``retrieval`` or ``drill_down`` here gave one continuation fact
+    two authorities in every governed response, measured live on the wave15
+    heavy finish cycle.
+    """
+
+    if not is_record_mapping(omission):
+        return omission
+    return {
+        key: value
+        for key, value in omission.items()
+        if key not in ("retrieval", "drill_down")
+    }
 
 
 def _continuation_payload(

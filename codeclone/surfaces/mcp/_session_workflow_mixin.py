@@ -1399,10 +1399,28 @@ def _finish_receipt_status(
     return "created"
 
 
+def _drop_embedded_scope_check_duplicate(payload: dict[str, object]) -> None:
+    """One scope-check fact, one authority: the top-level ``scope_check``.
+
+    The embedded verify payload carries its own copy of the intent check — a
+    strict fact-subset of the top-level block (measured live on the wave15
+    heavy cycle: every embedded key rides the top-level payload with an
+    identical value). The copy is dropped only while the top-level authority
+    is present; when the embedded block is the fact's only home it stays.
+    """
+
+    if payload.get("scope_check") is None:
+        return
+    verification = payload.get("verification")
+    if isinstance(verification, dict):
+        verification.pop("scope_check", None)
+
+
 def _budgeted_finish_response(payload: Mapping[str, object]) -> dict[str, object]:
     """Attach finish governance after deterministic, recoverable packing."""
 
     packed = deepcopy(dict(payload))
+    _drop_embedded_scope_check_duplicate(packed)
     response_budget_lanes: set[str] = set()
     omitted = _finish_governance_omitted(
         packed,
@@ -1466,10 +1484,39 @@ def _finish_retrieval_blockers(payload: Mapping[str, object]) -> list[str]:
     if (
         isinstance(patch_trail, Mapping)
         and str(patch_trail.get("patch_trail_digest", "")).strip()
-        and not _patch_trail_retrievable(payload)
+        and not _patch_trail_retrieval_available(payload)
     ):
         blockers.append("patch_trail_retrieval_unavailable")
     return blockers
+
+
+def _patch_trail_retrieval_available(payload: Mapping[str, object]) -> bool:
+    """Whether the patch trail can still be fetched from its durable route.
+
+    Answers retrievability, not reducibility: ``_patch_trail_retrievable``
+    reports whether the lane can still be packed further, and reusing it for
+    the blocker branded every compacted lane unavailable while the envelope
+    beside it published the executable route (measured live on the wave15
+    heavy cycle). A trail is retrievable while its digest and a durable audit
+    sequence survive in either the summary or the compact reference.
+    """
+
+    patch_trail = payload.get("patch_trail")
+    if not isinstance(patch_trail, Mapping):
+        return False
+    if not str(patch_trail.get("patch_trail_digest", "")).strip():
+        return False
+    evidence = patch_trail.get("evidence")
+    if (
+        isinstance(evidence, Mapping)
+        and evidence.get("patch_trail_audit_sequence") is not None
+    ):
+        return True
+    retrieval = patch_trail.get("retrieval")
+    return (
+        isinstance(retrieval, Mapping)
+        and retrieval.get("patch_trail_audit_sequence") is not None
+    )
 
 
 def _next_reducible_finish_lane(payload: Mapping[str, object]) -> str | None:

@@ -1528,7 +1528,12 @@ def test_mcp_service_get_implementation_context_enforces_response_budget(
     enforcement = cast("dict[str, bool]", governance["enforcement"])
     response, omitted = _payload_dicts(governance, ("response", "omitted"))
     public_omission = _mapping_child(omitted, "structural_context.public_surface")
-    retrieval = _mapping_child(public_omission, "retrieval")
+    continuation = _mapping_child(context, "_continuation")
+    public_lane = next(
+        lane
+        for lane in cast("list[dict[str, object]]", continuation["lanes"])
+        if lane["lane"] == "structural_context.public_surface"
+    )
     public_surface = cast("list[dict[str, object]]", structural["public_surface"])
     estimated = cast("int", governance["estimated"])
     limit = cast("int", governance["limit"])
@@ -1541,8 +1546,8 @@ def test_mcp_service_get_implementation_context_enforces_response_budget(
         "omission": enforcement["omission"],
         "policy": response["evidence_policy"],
         "reason": public_omission["reason"],
-        "facet": retrieval["facet"],
-        "offset": retrieval["offset"],
+        "facet": public_lane["facet"],
+        "offset": public_lane["offset"],
         "shown": public_omission["shown"],
         "list_len": len(public_surface),
     } == {
@@ -8719,6 +8724,12 @@ def test_mcp_finish_receipt_sources_evidence_from_the_attested_after_run(
     )
 
     assert finished["status"] in {"accepted", "accepted_with_external_changes"}
+    # An accepted finish publishes the intent check once, at top level: the
+    # authoritative block is present and the embedded verify copy is not
+    # (wave15: one scope-check fact, one authority).
+    finish_scope_check = cast("dict[str, object]", finished["scope_check"])
+    assert finish_scope_check["status"] == "clean"
+    assert "scope_check" not in cast("dict[str, object]", finished["verification"])
     receipt = cast("dict[str, object]", finished["receipt"])
     content = str(receipt["content"])
     assert {
@@ -12747,54 +12758,7 @@ def test_mcp_patch_changed_file_evidence_prefers_explicit_changed_files(
 
 
 def test_mcp_finish_response_budget_omits_retrievable_advisory_lanes() -> None:
-    payload: dict[str, object] = {
-        "intent_id": "intent-1",
-        "status": "accepted",
-        "reason": None,
-        "scope_check": {"status": "clean"},
-        "verification": {"status": "accepted"},
-        "claims": None,
-        "receipt": {
-            "run_id": "run12345",
-            "format": "markdown",
-            "receipt_version": "1",
-            "verdict": "clean",
-            "receipt_digest": {
-                "kind": "receipt_v1",
-                "algorithm": "sha256",
-                "digest_version": "1",
-                "value": "r" * 64,
-            },
-            "content": "review receipt\n" + ("detail\n" * 900),
-            "receipt_retrieval": {
-                "tool": "get_review_receipt",
-                "run_id": "run12345",
-                "receipt_digest": "r" * 64,
-                "format": "structured",
-            },
-        },
-        "patch_trail": {
-            "schema_version": "1",
-            "intent_id": "intent-1",
-            "scope_check_status": "clean",
-            "verification_status": "accepted",
-            "counts": {"declared": 1, "changed": 1},
-            "truncation": {},
-            "patch_trail_digest": "p" * 64,
-            "declared_files": [f"pkg/deep/module_{idx}.py" for idx in range(300)],
-            "changed_files": ["pkg/deep/module_1.py"],
-            "evidence": {"patch_trail_audit_sequence": 77},
-            "retrieval_policy": {
-                "patch_trail_does_not_authorize_edits": True,
-                "patch_trail_does_not_override_findings": True,
-            },
-        },
-        "intent_cleared": True,
-        "workspace_hygiene_after": {"workspace_dirty_summary": {}},
-        "summary": {"status": "accepted", "receipt": "created"},
-        "user_action_required": False,
-        "message": "accepted",
-    }
+    payload = _finish_payload_with_packable_lanes(trail_audit_sequence=77)
 
     governed = workflow_mod._budgeted_finish_response(payload)
     receipt = cast("dict[str, object]", governed["receipt"])
@@ -12834,14 +12798,177 @@ def test_mcp_finish_response_budget_omits_retrievable_advisory_lanes() -> None:
         "truncated": True,
         "mandatory_overflow": False,
     }
-    assert (
-        cast("dict[str, object]", receipt_omitted["retrieval"])["tool"]
-        == "get_review_receipt"
+    continuation = cast("dict[str, object]", governed["_continuation"])
+    lanes = cast("list[dict[str, object]]", continuation["lanes"])
+    assert [lane["lane"] for lane in lanes] == ["receipt.content", "patch_trail"]
+    assert lanes[0]["tool"] == "get_review_receipt"
+    assert lanes[1]["patch_trail_digest"] == "p" * 64
+
+
+def _finish_payload_with_packable_lanes(
+    *,
+    trail_audit_sequence: int | None,
+) -> dict[str, object]:
+    """Finish payload whose receipt and patch-trail lanes exceed the budget.
+
+    ``trail_audit_sequence=None`` models a patch trail with no durable audit
+    event behind it — the one case where retrieval genuinely is unavailable.
+    """
+    patch_trail: dict[str, object] = {
+        "schema_version": "1",
+        "intent_id": "intent-1",
+        "scope_check_status": "clean",
+        "verification_status": "accepted",
+        "counts": {"declared": 1, "changed": 1},
+        "truncation": {},
+        "patch_trail_digest": "p" * 64,
+        "declared_files": [f"pkg/deep/module_{idx}.py" for idx in range(300)],
+        "changed_files": ["pkg/deep/module_1.py"],
+        "retrieval_policy": {
+            "patch_trail_does_not_authorize_edits": True,
+            "patch_trail_does_not_override_findings": True,
+        },
+    }
+    if trail_audit_sequence is not None:
+        patch_trail["evidence"] = {"patch_trail_audit_sequence": trail_audit_sequence}
+    return {
+        "intent_id": "intent-1",
+        "status": "accepted",
+        "reason": None,
+        "scope_check": {"status": "clean"},
+        "verification": {"status": "accepted"},
+        "claims": None,
+        "receipt": {
+            "run_id": "run12345",
+            "format": "markdown",
+            "receipt_version": "1",
+            "verdict": "clean",
+            "receipt_digest": {
+                "kind": "receipt_v1",
+                "algorithm": "sha256",
+                "digest_version": "1",
+                "value": "r" * 64,
+            },
+            "content": "review receipt\n" + ("detail\n" * 900),
+            "receipt_retrieval": {
+                "tool": "get_review_receipt",
+                "run_id": "run12345",
+                "receipt_digest": "r" * 64,
+                "format": "structured",
+            },
+        },
+        "patch_trail": patch_trail,
+        "intent_cleared": True,
+        "workspace_hygiene_after": {"workspace_dirty_summary": {}},
+        "summary": {"status": "accepted", "receipt": "created"},
+        "user_action_required": False,
+        "message": "accepted",
+    }
+
+
+def test_mcp_finish_scope_check_has_one_authoritative_representation() -> None:
+    """One scope-check fact MUST be stated once in a finish response.
+
+    The embedded verify payload carries its own copy of the intent check while
+    the finish response already publishes the same fact at top level — a strict
+    fact-superset (every embedded key rides the top-level block with an
+    identical value, measured live on the wave15 heavy cycle). Restating it
+    inside ``verification`` gives one fact two authorities that can drift.
+    """
+    payload: dict[str, object] = {
+        "intent_id": "intent-1",
+        "status": "accepted",
+        "reason": None,
+        "scope_check": {
+            "intent_id": "intent-1",
+            "status": "clean",
+            "actual_changed_files": ["pkg/a.py"],
+        },
+        "verification": {
+            "status": "accepted",
+            "scope_check": {
+                "status": "clean",
+                "actual_changed_files": ["pkg/a.py"],
+            },
+        },
+        "claims": None,
+        "receipt": None,
+        "intent_cleared": True,
+        "message": "accepted",
+    }
+
+    governed = workflow_mod._budgeted_finish_response(payload)
+    verification = cast("dict[str, object]", governed["verification"])
+    scope_check = cast("dict[str, object]", governed["scope_check"])
+
+    assert "scope_check" not in verification
+    assert scope_check["status"] == "clean"
+    assert scope_check["actual_changed_files"] == ["pkg/a.py"]
+
+
+def test_mcp_finish_dedup_keeps_the_only_scope_check_representation() -> None:
+    """Deduplication MUST NOT delete the only representation of the fact.
+
+    When the finish response carries no top-level ``scope_check`` authority,
+    the embedded copy is the fact's only home and stays.
+    """
+    payload: dict[str, object] = {
+        "intent_id": "intent-1",
+        "status": "unverified",
+        "reason": "no_after_run",
+        "scope_check": None,
+        "verification": {
+            "status": "unverified",
+            "scope_check": {"status": "clean"},
+        },
+        "claims": None,
+        "receipt": None,
+        "intent_cleared": False,
+        "message": "unverified",
+    }
+
+    governed = workflow_mod._budgeted_finish_response(payload)
+    verification = cast("dict[str, object]", governed["verification"])
+
+    assert verification["scope_check"] == {"status": "clean"}
+
+
+def test_mcp_finish_packed_patch_trail_does_not_claim_retrieval_unavailable() -> None:
+    """A packed patch trail with a durable audit route is retrievable.
+
+    Exhausted reducibility is not retrieval unavailability: the compacted lane
+    still carries its digest and audit sequence, and ``get_patch_trail``
+    serves it. Claiming ``patch_trail_retrieval_unavailable`` beside the
+    executable route the same envelope publishes is one fact with two answers.
+    """
+    governed = workflow_mod._budgeted_finish_response(
+        _finish_payload_with_packable_lanes(trail_audit_sequence=77)
     )
-    assert (
-        cast("dict[str, object]", trail_omitted["retrieval"])["patch_trail_digest"]
-        == "p" * 64
+    governance = cast("dict[str, object]", governed["context_governance"])
+    blocked = cast("dict[str, list[str]]", governance["enforcement_blocked"])[
+        "response_budget"
+    ]
+    patch_trail = cast("dict[str, object]", governed["patch_trail"])
+
+    assert "declared_files" not in patch_trail
+    assert "patch_trail_retrieval_unavailable" not in blocked
+
+
+def test_mcp_finish_unretrievable_patch_trail_still_names_the_blocker() -> None:
+    """A patch trail with no durable audit event MUST keep its blocker.
+
+    The truthfulness fix removes the false claim after packing; it must not
+    silence the true claim when no audit sequence exists anywhere.
+    """
+    governed = workflow_mod._budgeted_finish_response(
+        _finish_payload_with_packable_lanes(trail_audit_sequence=None)
     )
+    governance = cast("dict[str, object]", governed["context_governance"])
+    blocked = cast("dict[str, list[str]]", governance["enforcement_blocked"])[
+        "response_budget"
+    ]
+
+    assert "patch_trail_retrieval_unavailable" in blocked
 
 
 def test_mcp_finish_controlled_change_external_health_and_memory_hook(

@@ -650,6 +650,91 @@ def test_continuation_cursor_has_exactly_one_authoritative_representation() -> N
     assert body.count(cursor) == 1
 
 
+def _omitted_lane_and_continuation_lanes(
+    governed: dict[str, object],
+    lane_key: str,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Unpack one omitted-lane record and the continuation index lanes."""
+    envelope = cast("dict[str, object]", governed["context_governance"])
+    omitted_lane = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", envelope["omitted"])[lane_key],
+    )
+    continuation = cast("dict[str, object]", governed["_continuation"])
+    lanes = cast("list[dict[str, object]]", continuation["lanes"])
+    return omitted_lane, lanes
+
+
+def test_omitted_lane_states_facts_once_and_routes_ride_continuation() -> None:
+    """The omission record MUST NOT restate the retrieval the index owns.
+
+    ``context_governance.omitted`` answers what was omitted and why;
+    ``_continuation.lanes[]`` is the one executable index for how to reach it
+    (the wave-9 cursor precedent). Restating ``retrieval`` in both is one fact
+    with two authorities that can drift.
+    """
+    governed = attach_finish_context_governance(
+        {"receipt": {"receipt_digest": {"value": "r" * 64}}},
+        evidence_omitted={
+            "receipt.content": {
+                "total": 1,
+                "shown": 0,
+                "omitted": 1,
+                "reason": "response_budget",
+                "field": "receipt.content",
+                "retrieval": {
+                    "tool": "get_review_receipt",
+                    "route": (
+                        "get_review_receipt(root=..., receipt_digest=..., "
+                        "format='markdown')"
+                    ),
+                    "receipt_digest": "r" * 64,
+                },
+            }
+        },
+    )
+    omitted_lane, lanes = _omitted_lane_and_continuation_lanes(
+        governed, "receipt.content"
+    )
+
+    assert "retrieval" not in omitted_lane
+    assert omitted_lane["reason"] == "response_budget"
+    assert omitted_lane["omitted"] == 1
+    assert lanes[0]["tool"] == "get_review_receipt"
+
+
+def test_memory_omitted_lane_does_not_restate_the_drill_down() -> None:
+    """The memory omission record MUST NOT restate the continuation drill-down.
+
+    Same law as the finish lanes: the omission block keeps the counts and the
+    reason; the tool and route ride the continuation index once.
+    """
+    governed = attach_memory_retrieval_context_governance(
+        {"records": [{"id": "mem-1"}]},
+        detail_level="compact",
+        max_records=20,
+        evidence_omitted={
+            "records": {
+                "total": 3,
+                "shown": 1,
+                "omitted": 2,
+                "reason": "response_budget",
+                "drill_down": {
+                    "tool": "get_memory_projection_page",
+                    "route": "get_memory_projection_page(cursor=...)",
+                    "cursor_path": "continuation.lanes.records.page.cursor",
+                },
+            }
+        },
+    )
+    omitted_lane, lanes = _omitted_lane_and_continuation_lanes(governed, "records")
+
+    assert "drill_down" not in omitted_lane
+    assert omitted_lane["omitted"] == 2
+    assert lanes[0]["route"] == "get_memory_projection_page(cursor=...)"
+    assert lanes[0]["cursor_path"] == "continuation.lanes.records.page.cursor"
+
+
 def test_enforcing_envelope_never_claims_a_budget_it_did_not_hold() -> None:
     """An envelope MUST NOT publish an enforcement claim it did not deliver.
 
@@ -700,7 +785,7 @@ def test_envelope_shape_and_contract_version_move_together() -> None:
         attach_passive_context_governance({"status": "accepted"})["context_governance"],
     )
 
-    assert governance_mod.CONTEXT_GOVERNANCE_CONTRACT_VERSION == "1.1"
+    assert governance_mod.CONTEXT_GOVERNANCE_CONTRACT_VERSION == "1.2"
     assert set(envelope) == {
         "contract_version",
         "estimator",
