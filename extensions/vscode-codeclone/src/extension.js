@@ -20,7 +20,6 @@ const {
     TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
 } = require("./constants");
 const {
-    baselineProvenanceDetails,
     capitalize,
     compactDecimal,
     coverageJoinPayload,
@@ -30,9 +29,6 @@ const {
     findingIcon,
     firstNormalizedLocation,
     focusModeSpec,
-    formatBaselineState,
-    formatBooleanWord,
-    formatCacheSummary,
     formatCoverageJoinMeasuredUnits,
     formatCoverageJoinPercent,
     formatCoverageJoinLocation,
@@ -138,7 +134,6 @@ const {
     STALE_REASON_WORKSPACE,
     isMinimumSupportedCodeCloneVersion,
     isLauncherWithinWorkspace,
-    launchSpecOrigin,
     resolveAnalysisSettings,
     sameAnalysisSettings,
     locationsNeedDetailHydration,
@@ -152,6 +147,10 @@ const {
     workspaceLocalLauncherCandidates,
     logChannelMessage,
 } = require("./support");
+const {
+    buildRunOverviewDetailNodes,
+    buildServerSessionDetailNodes,
+} = require("./treeNodes");
 
 class CodeCloneController {
     constructor(context) {
@@ -3765,59 +3764,16 @@ class CodeCloneController {
             ];
         }
         if (node.id === "overview.run") {
-            const inventory = safeObject(state.latestSummary.inventory);
-            const baseline = safeObject(state.latestSummary.baseline);
-            const launch = this.connectionInfo.launchSpec;
-            return [
-                this.detailNode("Workspace", state.folder.name),
-                this.detailNode("Run ID", state.currentRunId),
-                this.detailNode(
-                    "Analysis depth",
-                    currentAnalysisSettings ? currentAnalysisSettings.label : "unknown"
-                ),
-                this.detailNode(
-                    "Threshold profile",
-                    currentAnalysisSettings
-                        ? currentAnalysisSettings.thresholdSummary
-                        : "unknown"
-                ),
-                ...(pendingAnalysisSettings
-                    ? [
-                        this.detailNode(
-                            "Next run",
-                            `${pendingAnalysisSettings.label} · pending`
-                        ),
-                    ]
-                    : []),
-                this.detailNode(
-                    "Freshness",
-                    state.stale ? `stale · ${state.staleReason}` : "current"
-                ),
-                this.detailNode("Files", number(inventory.files)),
-                this.detailNode("Parsed lines", number(inventory.lines)),
-                this.detailNode("Callables", number(inventory.functions)),
-                this.detailNode("Classes", number(inventory.classes)),
-                this.detailNode("Baseline", formatBaselineState(baseline)),
-                // Same published fact, same shared reader as the triage markdown:
-                // two surfaces deciding this separately is how they came to
-                // disagree about one baseline.
-                ...baselineProvenanceDetails(baseline).map((detail) =>
-                    this.detailNode(detail.label, detail.value)
-                ),
-                // Which launcher this extension resolved. Nothing about the
-                // baseline can make it more or less true, so no baseline fact
-                // gates it — only whether a runtime was started at all. The
-                // session view already reports it on exactly those terms.
-                ...(launch
-                    ? [this.detailNode("Runtime source", launchSpecOrigin(launch))]
-                    : []),
-                this.detailNode(
-                    "Metrics baseline",
-                    formatBaselineState(state.latestSummary.metrics_baseline)
-                ),
-                this.detailNode("Baseline drift", this.baselineDriftSummary(state)),
-                this.detailNode("Cache", formatCacheSummary(state.latestSummary.cache)),
-            ];
+            return buildRunOverviewDetailNodes(
+                {
+                    state,
+                    currentAnalysisSettings,
+                    pendingAnalysisSettings,
+                    launchSpec: this.connectionInfo.launchSpec,
+                    baselineDriftSummary: this.baselineDriftSummary(state),
+                },
+                this.detailNode.bind(this)
+            );
         }
         if (node.id === "overview.triage") {
             const nextAction = this.describeNextBestAction(state);
@@ -4031,23 +3987,10 @@ class CodeCloneController {
             ];
         }
         if (node.id === "session.server") {
-            const launch = this.connectionInfo.launchSpec;
-            return [
-                this.detailNode("Connected", formatBooleanWord(this.connectionInfo.connected)),
-                this.detailNode(
-                    "CodeClone version",
-                    this.connectionInfo.serverInfo ? this.connectionInfo.serverInfo.version : "unknown"
-                ),
-                this.detailNode("Available tools", number(this.connectionInfo.toolCount)),
-                this.detailNode(
-                    "Runtime source",
-                    launch ? launchSpecOrigin(launch) : "not started"
-                ),
-                this.detailNode(
-                    "Launcher",
-                    launch ? `${launch.command} ${launch.args.join(" ")}`.trim() : "not started"
-                ),
-            ];
+            return buildServerSessionDetailNodes(
+                this.connectionInfo,
+                this.detailNode.bind(this)
+            );
         }
         if (node.id === "session.run") {
             if (!state || !state.latestSummary) {
@@ -5450,4 +5393,6 @@ async function deactivate() {
 module.exports = {
     activate,
     deactivate,
+    // Exported for node --test wiring pins only; VS Code calls activate/deactivate.
+    CodeCloneController,
 };
