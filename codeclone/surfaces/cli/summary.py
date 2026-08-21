@@ -63,6 +63,11 @@ class MetricsSnapshot:
     api_surface_public_symbols: int = 0
     api_surface_added: int = 0
     api_surface_breaking: int = 0
+    #: Whether the API-surface baseline comparison actually ran. ``False``
+    #: means ``api_surface_added`` / ``api_surface_breaking`` are not facts —
+    #: no surface may print them (`G4`, `B8`). Transported verbatim from the
+    #: comparison owner in ``api/comparison.py``; never derived here (`G2`).
+    api_surface_diff_available: bool = False
     coverage_join_status: str = ""
     coverage_join_overall_permille: int = 0
     coverage_join_coverage_hotspots: int = 0
@@ -212,6 +217,9 @@ def build_metrics_snapshot(
             if metrics_diff is not None and api_surface_diff_available
             else 0
         ),
+        # Transport, not computation: the same owner value the report
+        # enrichment publishes as ``api_surface.summary.baseline_diff_available``.
+        api_surface_diff_available=bool(api_surface_diff_available),
         coverage_join_status=str(coverage_join_summary.get("status", "")).strip(),
         coverage_join_overall_permille=_as_int(
             coverage_join_summary.get("overall_permille")
@@ -374,6 +382,9 @@ def _print_metrics(
                     modules=metrics.api_surface_modules,
                     added=metrics.api_surface_added,
                     breaking=metrics.api_surface_breaking,
+                    # The formatter, not this call site, decides whether the
+                    # diff terms exist — same split as ``fmt_metrics_health``.
+                    diff_available=metrics.api_surface_diff_available,
                 )
             )
         if metrics.coverage_join_status:
@@ -460,6 +471,7 @@ def _print_metrics(
                     modules=metrics.api_surface_modules,
                     added=metrics.api_surface_added,
                     breaking=metrics.api_surface_breaking,
+                    diff_available=metrics.api_surface_diff_available,
                 )
             )
         if metrics.coverage_join_status:

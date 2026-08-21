@@ -18,6 +18,7 @@ from ...messages.clone_health import clone_health_summary_sentence
 from ...messages.explain import plural_word
 from ...messages.overview import (
     ADOPTION_ADDED_SYMBOLS,
+    ADOPTION_API_DIFF_UNAVAILABLE,
     ADOPTION_API_DISABLED,
     ADOPTION_API_SURFACE_LABEL,
     ADOPTION_BREAKING_CHANGES,
@@ -581,7 +582,8 @@ def _api_card_html(api_summary: Mapping[str, object]) -> str:
         _fact_row(ADOPTION_MODULES, _format_count(modules)),
     ]
 
-    if bool(api_summary.get("baseline_diff_available")):
+    diff_available = bool(api_summary.get("baseline_diff_available"))
+    if diff_available:
         breaking = _as_int(api_summary.get("breaking"))
         added = _as_int(api_summary.get("added"))
         rows.append(
@@ -600,7 +602,16 @@ def _api_card_html(api_summary: Mapping[str, object]) -> str:
             )
         )
 
-    return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
+    body = '<div class="overview-fact-list">' + "".join(rows) + "</div>"
+    if not diff_available:
+        # The comparison never ran. Omitting the breaking/added rows alone
+        # left this card identical to "compared, nothing to report"; the
+        # muted sentence states the absence as a fact of the run (`G4`),
+        # in the same style the disabled branch above already uses.
+        body += (
+            f'<div class="overview-summary-value">{ADOPTION_API_DIFF_UNAVAILABLE}</div>'
+        )
+    return body
 
 
 def _adoption_and_api_section(ctx: ReportContext) -> str:

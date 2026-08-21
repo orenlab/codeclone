@@ -169,6 +169,13 @@ EXECUTIVE_HEALTH_SNAPSHOT_QUESTION: Final = "How healthy is this repository righ
 EXECUTIVE_THRESHOLDS_PREFIX: Final = "Thresholds: "
 
 ADOPTION_API_DISABLED: Final = "Disabled in this run."
+# The API card's absence sentence: the surface was measured, but the baseline
+# comparison never ran, so there are no breaking/added facts to show. Said in
+# words because omitting the rows rendered a withheld run identical to
+# "compared, nothing to report".
+ADOPTION_API_DIFF_UNAVAILABLE: Final = (
+    "Baseline comparison is unavailable for this run."
+)
 
 ADOPTION_CLUSTER_TITLE: Final = "Adoption & API"
 ADOPTION_CLUSTER_DESC: Final = (

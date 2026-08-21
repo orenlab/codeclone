@@ -440,14 +440,18 @@ def fmt_summary_compact_api_surface(
     modules: int,
     added: int,
     breaking: int,
+    diff_available: bool,
 ) -> str:
-    return (
-        "Public API"
-        f"  symbols={public_symbols}"
-        f"  modules={modules}"
-        f"  breaking={breaking}"
-        f"  added={added}"
-    )
+    # ``symbols=`` / ``modules=`` are facts of the current run and always
+    # print. ``breaking=`` / ``added=`` are facts about a baseline comparison:
+    # when that comparison never ran there is nothing to print, and printing
+    # the default zeros rendered a withheld run byte-identical to "compared,
+    # clean". The compact line omits the terms; the rich surfaces pronounce
+    # the absence in words — the ratified adoption split.
+    line = f"Public API  symbols={public_symbols}  modules={modules}"
+    if not diff_available:
+        return line
+    return f"{line}  breaking={breaking}  added={added}"
 
 
 def fmt_summary_compact_coverage_join(
@@ -650,18 +654,30 @@ def fmt_metrics_adoption(
     return f"  {'Adoption':<{_L}}{f' {GLYPH_SEP} '.join(parts)}"
 
 
+#: The rich line's absence sentence for an API comparison that never ran.
+#: One owner for the wording, mirroring the coverage-join "join unavailable"
+#: pattern: the fact is stated in words, never as fabricated zeros.
+_API_SURFACE_DIFF_ABSENCE: Final = "baseline comparison unavailable"
+
+
 def fmt_metrics_api_surface(
     *,
     public_symbols: int,
     modules: int,
     added: int,
     breaking: int,
+    diff_available: bool,
 ) -> str:
     parts = [
         f"{_v(public_symbols, STYLE_COUNT_NEUTRAL)} symbols",
         f"{_v(modules, STYLE_COUNT_NEUTRAL)} modules",
     ]
-    if breaking > 0 or added > 0:
+    if not diff_available:
+        # The comparison never ran, so there are no breaking/added facts.
+        # Silence here rendered a withheld run byte-identical to "compared,
+        # clean"; the rich surface pronounces the absence instead.
+        parts.append(f"[dim]{_API_SURFACE_DIFF_ABSENCE}[/dim]")
+    elif breaking > 0 or added > 0:
         parts.append(
             " / ".join(
                 [

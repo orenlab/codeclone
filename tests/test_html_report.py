@@ -2278,6 +2278,88 @@ def test_html_report_overview_includes_adoption_and_api_summary_cluster() -> Non
     )
 
 
+def test_html_report_api_surface_pronounces_a_withheld_baseline_comparison() -> None:
+    """The page must say the comparison did not run instead of staying silent.
+
+    Before the fix the breaking/added rows were simply omitted at
+    ``baseline_diff_available: false``, leaving the withheld page
+    indistinguishable from "compared, nothing to report" (`G4`, `B8`). The
+    absence is a fact of the run and is stated in the vocabulary owner's
+    words, muted, next to the current-run facts.
+    """
+
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["api_surface"] = {
+        "summary": {
+            "enabled": True,
+            "baseline_diff_available": False,
+            "modules": 1,
+            "public_symbols": 2,
+            "added": 0,
+            "breaking": 0,
+            "strict_types": False,
+        },
+        "items": [],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        "Public API surface",
+        "Public symbols",
+        "Modules",
+        "Baseline comparison is unavailable for this run.",
+    )
+    assert "Breaking changes" not in html
+    assert "Added symbols" not in html
+
+
+def test_html_report_api_surface_stays_silent_about_absence_when_compared() -> None:
+    """The opposite boundary: a compared page must not carry a false absence."""
+
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["api_surface"] = {
+        "summary": {
+            "enabled": True,
+            "baseline_diff_available": True,
+            "modules": 1,
+            "public_symbols": 2,
+            "added": 1,
+            "breaking": 1,
+            "strict_types": False,
+        },
+        "items": [],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(html, "Breaking changes", "Added symbols")
+    assert "Baseline comparison is unavailable for this run." not in html
+
+
 def test_html_report_quality_includes_coverage_join_subtab() -> None:
     metrics = _metrics_payload(
         health_score=82,

@@ -5,6 +5,17 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **Every surface can now say that the API-surface baseline comparison did not run.** The
+  availability fact existed (`api_surface.summary.baseline_diff_available`) but no surface could
+  pronounce it: the quiet (non-TTY) summary printed `breaking=0  added=0` for a withheld
+  comparison — byte-identical to "compared, no breaking changes" — the rich `Public API` line
+  rendered a withheld run as bare `symbols · modules`, indistinguishable from compared-and-clean,
+  and the HTML API card silently dropped its Breaking/Added rows. The CLI `MetricsSnapshot` now
+  transports `api_surface_diff_available` from the comparison owner (`codeclone.api.comparison`),
+  the compact line omits the `breaking=`/`added=` terms when the comparison never ran (current-run
+  facts `symbols=`/`modules=` stay), the rich line says `baseline comparison unavailable`, and the
+  HTML card states "Baseline comparison is unavailable for this run." as a muted fact. Runs whose
+  comparison ran are unchanged byte-for-byte on every surface.
 - **A run that did not observe its whole input universe no longer publishes an API surface
   comparison.** `api_surface_diff_available` asked only whether the metrics baseline was trusted
   and carried an API snapshot; the current run's own population was not part of the question. The

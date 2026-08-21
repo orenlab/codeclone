@@ -130,6 +130,7 @@ def test_fmt_metrics_api_surface_includes_breaking_and_added() -> None:
         modules=2,
         added=3,
         breaking=1,
+        diff_available=True,
     )
     assert "breaking" in text
     assert "added" in text
@@ -141,7 +142,63 @@ def test_fmt_metrics_api_surface_without_delta() -> None:
         modules=3,
         added=0,
         breaking=0,
+        diff_available=True,
     )
+    assert "breaking" not in text
+
+
+def test_fmt_summary_compact_api_surface_omits_diff_terms_when_withheld() -> None:
+    """No surface prints the numbers of a comparison that never ran."""
+
+    text = formatters.fmt_summary_compact_api_surface(
+        public_symbols=3,
+        modules=2,
+        added=0,
+        breaking=0,
+        diff_available=False,
+    )
+    assert text == "Public API  symbols=3  modules=2"
+
+
+def test_fmt_summary_compact_api_surface_keeps_diff_terms_when_available() -> None:
+    """The opposite boundary: a comparison that ran keeps its terms verbatim."""
+
+    text = formatters.fmt_summary_compact_api_surface(
+        public_symbols=3,
+        modules=2,
+        added=4,
+        breaking=1,
+        diff_available=True,
+    )
+    assert text == "Public API  symbols=3  modules=2  breaking=1  added=4"
+
+
+def test_fmt_metrics_api_surface_pronounces_a_withheld_comparison() -> None:
+    """The rich line carries the absence in words, never the zeros."""
+
+    text = formatters.fmt_metrics_api_surface(
+        public_symbols=10,
+        modules=3,
+        added=0,
+        breaking=0,
+        diff_available=False,
+    )
+    assert "baseline comparison unavailable" in text
+    assert "breaking" not in text
+    assert "added" not in text
+
+
+def test_fmt_metrics_api_surface_compared_clean_stays_silent_about_absence() -> None:
+    """Compared-and-clean keeps its shape and gains no false absence."""
+
+    text = formatters.fmt_metrics_api_surface(
+        public_symbols=10,
+        modules=3,
+        added=0,
+        breaking=0,
+        diff_available=True,
+    )
+    assert "unavailable" not in text
     assert "breaking" not in text
 
 

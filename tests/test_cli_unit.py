@@ -12,6 +12,7 @@ import webbrowser
 from argparse import Namespace
 from collections.abc import Callable
 from contextlib import redirect_stdout
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,7 +56,14 @@ from codeclone.core.worker import (
 from codeclone.core.worker import (
     process_file as _worker_process_file,
 )
-from codeclone.models import HealthScore, LaneTrust, ProjectMetrics, TrustVector
+from codeclone.models import (
+    ApiBreakingChange,
+    HealthScore,
+    LaneTrust,
+    MetricsDiff,
+    ProjectMetrics,
+    TrustVector,
+)
 from tests._assertions import assert_contains_all, assert_contains_none
 from tests._ast_metrics_helpers import module_registry_context, worker_registry_context
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
@@ -2010,6 +2018,7 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             modules=2,
             breaking=1,
             added=4,
+            diff_available=True,
         )
         == "Public API  symbols=3  modules=2  breaking=1  added=4"
     )
@@ -2130,6 +2139,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         modules=2,
         breaking=1,
         added=4,
+        diff_available=True,
     )
     assert_contains_all(api_surface, "symbols", "modules", "breaking", "added")
     coverage_join = ui.fmt_metrics_coverage_join(
@@ -2390,6 +2400,7 @@ def test_print_metrics_in_quiet_mode_includes_adoption_public_api_and_coverage(
             api_surface_public_symbols=3,
             api_surface_added=4,
             api_surface_breaking=1,
+            api_surface_diff_available=True,
             coverage_join_status="ok",
             coverage_join_overall_permille=735,
             coverage_join_coverage_hotspots=2,
@@ -2450,6 +2461,7 @@ def test_print_metrics_in_normal_mode_includes_adoption_public_api_and_coverage(
             api_surface_public_symbols=3,
             api_surface_added=4,
             api_surface_breaking=1,
+            api_surface_diff_available=True,
             coverage_join_status="ok",
             coverage_join_overall_permille=735,
             coverage_join_coverage_hotspots=2,
@@ -2477,6 +2489,165 @@ def test_print_metrics_in_normal_mode_includes_adoption_public_api_and_coverage(
         "73.5% overall",
         "2 hotspots < 50%",
     )
+
+
+def _api_surface_analysis_result() -> AnalysisResult:
+    """A run whose API surface was measured: 3 public symbols over 2 modules."""
+
+    return replace(
+        _stub_analysis_result(project_metrics=_sample_project_metrics()),
+        metrics_payload={
+            "api_surface": {
+                "summary": {"enabled": True, "modules": 2, "public_symbols": 3},
+                "items": [],
+            }
+        },
+    )
+
+
+def _api_surface_metrics_diff() -> MetricsDiff:
+    """A computed diff carrying 4 added symbols and 1 breaking change."""
+
+    return MetricsDiff(
+        new_high_risk_functions=(),
+        new_high_coupling_classes=(),
+        new_cycles=(),
+        new_dead_code=(),
+        health_delta=0,
+        new_api_symbols=(
+            "pkg.mod:f1",
+            "pkg.mod:f2",
+            "pkg.mod:f3",
+            "pkg.mod:f4",
+        ),
+        new_api_breaking_changes=(
+            ApiBreakingChange(
+                qualname="pkg.mod:gone",
+                filepath="pkg/mod.py",
+                start_line=1,
+                end_line=2,
+                symbol_kind="function",
+                change_kind="removed",
+                detail="symbol removed",
+            ),
+        ),
+    )
+
+
+def test_print_metrics_quiet_omits_api_diff_terms_when_comparison_withheld(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A withheld comparison must not render byte-identical to "compared, clean".
+
+    ``breaking=`` / ``added=`` are facts about a baseline comparison; a run
+    whose comparison never ran holds no such facts. The compact line keeps the
+    current-run facts (``symbols=`` / ``modules=``) and drops the diff terms,
+    following the ratified adoption pattern: the compact surface omits, the
+    rich surface pronounces (`G4`, `B8`).
+    """
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    snapshot = cli_summary.build_metrics_snapshot(
+        analysis_result=_api_surface_analysis_result(),
+        metrics_diff=_api_surface_metrics_diff(),
+        api_surface_diff_available=False,
+    )
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=snapshot,
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Public API", "symbols=3", "modules=2")
+    assert_contains_none(out, "breaking=", "added=")
+
+
+def test_print_metrics_quiet_keeps_api_diff_terms_for_an_available_comparison(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The opposite boundary: a comparison that ran keeps its compact terms."""
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    snapshot = cli_summary.build_metrics_snapshot(
+        analysis_result=_api_surface_analysis_result(),
+        metrics_diff=_api_surface_metrics_diff(),
+        api_surface_diff_available=True,
+    )
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=snapshot,
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(
+        out, "Public API", "symbols=3", "modules=2", "breaking=1", "added=4"
+    )
+
+
+def test_metrics_snapshot_transports_api_diff_availability_from_the_owner() -> None:
+    """The snapshot carries the comparison owner's flag; it derives nothing.
+
+    The value is decided once in ``api/comparison.py`` and travels here as a
+    parameter — the same value the report enrichment publishes as
+    ``api_surface.summary.baseline_diff_available``. The snapshot must
+    transport it, not recompute it from anything else (`G2`).
+    """
+
+    for available in (True, False):
+        snapshot = cli_summary.build_metrics_snapshot(
+            analysis_result=_api_surface_analysis_result(),
+            metrics_diff=_api_surface_metrics_diff(),
+            api_surface_diff_available=available,
+        )
+        assert snapshot.api_surface_diff_available is available
+
+
+def test_print_metrics_rich_api_line_pronounces_a_withheld_comparison(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rich line says the comparison did not run instead of staying silent.
+
+    Before the fix a withheld run rendered byte-identical to "compared, no
+    breaking changes": symbols and modules only. The absence sentence keeps
+    the two states distinguishable in words (`G4`).
+    """
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    snapshot = cli_summary.build_metrics_snapshot(
+        analysis_result=_api_surface_analysis_result(),
+        metrics_diff=_api_surface_metrics_diff(),
+        api_surface_diff_available=False,
+    )
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=False,
+        metrics=snapshot,
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Public API", "3 symbols", "2 modules")
+    assert_contains_all(out, "baseline comparison unavailable")
+    assert_contains_none(out, "breaking", "added")
+
+
+def test_print_metrics_rich_api_line_stays_silent_about_absence_when_compared(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The opposite boundary: a healthy page must not carry a false absence."""
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    snapshot = cli_summary.build_metrics_snapshot(
+        analysis_result=_api_surface_analysis_result(),
+        metrics_diff=_api_surface_metrics_diff(),
+        api_surface_diff_available=True,
+    )
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=False,
+        metrics=snapshot,
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Public API", "1 breaking", "4 added")
+    assert_contains_none(out, "baseline comparison unavailable")
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(
