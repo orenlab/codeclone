@@ -1672,9 +1672,12 @@ class CodeCloneController {
     }
 
     activeHotspotGroupIds(state) {
+        // Input contract: hotspotFocusMode is always a declared mode —
+        // loadHotspotFocusMode normalizes stored state and the focus picker
+        // only produces declared modes. A violating future setter fails
+        // loudly here; it must not silently borrow another mode's selection.
         const requested =
-            /** @type {any} */ (HOTSPOT_GROUPS_BY_MODE)[this.hotspotFocusMode] ||
-            HOTSPOT_GROUPS_BY_MODE.recommended;
+            /** @type {any} */ (HOTSPOT_GROUPS_BY_MODE)[this.hotspotFocusMode];
         if (this.hotspotFocusMode === "all") {
             return requested;
         }
@@ -4755,9 +4758,11 @@ class CodeCloneController {
     shouldShowGroup(groupId, state) {
         const specificMode = isSpecificFocusMode(this.hotspotFocusMode);
         if (specificMode) {
+            // Same input contract as activeHotspotGroupIds: an undeclared
+            // mode fails loudly instead of inheriting the recommended
+            // allow-list.
             const allowed =
-                /** @type {any} */ (HOTSPOT_GROUPS_BY_MODE)[this.hotspotFocusMode] ||
-                HOTSPOT_GROUPS_BY_MODE.recommended;
+                /** @type {any} */ (HOTSPOT_GROUPS_BY_MODE)[this.hotspotFocusMode];
             if (!allowed.includes(groupId)) {
                 return false;
             }

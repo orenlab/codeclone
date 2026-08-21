@@ -2,7 +2,9 @@
 
 // Sync pins for the three hand-maintained hotspot mode structures in
 // src/constants.js (HOTSPOT_GROUPS, HOTSPOT_FOCUS_MODES, HOTSPOT_GROUPS_BY_MODE)
-// plus a documenting pin for the silent fallback in activeHotspotGroupIds.
+// plus input-contract pins for the hotspot focus mode: the loader normalizes
+// stored state to a declared mode, and an undeclared mode fails loudly in the
+// mode-table lookups instead of silently borrowing another mode's selection.
 //
 // Every set expectation below is DERIVED from the structures under test —
 // never a third hand-written dictionary that would itself need syncing.
@@ -123,7 +125,7 @@ test("P3: mode 'reportOnly' maps to exactly securitySurfaces and overloadedModul
 });
 
 /**
- * Minimal state for the fallback probe. changedSummary is truthy so the
+ * Minimal state for the input-contract pins. changedSummary is truthy so the
  * changedFiles group stays visible under specific-mode semantics; the review
  * artifact arrays keep count lookups safe if evaluation order ever changes.
  */
@@ -142,25 +144,84 @@ function fallbackProbeState() {
     };
 }
 
-test("P4: unknown focus mode silently falls back to the recommended selection (documenting pin)", () => {
-    // DOCUMENTING PIN, not an endorsement. activeHotspotGroupIds resolves an
-    // unknown mode via `|| HOTSPOT_GROUPS_BY_MODE.recommended` without any
-    // warning. Worse: an unknown mode counts as "specific" for
-    // isSpecificFocusMode (it is neither 'recommended' nor 'all'), so the
-    // fallback list passes shouldShowGroup WITHOUT the count-based filtering
-    // the real 'recommended' mode applies — the user picks a mode that does
-    // not exist and sees strictly more than 'recommended' would show on a
-    // quiet run. Candidate for a loud failure instead; maintainer's decision.
+/**
+ * Controller wired with only the workspaceState input boundary, so the loader
+ * pins exercise loadHotspotFocusMode against an exact stored value.
+ */
+function controllerWithStoredMode(storedValue) {
+    const controller = /** @type {any} */ (
+        Object.create(CodeCloneController.prototype)
+    );
+    controller.context = {
+        workspaceState: {
+            get: (_key, fallback) =>
+                storedValue === undefined ? fallback : storedValue,
+        },
+    };
+    return controller;
+}
+
+test("P4: loader normalizes an undeclared stored focus mode to 'recommended'", () => {
+    // workspaceState is an input boundary: whatever survives there from an
+    // older install or a foreign writer must be normalized to a declared mode
+    // before it becomes controller state — never handed to the mode tables
+    // as-is.
+    const controller = controllerWithStoredMode("modeThatWasNeverDeclared");
+    assert.equal(
+        controller.loadHotspotFocusMode(),
+        "recommended",
+        "an undeclared stored focus mode must be normalized to 'recommended'"
+    );
+});
+
+test("P4: loader returns every declared focus mode unchanged", () => {
+    for (const mode of HOTSPOT_FOCUS_MODES) {
+        const controller = controllerWithStoredMode(mode.id);
+        assert.equal(
+            controller.loadHotspotFocusMode(),
+            mode.id,
+            `declared focus mode "${mode.id}" must round-trip through the loader`
+        );
+    }
+});
+
+test("P4: loader defaults to 'recommended' when nothing is stored", () => {
+    const controller = controllerWithStoredMode(undefined);
+    assert.equal(controller.loadHotspotFocusMode(), "recommended");
+});
+
+test("P5: an undeclared focus mode fails loudly in activeHotspotGroupIds instead of borrowing the recommended selection", () => {
+    // Input contract: loadHotspotFocusMode normalizes stored state and the
+    // picker only produces declared modes, so an undeclared mode here can only
+    // come from a future setter that violates the input contract. That is the
+    // new setter's defect, and it must surface as a loud failure (TypeError
+    // class) — not as the silent recommended selection the removed fallback
+    // used to substitute.
     const controller = /** @type {any} */ (
         Object.create(CodeCloneController.prototype)
     );
     controller.hotspotFocusMode = "modeThatWasNeverDeclared";
-    const ids = controller.activeHotspotGroupIds(fallbackProbeState());
-    assert.deepEqual(
-        ids,
-        HOTSPOT_GROUPS_BY_MODE.recommended,
-        "the silent fallback must return the recommended selection as-is; " +
-            "if this pin turns red because the fallback became a loud failure, " +
-            "replace the pin with one for the new contract"
+    assert.throws(
+        () => controller.activeHotspotGroupIds(fallbackProbeState()),
+        TypeError,
+        "an undeclared focus mode must fail loudly, not resolve to another " +
+            "mode's group selection"
+    );
+});
+
+test("P5: an undeclared specific focus mode fails loudly in shouldShowGroup", () => {
+    // Same input contract, second lookup site: an undeclared mode counts as
+    // "specific" (it is neither 'recommended' nor 'all'), so shouldShowGroup
+    // consults HOTSPOT_GROUPS_BY_MODE directly. A contract-violating caller
+    // must fail loudly here too, not inherit the recommended allow-list.
+    const controller = /** @type {any} */ (
+        Object.create(CodeCloneController.prototype)
+    );
+    controller.hotspotFocusMode = "modeThatWasNeverDeclared";
+    assert.throws(
+        () => controller.shouldShowGroup("newRegressions", fallbackProbeState()),
+        TypeError,
+        "an undeclared specific focus mode must fail loudly, not inherit " +
+            "the recommended mode's allow-list"
     );
 });
