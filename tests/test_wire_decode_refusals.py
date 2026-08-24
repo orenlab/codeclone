@@ -289,14 +289,28 @@ def test_unit_facts_absent_family_is_accepted_only_when_no_units_exist() -> None
 def test_units_with_sequences_refuse_an_unreadable_unit_list() -> None:
     """The unit list itself must decode before any family is considered."""
 
-    assert _decode_wire_units_with_sequences(obj={"u": "bad"}, filepath="a.py") is None
+    assert (
+        _decode_wire_units_with_sequences(
+            obj={"u": "bad"},
+            filepath="a.py",
+            materialized_clone_channels=(),
+        )
+        is None
+    )
 
 
 def test_units_with_sequences_refuse_units_whose_facts_are_missing() -> None:
     """A unit missing a fact family is not a usable unit, so the entry dies."""
 
     obj: dict[str, object] = {"u": [list(_VALID_UNIT_ROW)]}
-    assert _decode_wire_units_with_sequences(obj=obj, filepath="a.py") is None
+    assert (
+        _decode_wire_units_with_sequences(
+            obj=obj,
+            filepath="a.py",
+            materialized_clone_channels=("near_miss", "renamed_structure"),
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(

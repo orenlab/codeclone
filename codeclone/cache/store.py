@@ -33,6 +33,7 @@ from ..models import (
     CacheNeutralSegment,
     CacheNeutralUnit,
     CacheReuseDecision,
+    CloneArtifactChannel,
     ContentIdentityVerdict,
     DigestObject,
     FileMetrics,
@@ -286,6 +287,7 @@ class Cache:
         content: ContentIdentityVerdict,
         entry: CacheEntryV3,
         runtime_path: str,
+        required_clone_channels: tuple[CloneArtifactChannel, ...] = (),
     ) -> CacheReuseDecision:
         return cache_reuse_decision(
             content=content,
@@ -293,6 +295,7 @@ class Cache:
             neutral_profile=self._module_neutral_profile,
             dependent_profile=self._module_dependent_profile,
             binding_context=self._binding_context_for(runtime_path),
+            required_clone_channels=required_clone_channels,
         )
 
     def _set_load_warning(self, message: str | None) -> None:
@@ -610,9 +613,19 @@ class Cache:
         file_metrics: FileMetrics | None = None,
         structural_findings: list[StructuralFindingGroup] | None = None,
         function_relationship_facts: Sequence[FunctionRelationshipFacts] | None = None,
+        materialized_clone_channels: tuple[CloneArtifactChannel, ...] = (),
     ) -> None:
         if not self._write_enabled:
             return
+        # T2 witness honesty, producer side: an artifact the witness does not
+        # claim would be silently dropped by the encoder — computed work
+        # thrown away behind a row that says it never existed. The default
+        # (no channels) can only lie in the safe direction for units without
+        # artifacts; with artifacts present it must refuse loudly.
+        _validate_materialized_clone_channels(
+            units=units,
+            materialized_clone_channels=materialized_clone_channels,
+        )
         runtime_path = runtime_filepath_from_wire(
             wire_filepath_from_runtime(filepath, root=self.root),
             root=self.root,
@@ -789,6 +802,7 @@ class Cache:
                     ),
                     module_name=module_name,
                 ),
+                materialized_clone_channels=materialized_clone_channels,
             ),
             module_dependent=CacheDependentPayload(
                 class_metrics=tuple(class_metrics_rows),
@@ -834,6 +848,39 @@ class Cache:
             self._canonical_runtime_paths.discard(runtime_path)
         self._dirty = True
         return len(stale_runtime_paths)
+
+
+def _validate_materialized_clone_channels(
+    *,
+    units: Sequence[Unit],
+    materialized_clone_channels: tuple[CloneArtifactChannel, ...],
+) -> None:
+    """Refuse a witness that under-claims what the units actually carry.
+
+    The field-to-channel map is the measured consumer graph (see
+    _CLONE_KEY_CLAIMS in _wire_decode): the statement sequence feeds the
+    near-miss y8 domain, the digest feeds the renamed-structure tier, and the
+    renamed-canonical sequence feeds both — so it is legal under either claim.
+    """
+
+    claimed = set(materialized_clone_channels)
+    if "near_miss" not in claimed and any(unit.statement_sequence for unit in units):
+        raise ValueError(
+            "cache entry carries near-miss statement sequences the "
+            "materialization witness does not claim"
+        )
+    if "renamed_structure" not in claimed and any(
+        unit.renamed_fingerprint for unit in units
+    ):
+        raise ValueError(
+            "cache entry carries renamed-structure digests the "
+            "materialization witness does not claim"
+        )
+    if not claimed and any(unit.renamed_statement_sequence for unit in units):
+        raise ValueError(
+            "cache entry carries renamed-canonical sequences the "
+            "materialization witness does not claim"
+        )
 
 
 def file_stat_signature(path: str) -> FileStat:

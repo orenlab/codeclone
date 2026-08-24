@@ -16,7 +16,7 @@ from ..cache.entries import (
     _as_relationship_resolution_status,
 )
 from ..cache.projection import rehydrate_cache_neutral
-from ..cache.reuse import prove_cached_source_identity
+from ..cache.reuse import clone_artifact_channels, prove_cached_source_identity
 from ..cache.store import Cache, file_stat_signature
 from ..models import (
     ClassMetrics,
@@ -224,6 +224,13 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     index_ambiguous_fallbacks = racy_fallbacks = untracked_fallbacks = 0
     digest_verify_cost_us = stat_fast_rejects = 0
     neutral_hits = dependent_misses = 0
+    # T2: same flag derivation the processing stage uses for the workers and
+    # for the witness it writes; here it is what a cached row's witness must
+    # equal before its units are served warm.
+    required_clone_channels = clone_artifact_channels(
+        near_miss=bool(getattr(boot.args, "near_miss", False)),
+        renamed_structure=bool(getattr(boot.args, "renamed_structure", False)),
+    )
 
     with (
         span(name="cache.content_identity") as content_span,
@@ -267,7 +274,10 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                 digest_verify_cost_us += verdict.digest_verify_cost_us
                 stat_fast_rejects += int(verdict.stat_fast_reject)
                 decision = cache.reuse_decision(
-                    content=verdict, entry=cached, runtime_path=filepath
+                    content=verdict,
+                    entry=cached,
+                    runtime_path=filepath,
+                    required_clone_channels=required_clone_channels,
                 )
                 neutral_hits += int(decision.neutral.hit)
                 dependent_misses += int(not decision.dependent.hit)

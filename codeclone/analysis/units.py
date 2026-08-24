@@ -280,6 +280,13 @@ def extract_units_and_stats_from_source(
     collect_structural_findings: bool = True,
     collect_api_surface: bool = False,
     api_include_private_modules: bool = False,
+    # Tier ruling T2 (2026-08-24): the near-miss and renamed-structure tiers
+    # are opt-in, and a run that did not opt in must not pay for their
+    # per-unit artifacts (~a third of extraction on this repo). The defaults
+    # mirror the option defaults in ``config/spec.py`` — off — so the caller
+    # that wants a channel says so, exactly like the operator does.
+    collect_near_miss: bool = False,
+    collect_renamed_structure: bool = False,
     phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
     neutral_reuse: RehydratedCacheNeutral | None = None,
 ) -> tuple[
@@ -430,24 +437,34 @@ def extract_units_and_stats_from_source(
         # The near-miss tier is a clone lane, so only the clone lane's own
         # population pays for the sequence. The floors are part of the cache
         # neutral profile, so a floor change re-analyses rather than serving a
-        # sequence computed under different eligibility (39Y Y8).
+        # sequence computed under different eligibility (39Y Y8). The tier is
+        # also opt-in (T2): a run that did not ask for the channel computes
+        # nothing, and the cache row it feeds says so through the
+        # materialization witness rather than through an empty field.
         statement_sequence = (
             near_miss_statement_sequence(graph, cfg, unit_bindings)
-            if clone_eligible
+            if clone_eligible and collect_near_miss
             else ()
         )
-        # Same population rule as the sequence (Wave C): the renamed-structure
-        # tier is a clone lane, so only clone-eligible units pay for the
-        # ordinal-canonical walk, and its artifacts ride the cache wire with
-        # them. One walk produces both the digest and the renamed-canonical
-        # statement sequence (the CxB composition) — ordinal assignment is
-        # walk-global, so splitting them would repeat the deep-copy cost to
-        # reach identical tokens.
+        # Same population rule as the sequence (Wave C): only clone-eligible
+        # units pay for the ordinal-canonical walk. The walk has TWO opt-in
+        # consumers, not one (T2, measured in the consumer table of
+        # findings/clones/near_miss.py): the renamed-structure tier reads the
+        # digest, and the near-miss tier's ``renamed`` token domain reads the
+        # renamed-canonical statement sequence (the CxB composition). So the
+        # walk runs when either tier asked, and each output is kept only for
+        # the channel that consumes it — the digest is dropped when only
+        # near-miss asked, because no enabled consumer reads it. One walk
+        # produces both outputs: ordinal assignment is walk-global, so
+        # splitting them would repeat the deep-copy cost to reach identical
+        # tokens.
         renamed_fingerprint, renamed_statement_seq = (
             renamed_structure_artifacts(graph, node, cfg, unit_bindings)
-            if clone_eligible
+            if clone_eligible and (collect_near_miss or collect_renamed_structure)
             else ("", ())
         )
+        if not collect_renamed_structure:
+            renamed_fingerprint = ""
         # Unconditional, unlike the sequence above: a statement that cannot run
         # is a defect whether or not its function is large enough to be a clone
         # candidate, so no floor is consulted here (39Y Y5, Y9).

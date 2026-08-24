@@ -19,6 +19,7 @@ from ..models import (
     CacheNeutralSegment,
     CacheNeutralUnit,
     ClassMetricsDict,
+    CloneArtifactChannel,
     DeadCandidateDict,
     DependencyBinding,
     DependencyMechanism,
@@ -601,11 +602,18 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
     source_content_digest, git_blob_id_at_write = content_binding
     source_stats = _decode_optional_wire_source_stats(obj=neutral_obj)
     semantic_facts = _decode_semantic_facts(neutral_obj, filepath=filepath)
+    materialized_clone_channels = _decode_materialized_clone_channels(neutral_obj)
     if source_stats is None or semantic_facts is None:
+        return None
+    if materialized_clone_channels is None:
         return None
     facts_obj = dict(dependent_obj)
     facts_obj.update(neutral_obj)
-    file_sections = _decode_wire_file_sections(obj=facts_obj, filepath=filepath)
+    file_sections = _decode_wire_file_sections(
+        obj=facts_obj,
+        filepath=filepath,
+        materialized_clone_channels=materialized_clone_channels,
+    )
     if file_sections is None:
         return None
     (
@@ -678,6 +686,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
             blocks=tuple(_neutral_block_from_wire(block) for block in blocks),
             segments=tuple(_neutral_segment_from_wire(segment) for segment in segments),
             semantic_facts=semantic_facts,
+            materialized_clone_channels=materialized_clone_channels,
         ),
         module_dependent=CacheDependentPayload(
             class_metrics=tuple(class_metrics),
@@ -836,16 +845,66 @@ def _decode_wire_unit_unreachable_row(
     )
 
 
+#: The closed materialization-witness vocabulary (CACHE_VERSION 3.8).
+_CLONE_CHANNELS: Final[tuple[CloneArtifactChannel, ...]] = (
+    "near_miss",
+    "renamed_structure",
+)
+
+#: Which witness channels claim each artifact payload key — the measured
+#: consumer graph, not the producer layout: ``us`` feeds the near-miss y8
+#: domain, ``uc`` feeds the renamed-structure digest tier, and ``urs`` feeds
+#: BOTH the near-miss ``renamed`` token domain and the renamed-structure walk
+#: (see _DOMAIN_SEQUENCE_KEYS in findings/clones/near_miss.py). A key is
+#: present exactly when at least one claiming channel is in the witness.
+_CLONE_KEY_CLAIMS: Final[tuple[tuple[str, tuple[CloneArtifactChannel, ...]], ...]] = (
+    ("us", ("near_miss",)),
+    ("uc", ("renamed_structure",)),
+    ("urs", ("near_miss", "renamed_structure")),
+)
+
+
+def _decode_materialized_clone_channels(
+    obj: dict[str, object],
+) -> tuple[CloneArtifactChannel, ...] | None:
+    """Decode the mandatory ``mt`` witness, closed-list and canonically sorted.
+
+    Fail-closed like every other neutral fact: an entry without a witness, or
+    with a witness outside the closed vocabulary, is not this generation's row
+    and is rejected rather than guessed at.
+    """
+
+    rows = _as_list(obj.get("mt"))
+    if rows is None:
+        return None
+    channels: list[CloneArtifactChannel] = []
+    for row in rows:
+        if not isinstance(row, str) or row not in _CLONE_CHANNELS:
+            return None
+        channels.append(row)
+    if channels != sorted(set(channels)):
+        return None
+    return tuple(channels)
+
+
 def _decode_wire_units_with_sequences(
     *,
     obj: dict[str, object],
     filepath: str,
+    materialized_clone_channels: tuple[CloneArtifactChannel, ...],
 ) -> list[UnitDict] | None:
     """Decode unit facts together with the per-unit facts that belong to them.
 
     One step, because a unit whose sequence or reachability facts could not be
     attached is not a usable unit: keeping them apart would let a caller forget
     the second half and silently get units missing a fact.
+
+    The witness is held to its payload keys here, in both directions of a lie
+    (T2): a claimed channel whose key is missing would decode into units that
+    merely look artifact-free — the pre-witness B8 trap — and an unclaimed
+    channel whose key is present would hand a warm run artifacts the witness
+    says were never materialized. Either row is rejected, and rejection just
+    re-analyses the file.
     """
 
     units = _decode_optional_wire_items_for_filepath(
@@ -856,6 +915,13 @@ def _decode_wire_units_with_sequences(
     )
     if units is None:
         return None
+    claimed = set(materialized_clone_channels)
+    claimed_keys: set[str] = set()
+    for key, claims in _CLONE_KEY_CLAIMS:
+        if claimed.intersection(claims):
+            claimed_keys.add(key)
+        elif key in obj:
+            return None
     families = (
         ("us", _decode_wire_unit_sequence_row, _assign_statement_sequence),
         ("uc", _decode_wire_unit_renamed_row, _assign_renamed_fingerprint),
@@ -865,6 +931,8 @@ def _decode_wire_units_with_sequences(
         ("ur", _decode_wire_unit_unreachable_row, _assign_unreachable_statements),
     )
     for key, decode_row, assign in families:
+        if key != "ur" and key not in claimed_keys:
+            continue
         if not _apply_wire_unit_facts(
             obj=obj,
             units=units,
@@ -880,6 +948,7 @@ def _decode_wire_file_sections(
     *,
     obj: dict[str, object],
     filepath: str,
+    materialized_clone_channels: tuple[CloneArtifactChannel, ...],
 ) -> (
     tuple[
         list[UnitDict],
@@ -891,7 +960,11 @@ def _decode_wire_file_sections(
     ]
     | None
 ):
-    units = _decode_wire_units_with_sequences(obj=obj, filepath=filepath)
+    units = _decode_wire_units_with_sequences(
+        obj=obj,
+        filepath=filepath,
+        materialized_clone_channels=materialized_clone_channels,
+    )
     blocks = _decode_optional_wire_items_for_filepath(
         obj=obj,
         key="b",

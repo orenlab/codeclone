@@ -1563,7 +1563,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.7"
+    assert Cache._CACHE_VERSION == "3.8"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1579,7 +1579,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.7"
+    assert old_document["v"] == "3.8"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -3521,7 +3521,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     assert "SECURITY_SURFACE_CATALOG_VERSION" in source
     assert "RUNTIME_REACHABILITY_CATALOG_VERSION" in source
     assert "STRUCTURAL_FINDINGS_CATALOG_VERSION" in source
-    assert CACHE_VERSION == "3.7"
+    assert CACHE_VERSION == "3.8"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

@@ -208,6 +208,8 @@ def _stub_process_file(
         collect_structural_findings: bool = True,
         collect_api_surface: bool = False,
         api_include_private_modules: bool = False,
+        collect_near_miss: bool = False,
+        collect_renamed_structure: bool = False,
         block_min_loc: int = 20,
         block_min_stmt: int = 8,
         segment_min_loc: int = 20,
@@ -585,6 +587,8 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         collect_structural_findings: bool = True,
         collect_api_surface: bool = False,
         api_include_private_modules: bool = False,
+        collect_near_miss: bool = False,
+        collect_renamed_structure: bool = False,
         block_min_loc: int = 20,
         block_min_stmt: int = 8,
         segment_min_loc: int = 20,
@@ -824,6 +828,8 @@ def test_invoke_process_file_passes_full_contract_without_introspection(
             collect_structural_findings=False,
             collect_api_surface=False,
             api_include_private_modules=False,
+            collect_near_miss=False,
+            collect_renamed_structure=False,
             block_min_loc=20,
             block_min_stmt=8,
             segment_min_loc=20,
@@ -892,6 +898,7 @@ def test_process_cache_put_file_entry_receives_required_binding_fields(
             source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
+            materialized_clone_channels: tuple[str, ...] = (),
         ) -> None:
             self.calls += 1
 
@@ -958,6 +965,7 @@ def test_process_cache_put_file_entry_type_error_is_raised(
             source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
+            materialized_clone_channels: tuple[str, ...] = (),
         ) -> None:
             raise TypeError("broken cache write")
 

@@ -78,7 +78,14 @@ def payload_sequence(value: object) -> list[object]:
 
 
 def extract_units(root: Path, *, min_loc: int, min_stmt: int) -> list[Unit]:
-    """Extract every unit fact of a fixture tree, in module-path order."""
+    """Extract every unit fact of a fixture tree, in module-path order.
+
+    Every fact includes the opt-in clone-artifact channels (T2): the suites
+    this helper serves are the tier suites, and a helper that silently
+    dropped their inputs would make each of them opt in separately or go
+    inert. A suite pinning the *disabled* configuration calls the extractor
+    itself with the flags it means.
+    """
 
     registry = build_module_registry(root=root)
     units: list[Unit] = []
@@ -92,6 +99,8 @@ def extract_units(root: Path, *, min_loc: int, min_stmt: int) -> list[Unit]:
             cfg=NormalizationConfig(),
             min_loc=min_loc,
             min_stmt=min_stmt,
+            collect_near_miss=True,
+            collect_renamed_structure=True,
         )
         units.extend(extracted)
     return units
@@ -106,6 +115,7 @@ def analysis_boot(
     skip_dependencies: bool = False,
     skip_dead_code: bool = False,
     near_miss: bool = False,
+    renamed_structure: bool = False,
 ) -> BootstrapResult:
     """A bootstrap over ``root`` with the clone floors the caller declares."""
 
@@ -124,6 +134,7 @@ def analysis_boot(
             skip_dependencies=skip_dependencies,
             skip_dead_code=skip_dead_code,
             near_miss=near_miss,
+            renamed_structure=renamed_structure,
         ),
         output_paths=OutputPaths(html=None, json=None, text=None),
         cache_path=root / "cache.json",

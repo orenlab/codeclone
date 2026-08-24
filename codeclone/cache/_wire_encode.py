@@ -32,7 +32,12 @@ def _encode_source_stats(entry: CacheFactsDict, wire: dict[str, object]) -> None
         ]
 
 
-def _encode_units(entry: CacheFactsDict, wire: dict[str, object]) -> None:
+def _encode_units(
+    entry: CacheFactsDict,
+    wire: dict[str, object],
+    *,
+    materialized_clone_channels: tuple[str, ...] = (),
+) -> None:
     units = sorted(
         entry["units"],
         key=lambda unit: (
@@ -72,47 +77,57 @@ def _encode_units(entry: CacheFactsDict, wire: dict[str, object]) -> None:
         # sequence carried there would read as "no statements" on a stale entry
         # and a warm run would silently report zero near-miss pairs. As its own
         # key its ABSENCE rejects the entry instead, and rejection just means
-        # the file is re-analysed (39Y Y8).
-        wire["us"] = [
-            [
-                unit["qualname"],
-                unit["start_line"],
+        # the file is re-analysed (39Y Y8). Since CACHE_VERSION 3.8 each key
+        # is emitted exactly when the ``mt`` witness claims a channel that
+        # consumes it (the table lives in _wire_decode._CLONE_KEY_CLAIMS):
+        # absence became a legal, declared state — "not materialized" — and
+        # the witness, not the key, is what the reuse gate reads.
+        if "near_miss" in materialized_clone_channels:
+            wire["us"] = [
                 [
-                    field
-                    for element in unit.get("statement_sequence", ())
-                    for field in (element[0], element[1], element[2])
-                ],
+                    unit["qualname"],
+                    unit["start_line"],
+                    [
+                        field
+                        for element in unit.get("statement_sequence", ())
+                        for field in (element[0], element[1], element[2])
+                    ],
+                ]
+                for unit in units
             ]
-            for unit in units
-        ]
-        # Same own-key/absence-rejects carriage as "us" (Wave C, CACHE_VERSION
-        # 3.3): the renamed-structure digest is computed from the AST, which a
-        # warm run never re-parses. A stale entry without this key must reject
-        # rather than decode into units that merely look digest-free.
-        wire["uc"] = [
-            [
-                unit["qualname"],
-                unit["start_line"],
-                unit.get("renamed_fingerprint", ""),
+        # Same own-key carriage as "us" (Wave C, CACHE_VERSION 3.3), under
+        # the ``renamed_structure`` channel since 3.8: the renamed-structure
+        # digest is computed from the AST, which a warm run never re-parses,
+        # and only the renamed-structure tier reads it.
+        if "renamed_structure" in materialized_clone_channels:
+            wire["uc"] = [
+                [
+                    unit["qualname"],
+                    unit["start_line"],
+                    unit.get("renamed_fingerprint", ""),
+                ]
+                for unit in units
             ]
-            for unit in units
-        ]
         # The renamed-canonical statement sequence (the CxB composition,
-        # CACHE_VERSION 3.4): same row shape as "us", same own-key law. A
-        # stale entry without this key must reject rather than decode into
-        # units whose warm run would silently report only y8-domain pairs.
-        wire["urs"] = [
-            [
-                unit["qualname"],
-                unit["start_line"],
+        # CACHE_VERSION 3.4): same row shape as "us". Claimed by EITHER
+        # channel — the near-miss tier's ``renamed`` token domain reads it
+        # beside the renamed-structure tier — so it rides whenever one of
+        # its two consumers was asked for.
+        if "near_miss" in materialized_clone_channels or (
+            "renamed_structure" in materialized_clone_channels
+        ):
+            wire["urs"] = [
                 [
-                    field
-                    for element in unit.get("renamed_statement_sequence", ())
-                    for field in (element[0], element[1], element[2])
-                ],
+                    unit["qualname"],
+                    unit["start_line"],
+                    [
+                        field
+                        for element in unit.get("renamed_statement_sequence", ())
+                        for field in (element[0], element[1], element[2])
+                    ],
+                ]
+                for unit in units
             ]
-            for unit in units
-        ]
         # Same reasoning one lane over (39Y Y9): the CFG is built only on the
         # analysed path, so a warm run cannot recompute reachability. Carried
         # as its own key, an entry written before the fact existed is rejected
@@ -716,7 +731,15 @@ def _encode_wire_file_entry(entry: CacheEntryV3) -> dict[str, object]:
     neutral_facts = _neutral_facts(entry)
     dependent_facts = _dependent_facts(entry)
     _encode_source_stats(neutral_facts, neutral_wire)
-    _encode_units(neutral_facts, neutral_wire)
+    # The materialization witness (CACHE_VERSION 3.8) is mandatory on every
+    # entry — including one with no units — so a reader never has to infer
+    # the writing configuration from which payload keys happen to exist.
+    neutral_wire["mt"] = list(entry.module_neutral.materialized_clone_channels)
+    _encode_units(
+        neutral_facts,
+        neutral_wire,
+        materialized_clone_channels=entry.module_neutral.materialized_clone_channels,
+    )
     _encode_blocks(neutral_facts, neutral_wire)
     _encode_segments(neutral_facts, neutral_wire)
     _encode_semantic_facts(entry, neutral_wire)

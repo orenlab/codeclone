@@ -164,6 +164,7 @@ def _assert_profile_input_misses_only_dependent_lane(
         entry=entry,
         neutral_profile=neutral_profile,
         dependent_profile=current_dependent_profile,
+        required_clone_channels=(),
     )
 
     assert legacy_dependent_profile != current_dependent_profile

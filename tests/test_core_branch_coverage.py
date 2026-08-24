@@ -1411,8 +1411,9 @@ def _discover_with_single_cached_entry(
             content: ContentIdentityVerdict,
             entry: CacheEntryV3,
             runtime_path: str,
+            required_clone_channels: tuple[str, ...] = (),
         ) -> CacheReuseDecision:
-            del entry, runtime_path
+            del entry, runtime_path, required_clone_channels
             if not content.hit:
                 miss = CacheLaneVerdict(hit=False, reason="content_miss")
                 return CacheReuseDecision(neutral=miss, dependent=miss)

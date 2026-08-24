@@ -336,7 +336,23 @@ TIER_STATE_COMPLETE: Final = "complete"
 # is no byte-stable path for the widened row, the checksummed scope, the
 # key-name change, or the dependency-row schema, so the bump IS the
 # compatibility guarantee.
-CACHE_VERSION: Final = "3.7"
+#
+# 3.8 carries the clone-artifact materialization witness (tier ruling T2,
+# 2026-08-24): the neutral wire gains the mandatory ``mt`` key naming which
+# opt-in artifact channels (``near_miss``, ``renamed_structure``) the writing
+# extraction actually computed, and the ``us``/``uc``/``urs`` payload keys are
+# emitted exactly when their channel is claimed. Under 3.7 the artifacts were
+# computed unconditionally, so absence of a payload could only mean a stale
+# entry and "absence rejects" was a complete law. Once disabled tiers stop
+# paying for artifacts, the row needs a legal way to say "not materialized"
+# that no reader can confuse with "materialized empty" — measured on 3.7:
+# present-but-empty sequence rows load as OK, warm-hit, and report zero
+# near-miss pairs where a cold run reports five. The witness is that legal
+# form; decode rejects a row whose witness disagrees with its payload keys in
+# either direction, and the neutral reuse gate demands witness == the running
+# configuration's channels. 3.7 caches are rejected at the version gate and
+# re-analysed — there is no byte-stable path for the mandatory key.
+CACHE_VERSION: Final = "3.8"
 # 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
 # changed. "complete" became "complete_nonempty" and "complete_empty" joined
 # it, because one word was carrying two facts — a population that exists and

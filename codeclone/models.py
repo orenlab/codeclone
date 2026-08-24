@@ -1244,12 +1244,21 @@ class StructuralFindingGroupDict(TypedDict):
 
 CacheLaneReuseReason = Literal[
     "binding_context_mismatch",
+    "clone_channels_mismatch",
     "content_miss",
     "dependent_profile_mismatch",
     "hit",
     "malformed_payload",
     "neutral_profile_mismatch",
 ]
+
+#: The closed vocabulary of opt-in clone-artifact channels (tier ruling T2).
+#: Each name is a detection tier whose per-unit artifacts are computed only
+#: when the tier is asked for: ``near_miss`` owns ``Unit.statement_sequence``
+#: (39Y Y8) and ``renamed_structure`` owns ``Unit.renamed_fingerprint`` plus
+#: ``Unit.renamed_statement_sequence`` (Wave C). The names are the option
+#: dests in ``config/spec.py`` — one owner, one spelling.
+CloneArtifactChannel = Literal["near_miss", "renamed_structure"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1305,6 +1314,12 @@ class CacheNeutralPayload:
     blocks: tuple[CacheNeutralBlock, ...]
     segments: tuple[CacheNeutralSegment, ...]
     semantic_facts: SemanticFileFacts
+    #: The materialization witness (CACHE_VERSION 3.8): which clone-artifact
+    #: channels the writing extraction actually produced, sorted. The reuse
+    #: gate reads THIS, never the artifact fields — an empty sequence and a
+    #: never-computed sequence are byte-identical on a unit row, and guessing
+    #: between them is the measured B8 lie the witness exists to forbid.
+    materialized_clone_channels: tuple[CloneArtifactChannel, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

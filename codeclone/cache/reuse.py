@@ -41,6 +41,7 @@ from ..models import (
     CacheLaneReuseReason,
     CacheLaneVerdict,
     CacheReuseDecision,
+    CloneArtifactChannel,
     ContentIdentityVerdict,
     DigestObject,
     FileStat,
@@ -219,6 +220,26 @@ def build_module_dependent_profile(
     )
 
 
+def clone_artifact_channels(
+    *,
+    near_miss: bool,
+    renamed_structure: bool,
+) -> tuple[CloneArtifactChannel, ...]:
+    """Canonical channel tuple for one run configuration, sorted.
+
+    One constructor for both uses of the vocabulary — the witness a writing
+    run stamps on its rows and the requirement a reading run compares against
+    — so the two can never drift into different spellings or orders.
+    """
+
+    channels: list[CloneArtifactChannel] = []
+    if near_miss:
+        channels.append("near_miss")
+    if renamed_structure:
+        channels.append("renamed_structure")
+    return tuple(channels)
+
+
 def binding_context_digest(module: PythonModuleIdentity | None) -> DigestObject:
     """Digest the binding-context inputs that are not in the file's own bytes.
 
@@ -255,6 +276,7 @@ def cache_reuse_decision(
     neutral_profile: DigestObject,
     dependent_profile: DigestObject,
     binding_context: DigestObject,
+    required_clone_channels: tuple[CloneArtifactChannel, ...],
 ) -> CacheReuseDecision:
     if not content.hit:
         miss = CacheLaneVerdict(hit=False, reason="content_miss")
@@ -265,13 +287,27 @@ def cache_reuse_decision(
     # beside the profile. The dependent lane already keys on the whole module
     # manifest, which moves whenever any module identity does.
     binding_hit = entry.binding_context_digest == binding_context
-    neutral_hit = entry.module_neutral_profile == neutral_profile and binding_hit
+    # T2: the materialization witness must equal this run's channel set —
+    # strictly, in both directions. A row missing a required channel has no
+    # artifacts to serve ("not materialized" is recomputed, never read as
+    # "materialized empty"); a row carrying an unrequired channel would hand
+    # a warm run artifacts its own cold extraction never computes. Equality
+    # is the only shape under which warm output is cold output by
+    # construction.
+    channels_hit = entry.module_neutral.materialized_clone_channels == tuple(
+        required_clone_channels
+    )
+    neutral_hit = (
+        entry.module_neutral_profile == neutral_profile and binding_hit and channels_hit
+    )
     dependent_hit = entry.module_dependent_profile == dependent_profile
     neutral_reason: CacheLaneReuseReason = "hit"
     if not binding_hit:
         neutral_reason = "binding_context_mismatch"
-    elif not neutral_hit:
+    elif entry.module_neutral_profile != neutral_profile:
         neutral_reason = "neutral_profile_mismatch"
+    elif not channels_hit:
+        neutral_reason = "clone_channels_mismatch"
     return CacheReuseDecision(
         neutral=CacheLaneVerdict(hit=neutral_hit, reason=neutral_reason),
         dependent=CacheLaneVerdict(
@@ -359,6 +395,7 @@ __all__ = [
     "build_module_dependent_profile",
     "build_module_neutral_profile",
     "cache_reuse_decision",
+    "clone_artifact_channels",
     "git_blob_identity_for_parsed_source",
     "prove_cached_source_identity",
     "source_content_digest",

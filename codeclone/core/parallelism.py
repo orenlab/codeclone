@@ -12,6 +12,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from ..analysis.phase_ledger import PhaseLedger, PhaseSnapshot
 from ..cache.entries import SourceStatsDict
+from ..cache.reuse import clone_artifact_channels
 from ..cache.store import Cache
 from ..models import (
     ClassMetrics,
@@ -208,6 +209,17 @@ def process(
     api_include_private_modules = bool(
         getattr(boot.args, "api_include_private_modules", False)
     )
+    # Tier ruling T2: the flags decide what the workers materialize, and the
+    # SAME derivation stamps the materialization witness on every cache row
+    # written below — one derivation site, so the witness cannot disagree with
+    # what the extraction actually did. Flag ownership is unchanged: the
+    # ``near_miss`` / ``renamed_structure`` OptionSpecs in ``config/spec.py``.
+    collect_near_miss = bool(getattr(boot.args, "near_miss", False))
+    collect_renamed_structure = bool(getattr(boot.args, "renamed_structure", False))
+    materialized_clone_channels = clone_artifact_channels(
+        near_miss=collect_near_miss,
+        renamed_structure=collect_renamed_structure,
+    )
     files_analyzed = 0
     files_skipped = discovery.files_skipped
     analyzed_lines = 0
@@ -285,6 +297,7 @@ def process(
                 source_stats=source_stats_payload,
                 file_metrics=result.file_metrics,
                 structural_findings=structural_payload,
+                materialized_clone_channels=materialized_clone_channels,
             )
             files_analyzed += 1
             analyzed_lines += result.lines
@@ -365,6 +378,8 @@ def process(
                     collect_structural_findings=collect_structural_findings,
                     collect_api_surface=collect_api_surface,
                     api_include_private_modules=api_include_private_modules,
+                    collect_near_miss=collect_near_miss,
+                    collect_renamed_structure=collect_renamed_structure,
                     block_min_loc=block_min_loc,
                     block_min_stmt=block_min_stmt,
                     segment_min_loc=segment_min_loc,
@@ -399,6 +414,8 @@ def process(
                                 collect_structural_findings=collect_structural_findings,
                                 collect_api_surface=collect_api_surface,
                                 api_include_private_modules=api_include_private_modules,
+                                collect_near_miss=collect_near_miss,
+                                collect_renamed_structure=collect_renamed_structure,
                                 block_min_loc=block_min_loc,
                                 block_min_stmt=block_min_stmt,
                                 segment_min_loc=segment_min_loc,
