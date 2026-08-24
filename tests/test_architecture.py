@@ -61,6 +61,7 @@ _RING_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("codeclone.blocks", "r2"),
     ("codeclone.budget", "r2"),
     ("codeclone.cache", "r2"),
+    ("codeclone.canonical", "r2"),
     ("codeclone.config", "r2"),
     ("codeclone.core", "r2"),
     ("codeclone.domain", "r2"),
@@ -266,8 +267,12 @@ def _model_store_violations(
     violations: dict[str, set[str]],
 ) -> None:
     for module_name, path in _iter_codeclone_modules(root):
+        # codeclone.canonical is the ratified canonical semantic model layer
+        # (F-3, 2026-08-13): a model store by design, on the same footing as
+        # codeclone.models — its typed identity/fact definitions live there
+        # and nowhere else.
         if module_name == "codeclone.models" or module_name.startswith(
-            "codeclone.models."
+            ("codeclone.models.", "codeclone.canonical")
         ):
             continue
         tree = ast.parse(path.read_text("utf-8"))

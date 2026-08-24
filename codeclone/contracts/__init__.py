@@ -35,6 +35,21 @@ PORTABLE_PATH_PROFILE_VERSION: Final = "1"
 # the previous vocabulary's events off a warm hit.
 SEMANTIC_EVENT_VERSION: Final = "1"
 CONTRACT_IR_VERSION: Final = "1"
+# Canonical normalized model (F-3) — the one semantic model shared by the
+# run-store backend and canonical JSON vNext. Revision "1" is the frozen
+# semantic substrate ratified 2026-08-13 (three-class value epistemics;
+# ModuleKey split by places; SYMBOL = (FILE, qualname), proven lossless
+# against the legacy ModuleKey addressing on the frozen corpus). Independent
+# of REPORT_SCHEMA_VERSION and of any storage schema revision by design: a
+# projection revision never reaches back into semantic identity.
+CANONICAL_MODEL_REVISION: Final = "1"
+# Wire revision of canonical JSON vNext. "0" is the pre-freeze draft grammar
+# built by backend wave 1 (root members: format, revisions, values, domains,
+# sets, scope, facts, integrity). The bump to "1" is the wire-freeze event
+# and belongs to the maintainer once the sanctioned closed list (mechanical
+# facts order, discriminator-first proof, columnar benchmark, lexical
+# float/escape law, exact integrity preimage, violation_id fixture) closes.
+CANONICAL_WIRE_REVISION: Final = "0"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"
@@ -709,6 +724,8 @@ __all__ = [
     "BASELINE_ROOT_DIGEST_DOMAIN",
     "BASELINE_SCHEMA_VERSION",
     "CACHE_VERSION",
+    "CANONICAL_MODEL_REVISION",
+    "CANONICAL_WIRE_REVISION",
     "CLONE_KIND_BLOCK",
     "CLONE_KIND_FUNCTION",
     "CLONE_KIND_SEGMENT",

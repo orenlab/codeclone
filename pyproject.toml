@@ -144,6 +144,7 @@ packages = [
     "codeclone.blocks",
     "codeclone.budget",
     "codeclone.cache",
+    "codeclone.canonical",
     "codeclone.config",
     "codeclone.contracts",
     "codeclone.controller_insights",

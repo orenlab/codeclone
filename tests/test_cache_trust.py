@@ -525,6 +525,16 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "AUTHORITY_ANALYSIS_REVISION": (_LANE_NONE, "aggregate authority pass, post-cache"),
     "AUTHORITY_REGISTRY_VERSION": (_LANE_NONE, "aggregate authority pass, post-cache"),
     "BASELINE_LANE_DESCRIPTOR_VERSION": (_LANE_NONE, "baseline lane descriptor"),
+    "CANONICAL_MODEL_REVISION": (
+        _LANE_NONE,
+        "canonical semantic model (F-3); no cache payload stores its output — "
+        "the run-store backend owns persistence from wave 2 on",
+    ),
+    "CANONICAL_WIRE_REVISION": (
+        _LANE_NONE,
+        "canonical JSON vNext wire grammar; an export projection, never a "
+        "cache payload",
+    ),
     "CONTRACT_IR_VERSION": (_LANE_NONE, "IR is built per run from cached summaries"),
     "GATE_LANE_MATRIX_VERSION": (_LANE_NONE, "gate projection, post-cache"),
     "HEALTH_INPUT_MANIFEST_VERSION": (_LANE_NONE, "health projection, post-cache"),
