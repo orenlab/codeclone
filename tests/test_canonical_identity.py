@@ -138,7 +138,8 @@ def test_canonical_order_is_shuffle_stable_and_injective() -> None:
         ),
         lambda: EffectLabelRoot("not_a_kind", "label"),
         lambda: EffectLabelRoot("artifact_write", ""),
-        lambda: OperationTarget(OpaqueDottedHead("x"), ""),
+        lambda: OperationTarget(KnownModule(ModuleId("pkg.a")), ""),
+        lambda: OperationTarget(AnalysisFile(FileId("pkg/a.py")), ""),
         lambda: OpaqueDottedHead(""),
         lambda: ModuleId(""),
         lambda: SymbolId(FileId("a.py"), ""),
@@ -149,6 +150,21 @@ def test_closed_vocabularies_and_empty_values_are_refused(
 ) -> None:
     with pytest.raises(CanonicalModelError):
         build()
+
+
+def test_colonless_opaque_target_is_admitted_and_distinct() -> None:
+    """Measured on the frozen corpus (wave 2): 21 of 1 080 operation
+    targets are one opaque dotted string with no ModuleKey colon.  They are
+    representable — empty local name under an opaque head only — and stay
+    distinct from every colon-split neighbour."""
+    whole = OperationRoot(
+        "canonical_operation", OperationTarget(OpaqueDottedHead("a.b.c"), "")
+    )
+    split = OperationRoot(
+        "canonical_operation", OperationTarget(OpaqueDottedHead("a.b"), "c")
+    )
+    assert canonical_key(whole) != canonical_key(split)
+    assert len({canonical_key(whole), canonical_key(split)}) == 2
 
 
 def test_canonical_key_refuses_foreign_values() -> None:

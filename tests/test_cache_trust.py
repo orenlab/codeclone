@@ -536,6 +536,12 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
         "cache payload",
     ),
     "CONTRACT_IR_VERSION": (_LANE_NONE, "IR is built per run from cached summaries"),
+    "STORAGE_SCHEMA_REVISION": (
+        _LANE_NONE,
+        "canonical run-store SQLite schema (wave 2); a separate persistence "
+        "boundary by law — never a cache payload, and the cache is never "
+        "required to reconstruct a published run",
+    ),
     "GATE_LANE_MATRIX_VERSION": (_LANE_NONE, "gate projection, post-cache"),
     "HEALTH_INPUT_MANIFEST_VERSION": (_LANE_NONE, "health projection, post-cache"),
     "NEAR_MISS_ALGORITHM_REVISION": (

@@ -181,14 +181,27 @@ class OperationTarget:
     Identity is separate from resolution: a later-proven resolution
     (re-export alias to a SYMBOL) is a separate fact and never rewrites
     this identity in place.
+
+    Measured on the frozen corpus (wave 2): 21 of 1 080 operation targets
+    carry no ModuleKey colon at all — the producer asserted one opaque
+    dotted string, not a ``head:local`` pair.  Splitting such a string at a
+    dot would manufacture structure the producer never asserted (the exact
+    defect class of the ``graph_packages`` projection), so the whole string
+    is the opaque head and ``local_name`` is empty.  An empty local name
+    under a ``KnownModule``/``AnalysisFile`` head stays refused: for those
+    the producer's grammar always carries a local name.
     """
 
     head: OperationHead
     local_name: str
 
     def __post_init__(self) -> None:
-        if not self.local_name:
-            raise CanonicalModelError("operation target local name must be non-empty")
+        if not self.local_name and not isinstance(self.head, OpaqueDottedHead):
+            raise CanonicalModelError(
+                "operation target local name may be empty only under an "
+                "opaque head (measured: 21 of 1 080 corpus targets are one "
+                "opaque dotted string)"
+            )
 
 
 @dataclass(frozen=True, slots=True)

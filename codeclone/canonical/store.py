@@ -1,0 +1,1186 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+"""SQLite run-store of the canonical model — backend wave 2 (state is
+written; no incrementality).
+
+The store holds **immutable content-addressed fact objects** and **run
+membership snapshots** over them (brief §3): two runs may share storage,
+but a run never semantically depends on another run, and deleting a
+neighbour never makes a run unreadable.  The store is separate from the
+analysis cache by law (brief §2.1): nothing here is required to
+reconstruct a cache, and no cache write participates in the authoritative
+publish transaction.
+
+Walls held here, and where:
+
+* ``cache != truth`` — this module never touches the analysis cache.
+* ``run != previous run + patch`` — a run is a full membership snapshot;
+  there are no delta chains and no inter-run references.
+* ``SQLite ID != canonical ID`` (wall 3) — every internal ``*_pk`` stays
+  inside this module; the API speaks ``run_id`` / ``object_id`` content
+  digests only, and both are recomputed from bytes, never from rowids.
+* ``normalized != expanded legacy`` — the store persists canonical model
+  rows; the legacy report shape never enters.
+
+Storage payload bytes are a *storage representation* of the one canonical
+model (F-3 §13: one semantic model, two representations).  They are not a
+second truth: law L8 (``project(store) == project(model)``) is proven by
+reading a run back and re-encoding it byte-identically, and every stored
+payload re-hashes to its own content address on read.
+
+Cross-version safety (brief §4): the store carries a **layered
+compatibility witness**; ``open`` refuses an incompatible generation (law
+7), and every mutating transaction re-reads the store generation and
+refuses when it moved under the handle — fencing on each mutation, not
+only at ``open`` (§4.2).
+
+Atomic publish (brief §10): objects, run row, and membership are staged
+inside one immediate transaction with ``published = 0``; digests are
+re-verified **from the database rows**, the run flips to ``published = 1``
+and the target head advances by compare-and-swap — all in the same
+transaction.  Death anywhere leaves the previous head true; readers never
+see an unpublished run.  A publisher whose expected generation is stale
+keeps its run as a valid immutable run but does not advance the head
+(brief §6.1) — monotonic head advancement, law 8.
+
+Object identity follows F-3 §5.0.0/§5.0.1: the content address is
+``H(namespace · family · family contract namespace · payload)``, so a
+model-local identity shares storage only inside one semantic namespace,
+and a fact never silently crosses a producer revision.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from types import TracebackType
+from typing import Final, cast
+
+from codeclone.canonical.codec import encode_canonical_json
+from codeclone.canonical.errors import (
+    CanonicalModelError,
+    RunStoreError,
+    StoreCompatibilityError,
+    StoreFenceError,
+    StoreIntegrityError,
+    UnknownRunError,
+)
+from codeclone.canonical.identity import (
+    AnalysisFile,
+    DependencyEndpoint,
+    EffectLabelRoot,
+    EffectRoot,
+    FileId,
+    KnownModule,
+    ModuleId,
+    OpaqueDottedHead,
+    OperationHead,
+    OperationRoot,
+    OperationTarget,
+    ProducerRoot,
+    SymbolId,
+    UnresolvedRoot,
+    canonical_key,
+)
+from codeclone.canonical.model import (
+    CandidateRow,
+    CanonicalFacts,
+    CanonicalModel,
+    ContractRow,
+    DependencyEdgeRow,
+    FileModuleRelation,
+    GraphNodeRow,
+    SemanticEdge,
+    SinkRoleRow,
+    ViolationRow,
+)
+from codeclone.contracts import (
+    AUTHORITY_ANALYSIS_REVISION,
+    CANONICAL_MODEL_REVISION,
+    CANONICAL_WIRE_REVISION,
+    CONTRACT_IR_VERSION,
+    MODULE_IDENTITY_VERSION,
+    STORAGE_SCHEMA_REVISION,
+)
+
+_DOMAIN_PREFIX: Final = f"cc-run-store:{STORAGE_SCHEMA_REVISION}\x00".encode()
+_DOMAIN_OBJECT: Final = _DOMAIN_PREFIX + b"object\x00"
+_DOMAIN_RUN: Final = _DOMAIN_PREFIX + b"run\x00"
+_DOMAIN_SCOPE: Final = _DOMAIN_PREFIX + b"scope\x00"
+_DOMAIN_MEMBERSHIP: Final = _DOMAIN_PREFIX + b"membership\x00"
+_DOMAIN_CONTRACT_EPOCH: Final = _DOMAIN_PREFIX + b"contract-epoch\x00"
+
+# Layered compatibility witness (brief §4.1).  ``analysis`` layers enter the
+# run identity; the ``projection`` layer (wire revision) and the ``storage``
+# layer do not — a projection revision never reaches back into semantic run
+# identity (brief §5), and storage physics is not semantics.  All layers
+# participate in the witness comparison and in the fenced contract epoch.
+_WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
+    ("authority_analysis", AUTHORITY_ANALYSIS_REVISION, "analysis"),
+    ("canonical_model", CANONICAL_MODEL_REVISION, "analysis"),
+    ("canonical_wire", CANONICAL_WIRE_REVISION, "projection"),
+    ("contract_ir", CONTRACT_IR_VERSION, "analysis"),
+    ("module_identity", MODULE_IDENTITY_VERSION, "analysis"),
+    ("storage_schema", STORAGE_SCHEMA_REVISION, "storage"),
+)
+
+# Family contract namespaces (F-3 §5.0.1): a fact's content address carries
+# the revision of the contract that gives it meaning, so a fact identity
+# never silently crosses a producer revision.
+_FAMILY_NAMESPACE: Final[dict[str, str]] = {
+    "analyzed_file": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    "candidate": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+    "contract": f"contract_ir:{CONTRACT_IR_VERSION}",
+    "coupled_set": f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    "dependency_edge": f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    "file": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    "file_module": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    "graph_node": f"contract_ir:{CONTRACT_IR_VERSION}",
+    "module": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    "semantic_edge": f"contract_ir:{CONTRACT_IR_VERSION}",
+    "sink_role": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+    "violation": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+}
+
+_SCHEMA: Final = """
+CREATE TABLE IF NOT EXISTS store_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    store_epoch INTEGER NOT NULL,
+    storage_schema_revision TEXT NOT NULL,
+    contract_epoch TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS witness (
+    layer TEXT PRIMARY KEY,
+    revision TEXT NOT NULL,
+    role TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS namespaces (
+    namespace_pk INTEGER PRIMARY KEY,
+    namespace TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS objects (
+    object_pk INTEGER PRIMARY KEY,
+    namespace_pk INTEGER NOT NULL REFERENCES namespaces(namespace_pk),
+    object_id TEXT NOT NULL,
+    family TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    UNIQUE (namespace_pk, object_id)
+);
+CREATE TABLE IF NOT EXISTS runs (
+    run_pk INTEGER PRIMARY KEY,
+    namespace_pk INTEGER NOT NULL REFERENCES namespaces(namespace_pk),
+    run_id TEXT NOT NULL UNIQUE,
+    analysis_scope_digest TEXT NOT NULL,
+    membership_digest TEXT NOT NULL,
+    published INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS run_members (
+    run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
+    object_pk INTEGER NOT NULL REFERENCES objects(object_pk),
+    PRIMARY KEY (run_pk, object_pk)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS heads (
+    namespace_pk INTEGER NOT NULL REFERENCES namespaces(namespace_pk),
+    target TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
+    PRIMARY KEY (namespace_pk, target)
+) WITHOUT ROWID;
+"""
+
+
+# ---------------------------------------------------------------------------
+# Storage row codec — the storage representation of model rows.
+# ---------------------------------------------------------------------------
+
+
+def _payload_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError) as error:
+        raise CanonicalModelError(f"value has no storage form: {error}") from error
+
+
+def _symbol_value(symbol: SymbolId) -> list[str]:
+    return [symbol.file.path, symbol.qualname]
+
+
+def _decode_symbol(value: object, where: str) -> SymbolId:
+    if not isinstance(value, list) or len(value) != 2:
+        raise StoreIntegrityError(f"{where}: stored symbol is not a [path, qualname]")
+    path, qualname = value
+    if not isinstance(path, str) or not isinstance(qualname, str):
+        raise StoreIntegrityError(f"{where}: stored symbol is not a [path, qualname]")
+    return SymbolId(FileId(path), qualname)
+
+
+def _endpoint_value(endpoint: DependencyEndpoint) -> list[str]:
+    if isinstance(endpoint, ModuleId):
+        return ["module", endpoint.module]
+    return ["file", endpoint.path]
+
+
+def _decode_endpoint(value: object, where: str) -> DependencyEndpoint:
+    if not isinstance(value, list) or len(value) != 2:
+        raise StoreIntegrityError(f"{where}: stored endpoint is not a [tag, value]")
+    tag, text = value
+    if not isinstance(tag, str) or not isinstance(text, str):
+        raise StoreIntegrityError(f"{where}: stored endpoint is not a [tag, value]")
+    if tag == "module":
+        return ModuleId(text)
+    if tag == "file":
+        return FileId(text)
+    raise StoreIntegrityError(f"{where}: unknown endpoint tag {tag!r}")
+
+
+def _head_value(head: OperationHead) -> list[str]:
+    if isinstance(head, KnownModule):
+        return ["module", head.module.module]
+    if isinstance(head, AnalysisFile):
+        return ["file", head.file.path]
+    return ["opaque", head.text]
+
+
+def _decode_head(value: object, where: str) -> OperationHead:
+    if not isinstance(value, list) or len(value) != 2:
+        raise StoreIntegrityError(f"{where}: stored head is not a [tag, value]")
+    tag, text = value
+    if not isinstance(tag, str) or not isinstance(text, str):
+        raise StoreIntegrityError(f"{where}: stored head is not a [tag, value]")
+    if tag == "module":
+        return KnownModule(ModuleId(text))
+    if tag == "file":
+        return AnalysisFile(FileId(text))
+    if tag == "opaque":
+        return OpaqueDottedHead(text)
+    raise StoreIntegrityError(f"{where}: unknown head tag {tag!r}")
+
+
+def _root_value(root: EffectRoot) -> list[object]:
+    if isinstance(root, OperationRoot):
+        return [
+            "operation",
+            root.operation_kind,
+            _head_value(root.target.head),
+            root.target.local_name,
+        ]
+    if isinstance(root, ProducerRoot):
+        return ["producer", *_symbol_value(root.target)]
+    if isinstance(root, EffectLabelRoot):
+        return ["effect", root.effect_kind, root.label]
+    return ["unresolved"]
+
+
+def _root_strings(
+    first: object, second: object, where: str, what: str
+) -> tuple[str, str]:
+    """The shared string-pair guard of the operation and effect variants."""
+    if not isinstance(first, str) or not isinstance(second, str):
+        raise StoreIntegrityError(f"{where}: malformed {what} root")
+    return first, second
+
+
+def _decode_root(value: object, where: str) -> EffectRoot:
+    if not isinstance(value, list) or not value or not isinstance(value[0], str):
+        raise StoreIntegrityError(f"{where}: stored root has no family tag")
+    family = value[0]
+    if family == "unresolved" and len(value) == 1:
+        return UnresolvedRoot()
+    if family == "operation" and len(value) == 4:
+        kind, local_name = _root_strings(value[1], value[3], where, "operation")
+        return OperationRoot(
+            kind, OperationTarget(_decode_head(value[2], where), local_name)
+        )
+    if family == "producer" and len(value) == 3:
+        return ProducerRoot(_decode_symbol(value[1:], where))
+    if family == "effect" and len(value) == 3:
+        return EffectLabelRoot(*_root_strings(value[1], value[2], where, "effect"))
+    raise StoreIntegrityError(f"{where}: unknown stored root family {family!r}")
+
+
+def _sorted_symbols(symbols: frozenset[SymbolId]) -> list[list[str]]:
+    return [_symbol_value(s) for s in sorted(symbols, key=canonical_key)]
+
+
+def _sorted_roots(roots: frozenset[EffectRoot]) -> list[list[object]]:
+    return [_root_value(r) for r in sorted(roots, key=canonical_key)]
+
+
+def _decode_symbol_set(value: object, where: str) -> frozenset[SymbolId]:
+    if not isinstance(value, list):
+        raise StoreIntegrityError(f"{where}: stored symbol set is not an array")
+    return frozenset(_decode_symbol(item, where) for item in value)
+
+
+def _decode_root_set(value: object, where: str) -> frozenset[EffectRoot]:
+    if not isinstance(value, list):
+        raise StoreIntegrityError(f"{where}: stored root set is not an array")
+    return frozenset(_decode_root(item, where) for item in value)
+
+
+def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
+    """Every storage row of one normalized model, deterministically ordered."""
+    facts = model.facts
+    for file_id in sorted(model.files, key=canonical_key):
+        yield "file", {"path": file_id.path}
+    for module in sorted(model.modules, key=canonical_key):
+        yield "module", {"module": module.module}
+    for file_id in sorted(model.analyzed_files, key=canonical_key):
+        yield "analyzed_file", {"path": file_id.path}
+    for relation in sorted(
+        model.file_modules,
+        key=lambda rel: (canonical_key(rel.file), canonical_key(rel.module)),
+    ):
+        yield (
+            "file_module",
+            {"file": relation.file.path, "module": relation.module.module},
+        )
+    for labels in sorted(sorted(group) for group in model.coupled_sets):
+        yield "coupled_set", {"labels": list(labels)}
+    for contract in sorted(
+        facts.contracts, key=lambda row: canonical_key(row.function)
+    ):
+        yield (
+            "contract",
+            {
+                "effect_signature": contract.effect_signature,
+                "function": _symbol_value(contract.function),
+                "root_set": _sorted_roots(contract.root_set),
+            },
+        )
+    for node in sorted(facts.graph_nodes, key=lambda row: canonical_key(row.function)):
+        yield (
+            "graph_node",
+            {
+                "effect_signature": node.effect_signature,
+                "function": _symbol_value(node.function),
+                "output_facts": list(node.output_facts),
+                "resolution_state": node.resolution_state,
+                "root_set": _sorted_roots(node.root_set),
+            },
+        )
+    for sink in sorted(facts.sink_roles, key=lambda row: canonical_key(row.symbol)):
+        yield (
+            "sink_role",
+            {
+                "authority_status": sink.authority_status,
+                "symbol": _symbol_value(sink.symbol),
+            },
+        )
+    for candidate in sorted(
+        facts.candidates,
+        key=lambda row: (row.level, row.shared_fact, _sorted_symbols(row.producer_set)),
+    ):
+        yield (
+            "candidate",
+            {
+                "level": candidate.level,
+                "producer_set": _sorted_symbols(candidate.producer_set),
+                "shared_fact": candidate.shared_fact,
+            },
+        )
+    for edge in sorted(
+        facts.semantic_edges,
+        key=lambda row: (canonical_key(row.source), canonical_key(row.target)),
+    ):
+        yield (
+            "semantic_edge",
+            {
+                "source": _symbol_value(edge.source),
+                "target": _symbol_value(edge.target),
+            },
+        )
+    for dep in sorted(
+        facts.dependency_edges,
+        key=lambda row: (
+            _endpoint_value(row.source),
+            _endpoint_value(row.target),
+            row.import_type,
+            row.line,
+        ),
+    ):
+        yield (
+            "dependency_edge",
+            {
+                "binding": dep.binding,
+                "import_type": dep.import_type,
+                "is_lazy": dep.is_lazy,
+                "line": dep.line,
+                "source": _endpoint_value(dep.source),
+                "target": _endpoint_value(dep.target),
+            },
+        )
+    for violation in sorted(
+        facts.violations,
+        key=lambda row: (
+            row.contract_id,
+            row.kind,
+            canonical_key(row.sink_identity),
+            _sorted_symbols(row.producer_set),
+        ),
+    ):
+        yield (
+            "violation",
+            {
+                "authority_status": violation.authority_status,
+                "canonical_owner": _symbol_value(violation.canonical_owner),
+                "contract_id": violation.contract_id,
+                "effect_signature": violation.effect_signature,
+                "kind": violation.kind,
+                "producer_set": _sorted_symbols(violation.producer_set),
+                "resolution_state": violation.resolution_state,
+                "root_set": _sorted_roots(violation.root_set),
+                "sink_identity": _symbol_value(violation.sink_identity),
+                "suppressed": violation.suppressed,
+            },
+        )
+
+
+def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
+    if key not in row:
+        raise StoreIntegrityError(f"{where}: stored row is missing {key!r}")
+    return row[key]
+
+
+def _require_str(row: Mapping[str, object], key: str, where: str) -> str:
+    value = _require_field(row, key, where)
+    if not isinstance(value, str):
+        raise StoreIntegrityError(f"{where}: stored field {key!r} is not a string")
+    return value
+
+
+def _require_str_list(row: Mapping[str, object], key: str, where: str) -> list[str]:
+    values = _require_field(row, key, where)
+    if not isinstance(values, list):
+        raise StoreIntegrityError(f"{where}: stored field {key!r} is not an array")
+    items: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            raise StoreIntegrityError(
+                f"{where}: stored field {key!r} carries a non-string"
+            )
+        items.append(item)
+    return items
+
+
+def _require_bool(row: Mapping[str, object], key: str, where: str) -> bool:
+    value = _require_field(row, key, where)
+    if not isinstance(value, bool):
+        raise StoreIntegrityError(f"{where}: stored field {key!r} is not a boolean")
+    return value
+
+
+def _require_line(row: Mapping[str, object], key: str, where: str) -> int:
+    value = _require_field(row, key, where)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise StoreIntegrityError(f"{where}: stored field {key!r} is not an int")
+    return value
+
+
+def _row_symbol(row: Mapping[str, object], key: str, where: str) -> SymbolId:
+    return _decode_symbol(_require_field(row, key, where), where)
+
+
+def _decode_file_row(row: Mapping[str, object], where: str) -> FileId:
+    return FileId(_require_str(row, "path", where))
+
+
+def _decode_module_row(row: Mapping[str, object], where: str) -> ModuleId:
+    return ModuleId(_require_str(row, "module", where))
+
+
+def _decode_file_module_row(
+    row: Mapping[str, object], where: str
+) -> FileModuleRelation:
+    return FileModuleRelation(
+        FileId(_require_str(row, "file", where)),
+        ModuleId(_require_str(row, "module", where)),
+    )
+
+
+def _decode_coupled_row(row: Mapping[str, object], where: str) -> frozenset[str]:
+    return frozenset(_require_str_list(row, "labels", where))
+
+
+def _decode_contract_row(row: Mapping[str, object], where: str) -> ContractRow:
+    return ContractRow(
+        function=_row_symbol(row, "function", where),
+        effect_signature=_require_str(row, "effect_signature", where),
+        root_set=_decode_root_set(_require_field(row, "root_set", where), where),
+    )
+
+
+def _decode_graph_node_row(row: Mapping[str, object], where: str) -> GraphNodeRow:
+    return GraphNodeRow(
+        function=_row_symbol(row, "function", where),
+        effect_signature=_require_str(row, "effect_signature", where),
+        root_set=_decode_root_set(_require_field(row, "root_set", where), where),
+        output_facts=tuple(_require_str_list(row, "output_facts", where)),
+        resolution_state=_require_str(row, "resolution_state", where),
+    )
+
+
+def _decode_sink_role_row(row: Mapping[str, object], where: str) -> SinkRoleRow:
+    return SinkRoleRow(
+        symbol=_row_symbol(row, "symbol", where),
+        authority_status=_require_str(row, "authority_status", where),
+    )
+
+
+def _decode_candidate_row(row: Mapping[str, object], where: str) -> CandidateRow:
+    return CandidateRow(
+        level=_require_str(row, "level", where),
+        shared_fact=_require_str(row, "shared_fact", where),
+        producer_set=_decode_symbol_set(
+            _require_field(row, "producer_set", where), where
+        ),
+    )
+
+
+def _decode_semantic_edge_row(row: Mapping[str, object], where: str) -> SemanticEdge:
+    return SemanticEdge(
+        source=_row_symbol(row, "source", where),
+        target=_row_symbol(row, "target", where),
+    )
+
+
+def _decode_dependency_edge_row(
+    row: Mapping[str, object], where: str
+) -> DependencyEdgeRow:
+    return DependencyEdgeRow(
+        source=_decode_endpoint(_require_field(row, "source", where), where),
+        target=_decode_endpoint(_require_field(row, "target", where), where),
+        import_type=_require_str(row, "import_type", where),
+        line=_require_line(row, "line", where),
+        binding=_require_str(row, "binding", where),
+        is_lazy=_require_bool(row, "is_lazy", where),
+    )
+
+
+def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow:
+    return ViolationRow(
+        contract_id=_require_str(row, "contract_id", where),
+        kind=_require_str(row, "kind", where),
+        sink_identity=_row_symbol(row, "sink_identity", where),
+        canonical_owner=_row_symbol(row, "canonical_owner", where),
+        authority_status=_require_str(row, "authority_status", where),
+        effect_signature=_require_str(row, "effect_signature", where),
+        resolution_state=_require_str(row, "resolution_state", where),
+        root_set=_decode_root_set(_require_field(row, "root_set", where), where),
+        producer_set=_decode_symbol_set(
+            _require_field(row, "producer_set", where), where
+        ),
+        suppressed=_require_bool(row, "suppressed", where),
+    )
+
+
+# One decoder per storage family — the mechanical inverse of _model_rows.
+# Dispatch is total over _FAMILY_NAMESPACE; an unknown family is a typed
+# integrity refusal at the call site, never a silent skip.
+_ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] = {
+    "analyzed_file": _decode_file_row,
+    "candidate": _decode_candidate_row,
+    "contract": _decode_contract_row,
+    "coupled_set": _decode_coupled_row,
+    "dependency_edge": _decode_dependency_edge_row,
+    "file": _decode_file_row,
+    "file_module": _decode_file_module_row,
+    "graph_node": _decode_graph_node_row,
+    "module": _decode_module_row,
+    "semantic_edge": _decode_semantic_edge_row,
+    "sink_role": _decode_sink_role_row,
+    "violation": _decode_violation_row,
+}
+
+
+def _decode_row(family: str, row: Mapping[str, object], where: str) -> object:
+    decoder = _ROW_DECODERS.get(family)
+    if decoder is None:
+        raise StoreIntegrityError(f"{where}: unknown stored family {family!r}")
+    try:
+        return decoder(row, where)
+    except CanonicalModelError as error:
+        raise StoreIntegrityError(f"{where}: {error}") from error
+
+
+def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
+    """Assemble decoded family rows into one canonical model."""
+
+    def family(name: str) -> list[object]:
+        return collected.get(name, [])
+
+    return CanonicalModel(
+        files=frozenset(cast("list[FileId]", family("file"))),
+        modules=frozenset(cast("list[ModuleId]", family("module"))),
+        analyzed_files=frozenset(cast("list[FileId]", family("analyzed_file"))),
+        file_modules=frozenset(cast("list[FileModuleRelation]", family("file_module"))),
+        facts=CanonicalFacts(
+            contracts=frozenset(cast("list[ContractRow]", family("contract"))),
+            graph_nodes=frozenset(cast("list[GraphNodeRow]", family("graph_node"))),
+            sink_roles=frozenset(cast("list[SinkRoleRow]", family("sink_role"))),
+            candidates=frozenset(cast("list[CandidateRow]", family("candidate"))),
+            semantic_edges=frozenset(
+                cast("list[SemanticEdge]", family("semantic_edge"))
+            ),
+            dependency_edges=frozenset(
+                cast("list[DependencyEdgeRow]", family("dependency_edge"))
+            ),
+            violations=frozenset(cast("list[ViolationRow]", family("violation"))),
+        ),
+        coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Digests
+# ---------------------------------------------------------------------------
+
+
+def _object_id(namespace: str, family: str, payload: bytes) -> str:
+    preimage = b"\x00".join(
+        (
+            _DOMAIN_OBJECT + namespace.encode("utf-8"),
+            family.encode("utf-8"),
+            _FAMILY_NAMESPACE[family].encode("utf-8"),
+            payload,
+        )
+    )
+    return hashlib.sha256(preimage).hexdigest()
+
+
+def analysis_scope_digest(analyzed_files: frozenset[FileId]) -> str:
+    """Scope receipt digest (brief §7.1, wave-2 minimal honest input): the
+    canonical digest of the analyzed-file identity set."""
+    paths = sorted(file_id.path for file_id in analyzed_files)
+    return hashlib.sha256(_DOMAIN_SCOPE + _payload_bytes(paths)).hexdigest()
+
+
+def _membership_digest(object_ids: Sequence[str]) -> str:
+    joined = "\x00".join(sorted(object_ids)).encode("utf-8")
+    return hashlib.sha256(_DOMAIN_MEMBERSHIP + joined).hexdigest()
+
+
+def _run_id(namespace: str, scope_digest: str, membership_digest: str) -> str:
+    analysis_layers = [
+        f"{layer}:{revision}"
+        for layer, revision, role in _WITNESS_LAYERS
+        if role == "analysis"
+    ]
+    preimage = b"\x00".join(
+        (
+            _DOMAIN_RUN + namespace.encode("utf-8"),
+            "\x00".join(analysis_layers).encode("utf-8"),
+            scope_digest.encode("utf-8"),
+            membership_digest.encode("utf-8"),
+        )
+    )
+    return hashlib.sha256(preimage).hexdigest()
+
+
+def _contract_epoch() -> str:
+    layers = [f"{layer}:{revision}" for layer, revision, _role in _WITNESS_LAYERS]
+    return hashlib.sha256(
+        _DOMAIN_CONTRACT_EPOCH + "\x00".join(layers).encode("utf-8")
+    ).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Store transaction steps (module-level: RunStore owns transactions and
+# lifecycle; the pure steps live here, in the codec's function-per-step
+# style)
+# ---------------------------------------------------------------------------
+
+
+def _open_witness(cursor: sqlite3.Cursor) -> tuple[int, str, str]:
+    """Create-or-verify the layered witness; returns the fence triple.
+
+    Law 7: an existing store whose witness is not this process's declared
+    generation is refused, never reinterpreted.
+    """
+    meta = cursor.execute(
+        "SELECT store_epoch, storage_schema_revision, contract_epoch "
+        "FROM store_meta WHERE id = 1"
+    ).fetchone()
+    if meta is None:
+        for layer, revision, role in _WITNESS_LAYERS:
+            cursor.execute(
+                "INSERT INTO witness (layer, revision, role) VALUES (?, ?, ?)",
+                (layer, revision, role),
+            )
+        epoch = _contract_epoch()
+        cursor.execute(
+            "INSERT INTO store_meta "
+            "(id, store_epoch, storage_schema_revision, contract_epoch) "
+            "VALUES (1, 1, ?, ?)",
+            (STORAGE_SCHEMA_REVISION, epoch),
+        )
+        return (1, STORAGE_SCHEMA_REVISION, epoch)
+    stored = dict(cursor.execute("SELECT layer, revision FROM witness ORDER BY layer"))
+    declared = {layer: revision for layer, revision, _role in _WITNESS_LAYERS}
+    if stored != declared:
+        diverging = sorted(set(stored.items()) ^ set(declared.items()))
+        raise StoreCompatibilityError(
+            "store witness is not this process's declared generation; "
+            f"diverging layers: {diverging!r}. Refusing the stored "
+            "generation (law 7)."
+        )
+    return (int(meta[0]), str(meta[1]), str(meta[2]))
+
+
+def _fence_guard(cursor: sqlite3.Cursor, fence: tuple[int, str, str]) -> None:
+    """Refuse the mutation when the store generation moved under the handle
+    (brief §4.2: fencing on every mutation, not only at open)."""
+    row = cursor.execute(
+        "SELECT store_epoch, storage_schema_revision, contract_epoch "
+        "FROM store_meta WHERE id = 1"
+    ).fetchone()
+    current = (int(row[0]), str(row[1]), str(row[2])) if row else None
+    if current != fence:
+        raise StoreFenceError(
+            f"store generation moved under this handle (held {fence!r}, "
+            f"current {current!r}); write refused"
+        )
+
+
+def _require_publish_inputs(namespace: str, target: str) -> None:
+    if not namespace:
+        raise RunStoreError("namespace must be non-empty")
+    if not target:
+        raise RunStoreError("target must be non-empty")
+
+
+def _verify_staged_membership(
+    cursor: sqlite3.Cursor, run_pk: int, namespace: str, membership: str
+) -> None:
+    """Re-verify the staged run from the database rows themselves before
+    the publish flip (brief §10: verify digests inside the transaction).
+
+    Every member's bytes must still hash to its own content address: a
+    publish that sealed corrupted staging would produce a published run no
+    reader can decode — law 5 promises the previous generation or the next
+    COMPLETE one, never a published-but-unreadable state.  The membership
+    digest over the member ids must reproduce as well.
+    """
+    stored_ids: list[str] = []
+    for object_id_value, family, payload in cursor.execute(
+        "SELECT o.object_id, o.family, o.payload FROM run_members m "
+        "JOIN objects o ON o.object_pk = m.object_pk "
+        "WHERE m.run_pk = ? ORDER BY o.object_id",
+        (run_pk,),
+    ):
+        stored_id = str(object_id_value)
+        if _object_id(namespace, str(family), bytes(payload)) != stored_id:
+            raise StoreIntegrityError(
+                f"staged object {stored_id[:12]}… does not hash to its "
+                "content address; publish refused"
+            )
+        stored_ids.append(stored_id)
+    if _membership_digest(stored_ids) != membership:
+        raise RunStoreError(
+            "staged membership does not reproduce its digest; publish refused"
+        )
+
+
+def _published_run_row(
+    connection: sqlite3.Connection, run_id: str
+) -> tuple[int, str, str, str]:
+    row = connection.execute(
+        "SELECT r.run_pk, n.namespace, r.analysis_scope_digest, "
+        "r.membership_digest FROM runs r "
+        "JOIN namespaces n ON n.namespace_pk = r.namespace_pk "
+        "WHERE r.run_id = ? AND r.published = 1",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        raise UnknownRunError(f"run {run_id!r} is not a published run")
+    return (int(row[0]), str(row[1]), str(row[2]), str(row[3]))
+
+
+def _reconstruct_run(
+    connection: sqlite3.Connection,
+    *,
+    run_pk: int,
+    namespace: str,
+    scope_digest: str,
+    membership: str,
+    run_id: str,
+) -> CanonicalModel:
+    """Rebuild one published run, proving every stored byte on the way.
+
+    Every payload is re-hashed against its content address, the membership
+    digest, the scope receipt, and the run identity are recomputed from the
+    stored rows; any disagreement is a typed refusal, never a silently
+    different model.
+    """
+    collected: dict[str, list[object]] = {}
+    object_ids: list[str] = []
+    rows = connection.execute(
+        "SELECT o.object_id, o.family, o.payload FROM run_members m "
+        "JOIN objects o ON o.object_pk = m.object_pk "
+        "WHERE m.run_pk = ? ORDER BY o.object_id",
+        (run_pk,),
+    )
+    for object_id_value, family, payload in rows:
+        family_name = str(family)
+        payload_bytes = bytes(payload)
+        if family_name not in _FAMILY_NAMESPACE:
+            raise StoreIntegrityError(
+                f"run {run_id!r} carries unknown family {family_name!r}"
+            )
+        recomputed = _object_id(namespace, family_name, payload_bytes)
+        if recomputed != str(object_id_value):
+            raise StoreIntegrityError(
+                f"object {str(object_id_value)[:12]}… does not hash to its "
+                "content address; store bytes are corrupt"
+            )
+        try:
+            row = json.loads(payload_bytes)
+        except ValueError as error:
+            raise StoreIntegrityError(
+                f"object {str(object_id_value)[:12]}… payload is not "
+                f"storage JSON: {error}"
+            ) from error
+        if not isinstance(row, dict):
+            raise StoreIntegrityError(
+                f"object {str(object_id_value)[:12]}… payload is not a row"
+            )
+        collected.setdefault(family_name, []).append(
+            _decode_row(family_name, row, f"{family_name} object")
+        )
+        object_ids.append(str(object_id_value))
+    if _membership_digest(object_ids) != membership:
+        raise StoreIntegrityError(
+            f"run {run_id!r} membership does not reproduce its digest"
+        )
+    model = _collected_model(collected)
+    if analysis_scope_digest(model.analyzed_files) != scope_digest:
+        raise StoreIntegrityError(
+            f"run {run_id!r} scope receipt does not reproduce its digest"
+        )
+    if _run_id(namespace, scope_digest, membership) != run_id:
+        raise StoreIntegrityError(
+            f"run {run_id!r} identity does not recompute from its parts"
+        )
+    return model.normalize()
+
+
+# ---------------------------------------------------------------------------
+# Public receipts
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class HeadState:
+    """One target head: operational namespace only, never canonical
+    semantics (brief §6)."""
+
+    namespace: str
+    target: str
+    generation: int
+    run_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublishReceipt:
+    """Outcome of one full-run publish.
+
+    ``head_advanced`` is a typed outcome, not an error: a stale publisher's
+    run is stored as a valid immutable run but does not move the head
+    (brief §6.1); ``generation`` and ``head_run_id`` always describe the
+    head after this call.
+    """
+
+    run_id: str
+    analysis_scope_digest: str
+    head_advanced: bool
+    generation: int
+    head_run_id: str
+    object_count: int
+    new_objects: int
+    shared_objects: int
+    family_counts: dict[str, int]
+
+
+class RunStore:
+    """The wave-2 canonical run-store over one SQLite file."""
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = str(path)
+        self._connection = sqlite3.connect(self._path, isolation_level=None)
+        self._connection.execute("PRAGMA foreign_keys = ON")
+        self._fence: tuple[int, str, str] = (0, "", "")
+        self._initialize()
+
+    # -- lifecycle ---------------------------------------------------------
+
+    def close(self) -> None:
+        self._connection.close()
+
+    def __enter__(self) -> RunStore:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    # -- open-time witness (law 7) ----------------------------------------
+
+    def _initialize(self) -> None:
+        cursor = self._connection.cursor()
+        # DDL first: ``executescript`` would commit an open transaction, so
+        # the idempotent CREATEs run in autocommit and the witness handshake
+        # gets its own immediate transaction below.
+        for statement in _SCHEMA.split(";"):
+            if statement.strip():
+                cursor.execute(statement)
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            fence = _open_witness(cursor)
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+        self._fence = fence
+
+    # -- fencing on every mutation (brief §4.2) ---------------------------
+
+    def bump_store_epoch(self) -> int:
+        """Advance the store epoch (the migration actor's move).
+
+        Itself a fenced mutation: a stale handle cannot bump either.
+        """
+        cursor = self._connection.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            _fence_guard(cursor, self._fence)
+            new_epoch = self._fence[0] + 1
+            cursor.execute(
+                "UPDATE store_meta SET store_epoch = ? WHERE id = 1", (new_epoch,)
+            )
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+        self._fence = (new_epoch, self._fence[1], self._fence[2])
+        return new_epoch
+
+    # -- write path --------------------------------------------------------
+
+    def _before_publish(self) -> None:
+        """Crash-injection seam for the atomicity law (§10); production no-op.
+
+        The staging rows written before this point must never become visible
+        to a reader if the transaction dies here.
+        """
+
+    def write_full_run(
+        self,
+        model: CanonicalModel,
+        *,
+        namespace: str,
+        target: str,
+        expected_generation: int,
+    ) -> PublishReceipt:
+        """Stage and atomically publish one full run (brief §10).
+
+        The head advances only from ``expected_generation`` (CAS, law 8);
+        a stale publisher's run stays stored, unpublished to no one —
+        readable by ``run_id`` — but the head does not move.
+        """
+        _require_publish_inputs(namespace, target)
+        model = model.normalize()
+
+        staged: dict[str, tuple[str, bytes]] = {}
+        family_counts: dict[str, int] = {}
+        for family, row in _model_rows(model):
+            payload = _payload_bytes(row)
+            object_id = _object_id(namespace, family, payload)
+            staged[object_id] = (family, payload)
+            family_counts[family] = family_counts.get(family, 0) + 1
+        scope_digest = analysis_scope_digest(model.analyzed_files)
+        membership = _membership_digest(list(staged))
+        run_id = _run_id(namespace, scope_digest, membership)
+
+        cursor = self._connection.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            _fence_guard(cursor, self._fence)
+            namespace_pk = self._namespace_pk(cursor, namespace)
+            new_objects = 0
+            object_pks: list[int] = []
+            for object_id_value in sorted(staged):
+                family, payload = staged[object_id_value]
+                existing = cursor.execute(
+                    "SELECT object_pk FROM objects "
+                    "WHERE namespace_pk = ? AND object_id = ?",
+                    (namespace_pk, object_id_value),
+                ).fetchone()
+                if existing is None:
+                    cursor.execute(
+                        "INSERT INTO objects "
+                        "(namespace_pk, object_id, family, payload) "
+                        "VALUES (?, ?, ?, ?)",
+                        (namespace_pk, object_id_value, family, payload),
+                    )
+                    object_pks.append(int(cursor.lastrowid or 0))
+                    new_objects += 1
+                else:
+                    object_pks.append(int(existing[0]))
+            existing_run = cursor.execute(
+                "SELECT run_pk, published FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if existing_run is None:
+                cursor.execute(
+                    "INSERT INTO runs "
+                    "(namespace_pk, run_id, analysis_scope_digest, "
+                    "membership_digest, published) VALUES (?, ?, ?, ?, 0)",
+                    (namespace_pk, run_id, scope_digest, membership),
+                )
+                run_pk = int(cursor.lastrowid or 0)
+                cursor.executemany(
+                    "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
+                    [(run_pk, object_pk) for object_pk in object_pks],
+                )
+            else:
+                run_pk = int(existing_run[0])
+            self._before_publish()
+            _verify_staged_membership(cursor, run_pk, namespace, membership)
+            cursor.execute("UPDATE runs SET published = 1 WHERE run_pk = ?", (run_pk,))
+            head_advanced, generation, head_run_id = self._advance_head(
+                cursor,
+                namespace_pk=namespace_pk,
+                target=target,
+                expected_generation=expected_generation,
+                run_pk=run_pk,
+                run_id=run_id,
+            )
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+        return PublishReceipt(
+            run_id=run_id,
+            analysis_scope_digest=scope_digest,
+            head_advanced=head_advanced,
+            generation=generation,
+            head_run_id=head_run_id,
+            object_count=len(staged),
+            new_objects=new_objects,
+            shared_objects=len(staged) - new_objects,
+            family_counts=family_counts,
+        )
+
+    def _namespace_pk(self, cursor: sqlite3.Cursor, namespace: str) -> int:
+        row = cursor.execute(
+            "SELECT namespace_pk FROM namespaces WHERE namespace = ?", (namespace,)
+        ).fetchone()
+        if row is not None:
+            return int(row[0])
+        cursor.execute("INSERT INTO namespaces (namespace) VALUES (?)", (namespace,))
+        return int(cursor.lastrowid or 0)
+
+    def _advance_head(
+        self,
+        cursor: sqlite3.Cursor,
+        *,
+        namespace_pk: int,
+        target: str,
+        expected_generation: int,
+        run_pk: int,
+        run_id: str,
+    ) -> tuple[bool, int, str]:
+        """Compare-and-swap head advancement (law 8) inside the caller's
+        transaction: the head moves only from the generation the run was
+        derived from; a stale publisher never overwrites a newer head."""
+        current = cursor.execute(
+            "SELECT h.generation, r.run_id FROM heads h "
+            "JOIN runs r ON r.run_pk = h.run_pk "
+            "WHERE h.namespace_pk = ? AND h.target = ?",
+            (namespace_pk, target),
+        ).fetchone()
+        current_generation = int(current[0]) if current else 0
+        if current_generation != expected_generation:
+            return False, current_generation, str(current[1]) if current else ""
+        new_generation = expected_generation + 1
+        if current is None:
+            cursor.execute(
+                "INSERT INTO heads (namespace_pk, target, generation, run_pk) "
+                "VALUES (?, ?, ?, ?)",
+                (namespace_pk, target, new_generation, run_pk),
+            )
+        else:
+            cursor.execute(
+                "UPDATE heads SET generation = ?, run_pk = ? "
+                "WHERE namespace_pk = ? AND target = ?",
+                (new_generation, run_pk, namespace_pk, target),
+            )
+        return True, new_generation, run_id
+
+    # -- read path ---------------------------------------------------------
+
+    def head(self, *, namespace: str, target: str) -> HeadState | None:
+        row = self._connection.execute(
+            "SELECT h.generation, r.run_id FROM heads h "
+            "JOIN namespaces n ON n.namespace_pk = h.namespace_pk "
+            "JOIN runs r ON r.run_pk = h.run_pk "
+            "WHERE n.namespace = ? AND h.target = ?",
+            (namespace, target),
+        ).fetchone()
+        if row is None:
+            return None
+        return HeadState(
+            namespace=namespace,
+            target=target,
+            generation=int(row[0]),
+            run_id=str(row[1]),
+        )
+
+    def run_scope_digest(self, run_id: str) -> str:
+        """The scope receipt of one published run (brief §7.1)."""
+        return _published_run_row(self._connection, run_id)[2]
+
+    def read_run(self, run_id: str) -> CanonicalModel:
+        """Reconstruct one published run as a canonical model.
+
+        Delegates to :func:`_reconstruct_run`, which proves every stored
+        byte on the way; any disagreement is a typed refusal, never a
+        silently different model.
+        """
+        run_pk, namespace, scope_digest, membership = _published_run_row(
+            self._connection, run_id
+        )
+        return _reconstruct_run(
+            self._connection,
+            run_pk=run_pk,
+            namespace=namespace,
+            scope_digest=scope_digest,
+            membership=membership,
+            run_id=run_id,
+        )
+
+    def project_run(self, run_id: str) -> bytes:
+        """Canonical bytes of one published run — law L8's left-hand side:
+        byte-identical to ``encode_canonical_json`` of the same model."""
+        return encode_canonical_json(self.read_run(run_id))
+
+
+__all__ = [
+    "HeadState",
+    "PublishReceipt",
+    "RunStore",
+    "analysis_scope_digest",
+]

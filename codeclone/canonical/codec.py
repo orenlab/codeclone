@@ -890,8 +890,13 @@ def _decode_root_row(
         local_name = _expect_string(
             sparse["local_name"][position], f"effect_roots.local_name[{position}]"
         )
-        if not local_name:
-            raise _refuse("W18", f"effect_roots.local_name[{position}] is empty")
+        if not local_name and not isinstance(head, OpaqueDottedHead):
+            # Empty local names exist only where the producer asserted one
+            # opaque dotted string (measured: 21 of 1 080 corpus targets).
+            raise _refuse(
+                "W18",
+                f"effect_roots.local_name[{position}] is empty under a non-opaque head",
+            )
         return OperationRoot(kind, OperationTarget(head, local_name))
     if family == ROOT_FAMILY_PRODUCER:
         ordinal = _expect_ordinal(

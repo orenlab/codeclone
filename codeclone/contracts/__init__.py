@@ -50,6 +50,13 @@ CANONICAL_MODEL_REVISION: Final = "1"
 # facts order, discriminator-first proof, columnar benchmark, lexical
 # float/escape law, exact integrity preimage, violation_id fixture) closes.
 CANONICAL_WIRE_REVISION: Final = "0"
+# Storage schema revision of the canonical run-store (backend wave 2).
+# Deliberately separate from CANONICAL_WIRE_REVISION and REPORT_SCHEMA_VERSION
+# (F-3 §10, brief §14): the SQLite physics may change without claiming the
+# semantics moved, and a projection revision never reaches back into stored
+# run identity. "0" is the pre-freeze draft schema; the SQLite file is an
+# internal store, never a user-facing artifact contract.
+STORAGE_SCHEMA_REVISION: Final = "0"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"
@@ -827,6 +834,7 @@ __all__ = [
     "SEMANTIC_PROJECTION_REVISION_VERSION",
     "SOURCE_KIND_POLICY_VERSION",
     "STATEMENT_REACHABILITY_POLICY_VERSION",
+    "STORAGE_SCHEMA_REVISION",
     "STRUCTURAL_FINDINGS_CATALOG_VERSION",
     "SUPPRESSED_CONTAINER_KEY",
     "SUPPRESSED_CONTAINER_PATH",

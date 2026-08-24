@@ -26,7 +26,16 @@ from codeclone.canonical.codec import (
     decode_canonical_json,
     encode_canonical_json,
 )
-from codeclone.canonical.errors import CanonicalModelError, WireDecodeError
+from codeclone.canonical.errors import (
+    CanonicalModelError,
+    LegacyIngestError,
+    RunStoreError,
+    StoreCompatibilityError,
+    StoreFenceError,
+    StoreIntegrityError,
+    UnknownRunError,
+    WireDecodeError,
+)
 from codeclone.canonical.identity import (
     DEPENDENCY_BINDINGS,
     EFFECT_KINDS,
@@ -52,6 +61,7 @@ from codeclone.canonical.identity import (
     head_tag,
     root_family,
 )
+from codeclone.canonical.ingest import canonical_model_from_legacy_document
 from codeclone.canonical.model import (
     CandidateRow,
     CanonicalFacts,
@@ -71,6 +81,12 @@ from codeclone.canonical.registry import (
     sparse_bool_wire_columns,
     wire_columns,
     wire_fact_family_order,
+)
+from codeclone.canonical.store import (
+    HeadState,
+    PublishReceipt,
+    RunStore,
+    analysis_scope_digest,
 )
 
 __all__ = [
@@ -96,23 +112,34 @@ __all__ = [
     "FileId",
     "FileModuleRelation",
     "GraphNodeRow",
+    "HeadState",
     "KnownModule",
+    "LegacyIngestError",
     "ModuleId",
     "OpaqueDottedHead",
     "OperationHead",
     "OperationRoot",
     "OperationTarget",
     "ProducerRoot",
+    "PublishReceipt",
+    "RunStore",
+    "RunStoreError",
     "SemanticEdge",
     "SinkRoleRow",
+    "StoreCompatibilityError",
+    "StoreFenceError",
+    "StoreIntegrityError",
     "SymbolId",
+    "UnknownRunError",
     "UnresolvedRoot",
     "ViolationRow",
     "WireDecodeError",
+    "analysis_scope_digest",
     "candidate_handle",
     "candidate_total_order_key",
     "canonical_float_lexeme",
     "canonical_key",
+    "canonical_model_from_legacy_document",
     "canonical_string_lexeme",
     "decode_canonical_json",
     "derived_wire_columns",
