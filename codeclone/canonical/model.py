@@ -15,11 +15,24 @@ the wire projection.
 the frozen corpus, 1 157 of 12 244 rows are not sorted-deduplicated, so the
 producer's order is a fact and canonizing it away would lose an entity.
 
-Wave-1 family subset: ``file_modules · contracts · graph_nodes · sink_roles
-· candidates · semantic_edges`` plus the standalone ``coupled_sets`` value
-sets.  ``dependency_edges`` is deferred to wave 2: its logical row key was
-never measured from the producer, and inventing one here would be exactly
-the manual-tail defect the facts-order sanction forbids.
+Wave family subset: ``file_modules · contracts · graph_nodes · sink_roles
+· candidates · semantic_edges · dependency_edges · violations`` plus the
+standalone ``coupled_sets`` value sets.
+
+``dependency_edges`` (wave 1.5): the logical row key is **measured from the
+producer**, not invented — ``metrics/dependencies.py:_unique_sorted_edges``
+dedups and sorts on ``(source, target, import_type, line)``; on the frozen
+corpus the key is unique on 5 244 of 5 244 rows, dropping ``line`` collides
+926 of them, and the 861 distinct endpoints split MODULE 860 / FILE 1 —
+the ratified ``DependencyEndpoint`` union.  ``binding`` and ``is_lazy`` are
+payload, not key: two rows under one producer key may not disagree.
+
+``violations`` (wave 1.5): natural key ``(contract_id, kind, sink_identity,
+PRODUCER_SET)`` under the ``AUTHORITY_ANALYSIS_REVISION`` namespace — the
+preimage of the class-B ``violation_id`` handle, owned by
+``codeclone.canonical.authority_identity``.  The row carries the violation's
+own analysis facts; ``locations`` stays with the legacy producer for a later
+wave (a record-in-record wire shape the revision-0 grammar does not carry).
 
 The container mirrors the wire: :class:`CanonicalFacts` is the ``facts``
 section (record tables), :class:`CanonicalModel` adds the identity domains,
@@ -34,7 +47,11 @@ from typing import TypeVar
 
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
+    DEPENDENCY_BINDINGS,
+    IMPORT_TYPES,
+    VIOLATION_KINDS,
     AnalysisFile,
+    DependencyEndpoint,
     EffectRoot,
     FileId,
     KnownModule,
@@ -43,6 +60,7 @@ from codeclone.canonical.identity import (
     ProducerRoot,
     SymbolId,
     canonical_key,
+    endpoint_key,
 )
 
 
@@ -110,6 +128,64 @@ class SemanticEdge:
 
 
 @dataclass(frozen=True, slots=True)
+class DependencyEdgeRow:
+    """Module dependency fact over the ratified endpoint union.
+
+    Logical key — measured from the producer's own dedup, never invented:
+    ``(source, target, import_type, line)``.  ``binding`` and ``is_lazy``
+    are payload; two rows sharing the key with different payload are a
+    producer defect and are refused, not last-writer-silenced.
+    """
+
+    source: DependencyEndpoint
+    target: DependencyEndpoint
+    import_type: str
+    line: int
+    binding: str
+    is_lazy: bool
+
+    def __post_init__(self) -> None:
+        if self.import_type not in IMPORT_TYPES:
+            raise CanonicalModelError(f"unknown import_type: {self.import_type!r}")
+        if self.binding not in DEPENDENCY_BINDINGS:
+            raise CanonicalModelError(f"unknown dependency binding: {self.binding!r}")
+        if isinstance(self.line, bool) or self.line < 0:
+            raise CanonicalModelError(
+                f"dependency line must be a non-negative int: {self.line!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ViolationRow:
+    """Authority violation fact; natural key ``(contract_id, kind,
+    sink_identity, producer_set)`` under the analysis-revision namespace.
+
+    ``violation_id`` is the class-B handle of that key — never stored here,
+    emitted on the wire by the projector through its one formula owner.
+    ``sink_identity`` and every producer must carry the FUNCTION role (the
+    producer indexes the contract table with both); ``canonical_owner`` is a
+    registry declaration and carries no role requirement.
+    """
+
+    contract_id: str
+    kind: str
+    sink_identity: SymbolId
+    canonical_owner: SymbolId
+    authority_status: str
+    effect_signature: str
+    resolution_state: str
+    root_set: frozenset[EffectRoot]
+    producer_set: frozenset[SymbolId]
+    suppressed: bool
+
+    def __post_init__(self) -> None:
+        if not self.contract_id:
+            raise CanonicalModelError("violation contract_id must be non-empty")
+        if self.kind not in VIOLATION_KINDS:
+            raise CanonicalModelError(f"unknown violation kind: {self.kind!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalFacts:
     """The record tables of one model state — the wire's ``facts`` section."""
 
@@ -118,6 +194,8 @@ class CanonicalFacts:
     sink_roles: frozenset[SinkRoleRow] = field(default_factory=frozenset)
     candidates: frozenset[CandidateRow] = field(default_factory=frozenset)
     semantic_edges: frozenset[SemanticEdge] = field(default_factory=frozenset)
+    dependency_edges: frozenset[DependencyEdgeRow] = field(default_factory=frozenset)
+    violations: frozenset[ViolationRow] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +239,26 @@ def _candidate_natural_key(row: CandidateRow) -> tuple[object, ...]:
     )
 
 
+def _dependency_edge_key(row: DependencyEdgeRow) -> tuple[object, ...]:
+    # The producer's dedup key, verbatim (metrics/dependencies.py):
+    # (source, target, import_type, line) — binding and is_lazy are payload.
+    return (
+        endpoint_key(row.source),
+        endpoint_key(row.target),
+        row.import_type,
+        row.line,
+    )
+
+
+def _violation_natural_key(row: ViolationRow) -> tuple[object, ...]:
+    return (
+        row.contract_id,
+        row.kind,
+        canonical_key(row.sink_identity),
+        tuple(sorted(canonical_key(p) for p in row.producer_set)),
+    )
+
+
 class _DomainClosure:
     """Referential closure of the identity domains — never invents facts."""
 
@@ -183,24 +281,39 @@ class _DomainClosure:
             elif isinstance(head, AnalysisFile):
                 self.files.add(head.file)
 
+    def see_rooted_function(
+        self, function: SymbolId, root_set: frozenset[EffectRoot]
+    ) -> None:
+        self.see_symbol(function)
+        for root in root_set:
+            self.see_root(root)
 
-def _normalized(model: CanonicalModel) -> CanonicalModel:
-    """Complete the domains to their closure and prove every key law
-    (idempotent; never invents facts, never reorders — order is a
-    projection concern)."""
+    def see_endpoint(self, endpoint: DependencyEndpoint) -> None:
+        if isinstance(endpoint, ModuleId):
+            self.modules.add(endpoint)
+        else:
+            self.files.add(endpoint)
+
+    def see_violation(self, violation: ViolationRow) -> None:
+        self.see_symbol(violation.sink_identity)
+        self.see_symbol(violation.canonical_owner)
+        for producer in violation.producer_set:
+            self.see_symbol(producer)
+        for root in violation.root_set:
+            self.see_root(root)
+
+
+def _close_domains(model: CanonicalModel) -> _DomainClosure:
+    """Stage 1: complete the identity domains to their referential closure."""
     closure = _DomainClosure(model)
     facts = model.facts
     for relation in model.file_modules:
         closure.files.add(relation.file)
         closure.modules.add(relation.module)
     for contract in facts.contracts:
-        closure.see_symbol(contract.function)
-        for root in contract.root_set:
-            closure.see_root(root)
+        closure.see_rooted_function(contract.function, contract.root_set)
     for node in facts.graph_nodes:
-        closure.see_symbol(node.function)
-        for root in node.root_set:
-            closure.see_root(root)
+        closure.see_rooted_function(node.function, node.root_set)
     for sink in facts.sink_roles:
         closure.see_symbol(sink.symbol)
     for candidate in facts.candidates:
@@ -209,8 +322,17 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     for edge in facts.semantic_edges:
         closure.see_symbol(edge.source)
         closure.see_symbol(edge.target)
+    for dep in facts.dependency_edges:
+        closure.see_endpoint(dep.source)
+        closure.see_endpoint(dep.target)
+    for violation in facts.violations:
+        closure.see_violation(violation)
     closure.files.update(model.analyzed_files)
+    return closure
 
+
+def _prove_logical_keys(facts: CanonicalFacts) -> None:
+    """Stage 2: one logical key names at most one fact, per family (S5.A)."""
     _unique_by_key(
         facts.contracts,
         "contracts.function",
@@ -227,16 +349,41 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
         lambda row: canonical_key(row.symbol),
     )
     _unique_by_key(facts.candidates, "candidates.natural_key", _candidate_natural_key)
+    _unique_by_key(
+        facts.dependency_edges,
+        "dependency_edges.producer_key",
+        _dependency_edge_key,
+    )
+    _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
 
+
+def _prove_function_roles(facts: CanonicalFacts) -> None:
+    """Stage 3: producers and violation sinks carry the FUNCTION role."""
     function_symbols = {row.function for row in facts.contracts}
-    for candidate in facts.candidates:
-        for producer in candidate.producer_set:
+    producer_sets = [row.producer_set for row in facts.candidates]
+    producer_sets.extend(row.producer_set for row in facts.violations)
+    for producer_set in producer_sets:
+        for producer in producer_set:
             if producer not in function_symbols:
                 raise CanonicalModelError(
                     "producer set references a symbol without the "
                     f"FUNCTION role: {producer!r}"
                 )
+    for violation in facts.violations:
+        if violation.sink_identity not in function_symbols:
+            raise CanonicalModelError(
+                "violation sink references a symbol without the "
+                f"FUNCTION role: {violation.sink_identity!r}"
+            )
 
+
+def _normalized(model: CanonicalModel) -> CanonicalModel:
+    """Complete the domains to their closure and prove every key law
+    (idempotent; never invents facts, never reorders — order is a
+    projection concern)."""
+    closure = _close_domains(model)
+    _prove_logical_keys(model.facts)
+    _prove_function_roles(model.facts)
     return replace(
         model,
         files=frozenset(closure.files),

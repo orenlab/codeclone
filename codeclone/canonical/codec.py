@@ -33,6 +33,19 @@ Canonical byte laws implemented here:
   braces excluded — so a third party recomputes it one way only;
 * a decoded document must re-encode to the identical bytes (W24) — one
   semantic document has exactly one byte encoding.
+
+Wave-1.5 additions:
+
+* ``dependency_edges`` — endpoint slots are the ratified polymorphic
+  ``[tag, ordinal]`` pairs over ``MODULE | FILE``; the row key is the
+  producer's measured dedup key ``(source, target, import_type, line)``;
+* ``violations`` — the second class-B handle family;
+* sparse boolean columns (``is_lazy``, ``suppressed``): a strictly
+  increasing list of true row positions, omitted when no row is true;
+* contract-derived public handles (``candidate_id``, ``violation_id``) are
+  computed at projection time through their one formula owner
+  (:mod:`codeclone.canonical.authority_identity`), never stored; the
+  decoder recomputes each handle and refuses a mismatch (W25).
 """
 
 from __future__ import annotations
@@ -43,18 +56,27 @@ from collections.abc import Iterable, Mapping, Sequence
 from itertools import pairwise
 from typing import Any, TypeVar, cast
 
+from codeclone.canonical.authority_identity import (
+    candidate_handle,
+    legacy_symbol_key,
+    violation_handle,
+)
 from codeclone.canonical.errors import CanonicalModelError, WireDecodeError
 from codeclone.canonical.identity import (
+    DEPENDENCY_BINDINGS,
     DOMAIN_TAG_FILE,
     DOMAIN_TAG_MODULE,
     EFFECT_KINDS,
     HEAD_TAG_OPAQUE,
+    IMPORT_TYPES,
     OPERATION_KINDS,
     ROOT_FAMILY_EFFECT,
     ROOT_FAMILY_OPERATION,
     ROOT_FAMILY_PRODUCER,
     ROOT_FAMILY_UNRESOLVED,
+    VIOLATION_KINDS,
     AnalysisFile,
+    DependencyEndpoint,
     EffectLabelRoot,
     EffectRoot,
     FileId,
@@ -75,12 +97,18 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     ContractRow,
+    DependencyEdgeRow,
     FileModuleRelation,
     GraphNodeRow,
     SemanticEdge,
     SinkRoleRow,
+    ViolationRow,
 )
-from codeclone.canonical.registry import wire_columns, wire_fact_family_order
+from codeclone.canonical.registry import (
+    sparse_bool_wire_columns,
+    wire_columns,
+    wire_fact_family_order,
+)
 from codeclone.contracts import (
     AUTHORITY_ANALYSIS_REVISION,
     CANONICAL_MODEL_REVISION,
@@ -242,13 +270,26 @@ def _domain_symbols(facts: CanonicalFacts) -> list[SymbolId]:
     for edge in facts.semantic_edges:
         referenced.add(edge.source)
         referenced.add(edge.target)
+    for violation in facts.violations:
+        referenced.add(violation.sink_identity)
+        referenced.add(violation.canonical_owner)
+        referenced.update(violation.producer_set)
     return _sorted_domain(referenced)
 
 
+def _root_carriers(
+    facts: CanonicalFacts,
+) -> Iterable[frozenset[EffectRoot]]:
+    for row in facts.contracts:
+        yield row.root_set
+    for node in facts.graph_nodes:
+        yield node.root_set
+    for violation in facts.violations:
+        yield violation.root_set
+
+
 def _domain_roots(facts: CanonicalFacts) -> list[EffectRoot]:
-    return _sorted_domain(
-        root for row in facts.contracts | facts.graph_nodes for root in row.root_set
-    )
+    return _sorted_domain(root for row_set in _root_carriers(facts) for root in row_set)
 
 
 def _head_value(
@@ -306,17 +347,33 @@ def _fact_tables(
     producer_set_ordinal: Mapping[tuple[int, ...], int],
     root_set_ordinal: Mapping[tuple[int, ...], int],
 ) -> dict[str, list[dict[str, object]]]:
-    def producer_ref(row: CandidateRow) -> tuple[int, ...]:
-        return tuple(sorted(symbol_ordinal[p] for p in row.producer_set))
+    def producer_ref(producer_set: frozenset[SymbolId]) -> tuple[int, ...]:
+        return tuple(sorted(symbol_ordinal[p] for p in producer_set))
 
     def root_set_ref(row_set: frozenset[EffectRoot]) -> int:
         return root_set_ordinal[tuple(sorted(root_ordinal[r] for r in row_set))]
 
+    handle_symbols: set[SymbolId] = set()
+    for candidate in facts.candidates:
+        handle_symbols.update(candidate.producer_set)
+    for violation in facts.violations:
+        handle_symbols.add(violation.sink_identity)
+        handle_symbols.update(violation.producer_set)
+    legacy_keys = _legacy_symbol_keys(handle_symbols, file_modules)
+
+    def endpoint_ref(endpoint: DependencyEndpoint) -> tuple[str, int]:
+        return _endpoint_sort_key(endpoint, module_ordinal, file_ordinal)
+
     return {
         "candidates": [
             {
+                "candidate_id": candidate_handle(
+                    level=row.level,
+                    shared_fact=row.shared_fact,
+                    producers=[legacy_keys[p] for p in row.producer_set],
+                ),
                 "level": row.level,
-                "producer_set": producer_set_ordinal[producer_ref(row)],
+                "producer_set": producer_set_ordinal[producer_ref(row.producer_set)],
                 "shared_fact": row.shared_fact,
             }
             for row in sorted(
@@ -324,7 +381,55 @@ def _fact_tables(
                 key=lambda row: (
                     row.level.encode("utf-8"),
                     row.shared_fact.encode("utf-8"),
-                    producer_ref(row),
+                    producer_ref(row.producer_set),
+                ),
+            )
+        ],
+        "dependency_edges": [
+            {
+                "binding": row.binding,
+                "import_type": row.import_type,
+                "is_lazy": row.is_lazy,
+                "line": row.line,
+                "source": _endpoint_value(row.source, module_ordinal, file_ordinal),
+                "target": _endpoint_value(row.target, module_ordinal, file_ordinal),
+            }
+            for row in sorted(
+                facts.dependency_edges,
+                key=lambda row: (
+                    *endpoint_ref(row.source),
+                    *endpoint_ref(row.target),
+                    row.import_type,
+                    row.line,
+                ),
+            )
+        ],
+        "violations": [
+            {
+                "authority_status": row.authority_status,
+                "canonical_owner": symbol_ordinal[row.canonical_owner],
+                "contract_id": row.contract_id,
+                "effect_signature": row.effect_signature,
+                "kind": row.kind,
+                "producer_set": producer_set_ordinal[producer_ref(row.producer_set)],
+                "resolution_state": row.resolution_state,
+                "root_set": root_set_ref(row.root_set),
+                "sink_identity": symbol_ordinal[row.sink_identity],
+                "suppressed": row.suppressed,
+                "violation_id": violation_handle(
+                    contract_id=row.contract_id,
+                    kind=row.kind,
+                    sink_identity=legacy_keys[row.sink_identity],
+                    producers=[legacy_keys[p] for p in row.producer_set],
+                ),
+            }
+            for row in sorted(
+                facts.violations,
+                key=lambda row: (
+                    row.contract_id.encode("utf-8"),
+                    row.kind.encode("utf-8"),
+                    symbol_ordinal[row.sink_identity],
+                    producer_ref(row.producer_set),
                 ),
             )
         ],
@@ -407,10 +512,12 @@ def _interned_labels(
 def _interned_producer_sets(
     facts: CanonicalFacts, symbol_ordinal: Mapping[SymbolId, int]
 ) -> list[tuple[int, ...]]:
+    producer_sets = {row.producer_set for row in facts.candidates}
+    producer_sets.update(row.producer_set for row in facts.violations)
     return sorted(
         {
-            tuple(sorted(symbol_ordinal[p] for p in row.producer_set))
-            for row in facts.candidates
+            tuple(sorted(symbol_ordinal[p] for p in producer_set))
+            for producer_set in producer_sets
         }
     )
 
@@ -420,10 +527,60 @@ def _interned_root_sets(
 ) -> list[tuple[int, ...]]:
     return sorted(
         {
-            tuple(sorted(root_ordinal[r] for r in row.root_set))
-            for row in facts.contracts | facts.graph_nodes
+            tuple(sorted(root_ordinal[r] for r in row_set))
+            for row_set in _root_carriers(facts)
         }
     )
+
+
+def _legacy_symbol_keys(
+    symbols: Iterable[SymbolId], file_modules: frozenset[FileModuleRelation]
+) -> dict[SymbolId, str]:
+    """Project symbols back to the producer's ModuleKey-headed keys.
+
+    The reverse of the measured lossless normalization (F-3 §2.1.8): the
+    head is the file's registry module when the relation names exactly one,
+    the analysis path otherwise.  A file with two modules has no
+    deterministic legacy head, so the projection refuses instead of
+    guessing — the class-B handles hash these keys and a guess would be a
+    silently wrong identity.
+    """
+    module_of: dict[FileId, ModuleId] = {}
+    ambiguous: set[FileId] = set()
+    for relation in file_modules:
+        if relation.file in module_of and module_of[relation.file] != relation.module:
+            ambiguous.add(relation.file)
+        module_of[relation.file] = relation.module
+    keys: dict[SymbolId, str] = {}
+    for symbol in symbols:
+        if symbol.file in ambiguous:
+            raise CanonicalModelError(
+                "legacy producer key needs an unambiguous FILE-MODULE "
+                f"relation, and {symbol.file.path!r} has more than one module"
+            )
+        module = module_of.get(symbol.file)
+        head = module.module if module is not None else symbol.file.path
+        keys[symbol] = legacy_symbol_key(head, symbol.qualname)
+    return keys
+
+
+def _endpoint_sort_key(
+    endpoint: DependencyEndpoint,
+    module_ordinal: Mapping[ModuleId, int],
+    file_ordinal: Mapping[FileId, int],
+) -> tuple[str, int]:
+    if isinstance(endpoint, ModuleId):
+        return (DOMAIN_TAG_MODULE, module_ordinal[endpoint])
+    return (DOMAIN_TAG_FILE, file_ordinal[endpoint])
+
+
+def _endpoint_value(
+    endpoint: DependencyEndpoint,
+    module_ordinal: Mapping[ModuleId, int],
+    file_ordinal: Mapping[FileId, int],
+) -> list[object]:
+    tag, ordinal = _endpoint_sort_key(endpoint, module_ordinal, file_ordinal)
+    return [tag, ordinal]
 
 
 def _domains_member(
@@ -459,19 +616,24 @@ def _domains_member(
 
 
 def _facts_member(tables: Mapping[str, list[dict[str, object]]]) -> _Obj:
+    def columns(family: str) -> list[tuple[str, object]]:
+        sparse = set(sparse_bool_wire_columns(family))
+        members: list[tuple[str, object]] = []
+        for column in wire_columns(family):
+            if column in sparse:
+                positions = [
+                    position
+                    for position, row in enumerate(tables[family])
+                    if row[column]
+                ]
+                if positions:  # omitted list means: no row is true (§7.6)
+                    members.append((column, positions))
+            else:
+                members.append((column, [row[column] for row in tables[family]]))
+        return members
+
     return _Obj(
-        [
-            (
-                family,
-                _Obj(
-                    [
-                        (column, [row[column] for row in tables[family]])
-                        for column in wire_columns(family)
-                    ]
-                ),
-            )
-            for family in wire_fact_family_order()
-        ]
+        [(family, _Obj(columns(family))) for family in wire_fact_family_order()]
     )
 
 
@@ -605,7 +767,7 @@ def _expect_string(value: object, where: str) -> str:
     return value
 
 
-def _expect_ordinal(value: object, size: int, where: str) -> int:
+def _expect_wire_int(value: object, where: str) -> int:
     if value is None:
         raise _refuse("W18", f"{where} is null where the contract forbids null")
     if isinstance(value, bool):
@@ -616,9 +778,14 @@ def _expect_ordinal(value: object, size: int, where: str) -> int:
         raise _refuse("W18", f"{where} is not an integer")
     if not 0 <= value <= _MAX_INT:
         raise _refuse("W07", f"{where} integer {value} outside [0, 2**31-1]")
-    if value >= size:
-        raise _refuse("W10", f"{where} ordinal {value} outside table of {size}")
     return value
+
+
+def _expect_ordinal(value: object, size: int, where: str) -> int:
+    ordinal = _expect_wire_int(value, where)
+    if ordinal >= size:
+        raise _refuse("W10", f"{where} ordinal {ordinal} outside table of {size}")
+    return ordinal
 
 
 def _expect_list(value: object, where: str) -> list[object]:
@@ -673,24 +840,30 @@ def _decode_sparse_map(value: object, row_count: int, where: str) -> dict[int, o
     return positions
 
 
-def _decode_head(
-    value: object, files: Sequence[FileId], modules: Sequence[ModuleId], where: str
-) -> OperationHead:
+def _expect_tagged_pair(value: object, where: str) -> tuple[str, object]:
+    """One reading of a polymorphic ``[tag, value]`` reference slot."""
     pair = _expect_list(value, where)
     if len(pair) != 2:
         raise _refuse("W18", f"{where} is not a [tag, value] pair")
     tag = _expect_string(pair[0], f"{where}.tag")
     if tag not in _KNOWN_REFERENCE_TAGS:
         raise _refuse("W08", f"unknown reference tag {tag!r}")
+    return tag, pair[1]
+
+
+def _decode_head(
+    value: object, files: Sequence[FileId], modules: Sequence[ModuleId], where: str
+) -> OperationHead:
+    tag, slot = _expect_tagged_pair(value, where)
     if tag not in _HEAD_TAGS:
         raise _refuse(
             "W09", f"reference tag {tag!r} is not admitted for an operation head"
         )
     if tag == DOMAIN_TAG_MODULE:
-        return KnownModule(modules[_expect_ordinal(pair[1], len(modules), where)])
+        return KnownModule(modules[_expect_ordinal(slot, len(modules), where)])
     if tag == DOMAIN_TAG_FILE:
-        return AnalysisFile(files[_expect_ordinal(pair[1], len(files), where)])
-    text = _expect_string(pair[1], where)
+        return AnalysisFile(files[_expect_ordinal(slot, len(files), where)])
+    text = _expect_string(slot, where)
     if not text:
         raise _refuse("W18", f"{where} opaque head is empty")
     return OpaqueDottedHead(text)
@@ -815,19 +988,70 @@ def _decode_set_table(
     return decoded
 
 
+def _expect_table_keys(
+    family: str, table: Mapping[str, object], sparse_names: set[str]
+) -> list[str]:
+    """Prove the column key set and order of one record table (W01, W02)."""
+    declared = wire_columns(family)
+    keys = list(table.keys())
+    unknown = [key for key in keys if key not in declared]
+    if unknown:
+        raise _refuse("W01", f"facts.{family} carries unknown columns {unknown!r}")
+    missing = [
+        name for name in declared if name not in keys and name not in sparse_names
+    ]
+    if missing:
+        raise _refuse("W01", f"facts.{family} is missing columns {missing!r}")
+    if keys != [name for name in declared if name in keys]:
+        raise _refuse("W02", f"facts.{family} columns are not in canonical order")
+    return keys
+
+
+def _decode_sparse_positions(value: object, row_count: int, where: str) -> set[int]:
+    """Decode one sparse boolean column: strictly increasing true positions."""
+    decoded = [_expect_wire_int(item, where) for item in _expect_list(value, where)]
+    _expect_increasing_elements(decoded, where)
+    for position in decoded:
+        if position >= row_count:
+            raise _refuse(
+                "W10", f"{where} position {position} outside table of {row_count}"
+            )
+    return set(decoded)
+
+
 def _decode_columns(
-    family: str, value: object, expected: Sequence[str]
-) -> dict[str, list[object]]:
-    table = _expect_object(value, expected, f"facts.{family}")
+    family: str, value: object
+) -> tuple[dict[str, list[object]], dict[str, set[int]], int]:
+    """Decode one record table: plain columns, sparse booleans, row count.
+
+    A sparse boolean column may be absent (no row is true); every plain
+    column is mandatory and all plain columns must agree on length (W15).
+    """
+    sparse_names = set(sparse_bool_wire_columns(family))
+    if not isinstance(value, dict):
+        raise _refuse("W01", f"facts.{family} is not an object")
+    table = cast("dict[str, object]", value)
+    keys = _expect_table_keys(family, table, sparse_names)
     columns = {
-        name: _expect_list(table[name], f"facts.{family}.{name}") for name in expected
+        name: _expect_list(table[name], f"facts.{family}.{name}")
+        for name in keys
+        if name not in sparse_names
     }
     lengths = {len(column) for column in columns.values()}
     if len(lengths) > 1:
         raise _refuse(
             "W15", f"facts.{family} columns have diverging lengths {lengths!r}"
         )
-    return columns
+    row_count = lengths.pop() if lengths else 0
+    flags = {
+        name: (
+            _decode_sparse_positions(table[name], row_count, f"facts.{family}.{name}")
+            if name in table
+            else set[int]()
+        )
+        for name in sparse_names
+    }
+    return columns, flags, row_count
 
 
 def _parse_document(data: bytes) -> Mapping[str, object]:
@@ -949,13 +1173,12 @@ def _decode_candidates(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
     producer_tables: Sequence[tuple[int, ...]],
-) -> frozenset[CandidateRow]:
-    columns = _decode_columns(
-        "candidates", facts["candidates"], wire_columns("candidates")
-    )
+) -> tuple[list[CandidateRow], list[str]]:
+    columns, _flags, row_count = _decode_columns("candidates", facts["candidates"])
     rows = []
+    handles = []
     keys = []
-    for index in range(len(columns["level"])):
+    for index in range(row_count):
         level = _expect_string(
             columns["level"][index], f"facts.candidates.level[{index}]"
         )
@@ -974,9 +1197,15 @@ def _decode_candidates(
                 frozenset(symbols[o] for o in producer_tables[set_ordinal]),
             )
         )
+        handles.append(
+            _expect_string(
+                columns["candidate_id"][index],
+                f"facts.candidates.candidate_id[{index}]",
+            )
+        )
         keys.append((level.encode("utf-8"), shared_fact.encode("utf-8"), set_ordinal))
     _expect_strictly_increasing(keys, "facts.candidates")
-    return frozenset(rows)
+    return rows, handles
 
 
 def _decode_contracts(
@@ -985,12 +1214,10 @@ def _decode_contracts(
     roots: Sequence[EffectRoot],
     root_tables: Sequence[tuple[int, ...]],
 ) -> tuple[frozenset[ContractRow], set[int]]:
-    columns = _decode_columns(
-        "contracts", facts["contracts"], wire_columns("contracts")
-    )
+    columns, _flags, row_count = _decode_columns("contracts", facts["contracts"])
     rows = []
     ordinals = []
-    for index in range(len(columns["function"])):
+    for index in range(row_count):
         ordinal = _expect_ordinal(
             columns["function"][index],
             len(symbols),
@@ -1021,12 +1248,10 @@ def _decode_file_modules(
     files: Sequence[FileId],
     modules: Sequence[ModuleId],
 ) -> frozenset[FileModuleRelation]:
-    columns = _decode_columns(
-        "file_modules", facts["file_modules"], wire_columns("file_modules")
-    )
+    columns, _flags, row_count = _decode_columns("file_modules", facts["file_modules"])
     rows = []
     keys = []
-    for index in range(len(columns["file"])):
+    for index in range(row_count):
         file_ref = _expect_ordinal(
             columns["file"][index], len(files), f"facts.file_modules.file[{index}]"
         )
@@ -1047,12 +1272,10 @@ def _decode_graph_nodes(
     roots: Sequence[EffectRoot],
     root_tables: Sequence[tuple[int, ...]],
 ) -> frozenset[GraphNodeRow]:
-    columns = _decode_columns(
-        "graph_nodes", facts["graph_nodes"], wire_columns("graph_nodes")
-    )
+    columns, _flags, row_count = _decode_columns("graph_nodes", facts["graph_nodes"])
     rows = []
     ordinals = []
-    for index in range(len(columns["function"])):
+    for index in range(row_count):
         ordinal = _expect_ordinal(
             columns["function"][index],
             len(symbols),
@@ -1093,12 +1316,12 @@ def _decode_graph_nodes(
 def _decode_semantic_edges(
     facts: Mapping[str, object], symbols: Sequence[SymbolId]
 ) -> frozenset[SemanticEdge]:
-    columns = _decode_columns(
-        "semantic_edges", facts["semantic_edges"], wire_columns("semantic_edges")
+    columns, _flags, row_count = _decode_columns(
+        "semantic_edges", facts["semantic_edges"]
     )
     rows = []
     keys = []
-    for index in range(len(columns["source"])):
+    for index in range(row_count):
         source = _expect_ordinal(
             columns["source"][index],
             len(symbols),
@@ -1118,12 +1341,10 @@ def _decode_semantic_edges(
 def _decode_sink_roles(
     facts: Mapping[str, object], symbols: Sequence[SymbolId]
 ) -> frozenset[SinkRoleRow]:
-    columns = _decode_columns(
-        "sink_roles", facts["sink_roles"], wire_columns("sink_roles")
-    )
+    columns, _flags, row_count = _decode_columns("sink_roles", facts["sink_roles"])
     rows = []
     ordinals = []
-    for index in range(len(columns["symbol"])):
+    for index in range(row_count):
         ordinal = _expect_ordinal(
             columns["symbol"][index],
             len(symbols),
@@ -1141,6 +1362,210 @@ def _decode_sink_roles(
         ordinals.append(ordinal)
     _expect_strictly_increasing(ordinals, "facts.sink_roles")
     return frozenset(rows)
+
+
+def _decode_endpoint(
+    value: object,
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+    where: str,
+) -> tuple[DependencyEndpoint, tuple[str, int]]:
+    tag, slot = _expect_tagged_pair(value, where)
+    table: Sequence[DependencyEndpoint]
+    if tag == DOMAIN_TAG_MODULE:
+        table = modules
+    elif tag == DOMAIN_TAG_FILE:
+        table = files
+    else:
+        raise _refuse(
+            "W09", f"reference tag {tag!r} is not admitted for a dependency endpoint"
+        )
+    ordinal = _expect_ordinal(slot, len(table), where)
+    return table[ordinal], (tag, ordinal)
+
+
+def _decode_dependency_edges(
+    facts: Mapping[str, object],
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+) -> frozenset[DependencyEdgeRow]:
+    columns, flags, row_count = _decode_columns(
+        "dependency_edges", facts["dependency_edges"]
+    )
+    lazy_positions = flags["is_lazy"]
+    rows = []
+    keys = []
+    for index in range(row_count):
+        source, source_key = _decode_endpoint(
+            columns["source"][index],
+            files,
+            modules,
+            f"facts.dependency_edges.source[{index}]",
+        )
+        target, target_key = _decode_endpoint(
+            columns["target"][index],
+            files,
+            modules,
+            f"facts.dependency_edges.target[{index}]",
+        )
+        import_type = _expect_string(
+            columns["import_type"][index],
+            f"facts.dependency_edges.import_type[{index}]",
+        )
+        if import_type not in IMPORT_TYPES:
+            raise _refuse("W08", f"unknown import_type tag {import_type!r}")
+        binding = _expect_string(
+            columns["binding"][index], f"facts.dependency_edges.binding[{index}]"
+        )
+        if binding not in DEPENDENCY_BINDINGS:
+            raise _refuse("W08", f"unknown dependency binding tag {binding!r}")
+        line = _expect_wire_int(
+            columns["line"][index], f"facts.dependency_edges.line[{index}]"
+        )
+        rows.append(
+            DependencyEdgeRow(
+                source, target, import_type, line, binding, index in lazy_positions
+            )
+        )
+        keys.append((*source_key, *target_key, import_type, line))
+    _expect_strictly_increasing(keys, "facts.dependency_edges")
+    return frozenset(rows)
+
+
+def _decode_violations(
+    facts: Mapping[str, object],
+    symbols: Sequence[SymbolId],
+    roots: Sequence[EffectRoot],
+    root_tables: Sequence[tuple[int, ...]],
+    producer_tables: Sequence[tuple[int, ...]],
+    function_ordinals: set[int],
+) -> tuple[list[ViolationRow], list[str]]:
+    columns, flags, row_count = _decode_columns("violations", facts["violations"])
+    suppressed_positions = flags["suppressed"]
+    rows = []
+    handles = []
+    keys = []
+    for index in range(row_count):
+        contract_id = _expect_string(
+            columns["contract_id"][index], f"facts.violations.contract_id[{index}]"
+        )
+        if not contract_id:
+            raise _refuse("W18", f"facts.violations.contract_id[{index}] is empty")
+        kind = _expect_string(columns["kind"][index], f"facts.violations.kind[{index}]")
+        if kind not in VIOLATION_KINDS:
+            raise _refuse("W08", f"unknown violation kind tag {kind!r}")
+        sink_ordinal = _expect_ordinal(
+            columns["sink_identity"][index],
+            len(symbols),
+            f"facts.violations.sink_identity[{index}]",
+        )
+        if sink_ordinal not in function_ordinals:
+            raise _refuse(
+                "W16",
+                f"violation sink references symbol ordinal {sink_ordinal} "
+                "without the FUNCTION role",
+            )
+        owner_ordinal = _expect_ordinal(
+            columns["canonical_owner"][index],
+            len(symbols),
+            f"facts.violations.canonical_owner[{index}]",
+        )
+        producer_set_ordinal = _expect_ordinal(
+            columns["producer_set"][index],
+            len(producer_tables),
+            f"facts.violations.producer_set[{index}]",
+        )
+        root_set_ordinal = _expect_ordinal(
+            columns["root_set"][index],
+            len(root_tables),
+            f"facts.violations.root_set[{index}]",
+        )
+        rows.append(
+            ViolationRow(
+                contract_id=contract_id,
+                kind=kind,
+                sink_identity=symbols[sink_ordinal],
+                canonical_owner=symbols[owner_ordinal],
+                authority_status=_expect_string(
+                    columns["authority_status"][index],
+                    f"facts.violations.authority_status[{index}]",
+                ),
+                effect_signature=_expect_string(
+                    columns["effect_signature"][index],
+                    f"facts.violations.effect_signature[{index}]",
+                ),
+                resolution_state=_expect_string(
+                    columns["resolution_state"][index],
+                    f"facts.violations.resolution_state[{index}]",
+                ),
+                root_set=frozenset(roots[r] for r in root_tables[root_set_ordinal]),
+                producer_set=frozenset(
+                    symbols[o] for o in producer_tables[producer_set_ordinal]
+                ),
+                suppressed=index in suppressed_positions,
+            )
+        )
+        handles.append(
+            _expect_string(
+                columns["violation_id"][index],
+                f"facts.violations.violation_id[{index}]",
+            )
+        )
+        keys.append(
+            (
+                contract_id.encode("utf-8"),
+                kind.encode("utf-8"),
+                sink_ordinal,
+                producer_set_ordinal,
+            )
+        )
+    _expect_strictly_increasing(keys, "facts.violations")
+    return rows, handles
+
+
+def _verify_public_handles(
+    candidates: Sequence[CandidateRow],
+    candidate_handles: Sequence[str],
+    violations: Sequence[ViolationRow],
+    violation_handles: Sequence[str],
+    file_modules: frozenset[FileModuleRelation],
+) -> None:
+    """Recompute every class-B handle through its one formula owner (W25)."""
+    handle_symbols: set[SymbolId] = set()
+    for row in candidates:
+        handle_symbols.update(row.producer_set)
+    for violation in violations:
+        handle_symbols.add(violation.sink_identity)
+        handle_symbols.update(violation.producer_set)
+    try:
+        legacy_keys = _legacy_symbol_keys(handle_symbols, file_modules)
+    except CanonicalModelError as error:
+        raise _refuse("W25", f"public handles are unverifiable: {error}") from error
+    for index, row in enumerate(candidates):
+        expected = candidate_handle(
+            level=row.level,
+            shared_fact=row.shared_fact,
+            producers=[legacy_keys[p] for p in row.producer_set],
+        )
+        if candidate_handles[index] != expected:
+            raise _refuse(
+                "W25",
+                f"facts.candidates.candidate_id[{index}] does not match its "
+                "formula owner",
+            )
+    for index, violation in enumerate(violations):
+        expected = violation_handle(
+            contract_id=violation.contract_id,
+            kind=violation.kind,
+            sink_identity=legacy_keys[violation.sink_identity],
+            producers=[legacy_keys[p] for p in violation.producer_set],
+        )
+        if violation_handles[index] != expected:
+            raise _refuse(
+                "W25",
+                f"facts.violations.violation_id[{index}] does not match its "
+                "formula owner",
+            )
 
 
 def _check_function_role(
@@ -1208,7 +1633,9 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     _expect_increasing_elements(analyzed_ordinals, "scope.analyzed_files")
 
     facts_section = _expect_object(root["facts"], wire_fact_family_order(), "facts")
-    candidates = _decode_candidates(facts_section, symbols, producer_tables)
+    candidates, candidate_handles = _decode_candidates(
+        facts_section, symbols, producer_tables
+    )
     contracts, function_ordinals = _decode_contracts(
         facts_section, symbols, roots, root_tables
     )
@@ -1216,7 +1643,14 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     graph_nodes = _decode_graph_nodes(facts_section, symbols, roots, root_tables)
     semantic_edges = _decode_semantic_edges(facts_section, symbols)
     sink_roles = _decode_sink_roles(facts_section, symbols)
+    dependency_edges = _decode_dependency_edges(facts_section, files, modules)
+    violations, violation_handles = _decode_violations(
+        facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
+    )
     _check_function_role(producer_tables, function_ordinals)
+    _verify_public_handles(
+        candidates, candidate_handles, violations, violation_handles, file_modules
+    )
     _check_integrity(data, root)
 
     model = CanonicalModel(
@@ -1228,8 +1662,10 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
             contracts=contracts,
             graph_nodes=graph_nodes,
             sink_roles=sink_roles,
-            candidates=candidates,
+            candidates=frozenset(candidates),
             semantic_edges=semantic_edges,
+            dependency_edges=dependency_edges,
+            violations=frozenset(violations),
         ),
         coupled_sets=frozenset(
             frozenset(labels[o] for o in table) for table in coupled_tables

@@ -14,8 +14,12 @@ from collections.abc import Callable
 import pytest
 
 from codeclone.canonical import (
+    DEPENDENCY_BINDINGS,
+    IMPORT_TYPES,
+    VIOLATION_KINDS,
     AnalysisFile,
     CanonicalModelError,
+    DependencyEdgeRow,
     EffectLabelRoot,
     EffectRoot,
     FileId,
@@ -27,9 +31,13 @@ from codeclone.canonical import (
     ProducerRoot,
     SymbolId,
     UnresolvedRoot,
+    ViolationRow,
     canonical_key,
+    derived_wire_columns,
+    endpoint_key,
     head_tag,
     root_family,
+    sparse_bool_wire_columns,
     wire_columns,
     wire_fact_family_order,
 )
@@ -148,6 +156,64 @@ def test_canonical_key_refuses_foreign_values() -> None:
         canonical_key(object())
 
 
+def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
+    """Same text under MODULE and FILE stays distinct, and the union order
+    is (tag, domain bytes) — one construction for every ratified union."""
+    module = ModuleId("pkg.a")
+    file_endpoint = FileId("pkg.a")
+    assert endpoint_key(module) != endpoint_key(file_endpoint)
+    assert endpoint_key(module) == ("module", b"pkg.a")
+    assert endpoint_key(file_endpoint) == ("file", b"pkg.a")
+    assert endpoint_key(file_endpoint) < endpoint_key(module)  # "file" < "module"
+    with pytest.raises(CanonicalModelError):
+        endpoint_key(SymbolId(FileId("a.py"), "f"))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: DependencyEdgeRow(
+            ModuleId("a"), ModuleId("b"), "banana", 1, "import_time", False
+        ),
+        lambda: DependencyEdgeRow(
+            ModuleId("a"), ModuleId("b"), "import", 1, "banana", False
+        ),
+        lambda: DependencyEdgeRow(
+            ModuleId("a"), ModuleId("b"), "import", -1, "import_time", False
+        ),
+        lambda: ViolationRow(
+            contract_id="",
+            kind="owner_bypass",
+            sink_identity=SymbolId(FileId("a.py"), "f"),
+            canonical_owner=SymbolId(FileId("a.py"), "f"),
+            authority_status="shadow",
+            effect_signature="sig",
+            resolution_state="resolved",
+            root_set=frozenset(),
+            producer_set=frozenset(),
+            suppressed=False,
+        ),
+        lambda: ViolationRow(
+            contract_id="c",
+            kind="banana",
+            sink_identity=SymbolId(FileId("a.py"), "f"),
+            canonical_owner=SymbolId(FileId("a.py"), "f"),
+            authority_status="shadow",
+            effect_signature="sig",
+            resolution_state="resolved",
+            root_set=frozenset(),
+            producer_set=frozenset(),
+            suppressed=False,
+        ),
+    ],
+)
+def test_new_family_vocabularies_and_bounds_are_refused(
+    build: Callable[[], object],
+) -> None:
+    with pytest.raises(CanonicalModelError):
+        build()
+
+
 def test_fact_family_order_is_mechanical_not_a_manual_tail() -> None:
     order = wire_fact_family_order()
     assert order == tuple(sorted(FACT_FAMILY_FIELDS))
@@ -158,9 +224,54 @@ def test_fact_family_order_is_mechanical_not_a_manual_tail() -> None:
         assert columns, family
 
 
-def test_registry_never_emits_undeclared_or_unstored_fields() -> None:
+def test_registry_wire_columns_are_exactly_the_declared_wire_fields() -> None:
+    """Every wire=True field is a wire column and nothing else is: stored
+    facts come from the model, and a derived wire field must be a declared
+    contract-derived public handle with one named formula owner — an
+    undeclared derived field is not something a test catches, it is
+    something that cannot be written."""
     for family, declarations in FACT_FAMILY_FIELDS.items():
         emitted = set(wire_columns(family))
+        assert emitted == {d.field for d in declarations if d.wire}, family
         for declaration in declarations:
-            if not (declaration.stored and declaration.wire):
+            if declaration.wire and not declaration.stored:
+                assert declaration.field in set(derived_wire_columns(family))
+                assert declaration.public_handle, (family, declaration.field)
+                assert declaration.owner.endswith(".v1"), (family, declaration.field)
+            if not declaration.wire:
                 assert declaration.field not in emitted, (family, declaration.field)
+
+
+def test_registry_declares_the_two_class_b_handles_and_their_owners() -> None:
+    assert derived_wire_columns("candidates") == ("candidate_id",)
+    assert derived_wire_columns("violations") == ("violation_id",)
+    owners = {
+        d.field: d.owner
+        for family in ("candidates", "violations")
+        for d in FACT_FAMILY_FIELDS[family]
+        if not d.stored and d.wire
+    }
+    assert owners == {
+        "candidate_id": "candidate_identity_contract.v1",
+        "violation_id": "violation_identity_contract.v1",
+    }
+
+
+def test_registry_declares_the_sparse_boolean_columns() -> None:
+    assert sparse_bool_wire_columns("dependency_edges") == ("is_lazy",)
+    assert sparse_bool_wire_columns("violations") == ("suppressed",)
+    assert sparse_bool_wire_columns("candidates") == ()
+
+
+def test_fact_vocabularies_mirror_the_producer_literals() -> None:
+    """The wire's closed dictionaries and the producer's Literal types are
+    pinned against each other: drift on either side is loud (G2 — one
+    signal, one place, one interpretation)."""
+    from typing import get_args, get_type_hints
+
+    from codeclone.models import AuthorityViolationKind, DependencyBinding, ModuleDep
+
+    hints = get_type_hints(ModuleDep)
+    assert get_args(hints["import_type"]) == IMPORT_TYPES
+    assert get_args(DependencyBinding) == DEPENDENCY_BINDINGS
+    assert get_args(AuthorityViolationKind) == VIOLATION_KINDS

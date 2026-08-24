@@ -38,7 +38,14 @@ REPRESENTATION: Final = "representation_projection"
 
 @dataclass(frozen=True, slots=True)
 class FieldDeclaration:
-    """One canonical field: who owns it, what it is, and where it may appear."""
+    """One canonical field: who owns it, what it is, and where it may appear.
+
+    ``wire_shape`` names the column's wire form: ``"column"`` is a plain
+    equal-length column; ``"sparse_bool_positions"`` is a boolean written as
+    a strictly increasing list of true row positions, omitted when no row is
+    true (F-3 §7.6 rule 3 — omitted list means no trues, so absence and
+    emptiness mean the same thing and rule 1 omits the default).
+    """
 
     field: str
     category: str
@@ -47,6 +54,7 @@ class FieldDeclaration:
     stored: bool
     wire: bool
     public_handle: bool = False
+    wire_shape: str = "column"
 
 
 # Fact families of the wave-1 canonical subset.  Keys are the wire table
@@ -118,6 +126,57 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             ANALYSIS_FACT,
             "contract_ir_producer",
             "observed",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    "dependency_edges": (
+        FieldDeclaration(
+            "binding",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "classified binding time; payload, never part of the row key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "import_type",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "producer row-key component (measured dedup key)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "is_lazy",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "raw PEP 810 marker; payload boolean",
+            stored=True,
+            wire=True,
+            wire_shape="sparse_bool_positions",
+        ),
+        FieldDeclaration(
+            "line",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "producer row-key component (926 corpus collisions without it)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "DependencyEndpoint union MODULE | FILE (measured 860/1)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "target",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "DependencyEndpoint union MODULE | FILE",
             stored=True,
             wire=True,
         ),
@@ -218,6 +277,98 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    "violations": (
+        FieldDeclaration(
+            "authority_status",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "observed",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "canonical_owner",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "governance registry declaration; no role requirement",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "contract_id",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "governance registry declaration; natural-key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "effect_signature",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "authority-effect domain digest; not derivable (S8.V.3)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "kind",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "closed vocabulary; natural-key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "producer_set",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "natural-key component; FUNCTION role required",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "resolution_state",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "observed",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "root_set",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "observed",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "sink_identity",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "natural-key component; FUNCTION role required",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "suppressed",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "inline suppression flag; payload boolean",
+            stored=True,
+            wire=True,
+            wire_shape="sparse_bool_positions",
+        ),
+        FieldDeclaration(
+            "violation_id",
+            CONTRACT_DERIVED,
+            "violation_identity_contract.v1",
+            "sha256 over (revision, contract_id, kind, sink_identity, producers)",
+            stored=False,
+            wire=True,
+            public_handle=True,
+        ),
+    ),
 }
 
 
@@ -227,11 +378,40 @@ def wire_fact_family_order() -> tuple[str, ...]:
 
 
 def wire_columns(family: str) -> tuple[str, ...]:
-    """Wire columns of one family, in canonical (sorted) column order."""
+    """Wire columns of one family, in canonical (sorted) column order.
+
+    Every ``wire=True`` field is a wire column: stored facts are emitted
+    from the model, and contract-derived handles (``stored=False``) are
+    computed by the projector through the field's one formula owner —
+    never by a consumer, never by a second spelling of the formula.
+    """
     return tuple(
         sorted(
             declaration.field
             for declaration in FACT_FAMILY_FIELDS[family]
-            if declaration.wire and declaration.stored
+            if declaration.wire
+        )
+    )
+
+
+def derived_wire_columns(family: str) -> tuple[str, ...]:
+    """The family's contract-derived wire columns (emitted, never stored)."""
+    return tuple(
+        sorted(
+            declaration.field
+            for declaration in FACT_FAMILY_FIELDS[family]
+            if declaration.wire and not declaration.stored
+        )
+    )
+
+
+def sparse_bool_wire_columns(family: str) -> tuple[str, ...]:
+    """The family's sparse-boolean wire columns (position lists, omitted
+    when no row is true — F-3 §7.6 rules 1 and 3)."""
+    return tuple(
+        sorted(
+            declaration.field
+            for declaration in FACT_FAMILY_FIELDS[family]
+            if declaration.wire and declaration.wire_shape == "sparse_bool_positions"
         )
     )

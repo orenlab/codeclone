@@ -56,6 +56,29 @@ EFFECT_KINDS: Final = (
     "serialize_field",
 )
 
+# Closed fact-family vocabularies of the wave-1.5 families. Values are the
+# contract dictionaries the wire refuses unknowns for (W08); they mirror the
+# producer's Literal types in ``codeclone.models`` and are pinned against
+# them by test — a silent drift on either side is loud, never absorbed.
+# ``deferred_getattr`` and ``lazy_syntax`` are corpus-unpopulated (0 of
+# 5 244 rows); unpopulated tags stay, as above.
+IMPORT_TYPES: Final = ("import", "from_import")
+DEPENDENCY_BINDINGS: Final = (
+    "import_time",
+    "deferred_function",
+    "deferred_getattr",
+    "type_checking",
+    "lazy_syntax",
+)
+VIOLATION_KINDS: Final = (
+    "multiple_independent_producers",
+    "shadow_projection",
+    "owner_bypass",
+    "reconstructed_contract",
+    "divergent_failure_semantics",
+    "divergent_canonicalization",
+)
+
 
 def _utf8(value: str) -> bytes:
     """UTF-8 bytes of canonical string content; a lone surrogate is refused
@@ -228,6 +251,18 @@ def _head_key(head: OperationHead) -> tuple[str, bytes]:
 def head_tag(head: OperationHead) -> str:
     """Contract tag string of an operation-head variant."""
     return _HEAD_KEYS[type(head)]
+
+
+def endpoint_key(endpoint: DependencyEndpoint) -> tuple[str, bytes]:
+    """Total canonical key of a dependency endpoint across the ratified
+    ``MODULE | FILE`` union (F-3 §2.1.8): the domain tag first, then the
+    domain's own key bytes — the same construction the operation head uses,
+    so two unions never grow two orderings."""
+    if isinstance(endpoint, ModuleId):
+        return (DOMAIN_TAG_MODULE, _utf8(endpoint.module))
+    if isinstance(endpoint, FileId):
+        return (DOMAIN_TAG_FILE, _utf8(endpoint.path))
+    raise CanonicalModelError(f"value is not a dependency endpoint: {endpoint!r}")
 
 
 def canonical_key(value: object) -> tuple[object, ...]:

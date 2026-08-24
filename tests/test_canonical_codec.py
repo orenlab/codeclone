@@ -119,8 +119,85 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"family":["banana",',
     ),
     ("W08", "unknown head tag", '["opaque","x.y"]', '["banana","x.y"]'),
-    ("W09", "domain not admitted for the slot", '["module",0]', '["symbol",0]'),
+    (
+        "W09",
+        "domain not admitted for the slot",
+        '"2":["module",0]',
+        '"2":["symbol",0]',
+    ),
     ("W10", "ordinal beyond its table", '"file":[0,0,1,2,2]', '"file":[0,0,1,2,9]'),
+    (
+        "W08",
+        "unknown import_type tag",
+        '"import_type":["from_import","from_import","import","import"]',
+        '"import_type":["banana","from_import","import","import"]',
+    ),
+    (
+        "W08",
+        "unknown dependency binding tag",
+        '"binding":["lazy_syntax","deferred_function","import_time","type_checking"]',
+        '"binding":["banana","deferred_function","import_time","type_checking"]',
+    ),
+    (
+        "W08",
+        "endpoint tag unknown",
+        '"source":[["file",2],',
+        '"source":[["banana",2],',
+    ),
+    (
+        "W09",
+        "endpoint tag not admitted",
+        '"source":[["file",2],',
+        '"source":[["symbol",2],',
+    ),
+    (
+        "W12",
+        "dependency edges out of producer-key order",
+        '"import_type":["from_import","from_import","import","import"]',
+        '"import_type":["from_import","import","from_import","import"]',
+    ),
+    (
+        "W13",
+        "duplicate dependency producer key",
+        '"line":[2,4,4,9]',
+        '"line":[2,4,4,4]',
+    ),
+    (
+        "W10",
+        "lazy position beyond the rows",
+        '"is_lazy":[0,3]',
+        '"is_lazy":[0,9]',
+    ),
+    (
+        "W14",
+        "lazy positions not increasing",
+        '"is_lazy":[0,3]',
+        '"is_lazy":[3,0]',
+    ),
+    (
+        "W08",
+        "unknown violation kind tag",
+        '"kind":["owner_bypass","shadow_projection"]',
+        '"kind":["banana","shadow_projection"]',
+    ),
+    (
+        "W16",
+        "violation sink without the FUNCTION role",
+        '"sink_identity":[0,0]',
+        '"sink_identity":[4,0]',
+    ),
+    (
+        "W18",
+        "empty violation contract_id",
+        '"contract_id":["governance.report_write","governance.report_write"]',
+        '"contract_id":["","governance.report_write"]',
+    ),
+    (
+        "W10",
+        "suppressed position beyond the rows",
+        '"suppressed":[1]',
+        '"suppressed":[9]',
+    ),
     (
         "W12",
         "identity table out of canonical order",
@@ -154,7 +231,12 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"producer_sets":[[0,1],[0,4]]',
     ),
     ("W17", "absolute FILE path", '"path":["pkg/a.py",', '"path":["/pkg/a.py",'),
-    ("W18", "null where forbidden", '"module":["pkg.a"]', '"module":[null]'),
+    (
+        "W18",
+        "null where forbidden",
+        '"module":["pkg.a","tools.helper"]',
+        '"module":[null,"tools.helper"]',
+    ),
     (
         "W18",
         "boolean in an integer slot",
@@ -248,6 +330,9 @@ def test_w23_refuses_a_tampered_integrity_digest(canonical_bytes: bytes) -> None
             '"analyzed_files":[0,2]',
             '"analyzed_files":[0,2E0]',
         ),
+        # a present-but-empty sparse boolean column decodes as "no trues"
+        # but is not the canonical encoding of that model (omission is)
+        ("present empty sparse column", '"suppressed":[1],', '"suppressed":[],'),
     ],
 )
 def test_w24_refuses_non_canonical_byte_encodings(
@@ -336,7 +421,18 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
         '"analyzed_files":7',
     ),
     ("W18", "scalar where a sparse map is declared", '"target":{"4":0}', '"target":7'),
-    ("W18", "head is not a pair", '["module",0]', '["module",0,1]'),
+    (
+        "W18",
+        "head is not a pair",
+        '"2":["module",0]',
+        '"2":["module",0,1]',
+    ),
+    (
+        "W18",
+        "endpoint is not a pair",
+        '"source":[["file",2],',
+        '"source":[["file",2,1],',
+    ),
     ("W18", "empty opaque head", '["opaque","x.y"]', '["opaque",""]'),
     (
         "W08",
@@ -346,13 +442,18 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
     ),
     ("W18", "empty local name", '"local_name":{"1":"W2"', '"local_name":{"1":""'),
     (
+        "W18",
+        "empty module name",
+        '"module":["pkg.a","tools.helper"]',
+        '"module":["","tools.helper"]',
+    ),
+    (
         "W08",
         "unknown effect_kind",
         '"effect_kind":{"0":"artifact_write"}',
         '"effect_kind":{"0":"banana"}',
     ),
     ("W18", "empty effect label", '"label":{"0":"os.replace"}', '"label":{"0":""}'),
-    ("W18", "empty module name", '"module":["pkg.a"]', '"module":[""]'),
     ("W18", "empty qualname", '"qualname":["A.run"', '"qualname":[""'),
     (
         "W15",
@@ -442,6 +543,28 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
             "revisions is not an object",
             lambda doc: doc.__setitem__("revisions", 7),
         ),
+        (
+            "W01",
+            "facts table with an unknown column",
+            lambda doc: doc["facts"]["candidates"].__setitem__("zzz", []),
+        ),
+        (
+            "W01",
+            "facts table missing a mandatory column",
+            lambda doc: doc["facts"]["candidates"].__delitem__("level"),
+        ),
+        (
+            "W02",
+            "facts table columns out of canonical order",
+            lambda doc: doc["facts"].__setitem__(
+                "candidates", _reordered(doc["facts"]["candidates"], ["level"])
+            ),
+        ),
+        (
+            "W01",
+            "facts table is not an object",
+            lambda doc: doc["facts"].__setitem__("dependency_edges", 7),
+        ),
     ],
     ids=[
         "W01-effect-roots-not-object",
@@ -449,6 +572,10 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
         "W01-unknown-variant-column",
         "W02-variant-columns-unsorted",
         "W21-revisions-not-object",
+        "W01-facts-unknown-column",
+        "W01-facts-missing-column",
+        "W02-facts-columns-unsorted",
+        "W01-facts-table-not-object",
     ],
 )
 def test_structural_refusals_on_reserialized_documents(

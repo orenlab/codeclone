@@ -17,6 +17,7 @@ from ..analysis.binding import EMPTY_BINDINGS
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.suppressions import DUPLICATE_RESPONSIBILITY_RULE_ID
 from ..analysis.wire import emit_wire
+from ..canonical.authority_identity import candidate_handle, violation_handle
 from ..contracts import AUTHORITY_ANALYSIS_REVISION
 from ..models import (
     AuthorityCandidate,
@@ -39,8 +40,6 @@ from ..models import (
 )
 from .ir import build_contract_ir
 
-_AUTHORITY_DOMAIN: Final = b"ccsem1:authority\x00"
-_AUTHORITY_VIOLATION_DOMAIN: Final = b"ccsem1:authority-violation\x00"
 _AUTHORITY_EFFECT_DOMAIN: Final = (
     b"ccsem1:authority-effect:" + AUTHORITY_ANALYSIS_REVISION.encode("ascii") + b"\x00"
 )
@@ -65,8 +64,9 @@ def _candidate_id(
     producers: tuple[str, ...],
     shared_fact: str,
 ) -> str:
-    wire = "\x00".join((AUTHORITY_ANALYSIS_REVISION, level, shared_fact, *producers))
-    return hashlib.sha256(_AUTHORITY_DOMAIN + wire.encode("utf-8")).hexdigest()
+    # The formula lives with its one versioned owner
+    # (candidate_identity_contract.v1); this producer only calls it.
+    return candidate_handle(level=level, shared_fact=shared_fact, producers=producers)
 
 
 def _operation_tokens(contract: FunctionContractIR) -> tuple[str, ...]:
@@ -306,18 +306,14 @@ def _violation_id(
     sink_identity: str,
     producers: tuple[str, ...],
 ) -> str:
-    wire = "\x00".join(
-        (
-            AUTHORITY_ANALYSIS_REVISION,
-            contract_id,
-            kind,
-            sink_identity,
-            *producers,
-        )
+    # The formula lives with its one versioned owner
+    # (violation_identity_contract.v1); this producer only calls it.
+    return violation_handle(
+        contract_id=contract_id,
+        kind=kind,
+        sink_identity=sink_identity,
+        producers=producers,
     )
-    return hashlib.sha256(
-        _AUTHORITY_VIOLATION_DOMAIN + wire.encode("utf-8")
-    ).hexdigest()
 
 
 def _summary_locations(
