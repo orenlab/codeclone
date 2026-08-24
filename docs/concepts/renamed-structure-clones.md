@@ -60,6 +60,23 @@ change an exit code.
 codeclone --renamed-structure
 ```
 
+## Execution state in the report
+
+The report container (`findings.groups.renamed_structure`) carries `state`,
+the primary witness of producer execution:
+
+- `state: "disabled"` — the producer was never invoked. The container is
+  exactly `{tier, state, algorithm_revision}`; `count` is omitted entirely
+  (omission, not 0 and not null), because a tier that never ran has no
+  measurement to report. `algorithm_revision` at `disabled` is the
+  *configured producer revision* — which algorithm the opt-in would run —
+  never evidence that it ran.
+- `state: "complete"` — the producer ran to completion. `count: 0` means a
+  completed measurement with an empty result, never absence of measurement.
+
+A reader must take `state` as the execution fact and never infer "measured
+empty" from a container that carries no `count`.
+
 ## Related pages
 
 - [Near-miss clones](near-miss-clones.md) — the sibling advisory tier for one-statement edits

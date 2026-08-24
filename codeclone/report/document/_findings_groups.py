@@ -19,6 +19,8 @@ from ...contracts import (
     NEAR_MISS_MAX_EDIT_STATEMENTS,
     RENAMED_STRUCTURE_ALGORITHM_REVISION,
     STATEMENT_REACHABILITY_POLICY_VERSION,
+    TIER_STATE_COMPLETE,
+    TIER_STATE_DISABLED,
 )
 from ...domain.findings import (
     FAMILY_CLONE,
@@ -498,6 +500,17 @@ def build_near_miss_payload(
 ) -> dict[str, object]:
     """Render the near-miss channel: pairs, evidence, and honest limitations.
 
+    ``state`` is the primary witness of producer execution (T1, 2026-08-24).
+    ``pairs is None`` means the producer was never invoked (opt-in off): the
+    container is exactly ``{tier, state: "disabled", algorithm_revision}``,
+    with ``count`` omitted entirely — omission, not 0 and not null — because
+    a tier that never ran has no measurement to utter. ``algorithm_revision``
+    at ``disabled`` is the *configured producer revision*: which algorithm
+    the opt-in would run, never evidence that it ran. An empty sequence means
+    the producer ran and measured nothing: ``state: "complete"`` with
+    ``count: 0``. The law: ``count=0`` MUST mean a completed measurement with
+    an empty result, never absence of measurement.
+
     The payload states its own standing rather than leaving a reader to infer
     it. ``gate_relevant`` is false because these pairs never become clone-lane
     keys, and ``novelty`` is ``untracked`` because a fact that reaches no
@@ -508,6 +521,12 @@ def build_near_miss_payload(
     list position or absence.
     """
 
+    if pairs is None:
+        return {
+            "tier": "near_miss",
+            "state": TIER_STATE_DISABLED,
+            "algorithm_revision": NEAR_MISS_ALGORITHM_REVISION,
+        }
     rendered = [
         {
             "pair_key": pair.pair_key,
@@ -529,10 +548,11 @@ def build_near_miss_payload(
                 for member in pair.members
             ],
         }
-        for pair in sorted(pairs or (), key=lambda pair: pair.pair_key)
+        for pair in sorted(pairs, key=lambda pair: pair.pair_key)
     ]
     return {
         "tier": "near_miss",
+        "state": TIER_STATE_COMPLETE,
         "max_edit_statements": NEAR_MISS_MAX_EDIT_STATEMENTS,
         "algorithm_revision": NEAR_MISS_ALGORITHM_REVISION,
         "gate_relevant": False,
@@ -549,14 +569,29 @@ def build_renamed_structure_payload(
 ) -> dict[str, object]:
     """Render the renamed-structure channel: groups, membership, honest standing.
 
-    Same standing as the near-miss channel one lane over: ``gate_relevant`` is
-    false because these groups never become clone-lane keys, and ``novelty``
-    is ``untracked`` because a fact that reaches no baseline lane can be
-    neither ``new`` nor ``known``. Each member carries its strict-exact
-    fingerprint so a reader can see how the group splits under fp3; there is
-    no similarity score of any kind.
+    Same standing as the near-miss channel one lane over, including the
+    execution witness: ``groups is None`` means the producer was never
+    invoked (opt-in off) and the container is exactly ``{tier, state:
+    "disabled", algorithm_revision}`` with ``count`` omitted entirely;
+    ``algorithm_revision`` at ``disabled`` is the *configured producer
+    revision*, never evidence that it ran. An empty sequence is a completed
+    empty measurement: ``state: "complete"`` with ``count: 0`` — ``count=0``
+    MUST mean a completed measurement with an empty result, never absence of
+    measurement.
+
+    ``gate_relevant`` is false because these groups never become clone-lane
+    keys, and ``novelty`` is ``untracked`` because a fact that reaches no
+    baseline lane can be neither ``new`` nor ``known``. Each member carries
+    its strict-exact fingerprint so a reader can see how the group splits
+    under fp3; there is no similarity score of any kind.
     """
 
+    if groups is None:
+        return {
+            "tier": "renamed_structure",
+            "state": TIER_STATE_DISABLED,
+            "algorithm_revision": RENAMED_STRUCTURE_ALGORITHM_REVISION,
+        }
     rendered = [
         {
             "group_key": group.group_key,
@@ -576,10 +611,11 @@ def build_renamed_structure_payload(
                 for member in group.members
             ],
         }
-        for group in sorted(groups or (), key=lambda group: group.group_key)
+        for group in sorted(groups, key=lambda group: group.group_key)
     ]
     return {
         "tier": "renamed_structure",
+        "state": TIER_STATE_COMPLETE,
         "algorithm_revision": RENAMED_STRUCTURE_ALGORITHM_REVISION,
         "gate_relevant": False,
         "novelty": "untracked",

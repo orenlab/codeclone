@@ -1,0 +1,21 @@
+{
+  "near_miss": {
+    "tier": "near_miss",
+    "state": "complete",
+    "max_edit_statements": 1,
+    "algorithm_revision": "3",
+    "gate_relevant": false,
+    "novelty": "untracked",
+    "count": 0,
+    "pairs": []
+  },
+  "renamed_structure": {
+    "tier": "renamed_structure",
+    "state": "complete",
+    "algorithm_revision": "1",
+    "gate_relevant": false,
+    "novelty": "untracked",
+    "count": 0,
+    "groups": []
+  }
+}

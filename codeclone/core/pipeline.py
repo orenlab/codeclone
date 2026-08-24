@@ -257,19 +257,26 @@ def analyze(
     # is what makes it gate-neutral; the opt-in below decides whether it runs
     # at all, so a new finding kind never appears unrequested. The flag has
     # exactly one owner: the ``near_miss`` OptionSpec in ``config/spec.py``.
+    # ``None`` carries "the producer was never invoked" to the report
+    # container (state: disabled); an empty tuple is a completed empty
+    # measurement (state: complete, count: 0). The distinction must be made
+    # here, at the opt-in decision, because ``else ()`` would erase the
+    # execution fact before any serializer could state it (T1, 2026-08-24).
     near_miss_pairs = (
         build_near_miss_pairs(clone_lane_units)
         if bool(getattr(boot.args, "near_miss", False))
-        else ()
+        else None
     )
     # Wave C mirrors that confinement exactly: renamed-structure groups keep
     # their own channel beside the clone lane, and the opt-in below decides
     # whether the channel is produced at all. The flag has exactly one owner:
-    # the ``renamed_structure`` OptionSpec in ``config/spec.py``.
+    # the ``renamed_structure`` OptionSpec in ``config/spec.py``. The same
+    # execution witness applies: ``None`` means not produced, ``()`` means
+    # produced empty.
     renamed_structure_groups = (
         build_renamed_structure_groups(clone_lane_units)
         if bool(getattr(boot.args, "renamed_structure", False))
-        else ()
+        else None
     )
     func_split = split_clone_groups_for_golden_fixtures(
         groups=build_groups(clone_lane_units),

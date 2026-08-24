@@ -256,6 +256,28 @@ NEAR_MISS_ALGORITHM_REVISION: Final = "3"
 # profile (codeclone/cache/reuse.py). Without it a partially warm run would
 # group digests of two generations against each other.
 RENAMED_STRUCTURE_ALGORITHM_REVISION: Final = "1"
+# The execution-state dictionary of the advisory tier containers
+# (``findings.groups.near_miss`` / ``findings.groups.renamed_structure``).
+# ``state`` is the primary witness of producer execution, and the dictionary
+# is contractually significant (the ``novelty_reason`` precedent): adding a
+# value is a contract change, not a serialization detail.
+#
+# - ``disabled``: the producer was never invoked. The container is exactly
+#   ``{tier, state, algorithm_revision}`` — ``count`` is omitted entirely
+#   (omission, not 0 and not null), because a tier that never ran has no
+#   measurement to utter. ``algorithm_revision`` at ``disabled`` is the
+#   *configured producer revision* — which algorithm the opt-in would run —
+#   never evidence that it ran.
+# - ``complete``: the producer ran to completion over the clone-eligible
+#   population. The law: ``count=0`` MUST mean a completed measurement with
+#   an empty result, never absence of measurement.
+#
+# Before this dictionary existed the containers stamped ``count: 0``
+# unconditionally, making "never ran" indistinguishable from "ran and found
+# nothing" (the empty-root-is-not-unmeasured class; benchmark pair T3-01 was
+# misattributed through exactly that hole).
+TIER_STATE_DISABLED: Final = "disabled"
+TIER_STATE_COMPLETE: Final = "complete"
 
 # 3.2 adds the two rule-3 fact families: per-class base resolution and
 # per-method decorator evidence. Both gate the tri-state liveness verdict,
@@ -838,6 +860,8 @@ __all__ = [
     "STRUCTURAL_FINDINGS_CATALOG_VERSION",
     "SUPPRESSED_CONTAINER_KEY",
     "SUPPRESSED_CONTAINER_PATH",
+    "TIER_STATE_COMPLETE",
+    "TIER_STATE_DISABLED",
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",

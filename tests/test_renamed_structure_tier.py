@@ -287,15 +287,20 @@ def test_renamed_structure_output_matches_cold_and_warm(tmp_path: Path) -> None:
         boot, cache_path, root=tmp_path, warm=True, expect_cache_hits=2
     )
 
-    cold_signature = _group_signature(cold.result.renamed_structure_groups)
+    cold_groups = cold.result.renamed_structure_groups
+    warm_groups = warm.result.renamed_structure_groups
+    assert cold_groups is not None and warm_groups is not None, (
+        "the opt-in run did not produce the channel"
+    )
+    cold_signature = _group_signature(cold_groups)
     assert cold_signature, "cold run found no renamed-structure group to compare"
-    assert cold_signature == _group_signature(warm.result.renamed_structure_groups)
+    assert cold_signature == _group_signature(warm_groups)
 
 
 def test_renamed_structure_channel_is_opt_in(tmp_path: Path) -> None:
     """The tier ships behind its own flag, off by default (near-miss precedent)."""
 
-    def _run(*, renamed_structure: bool) -> tuple[RenamedStructureGroup, ...]:
+    def _run(*, renamed_structure: bool) -> tuple[RenamedStructureGroup, ...] | None:
         boot = _pairs_package_boot(tmp_path, renamed_structure=renamed_structure)
         _cache, run = run_pipeline_once(
             boot,
@@ -305,7 +310,10 @@ def test_renamed_structure_channel_is_opt_in(tmp_path: Path) -> None:
         )
         return run.result.renamed_structure_groups
 
-    assert _run(renamed_structure=False) == ()
+    # Off means not produced (None), never "produced and empty" — the
+    # execution witness the T1 tier-state contract serializes as
+    # ``state: "disabled"``.
+    assert _run(renamed_structure=False) is None
     assert _run(renamed_structure=True), (
         "the opt-in run found no group; the guard is inert"
     )

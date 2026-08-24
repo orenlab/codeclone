@@ -210,10 +210,16 @@ class AnalysisResult:
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
     # Report-only advisory channel: near-miss pairs never enter func_groups,
     # so they reach no observation lane, no baseline novelty and no gate.
-    near_miss_pairs: tuple[NearMissPair, ...] = ()
-    # Same confinement, Wave C: renamed-structure groups are a sibling of the
-    # clone lane, never a member of it.
-    renamed_structure_groups: tuple[RenamedStructureGroup, ...] = ()
+    # ``None`` is the execution witness "the producer was never invoked"
+    # (opt-in off) and serializes as a ``state: "disabled"`` container; an
+    # empty tuple means the producer ran and measured nothing and serializes
+    # as ``state: "complete"`` with ``count: 0``. Collapsing the two would
+    # re-open the empty-root-is-not-unmeasured hole (T1, 2026-08-24).
+    near_miss_pairs: tuple[NearMissPair, ...] | None = None
+    # Same confinement and the same execution witness, Wave C:
+    # renamed-structure groups are a sibling of the clone lane, never a
+    # member of it; ``None`` means not produced, ``()`` means produced empty.
+    renamed_structure_groups: tuple[RenamedStructureGroup, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

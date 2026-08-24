@@ -606,6 +606,16 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
         _LANE_NONE,
         "report-wire container address, built from the two names above",
     ),
+    "TIER_STATE_COMPLETE": (
+        _LANE_NONE,
+        "report-wire execution witness of the advisory tier containers: the "
+        "state is decided per run at document build time from the opt-in "
+        "flags, and no cache payload stores it",
+    ),
+    "TIER_STATE_DISABLED": (
+        _LANE_NONE,
+        "report-wire execution witness, the disabled half of the pair above",
+    ),
     # ── no stored output: not read by any production code today
     "PORTABLE_PATH_PROFILE_VERSION": (_LANE_NONE, "dead constant, no producer"),
     "SOURCE_KIND_POLICY_VERSION": (

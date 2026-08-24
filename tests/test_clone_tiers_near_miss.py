@@ -339,9 +339,14 @@ def test_near_miss_output_matches_cold_and_warm(tmp_path: Path) -> None:
         boot, cache_path, root=tmp_path, warm=True, expect_cache_hits=2
     )
 
-    cold_signature = _near_miss_signature(cold.result.near_miss_pairs)
+    cold_pairs = cold.result.near_miss_pairs
+    warm_pairs = warm.result.near_miss_pairs
+    assert cold_pairs is not None and warm_pairs is not None, (
+        "the opt-in run did not produce the channel"
+    )
+    cold_signature = _near_miss_signature(cold_pairs)
     assert cold_signature, "cold run found no near-miss pair to compare"
-    assert cold_signature == _near_miss_signature(warm.result.near_miss_pairs)
+    assert cold_signature == _near_miss_signature(warm_pairs)
 
 
 def test_raising_the_bound_is_refused_instead_of_silently_under_reporting(
@@ -375,12 +380,15 @@ def test_near_miss_channel_is_opt_in(tmp_path: Path) -> None:
     a choice the operator made.
     """
 
-    def _run(*, near_miss: bool) -> tuple[NearMissPair, ...]:
+    def _run(*, near_miss: bool) -> tuple[NearMissPair, ...] | None:
         boot = _pairs_package_boot(tmp_path, near_miss=near_miss)
         _cache, run = run_pipeline_once(
             boot, tmp_path / f"cache-{near_miss}.json", root=tmp_path, warm=False
         )
         return run.result.near_miss_pairs
 
-    assert _run(near_miss=False) == ()
+    # Off means not produced (None), never "produced and empty" — the
+    # execution witness the T1 tier-state contract serializes as
+    # ``state: "disabled"``.
+    assert _run(near_miss=False) is None
     assert _run(near_miss=True), "the opt-in run found no pair; the guard is inert"

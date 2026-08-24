@@ -1,0 +1,12 @@
+{
+  "near_miss": {
+    "tier": "near_miss",
+    "state": "disabled",
+    "algorithm_revision": "3"
+  },
+  "renamed_structure": {
+    "tier": "renamed_structure",
+    "state": "disabled",
+    "algorithm_revision": "1"
+  }
+}

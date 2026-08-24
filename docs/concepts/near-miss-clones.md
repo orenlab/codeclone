@@ -59,6 +59,23 @@ no baseline novelty and no gate. Turning the flag on cannot change an exit code.
 codeclone --near-miss
 ```
 
+## Execution state in the report
+
+The report container (`findings.groups.near_miss`) carries `state`, the
+primary witness of producer execution:
+
+- `state: "disabled"` — the producer was never invoked. The container is
+  exactly `{tier, state, algorithm_revision}`; `count` is omitted entirely
+  (omission, not 0 and not null), because a tier that never ran has no
+  measurement to report. `algorithm_revision` at `disabled` is the
+  *configured producer revision* — which algorithm the opt-in would run —
+  never evidence that it ran.
+- `state: "complete"` — the producer ran to completion. `count: 0` means a
+  completed measurement with an empty result, never absence of measurement.
+
+A reader must take `state` as the execution fact and never infer "measured
+empty" from a container that carries no `count`.
+
 ## Related pages
 
 - [Structural analysis](structural-analysis.md) — the clone tiers that do gate

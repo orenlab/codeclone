@@ -346,7 +346,9 @@ def _cold_then_warm_signatures(
         )
         if not warm:
             cache.save()
-        signatures.append(_signature(run.result.near_miss_pairs))
+        pairs = run.result.near_miss_pairs
+        assert pairs is not None, "the opt-in run did not produce the channel"
+        signatures.append(_signature(pairs))
     return signatures[0], signatures[1]
 
 
@@ -369,10 +371,15 @@ def test_renamed_domain_output_matches_cold_and_warm(tmp_path: Path) -> None:
 
 
 def test_renamed_domain_obeys_the_near_miss_opt_in(tmp_path: Path) -> None:
-    """One flag owns the channel: off means no pairs in either domain."""
+    """One flag owns the channel: off means the channel is not produced.
+
+    ``None`` is the execution witness "the producer was never invoked" — the
+    T1 tier-state contract serializes it as ``state: "disabled"`` — so an
+    opt-out run must not manufacture an empty measurement in any domain.
+    """
 
     boot = _pairs_package_boot(tmp_path, near_miss=False)
     _cache, run = run_pipeline_once(
         boot, tmp_path / "cache.json", root=tmp_path, warm=False
     )
-    assert run.result.near_miss_pairs == ()
+    assert run.result.near_miss_pairs is None
