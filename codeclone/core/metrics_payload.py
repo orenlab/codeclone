@@ -12,6 +12,7 @@ from ..analysis.suppressions import (
     DEAD_CODE_RULE_ID,
     INLINE_CODECLONE_SUPPRESSION_SOURCE,
 )
+from ..canonical.authority_identity import candidate_total_order_key
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import CONFIDENCE_HIGH, RISK_LOW
 from ..metrics.health import health_report_fields
@@ -46,6 +47,25 @@ from .coverage_payload import (
     _permille,
 )
 from .security_surfaces_payload import build_security_surfaces_payload
+
+
+def _authority_item_order_tail(item: Mapping[str, object]) -> str:
+    """Totality tail of one semantic-authority item row.
+
+    Candidate rows are ordered by the owner of the candidate identity
+    formula (``candidate_identity_contract.v1``), recomputed from the
+    natural key on the row — never read from the stored ``candidate_id``
+    string, which could drift from the owner.  Rows of every other kind
+    own no candidate natural key and keep the empty tail.
+    """
+
+    if item.get("item_kind") != "candidate":
+        return ""
+    return candidate_total_order_key(
+        level=str(item["level"]),
+        shared_fact=str(item["shared_fact"]),
+        producers=[str(producer) for producer in as_sequence(item["producers"])],
+    )
 
 
 def _semantic_authority_payload(
@@ -175,7 +195,7 @@ def _semantic_authority_payload(
             key=lambda item: (
                 str(item["item_kind"]),
                 str(item.get("sink_identity", "")),
-                str(item.get("candidate_id", "")),
+                _authority_item_order_tail(item),
             ),
         ),
         "registry": registry_entries,

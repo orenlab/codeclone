@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from ...analysis.suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
+from ...canonical.authority_identity import candidate_total_order_key
 from ...domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -54,6 +55,25 @@ _COVERAGE_JOIN_FAMILY = "coverage_join"
 _SECURITY_SURFACES_FAMILY = "security_surfaces"
 
 _SEMANTIC_AUTHORITY_FAMILY = "semantic_authority"
+
+
+def _authority_item_order_tail(item: Mapping[str, object]) -> str:
+    """Totality tail of one semantic-authority document row.
+
+    Candidate rows are ordered by the owner of the candidate identity
+    formula (``candidate_identity_contract.v1``), recomputed from the
+    natural key on the row — never read from the published ``candidate_id``
+    string, which could drift from the owner.  Rows of every other kind
+    own no candidate natural key and keep the empty tail.
+    """
+
+    if str(item.get("item_kind", "")) != "candidate":
+        return ""
+    return candidate_total_order_key(
+        level=str(item["level"]),
+        shared_fact=str(item["shared_fact"]),
+        producers=[str(producer) for producer in _as_sequence(item["producers"])],
+    )
 
 
 def _producer_source_kind(producers: Sequence[str]) -> str:
@@ -760,7 +780,7 @@ def _normalize_metrics_families(
                 len(SOURCE_KIND_ORDER),
             ),
             -len(_as_sequence(item["producers"])),
-            item["candidate_id"],
+            _authority_item_order_tail(item),
         ),
     )
     semantic_authority_registry = sorted(

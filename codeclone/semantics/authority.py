@@ -17,7 +17,11 @@ from ..analysis.binding import EMPTY_BINDINGS
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.suppressions import DUPLICATE_RESPONSIBILITY_RULE_ID
 from ..analysis.wire import emit_wire
-from ..canonical.authority_identity import candidate_handle, violation_handle
+from ..canonical.authority_identity import (
+    candidate_handle,
+    candidate_total_order_key,
+    violation_handle,
+)
 from ..contracts import AUTHORITY_ANALYSIS_REVISION
 from ..models import (
     AuthorityCandidate,
@@ -397,7 +401,20 @@ def _candidate_for_sink(
     rows = [candidate for candidate in candidates if function in candidate.producers]
     if not rows:
         return None
-    return min(rows, key=lambda item: (-item.score, item.candidate_id))
+    # The totality tail comes from the one formula owner
+    # (candidate_identity_contract.v1), never from the stored id string:
+    # a stored string can drift from the owner; the owner cannot.
+    return min(
+        rows,
+        key=lambda item: (
+            -item.score,
+            candidate_total_order_key(
+                level=item.level,
+                shared_fact=item.shared_fact,
+                producers=item.producers,
+            ),
+        ),
+    )
 
 
 def _enforcement(
