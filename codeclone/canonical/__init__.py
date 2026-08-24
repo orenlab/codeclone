@@ -28,6 +28,7 @@ from codeclone.canonical.codec import (
 )
 from codeclone.canonical.errors import (
     CanonicalModelError,
+    ExportIntegrityError,
     LegacyIngestError,
     RunStoreError,
     StoreCompatibilityError,
@@ -35,6 +36,13 @@ from codeclone.canonical.errors import (
     StoreIntegrityError,
     UnknownRunError,
     WireDecodeError,
+)
+from codeclone.canonical.export import (
+    ByteSink,
+    ExportEnvelope,
+    WitnessLayer,
+    canonical_artifact_digest,
+    verify_export_artifact,
 )
 from codeclone.canonical.identity import (
     DEPENDENCY_BINDINGS,
@@ -87,6 +95,8 @@ from codeclone.canonical.store import (
     PublishReceipt,
     RunStore,
     analysis_scope_digest,
+    export_head,
+    export_run,
 )
 
 __all__ = [
@@ -99,6 +109,7 @@ __all__ = [
     "VIOLATION_IDENTITY_CONTRACT",
     "VIOLATION_KINDS",
     "AnalysisFile",
+    "ByteSink",
     "CandidateRow",
     "CanonicalFacts",
     "CanonicalModel",
@@ -108,6 +119,8 @@ __all__ = [
     "DependencyEndpoint",
     "EffectLabelRoot",
     "EffectRoot",
+    "ExportEnvelope",
+    "ExportIntegrityError",
     "FieldDeclaration",
     "FileId",
     "FileModuleRelation",
@@ -134,9 +147,11 @@ __all__ = [
     "UnresolvedRoot",
     "ViolationRow",
     "WireDecodeError",
+    "WitnessLayer",
     "analysis_scope_digest",
     "candidate_handle",
     "candidate_total_order_key",
+    "canonical_artifact_digest",
     "canonical_float_lexeme",
     "canonical_key",
     "canonical_model_from_legacy_document",
@@ -145,10 +160,13 @@ __all__ = [
     "derived_wire_columns",
     "encode_canonical_json",
     "endpoint_key",
+    "export_head",
+    "export_run",
     "head_tag",
     "legacy_symbol_key",
     "root_family",
     "sparse_bool_wire_columns",
+    "verify_export_artifact",
     "violation_handle",
     "wire_columns",
     "wire_fact_family_order",

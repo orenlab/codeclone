@@ -52,7 +52,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, TypeVar, cast
 
@@ -215,12 +216,15 @@ class _Obj:
         self.items = list(items)
 
 
+def _member_lexeme(key: str, value: object) -> str:
+    """The one lexeme of one object member — the same spelling whether the
+    member rides inside ``_write`` or is streamed chunk by chunk."""
+    return f"{canonical_string_lexeme(key)}:{_write(value)}"
+
+
 def _write(value: object) -> str:
     if isinstance(value, _Obj):
-        members = ",".join(
-            f"{canonical_string_lexeme(key)}:{_write(item)}"
-            for key, item in value.items
-        )
+        members = ",".join(_member_lexeme(key, item) for key, item in value.items)
         return "{" + members + "}"
     if isinstance(value, str):
         return canonical_string_lexeme(value)
@@ -252,7 +256,14 @@ def _sorted_domain(values: Iterable[_ValueT]) -> list[_ValueT]:
     return sorted(set(values), key=canonical_key)
 
 
-def _domain_symbols(facts: CanonicalFacts) -> list[SymbolId]:
+def referenced_symbols(facts: CanonicalFacts) -> set[SymbolId]:
+    """SYMBOL-domain contribution of one facts subset (F-3 §7.2).
+
+    Exactly the symbols the wire's ``symbols`` table carries: fact-row
+    references plus producer-root targets of contract and graph-node root
+    sets.  Callable per family, so the run-store's bounded exporter can
+    union contributions without ever holding the complete facts.
+    """
     referenced: set[SymbolId] = set()
     for contract in facts.contracts:
         referenced.add(contract.function)
@@ -274,7 +285,7 @@ def _domain_symbols(facts: CanonicalFacts) -> list[SymbolId]:
         referenced.add(violation.sink_identity)
         referenced.add(violation.canonical_owner)
         referenced.update(violation.producer_set)
-    return _sorted_domain(referenced)
+    return referenced
 
 
 def _root_carriers(
@@ -288,8 +299,107 @@ def _root_carriers(
         yield violation.root_set
 
 
-def _domain_roots(facts: CanonicalFacts) -> list[EffectRoot]:
-    return _sorted_domain(root for row_set in _root_carriers(facts) for root in row_set)
+def fact_root_sets(facts: CanonicalFacts) -> set[frozenset[EffectRoot]]:
+    """Every distinct root set carried by one facts subset."""
+    return set(_root_carriers(facts))
+
+
+def fact_producer_sets(facts: CanonicalFacts) -> set[frozenset[SymbolId]]:
+    """Every distinct producer set carried by one facts subset."""
+    producer_sets = {row.producer_set for row in facts.candidates}
+    producer_sets.update(row.producer_set for row in facts.violations)
+    return producer_sets
+
+
+@dataclass(slots=True)
+class WirePlan:
+    """Projection plan of one model state: the sorted identity domains,
+    their ordinals, and the interned set tables — everything the wire needs
+    besides the fact rows themselves.
+
+    :func:`plan_from_parts` is the one spelling of domain sorting and set
+    interning for both wire producers: the in-memory encoder and the
+    run-store's bounded exporter build the same plan from two row sources.
+    """
+
+    files: list[FileId]
+    modules: list[ModuleId]
+    symbols: list[SymbolId]
+    roots: list[EffectRoot]
+    file_ordinal: dict[FileId, int]
+    module_ordinal: dict[ModuleId, int]
+    symbol_ordinal: dict[SymbolId, int]
+    root_ordinal: dict[EffectRoot, int]
+    labels: list[str]
+    coupled_tables: list[tuple[int, ...]]
+    producer_set_tables: list[tuple[int, ...]]
+    root_set_tables: list[tuple[int, ...]]
+    producer_set_ordinal: dict[tuple[int, ...], int]
+    root_set_ordinal: dict[tuple[int, ...], int]
+    analyzed_files: frozenset[FileId]
+    file_modules: frozenset[FileModuleRelation]
+
+
+def plan_from_parts(
+    *,
+    files: Iterable[FileId],
+    modules: Iterable[ModuleId],
+    symbols: Iterable[SymbolId],
+    root_sets: Iterable[frozenset[EffectRoot]],
+    producer_sets: Iterable[frozenset[SymbolId]],
+    coupled_sets: Iterable[frozenset[str]],
+    analyzed_files: frozenset[FileId],
+    file_modules: frozenset[FileModuleRelation],
+) -> WirePlan:
+    """Assemble the projection plan from collected identity parts.
+
+    The EFFECT_ROOT domain is derived from the root sets themselves —
+    exactly the union the wire's ``root_sets`` tables reference (§7.2).
+    """
+    root_set_values = set(root_sets)
+    producer_set_values = set(producer_sets)
+    coupled_values = set(coupled_sets)
+    sorted_files = _sorted_domain(files)
+    sorted_modules = _sorted_domain(modules)
+    sorted_symbols = _sorted_domain(symbols)
+    sorted_roots = _sorted_domain(
+        root for row_set in root_set_values for root in row_set
+    )
+    symbol_ordinal = _ordinals(sorted_symbols)
+    root_ordinal = _ordinals(sorted_roots)
+    labels = sorted({label for group in coupled_values for label in group})
+    label_ordinal = _ordinals(labels)
+    coupled_tables = sorted(
+        tuple(sorted(label_ordinal[label] for label in group))
+        for group in coupled_values
+    )
+    producer_set_tables = sorted(
+        {
+            tuple(sorted(symbol_ordinal[p] for p in producer_set))
+            for producer_set in producer_set_values
+        }
+    )
+    root_set_tables = sorted(
+        {tuple(sorted(root_ordinal[r] for r in row_set)) for row_set in root_set_values}
+    )
+    return WirePlan(
+        files=sorted_files,
+        modules=sorted_modules,
+        symbols=sorted_symbols,
+        roots=sorted_roots,
+        file_ordinal=_ordinals(sorted_files),
+        module_ordinal=_ordinals(sorted_modules),
+        symbol_ordinal=symbol_ordinal,
+        root_ordinal=root_ordinal,
+        labels=labels,
+        coupled_tables=coupled_tables,
+        producer_set_tables=producer_set_tables,
+        root_set_tables=root_set_tables,
+        producer_set_ordinal=_ordinals(producer_set_tables),
+        root_set_ordinal=_ordinals(root_set_tables),
+        analyzed_files=analyzed_files,
+        file_modules=file_modules,
+    )
 
 
 def _head_value(
@@ -304,27 +414,27 @@ def _head_value(
     return [HEAD_TAG_OPAQUE, head.text]
 
 
-def _encode_effect_roots(
-    roots: Sequence[EffectRoot],
-    module_ordinal: Mapping[ModuleId, int],
-    file_ordinal: Mapping[FileId, int],
-    symbol_ordinal: Mapping[SymbolId, int],
-) -> _Obj:
+def _encode_effect_roots(plan: WirePlan) -> _Obj:
     family_column: list[str] = []
     sparse: dict[str, list[tuple[str, object]]] = {
         name: [] for name in _EFFECT_ROOT_SPARSE_COLUMNS
     }
-    for position, root in enumerate(roots):
+    for position, root in enumerate(plan.roots):
         family_column.append(root_family(root))
         key = str(position)
         if isinstance(root, OperationRoot):
             sparse["head"].append(
-                (key, _head_value(root.target.head, module_ordinal, file_ordinal))
+                (
+                    key,
+                    _head_value(
+                        root.target.head, plan.module_ordinal, plan.file_ordinal
+                    ),
+                )
             )
             sparse["local_name"].append((key, root.target.local_name))
             sparse["operation_kind"].append((key, root.operation_kind))
         elif isinstance(root, ProducerRoot):
-            sparse["target"].append((key, symbol_ordinal[root.target]))
+            sparse["target"].append((key, plan.symbol_ordinal[root.target]))
         elif isinstance(root, EffectLabelRoot):
             sparse["effect_kind"].append((key, root.effect_kind))
             sparse["label"].append((key, root.label))
@@ -337,200 +447,211 @@ def _encode_effect_roots(
     return _Obj(members)
 
 
-def _fact_tables(
-    facts: CanonicalFacts,
-    file_ordinal: Mapping[FileId, int],
-    module_ordinal: Mapping[ModuleId, int],
-    symbol_ordinal: Mapping[SymbolId, int],
-    file_modules: frozenset[FileModuleRelation],
-    root_ordinal: Mapping[EffectRoot, int],
-    producer_set_ordinal: Mapping[tuple[int, ...], int],
-    root_set_ordinal: Mapping[tuple[int, ...], int],
-) -> dict[str, list[dict[str, object]]]:
-    def producer_ref(producer_set: frozenset[SymbolId]) -> tuple[int, ...]:
-        return tuple(sorted(symbol_ordinal[p] for p in producer_set))
+def _producer_set_key(
+    producer_set: frozenset[SymbolId], plan: WirePlan
+) -> tuple[int, ...]:
+    return tuple(sorted(plan.symbol_ordinal[p] for p in producer_set))
 
-    def root_set_ref(row_set: frozenset[EffectRoot]) -> int:
-        return root_set_ordinal[tuple(sorted(root_ordinal[r] for r in row_set))]
 
+def _root_set_ref(row_set: frozenset[EffectRoot], plan: WirePlan) -> int:
+    return plan.root_set_ordinal[tuple(sorted(plan.root_ordinal[r] for r in row_set))]
+
+
+def _candidate_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+    handle_symbols = {p for row in facts.candidates for p in row.producer_set}
+    legacy_keys = _legacy_symbol_keys(handle_symbols, plan.file_modules)
+    return [
+        {
+            "candidate_id": candidate_handle(
+                level=row.level,
+                shared_fact=row.shared_fact,
+                producers=[legacy_keys[p] for p in row.producer_set],
+            ),
+            "level": row.level,
+            "producer_set": plan.producer_set_ordinal[
+                _producer_set_key(row.producer_set, plan)
+            ],
+            "shared_fact": row.shared_fact,
+        }
+        for row in sorted(
+            facts.candidates,
+            key=lambda row: (
+                row.level.encode("utf-8"),
+                row.shared_fact.encode("utf-8"),
+                _producer_set_key(row.producer_set, plan),
+            ),
+        )
+    ]
+
+
+def _dependency_edge_rows(
+    facts: CanonicalFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    def endpoint_ref(endpoint: DependencyEndpoint) -> tuple[str, int]:
+        return _endpoint_sort_key(endpoint, plan.module_ordinal, plan.file_ordinal)
+
+    return [
+        {
+            "binding": row.binding,
+            "import_type": row.import_type,
+            "is_lazy": row.is_lazy,
+            "line": row.line,
+            "source": _endpoint_value(
+                row.source, plan.module_ordinal, plan.file_ordinal
+            ),
+            "target": _endpoint_value(
+                row.target, plan.module_ordinal, plan.file_ordinal
+            ),
+        }
+        for row in sorted(
+            facts.dependency_edges,
+            key=lambda row: (
+                *endpoint_ref(row.source),
+                *endpoint_ref(row.target),
+                row.import_type,
+                row.line,
+            ),
+        )
+    ]
+
+
+def _violation_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
     handle_symbols: set[SymbolId] = set()
-    for candidate in facts.candidates:
-        handle_symbols.update(candidate.producer_set)
     for violation in facts.violations:
         handle_symbols.add(violation.sink_identity)
         handle_symbols.update(violation.producer_set)
-    legacy_keys = _legacy_symbol_keys(handle_symbols, file_modules)
-
-    def endpoint_ref(endpoint: DependencyEndpoint) -> tuple[str, int]:
-        return _endpoint_sort_key(endpoint, module_ordinal, file_ordinal)
-
-    return {
-        "candidates": [
-            {
-                "candidate_id": candidate_handle(
-                    level=row.level,
-                    shared_fact=row.shared_fact,
-                    producers=[legacy_keys[p] for p in row.producer_set],
-                ),
-                "level": row.level,
-                "producer_set": producer_set_ordinal[producer_ref(row.producer_set)],
-                "shared_fact": row.shared_fact,
-            }
-            for row in sorted(
-                facts.candidates,
-                key=lambda row: (
-                    row.level.encode("utf-8"),
-                    row.shared_fact.encode("utf-8"),
-                    producer_ref(row.producer_set),
-                ),
-            )
-        ],
-        "dependency_edges": [
-            {
-                "binding": row.binding,
-                "import_type": row.import_type,
-                "is_lazy": row.is_lazy,
-                "line": row.line,
-                "source": _endpoint_value(row.source, module_ordinal, file_ordinal),
-                "target": _endpoint_value(row.target, module_ordinal, file_ordinal),
-            }
-            for row in sorted(
-                facts.dependency_edges,
-                key=lambda row: (
-                    *endpoint_ref(row.source),
-                    *endpoint_ref(row.target),
-                    row.import_type,
-                    row.line,
-                ),
-            )
-        ],
-        "violations": [
-            {
-                "authority_status": row.authority_status,
-                "canonical_owner": symbol_ordinal[row.canonical_owner],
-                "contract_id": row.contract_id,
-                "effect_signature": row.effect_signature,
-                "kind": row.kind,
-                "producer_set": producer_set_ordinal[producer_ref(row.producer_set)],
-                "resolution_state": row.resolution_state,
-                "root_set": root_set_ref(row.root_set),
-                "sink_identity": symbol_ordinal[row.sink_identity],
-                "suppressed": row.suppressed,
-                "violation_id": violation_handle(
-                    contract_id=row.contract_id,
-                    kind=row.kind,
-                    sink_identity=legacy_keys[row.sink_identity],
-                    producers=[legacy_keys[p] for p in row.producer_set],
-                ),
-            }
-            for row in sorted(
-                facts.violations,
-                key=lambda row: (
-                    row.contract_id.encode("utf-8"),
-                    row.kind.encode("utf-8"),
-                    symbol_ordinal[row.sink_identity],
-                    producer_ref(row.producer_set),
-                ),
-            )
-        ],
-        "contracts": [
-            {
-                "effect_signature": row.effect_signature,
-                "function": symbol_ordinal[row.function],
-                "root_set": root_set_ref(row.root_set),
-            }
-            for row in sorted(
-                facts.contracts, key=lambda row: symbol_ordinal[row.function]
-            )
-        ],
-        "file_modules": [
-            {
-                "file": file_ordinal[rel.file],
-                "module": module_ordinal[rel.module],
-            }
-            for rel in sorted(
-                file_modules,
-                key=lambda rel: (file_ordinal[rel.file], module_ordinal[rel.module]),
-            )
-        ],
-        "graph_nodes": [
-            {
-                "effect_signature": row.effect_signature,
-                "function": symbol_ordinal[row.function],
-                "output_facts": list(row.output_facts),
-                "resolution_state": row.resolution_state,
-                "root_set": root_set_ref(row.root_set),
-            }
-            for row in sorted(
-                facts.graph_nodes, key=lambda row: symbol_ordinal[row.function]
-            )
-        ],
-        "semantic_edges": [
-            {
-                "source": symbol_ordinal[edge.source],
-                "target": symbol_ordinal[edge.target],
-            }
-            for edge in sorted(
-                facts.semantic_edges,
-                key=lambda e: (symbol_ordinal[e.source], symbol_ordinal[e.target]),
-            )
-        ],
-        "sink_roles": [
-            {
-                "authority_status": row.authority_status,
-                "symbol": symbol_ordinal[row.symbol],
-            }
-            for row in sorted(
-                facts.sink_roles, key=lambda row: symbol_ordinal[row.symbol]
-            )
-        ],
-    }
-
-
-def _seal(members: Sequence[tuple[str, object]]) -> bytes:
-    body = ",".join(
-        f"{canonical_string_lexeme(key)}:{_write(value)}" for key, value in members
-    ).encode("utf-8")
-    digest = hashlib.sha256(_INTEGRITY_DOMAIN + body).hexdigest()
-    integrity = _Obj([("algorithm", "sha256"), ("value", digest)])
-    tail = f',"integrity":{_write(integrity)}'.encode()
-    return b"{" + body + tail + b"}"
-
-
-def _interned_labels(
-    model: CanonicalModel,
-) -> tuple[list[str], list[tuple[int, ...]]]:
-    labels = sorted({label for group in model.coupled_sets for label in group})
-    label_ordinal = _ordinals(labels)
-    coupled_tables = sorted(
-        tuple(sorted(label_ordinal[label] for label in group))
-        for group in model.coupled_sets
-    )
-    return labels, coupled_tables
-
-
-def _interned_producer_sets(
-    facts: CanonicalFacts, symbol_ordinal: Mapping[SymbolId, int]
-) -> list[tuple[int, ...]]:
-    producer_sets = {row.producer_set for row in facts.candidates}
-    producer_sets.update(row.producer_set for row in facts.violations)
-    return sorted(
+    legacy_keys = _legacy_symbol_keys(handle_symbols, plan.file_modules)
+    return [
         {
-            tuple(sorted(symbol_ordinal[p] for p in producer_set))
-            for producer_set in producer_sets
+            "authority_status": row.authority_status,
+            "canonical_owner": plan.symbol_ordinal[row.canonical_owner],
+            "contract_id": row.contract_id,
+            "effect_signature": row.effect_signature,
+            "kind": row.kind,
+            "producer_set": plan.producer_set_ordinal[
+                _producer_set_key(row.producer_set, plan)
+            ],
+            "resolution_state": row.resolution_state,
+            "root_set": _root_set_ref(row.root_set, plan),
+            "sink_identity": plan.symbol_ordinal[row.sink_identity],
+            "suppressed": row.suppressed,
+            "violation_id": violation_handle(
+                contract_id=row.contract_id,
+                kind=row.kind,
+                sink_identity=legacy_keys[row.sink_identity],
+                producers=[legacy_keys[p] for p in row.producer_set],
+            ),
         }
-    )
+        for row in sorted(
+            facts.violations,
+            key=lambda row: (
+                row.contract_id.encode("utf-8"),
+                row.kind.encode("utf-8"),
+                plan.symbol_ordinal[row.sink_identity],
+                _producer_set_key(row.producer_set, plan),
+            ),
+        )
+    ]
 
 
-def _interned_root_sets(
-    facts: CanonicalFacts, root_ordinal: Mapping[EffectRoot, int]
-) -> list[tuple[int, ...]]:
-    return sorted(
+def _contract_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+    return [
         {
-            tuple(sorted(root_ordinal[r] for r in row_set))
-            for row_set in _root_carriers(facts)
+            "effect_signature": row.effect_signature,
+            "function": plan.symbol_ordinal[row.function],
+            "root_set": _root_set_ref(row.root_set, plan),
         }
-    )
+        for row in sorted(
+            facts.contracts, key=lambda row: plan.symbol_ordinal[row.function]
+        )
+    ]
+
+
+def _file_module_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+    del facts  # the relation rides the plan, not the fact tables (§2.3)
+    return [
+        {
+            "file": plan.file_ordinal[rel.file],
+            "module": plan.module_ordinal[rel.module],
+        }
+        for rel in sorted(
+            plan.file_modules,
+            key=lambda rel: (
+                plan.file_ordinal[rel.file],
+                plan.module_ordinal[rel.module],
+            ),
+        )
+    ]
+
+
+def _graph_node_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+    return [
+        {
+            "effect_signature": row.effect_signature,
+            "function": plan.symbol_ordinal[row.function],
+            "output_facts": list(row.output_facts),
+            "resolution_state": row.resolution_state,
+            "root_set": _root_set_ref(row.root_set, plan),
+        }
+        for row in sorted(
+            facts.graph_nodes, key=lambda row: plan.symbol_ordinal[row.function]
+        )
+    ]
+
+
+def _semantic_edge_rows(
+    facts: CanonicalFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "source": plan.symbol_ordinal[edge.source],
+            "target": plan.symbol_ordinal[edge.target],
+        }
+        for edge in sorted(
+            facts.semantic_edges,
+            key=lambda e: (
+                plan.symbol_ordinal[e.source],
+                plan.symbol_ordinal[e.target],
+            ),
+        )
+    ]
+
+
+def _sink_role_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+    return [
+        {
+            "authority_status": row.authority_status,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.sink_roles, key=lambda row: plan.symbol_ordinal[row.symbol]
+        )
+    ]
+
+
+_FAMILY_ROW_BUILDERS: dict[
+    str, Callable[[CanonicalFacts, WirePlan], list[dict[str, object]]]
+] = {
+    "candidates": _candidate_rows,
+    "contracts": _contract_rows,
+    "dependency_edges": _dependency_edge_rows,
+    "file_modules": _file_module_rows,
+    "graph_nodes": _graph_node_rows,
+    "semantic_edges": _semantic_edge_rows,
+    "sink_roles": _sink_role_rows,
+    "violations": _violation_rows,
+}
+
+
+def fact_family_rows(
+    family: str, facts: CanonicalFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    """Wire rows of one fact family, in canonical row order.
+
+    Only the named family's rows are read from ``facts`` — the provider may
+    carry a single family at a time (bounded working memory, brief law 11).
+    """
+    return _FAMILY_ROW_BUILDERS[family](facts, plan)
 
 
 def _legacy_symbol_keys(
@@ -583,104 +704,28 @@ def _endpoint_value(
     return [tag, ordinal]
 
 
-def _domains_member(
-    files: Sequence[FileId],
-    modules: Sequence[ModuleId],
-    symbols: Sequence[SymbolId],
-    roots: Sequence[EffectRoot],
-    file_ordinal: Mapping[FileId, int],
-    module_ordinal: Mapping[ModuleId, int],
-    symbol_ordinal: Mapping[SymbolId, int],
-) -> _Obj:
+def _domains_member(plan: WirePlan) -> _Obj:
     return _Obj(
         [
-            ("files", _Obj([("path", [f.path for f in files])])),
-            ("modules", _Obj([("module", [m.module for m in modules])])),
+            ("files", _Obj([("path", [f.path for f in plan.files])])),
+            ("modules", _Obj([("module", [m.module for m in plan.modules])])),
             (
                 "symbols",
                 _Obj(
                     [
-                        ("file", [file_ordinal[s.file] for s in symbols]),
-                        ("qualname", [s.qualname for s in symbols]),
+                        ("file", [plan.file_ordinal[s.file] for s in plan.symbols]),
+                        ("qualname", [s.qualname for s in plan.symbols]),
                     ]
                 ),
             ),
-            (
-                "effect_roots",
-                _encode_effect_roots(
-                    roots, module_ordinal, file_ordinal, symbol_ordinal
-                ),
-            ),
+            ("effect_roots", _encode_effect_roots(plan)),
         ]
     )
 
 
-def _facts_member(tables: Mapping[str, list[dict[str, object]]]) -> _Obj:
-    def columns(family: str) -> list[tuple[str, object]]:
-        sparse = set(sparse_bool_wire_columns(family))
-        members: list[tuple[str, object]] = []
-        for column in wire_columns(family):
-            if column in sparse:
-                positions = [
-                    position
-                    for position, row in enumerate(tables[family])
-                    if row[column]
-                ]
-                if positions:  # omitted list means: no row is true (§7.6)
-                    members.append((column, positions))
-            else:
-                members.append((column, [row[column] for row in tables[family]]))
-        return members
-
-    return _Obj(
-        [(family, _Obj(columns(family))) for family in wire_fact_family_order()]
-    )
-
-
-def encode_canonical_json(model: CanonicalModel) -> bytes:
-    """Project a canonical model to its one canonical byte encoding."""
-    model = model.normalize()
-    facts = model.facts
-
-    files = _sorted_domain(model.files)
-    modules = _sorted_domain(model.modules)
-    symbols = _domain_symbols(facts)
-    roots = _domain_roots(facts)
-    file_ordinal = _ordinals(files)
-    module_ordinal = _ordinals(modules)
-    symbol_ordinal = _ordinals(symbols)
-    root_ordinal = _ordinals(roots)
-
-    labels, coupled_tables = _interned_labels(model)
-    producer_set_tables = _interned_producer_sets(facts, symbol_ordinal)
-    root_set_tables = _interned_root_sets(facts, root_ordinal)
-    tables = _fact_tables(
-        facts,
-        file_ordinal,
-        module_ordinal,
-        symbol_ordinal,
-        model.file_modules,
-        root_ordinal,
-        _ordinals(producer_set_tables),
-        _ordinals(root_set_tables),
-    )
-
-    sets = _Obj(
-        [
-            ("coupled_sets", [list(t) for t in coupled_tables]),
-            ("producer_sets", [list(t) for t in producer_set_tables]),
-            ("root_sets", [list(t) for t in root_set_tables]),
-        ]
-    )
-    scope = _Obj(
-        [
-            (
-                "analyzed_files",
-                sorted(file_ordinal[f] for f in model.analyzed_files),
-            )
-        ]
-    )
-    members: list[tuple[str, object]] = [
+def _leading_members(plan: WirePlan) -> list[tuple[str, object]]:
+    """The six root members preceding ``facts``, in declared order (§7.1)."""
+    return [
         (
             "format",
             _Obj([("name", _FORMAT_NAME), ("wire", CANONICAL_WIRE_REVISION)]),
@@ -689,24 +734,108 @@ def encode_canonical_json(model: CanonicalModel) -> bytes:
             "revisions",
             _Obj([(key, _SUPPORTED_REVISIONS[key]) for key in _REVISION_KEYS]),
         ),
-        ("values", _Obj([("coupled_class_labels", labels)])),
+        ("values", _Obj([("coupled_class_labels", plan.labels)])),
+        ("domains", _domains_member(plan)),
         (
-            "domains",
-            _domains_member(
-                files,
-                modules,
-                symbols,
-                roots,
-                file_ordinal,
-                module_ordinal,
-                symbol_ordinal,
+            "sets",
+            _Obj(
+                [
+                    ("coupled_sets", [list(t) for t in plan.coupled_tables]),
+                    ("producer_sets", [list(t) for t in plan.producer_set_tables]),
+                    ("root_sets", [list(t) for t in plan.root_set_tables]),
+                ]
             ),
         ),
-        ("sets", sets),
-        ("scope", scope),
-        ("facts", _facts_member(tables)),
+        (
+            "scope",
+            _Obj(
+                [
+                    (
+                        "analyzed_files",
+                        sorted(plan.file_ordinal[f] for f in plan.analyzed_files),
+                    )
+                ]
+            ),
+        ),
     ]
-    return _seal(members)
+
+
+def _family_member(family: str, rows: Sequence[dict[str, object]]) -> _Obj:
+    """The wire member of one fact family: columnar, sparse booleans as
+    strictly increasing true positions, omitted when no row is true."""
+    sparse = set(sparse_bool_wire_columns(family))
+    members: list[tuple[str, object]] = []
+    for column in wire_columns(family):
+        if column in sparse:
+            positions = [position for position, row in enumerate(rows) if row[column]]
+            if positions:  # omitted list means: no row is true (§7.6)
+                members.append((column, positions))
+        else:
+            members.append((column, [row[column] for row in rows]))
+    return _Obj(members)
+
+
+def _integrity_tail(digest: str) -> str:
+    """The sealing tail after the hashed body: the integrity member only."""
+    integrity = _Obj([("algorithm", "sha256"), ("value", digest)])
+    return f',"integrity":{_write(integrity)}'
+
+
+def stream_canonical_wire(
+    plan: WirePlan,
+    facts_for_family: Callable[[str], CanonicalFacts],
+    write: Callable[[bytes], object],
+) -> None:
+    """Write the one canonical byte encoding of one model state.
+
+    The single wire emitter: :func:`encode_canonical_json` runs it over an
+    in-memory model, the run-store's exporter over per-family scans.
+    ``facts_for_family`` is called once per fact family, in wire order, and
+    only that family's rows are read — bounded working memory (brief law
+    11) is the provider's right by construction, never an accident.  The
+    ``integrity`` member seals the body exactly as the decoder recomputes
+    it: sha256 over the wire domain plus every emitted byte between the
+    outer braces that precedes the integrity tail.
+    """
+    hasher = hashlib.sha256(_INTEGRITY_DOMAIN)
+
+    def emit(text: str) -> None:
+        data = text.encode("utf-8")
+        hasher.update(data)
+        write(data)
+
+    write(b"{")
+    for index, (key, value) in enumerate(_leading_members(plan)):
+        emit(("," if index else "") + _member_lexeme(key, value))
+    emit(',"facts":{')
+    for index, family in enumerate(wire_fact_family_order()):
+        rows = fact_family_rows(family, facts_for_family(family), plan)
+        emit(
+            ("," if index else "")
+            + _member_lexeme(family, _family_member(family, rows))
+        )
+    emit("}")
+    write(_integrity_tail(hasher.hexdigest()).encode("utf-8"))
+    write(b"}")
+
+
+def encode_canonical_json(model: CanonicalModel) -> bytes:
+    """Project a canonical model to its one canonical byte encoding."""
+    model = model.normalize()
+    facts = model.facts
+    plan = plan_from_parts(
+        files=model.files,
+        modules=model.modules,
+        symbols=referenced_symbols(facts),
+        root_sets=fact_root_sets(facts),
+        producer_sets=fact_producer_sets(facts),
+        coupled_sets=model.coupled_sets,
+        analyzed_files=model.analyzed_files,
+        file_modules=model.file_modules,
+    )
+    out = bytearray()
+    stream_canonical_wire(plan, lambda _family: facts, out.extend)
+    return bytes(out)
 
 
 # ---------------------------------------------------------------------------

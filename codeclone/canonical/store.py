@@ -51,6 +51,16 @@ Object identity follows F-3 §5.0.0/§5.0.1: the content address is
 ``H(namespace · family · family contract namespace · payload)``, so a
 model-local identity shares storage only inside one semantic namespace,
 and a fact never silently crosses a producer revision.
+
+Bounded export (wave 3): ``export_run`` births the authoritative canonical
+bytes straight from the store — byte-identical to ``project_run`` without
+ever materializing the complete model (brief law 11).  Pass one proves
+every stored byte and collects the projection plan; pass two streams one
+fact family at a time through the codec's single wire emitter.  The export
+is pinned to one run identity resolved exactly once (§11.1, the
+``_pin_export`` seam), and its envelope separates the artifact digest
+(projection-layer identity, wire revision inside the domain) from the run
+identity (analysis layers only) — brief §5.
 """
 
 from __future__ import annotations
@@ -64,7 +74,15 @@ from pathlib import Path
 from types import TracebackType
 from typing import Final, cast
 
-from codeclone.canonical.codec import encode_canonical_json
+from codeclone.canonical.codec import (
+    WirePlan,
+    encode_canonical_json,
+    fact_producer_sets,
+    fact_root_sets,
+    plan_from_parts,
+    referenced_symbols,
+    stream_canonical_wire,
+)
 from codeclone.canonical.errors import (
     CanonicalModelError,
     RunStoreError,
@@ -72,6 +90,12 @@ from codeclone.canonical.errors import (
     StoreFenceError,
     StoreIntegrityError,
     UnknownRunError,
+)
+from codeclone.canonical.export import (
+    ByteSink,
+    ExportEnvelope,
+    WitnessLayer,
+    artifact_domain,
 )
 from codeclone.canonical.identity import (
     AnalysisFile,
@@ -806,6 +830,60 @@ def _published_run_row(
     return (int(row[0]), str(row[1]), str(row[2]), str(row[3]))
 
 
+def _decode_member_object(
+    namespace: str, object_id_value: str, family: str, payload: bytes
+) -> object:
+    """Prove one stored member against its content address and decode it.
+
+    The one spelling of the member read: the full-model reconstruction and
+    the bounded exporter both pass every stored byte through here, so a
+    corrupt payload is the same typed refusal on either path.
+    """
+    if _object_id(namespace, family, payload) != object_id_value:
+        raise StoreIntegrityError(
+            f"object {object_id_value[:12]}… does not hash to its "
+            "content address; store bytes are corrupt"
+        )
+    try:
+        row = json.loads(payload)
+    except ValueError as error:
+        raise StoreIntegrityError(
+            f"object {object_id_value[:12]}… payload is not storage JSON: {error}"
+        ) from error
+    if not isinstance(row, dict):
+        raise StoreIntegrityError(
+            f"object {object_id_value[:12]}… payload is not a row"
+        )
+    return _decode_row(family, row, f"{family} object")
+
+
+def _prove_run_digests(
+    *,
+    object_ids: Sequence[str],
+    analyzed_files: frozenset[FileId],
+    namespace: str,
+    scope_digest: str,
+    membership: str,
+    run_id: str,
+) -> None:
+    """The one spelling of the run-proof tail, shared by the materializing
+    read path and the bounded exporter: the membership digest, the scope
+    receipt, and the run identity must recompute from the stored rows —
+    any disagreement is a typed refusal, never a silently different run."""
+    if _membership_digest(list(object_ids)) != membership:
+        raise StoreIntegrityError(
+            f"run {run_id!r} membership does not reproduce its digest"
+        )
+    if analysis_scope_digest(analyzed_files) != scope_digest:
+        raise StoreIntegrityError(
+            f"run {run_id!r} scope receipt does not reproduce its digest"
+        )
+    if _run_id(namespace, scope_digest, membership) != run_id:
+        raise StoreIntegrityError(
+            f"run {run_id!r} identity does not recompute from its parts"
+        )
+
+
 def _reconstruct_run(
     connection: sqlite3.Connection,
     *,
@@ -832,46 +910,232 @@ def _reconstruct_run(
     )
     for object_id_value, family, payload in rows:
         family_name = str(family)
-        payload_bytes = bytes(payload)
         if family_name not in _FAMILY_NAMESPACE:
             raise StoreIntegrityError(
                 f"run {run_id!r} carries unknown family {family_name!r}"
             )
-        recomputed = _object_id(namespace, family_name, payload_bytes)
-        if recomputed != str(object_id_value):
-            raise StoreIntegrityError(
-                f"object {str(object_id_value)[:12]}… does not hash to its "
-                "content address; store bytes are corrupt"
-            )
-        try:
-            row = json.loads(payload_bytes)
-        except ValueError as error:
-            raise StoreIntegrityError(
-                f"object {str(object_id_value)[:12]}… payload is not "
-                f"storage JSON: {error}"
-            ) from error
-        if not isinstance(row, dict):
-            raise StoreIntegrityError(
-                f"object {str(object_id_value)[:12]}… payload is not a row"
-            )
         collected.setdefault(family_name, []).append(
-            _decode_row(family_name, row, f"{family_name} object")
+            _decode_member_object(
+                namespace, str(object_id_value), family_name, bytes(payload)
+            )
         )
         object_ids.append(str(object_id_value))
-    if _membership_digest(object_ids) != membership:
-        raise StoreIntegrityError(
-            f"run {run_id!r} membership does not reproduce its digest"
-        )
     model = _collected_model(collected)
-    if analysis_scope_digest(model.analyzed_files) != scope_digest:
-        raise StoreIntegrityError(
-            f"run {run_id!r} scope receipt does not reproduce its digest"
-        )
-    if _run_id(namespace, scope_digest, membership) != run_id:
-        raise StoreIntegrityError(
-            f"run {run_id!r} identity does not recompute from its parts"
-        )
+    _prove_run_digests(
+        object_ids=object_ids,
+        analyzed_files=model.analyzed_files,
+        namespace=namespace,
+        scope_digest=scope_digest,
+        membership=membership,
+        run_id=run_id,
+    )
     return model.normalize()
+
+
+# ---------------------------------------------------------------------------
+# Bounded export (backend wave 3)
+# ---------------------------------------------------------------------------
+
+# Families whose rows are identity/scope state rather than fact tables; the
+# export's first pass turns them directly into the projection plan.
+_IDENTITY_FAMILIES: Final = frozenset(
+    {"analyzed_file", "coupled_set", "file", "file_module", "module"}
+)
+
+# Wire fact-table name -> storage family name. The wire speaks the
+# registry's plural table names; storage rows carry the singular family of
+# the content address.  A missing entry is a loud KeyError, and a wrong one
+# turns a family empty — which the byte-parity oracle against
+# ``project_run`` catches (measured during wave 3: the first draft scanned
+# wire names and exported eight empty tables).
+_WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
+    "candidates": "candidate",
+    "contracts": "contract",
+    "dependency_edges": "dependency_edge",
+    "file_modules": "file_module",
+    "graph_nodes": "graph_node",
+    "semantic_edges": "semantic_edge",
+    "sink_roles": "sink_role",
+    "violations": "violation",
+}
+
+_MEMBER_FAMILY_SQL: Final = (
+    "SELECT o.object_id, o.payload FROM run_members m "
+    "JOIN objects o ON o.object_pk = m.object_pk "
+    "WHERE m.run_pk = ? AND o.family = ? ORDER BY o.object_id"
+)
+
+
+class _ArtifactStream:
+    """Counting, artifact-hashing wrapper around one export sink.
+
+    The artifact digest preimage is seeded from the one domain owner
+    (:func:`codeclone.canonical.export.artifact_domain`) and covers every
+    byte written — the projection-layer identity of these bytes, which the
+    run identity deliberately is not (brief §5).
+    """
+
+    __slots__ = ("_hasher", "_sink", "byte_count")
+
+    def __init__(self, sink: ByteSink) -> None:
+        self._sink = sink
+        self._hasher = hashlib.sha256(artifact_domain())
+        self.byte_count = 0
+
+    def write(self, data: bytes) -> None:
+        self._hasher.update(data)
+        self._sink.write(data)
+        self.byte_count += len(data)
+
+    def digest(self) -> str:
+        return self._hasher.hexdigest()
+
+
+def _scan_run_family(
+    connection: sqlite3.Connection,
+    run_pk: int,
+    namespace: str,
+    family: str,
+    object_ids: list[str],
+) -> list[object]:
+    """Decode one family of one run, row by row, proving every byte."""
+    rows: list[object] = []
+    for object_id_value, payload in connection.execute(
+        _MEMBER_FAMILY_SQL, (run_pk, family)
+    ):
+        stored_id = str(object_id_value)
+        rows.append(_decode_member_object(namespace, stored_id, family, bytes(payload)))
+        object_ids.append(stored_id)
+    return rows
+
+
+def _family_facts(
+    connection: sqlite3.Connection, run_pk: int, namespace: str, wire_family: str
+) -> CanonicalFacts:
+    """One fact family of one run — the bounded provider of the second
+    export pass.  Only this family's rows are alive at a time."""
+    family = _WIRE_FAMILY_STORAGE[wire_family]
+    object_ids: list[str] = []
+    rows = _scan_run_family(connection, run_pk, namespace, family, object_ids)
+    return _collected_model({family: rows}).facts
+
+
+def _export_plan(
+    connection: sqlite3.Connection,
+    *,
+    run_pk: int,
+    namespace: str,
+    scope_digest: str,
+    membership: str,
+    run_id: str,
+) -> WirePlan:
+    """First export pass: prove the run and collect the projection plan.
+
+    Streams every member once — content address per object, membership
+    digest, scope receipt, and run identity are all recomputed from the
+    stored rows before the first output byte exists.  Fact rows contribute
+    their identity-domain and set-table parts family by family and are
+    dropped; the complete model is never materialized (brief law 11).
+    """
+    stored_families = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT DISTINCT o.family FROM run_members m "
+            "JOIN objects o ON o.object_pk = m.object_pk "
+            "WHERE m.run_pk = ?",
+            (run_pk,),
+        )
+    }
+    unknown = sorted(stored_families - set(_FAMILY_NAMESPACE))
+    if unknown:
+        raise StoreIntegrityError(
+            f"run {run_id!r} carries unknown families {unknown!r}"
+        )
+    object_ids: list[str] = []
+    identity_rows: dict[str, list[object]] = {}
+    symbols: set[SymbolId] = set()
+    root_sets: set[frozenset[EffectRoot]] = set()
+    producer_sets: set[frozenset[SymbolId]] = set()
+    for family in sorted(_FAMILY_NAMESPACE):
+        rows = _scan_run_family(connection, run_pk, namespace, family, object_ids)
+        if family in _IDENTITY_FAMILIES:
+            identity_rows[family] = rows
+            continue
+        facts = _collected_model({family: rows}).facts
+        symbols |= referenced_symbols(facts)
+        root_sets |= fact_root_sets(facts)
+        producer_sets |= fact_producer_sets(facts)
+    skeleton = _collected_model(identity_rows)
+    _prove_run_digests(
+        object_ids=object_ids,
+        analyzed_files=skeleton.analyzed_files,
+        namespace=namespace,
+        scope_digest=scope_digest,
+        membership=membership,
+        run_id=run_id,
+    )
+    return plan_from_parts(
+        files=skeleton.files,
+        modules=skeleton.modules,
+        symbols=symbols,
+        root_sets=root_sets,
+        producer_sets=producer_sets,
+        coupled_sets=skeleton.coupled_sets,
+        analyzed_files=skeleton.analyzed_files,
+        file_modules=skeleton.file_modules,
+    )
+
+
+def _witness_state(connection: sqlite3.Connection) -> tuple[WitnessLayer, ...]:
+    """The store's layered witness as stored — the envelope's linkage is to
+    the store generation, not to process constants."""
+    return tuple(
+        WitnessLayer(layer=str(row[0]), revision=str(row[1]), role=str(row[2]))
+        for row in connection.execute(
+            "SELECT layer, revision, role FROM witness ORDER BY layer"
+        )
+    )
+
+
+def _stream_export(
+    connection: sqlite3.Connection,
+    sink: ByteSink,
+    *,
+    run_pk: int,
+    namespace: str,
+    scope_digest: str,
+    membership: str,
+    run_id: str,
+) -> ExportEnvelope:
+    """Both export passes of one pinned run: prove, then stream.
+
+    Pass one proves the run and collects the projection plan row by row;
+    pass two re-reads one fact family at a time through the single wire
+    emitter.  Nothing reaches ``sink`` before the whole run has proven its
+    digests.  The caller resolved the run identity exactly once and fired
+    the snapshot seam (§11.1) before entering.
+    """
+    plan = _export_plan(
+        connection,
+        run_pk=run_pk,
+        namespace=namespace,
+        scope_digest=scope_digest,
+        membership=membership,
+        run_id=run_id,
+    )
+    stream = _ArtifactStream(sink)
+    stream_canonical_wire(
+        plan,
+        lambda family: _family_facts(connection, run_pk, namespace, family),
+        stream.write,
+    )
+    return ExportEnvelope(
+        run_id=run_id,
+        artifact_digest=stream.digest(),
+        byte_count=stream.byte_count,
+        wire_revision=CANONICAL_WIRE_REVISION,
+        witness=_witness_state(connection),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1177,10 +1441,67 @@ class RunStore:
         byte-identical to ``encode_canonical_json`` of the same model."""
         return encode_canonical_json(self.read_run(run_id))
 
+    # -- bounded export (wave 3) ------------------------------------------
+
+    def _pin_export(self, run_id: str) -> None:
+        """Single-snapshot seam (brief §11.1); production no-op.
+
+        Fires once per export, after the export pinned its run identity and
+        before any universe read.  That identity is the export's ONE
+        mutable read: every later read addresses immutable published
+        content through it, so a publication landing after this point can
+        no longer reach the export — pinned by the concurrent-publish seam
+        test, the analogue of ``_before_publish``.
+        """
+
+
+def export_run(store: RunStore, run_id: str, sink: ByteSink) -> ExportEnvelope:
+    """Stream one published run's authoritative canonical bytes.
+
+    The store births the bytes (brief §17, wave 3): output is
+    byte-identical to ``project_run`` while never materializing the
+    complete model.  The export surface is a module-level projection over
+    a store, like every pure step in this module — :class:`RunStore` owns
+    the connection, the lifecycle, and the snapshot seam, nothing else.
+    """
+    run_pk, namespace, scope_digest, membership = _published_run_row(
+        store._connection, run_id
+    )
+    store._pin_export(run_id)
+    return _stream_export(
+        store._connection,
+        sink,
+        run_pk=run_pk,
+        namespace=namespace,
+        scope_digest=scope_digest,
+        membership=membership,
+        run_id=run_id,
+    )
+
+
+def export_head(
+    store: RunStore, *, namespace: str, target: str, sink: ByteSink
+) -> ExportEnvelope:
+    """Export the current head of one target.
+
+    The head is resolved exactly once, before the seam; the export is
+    pinned to that run from then on (§11.1) — a concurrent publication
+    advancing the head mid-export can no longer mix generations into the
+    stream.
+    """
+    head = store.head(namespace=namespace, target=target)
+    if head is None:
+        raise UnknownRunError(
+            f"target {target!r} has no published head in namespace {namespace!r}"
+        )
+    return export_run(store, head.run_id, sink)
+
 
 __all__ = [
     "HeadState",
     "PublishReceipt",
     "RunStore",
     "analysis_scope_digest",
+    "export_head",
+    "export_run",
 ]

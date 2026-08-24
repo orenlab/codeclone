@@ -80,3 +80,13 @@ class StoreIntegrityError(RunStoreError):
 
 class UnknownRunError(RunStoreError):
     """The requested ``run_id`` is not a published run of this store."""
+
+
+class ExportIntegrityError(RunStoreError):
+    """Exported artifact bytes disagree with their export envelope.
+
+    Raised by envelope verification when the artifact digest, the declared
+    byte count, or the declared wire revision does not prove against the
+    bytes at hand.  The artifact digest is projection-layer identity — it
+    covers the wire revision, which ``run_id`` never does (brief §5).
+    """
