@@ -26,14 +26,28 @@ Design constraints, deliberately conservative:
 - Subsystem-local wire constants (owned outside ``codeclone/contracts``)
   are covered by the symbol-existence check only; syncing their values
   would require an inventory of owning modules, which would drift.
-- Scope is AGENTS.md + docs/internal/**. CHANGELOG and public docs are
-  not scanned: CHANGELOG entries are historical by design, and public
-  docs carry package-release versions that this matcher must not
-  reinterpret as schema versions.
+- Symbol existence is scoped to AGENTS.md + docs/internal/**.
+- Version-literal sync additionally covers docs/reference/**, because the
+  matcher only fires on a claim that *names* the constant, and a public
+  reference page naming `REPORT_SCHEMA_VERSION` is quoting the schema, not
+  a package release. (This caught docs/reference/json-output.md quoting
+  `REPORT_SCHEMA_VERSION: 3.1` after the contract moved to 3.2.)
+- CHANGELOG and the remaining public docs are not scanned: CHANGELOG
+  entries are historical by design, and narrative pages carry
+  package-release versions this matcher must not reinterpret as schema
+  versions.
 - The matcher recognizes only explicit claim shapes (``NAME=value``,
-  ``NAME: value``, ``NAME ("value")``, and table rows naming exactly one
+  ``NAME: value``, ``NAME ("value")``, the appositive ``NAME, currently
+  value`` / ``NAME (currently value)``, and table rows naming exactly one
   constant). Prose like "schema v3.0" without a constant name is out of
   scope: fewer claims checked reliably beats false positives.
+
+The appositive shape was added after it was measured walking through.
+json-output.md carried the *same* stale version twice — the colon form on
+line 11 and the appositive on line 46 — and one edit repaired both, so a
+mutation that reverted only the colon form still died and the guard looked
+whole. A page can state a constant more than once; a claim shape this
+matcher cannot see is not absent, only unmeasured.
 """
 
 from __future__ import annotations
@@ -45,10 +59,17 @@ from typing import Final
 import pytest
 
 import codeclone.contracts as contracts
+from codeclone.report.document._common import _clone_novelty
+from codeclone.report.document._findings_groups import (
+    build_near_miss_payload,
+    build_renamed_structure_payload,
+)
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 _AGENTS_DOC: Final = _REPO_ROOT / "AGENTS.md"
 _DOCS_INTERNAL: Final = _REPO_ROOT / "docs" / "internal"
+_DOCS_REFERENCE: Final = _REPO_ROOT / "docs" / "reference"
+_JSON_OUTPUT_DOC: Final = _DOCS_REFERENCE / "json-output.md"
 
 pytestmark = pytest.mark.skipif(
     not _AGENTS_DOC.is_file() or not _DOCS_INTERNAL.is_dir(),
@@ -84,6 +105,18 @@ _DOTTED_TOKEN_RE: Final = re.compile(r"\d+\.\d+")
 
 def _governance_doc_paths() -> tuple[Path, ...]:
     return (_AGENTS_DOC, *sorted(_DOCS_INTERNAL.rglob("*.md")))
+
+
+def _version_claim_doc_paths() -> tuple[Path, ...]:
+    """Governance docs plus the public reference pages.
+
+    A reference page that names a contract constant is quoting the contract,
+    so it drifts exactly like an internal one. Narrative public pages stay
+    out: they quote release versions this matcher must not reinterpret.
+    """
+
+    reference = () if not _DOCS_REFERENCE.is_dir() else _DOCS_REFERENCE.rglob("*.md")
+    return (*_governance_doc_paths(), *sorted(reference))
 
 
 def _contract_versions() -> dict[str, str]:
@@ -136,6 +169,17 @@ def _claimed_versions_in_line(
         )
         paren_re = re.compile(rf"{name}`?\s*\(\"([^\"]+)\"\)")
         claims.extend((name, match.group(1)) for match in paren_re.finditer(line))
+        # Appositive: the value trails the name in prose instead of sitting
+        # behind `=` or `:`. One optional separator covers both spellings,
+        # `NAME, currently V` and `NAME (currently V)`.
+        currently_re = re.compile(
+            rf"{name}[`\"]?\s*[,(]?\s*currently\s+[`\"]?"
+            rf"([A-Za-z0-9][A-Za-z0-9._-]*)",
+            re.IGNORECASE,
+        )
+        claims.extend(
+            (name, match.group(1).rstrip('`"')) for match in currently_re.finditer(line)
+        )
     if line.lstrip().startswith("|") and len(set(present)) == 1:
         name = present[0]
         for cell in _table_cells(line):
@@ -192,7 +236,7 @@ def test_documented_version_literals_match_contracts() -> None:
     versions = _contract_versions()
     names = frozenset(versions)
     violations: list[str] = []
-    for doc_path in _governance_doc_paths():
+    for doc_path in _version_claim_doc_paths():
         rel_doc = doc_path.relative_to(_REPO_ROOT).as_posix()
         for line_no, line in enumerate(
             doc_path.read_text(encoding="utf-8").splitlines(), start=1
@@ -207,4 +251,38 @@ def test_documented_version_literals_match_contracts() -> None:
                     )
     assert not violations, "docs quote stale contract versions:\n" + "\n".join(
         violations
+    )
+
+
+def test_json_output_doc_states_every_novelty_word_the_producers_emit() -> None:
+    """The JSON reference must not narrow `novelty` to `new` / `known`.
+
+    Three producers own the word, and two of them cannot say `new` or
+    `known` at all: the near-miss and renamed-structure containers reach no
+    baseline lane, so they emit `untracked`, and a clone lane that was not
+    compared emits `unavailable` rather than guessing. A reference page that
+    lists only `new` / `known` tells a reader to filter on a vocabulary the
+    report does not use — the same reader who then reads an absent
+    comparison as "nothing new".
+
+    The vocabulary is re-derived from the producers here rather than
+    restated, so adding a fourth novelty word reds this test instead of
+    silently leaving the page a word short.
+    """
+
+    emitted = {
+        str(build_near_miss_payload([], scan_root=".")["novelty"]),
+        str(build_renamed_structure_payload([], scan_root=".")["novelty"]),
+        _clone_novelty(group_key="k", lane_trusted=False, new_keys=None)[0],
+        _clone_novelty(group_key="k", lane_trusted=True, new_keys=None)[0],
+        _clone_novelty(group_key="k", lane_trusted=True, new_keys=["k"])[0],
+        _clone_novelty(group_key="k", lane_trusted=True, new_keys=[])[0],
+    }
+    # The producers really do speak more than the two words the page listed.
+    assert emitted == {"untracked", "unavailable", "new", "known"}
+
+    doc_text = _JSON_OUTPUT_DOC.read_text(encoding="utf-8")
+    missing = sorted(word for word in emitted if f"`{word}`" not in doc_text)
+    assert not missing, (
+        f"docs/reference/json-output.md omits novelty words the report emits: {missing}"
     )

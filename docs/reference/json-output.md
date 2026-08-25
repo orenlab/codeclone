@@ -8,7 +8,7 @@ source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 
 ## What it is
 
-CodeClone produces deterministic, schema-versioned JSON reports via the `--json` flag. The report captures the complete structural analysis state: clone findings, metrics, dependencies, health scores, and baseline-relative deltas. The schema version (`REPORT_SCHEMA_VERSION: 3.1`) is stable within a CodeClone release; breaking changes require a new major version.
+CodeClone produces deterministic, schema-versioned JSON reports via the `--json` flag. The report captures the complete structural analysis state: clone findings, metrics, dependencies, health scores, and baseline-relative deltas. The schema version is `REPORT_SCHEMA_VERSION`, defined in `codeclone/contracts/__init__.py` — read the live value from there rather than from this page. It is stable within a CodeClone release; breaking changes require a new major version.
 
 JSON output is designed for programmatic consumption—CI gates, metric dashboards, IDE integrations, and cross-repository analysis. Each field is deterministic: the same codebase analyzed twice produces byte-identical JSON (modulo timestamps).
 
@@ -43,10 +43,10 @@ codeclone . --json [FILE]
 ```
 
 If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is valid JSON and contains these top-level keys:
-- `report_schema_version` — schema version string (matches `REPORT_SCHEMA_VERSION`, currently `3.1`)
+- `report_schema_version` — schema version string; the live value of `REPORT_SCHEMA_VERSION` in `codeclone/contracts/__init__.py`
 - `meta` — run metadata: `codeclone_version`, `project_name`, `scan_root`, `python_version`, `analysis_mode`, `analysis_thresholds`, `analysis_profile`, `baseline`, `cache`, `runtime`
 - `inventory` — scanned inventory: `files`, `code` counts, and `file_registry`
-- `findings` — object with `summary` and `groups[]`; each group carries type, locations, risk, and `novelty` (`new` / `known`)
+- `findings` — object with `summary` and `groups`. The baseline-tracked families (clones, structural, dead code, design, authority) carry groups with type, locations, risk, and `novelty`: `new`, `known`, or `unavailable` when the lane was not compared in this run. `groups` also holds the two advisory tier containers, `near_miss` and `renamed_structure`, which are **siblings of the clone lane, not members of it**: they never reach a baseline lane, so each carries `gate_relevant: false` and a `novelty` of `untracked`, plus a `state` witness (`disabled` when the opt-in never ran, with `count` omitted entirely; `complete` with `count: 0` for a measurement that found nothing)
 - `metrics` — object with `summary` and per-family `families` (complexity, coupling, cohesion, …)
 - `derived` — `suggestions`, `overview`, `hotlists`, `module_map`, `review_queue`
 - `integrity` — deterministic `canonicalization` and the `digests` hierarchy: `observation`, `analysis_facts`, `comparison`, `evaluation`, `envelope`. Each tier is an object with `kind`, `algorithm`, `digest_version` and `value`, and hashes the tier before it. Read `analysis_facts` to identify the analysed code, `comparison` to identify the run, and `envelope` to identify the exact document
@@ -57,7 +57,7 @@ If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is 
 |---------|--------|--------|
 | `codeclone . --json` | Analyze and write to default path | `.codeclone/report.json` |
 | `codeclone . --json FILE` | Analyze and write to custom path | `FILE` |
-| `codeclone . --json --baseline FILE` | Compare against baseline | JSON with `novelty` (`new` / `known`) per finding group |
+| `codeclone . --json --baseline FILE` | Compare against baseline | JSON with `novelty` (`new` / `known`) per tracked finding group |
 | `codeclone . --json --ci` | Preset for CI (quiet, color off) | `.codeclone/report.json` |
 | `codeclone . --json --fail-on-new --ci` | Gate: fail if any new findings | Exit code 3 if violated |
 
@@ -67,7 +67,7 @@ If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is 
 
 2. **Ignoring schema version**: Always validate `report_schema_version` matches your parser's supported schema. Breaking changes in a future major release may shift field names.
 
-3. **Not comparing against baseline**: The `novelty` field requires `--baseline FILE`. Without it, all findings appear novel. Always ground CI gates in baseline-aware decisions.
+3. **Reading an absent comparison as "nothing new"**: `novelty` requires `--baseline FILE`. Without a trusted, compared lane the field is `unavailable` — carrying a `novelty_reason` that separates "this lane is not comparable" from "no comparison ran for it" — and is deliberately *not* `new` and *not* `known`. A filter like `select(.novelty == "new")` therefore returns nothing on an uncompared run; treat `unavailable` as missing evidence, never as a clean result, and ground CI gates in baseline-aware decisions.
 
 4. **Parsing incomplete JSON during analysis**: JSON is written atomically after analysis completes. Do not attempt to parse `.codeclone/report.json` while `codeclone` is still running.
 
