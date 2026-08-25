@@ -1,0 +1,10 @@
+[tool.codeclone]
+semantic_authority = true
+baseline_scope_id = "9e6a3f60-1df0-4c1e-9f3a-6f2f4b6a0c11"
+
+[[tool.codeclone.authority]]
+contract_id = "corpus.sink_write/v1"
+canonical_owner = "pkg.authority_owner:write_sink"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = ["operation:canonical_operation:json:dumps"]

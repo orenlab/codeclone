@@ -1,0 +1,7 @@
+"""Cycle member A: half of a deliberate import-time cycle."""
+
+from pkg.cycle_b import BETA_BASE
+
+
+def alpha_step(value: int) -> int:
+    return value + BETA_BASE

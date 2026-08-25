@@ -1,0 +1,7 @@
+"""Canonical owner of the corpus sink-write contract."""
+
+import json
+
+
+def write_sink(payload: dict[str, int]) -> None:
+    json.dumps(payload, sort_keys=True)

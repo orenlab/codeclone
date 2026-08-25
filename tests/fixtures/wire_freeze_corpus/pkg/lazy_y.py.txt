@@ -1,0 +1,13 @@
+"""Deferred-cycle member Y: closes the lap only inside a function."""
+
+Y_TAG = "y"
+
+
+def lazy_probe(value: int) -> int:
+    return value * 2
+
+
+def y_step(value: int) -> int:
+    from pkg.lazy_x import X_TAG
+
+    return value + len(X_TAG)

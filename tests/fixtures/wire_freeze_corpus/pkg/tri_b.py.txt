@@ -1,0 +1,5 @@
+"""Three-module import cycle, member B."""
+
+from pkg.tri_c import TRI_C_TAG
+
+TRI_B_TAG = "b" + TRI_C_TAG

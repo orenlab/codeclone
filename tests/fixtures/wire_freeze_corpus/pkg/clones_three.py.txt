@@ -1,0 +1,31 @@
+"""A clone pair added after the baseline: the post-baseline novelty probe."""
+
+
+def fresh_gamma_first(rows: list[str]) -> dict[str, str]:
+    joined = ""
+    longest = ""
+    shortest = "z" * 80
+    seen = 0
+    for row in rows:
+        joined = joined + row
+        seen = seen + 1
+        if len(row) > len(longest):
+            longest = row
+        if len(row) < len(shortest):
+            shortest = row
+    return {"joined": joined, "longest": longest, "shortest": shortest, "seen": str(seen)}
+
+
+def fresh_gamma_second(rows: list[str]) -> dict[str, str]:
+    joined = ""
+    longest = ""
+    shortest = "z" * 80
+    seen = 0
+    for row in rows:
+        joined = joined + row
+        seen = seen + 1
+        if len(row) > len(longest):
+            longest = row
+        if len(row) < len(shortest):
+            shortest = row
+    return {"joined": joined, "longest": longest, "shortest": shortest, "seen": str(seen)}

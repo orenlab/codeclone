@@ -1,0 +1,86 @@
+"""First host of the shared statement run (block-kind clone group).
+
+Measured ground truth: the repeated 12-statement parenthesized run
+matches as a BLOCK-kind clone group with three items — twice in this
+function (an intra-function pair) and once in run_host_two. Segment
+grouping did NOT fire on this shape (segments require the same window
+hash at least twice inside one function AND survived emission; the
+run is consumed by block matching first) — a named residual of the
+wire-freeze corpus, not an accident."""
+
+
+def run_host_one(base: int) -> int:
+    seg_01 = (
+        base + 1
+    )
+    seg_02 = (
+        base + 2
+    )
+    seg_03 = (
+        base + 3
+    )
+    seg_04 = (
+        base + 4
+    )
+    seg_05 = (
+        base + 5
+    )
+    seg_06 = (
+        base + 6
+    )
+    seg_07 = (
+        base + 7
+    )
+    seg_08 = (
+        base + 8
+    )
+    seg_09 = (
+        base + 9
+    )
+    seg_10 = (
+        base + 10
+    )
+    seg_11 = (
+        base + 11
+    )
+    seg_12 = (
+        base + 12
+    )
+    base = seg_12
+    seg_01 = (
+        base + 1
+    )
+    seg_02 = (
+        base + 2
+    )
+    seg_03 = (
+        base + 3
+    )
+    seg_04 = (
+        base + 4
+    )
+    seg_05 = (
+        base + 5
+    )
+    seg_06 = (
+        base + 6
+    )
+    seg_07 = (
+        base + 7
+    )
+    seg_08 = (
+        base + 8
+    )
+    seg_09 = (
+        base + 9
+    )
+    seg_10 = (
+        base + 10
+    )
+    seg_11 = (
+        base + 11
+    )
+    seg_12 = (
+        base + 12
+    )
+    return seg_12

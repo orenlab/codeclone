@@ -1,0 +1,31 @@
+"""First emitted clone group: two structurally identical siblings."""
+
+
+def twin_alpha_first(items: list[int]) -> dict[str, int]:
+    total = 0
+    largest = 0
+    smallest = 999
+    count = 0
+    for item in items:
+        total = total + item
+        count = count + 1
+        if item > largest:
+            largest = item
+        if item < smallest:
+            smallest = item
+    return {"total": total, "largest": largest, "smallest": smallest, "count": count}
+
+
+def twin_alpha_second(items: list[int]) -> dict[str, int]:
+    total = 0
+    largest = 0
+    smallest = 999
+    count = 0
+    for item in items:
+        total = total + item
+        count = count + 1
+        if item > largest:
+            largest = item
+        if item < smallest:
+            smallest = item
+    return {"total": total, "largest": largest, "smallest": smallest, "count": count}

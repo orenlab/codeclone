@@ -1,0 +1,37 @@
+"""Second emitted clone group: a different structural shape, twice."""
+
+
+def twin_beta_first(text: str) -> list[str]:
+    rows: list[str] = []
+    upper = 0
+    lower = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.isupper():
+            upper = upper + 1
+        else:
+            lower = lower + 1
+        rows.append(stripped)
+    rows.append(str(upper))
+    rows.append(str(lower))
+    return rows
+
+
+def twin_beta_second(text: str) -> list[str]:
+    rows: list[str] = []
+    upper = 0
+    lower = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.isupper():
+            upper = upper + 1
+        else:
+            lower = lower + 1
+        rows.append(stripped)
+    rows.append(str(upper))
+    rows.append(str(lower))
+    return rows

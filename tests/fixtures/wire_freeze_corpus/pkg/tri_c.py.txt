@@ -1,0 +1,9 @@
+"""Three-module import cycle, member C."""
+
+import pkg.tri_a
+
+TRI_C_TAG = "c"
+
+
+def tri_close() -> str:
+    return pkg.tri_a.TRI_A_TAG + TRI_C_TAG

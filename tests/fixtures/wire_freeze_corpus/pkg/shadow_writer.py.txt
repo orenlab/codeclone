@@ -1,0 +1,7 @@
+"""A second writer of the governed sink that never consults the owner."""
+
+import json
+
+
+def bypass_sink(payload: dict[str, int]) -> None:
+    json.dumps(payload, sort_keys=True, indent=2)

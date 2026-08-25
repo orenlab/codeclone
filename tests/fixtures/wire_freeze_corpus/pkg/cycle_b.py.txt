@@ -1,0 +1,21 @@
+"""Cycle member B: the other half of the deliberate import-time cycle.
+
+Also closes a second, deferred lap over the same module pair: the
+function-level import is a distinct edge (different line, deferred
+binding), so the same two modules carry both an import-time cycle and a
+deferred back-edge.
+"""
+
+from pkg.cycle_a import alpha_step
+
+BETA_BASE = 3
+
+
+def beta_step(value: int) -> int:
+    return alpha_step(value) - 1
+
+
+def beta_deferred(value: int) -> int:
+    from pkg.cycle_a import alpha_step as deferred_alpha
+
+    return deferred_alpha(value) + 1

@@ -1,0 +1,9 @@
+"""Deferred-cycle member X: imports Y eagerly."""
+
+from pkg.lazy_y import lazy_probe
+
+X_TAG = "x"
+
+
+def x_step(value: int) -> int:
+    return lazy_probe(value) + 1

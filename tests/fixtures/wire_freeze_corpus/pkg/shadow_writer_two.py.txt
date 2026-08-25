@@ -1,0 +1,7 @@
+"""A third independent writer of the governed sink."""
+
+import json
+
+
+def second_bypass_sink(payload: dict[str, int]) -> None:
+    json.dumps(payload, indent=4)
