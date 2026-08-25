@@ -24,6 +24,7 @@ import json
 import pytest
 
 from codeclone.canonical import (
+    AnalysisFacts,
     AnalysisFile,
     CandidateRow,
     CanonicalFacts,
@@ -51,6 +52,12 @@ from codeclone.canonical import (
     encode_canonical_json,
     wire_fact_family_order,
 )
+
+
+def analysis_facts(**families: object) -> CanonicalFacts:
+    """The one test spelling of a fact root: families live in the ANALYSIS
+    house; the root stays pure composition (ruling variant v)."""
+    return CanonicalFacts(analysis=AnalysisFacts(**families))  # type: ignore[arg-type]
 
 
 def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
@@ -152,7 +159,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
         file_modules=frozenset({FileModuleRelation(fa, ma)}),
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset(contracts),
             graph_nodes=frozenset(graph_nodes),
             sink_roles=frozenset(sink_roles),
@@ -175,6 +182,10 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     the wave-1 literal (1594 bytes, sha256 4172612b…) deliberately: the
     draft gained the ``dependency_edges`` and ``violations`` families and
     the two class-B handle columns, so every document's bytes moved.
+
+    The three-house facts split (ruling variant v) deliberately did NOT
+    move this literal: the split is wire-neutral, and these bytes are the
+    proof.
     """
     payload = encode_canonical_json(fixture_model())
     assert len(payload) == 2576
@@ -221,14 +232,16 @@ def test_entity_counts_survive_the_round_trip() -> None:
         "dependency_edges",
         "violations",
     ):
-        assert len(getattr(decoded.facts, field)) == len(getattr(model.facts, field)), (
-            field
-        )
+        assert len(getattr(decoded.facts.analysis, field)) == len(
+            getattr(model.facts.analysis, field)
+        ), field
 
 
 def test_empty_root_set_is_a_measured_value_not_an_absence() -> None:
     decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
-    empty_rows = [row for row in decoded.facts.contracts if row.root_set == frozenset()]
+    empty_rows = [
+        row for row in decoded.facts.analysis.contracts if row.root_set == frozenset()
+    ]
     assert len(empty_rows) == 1
     assert empty_rows[0].effect_signature == "sig-c"
 
@@ -261,7 +274,7 @@ def test_wire_fact_families_come_from_the_registry_in_sorted_order() -> None:
 
 def test_dependency_edge_key_components_and_payload_survive_the_round_trip() -> None:
     decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
-    edges = decoded.facts.dependency_edges
+    edges = decoded.facts.analysis.dependency_edges
     assert len(edges) == 4
     # both producer-key components are load-bearing: rows differing only in
     # line, and only in import_type, coexist after the round trip
@@ -302,7 +315,7 @@ def test_tied_dependency_rows_are_ordered_by_line_on_the_wire() -> None:
     """
     ma, mb = ModuleId("pkg.a"), ModuleId("pkg.b")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             dependency_edges=frozenset(
                 DependencyEdgeRow(ma, mb, "import", line, "import_time", False)
                 for line in (13, 5, 89, 2, 34, 21, 55, 8)
@@ -319,16 +332,16 @@ def test_sparse_boolean_column_is_omitted_when_no_row_is_true() -> None:
     model = fixture_model()
     eager = frozenset(
         DependencyEdgeRow(e.source, e.target, e.import_type, e.line, e.binding, False)
-        for e in model.facts.dependency_edges
+        for e in model.facts.analysis.dependency_edges
     )
-    facts = CanonicalFacts(
-        contracts=model.facts.contracts,
-        graph_nodes=model.facts.graph_nodes,
-        sink_roles=model.facts.sink_roles,
-        candidates=model.facts.candidates,
-        semantic_edges=model.facts.semantic_edges,
+    facts = analysis_facts(
+        contracts=model.facts.analysis.contracts,
+        graph_nodes=model.facts.analysis.graph_nodes,
+        sink_roles=model.facts.analysis.sink_roles,
+        candidates=model.facts.analysis.candidates,
+        semantic_edges=model.facts.analysis.semantic_edges,
         dependency_edges=eager,
-        violations=model.facts.violations,
+        violations=model.facts.analysis.violations,
     )
     stripped = CanonicalModel(
         analyzed_files=model.analyzed_files,
@@ -339,13 +352,15 @@ def test_sparse_boolean_column_is_omitted_when_no_row_is_true() -> None:
     document = json.loads(encode_canonical_json(stripped))
     assert "is_lazy" not in document["facts"]["dependency_edges"]
     decoded = decode_canonical_json(encode_canonical_json(stripped))
-    assert all(not e.is_lazy for e in decoded.facts.dependency_edges)
+    assert all(not e.is_lazy for e in decoded.facts.analysis.dependency_edges)
 
 
 def test_output_facts_order_and_multiplicity_are_facts() -> None:
     decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
     node = next(
-        row for row in decoded.facts.graph_nodes if row.effect_signature == "gsig-a"
+        row
+        for row in decoded.facts.analysis.graph_nodes
+        if row.effect_signature == "gsig-a"
     )
     assert node.output_facts == ("unresolved", "const:int:1", "unresolved")
 
@@ -354,7 +369,7 @@ def test_model_refuses_two_facts_under_one_logical_key() -> None:
     fa = FileId("pkg/a.py")
     sa = SymbolId(fa, "A.run")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset(
                 {
                     ContractRow(sa, "sig-1", frozenset()),
@@ -372,7 +387,7 @@ def test_model_refuses_a_producer_without_the_function_role() -> None:
     sa = SymbolId(fa, "A.run")
     ghost = SymbolId(fa, "ghost")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset({ContractRow(sa, "sig", frozenset())}),
             candidates=frozenset(
                 {CandidateRow("exact", "shared", frozenset({sa, ghost}))}
@@ -389,7 +404,7 @@ def test_model_refuses_two_edges_under_one_producer_key() -> None:
     are refused loudly, not last-writer-silenced."""
     ma, mb = ModuleId("pkg.a"), ModuleId("pkg.b")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             dependency_edges=frozenset(
                 {
                     DependencyEdgeRow(ma, mb, "import", 4, "import_time", False),
@@ -405,7 +420,7 @@ def test_model_refuses_two_edges_under_one_producer_key() -> None:
 def test_edge_rows_differing_in_any_key_component_coexist() -> None:
     ma, mb = ModuleId("pkg.a"), ModuleId("pkg.b")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             dependency_edges=frozenset(
                 {
                     DependencyEdgeRow(ma, mb, "import", 4, "import_time", False),
@@ -415,7 +430,7 @@ def test_edge_rows_differing_in_any_key_component_coexist() -> None:
             )
         )
     )
-    assert len(model.normalize().facts.dependency_edges) == 3
+    assert len(model.normalize().facts.analysis.dependency_edges) == 3
 
 
 def _violation(kind: str, *, status: str = "shadow") -> ViolationRow:
@@ -438,7 +453,7 @@ def _violation(kind: str, *, status: str = "shadow") -> ViolationRow:
 def test_model_refuses_two_violations_under_one_natural_key() -> None:
     sa = SymbolId(FileId("pkg/a.py"), "A.run")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset({ContractRow(sa, "sig", frozenset())}),
             violations=frozenset(
                 {
@@ -455,21 +470,21 @@ def test_model_refuses_two_violations_under_one_natural_key() -> None:
 def test_violations_differing_only_in_kind_are_distinct_rows() -> None:
     sa = SymbolId(FileId("pkg/a.py"), "A.run")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset({ContractRow(sa, "sig", frozenset())}),
             violations=frozenset(
                 {_violation("owner_bypass"), _violation("shadow_projection")}
             ),
         )
     )
-    assert len(model.normalize().facts.violations) == 2
+    assert len(model.normalize().facts.analysis.violations) == 2
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:
     sa = SymbolId(FileId("pkg/a.py"), "A.run")
     row = _violation("owner_bypass")
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset({ContractRow(sa, "sig", frozenset())}),
             violations=frozenset(
                 {

@@ -199,20 +199,20 @@ def legacy_document() -> dict[str, Any]:
 def test_ingest_builds_the_measured_families() -> None:
     model = canonical_model_from_legacy_document(legacy_document())
     facts = model.facts
-    assert len(facts.contracts) == 2
-    assert len(facts.graph_nodes) == 2
-    assert len(facts.sink_roles) == 2
-    assert len(facts.candidates) == 1
-    assert len(facts.semantic_edges) == 1
-    assert len(facts.dependency_edges) == 2
-    assert len(facts.violations) == 1
+    assert len(facts.analysis.contracts) == 2
+    assert len(facts.analysis.graph_nodes) == 2
+    assert len(facts.analysis.sink_roles) == 2
+    assert len(facts.analysis.candidates) == 1
+    assert len(facts.analysis.semantic_edges) == 1
+    assert len(facts.analysis.dependency_edges) == 2
+    assert len(facts.analysis.violations) == 1
     assert len(model.coupled_sets) == 2  # duplicates collapse, empty drops
     assert len(model.analyzed_files) == 3
     assert len(model.file_modules) == 2
     make = SymbolId(FileId("pkg/mod.py"), "make")
     run = SymbolId(FileId("scripts/tool.py"), "run")
-    assert {row.function for row in facts.contracts} == {make, run}
-    candidate = next(iter(facts.candidates))
+    assert {row.function for row in facts.analysis.contracts} == {make, run}
+    candidate = next(iter(facts.analysis.candidates))
     assert candidate.producer_set == frozenset({make, run})
 
 
@@ -220,7 +220,7 @@ def test_ingest_reads_the_producer_root_grammar() -> None:
     model = canonical_model_from_legacy_document(legacy_document())
     contract = next(
         row
-        for row in model.facts.contracts
+        for row in model.facts.analysis.contracts
         if row.function == SymbolId(FileId("pkg/mod.py"), "make")
     )
     assert contract.root_set == frozenset(
@@ -254,7 +254,7 @@ def test_colonless_operation_target_is_one_opaque_head() -> None:
     model = canonical_model_from_legacy_document(legacy_document())
     roots = {
         root
-        for row in model.facts.contracts
+        for row in model.facts.analysis.contracts
         for root in row.root_set
         if isinstance(root, OperationRoot)
         and isinstance(root.target.head, OpaqueDottedHead)

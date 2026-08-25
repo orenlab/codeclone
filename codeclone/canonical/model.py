@@ -34,9 +34,12 @@ preimage of the class-B ``violation_id`` handle, owned by
 own analysis facts; ``locations`` stays with the legacy producer for a later
 wave (a record-in-record wire shape the revision-0 grammar does not carry).
 
-The container mirrors the wire: :class:`CanonicalFacts` is the ``facts``
-section (record tables), :class:`CanonicalModel` adds the identity domains,
-the scope, and the standalone value sets.
+The fact container is a three-house composition (ruling 2026-08-24 §4,
+variant v): :class:`CanonicalFacts` is the pure composition root over
+:class:`AnalysisFacts` (the wire's ``facts`` record tables),
+:class:`ComparisonFacts` and :class:`EvaluationFacts` (born empty under the
+ratified grammar); :class:`CanonicalModel` adds the identity domains, the
+scope, and the standalone value sets.
 """
 
 from __future__ import annotations
@@ -186,8 +189,14 @@ class ViolationRow:
 
 
 @dataclass(frozen=True, slots=True)
-class CanonicalFacts:
-    """The record tables of one model state — the wire's ``facts`` section."""
+class AnalysisFacts:
+    """The analysis-tier record tables — the wire's ``facts`` section.
+
+    One of the three ratified fact houses (ruling 2026-08-24 §4): normalized
+    findings and facts the ANALYSIS of one source state established.  Every
+    family the wave-1..4 model carries is analysis-tier, so every family
+    lives here.
+    """
 
     contracts: frozenset[ContractRow] = field(default_factory=frozenset)
     graph_nodes: frozenset[GraphNodeRow] = field(default_factory=frozenset)
@@ -196,6 +205,51 @@ class CanonicalFacts:
     semantic_edges: frozenset[SemanticEdge] = field(default_factory=frozenset)
     dependency_edges: frozenset[DependencyEdgeRow] = field(default_factory=frozenset)
     violations: frozenset[ViolationRow] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonFacts:
+    """The comparison-tier fact house — born empty, and legitimately so.
+
+    The ratified §4 grammar names its future residents: baseline
+    state/scope/root witnesses, per-lane trust, availability/refusal,
+    novelty facts, metric-baseline identity and results, deltas, disabled
+    capabilities.  Zero families is the CURRENT state, not an omission:
+    comparison facts join with their own wire-revision bump, because
+    emitting an empty section today would present "not populated by this
+    model revision" as "measured empty" (the four-state law forbids it).
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationFacts:
+    """The evaluation-tier fact house — born empty, and legitimately so.
+
+    The ratified §4 grammar names its future residents: evaluation contract
+    revisions, the evaluation request, health results, gate inputs and
+    outcomes, verdict/refusal facts.  Zero families is the CURRENT state
+    for the same four-state reason as :class:`ComparisonFacts`.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalFacts:
+    """The fact root: PURE COMPOSITION of the three tier houses.
+
+    Maintainer form (ruling, variant v): the root owns nothing but the
+    composition — no formulas, no routing policy, no derived values, no
+    proxy methods outward.  A helper that needs a family reaches through
+    the owning house (``facts.analysis.contracts``), never through a root
+    forwarder — a forwarder would rebuild the undifferentiated bag one
+    level up.  The pin lives in
+    ``tests/test_canonical_facts_composition.py`` and reads this class's
+    SOURCE, so a smuggled method cannot hide behind byte-identical runtime
+    behavior.
+    """
+
+    analysis: AnalysisFacts = field(default_factory=AnalysisFacts)
+    comparison: ComparisonFacts = field(default_factory=ComparisonFacts)
+    evaluation: EvaluationFacts = field(default_factory=EvaluationFacts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,7 +360,7 @@ class _DomainClosure:
 def _close_domains(model: CanonicalModel) -> _DomainClosure:
     """Stage 1: complete the identity domains to their referential closure."""
     closure = _DomainClosure(model)
-    facts = model.facts
+    facts = model.facts.analysis
     for relation in model.file_modules:
         closure.files.add(relation.file)
         closure.modules.add(relation.module)
@@ -331,7 +385,7 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
     return closure
 
 
-def _prove_logical_keys(facts: CanonicalFacts) -> None:
+def _prove_logical_keys(facts: AnalysisFacts) -> None:
     """Stage 2: one logical key names at most one fact, per family (S5.A)."""
     _unique_by_key(
         facts.contracts,
@@ -357,7 +411,7 @@ def _prove_logical_keys(facts: CanonicalFacts) -> None:
     _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
 
 
-def _prove_function_roles(facts: CanonicalFacts) -> None:
+def _prove_function_roles(facts: AnalysisFacts) -> None:
     """Stage 3: producers and violation sinks carry the FUNCTION role."""
     function_symbols = {row.function for row in facts.contracts}
     producer_sets = [row.producer_set for row in facts.candidates]
@@ -382,8 +436,8 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     (idempotent; never invents facts, never reorders — order is a
     projection concern)."""
     closure = _close_domains(model)
-    _prove_logical_keys(model.facts)
-    _prove_function_roles(model.facts)
+    _prove_logical_keys(model.facts.analysis)
+    _prove_function_roles(model.facts.analysis)
     return replace(
         model,
         files=frozenset(closure.files),

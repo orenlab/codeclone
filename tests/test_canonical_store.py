@@ -362,23 +362,34 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "malformed",
+    ("family", "malformed", "match"),
     [
         # Not a pair at all: reaches the list-shape guard.
-        b'{"effect_signature":"x","function":"not-a-pair","root_set":[]}',
+        (
+            "contract",
+            b'{"effect_signature":"x","function":"not-a-pair","root_set":[]}',
+            "stored symbol",
+        ),
         # A pair of non-strings: reaches the element-type guard behind it.
-        b'{"effect_signature":"x","function":[1,2],"root_set":[]}',
+        (
+            "contract",
+            b'{"effect_signature":"x","function":[1,2],"root_set":[]}',
+            "stored symbol",
+        ),
     ],
-    ids=["not-a-pair", "non-string-pair"],
+    ids=[
+        "contract-not-a-pair",
+        "contract-non-string-pair",
+    ],
 )
 def test_well_addressed_malformed_payload_is_refused(
-    tmp_path: Path, malformed: bytes
+    tmp_path: Path, family: str, malformed: bytes, match: str
 ) -> None:
     """Depth guard reachability: a payload that hashes to its content
-    address but decodes to the wrong shape (a writer-drift class, not bit
-    rot) is still a typed refusal, never a silently different model.  One
-    input per sub-guard: a sibling guard catching the probe would otherwise
-    mask a dropped one."""
+    address but decodes to the wrong shape or violates a family law (a
+    writer-drift class, not bit rot) is still a typed refusal, never a
+    silently different model.  One input per sub-guard: a sibling guard
+    catching the probe would otherwise mask a dropped one."""
     from codeclone.canonical.store import _object_id
 
     model = fixture_model()
@@ -387,17 +398,17 @@ def test_well_addressed_malformed_payload_is_refused(
         run_id = _publish(store, model).run_id
     with sqlite3.connect(path) as connection:
         row = connection.execute(
-            "SELECT object_pk FROM objects WHERE family = 'contract' "
-            "ORDER BY object_id LIMIT 1"
+            "SELECT object_pk FROM objects WHERE family = ? ORDER BY object_id LIMIT 1",
+            (family,),
         ).fetchone()
         connection.execute(
             "UPDATE objects SET payload = ?, object_id = ? WHERE object_pk = ?",
-            (malformed, _object_id(_NS, "contract", malformed), row[0]),
+            (malformed, _object_id(_NS, family, malformed), row[0]),
         )
         connection.commit()
     with (
         RunStore(path) as store,
-        pytest.raises(StoreIntegrityError, match="stored symbol"),
+        pytest.raises(StoreIntegrityError, match=match),
     ):
         store.read_run(run_id)
 
@@ -516,13 +527,13 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
     with _store(tmp_path) as store:
         receipt = _publish(store, model)
         counts = receipt.family_counts
-        assert counts["contract"] == len(model.facts.contracts)
-        assert counts["graph_node"] == len(model.facts.graph_nodes)
-        assert counts["sink_role"] == len(model.facts.sink_roles)
-        assert counts["candidate"] == len(model.facts.candidates)
-        assert counts["semantic_edge"] == len(model.facts.semantic_edges)
-        assert counts["dependency_edge"] == len(model.facts.dependency_edges)
-        assert counts["violation"] == len(model.facts.violations)
+        assert counts["contract"] == len(model.facts.analysis.contracts)
+        assert counts["graph_node"] == len(model.facts.analysis.graph_nodes)
+        assert counts["sink_role"] == len(model.facts.analysis.sink_roles)
+        assert counts["candidate"] == len(model.facts.analysis.candidates)
+        assert counts["semantic_edge"] == len(model.facts.analysis.semantic_edges)
+        assert counts["dependency_edge"] == len(model.facts.analysis.dependency_edges)
+        assert counts["violation"] == len(model.facts.analysis.violations)
         assert counts["file"] == len(model.files)
         assert counts["module"] == len(model.modules)
         assert counts["analyzed_file"] == len(model.analyzed_files)

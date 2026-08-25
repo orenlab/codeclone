@@ -61,6 +61,7 @@ from codeclone.canonical.identity import (
     UnresolvedRoot,
 )
 from codeclone.canonical.model import (
+    AnalysisFacts,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -427,13 +428,15 @@ def canonical_model_from_legacy_document(
         analyzed_files=analyzed,
         file_modules=file_modules,
         facts=CanonicalFacts(
-            contracts=contracts,
-            graph_nodes=graph_nodes,
-            sink_roles=sink_roles,
-            candidates=candidates,
-            semantic_edges=semantic_edges,
-            dependency_edges=dependency_edges,
-            violations=violations,
+            analysis=AnalysisFacts(
+                contracts=contracts,
+                graph_nodes=graph_nodes,
+                sink_roles=sink_roles,
+                candidates=candidates,
+                semantic_edges=semantic_edges,
+                dependency_edges=dependency_edges,
+                violations=violations,
+            )
         ),
         coupled_sets=coupled_sets,
     ).normalize()

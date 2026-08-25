@@ -94,6 +94,7 @@ from codeclone.canonical.identity import (
     root_family,
 )
 from codeclone.canonical.model import (
+    AnalysisFacts,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -256,7 +257,7 @@ def _sorted_domain(values: Iterable[_ValueT]) -> list[_ValueT]:
     return sorted(set(values), key=canonical_key)
 
 
-def referenced_symbols(facts: CanonicalFacts) -> set[SymbolId]:
+def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
     """SYMBOL-domain contribution of one facts subset (F-3 §7.2).
 
     Exactly the symbols the wire's ``symbols`` table carries: fact-row
@@ -289,7 +290,7 @@ def referenced_symbols(facts: CanonicalFacts) -> set[SymbolId]:
 
 
 def _root_carriers(
-    facts: CanonicalFacts,
+    facts: AnalysisFacts,
 ) -> Iterable[frozenset[EffectRoot]]:
     for row in facts.contracts:
         yield row.root_set
@@ -299,12 +300,12 @@ def _root_carriers(
         yield violation.root_set
 
 
-def fact_root_sets(facts: CanonicalFacts) -> set[frozenset[EffectRoot]]:
+def fact_root_sets(facts: AnalysisFacts) -> set[frozenset[EffectRoot]]:
     """Every distinct root set carried by one facts subset."""
     return set(_root_carriers(facts))
 
 
-def fact_producer_sets(facts: CanonicalFacts) -> set[frozenset[SymbolId]]:
+def fact_producer_sets(facts: AnalysisFacts) -> set[frozenset[SymbolId]]:
     """Every distinct producer set carried by one facts subset."""
     producer_sets = {row.producer_set for row in facts.candidates}
     producer_sets.update(row.producer_set for row in facts.violations)
@@ -457,7 +458,7 @@ def _root_set_ref(row_set: frozenset[EffectRoot], plan: WirePlan) -> int:
     return plan.root_set_ordinal[tuple(sorted(plan.root_ordinal[r] for r in row_set))]
 
 
-def _candidate_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+def _candidate_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     handle_symbols = {p for row in facts.candidates for p in row.producer_set}
     legacy_keys = _legacy_symbol_keys(handle_symbols, plan.file_modules)
     return [
@@ -485,7 +486,7 @@ def _candidate_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, obj
 
 
 def _dependency_edge_rows(
-    facts: CanonicalFacts, plan: WirePlan
+    facts: AnalysisFacts, plan: WirePlan
 ) -> list[dict[str, object]]:
     def endpoint_ref(endpoint: DependencyEndpoint) -> tuple[str, int]:
         return _endpoint_sort_key(endpoint, plan.module_ordinal, plan.file_ordinal)
@@ -515,7 +516,7 @@ def _dependency_edge_rows(
     ]
 
 
-def _violation_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+def _violation_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     handle_symbols: set[SymbolId] = set()
     for violation in facts.violations:
         handle_symbols.add(violation.sink_identity)
@@ -554,7 +555,7 @@ def _violation_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, obj
     ]
 
 
-def _contract_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+def _contract_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
             "effect_signature": row.effect_signature,
@@ -567,7 +568,7 @@ def _contract_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, obje
     ]
 
 
-def _file_module_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+def _file_module_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     del facts  # the relation rides the plan, not the fact tables (§2.3)
     return [
         {
@@ -584,7 +585,7 @@ def _file_module_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, o
     ]
 
 
-def _graph_node_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+def _graph_node_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
             "effect_signature": row.effect_signature,
@@ -600,7 +601,7 @@ def _graph_node_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, ob
 
 
 def _semantic_edge_rows(
-    facts: CanonicalFacts, plan: WirePlan
+    facts: AnalysisFacts, plan: WirePlan
 ) -> list[dict[str, object]]:
     return [
         {
@@ -617,7 +618,7 @@ def _semantic_edge_rows(
     ]
 
 
-def _sink_role_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, object]]:
+def _sink_role_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
             "authority_status": row.authority_status,
@@ -630,7 +631,7 @@ def _sink_role_rows(facts: CanonicalFacts, plan: WirePlan) -> list[dict[str, obj
 
 
 _FAMILY_ROW_BUILDERS: dict[
-    str, Callable[[CanonicalFacts, WirePlan], list[dict[str, object]]]
+    str, Callable[[AnalysisFacts, WirePlan], list[dict[str, object]]]
 ] = {
     "candidates": _candidate_rows,
     "contracts": _contract_rows,
@@ -644,7 +645,7 @@ _FAMILY_ROW_BUILDERS: dict[
 
 
 def fact_family_rows(
-    family: str, facts: CanonicalFacts, plan: WirePlan
+    family: str, facts: AnalysisFacts, plan: WirePlan
 ) -> list[dict[str, object]]:
     """Wire rows of one fact family, in canonical row order.
 
@@ -783,7 +784,7 @@ def _integrity_tail(digest: str) -> str:
 
 def stream_canonical_wire(
     plan: WirePlan,
-    facts_for_family: Callable[[str], CanonicalFacts],
+    facts_for_family: Callable[[str], AnalysisFacts],
     write: Callable[[bytes], object],
 ) -> None:
     """Write the one canonical byte encoding of one model state.
@@ -822,7 +823,7 @@ def stream_canonical_wire(
 def encode_canonical_json(model: CanonicalModel) -> bytes:
     """Project a canonical model to its one canonical byte encoding."""
     model = model.normalize()
-    facts = model.facts
+    facts = model.facts.analysis
     plan = plan_from_parts(
         files=model.files,
         modules=model.modules,
@@ -1793,13 +1794,15 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
         analyzed_files=frozenset(files[o] for o in analyzed_ordinals),
         file_modules=file_modules,
         facts=CanonicalFacts(
-            contracts=contracts,
-            graph_nodes=graph_nodes,
-            sink_roles=sink_roles,
-            candidates=frozenset(candidates),
-            semantic_edges=semantic_edges,
-            dependency_edges=dependency_edges,
-            violations=frozenset(violations),
+            analysis=AnalysisFacts(
+                contracts=contracts,
+                graph_nodes=graph_nodes,
+                sink_roles=sink_roles,
+                candidates=frozenset(candidates),
+                semantic_edges=semantic_edges,
+                dependency_edges=dependency_edges,
+                violations=frozenset(violations),
+            )
         ),
         coupled_sets=frozenset(
             frozenset(labels[o] for o in table) for table in coupled_tables

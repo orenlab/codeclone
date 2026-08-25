@@ -33,7 +33,6 @@ import codeclone.canonical.codec as codec_module
 import codeclone.canonical.store as store_module
 from codeclone.canonical import (
     CandidateRow,
-    CanonicalFacts,
     CanonicalModel,
     CanonicalModelError,
     ContractRow,
@@ -67,7 +66,7 @@ from codeclone.canonical.store import (
     _payload_bytes,
     _run_id,
 )
-from tests.test_canonical_roundtrip import fixture_model
+from tests.test_canonical_roundtrip import analysis_facts, fixture_model
 
 _NS = "lineage-alpha"
 _TARGET = "worktree-a"
@@ -268,13 +267,16 @@ def _grown_model() -> CanonicalModel:
     an exporter mixing generations cannot reproduce the pinned bytes."""
     model = fixture_model()
     sa = SymbolId(FileId("pkg/a.py"), "A.run")
-    candidates = set(model.facts.candidates)
+    candidates = set(model.facts.analysis.candidates)
     candidates.add(CandidateRow("exact", "grown", frozenset({sa})))
     coupled = set(model.coupled_sets)
     coupled.add(frozenset({"OnlyInSecond"}))
     return replace(
         model,
-        facts=replace(model.facts, candidates=frozenset(candidates)),
+        facts=replace(
+            model.facts,
+            analysis=replace(model.facts.analysis, candidates=frozenset(candidates)),
+        ),
         coupled_sets=frozenset(coupled),
     )
 
@@ -541,7 +543,7 @@ def _bulk_model(rows: int = 1500) -> CanonicalModel:
     ]
     return CanonicalModel(
         analyzed_files=frozenset(files),
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset(
                 ContractRow(symbols[i], f"sig{i}", pool[i % 24]) for i in range(rows)
             ),

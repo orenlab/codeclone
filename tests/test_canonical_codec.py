@@ -24,7 +24,6 @@ from typing import Any
 import pytest
 
 from codeclone.canonical import (
-    CanonicalFacts,
     CanonicalModel,
     CanonicalModelError,
     ContractRow,
@@ -37,7 +36,7 @@ from codeclone.canonical import (
     encode_canonical_json,
 )
 from codeclone.canonical import codec as codec_module
-from tests.test_canonical_roundtrip import fixture_model
+from tests.test_canonical_roundtrip import analysis_facts, fixture_model
 
 
 @pytest.fixture(scope="module")
@@ -352,7 +351,7 @@ def test_w11_stays_deleted_by_sanction() -> None:
 
 def test_encoder_refuses_a_lone_surrogate_in_content() -> None:
     model = CanonicalModel(
-        facts=CanonicalFacts(
+        facts=analysis_facts(
             contracts=frozenset(
                 {
                     ContractRow(

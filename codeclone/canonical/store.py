@@ -115,6 +115,7 @@ from codeclone.canonical.identity import (
     canonical_key,
 )
 from codeclone.canonical.model import (
+    AnalysisFacts,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -355,7 +356,7 @@ def _decode_root_set(value: object, where: str) -> frozenset[EffectRoot]:
 
 def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
     """Every storage row of one normalized model, deterministically ordered."""
-    facts = model.facts
+    facts = model.facts.analysis
     for file_id in sorted(model.files, key=canonical_key):
         yield "file", {"path": file_id.path}
     for module in sorted(model.modules, key=canonical_key):
@@ -650,17 +651,19 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
         analyzed_files=frozenset(cast("list[FileId]", family("analyzed_file"))),
         file_modules=frozenset(cast("list[FileModuleRelation]", family("file_module"))),
         facts=CanonicalFacts(
-            contracts=frozenset(cast("list[ContractRow]", family("contract"))),
-            graph_nodes=frozenset(cast("list[GraphNodeRow]", family("graph_node"))),
-            sink_roles=frozenset(cast("list[SinkRoleRow]", family("sink_role"))),
-            candidates=frozenset(cast("list[CandidateRow]", family("candidate"))),
-            semantic_edges=frozenset(
-                cast("list[SemanticEdge]", family("semantic_edge"))
-            ),
-            dependency_edges=frozenset(
-                cast("list[DependencyEdgeRow]", family("dependency_edge"))
-            ),
-            violations=frozenset(cast("list[ViolationRow]", family("violation"))),
+            analysis=AnalysisFacts(
+                contracts=frozenset(cast("list[ContractRow]", family("contract"))),
+                graph_nodes=frozenset(cast("list[GraphNodeRow]", family("graph_node"))),
+                sink_roles=frozenset(cast("list[SinkRoleRow]", family("sink_role"))),
+                candidates=frozenset(cast("list[CandidateRow]", family("candidate"))),
+                semantic_edges=frozenset(
+                    cast("list[SemanticEdge]", family("semantic_edge"))
+                ),
+                dependency_edges=frozenset(
+                    cast("list[DependencyEdgeRow]", family("dependency_edge"))
+                ),
+                violations=frozenset(cast("list[ViolationRow]", family("violation"))),
+            )
         ),
         coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
     )
@@ -1012,13 +1015,13 @@ def _scan_run_family(
 
 def _family_facts(
     connection: sqlite3.Connection, run_pk: int, namespace: str, wire_family: str
-) -> CanonicalFacts:
+) -> AnalysisFacts:
     """One fact family of one run — the bounded provider of the second
     export pass.  Only this family's rows are alive at a time."""
     family = _WIRE_FAMILY_STORAGE[wire_family]
     object_ids: list[str] = []
     rows = _scan_run_family(connection, run_pk, namespace, family, object_ids)
-    return _collected_model({family: rows}).facts
+    return _collected_model({family: rows}).facts.analysis
 
 
 def _export_plan(
@@ -1062,7 +1065,7 @@ def _export_plan(
         if family in _IDENTITY_FAMILIES:
             identity_rows[family] = rows
             continue
-        facts = _collected_model({family: rows}).facts
+        facts = _collected_model({family: rows}).facts.analysis
         symbols |= referenced_symbols(facts)
         root_sets |= fact_root_sets(facts)
         producer_sets |= fact_producer_sets(facts)
