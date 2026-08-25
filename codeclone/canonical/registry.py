@@ -372,6 +372,41 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Ratified future-family keys (wave-4 form) — declarations, not wire families
+# ---------------------------------------------------------------------------
+
+# F1 ``risk_observations`` — logical key of the FUTURE analysis-fact family,
+# resolved by the 2026-08-24 night preflight trace (ruling 2026-08-24 §1).
+#
+# The measured defect: the bare ``(FILE, qualname, dimension)`` key is blind
+# to 4 real entity groups (three ``@overload`` triples and one
+# property/setter pair — 9 of 17 561 corpus rows lost), and every one of
+# them is *different declarations sharing one name*, so deduplication is
+# indefensible: a producer-native discriminator is required.
+#
+# The ratified discriminator is the declaration-site ``start_line``, by the
+# product's own precedent: ``complexity.items`` already keys
+# ``(path, qualname, start_line)`` and is 12 285/12 285 unique on the frozen
+# corpus.  SOURCE OF THE FACT: ``codeclone.models.Unit`` carries
+# ``start_line`` on the producer's own input; the projection
+# (``observations/projection.py`` → ``IntegerObservation``) is the lossy
+# step that drops it.  Wiring it through is producer work for the wave that
+# introduces the family — the production projector is deliberately not
+# touched by this declaration.
+#
+# FLAG (named fork for the maintainer, morning override): this admits the
+# declaration site into an *identity* — unlike dependency occurrences,
+# where location is evidence and never key (ruling §2).
+RISK_OBSERVATIONS_FAMILY: Final = "risk_observations"
+RISK_OBSERVATIONS_KEY: Final[tuple[str, ...]] = (
+    "file",
+    "qualname",
+    "dimension",
+    "start_line",
+)
+
+
 def wire_fact_family_order() -> tuple[str, ...]:
     """Wire order of fact families: mechanical, total, no manual tail."""
     return tuple(sorted(FACT_FAMILY_FIELDS))
