@@ -65,11 +65,11 @@ not the current working directory.
 | Key | Type | Default | CLI flag | Purpose |
 |-----|------|---------|----------|---------|
 | `min_loc` | int | `10` | `--min-loc` | Minimum lines of code for a clone-eligible unit |
-| `min_stmt` | int | `6` | `--min-stmt` | Minimum AST statements for a clone-eligible unit |
+| `min_stmt` | int | `6` | `--min-stmt` | Minimum top-level statements in the function body for a clone-eligible unit |
 | `block_min_loc` | int | `20` | — | Minimum LOC floor for block-level clone artifacts inside a clone-eligible unit |
-| `block_min_stmt` | int | `8` | — | Minimum statement floor for block-level clone artifacts |
+| `block_min_stmt` | int | `8` | — | Minimum top-level-statement floor for block-level clone artifacts |
 | `segment_min_loc` | int | `20` | — | Minimum LOC floor for statement-segment clone artifacts |
-| `segment_min_stmt` | int | `10` | — | Minimum statement floor for statement-segment clone artifacts |
+| `segment_min_stmt` | int | `10` | — | Minimum top-level-statement floor for statement-segment clone artifacts |
 | `processes` | int | `4` | `--processes` | Parallel worker processes |
 | `near_miss` | bool | `false` | `--near-miss` | Produce the advisory near-miss clone channel |
 | `renamed_structure` | bool | `false` | `--renamed-structure` | Produce the advisory renamed-structure clone channel |
@@ -77,6 +77,12 @@ not the current working directory.
 | `source_roots` | list[str] | auto-detected | — | Explicit repo-relative import roots for module identity; unset auto-detects an unambiguous `src` layout, otherwise the repository root |
 | `baseline_scope_id` | str | unset | — | Stable canonical UUID naming the baseline scope. Required for baseline update and baseline-relative gating |
 | `project_label` | str | unset | — | Operator-facing project name recorded in the published baseline metadata — see below |
+
+Every `*_min_stmt` floor counts the statements at the top level of a function
+body — the length of `body`. Statements nested inside them do not add to the
+count, so a ten-line function built from one multi-line `return` counts as one
+statement, and the block and segment windows slide over that same top-level
+list.
 
 ### Audit trail and intent registry
 

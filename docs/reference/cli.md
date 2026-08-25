@@ -26,7 +26,7 @@ Specialized subcommands manage setup, engineering memory, and analytics. Exit co
 |--------|-------------|
 | `root` | Project root directory. Defaults to `.` |
 | `--min-loc MIN_LOC` | Minimum Lines of Code for clone analysis. Default: 10 |
-| `--min-stmt MIN_STMT` | Minimum AST statement count for clone analysis. Default: 6 |
+| `--min-stmt MIN_STMT` | Minimum top-level statements in the function body for clone analysis; statements nested inside them are not counted. Default: 6 |
 | `--processes PROCESSES` | Parallel worker processes. Default: 4 |
 | `--changed-only` | Limit findings to files in a git diff |
 | `--diff-against REF` | Use `git diff --name-only <REF>` to determine changed files |

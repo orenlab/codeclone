@@ -32,7 +32,8 @@ HELP_MIN_LOC = (
     f"Default: {DEFAULT_MIN_LOC}."
 )
 HELP_MIN_STMT = (
-    "Minimum AST statement count required for clone analysis.\n"
+    "Minimum top-level statements in the function body required for\n"
+    "clone analysis. Statements nested inside them are not counted.\n"
     f"Default: {DEFAULT_MIN_STMT}."
 )
 HELP_PROCESSES = f"Number of parallel worker processes.\nDefault: {DEFAULT_PROCESSES}."

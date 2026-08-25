@@ -11,6 +11,7 @@ import json
 import os
 import signal
 import sys
+import textwrap
 import tokenize
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -24,7 +25,7 @@ import codeclone.analysis.ast_helpers as ast_helpers_mod
 import codeclone.analysis.parser as parser_mod
 import codeclone.analysis.reachability as reachability_mod
 import codeclone.analysis.units as units_mod
-from codeclone import contracts, qualnames
+from codeclone import contracts, qualnames, ui_messages
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ParseError
 from codeclone.metrics.dead_code import classify_liveness, find_unused
@@ -5116,3 +5117,45 @@ def fn(x):
     )
     assert list(r_units) == list(units)
     assert [group.finding_kind for group in r_findings] == ["duplicated_branches"]
+
+
+def test_stmt_floor_help_states_what_the_producer_measures() -> None:
+    """The stmt floors count top-level body statements, not AST statements.
+
+    ``_stmt_count`` is ``len(node.body)``, so only the outermost statements of a
+    function body reach the floors. "AST statement count" names a different
+    measurement, and a reader who applies it predicts the opposite eligibility
+    verdict for the function below. The help string is therefore pinned to the
+    producer's semantics rather than to a literal: the counts here are
+    re-derived from the producer, and wording the producer contradicts is
+    refused. The docs tables carry the same phrasing; this is their upstream.
+    """
+
+    source = textwrap.dedent(
+        """\
+        def wide(flag):
+            if flag:
+                a = 1
+                b = 2
+                c = 3
+                d = 4
+                e = 5
+                f = 6
+                return a + b + c + d + e + f
+            return 0
+        """
+    )
+    node = ast.parse(source).body[0]
+    assert isinstance(node, ast.FunctionDef)
+
+    measured = units_mod._stmt_count(node)
+    nested_total = sum(1 for child in ast.walk(node) if isinstance(child, ast.stmt)) - 1
+
+    # What the floors apply to, versus what "AST statements" would name.
+    assert measured == 2
+    assert nested_total == 9
+    assert measured < contracts.DEFAULT_MIN_STMT <= nested_total
+
+    help_text = ui_messages.HELP_MIN_STMT.lower()
+    assert "top-level" in help_text
+    assert "ast statement" not in help_text

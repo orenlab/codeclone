@@ -1209,7 +1209,7 @@
           "scope": "resource",
           "default": 6,
           "minimum": 0,
-          "description": "Custom function minimum statement count. Used only when analysis.profile is set to custom."
+          "description": "Custom function minimum count of top-level statements in the function body; nested statements are not counted. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.blockMinLoc": {
           "type": "integer",
@@ -1223,7 +1223,7 @@
           "scope": "resource",
           "default": 8,
           "minimum": 0,
-          "description": "Custom block minimum statement count. Used only when analysis.profile is set to custom."
+          "description": "Custom block minimum count of consecutive top-level statements of a function body. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.segmentMinLoc": {
           "type": "integer",
@@ -1237,7 +1237,7 @@
           "scope": "resource",
           "default": 10,
           "minimum": 0,
-          "description": "Custom segment minimum statement count. Used only when analysis.profile is set to custom."
+          "description": "Custom segment minimum count of consecutive top-level statements of a function body. Used only when analysis.profile is set to custom."
         },
         "codeclone.ui.showStatusBar": {
           "type": "boolean",

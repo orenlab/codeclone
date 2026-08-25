@@ -62,11 +62,11 @@ Thresholds define boundaries for finding classification. Defaults set baseline c
 | `DEFAULT_HEALTH_THRESHOLD` | `60` | Health reporting floor | Only report modules below this health score. |
 | `DEFAULT_COVERAGE_MIN` | `50` | Coverage minimum | Treat coverage below 50% as lacking evidence. |
 | `DEFAULT_MIN_LOC` | `10` | Minimum lines of code | Ignore fragments < 10 lines in clone detection. |
-| `DEFAULT_MIN_STMT` | `6` | Minimum statements | Ignore fragments < 6 statements in clone detection. |
+| `DEFAULT_MIN_STMT` | `6` | Minimum top-level statements | Ignore functions whose body holds < 6 top-level statements in clone detection; nested statements do not count. |
 | `DEFAULT_BLOCK_MIN_LOC` | `20` | Clone block minimum LOC | Report only clone blocks >= 20 lines. |
-| `DEFAULT_BLOCK_MIN_STMT` | `8` | Clone block minimum statements | Report only clone blocks >= 8 statements. |
+| `DEFAULT_BLOCK_MIN_STMT` | `8` | Clone block minimum top-level statements | Report only clone blocks >= 8 consecutive top-level statements of a function body. |
 | `DEFAULT_SEGMENT_MIN_LOC` | `20` | Segment minimum LOC | Ignore code segments < 20 lines. |
-| `DEFAULT_SEGMENT_MIN_STMT` | `10` | Segment minimum statements | Ignore segments < 10 statements. |
+| `DEFAULT_SEGMENT_MIN_STMT` | `10` | Segment minimum top-level statements | Ignore segments shorter than 10 consecutive top-level statements of a function body. |
 
 ### Health Weighting
 

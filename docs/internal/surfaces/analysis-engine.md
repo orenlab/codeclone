@@ -18,7 +18,7 @@ The engine is organized into functional surfaces — file discovery, analysis pi
 | Contract | Value | Purpose |
 |----------|-------|---------|
 | `DEFAULT_BLOCK_MIN_LOC` | `20` | Minimum lines of code for a block to be eligible for block-level clone detection |
-| `DEFAULT_BLOCK_MIN_STMT` | `8` | Minimum AST statement count for the same eligibility check |
+| `DEFAULT_BLOCK_MIN_STMT` | `8` | Minimum top-level statements in the function body for the same eligibility check; nested statements are not counted |
 | `CACHE_VERSION` | see `codeclone/contracts/__init__.py` | Analysis cache format; bumped on structural changes, invalidating all cached metrics |
 | `HEALTH_WEIGHTS` | clones 0.25, complexity 0.2, cohesion 0.15, coupling 0.1, coverage 0.1, dead_code 0.1, dependencies 0.1 | Composite health score weighting across the seven structural dimensions |
 
