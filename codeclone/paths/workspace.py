@@ -22,6 +22,10 @@ REL_REPORT_SARIF_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.sarif"
 REL_REPORT_TEXT_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.txt"
 REL_AUDIT_DB_PATH: Final = f"{WORKSPACE_DIR_NAME}/db/audit.sqlite3"
 REL_INTENT_REGISTRY_DB_PATH: Final = f"{WORKSPACE_DIR_NAME}/db/intents.sqlite3"
+# Canonical run-store location — W1, ratified 2026-08-24 (§5: W2 separate
+# file and W3 outside the repo both rejected): one db/ directory, one
+# retention policy, symmetric with the audit and intent stores above.
+REL_RUN_STORE_DB_PATH: Final = f"{WORKSPACE_DIR_NAME}/db/runs.sqlite3"
 REL_MEMORY_DB_PATH: Final = f"{WORKSPACE_DIR_NAME}/memory/engineering_memory.sqlite3"
 REL_SEMANTIC_INDEX_PATH: Final = f"{WORKSPACE_DIR_NAME}/memory/semantic_index.lance"
 REL_SEMANTIC_EMBEDDING_CACHE_DIR: Final = f"{WORKSPACE_DIR_NAME}/memory/fastembed"
@@ -114,6 +118,7 @@ __all__ = [
     "REL_REPORT_MARKDOWN_PATH",
     "REL_REPORT_SARIF_PATH",
     "REL_REPORT_TEXT_PATH",
+    "REL_RUN_STORE_DB_PATH",
     "REL_SEMANTIC_EMBEDDING_CACHE_DIR",
     "REL_SEMANTIC_INDEX_PATH",
     "REPORT_JSON_PARTS",

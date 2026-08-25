@@ -455,6 +455,59 @@ def test_scope_digest_separates_scope_from_facts(tmp_path: Path) -> None:
         assert facts_moved.run_id != base.run_id
 
 
+# -- W1 + the ratified PRAGMA convention (ruling 2026-08-24 §5) -------------
+
+
+def test_w1_run_store_path_is_a_workspace_constant() -> None:
+    """W1 verbatim: the run-store lives at ``.codeclone/db/runs.sqlite3``.
+
+    The value is a ratified normative decision (ruling 2026-08-24 §5: W2 and
+    W3 rejected), pinned literally on purpose — moving the store is a
+    decision for the maintainer, not a refactor.
+    """
+    from codeclone.paths.workspace import REL_RUN_STORE_DB_PATH
+
+    assert REL_RUN_STORE_DB_PATH == ".codeclone/db/runs.sqlite3"
+
+
+def _connection_pragmas(store: RunStore) -> tuple[str, int, int, int]:
+    connection = store._connection
+    return (
+        str(connection.execute("PRAGMA journal_mode").fetchone()[0]),
+        int(connection.execute("PRAGMA busy_timeout").fetchone()[0]),
+        int(connection.execute("PRAGMA synchronous").fetchone()[0]),
+        int(connection.execute("PRAGMA foreign_keys").fetchone()[0]),
+    )
+
+
+def test_store_connection_carries_the_ratified_pragmas(tmp_path: Path) -> None:
+    """WAL + busy_timeout=5000 + synchronous=FULL(2) + foreign keys ON.
+
+    The convention arrives through the one shared connection owner
+    (``codeclone.utils.sqlite_store``); FULL is this store's own override —
+    the durability of a published immutable run is not weakened to NORMAL
+    as a side effect of unification (ruling 2026-08-24 §5).
+    """
+    with _store(tmp_path) as store:
+        journal, busy_timeout, synchronous, foreign_keys = _connection_pragmas(store)
+    assert journal == "wal"
+    assert busy_timeout == 5000
+    assert synchronous == 2  # FULL — never NORMAL(1) by unification default
+    assert foreign_keys == 1
+
+
+def test_ratified_pragmas_hold_on_reopen_of_an_existing_store(tmp_path: Path) -> None:
+    """journal_mode persists in the file, but busy_timeout and synchronous
+    are per-connection state: a reopen path that bypasses the shared owner
+    loses them silently, so the pin observes a second handle."""
+    path = tmp_path / "runs.sqlite"
+    with RunStore(path) as store:
+        _publish(store, fixture_model())
+    with RunStore(path) as reopened:
+        journal, busy_timeout, synchronous, foreign_keys = _connection_pragmas(reopened)
+    assert (journal, busy_timeout, synchronous, foreign_keys) == ("wal", 5000, 2, 1)
+
+
 # -- Receipt counts ---------------------------------------------------------
 
 

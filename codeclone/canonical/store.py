@@ -134,6 +134,7 @@ from codeclone.contracts import (
     MODULE_IDENTITY_VERSION,
     STORAGE_SCHEMA_REVISION,
 )
+from codeclone.utils.sqlite_store import open_sqlite_db
 
 _DOMAIN_PREFIX: Final = f"cc-run-store:{STORAGE_SCHEMA_REVISION}\x00".encode()
 _DOMAIN_OBJECT: Final = _DOMAIN_PREFIX + b"object\x00"
@@ -1175,13 +1176,36 @@ class PublishReceipt:
     family_counts: dict[str, int]
 
 
+def _ensure_schema(connection: sqlite3.Connection) -> None:
+    """Idempotent DDL of the store, run by the shared connection owner.
+
+    DDL statements are not implicitly transacted by the sqlite3 module, so
+    the CREATEs run in autocommit; the witness handshake that follows in
+    ``RunStore._initialize`` gets its own immediate transaction.
+    (``executescript`` would commit an open transaction — never used here.)
+    """
+    for statement in _SCHEMA.split(";"):
+        if statement.strip():
+            connection.execute(statement)
+
+
 class RunStore:
     """The wave-2 canonical run-store over one SQLite file."""
 
     def __init__(self, path: str | Path) -> None:
         self._path = str(path)
-        self._connection = sqlite3.connect(self._path, isolation_level=None)
-        self._connection.execute("PRAGMA foreign_keys = ON")
+        # The ratified connection convention (ruling 2026-08-24 §5) arrives
+        # through the ONE shared connection owner — WAL and busy_timeout
+        # 5000 are the owner's, never restated here.  ``synchronous=FULL``
+        # is this store's explicit override: the durability of a published
+        # immutable run is not weakened to NORMAL as a side effect of
+        # unification (NORMAL would be a separate measured decision).
+        self._connection = open_sqlite_db(
+            Path(self._path),
+            ensure_schema=_ensure_schema,
+            foreign_keys=True,
+            synchronous="FULL",
+        )
         self._fence: tuple[int, str, str] = (0, "", "")
         self._initialize()
 
@@ -1204,13 +1228,10 @@ class RunStore:
     # -- open-time witness (law 7) ----------------------------------------
 
     def _initialize(self) -> None:
+        # The DDL already ran inside the shared connection owner
+        # (``_ensure_schema``); only the witness handshake remains, in its
+        # own immediate transaction.
         cursor = self._connection.cursor()
-        # DDL first: ``executescript`` would commit an open transaction, so
-        # the idempotent CREATEs run in autocommit and the witness handshake
-        # gets its own immediate transaction below.
-        for statement in _SCHEMA.split(";"):
-            if statement.strip():
-                cursor.execute(statement)
         cursor.execute("BEGIN IMMEDIATE")
         try:
             fence = _open_witness(cursor)
