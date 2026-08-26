@@ -81,6 +81,7 @@ from codeclone.canonical.identity import (
     HEAD_TAG_OPAQUE,
     IMPORT_TYPES,
     OPERATION_KINDS,
+    RISK_DIMENSIONS,
     ROOT_FAMILY_EFFECT,
     ROOT_FAMILY_OPERATION,
     ROOT_FAMILY_PRODUCER,
@@ -116,6 +117,7 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    RiskObservationRow,
     RunScalars,
     SemanticEdge,
     SinkRoleRow,
@@ -304,6 +306,7 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
         referenced.update(violation.producer_set)
     referenced.update(row.symbol for row in facts.coupling_cohesion_observations)
     referenced.update(row.symbol for row in facts.api_symbols)
+    referenced.update(row.symbol for row in facts.risk_observations)
     return referenced
 
 
@@ -614,6 +617,30 @@ def _coupling_cohesion_rows(
     ]
 
 
+def _risk_observation_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    # F1 key order: (symbol, dimension, start_line) — symbol ordinals are
+    # assigned in canonical-key order, so this spells the registry's
+    # (file, qualname, dimension, start_line).
+    return [
+        {
+            "dimension": row.dimension,
+            "numerator": row.numerator,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.risk_observations,
+            key=lambda row: (
+                plan.symbol_ordinal[row.symbol],
+                row.dimension.encode("utf-8"),
+                row.start_line,
+            ),
+        )
+    ]
+
+
 def _api_parameter_cell(parameter: ApiParameterFact) -> list[object]:
     """One wire cell per parameter: ``[name, kind, default, annotation?]``.
 
@@ -748,6 +775,7 @@ _FAMILY_ROW_BUILDERS: dict[
     "dependency_relations": _dependency_relation_rows,
     "file_modules": _file_module_rows,
     "graph_nodes": _graph_node_rows,
+    "risk_observations": _risk_observation_rows,
     "run_scalars": _run_scalars_rows,
     "semantic_edges": _semantic_edge_rows,
     "sink_roles": _sink_role_rows,
@@ -1763,6 +1791,58 @@ def _decode_coupling_cohesion(
     return frozenset(rows)
 
 
+def _decode_risk_observations(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[RiskObservationRow]:
+    columns, _flags, row_count = _decode_columns(
+        "risk_observations", facts["risk_observations"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        dimension = _expect_string(
+            columns["dimension"][index],
+            f"facts.risk_observations.dimension[{index}]",
+        )
+        if dimension not in RISK_DIMENSIONS:
+            raise _refuse("W08", f"unknown risk dimension tag {dimension!r}")
+        numerator = _expect_wire_int(
+            columns["numerator"][index],
+            f"facts.risk_observations.numerator[{index}]",
+        )
+        if numerator < 1:
+            raise _refuse(
+                "W07",
+                f"facts.risk_observations.numerator[{index}] is "
+                f"{numerator}, outside the family's declared domain "
+                "[1, 2**31-1] (a zero row would present absence as a "
+                "measured value)",
+            )
+        start_line = _expect_wire_int(
+            columns["start_line"][index],
+            f"facts.risk_observations.start_line[{index}]",
+        )
+        if start_line < 1:
+            raise _refuse(
+                "W07",
+                f"facts.risk_observations.start_line[{index}] is "
+                f"{start_line}, outside the declaration-site domain "
+                "[1, 2**31-1] (a zero site would spell no declaration "
+                "as a declaration)",
+            )
+        ordinal = _expect_ordinal(
+            columns["symbol"][index],
+            len(symbols),
+            f"facts.risk_observations.symbol[{index}]",
+        )
+        rows.append(
+            RiskObservationRow(symbols[ordinal], dimension, numerator, start_line)
+        )
+        keys.append((ordinal, dimension.encode("utf-8"), start_line))
+    _expect_strictly_increasing(keys, "facts.risk_observations")
+    return frozenset(rows)
+
+
 def _decode_api_parameter(value: object, where: str) -> ApiParameterFact:
     cell = _expect_list(value, where)
     if len(cell) not in (3, 4):
@@ -2089,6 +2169,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     )
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
+    risk_observations = _decode_risk_observations(facts_section, symbols)
     run_scalars = _decode_run_scalars(facts_section)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
@@ -2116,6 +2197,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
+                risk_observations=risk_observations,
                 run_scalars=run_scalars,
             )
         ),

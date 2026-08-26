@@ -26,6 +26,7 @@ import pytest
 
 from codeclone.canonical import (
     AnalysisFile,
+    CanonicalModelError,
     EffectLabelRoot,
     FileId,
     KnownModule,
@@ -255,6 +256,42 @@ def legacy_document() -> dict[str, Any]:
                         "returns_digest": None,
                     },
                 ],
+                # F1 lane verbatim from the producer's shape (fork (b)):
+                # the @overload pair shares source, qualname, dimension
+                # AND numerator — only the declaration site tells the two
+                # facts apart; the third row rides the module-less file.
+                "risk_observations": [
+                    {
+                        "source": {
+                            "file": {"path": "pkg/mod.py"},
+                            "python_module": {"module": "pkg.mod"},
+                        },
+                        "qualname": "make",
+                        "dimension": "cyclomatic_complexity",
+                        "numerator": 7,
+                        "start_line": 10,
+                    },
+                    {
+                        "source": {
+                            "file": {"path": "pkg/mod.py"},
+                            "python_module": {"module": "pkg.mod"},
+                        },
+                        "qualname": "make",
+                        "dimension": "cyclomatic_complexity",
+                        "numerator": 7,
+                        "start_line": 40,
+                    },
+                    {
+                        "source": {
+                            "file": {"path": "scripts/tool.py"},
+                            "python_module": None,
+                        },
+                        "qualname": "run",
+                        "dimension": "nesting_depth",
+                        "numerator": 2,
+                        "start_line": 5,
+                    },
+                ],
             },
         },
         "metrics": {
@@ -349,6 +386,21 @@ def test_ingest_builds_the_measured_families() -> None:
     assert {row.function for row in facts.analysis.contracts} == {make, run}
     candidate = next(iter(facts.analysis.candidates))
     assert candidate.producer_set == frozenset({make, run})
+
+
+def test_ingest_keeps_both_overload_risk_declarations() -> None:
+    """F1: the @overload pair survives as TWO facts — equal in everything
+    but the declaration site — plus the module-less third row."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    rows = {
+        (row.symbol.qualname, row.dimension, row.numerator, row.start_line)
+        for row in model.facts.analysis.risk_observations
+    }
+    assert rows == {
+        ("make", "cyclomatic_complexity", 7, 10),
+        ("make", "cyclomatic_complexity", 7, 40),
+        ("run", "nesting_depth", 2, 5),
+    }
 
 
 def test_ingest_reads_the_producer_root_grammar() -> None:
@@ -638,3 +690,46 @@ def test_ingest_maps_observation_sources_to_file_headed_symbols() -> None:
         ("cbo", 3),
         ("lcom4", 1),
     }
+
+
+def _risk_row(document: dict[str, Any]) -> dict[str, Any]:
+    families = document["source_facts"]["source_fact_families"]
+    row: dict[str, Any] = families["risk_observations"][0]
+    return row
+
+
+def test_ingest_refuses_a_risk_row_without_a_declaration_site() -> None:
+    """F1: the site is a key component; a lane row that lost it cannot name
+    its entity and is refused, never defaulted."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _risk_row(document).pop("start_line")
+
+    with pytest.raises(LegacyIngestError, match="start_line"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_non_integer_risk_declaration_site() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _risk_row(document)["start_line"] = True
+
+    with pytest.raises(LegacyIngestError, match="start_line"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_unknown_risk_dimension() -> None:
+    """The model law owns the vocabulary; ingest routes its refusal."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _risk_row(document)["dimension"] = "cbo"
+
+    with pytest.raises(CanonicalModelError, match="risk dimension"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_glued_risk_qualname() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _risk_row(document)["qualname"] = "pkg.mod:make"
+
+    with pytest.raises(LegacyIngestError, match="glued"):
+        canonical_model_from_legacy_document(_mutated(swap))

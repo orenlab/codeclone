@@ -4,20 +4,21 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""F1 discriminator ratification pins (ruling 2026-08-24 §1, night preflight).
+"""F1 discriminator pins (ruling 2026-08-24 §1; fork resolved 2026-08-26).
 
 The measured defect: the bare ``(FILE, qualname, dimension)`` key of the
-future ``risk_observations`` family is blind to 4 real entity groups
-(3 sets of ``@overload`` declarations and one property/setter pair, 9 lost
-rows of 17 561 on the frozen corpus) — different declarations, one key.
-The ratified resolution is a producer-native discriminator: the
+``risk_observations`` family is blind to 4 real entity groups (3 sets of
+``@overload`` declarations and one property/setter pair, 9 lost rows of
+17 561 on the frozen corpus) — different declarations, one key.  The
+ratified resolution is a producer-native discriminator: the
 declaration-site ``start_line``, by the product's own precedent
 (``complexity.items`` keys ``(path, qualname, start_line)`` and is
 12 285/12 285 unique on the same corpus).
 
-FLAG for the maintainer (named fork, morning override): this makes the
-declaration site part of an *identity* — unlike dependency occurrences,
-where location is evidence and never key.
+The named fork — declaration site as identity, unlike dependency
+occurrences where location is evidence — was RESOLVED by the maintainer's
+morning ruling (2026-08-26, variant (b)): the family is now a real wire
+family, and the producer carries the site end to end.
 """
 
 from __future__ import annotations
@@ -28,8 +29,10 @@ from codeclone.canonical.registry import (
     FACT_FAMILY_FIELDS,
     RISK_OBSERVATIONS_FAMILY,
     RISK_OBSERVATIONS_KEY,
+    wire_columns,
+    wire_fact_family_order,
 )
-from codeclone.models import IntegerObservation, Unit
+from codeclone.models import RiskObservation, Unit
 
 
 def test_f1_key_is_the_ratified_declaration_site_key() -> None:
@@ -42,23 +45,59 @@ def test_f1_key_is_the_ratified_declaration_site_key() -> None:
     assert RISK_OBSERVATIONS_KEY == ("file", "qualname", "dimension", "start_line")
 
 
-def test_f1_family_is_declared_but_not_yet_a_wire_family() -> None:
-    """The ratification lands as a declaration only: a wire family without
-    codec, store, and ingest support would be a partially-introduced family,
-    which the night protocol forbids."""
+def test_f1_family_is_a_wire_family_with_the_ratified_columns() -> None:
+    """Fork (b) landed: the family is real, keyed as ratified, and its wire
+    columns are born mechanically from the registry — key components plus
+    the one payload column, nothing else."""
     assert RISK_OBSERVATIONS_FAMILY == "risk_observations"
-    assert RISK_OBSERVATIONS_FAMILY not in FACT_FAMILY_FIELDS
+    assert RISK_OBSERVATIONS_FAMILY in FACT_FAMILY_FIELDS
+    assert RISK_OBSERVATIONS_FAMILY in wire_fact_family_order()
+    assert wire_columns(RISK_OBSERVATIONS_FAMILY) == (
+        "dimension",
+        "numerator",
+        "start_line",
+        "symbol",
+    )
 
 
 def test_f1_discriminator_source_claim_is_executed_not_narrated() -> None:
-    """The registry declaration says the fact is producer-native and the
-    projection is the lossy step. Execute that claim against the real types:
-    ``Unit`` carries ``start_line``; ``IntegerObservation`` (the projection
-    row of observations/projection.py) does not. If either side moves, the
-    declaration's stated source is stale and this pin reds."""
+    """The registry declaration says the fact is producer-native.  Execute
+    that claim against the real types: ``Unit`` carries ``start_line``, and
+    since the K1 lane migration the projection row (``RiskObservation``)
+    carries it too — the projection is no longer the lossy step."""
     unit_fields = {field.name for field in dataclasses.fields(Unit)}
-    observation_fields = {
-        field.name for field in dataclasses.fields(IntegerObservation)
-    }
+    observation_fields = {field.name for field in dataclasses.fields(RiskObservation)}
     assert "start_line" in unit_fields
-    assert "start_line" not in observation_fields
+    assert "start_line" in observation_fields
+
+
+def test_f1_dimension_vocabulary_mirrors_the_producer() -> None:
+    """Executed cross-check, not a narrated one: the closed RISK_DIMENSIONS
+    vocabulary equals the dimension set the real producer emits for a unit
+    measured on both axes.  A drift on either side reds here."""
+    from pathlib import Path
+
+    from codeclone.canonical.identity import RISK_DIMENSIONS
+    from codeclone.observations.projection import build_observation_bundle
+    from tests._ast_metrics_helpers import module_registry_context
+
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=registry,
+        units=(
+            {
+                "filepath": "pkg/mod.py",
+                "qualname": "pkg.mod:probe",
+                "cyclomatic_complexity": 3,
+                "nesting_depth": 2,
+                "start_line": 1,
+                "end_line": 9,
+            },
+        ),
+    )
+    emitted = {row.dimension for row in bundle.structural.risk_observations}
+    assert emitted == set(RISK_DIMENSIONS)

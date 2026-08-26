@@ -49,6 +49,7 @@ from codeclone.canonical import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    RiskObservationRow,
     RunScalars,
     SemanticEdge,
     SinkRoleRow,
@@ -212,6 +213,19 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             None,
         ),
     ]
+    risk_observations = [
+        # F1 (fork (b)): the measured @overload class verbatim — one
+        # (symbol, dimension) pair, two declaration sites with EQUAL
+        # measures; the site-blind key loses one of these two rows, the
+        # ratified key keeps both.
+        RiskObservationRow(sa, "cyclomatic_complexity", 7, 10),
+        RiskObservationRow(sa, "cyclomatic_complexity", 7, 40),
+        # the same declaration's second dimension
+        RiskObservationRow(sa, "nesting_depth", 2, 10),
+        # a row on the module-less separator-collision file, with the
+        # numerator and the site both on the family floor boundary (1/1)
+        RiskObservationRow(se, "nesting_depth", 1, 1),
+    ]
     # F9 (wave 4): ONE run-scalars record per analysis snapshot — never a
     # table, no invented entity key.  Values pairwise distinct so a
     # cross-wired producer mapping cannot survive, and one zero: zero is a
@@ -240,6 +254,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         violations = list(reversed(violations))
         coupling_cohesion = list(reversed(coupling_cohesion))
         api_symbols = list(reversed(api_symbols))
+        risk_observations = list(reversed(risk_observations))
         coupled = list(reversed(coupled))
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
@@ -255,6 +270,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             violations=frozenset(violations),
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
+            risk_observations=frozenset(risk_observations),
             run_scalars=run_scalars,
         ),
         coupled_sets=frozenset(coupled),
@@ -284,15 +300,18 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     families.  Wave 4's F5 family then replaced that literal deliberately
     (3906 bytes, sha256 4db95d8e…): the draft gained ``api_symbols`` with
     its contract-derived ``signature_variant`` column.  Wave 4's F9 family
-    then replaced that literal deliberately: the draft gained the
-    ``run_scalars`` record member, so every document's bytes moved — the
-    one announced transition of this commit.
+    then replaced that literal deliberately (4107 bytes, sha256 3f4af32e…):
+    the draft gained the ``run_scalars`` record member.  The F1
+    ``risk_observations`` family (ruling 2026-08-26, fork (b)) then
+    replaced the F9 literal deliberately: the draft gained the
+    declaration-site keyed risk family, so every document's bytes moved —
+    the one announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 4107
+    assert len(payload) == 4290
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "3f4af32e8b1011b9d4c50da457dbaa450bd88f8c0898eafaa912214f7ee9a044"
+        == "873a0a42f0500978177d3ad8494ba8294a58d2c1399a84462253472f4e97d924"
     )
 
 
@@ -931,3 +950,63 @@ def test_model_refuses_a_violation_sink_without_the_function_role() -> None:
     )
     with pytest.raises(CanonicalModelError, match="violation sink"):
         model.normalize()
+
+
+def test_model_refuses_two_risk_rows_under_one_declaration_key() -> None:
+    """F1 key law: (SYMBOL, dimension, start_line) names at most one fact."""
+    sa = SymbolId(FileId("pkg/a.py"), "A.run")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            risk_observations=frozenset(
+                {
+                    RiskObservationRow(sa, "cyclomatic_complexity", 3, 10),
+                    RiskObservationRow(sa, "cyclomatic_complexity", 4, 10),
+                }
+            )
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"risk_observations\.key"):
+        model.normalize()
+
+
+def test_risk_rows_differing_only_in_declaration_site_coexist() -> None:
+    """The F1 resolution itself: the measured @overload shape — equal in
+    symbol, dimension AND numerator — is two facts under the ratified key,
+    where the site-blind key had made deduplication indefensible."""
+    sa = SymbolId(FileId("pkg/a.py"), "parse_args")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            risk_observations=frozenset(
+                {
+                    RiskObservationRow(sa, "cyclomatic_complexity", 7, 10),
+                    RiskObservationRow(sa, "cyclomatic_complexity", 7, 40),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.risk_observations) == 2
+
+
+def test_tied_risk_rows_are_ordered_by_site_on_the_wire() -> None:
+    """Rows tied on (symbol, dimension) MUST order by declaration site.
+
+    An encoder that drops ``start_line`` from its sort key leaks set
+    iteration order into the wire and this pin reds (the F2 tied-row
+    precedent verbatim, one key component further down).
+    """
+    sa = SymbolId(FileId("pkg/a.py"), "parse_args")
+    sites = (40, 10, 25, 90, 55, 70)
+    model = CanonicalModel(
+        facts=analysis_facts(
+            risk_observations=frozenset(
+                RiskObservationRow(sa, dimension, 2, site)
+                for dimension in ("cyclomatic_complexity", "nesting_depth")
+                for site in sites
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    table = document["facts"]["risk_observations"]
+    assert table["start_line"] == sorted(sites) + sorted(sites)
+    assert table["dimension"] == (["cyclomatic_complexity"] * 6 + ["nesting_depth"] * 6)
+    assert table["symbol"] == [0] * 12

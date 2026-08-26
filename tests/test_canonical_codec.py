@@ -227,6 +227,36 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     ),
     (
         "W08",
+        "unknown risk dimension tag",
+        '"risk_observations":{"dimension":["cyclomatic_complexity",',
+        '"risk_observations":{"dimension":["banana",',
+    ),
+    (
+        "W07",
+        "risk numerator below the family floor",
+        '"numerator":[7,7,2,1]',
+        '"numerator":[0,7,2,1]',
+    ),
+    (
+        "W07",
+        "risk declaration site below the family floor",
+        '"start_line":[10,40,10,1]',
+        '"start_line":[0,40,10,1]',
+    ),
+    (
+        "W12",
+        "risk rows out of declaration-key order",
+        '"start_line":[10,40,10,1]',
+        '"start_line":[40,10,10,1]',
+    ),
+    (
+        "W13",
+        "duplicate risk declaration key",
+        '"start_line":[10,40,10,1]',
+        '"start_line":[10,10,10,1]',
+    ),
+    (
+        "W08",
         "unknown violation kind tag",
         '"kind":["owner_bypass","shadow_projection"]',
         '"kind":["banana","shadow_projection"]',

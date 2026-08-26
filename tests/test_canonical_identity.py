@@ -35,6 +35,7 @@ from codeclone.canonical import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    RiskObservationRow,
     SymbolId,
     UnresolvedRoot,
     ViolationRow,
@@ -216,6 +217,14 @@ def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
         lambda: ApiParameterFact("value", "banana", False, None),
         lambda: ApiParameterFact("", "pos_or_kw", False, None),
         lambda: ApiParameterFact("value", "pos_or_kw", False, ""),
+        # F1: the closed dimension vocabulary and both positive floors
+        lambda: RiskObservationRow(SymbolId(FileId("a.py"), "f"), "cbo", 3, 10),
+        lambda: RiskObservationRow(
+            SymbolId(FileId("a.py"), "f"), "cyclomatic_complexity", 0, 10
+        ),
+        lambda: RiskObservationRow(
+            SymbolId(FileId("a.py"), "f"), "cyclomatic_complexity", 3, 0
+        ),
         lambda: ViolationRow(
             contract_id="",
             kind="owner_bypass",

@@ -128,6 +128,7 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    RiskObservationRow,
     RunScalars,
     SemanticEdge,
     SinkRoleRow,
@@ -138,6 +139,7 @@ from codeclone.contracts import (
     AUTHORITY_ANALYSIS_REVISION,
     CANONICAL_MODEL_REVISION,
     CANONICAL_WIRE_REVISION,
+    COMPLEXITY_ALGORITHM_REVISION,
     CONTRACT_IR_VERSION,
     DESIGN_METRICS_ALGORITHM_REVISION,
     MODULE_IDENTITY_VERSION,
@@ -190,6 +192,10 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     "file_module": f"module_identity:{MODULE_IDENTITY_VERSION}",
     "graph_node": f"contract_ir:{CONTRACT_IR_VERSION}",
     "module": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    # F1: the risk lane rides COMPLEXITY_ALGORITHM_REVISION (the Wave D
+    # two-metric split), so a complexity recount never lets these facts
+    # silently share content addresses across generations.
+    "risk_observation": f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
     "run_scalar": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "semantic_edge": f"contract_ir:{CONTRACT_IR_VERSION}",
     "sink_role": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
@@ -518,6 +524,19 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "symbol": _symbol_value(observation.symbol),
             },
         )
+    for risk_observation in sorted(
+        facts.risk_observations,
+        key=lambda row: (canonical_key(row.symbol), row.dimension, row.start_line),
+    ):
+        yield (
+            "risk_observation",
+            {
+                "dimension": risk_observation.dimension,
+                "numerator": risk_observation.numerator,
+                "start_line": risk_observation.start_line,
+                "symbol": _symbol_value(risk_observation.symbol),
+            },
+        )
     for api_symbol in sorted(
         facts.api_symbols,
         key=lambda row: (
@@ -688,6 +707,22 @@ def _decode_coupling_cohesion_row(
     )
 
 
+def _decode_risk_observation_row(
+    row: Mapping[str, object], where: str
+) -> RiskObservationRow:
+    """Shape guards only: the numerator/site floors and the dimension
+    vocabulary have exactly one owner — the model law
+    (``RiskObservationRow``), whose refusal ``_decode_row`` wraps into a
+    typed integrity error.  A second spelling here would be the G2 drift
+    class."""
+    return RiskObservationRow(
+        symbol=_row_symbol(row, "symbol", where),
+        dimension=_require_str(row, "dimension", where),
+        numerator=_require_line(row, "numerator", where),
+        start_line=_require_line(row, "start_line", where),
+    )
+
+
 def _decode_api_parameter_value(value: object, where: str) -> ApiParameterFact:
     if not isinstance(value, list) or len(value) != 4:
         raise StoreIntegrityError(
@@ -778,6 +813,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "file_module": _decode_file_module_row,
     "graph_node": _decode_graph_node_row,
     "module": _decode_module_row,
+    "risk_observation": _decode_risk_observation_row,
     "run_scalar": _decode_run_scalar_row,
     "semantic_edge": _decode_semantic_edge_row,
     "sink_role": _decode_sink_role_row,
@@ -840,6 +876,9 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                     )
                 ),
                 api_symbols=frozenset(cast("list[ApiSymbolRow]", family("api_symbol"))),
+                risk_observations=frozenset(
+                    cast("list[RiskObservationRow]", family("risk_observation"))
+                ),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
             )
         ),
@@ -1139,6 +1178,7 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "dependency_relations": "dependency_relation",
     "file_modules": "file_module",
     "graph_nodes": "graph_node",
+    "risk_observations": "risk_observation",
     "run_scalars": "run_scalar",
     "semantic_edges": "semantic_edge",
     "sink_roles": "sink_role",

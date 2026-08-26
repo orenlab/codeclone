@@ -90,6 +90,12 @@ COUPLING_COHESION_DIMENSIONS: Final = (
     "lcom4",
     "methods",
 )
+# F1 risk_observations (ruling 2026-08-26, fork (b)): the producer's closed
+# dimension set (observations/projection.py `_risk_observations`), mirrored
+# verbatim.  The wire refuses unknowns (W08); meaning is owned by
+# COMPLEXITY_ALGORITHM_REVISION (the Wave D lane split: the risk lane rides
+# the complexity revision, never the shared design-metrics one).
+RISK_DIMENSIONS: Final = ("cyclomatic_complexity", "nesting_depth")
 # F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
 # verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
 # ApiVisibility / ApiParameterKind) and pinned against them by test — a

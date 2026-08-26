@@ -17,8 +17,9 @@ producer's order is a fact and canonizing it away would lose an entity.
 
 Wave family subset: ``file_modules · contracts · graph_nodes · sink_roles
 · candidates · semantic_edges · dependency_relations ·
-dependency_occurrences · violations · coupling_cohesion_observations``
-plus the standalone ``coupled_sets`` value sets.
+dependency_occurrences · violations · coupling_cohesion_observations ·
+api_symbols · risk_observations · run_scalars`` plus the standalone
+``coupled_sets`` value sets.
 
 ``dependency_relations`` / ``dependency_occurrences`` (ratified split,
 ruling 2026-08-24 §2): dependencies are TWO objects.  The **relation**
@@ -66,6 +67,7 @@ from codeclone.canonical.identity import (
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     IMPORT_TYPES,
+    RISK_DIMENSIONS,
     VIOLATION_KINDS,
     AnalysisFile,
     DependencyEndpoint,
@@ -254,6 +256,42 @@ class CouplingCohesionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskObservationRow:
+    """F1 per-declaration risk observation (ruling 2026-08-26, fork (b)).
+
+    Logical key — the RATIFIED form: ``(SYMBOL, dimension, start_line)``,
+    spelling the registry's ``(file, qualname, dimension, start_line)``.
+    The bare site-blind key is blind to 4 measured entity groups (three
+    ``@overload`` triples and one property/setter pair — 9 of 17 561 corpus
+    rows), and every one is *different declarations sharing one name*, so
+    deduplication is indefensible.  ``start_line`` is the producer-native
+    discriminator (the ``complexity.items`` precedent, 12 285/12 285
+    unique) and here it IS identity — the named exception to the
+    dependency rule that location is evidence (ruling §2), admitted by the
+    maintainer's fork (b).  ``numerator`` is payload and strictly positive:
+    the producer drops zero rows, so absence already means zero.  No
+    FUNCTION-role requirement: these symbols name any measured unit.
+    """
+
+    symbol: SymbolId
+    dimension: str
+    numerator: int
+    start_line: int
+
+    def __post_init__(self) -> None:
+        if self.dimension not in RISK_DIMENSIONS:
+            raise CanonicalModelError(f"unknown risk dimension: {self.dimension!r}")
+        if isinstance(self.numerator, bool) or self.numerator < 1:
+            raise CanonicalModelError(
+                f"risk numerator must be a positive int: {self.numerator!r}"
+            )
+        if isinstance(self.start_line, bool) or self.start_line < 1:
+            raise CanonicalModelError(
+                f"risk declaration site must be a positive int: {self.start_line!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class ApiParameterFact:
     """One parameter of an F5 API symbol signature (wave 4).
 
@@ -371,6 +409,7 @@ class AnalysisFacts:
         default_factory=frozenset
     )
     api_symbols: frozenset[ApiSymbolRow] = field(default_factory=frozenset)
+    risk_observations: frozenset[RiskObservationRow] = field(default_factory=frozenset)
     # F9: one record per analysis snapshot; None is the absent record —
     # never an all-zero fake (zero is measured in this family).
     run_scalars: RunScalars | None = None
@@ -569,6 +608,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_symbol(observation.symbol)
     for api_symbol in facts.api_symbols:
         closure.see_symbol(api_symbol.symbol)
+    for risk_observation in facts.risk_observations:
+        closure.see_symbol(risk_observation.symbol)
     closure.files.update(model.analyzed_files)
     return closure
 
@@ -603,6 +644,11 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         lambda row: (canonical_key(row.symbol), row.dimension),
     )
     _unique_by_key(facts.api_symbols, "api_symbols.key", _api_symbol_natural_key)
+    _unique_by_key(
+        facts.risk_observations,
+        "risk_observations.key",
+        lambda row: (canonical_key(row.symbol), row.dimension, row.start_line),
+    )
 
 
 def _prove_occurrence_relations(facts: AnalysisFacts) -> None:

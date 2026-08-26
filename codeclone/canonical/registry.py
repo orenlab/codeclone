@@ -355,6 +355,47 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # F1 (ruling 2026-08-26, fork (b)): key (SYMBOL, dimension, start_line)
+    # — the declaration site IS a key component here, the named exception
+    # to the dependency rule that location is evidence (§2), resolved by
+    # the maintainer's morning ruling.  See RISK_OBSERVATIONS_KEY below.
+    "risk_observations": (
+        FieldDeclaration(
+            "dimension",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "closed vocabulary (RISK_DIMENSIONS); key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "numerator",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "observed positive count; payload, never key (zero rows dropped "
+            "by the producer — absence means zero)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "declaration-site discriminator; key component (the "
+            "complexity.items precedent, 12 285/12 285 unique) — different "
+            "declarations sharing one qualname are different entities",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "SYMBOL key component",
+            stored=True,
+            wire=True,
+        ),
+    ),
     # F9 (wave 4, ratified form): ONE record per analysis snapshot — a
     # run-level analysis fact, not a tabular entity; no invented entity key.
     # The wire member is a record object (see RECORD_WIRE_FAMILIES).
@@ -572,11 +613,13 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
 
 
 # ---------------------------------------------------------------------------
-# Ratified future-family keys (wave-4 form) — declarations, not wire families
+# The ratified F1 key — the fork was RESOLVED by the maintainer (2026-08-26,
+# variant (b)), and the family above is now a real wire family.
 # ---------------------------------------------------------------------------
 
-# F1 ``risk_observations`` — logical key of the FUTURE analysis-fact family,
-# resolved by the 2026-08-24 night preflight trace (ruling 2026-08-24 §1).
+# F1 ``risk_observations`` — logical key of the analysis-fact family,
+# resolved by the 2026-08-24 night preflight trace (ruling 2026-08-24 §1)
+# and ratified by the 2026-08-26 morning ruling (fork (b)).
 #
 # The measured defect: the bare ``(FILE, qualname, dimension)`` key is blind
 # to 4 real entity groups (three ``@overload`` triples and one
@@ -587,16 +630,11 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
 # The ratified discriminator is the declaration-site ``start_line``, by the
 # product's own precedent: ``complexity.items`` already keys
 # ``(path, qualname, start_line)`` and is 12 285/12 285 unique on the frozen
-# corpus.  SOURCE OF THE FACT: ``codeclone.models.Unit`` carries
-# ``start_line`` on the producer's own input; the projection
-# (``observations/projection.py`` → ``IntegerObservation``) is the lossy
-# step that drops it.  Wiring it through is producer work for the wave that
-# introduces the family — the production projector is deliberately not
-# touched by this declaration.
-#
-# FLAG (named fork for the maintainer, morning override): this admits the
-# declaration site into an *identity* — unlike dependency occurrences,
-# where location is evidence and never key (ruling §2).
+# corpus.  The producer now carries the fact end to end: the risk lane's
+# ``RiskObservation`` row keeps ``start_line`` (payload schema "5"), the
+# baseline reader keys with it, and the family declaration above admits it
+# as a KEY component — the named exception to the dependency rule that
+# location is evidence (ruling §2), admitted by fork (b).
 RISK_OBSERVATIONS_FAMILY: Final = "risk_observations"
 RISK_OBSERVATIONS_KEY: Final[tuple[str, ...]] = (
     "file",

@@ -89,8 +89,12 @@ _TARGET = "worktree-a"
 # api_symbol objects under the api_surface_signature namespace.  The F9
 # ``run_scalars`` record replaced the F5 literals (run f4a7c24b..., artifact
 # 2072e742...) deliberately: the fixture gained its one run_scalar object.
-_FIXTURE_RUN_ID = "c3e2d21cf173cf59a959b8b4545c699b630165337c56ad1db2aacf589c856bcc"
-_FIXTURE_ARTIFACT = "642922b38e5249e6eeebc0386610756d5070da282105ef89a3b91102dbc5b695"
+# The F1 ``risk_observations`` family (ruling 2026-08-26, fork (b))
+# replaced the F9 literals (run c3e2d21c..., artifact 642922b3...)
+# deliberately: the fixture gained four declaration-site keyed
+# risk_observation objects under the complexity_metrics namespace.
+_FIXTURE_RUN_ID = "22bd2c6d13510b00a3bc189125052aefc2758d256c8ebd8e2ac7e16e48192bf4"
+_FIXTURE_ARTIFACT = "e8d701a8f1388d7208ce1a2cbeff975a1a6338c0ebba1651df8b5315049fa98c"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

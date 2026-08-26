@@ -73,6 +73,7 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    RiskObservationRow,
     RunScalars,
     SemanticEdge,
     SinkRoleRow,
@@ -457,6 +458,14 @@ def canonical_model_from_legacy_document(
         for row in api_rows
     )
 
+    risk_rows = _sequence(
+        _field(fact_families, "risk_observations", "source_fact_families"),
+        "source_fact_families.risk_observations",
+    )
+    risk_observations = frozenset(
+        _risk_observation(_mapping(row, "risk observation"), index) for row in risk_rows
+    )
+
     run_scalars = _run_scalars(document)
 
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
@@ -481,6 +490,7 @@ def canonical_model_from_legacy_document(
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
+                risk_observations=risk_observations,
                 run_scalars=run_scalars,
             )
         ),
@@ -562,6 +572,18 @@ def _lane_symbol(
     return SymbolId(FileId(path), name)
 
 
+def _lane_int(row: Mapping[str, object], key: str, where: str) -> int:
+    """One integer field of a lane row, refused typed when it is not one.
+
+    Shared by the F2 and F1 observation decoders — the F5 landing measured
+    that duplicating this block across lane oracles mints clone groups.
+    """
+    value = _field(row, key, where)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise LegacyIngestError(f"{where} {key} is not an integer")
+    return value
+
+
 def _coupling_cohesion_observation(
     row: Mapping[str, object], index: _RegistryIndex
 ) -> CouplingCohesionRow:
@@ -570,15 +592,31 @@ def _coupling_cohesion_observation(
     symbol = _lane_symbol(
         row, index, source_key="source", name_key="qualname", lane="coupling_cohesion"
     )
-    numerator = _field(row, "numerator", "coupling_cohesion observation")
-    if isinstance(numerator, bool) or not isinstance(numerator, int):
-        raise LegacyIngestError(
-            "coupling_cohesion observation numerator is not an integer"
-        )
     return CouplingCohesionRow(
         symbol=symbol,
         dimension=_string(row, "dimension", "coupling_cohesion observation"),
-        numerator=numerator,
+        numerator=_lane_int(row, "numerator", "coupling_cohesion observation"),
+    )
+
+
+def _risk_observation(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> RiskObservationRow:
+    """One F1 fact from the producer's own risk lane row.
+
+    The identity law lives in :func:`_lane_symbol`; the declaration site is
+    read as a fact of the row — a lane row without one cannot name its
+    entity and is refused, never defaulted (the site is a key component,
+    ruling 2026-08-26 fork (b)).
+    """
+    symbol = _lane_symbol(
+        row, index, source_key="source", name_key="qualname", lane="risk"
+    )
+    return RiskObservationRow(
+        symbol=symbol,
+        dimension=_string(row, "dimension", "risk observation"),
+        numerator=_lane_int(row, "numerator", "risk observation"),
+        start_line=_lane_int(row, "start_line", "risk observation"),
     )
 
 
