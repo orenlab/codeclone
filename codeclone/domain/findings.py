@@ -24,6 +24,44 @@ FAMILY_DESIGN: Final = "design"
 FAMILY_AUTHORITY: Final = "authority"
 FAMILY_METRICS: Final = "metrics"
 
+#: The finding families a baseline tracks. ``findings.summary.total`` and every
+#: consumer total are computed over exactly these: each one owns baseline-lane
+#: keys, so its members can carry a ``new`` / ``known`` novelty verdict.
+BASELINE_TRACKED_FAMILIES: Final[tuple[str, ...]] = (
+    FAMILY_CLONE,
+    FAMILY_STRUCTURAL,
+    FAMILY_DEAD_CODE,
+    FAMILY_DESIGN,
+    FAMILY_AUTHORITY,
+)
+
+#: The advisory detection tiers. They are siblings of the clone lane, never
+#: members of it: their records reach no baseline lane, so ``gate_relevant`` is
+#: false and ``novelty`` is ``untracked`` — neither ``new`` nor ``known`` is a
+#: claim any baseline could support.
+#:
+#: These names are *not* finding families and never widen a published total.
+#: They key the two containers at ``findings.groups.<tier>`` and are the
+#: vocabulary every consumer surface uses to name the tier it is showing —
+#: MCP's explicit ``family`` values, the HTML tier rows, and the subset
+#: declarations the markdown/text/SARIF projections carry. One owner, because
+#: a name spelled independently in four surfaces is four chances to disagree.
+TIER_NEAR_MISS: Final = "near_miss"
+TIER_RENAMED_STRUCTURE: Final = "renamed_structure"
+ADVISORY_TIER_NAMES: Final[tuple[str, ...]] = (
+    TIER_NEAR_MISS,
+    TIER_RENAMED_STRUCTURE,
+)
+
+#: Where each tier container lists its records. The two tiers differ by
+#: construction — edit distance is not transitive, so near-miss evidence is
+#: pairwise, while digest equality is, so renamed structure is a group — and
+#: the key names that difference rather than flattening it.
+ADVISORY_TIER_RECORD_KEYS: Final[dict[str, str]] = {
+    TIER_NEAR_MISS: "pairs",
+    TIER_RENAMED_STRUCTURE: "groups",
+}
+
 CATEGORY_CLONE: Final = "clone"
 CATEGORY_STRUCTURAL: Final = "structural"
 CATEGORY_COMPLEXITY: Final = "complexity"

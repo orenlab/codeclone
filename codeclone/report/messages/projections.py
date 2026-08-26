@@ -54,6 +54,16 @@ TEXT_SECTION_SECURITY_SURFACES: Final = "SECURITY SURFACES (top 10)"
 TEXT_BASELINE_UNTRUSTED_NOTE: Final = (
     "Note: unavailable baseline lanes produce UNAVAILABLE novelty, never NEW."
 )
+# The FINDINGS SUMMARY block is a subset projection and says so. Its families
+# are the baseline-tracked ones; the advisory detection tiers reach no
+# baseline lane, are counted in no total here, and appear in this artifact
+# nowhere at all. Without this line the block reads as a complete inventory.
+TEXT_FINDINGS_SCOPE_NOTE: Final = (
+    "  Scope: baseline-tracked families only. Advisory detection tiers "
+    "(near_miss, renamed_structure) are not in this artifact and not in the "
+    "total above; read findings.groups.<tier> in report.json, where each "
+    "carries its own execution state."
+)
 TEXT_SECTION_BASELINE_LANE_TRUST: Final = "BASELINE LANE TRUST"
 
 TEXT_OVERVIEW_FAMILIES: Final = "Families:"

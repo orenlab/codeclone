@@ -12,6 +12,7 @@ import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from codeclone.contracts import TIER_STATE_COMPLETE
 from codeclone.utils import coerce as _coerce
 
 from ...messages.clone_health import clone_health_summary_sentence
@@ -78,6 +79,18 @@ from ...messages.overview import (
     KPI_TIP_SUGGESTIONS,
     RADAR_DIMENSIONS,
     RADAR_LABELS,
+    TIER_CLUSTER_DESC,
+    TIER_CLUSTER_TITLE,
+    TIER_COMPLETE_HINT,
+    TIER_COUNT_ABSENT,
+    TIER_DISABLED_HINT,
+    TIER_DISPLAY_ORDER,
+    TIER_LABELS,
+    TIER_ROW_COUNT,
+    TIER_ROW_REVISION,
+    TIER_ROW_STATE,
+    TIER_STATE_LABEL_COMPLETE,
+    TIER_STATE_LABEL_DISABLED,
 )
 from ..primitives.escape import _escape_html
 from ..widgets.badges import (
@@ -642,6 +655,92 @@ def _adoption_and_api_section(ctx: ReportContext) -> str:
     return (
         '<section class="overview-cluster">'
         + overview_cluster_header(ADOPTION_CLUSTER_TITLE, ADOPTION_CLUSTER_DESC)
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + "".join(cards)
+        + "</div></section>"
+    )
+
+
+def _tier_card_html(container: Mapping[str, object]) -> str:
+    """Draw one advisory tier container, restating what it says about itself.
+
+    The container is the authority on its own execution: ``state`` says
+    whether the producer ran, and ``count`` exists only when it did. This
+    function reads both and computes neither -- a ``disabled`` tier is drawn
+    with the absence stated in words, never with a ``0`` standing in for a
+    measurement that was never taken. Drawing the same "0" for both states
+    would reproduce, on the surface a human reads, exactly the confusion the
+    container's execution witness was introduced to remove.
+    """
+
+    state = str(container.get("state", "")).strip()
+    complete = state == TIER_STATE_COMPLETE
+    rows = [
+        _fact_row(
+            TIER_ROW_STATE,
+            TIER_STATE_LABEL_COMPLETE if complete else TIER_STATE_LABEL_DISABLED,
+            value_cls="good" if complete else "muted",
+        )
+    ]
+    # ``count`` is present exactly when the producer ran, and it is READ, never
+    # re-derived from the record list beside it. The two are different facts:
+    # ``count`` is what the producer measured, the list is what this document
+    # carries, and a ceiling or a truncation makes them differ legitimately.
+    # A renderer that counted the list it was handed would report the smaller
+    # number with full confidence on exactly that day.
+    if "count" in container:
+        rows.append(
+            _fact_row(TIER_ROW_COUNT, _format_count(_as_int(container["count"])))
+        )
+    else:
+        rows.append(_fact_row(TIER_ROW_COUNT, TIER_COUNT_ABSENT, value_cls="muted"))
+    revision = str(container.get("algorithm_revision", "")).strip()
+    if revision:
+        rows.append(_fact_row(TIER_ROW_REVISION, revision))
+    hint = TIER_COMPLETE_HINT if complete else TIER_DISABLED_HINT
+    return (
+        '<div class="overview-fact-list">'
+        + "".join(rows)
+        + "</div>"
+        + f'<div class="overview-summary-value">{_escape_html(hint)}</div>'
+    )
+
+
+def _detection_tiers_section(ctx: ReportContext) -> str:
+    """The advisory tier cluster: one card per tier, each stating its state.
+
+    A document that carries no tier container has no state to restate, so
+    nothing is drawn for it. The renderer never manufactures a state for a
+    tier the document is silent about.
+    """
+
+    groups = _as_mapping(_as_mapping(ctx.report_document.get("findings")).get("groups"))
+    cards: list[str] = []
+    for tier in TIER_DISPLAY_ORDER:
+        container = _as_mapping(groups.get(tier))
+        if not container:
+            continue
+        cards.append(
+            '<div class="overview-tier-row" '
+            f'data-tier="{_escape_html(tier)}" '
+            f'data-tier-state="{_escape_html(str(container.get("state", "")))}"'
+            + (
+                f' data-tier-count="{_as_int(container["count"])}"'
+                if "count" in container
+                else ""
+            )
+            + ">"
+            + overview_summary_item_html(
+                label=TIER_LABELS[tier],
+                body_html=_tier_card_html(container),
+            )
+            + "</div>"
+        )
+    if not cards:
+        return ""
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(TIER_CLUSTER_TITLE, TIER_CLUSTER_DESC)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + "".join(cards)
         + "</div></section>"
@@ -1213,6 +1312,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div>"
         + executive
         + _adoption_and_api_section(ctx)
+        + _detection_tiers_section(ctx)
         + _directory_hotspots_section(ctx)
         + _overloaded_modules_section(ctx)
         + _analytics_section(ctx)

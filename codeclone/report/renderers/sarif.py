@@ -21,6 +21,7 @@ from ...contracts import (
     REPOSITORY_URL,
 )
 from ...domain.findings import (
+    ADVISORY_TIER_NAMES,
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
@@ -958,6 +959,14 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
         "properties": {
             "profileVersion": SARIF_PROFILE_VERSION,
             "reportSchemaVersion": _text(payload.get("report_schema_version")),
+            # Unconditional: what this artifact projects is a property of the
+            # artifact, not of the run. A declaration that appeared only when
+            # a tier happened to be populated would be silent in exactly the
+            # run where a reader most needs it -- the one where the tiers are
+            # off and the result set looks complete.
+            "resultScope": sarif_msgs.SARIF_RESULT_SCOPE,
+            "advisoryTiersOmitted": list(ADVISORY_TIER_NAMES),
+            "resultScopeNote": sarif_msgs.SARIF_RESULT_SCOPE_NOTE,
             "analysisMode": analysis_mode,
             "reportMode": _text(meta.get("report_mode")),
             "canonicalDigestSha256": _text(

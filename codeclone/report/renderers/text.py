@@ -966,6 +966,10 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             f"count={len(_as_sequence(file_registry.get('items')))}",
             "",
             proj.TEXT_SECTION_FINDINGS_SUMMARY,
+            # The universe first, then the numbers over it: a total whose
+            # scope is stated after the family breakdown has already been
+            # read as complete by the time the qualification arrives.
+            proj.TEXT_FINDINGS_SCOPE_NOTE,
             proj.TEXT_FINDINGS_TOTAL_GROUPS
             + f"{format_meta_text_value(findings_summary.get('total'))}",
             proj.TEXT_FINDINGS_FAMILIES

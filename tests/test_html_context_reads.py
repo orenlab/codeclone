@@ -119,6 +119,10 @@ _DYNAMIC_KEY_READS: dict[str, tuple[str, ...]] = {
         "block_group_facts",
     ),
     "codeclone/report/html/sections/_overview.py": (
+        # The advisory tier containers, keyed by tier name. The page walks
+        # its own display order and asks the document for each tier in turn,
+        # so the key is a loop variable rather than a literal.
+        "report_document.findings.groups",
         # Directory hotspots, keyed by source-kind bucket.
         "overview_data.directory_hotspots",
     ),

@@ -437,6 +437,10 @@ def _section_ctx(**overrides: object) -> SimpleNamespace:
         "cache_meta": {},
         "metrics_baseline_meta": {},
         "runtime_meta": {},
+        # ``ReportContext`` carries the whole canonical document, and the
+        # overview panel reads the advisory tier containers out of it. A stub
+        # without the field models a context that cannot exist.
+        "report_document": {},
         "integrity_map": {},
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "report_generated_at": "2026-03-22T21:30:45Z",

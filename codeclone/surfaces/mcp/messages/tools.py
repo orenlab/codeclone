@@ -220,7 +220,47 @@ LIST_FINDINGS: Final = (
     "List canonical finding groups with deterministic ordering, optional "
     "filters, pagination, and compact summary cards by default. Prefer "
     "list_hotspots or focused check_* tools for first-pass triage; use "
-    "this when you need a broader filtered list."
+    "this when you need a broader filtered list. "
+    "family='all' is the baseline-tracked universe — clone, structural, "
+    "dead_code, design, authority — and its total counts those five families "
+    "and nothing else. The advisory detection tiers, near_miss and "
+    "renamed_structure, are reachable only by naming them: they are "
+    "containers beside the clone lane whose records reach no baseline lane, "
+    "so they are never gate-relevant, never novelty-classified, and never "
+    "added to a published total. Admitting them into family='all' would be a "
+    "separate contract decision about what a total means, and is not one this "
+    "wave makes. A named tier answers with its own execution state: 'disabled' "
+    "means the producer never ran and carries no count at all, while "
+    "'complete' is a finished measurement whose count may be 0."
+)
+
+#: Notes a named advisory tier carries so its response explains its own
+#: standing instead of leaving a reader to infer it from missing keys.
+TIER_NOTE_DISABLED: Final = (
+    "This tier's producer was never invoked in this run, so it has no "
+    "measurement to report: count, total and items are omitted entirely "
+    "rather than reported as 0. Enable the tier's opt-in and re-analyze to "
+    "obtain one. algorithm_revision here is the configured producer "
+    "revision — which algorithm would run — never evidence that it ran."
+)
+TIER_NOTE_COMPLETE: Final = (
+    "This tier's producer ran to completion over the clone-eligible "
+    "population, so count is a finished measurement; count=0 means it "
+    "measured nothing, never that it did not measure."
+)
+TIER_NOTE_OUTSIDE_TOTAL: Final = (
+    "Advisory tier: outside the baseline-tracked universe that family='all' "
+    "totals. These records reach no baseline lane, carry no novelty verdict, "
+    "and trip no gate. Records are keyed by pair_key (near_miss) or group_key "
+    "(renamed_structure); neither is an addressable finding id, and "
+    "get_finding does not resolve them."
+)
+TIER_STATUS_NO_CONTAINER: Final = "no_tier_container"
+TIER_NOTE_NO_CONTAINER: Final = (
+    "This run's report document carries no container for this tier, so it has "
+    "no execution state to report. Re-analyze with a current CodeClone to "
+    "obtain one; a state reported here would be this tool's guess, not the "
+    "document's fact."
 )
 
 GET_FINDING: Final = (

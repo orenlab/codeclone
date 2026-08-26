@@ -196,3 +196,49 @@ ADOPTION_BREAKING_CHANGES: Final = "Breaking changes"
 ADOPTION_ADDED_SYMBOLS: Final = "Added symbols"
 ADOPTION_STRICT_MODE: Final = "Strict mode"
 ADOPTION_STRICT_MODE_ENABLED: Final = "enabled"
+
+# --- Advisory detection tiers -------------------------------------------
+# The two tiers beside the clone lane. Before this cluster existed the HTML
+# report named them nowhere at all: a reader could not tell whether a tier had
+# run and found nothing or had never run, because the page showed neither.
+#
+# Every string below is a label. The page restates the container's own `state`
+# and `count` and derives nothing: a tier that reports no count is drawn with
+# no count, never with a zero, because a zero here is a measurement and the
+# renderer has none to make.
+TIER_CLUSTER_TITLE: Final = "Advisory detection tiers"
+TIER_CLUSTER_DESC: Final = (
+    "Reported beside the clone lane, never inside it: these records reach no "
+    "baseline lane, carry no novelty verdict, and trip no gate. They are not "
+    "counted in the findings total above."
+)
+# The tier containers this page draws, in the order it draws them. The
+# presentation ring cannot import the domain vocabulary that names them
+# (`codeclone.domain.findings` is r2, this module and the HTML sections are
+# r4, and the boundary ratchet holds that line), so the surface declares its
+# own display list and the agreement is held by the document instead: the page
+# draws exactly the containers `findings.groups` carries that appear here, and
+# `test_tier_surface_declaration` pins that every tier container a canonical
+# document holds is one this list covers.
+TIER_DISPLAY_ORDER: Final[tuple[str, ...]] = ("near_miss", "renamed_structure")
+TIER_LABELS: Final[dict[str, str]] = {
+    "near_miss": "Near-miss pairs",
+    "renamed_structure": "Renamed structure groups",
+}
+TIER_ROW_STATE: Final = "State"
+TIER_ROW_COUNT: Final = "Measured"
+TIER_ROW_REVISION: Final = "Algorithm revision"
+TIER_STATE_LABEL_DISABLED: Final = "disabled — never ran"
+TIER_STATE_LABEL_COMPLETE: Final = "complete — measured"
+# A tier that never ran has no measurement to draw, and a "0" beside it would
+# read as one. The absence is stated in words instead.
+TIER_COUNT_ABSENT: Final = "no measurement in this run"
+TIER_DISABLED_HINT: Final = (
+    "The producer was never invoked, so this tier has no count. The revision "
+    "shown is the algorithm the opt-in would run, not evidence that it ran."
+)
+TIER_COMPLETE_HINT: Final = (
+    "The producer ran to completion, so this count is a finished measurement. "
+    "A count of 0 here means it measured nothing, never that it did not "
+    "measure."
+)

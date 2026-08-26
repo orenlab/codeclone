@@ -378,7 +378,14 @@ LimitParam = Annotated[
 ]
 FindingFamilyParam = Annotated[
     str,
-    Field(description="all, clone, structural, dead_code, design, or authority."),
+    Field(
+        description=(
+            "all, clone, structural, dead_code, design, or authority — the "
+            "baseline-tracked universe 'all' totals. The advisory tiers "
+            "near_miss and renamed_structure are reachable only by naming "
+            "them and are never part of 'all'."
+        )
+    ),
 ]
 CategoryParam = Annotated[str | None, Field(description="Finding category filter.")]
 SeverityParam = Annotated[str | None, Field(description="critical, warning, or info.")]

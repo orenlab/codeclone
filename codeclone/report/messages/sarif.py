@@ -12,6 +12,19 @@ from typing import Final
 
 SARIF_HELP_DOCS_SUFFIX: Final = "See [CodeClone docs]({docs_url})."
 
+# SARIF carries results for the baseline-tracked families only. A SARIF
+# consumer sees rules and results with no way to learn that a whole advisory
+# channel was never projected into them, so the run states its own result
+# scope rather than letting the absence imply a complete scan.
+SARIF_RESULT_SCOPE: Final = "baseline_tracked_families"
+SARIF_RESULT_SCOPE_NOTE: Final = (
+    "Results cover the baseline-tracked finding families only. The advisory "
+    "detection tiers listed in advisoryTiersOmitted are projected into no "
+    "SARIF result and counted in no total here: they reach no baseline lane "
+    "and trip no gate. Read findings.groups.<tier> in report.json, where each "
+    "tier carries its own execution state."
+)
+
 REMEDIATION_CLONE: Final = (
     "Review the representative occurrence and related occurrences, "
     "then extract shared behavior or keep accepted debt in the baseline."

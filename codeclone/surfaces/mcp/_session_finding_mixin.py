@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Protocol
 
+from ...contracts import TIER_STATE_COMPLETE
 from ...utils.mapping_paths import section
 from ...utils.repo_paths import RepoPathError, RepoPathPolicy, resolve_under_repo_root
 from . import _session_helpers as _helpers
@@ -35,6 +36,8 @@ from ._session_shared import (
     _VALID_FINDING_SORT,
     _VALID_HOTLIST_KINDS,
     _VALID_SEVERITIES,
+    ADVISORY_TIER_NAMES,
+    ADVISORY_TIER_RECORD_KEYS,
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
@@ -68,6 +71,7 @@ from ._session_shared import (
     paginate,
     resolve_finding_id,
 )
+from .messages import tools as mcp_tools
 
 _NON_CLONE_FINDING_FAMILIES = (
     FAMILY_STRUCTURAL,
@@ -1329,6 +1333,82 @@ class _MCPSessionFindingMixin:
             )
         return rows
 
+    def _tier_family_payload(
+        self,
+        *,
+        record: MCPRunRecord,
+        tier: str,
+        offset: int,
+        limit: int,
+    ) -> dict[str, object]:
+        """Answer one advisory tier by restating its canonical container.
+
+        The container's own keys are carried through verbatim -- ``state``,
+        ``algorithm_revision``, ``gate_relevant``, ``novelty``, ``count``, and
+        the near-miss ``max_edit_statements``. Nothing is recomputed and
+        nothing is added: in particular a ``disabled`` container utters no
+        ``count``, so neither does this response, and no paging fields appear
+        beside it either. ``total: 0`` on a tier that never ran would restate,
+        on the wire, the exact confusion the container's execution witness was
+        introduced to remove (T1).
+
+        Records keep the key the tier gives them -- ``pair_key`` for near-miss
+        pairs, ``group_key`` for renamed-structure groups. Neither is an
+        addressable finding id and no id is manufactured for them: they reach
+        no baseline lane, so there is nothing for an id to address.
+        """
+
+        records_key = ADVISORY_TIER_RECORD_KEYS[tier]
+        container = _helpers._as_mapping(
+            _helpers._as_mapping(
+                _helpers._as_mapping(record.report_document.get("findings")).get(
+                    "groups"
+                )
+            ).get(tier)
+        )
+        payload: dict[str, object] = {
+            "run_id": _helpers._short_run_id(record.run_id),
+            "family": tier,
+        }
+        if not container:
+            # No container at all: a document from before the tier existed, or
+            # one built by a foreign producer. There is no state to restate,
+            # and inventing one -- in either direction -- would be this
+            # surface issuing a verdict the document declined to state.
+            payload["tier"] = tier
+            payload["status"] = mcp_tools.TIER_STATUS_NO_CONTAINER
+            payload["state_note"] = mcp_tools.TIER_NOTE_NO_CONTAINER
+            payload["universe_note"] = mcp_tools.TIER_NOTE_OUTSIDE_TOTAL
+            return payload
+        payload.update(
+            {key: value for key, value in container.items() if key != records_key}
+        )
+        payload["state_note"] = (
+            mcp_tools.TIER_NOTE_COMPLETE
+            if str(container.get("state", "")) == TIER_STATE_COMPLETE
+            else mcp_tools.TIER_NOTE_DISABLED
+        )
+        payload["universe_note"] = mcp_tools.TIER_NOTE_OUTSIDE_TOTAL
+        if records_key not in container:
+            return payload
+        page = paginate(
+            _helpers._dict_list(container.get(records_key)),
+            offset=offset,
+            limit=limit,
+            max_limit=200,
+        )
+        payload.update(
+            {
+                "offset": page.offset,
+                "limit": page.limit,
+                "returned": len(page.items),
+                "total": page.total,
+                "next_offset": page.next_offset,
+                "items": list(page.items),
+            }
+        )
+        return payload
+
     def list_findings(
         self,
         *,
@@ -1352,6 +1432,20 @@ class _MCPSessionFindingMixin:
             family,
             _VALID_FINDING_FAMILIES,
         )
+        normalized_limit = max(
+            1,
+            min(max_results if max_results is not None else limit, 200),
+        )
+        if validated_family in ADVISORY_TIER_NAMES:
+            # A tier is a container, not a family of finding rows: it has an
+            # execution state, its records carry their own keys, and none of
+            # it reaches the baseline lane the row filters below interrogate.
+            return self._tier_family_payload(
+                record=self._runs.resolve_any_root(run_id),
+                tier=validated_family,
+                offset=offset,
+                limit=normalized_limit,
+            )
         validated_novelty = _helpers._validate_choice(
             "novelty",
             novelty,
@@ -1377,10 +1471,6 @@ class _MCPSessionFindingMixin:
             record=record,
             changed_paths=changed_paths,
             git_diff_ref=git_diff_ref,
-        )
-        normalized_limit = max(
-            1,
-            min(max_results if max_results is not None else limit, 200),
         )
         ordered, max_spread_value, remediation_map, priority_map = (
             self._ordered_finding_rows(

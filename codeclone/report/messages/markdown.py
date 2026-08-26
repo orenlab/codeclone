@@ -30,6 +30,19 @@ MD_REPORT_GENERATED_LABEL: Final = "Report generated (UTC)"
 MD_LABEL_HEALTH: Final = "Health"
 MD_LABEL_TOTAL_FINDINGS: Final = "Total findings"
 MD_LABEL_FAMILIES: Final = "Families"
+# This projection carries the baseline-tracked families only. Stated in the
+# artifact's own words because "Total findings" beside a family list reads as
+# a complete inventory, and the advisory detection tiers -- which reach no
+# baseline lane and are counted in no total -- are absent from it entirely.
+# A reader of the markdown alone had no way to learn that a whole advisory
+# channel existed, let alone whether it had run.
+MD_LABEL_SCOPE: Final = "Findings scope"
+MD_FINDINGS_SUBSET_NOTE: Final = (
+    "baseline-tracked families only. The advisory detection tiers "
+    "(`near_miss`, `renamed_structure`) are not included in this artifact or "
+    "in any total above; read them from `findings.groups.<tier>` in "
+    "`report.json`, where each carries its own execution state."
+)
 MD_LABEL_STRONGEST_DIMENSION: Final = "Strongest dimension"
 MD_LABEL_WEAKEST_DIMENSION: Final = "Weakest dimension"
 MD_LABEL_FILES: Final = "Files"

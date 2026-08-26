@@ -60,6 +60,9 @@ from ...core.parallelism import process
 from ...core.pipeline import analyze
 from ...core.reporting import report
 from ...domain.findings import (
+    ADVISORY_TIER_NAMES,
+    ADVISORY_TIER_RECORD_KEYS,
+    BASELINE_TRACKED_FAMILIES,
     CATEGORY_CLONE,
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -133,6 +136,11 @@ HotlistKind = Literal[
     "production_hotspots",
     "test_fixture_hotspots",
 ]
+#: ``list_findings`` family vocabulary. The first six are the baseline-tracked
+#: universe ``all`` sums; the last two are the advisory detection tiers, which
+#: are reachable only by naming them and are deliberately absent from ``all``
+#: (widening a published total onto records no baseline lane holds would be a
+#: separate contract decision).
 FindingFamilyFilter = Literal[
     "all",
     "clone",
@@ -140,6 +148,8 @@ FindingFamilyFilter = Literal[
     "dead_code",
     "design",
     "authority",
+    "near_miss",
+    "renamed_structure",
 ]
 FindingNoveltyFilter = Literal["all", "new", "known", "unavailable"]
 FindingSort = Literal["default", "priority", "severity", "spread"]
@@ -238,7 +248,11 @@ _CONFIDENCE_WEIGHT: Final[dict[str, float]] = {
 _VALID_ANALYSIS_MODES = frozenset({"full", "clones_only"})
 _VALID_CACHE_POLICIES = frozenset({"reuse", "off"})
 _VALID_FINDING_FAMILIES = frozenset(
-    {"all", "clone", "structural", "dead_code", "design", "authority"}
+    {
+        "all",
+        *BASELINE_TRACKED_FAMILIES,
+        *ADVISORY_TIER_NAMES,
+    }
 )
 _VALID_FINDING_NOVELTY = frozenset({"all", "new", "known", "unavailable"})
 _VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
@@ -984,6 +998,9 @@ class CodeCloneMCPRunStore:
 
 
 __all__ = [
+    "ADVISORY_TIER_NAMES",
+    "ADVISORY_TIER_RECORD_KEYS",
+    "BASELINE_TRACKED_FAMILIES",
     "CATEGORY_CLONE",
     "CATEGORY_COHESION",
     "CATEGORY_COMPLEXITY",

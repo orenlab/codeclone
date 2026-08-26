@@ -368,6 +368,10 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                     )
                 ),
             ),
+            # Stated beside the total it qualifies, not in a footnote: a
+            # reader who stops after "Total findings" must already have been
+            # told what that total is a total of.
+            (md_msgs.MD_LABEL_SCOPE, md_msgs.MD_FINDINGS_SUBSET_NOTE),
             (
                 md_msgs.MD_LABEL_STRONGEST_DIMENSION,
                 health_snapshot.get("strongest_dimension"),
