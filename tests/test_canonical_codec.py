@@ -82,8 +82,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W02",
         "column order",
-        '"file":[0,0,1,2,2],"qualname":["A.run","A.stop","run","helper","zz"]',
-        '"qualname":["A.run","A.stop","run","helper","zz"],"file":[0,0,1,2,2]',
+        '"file":[0,0,1,2,2,2],"qualname":["A.run","A.stop","run","clone_only","helper","zz"]',
+        '"qualname":["A.run","A.stop","run","clone_only","helper","zz"],"file":[0,0,1,2,2,2]',
     ),
     (
         "W02",
@@ -98,18 +98,18 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '{"name":"codeclone-canonical","name":"codeclone-canonical","wire":"0"}',
     ),
     ("W05", "lone surrogate escape", '"zz"', '"z\\ud800z"'),
-    ("W06", "NaN literal", '"file":[0,0,1,2,2]', '"file":[NaN,0,1,2,2]'),
+    ("W06", "NaN literal", '"file":[0,0,1,2,2,2]', '"file":[NaN,0,1,2,2,2]'),
     (
         "W07",
         "fraction in an integer slot",
-        '"file":[0,0,1,2,2]',
-        '"file":[0.5,0,1,2,2]',
+        '"file":[0,0,1,2,2,2]',
+        '"file":[0.5,0,1,2,2,2]',
     ),
     (
         "W07",
         "integer above 2**31-1",
-        '"file":[0,0,1,2,2]',
-        '"file":[2147483648,0,1,2,2]',
+        '"file":[0,0,1,2,2,2]',
+        '"file":[2147483648,0,1,2,2,2]',
     ),
     (
         "W08",
@@ -124,7 +124,7 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"2":["module",0]',
         '"2":["symbol",0]',
     ),
-    ("W10", "ordinal beyond its table", '"file":[0,0,1,2,2]', '"file":[0,0,1,2,9]'),
+    ("W10", "ordinal beyond its table", '"file":[0,0,1,2,2,2]', '"file":[0,0,1,2,2,9]'),
     (
         "W08",
         "unknown occurrence dependency_type tag",
@@ -239,6 +239,72 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     ),
     (
         "W08",
+        "unknown clone kind tag",
+        '"clone_groups":{"clone_kind":["block"',
+        '"clone_groups":{"clone_kind":["banana"',
+    ),
+    (
+        "W13",
+        "duplicate clone group key",
+        '"clone_kind":["block","function","segment"]',
+        '"clone_kind":["block","function","function"]',
+    ),
+    (
+        "W12",
+        "clone groups out of kind-key order",
+        '"clone_kind":["block","function","segment"]',
+        '"clone_kind":["block","segment","function"]',
+    ),
+    (
+        "W18",
+        "empty clone group key",
+        '"group_key":["bb22|bb22|bb22|bb22","aa11|0-19","aa11|0-19"]',
+        '"group_key":["","aa11|0-19","aa11|0-19"]',
+    ),
+    (
+        "W18",
+        "clone group with fewer than two items",
+        "[[0,4,16],[2,19,31]]",
+        "[[0,4,16]]",
+    ),
+    (
+        "W13",
+        "duplicate clone item cell",
+        "[[0,4,16],[2,19,31]]",
+        "[[0,4,16],[0,4,16]]",
+    ),
+    (
+        "W12",
+        "clone item cells out of order",
+        "[[0,4,16],[2,19,31]]",
+        "[[2,19,31],[0,4,16]]",
+    ),
+    (
+        "W07",
+        "clone item start below the span floor",
+        "[[0,4,16],[2,19,31]]",
+        "[[0,0,16],[2,19,31]]",
+    ),
+    (
+        "W18",
+        "clone item end precedes its start",
+        "[[0,4,16],[2,19,31]]",
+        "[[0,4,3],[2,19,31]]",
+    ),
+    (
+        "W18",
+        "clone item cell of a wrong arity",
+        "[[0,4,16],[2,19,31]]",
+        "[[0,4],[2,19,31]]",
+    ),
+    (
+        "W10",
+        "clone item symbol ordinal beyond the table",
+        "[[0,4,16],[2,19,31]]",
+        "[[0,4,16],[9,19,31]]",
+    ),
+    (
+        "W08",
         "unknown coupling dimension tag",
         '"dimension":["cbo","lcom4"',
         '"dimension":["banana","lcom4"',
@@ -301,7 +367,7 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         "W16",
         "violation sink without the FUNCTION role",
         '"sink_identity":[0,0]',
-        '"sink_identity":[4,0]',
+        '"sink_identity":[3,0]',
     ),
     (
         "W18",
@@ -330,22 +396,22 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W13",
         "parallel semantic edge (simple-graph pin)",
-        '"source":[0,1,3],"target":[3,4,1]',
-        '"source":[0,1,1],"target":[3,4,4]',
+        '"source":[0,1,4],"target":[4,5,1]',
+        '"source":[0,1,1],"target":[4,5,5]',
     ),
     ("W14", "set elements unsorted", "[4,5]", "[5,4]"),
     ("W14", "set element repeated", "[4,5]", "[4,4]"),
     (
         "W15",
         "diverging column lengths",
-        '"qualname":["A.run","A.stop","run","helper","zz"]',
-        '"qualname":["A.run","A.stop","run","helper"]',
+        '"qualname":["A.run","A.stop","run","clone_only","helper","zz"]',
+        '"qualname":["A.run","A.stop","run","clone_only","helper"]',
     ),
     (
         "W16",
         "producer without the FUNCTION role",
-        '"producer_sets":[[0,1],[0,3]]',
         '"producer_sets":[[0,1],[0,4]]',
+        '"producer_sets":[[0,1],[0,3]]',
     ),
     ("W17", "absolute FILE path", '"path":["pkg/a.py",', '"path":["/pkg/a.py",'),
     (
@@ -431,8 +497,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W12",
         "api symbol rows out of key order",
-        '"symbol":[0,1,2,3,3],"symbol_kind"',
-        '"symbol":[0,1,2,3,2],"symbol_kind"',
+        '"symbol":[0,1,2,4,4],"symbol_kind"',
+        '"symbol":[0,1,2,4,2],"symbol_kind"',
     ),
     (
         "W18",
@@ -613,8 +679,8 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "string in an integer column",
-        '"function":[0,1,2,3]',
-        '"function":["0",1,2,3]',
+        '"function":[0,1,2,4]',
+        '"function":["0",1,2,4]',
     ),
     (
         "W18",

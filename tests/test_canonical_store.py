@@ -453,6 +453,28 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'{"kind":"import_cycle","modules":["pkg.a"]}',
             "at least two",
         ),
+        # F8 shape guard: an item that is not a [path, qualname, start, end]
+        # quad is refused by the store
+        (
+            "clone_group",
+            b'{"clone_kind":"function","group_key":"k1",'
+            b'"items":[["pkg/a.py","A.run",1]]}',
+            "clone item is not a",
+        ),
+        # F8 model law through the store wrapper: unknown clone kind
+        (
+            "clone_group",
+            b'{"clone_kind":"banana","group_key":"k1",'
+            b'"items":[["pkg/a.py","A.run",1,5],["pkg/a.py","A.run",9,13]]}',
+            "clone kind",
+        ),
+        # F8 model law through the store wrapper: the two-item floor
+        (
+            "clone_group",
+            b'{"clone_kind":"function","group_key":"k1",'
+            b'"items":[["pkg/a.py","A.run",1,5]]}',
+            "at least two",
+        ),
         # F9 shape guard: a non-int scalar is refused by the store
         (
             "run_scalar",
@@ -487,6 +509,9 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "cycle-non-string-module-shape-guard",
         "cycle-unknown-kind-model-law",
         "cycle-single-module-model-law",
+        "clone-item-not-a-quad-shape-guard",
+        "clone-unknown-kind-model-law",
+        "clone-single-item-model-law",
         "run-scalar-non-int-shape-guard",
         "run-scalar-negative-model-law",
     ],
@@ -720,6 +745,7 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
             model.facts.analysis.dependency_occurrences
         )
         assert counts["dependency_cycle"] == len(model.facts.analysis.dependency_cycles)
+        assert counts["clone_group"] == len(model.facts.analysis.clone_groups)
         assert counts["violation"] == len(model.facts.analysis.violations)
         assert counts["coupling_cohesion_observation"] == len(
             model.facts.analysis.coupling_cohesion_observations

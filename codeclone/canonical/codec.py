@@ -73,6 +73,7 @@ from codeclone.canonical.identity import (
     API_PARAMETER_KINDS,
     API_SYMBOL_KINDS,
     API_VISIBILITIES,
+    CLONE_KINDS,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     DEPENDENCY_CYCLE_KINDS,
@@ -112,6 +113,8 @@ from codeclone.canonical.model import (
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
+    CloneGroupRow,
+    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DependencyCycleRow,
@@ -306,6 +309,8 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
         referenced.add(violation.sink_identity)
         referenced.add(violation.canonical_owner)
         referenced.update(violation.producer_set)
+    for group in facts.clone_groups:
+        referenced.update(item.symbol for item in group.items)
     referenced.update(row.symbol for row in facts.coupling_cohesion_observations)
     referenced.update(row.symbol for row in facts.api_symbols)
     referenced.update(row.symbol for row in facts.risk_observations)
@@ -561,6 +566,29 @@ def _dependency_occurrence_rows(
     ]
 
 
+def _clone_group_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
+    # Row order is the (clone_kind, group_key) byte key; every item cell is
+    # [symbol ordinal, start, end], sorted — two levels, neither of which
+    # may leak set iteration order.
+    return [
+        {
+            "clone_kind": row.clone_kind,
+            "group_key": row.group_key,
+            "items": sorted(
+                [plan.symbol_ordinal[item.symbol], item.start_line, item.end_line]
+                for item in row.items
+            ),
+        }
+        for row in sorted(
+            facts.clone_groups,
+            key=lambda row: (
+                row.clone_kind.encode("utf-8"),
+                row.group_key.encode("utf-8"),
+            ),
+        )
+    ]
+
+
 def _dependency_cycle_rows(
     facts: AnalysisFacts, plan: WirePlan
 ) -> list[dict[str, object]]:
@@ -784,6 +812,7 @@ _FAMILY_ROW_BUILDERS: dict[
 ] = {
     "api_symbols": _api_symbol_rows,
     "candidates": _candidate_rows,
+    "clone_groups": _clone_group_rows,
     "contracts": _contract_rows,
     "coupling_cohesion_observations": _coupling_cohesion_rows,
     "dependency_cycles": _dependency_cycle_rows,
@@ -1767,6 +1796,62 @@ def _decode_dependency_occurrences(
     return frozenset(rows)
 
 
+def _decode_clone_item(
+    value: object, symbols: Sequence[SymbolId], where: str
+) -> tuple[tuple[int, int, int], CloneItemRow]:
+    cell = _expect_list(value, where)
+    if len(cell) != 3:
+        raise _refuse("W18", f"{where} is not a [symbol, start, end] cell")
+    ordinal = _expect_ordinal(cell[0], len(symbols), where)
+    start_line = _expect_wire_int(cell[1], f"{where}.start")
+    if start_line < 1:
+        raise _refuse(
+            "W07",
+            f"{where}.start is {start_line}, outside the span domain [1, 2**31-1]",
+        )
+    end_line = _expect_wire_int(cell[2], f"{where}.end")
+    if end_line < start_line:
+        raise _refuse("W18", f"{where}.end precedes its start")
+    return (ordinal, start_line, end_line), CloneItemRow(
+        symbols[ordinal], start_line, end_line
+    )
+
+
+def _decode_clone_groups(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[CloneGroupRow]:
+    columns, _flags, row_count = _decode_columns("clone_groups", facts["clone_groups"])
+    rows = []
+    keys = []
+    for index in range(row_count):
+        kind = _expect_string(
+            columns["clone_kind"][index], f"facts.clone_groups.clone_kind[{index}]"
+        )
+        if kind not in CLONE_KINDS:
+            raise _refuse("W08", f"unknown clone kind tag {kind!r}")
+        group_key = _expect_string(
+            columns["group_key"][index], f"facts.clone_groups.group_key[{index}]"
+        )
+        if not group_key:
+            raise _refuse("W18", f"facts.clone_groups.group_key[{index}] is empty")
+        where = f"facts.clone_groups.items[{index}]"
+        cells = _expect_list(columns["items"][index], where)
+        if len(cells) < 2:
+            raise _refuse(
+                "W18",
+                f"{where} names fewer than two members (a group of one is "
+                "not a grouping the producer makes)",
+            )
+        decoded = [_decode_clone_item(cell, symbols, where) for cell in cells]
+        _expect_strictly_increasing([key for key, _item in decoded], where)
+        rows.append(
+            CloneGroupRow(kind, group_key, frozenset(item for _key, item in decoded))
+        )
+        keys.append((kind.encode("utf-8"), group_key.encode("utf-8")))
+    _expect_strictly_increasing(keys, "facts.clone_groups")
+    return frozenset(rows)
+
+
 def _decode_dependency_cycles(
     facts: Mapping[str, object], modules: Sequence[ModuleId]
 ) -> frozenset[DependencyCycleRow]:
@@ -2218,6 +2303,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
         facts_section, files, modules, relation_keys
     )
     dependency_cycles = _decode_dependency_cycles(facts_section, modules)
+    clone_groups = _decode_clone_groups(facts_section, symbols)
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
     risk_observations = _decode_risk_observations(facts_section, symbols)
@@ -2246,6 +2332,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 dependency_relations=dependency_relations,
                 dependency_occurrences=dependency_occurrences,
                 dependency_cycles=dependency_cycles,
+                clone_groups=clone_groups,
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,

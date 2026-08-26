@@ -122,6 +122,8 @@ from codeclone.canonical.model import (
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
+    CloneGroupRow,
+    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DependencyCycleRow,
@@ -138,6 +140,7 @@ from codeclone.canonical.model import (
 from codeclone.contracts import (
     API_SURFACE_SIGNATURE_VERSION,
     AUTHORITY_ANALYSIS_REVISION,
+    BASELINE_FINGERPRINT_VERSION,
     CANONICAL_MODEL_REVISION,
     CANONICAL_WIRE_REVISION,
     COMPLEXITY_ALGORITHM_REVISION,
@@ -179,6 +182,10 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     # content addresses across generations.
     "api_symbol": f"api_surface_signature:{API_SURFACE_SIGNATURE_VERSION}",
     "candidate": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+    # F8: group_key meaning is owned by the clone fingerprint generation —
+    # a fingerprint-generation bump never lets these facts silently share
+    # content addresses across generations.
+    "clone_group": f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}",
     "contract": f"contract_ir:{CONTRACT_IR_VERSION}",
     "coupled_set": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     # F2: the Wave D lane split put coupling/cohesion meaning on the design
@@ -511,6 +518,20 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "modules": sorted(module.module for module in cycle.modules),
             },
         )
+    for group in sorted(
+        facts.clone_groups, key=lambda row: (row.clone_kind, row.group_key)
+    ):
+        yield (
+            "clone_group",
+            {
+                "clone_kind": group.clone_kind,
+                "group_key": group.group_key,
+                "items": sorted(
+                    [*_symbol_value(item.symbol), item.start_line, item.end_line]
+                    for item in group.items
+                ),
+            },
+        )
     for violation in sorted(
         facts.violations,
         key=lambda row: (
@@ -716,6 +737,38 @@ def _decode_dependency_occurrence_row(
     )
 
 
+def _decode_clone_item_value(value: object, where: str) -> CloneItemRow:
+    if not isinstance(value, list) or len(value) != 4:
+        raise StoreIntegrityError(
+            f"{where}: stored clone item is not a [path, qualname, start, end] row"
+        )
+    path, qualname, start_line, end_line = value
+    if not isinstance(path, str) or not isinstance(qualname, str):
+        raise StoreIntegrityError(f"{where}: stored clone item names are not strings")
+    if (
+        isinstance(start_line, bool)
+        or not isinstance(start_line, int)
+        or isinstance(end_line, bool)
+        or not isinstance(end_line, int)
+    ):
+        raise StoreIntegrityError(f"{where}: stored clone item span is not an int")
+    return CloneItemRow(SymbolId(FileId(path), qualname), start_line, end_line)
+
+
+def _decode_clone_group_row(row: Mapping[str, object], where: str) -> CloneGroupRow:
+    """Shape guards only: the kind vocabulary, key floor, and two-item
+    floor have exactly one owner — the model law (``CloneGroupRow``),
+    whose refusal ``_decode_row`` wraps into a typed integrity error."""
+    items = _require_field(row, "items", where)
+    if not isinstance(items, list):
+        raise StoreIntegrityError(f"{where}: stored field 'items' is not an array")
+    return CloneGroupRow(
+        clone_kind=_require_str(row, "clone_kind", where),
+        group_key=_require_str(row, "group_key", where),
+        items=frozenset(_decode_clone_item_value(item, where) for item in items),
+    )
+
+
 def _decode_dependency_cycle_row(
     row: Mapping[str, object], where: str
 ) -> DependencyCycleRow:
@@ -841,6 +894,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "analyzed_file": _decode_file_row,
     "api_symbol": _decode_api_symbol_row,
     "candidate": _decode_candidate_row,
+    "clone_group": _decode_clone_group_row,
     "contract": _decode_contract_row,
     "coupled_set": _decode_coupled_row,
     "coupling_cohesion_observation": _decode_coupling_cohesion_row,
@@ -908,6 +962,9 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 ),
                 dependency_cycles=frozenset(
                     cast("list[DependencyCycleRow]", family("dependency_cycle"))
+                ),
+                clone_groups=frozenset(
+                    cast("list[CloneGroupRow]", family("clone_group"))
                 ),
                 violations=frozenset(cast("list[ViolationRow]", family("violation"))),
                 coupling_cohesion_observations=frozenset(
@@ -1213,6 +1270,7 @@ _IDENTITY_FAMILIES: Final = frozenset(
 _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "api_symbols": "api_symbol",
     "candidates": "candidate",
+    "clone_groups": "clone_group",
     "contracts": "contract",
     "coupling_cohesion_observations": "coupling_cohesion_observation",
     "dependency_cycles": "dependency_cycle",

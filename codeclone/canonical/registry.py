@@ -160,6 +160,39 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=False,
         ),
     ),
+    # F8 (wave 4): the emitted clone population only — suppressed is a
+    # different population (ruling 2026-08-24 §10) and has no columns here.
+    "clone_groups": (
+        FieldDeclaration(
+            "clone_kind",
+            ANALYSIS_FACT,
+            "clone_detection_producer",
+            "closed vocabulary (CLONE_KINDS); key component — one producer "
+            "key string may exist under two kinds",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "group_key",
+            ANALYSIS_FACT,
+            "clone_detection_producer",
+            "the producer's fp-v2 grouping key; key component — meaning "
+            "owned by the clone fingerprint generation "
+            "(BASELINE_FINGERPRINT_VERSION)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "items",
+            ANALYSIS_FACT,
+            "clone_detection_producer",
+            "member identities (unit and span); group arity and item "
+            "identity are different measurements — per-kind item metrics "
+            "stay with the legacy document",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "contracts": (
         FieldDeclaration(
             "effect_signature",

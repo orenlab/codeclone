@@ -104,6 +104,15 @@ RISK_DIMENSIONS: Final = ("cyclomatic_complexity", "nesting_depth")
 # (``metrics/dependencies.runtime_cycle_facts``); the family stores the
 # verdict as an analysis FACT and never re-derives it on read.
 DEPENDENCY_CYCLE_KINDS: Final = ("import_cycle", "deferred_cycle")
+# F8 clone_groups (wave 4): the emitted clone-kind vocabulary, mirrored
+# verbatim from the contract constants (CLONE_KIND_FUNCTION / _BLOCK /
+# _SEGMENT) and pinned against them by test.  The wire refuses unknowns
+# (W08); the producer group_key's meaning is owned by the clone fingerprint
+# generation (BASELINE_FINGERPRINT_VERSION).  This family carries the
+# EMITTED population only: the suppressed container is a DIFFERENT
+# population (ruling 2026-08-24 §10 — the known dialect root) and never
+# enters it.
+CLONE_KINDS: Final = ("function", "block", "segment")
 # F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
 # verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
 # ApiVisibility / ApiParameterKind) and pinned against them by test — a

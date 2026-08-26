@@ -67,6 +67,8 @@ from codeclone.canonical.model import (
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
+    CloneGroupRow,
+    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DependencyCycleRow,
@@ -413,6 +415,8 @@ def canonical_model_from_legacy_document(
         for row in cycle_rows
     )
 
+    clone_groups = _clone_group_family(document, index)
+
     coupling_rows = _sequence(
         _field(
             _mapping(
@@ -494,6 +498,7 @@ def canonical_model_from_legacy_document(
                 dependency_relations=dependency_relations,
                 dependency_occurrences=dependency_occurrences,
                 dependency_cycles=dependency_cycles,
+                clone_groups=clone_groups,
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
@@ -581,6 +586,79 @@ def _dependency_cycle(
     return DependencyCycleRow(
         kind=_string(row, "kind", "cycle_details row"),
         modules=frozenset(ModuleId(module) for module in modules),
+    )
+
+
+# The emitted clone buckets, in the container's own order.  ``suppressed``
+# is DELIBERATELY absent: it is a different population (ruling 2026-08-24
+# §10 — the known dialect root), and this oracle never reads it.
+_CLONE_CONTAINERS: tuple[tuple[str, str], ...] = (
+    ("functions", "function"),
+    ("blocks", "block"),
+    ("segments", "segment"),
+)
+
+
+def _clone_item(
+    row: Mapping[str, object], index: _RegistryIndex, where: str
+) -> CloneItemRow:
+    symbol = _symbol(_string(row, "qualname", where), index, where)
+    declared_path = _string(row, "relative_path", where)
+    if symbol.file.path != declared_path:
+        raise LegacyIngestError(
+            f"{where}: relative_path {declared_path!r} disagrees with the "
+            f"item's own resolved identity {symbol.file.path!r}"
+        )
+    return CloneItemRow(
+        symbol=symbol,
+        start_line=_lane_int(row, "start_line", where),
+        end_line=_lane_int(row, "end_line", where),
+    )
+
+
+def _clone_group(
+    row: Mapping[str, object], index: _RegistryIndex, kind: str
+) -> CloneGroupRow:
+    where = f"{kind} clone group"
+    declared_kind = _string(row, "clone_kind", where)
+    if declared_kind != kind:
+        raise LegacyIngestError(
+            f"{where}: clone_kind {declared_kind!r} disagrees with its container"
+        )
+    facts_value = _mapping(_field(row, "facts", where), f"{where}.facts")
+    item_rows = [
+        _clone_item(_mapping(item, f"{where} item"), index, f"{where} item")
+        for item in _sequence(_field(row, "items", where), f"{where}.items")
+    ]
+    items = frozenset(item_rows)
+    if len(items) != len(item_rows):
+        raise LegacyIngestError(
+            f"{where}: two items share one identity; a set would absorb "
+            "the arity defect silently"
+        )
+    return CloneGroupRow(
+        clone_kind=kind,
+        group_key=_string(facts_value, "group_key", f"{where}.facts"),
+        items=items,
+    )
+
+
+def _clone_group_family(
+    document: Mapping[str, object], index: _RegistryIndex
+) -> frozenset[CloneGroupRow]:
+    """The F8 family from the document's EMITTED clone containers only."""
+    findings = _mapping(_field(document, "findings", "document"), "findings")
+    groups = _mapping(_field(findings, "groups", "findings"), "findings.groups")
+    clones = _mapping(
+        _field(groups, "clones", "findings.groups"), "findings.groups.clones"
+    )
+    return frozenset(
+        _clone_group(_mapping(row, f"{kind} clone group"), index, kind)
+        for container_key, kind in _CLONE_CONTAINERS
+        for row in _sequence(
+            _field(clones, container_key, "findings.groups.clones"),
+            f"clones.{container_key}",
+        )
     )
 
 

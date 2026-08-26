@@ -34,6 +34,8 @@ from codeclone.canonical import (
     CanonicalFacts,
     CanonicalModel,
     CanonicalModelError,
+    CloneGroupRow,
+    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DependencyCycleRow,
@@ -80,6 +82,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
     sc = SymbolId(fa, "A.stop")
     sd = SymbolId(fb, "zz")  # referenced by an edge only: no FUNCTION role
     se = SymbolId(fc, "run")
+    sy = SymbolId(fb, "clone_only")  # referenced only by a clone item
     roots_a: frozenset[EffectRoot] = frozenset({UnresolvedRoot(), ProducerRoot(sa)})
     roots_b: frozenset[EffectRoot] = frozenset(
         {
@@ -147,6 +150,36 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
     dependency_cycles = [
         DependencyCycleRow("import_cycle", frozenset({ma, mh})),
         DependencyCycleRow("deferred_cycle", frozenset({ma, mh, mz})),
+    ]
+    # F8 (wave 4): the EMITTED population only.  The block group's three
+    # items include an intra-function pair (one SYMBOL, two spans) — group
+    # arity and item identity are different measurements; the segment group
+    # shares its producer key STRING with the function group, so the kind
+    # is proven to be a key component, not a display label.
+    clone_groups = [
+        CloneGroupRow(
+            "function",
+            "aa11|0-19",
+            frozenset({CloneItemRow(sa, 4, 16), CloneItemRow(se, 19, 31)}),
+        ),
+        CloneGroupRow(
+            "block",
+            "bb22|bb22|bb22|bb22",
+            frozenset(
+                {
+                    CloneItemRow(sb, 13, 48),
+                    CloneItemRow(sb, 53, 67),  # intra-function pair
+                    CloneItemRow(sc, 9, 41),
+                }
+            ),
+        ),
+        CloneGroupRow(
+            "segment",
+            "aa11|0-19",  # same producer key string as the function group
+            # sy is referenced by NO other family: the closure must admit
+            # a clone-only symbol into the SYMBOL domain on its own.
+            frozenset({CloneItemRow(sa, 5, 9), CloneItemRow(sy, 7, 11)}),
+        ),
     ]
     violations = [
         ViolationRow(
@@ -262,6 +295,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         dependency_relations = list(reversed(dependency_relations))
         dependency_occurrences = list(reversed(dependency_occurrences))
         dependency_cycles = list(reversed(dependency_cycles))
+        clone_groups = list(reversed(clone_groups))
         violations = list(reversed(violations))
         coupling_cohesion = list(reversed(coupling_cohesion))
         api_symbols = list(reversed(api_symbols))
@@ -279,6 +313,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             dependency_relations=frozenset(dependency_relations),
             dependency_occurrences=frozenset(dependency_occurrences),
             dependency_cycles=frozenset(dependency_cycles),
+            clone_groups=frozenset(clone_groups),
             violations=frozenset(violations),
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
@@ -318,15 +353,17 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     replaced the F9 literal deliberately: the draft gained the
     declaration-site keyed risk family (4290 bytes, sha256 873a0a42…).
     The F7 ``dependency_cycles`` family (slice 4, K1) then replaced the F1
-    literal deliberately: the draft gained the module-set keyed cycle
-    family, so every document's bytes moved — the one announced transition
-    of this commit.
+    literal deliberately (4388 bytes, sha256 bdd06ad1…): the draft gained
+    the module-set keyed cycle family.  The F8 ``clone_groups`` family
+    (slice 4, K2) then replaced the K1 literal deliberately: the draft
+    gained the emitted clone-group family, so every document's bytes moved
+    — the one announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 4388
+    assert len(payload) == 4605
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "bdd06ad1bb85c94ffdb432b822d61240e6e96383be1d7be78db6db799168f30d"
+        == "db810d3d2663897c0464798c9909014a1ceb3292bd69ee747eb963755d036c3b"
     )
 
 
@@ -367,6 +404,7 @@ def test_entity_counts_survive_the_round_trip() -> None:
         "dependency_relations",
         "dependency_occurrences",
         "dependency_cycles",
+        "clone_groups",
         "violations",
         "coupling_cohesion_observations",
         "api_symbols",
@@ -1042,6 +1080,135 @@ def test_cycle_family_survives_the_round_trip() -> None:
     )
     # the closure-only module (no other family references it) survived
     assert mz in decoded.modules
+
+
+def _clone_items(*spans: tuple[int, int]) -> frozenset[CloneItemRow]:
+    sa = SymbolId(FileId("pkg/a.py"), "A.run")
+    return frozenset(CloneItemRow(sa, start, end) for start, end in spans)
+
+
+def test_model_refuses_two_clone_groups_under_one_key() -> None:
+    """F8 key law: (clone_kind, producer group_key) names at most one
+    group; two groups sharing the key with different members are a
+    producer defect, refused loudly."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            clone_groups=frozenset(
+                {
+                    CloneGroupRow("function", "k1", _clone_items((1, 5), (9, 13))),
+                    CloneGroupRow("function", "k1", _clone_items((1, 5), (20, 24))),
+                }
+            )
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"clone_groups\.key"):
+        model.normalize()
+
+
+def test_clone_groups_sharing_a_key_string_across_kinds_coexist() -> None:
+    """The kind is a KEY component: one producer key string under two clone
+    kinds is two entities, never a collision."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            clone_groups=frozenset(
+                {
+                    CloneGroupRow("function", "k1", _clone_items((1, 5), (9, 13))),
+                    CloneGroupRow("segment", "k1", _clone_items((1, 5), (9, 13))),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.clone_groups) == 2
+
+
+def test_clone_group_refuses_an_unknown_kind() -> None:
+    with pytest.raises(CanonicalModelError, match="clone kind"):
+        CloneGroupRow("banana", "k1", _clone_items((1, 5), (9, 13)))
+
+
+def test_clone_group_refuses_an_empty_group_key() -> None:
+    with pytest.raises(CanonicalModelError, match="group key"):
+        CloneGroupRow("function", "", _clone_items((1, 5), (9, 13)))
+
+
+def test_clone_group_refuses_fewer_than_two_items() -> None:
+    """A group of one is not a group: every producer tier emits groups of
+    at least two occurrences — a single-item row asserts a grouping the
+    detector never made."""
+    with pytest.raises(CanonicalModelError, match="at least two"):
+        CloneGroupRow("function", "k1", _clone_items((1, 5)))
+
+
+def test_clone_item_refuses_degenerate_spans() -> None:
+    sa = SymbolId(FileId("pkg/a.py"), "A.run")
+    with pytest.raises(CanonicalModelError, match="start line"):
+        CloneItemRow(sa, 0, 5)
+    with pytest.raises(CanonicalModelError, match="end line"):
+        CloneItemRow(sa, 5, 4)
+
+
+def test_intra_function_pair_is_two_items_not_one() -> None:
+    """The corpus-pinned measurement: group arity and item identity are
+    different dimensions — one SYMBOL with two spans is two members."""
+    decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
+    block = next(
+        row for row in decoded.facts.analysis.clone_groups if row.clone_kind == "block"
+    )
+    assert len(block.items) == 3
+    assert len({item.symbol for item in block.items}) == 2
+
+
+def test_clone_groups_are_ordered_by_kind_then_key_on_the_wire() -> None:
+    """Row order is the (clone_kind, group_key) byte key, and every item
+    cell is sorted by (symbol ordinal, start, end) — an encoder that leaks
+    set iteration order into either level reds here."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    table = document["facts"]["clone_groups"]
+    assert table["clone_kind"] == ["block", "function", "segment"]
+    assert table["group_key"] == ["bb22|bb22|bb22|bb22", "aa11|0-19", "aa11|0-19"]
+    for cells in table["items"]:
+        assert cells == sorted(cells)
+    # the intra-function pair rides one symbol ordinal with two spans
+    block_cells = table["items"][0]
+    assert len(block_cells) == 3
+    assert block_cells[1][0] == block_cells[2][0]
+
+
+def test_tied_clone_groups_are_ordered_by_group_key_on_the_wire() -> None:
+    """Rows tied on the kind MUST order by group_key bytes: an encoder
+    that drops the key from its sort leaks set iteration order into the
+    wire and this pin reds (the F2 tied-row precedent verbatim)."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            clone_groups=frozenset(
+                CloneGroupRow("function", key, _clone_items((1, 5), (9, 13)))
+                for key in ("cc33", "aa11", "bb22", "ee55", "dd44")
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    table = document["facts"]["clone_groups"]
+    assert table["group_key"] == ["aa11", "bb22", "cc33", "dd44", "ee55"]
+    assert table["clone_kind"] == ["function"] * 5
+
+
+def test_clone_only_symbol_enters_the_domain_through_the_closure() -> None:
+    """A symbol referenced by nothing but a clone item still reaches the
+    SYMBOL domain — a closure that skips the clone family reds here."""
+    decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
+    clone_only = SymbolId(FileId("tools/b.py"), "clone_only")
+    segment = next(
+        row
+        for row in decoded.facts.analysis.clone_groups
+        if row.clone_kind == "segment"
+    )
+    assert clone_only in {item.symbol for item in segment.items}
+
+
+def test_clone_family_survives_the_round_trip() -> None:
+    model = fixture_model().normalize()
+    decoded = decode_canonical_json(encode_canonical_json(model))
+    assert decoded.facts.analysis.clone_groups == model.facts.analysis.clone_groups
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:

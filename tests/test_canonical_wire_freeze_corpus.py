@@ -23,7 +23,9 @@ from __future__ import annotations
 
 from codeclone.canonical import (
     DependencyCycleRow,
+    FileId,
     ModuleId,
+    SymbolId,
     canonical_model_from_legacy_document,
 )
 
@@ -59,3 +61,32 @@ def test_f7_canonical_family_carries_the_corpus_cycles_end_to_end(
             ),
         }
     )
+
+
+def test_f8_canonical_family_carries_the_emitted_corpus_groups(
+    corpus_report: dict[str, object],
+) -> None:
+    """F8 from the REAL producer document: four emitted groups in two
+    kinds, keys distinct, and the block group's three items spanning TWO
+    symbols — the intra-function pair is two members of one symbol.  The
+    segment population stays zero (the corpus's named residual), and the
+    suppressed population never enters the family by construction."""
+    model = canonical_model_from_legacy_document(corpus_report)
+    groups = model.facts.analysis.clone_groups
+    keys = {(row.clone_kind, row.group_key) for row in groups}
+    assert len(groups) == 4
+    assert len(keys) == 4
+    assert sorted(kind for kind, _key in keys) == [
+        "block",
+        "function",
+        "function",
+        "function",
+    ]
+    (block,) = [row for row in groups if row.clone_kind == "block"]
+    host_one = SymbolId(FileId("pkg/run_host_one.py"), "run_host_one")
+    host_two = SymbolId(FileId("pkg/run_host_two.py"), "run_host_two")
+    assert {(item.symbol, item.start_line, item.end_line) for item in block.items} == {
+        (host_one, 13, 48),
+        (host_one, 53, 67),
+        (host_two, 9, 41),
+    }

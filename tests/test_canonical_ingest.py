@@ -27,6 +27,8 @@ import pytest
 from codeclone.canonical import (
     AnalysisFile,
     CanonicalModelError,
+    CloneGroupRow,
+    CloneItemRow,
     DependencyCycleRow,
     EffectLabelRoot,
     FileId,
@@ -352,6 +354,97 @@ def legacy_document() -> dict[str, Any]:
                 },
             }
         },
+        # F8: the emitted clone population verbatim from the producer's
+        # shape — item qualnames are glued ModuleKey heads, the block group
+        # carries an intra-function pair, and the SUPPRESSED container sits
+        # right beside the emitted buckets carrying a group that must NEVER
+        # enter the family (§10: suppressed is a different population).
+        "findings": {
+            "groups": {
+                "clones": {
+                    "functions": [
+                        {
+                            "id": "clone:function:aa11|0-19",
+                            "clone_kind": "function",
+                            "novelty": "known",
+                            "facts": {"group_key": "aa11|0-19", "group_arity": 2},
+                            "items": [
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 4,
+                                    "end_line": 16,
+                                    "loc": 13,
+                                },
+                                {
+                                    "relative_path": "scripts/tool.py",
+                                    "qualname": "scripts/tool.py:run",
+                                    "start_line": 19,
+                                    "end_line": 31,
+                                    "loc": 13,
+                                },
+                            ],
+                        }
+                    ],
+                    "blocks": [
+                        {
+                            "id": "clone:block:bb22",
+                            "clone_kind": "block",
+                            "novelty": "known",
+                            "facts": {"group_key": "bb22|bb22|bb22|bb22"},
+                            "items": [
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 13,
+                                    "end_line": 48,
+                                    "size": 36,
+                                },
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 53,
+                                    "end_line": 67,
+                                    "size": 15,
+                                },
+                                {
+                                    "relative_path": "pkg/other.py",
+                                    "qualname": "pkg.other:helper",
+                                    "start_line": 9,
+                                    "end_line": 41,
+                                    "size": 33,
+                                },
+                            ],
+                        }
+                    ],
+                    "segments": [],
+                    "suppressed": {
+                        "functions": [
+                            {
+                                "clone_kind": "function",
+                                "facts": {"group_key": "ffff|20-39"},
+                                "items": [
+                                    {
+                                        "relative_path": "pkg/mod.py",
+                                        "qualname": "pkg.mod:make",
+                                        "start_line": 70,
+                                        "end_line": 90,
+                                    },
+                                    {
+                                        "relative_path": "pkg/other.py",
+                                        "qualname": "pkg.other:helper",
+                                        "start_line": 70,
+                                        "end_line": 90,
+                                    },
+                                ],
+                            }
+                        ],
+                        "blocks": [],
+                        "segments": [],
+                    },
+                }
+            }
+        },
         # F9: the document's inventory scalars verbatim (values pairwise
         # distinct so a cross-wired mapping cannot survive; the witness
         # list and file_registry beside them are deliberately not scalars).
@@ -432,6 +525,93 @@ def test_ingest_builds_the_cycle_family_rows() -> None:
             ),
         }
     )
+
+
+def test_ingest_builds_the_emitted_clone_groups_only() -> None:
+    """F8: the emitted population verbatim — and NOT ONE row from the
+    suppressed container sitting right beside it (§10: suppressed is a
+    different population; mixing them is the known dialect root)."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    make = SymbolId(FileId("pkg/mod.py"), "make")
+    run = SymbolId(FileId("scripts/tool.py"), "run")
+    helper = SymbolId(FileId("pkg/other.py"), "helper")
+    assert model.facts.analysis.clone_groups == frozenset(
+        {
+            CloneGroupRow(
+                "function",
+                "aa11|0-19",
+                frozenset({CloneItemRow(make, 4, 16), CloneItemRow(run, 19, 31)}),
+            ),
+            CloneGroupRow(
+                "block",
+                "bb22|bb22|bb22|bb22",
+                frozenset(
+                    {
+                        CloneItemRow(make, 13, 48),
+                        CloneItemRow(make, 53, 67),
+                        CloneItemRow(helper, 9, 41),
+                    }
+                ),
+            ),
+        }
+    )
+
+
+def _function_clone_group(document: dict[str, Any]) -> dict[str, Any]:
+    groups = document["findings"]["groups"]["clones"]["functions"]
+    row: dict[str, Any] = groups[0]
+    return row
+
+
+def test_ingest_refuses_a_clone_kind_disagreeing_with_its_container() -> None:
+    """The container name IS the population statement; a row disagreeing
+    with its own bucket is a document at war with itself."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _function_clone_group(document)["clone_kind"] = "block"
+
+    with pytest.raises(LegacyIngestError, match="disagrees with its container"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_clone_item_path_disagreeing_with_identity() -> None:
+    """relative_path is the item's second spelling of its own file; when it
+    disagrees with the resolved glued qualname the document is refused,
+    never silently repaired toward either spelling."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _function_clone_group(document)["items"][0]["relative_path"] = "pkg/other.py"
+
+    with pytest.raises(LegacyIngestError, match="disagrees with the item"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_duplicate_clone_items() -> None:
+    """Arity and identity are different measurements: two byte-identical
+    members would be silently absorbed by a set — refused loudly instead."""
+
+    def swap(document: dict[str, Any]) -> None:
+        items = _function_clone_group(document)["items"]
+        items.append(dict(items[0]))
+
+    with pytest.raises(LegacyIngestError, match="share one identity"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_clone_group_without_a_group_key() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        del _function_clone_group(document)["facts"]["group_key"]
+
+    with pytest.raises(LegacyIngestError, match="missing 'group_key'"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_document_missing_the_clone_container() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        del document["findings"]["groups"]["clones"]["blocks"]
+
+    with pytest.raises(LegacyIngestError, match="missing 'blocks'"):
+        canonical_model_from_legacy_document(_mutated(swap))
 
 
 def test_ingest_keeps_both_overload_risk_declarations() -> None:

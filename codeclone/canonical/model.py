@@ -64,6 +64,7 @@ from codeclone.canonical.identity import (
     API_PARAMETER_KINDS,
     API_SYMBOL_KINDS,
     API_VISIBILITIES,
+    CLONE_KINDS,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     DEPENDENCY_CYCLE_KINDS,
@@ -230,6 +231,65 @@ class DependencyCycleRow:
             raise CanonicalModelError(
                 "a dependency cycle names at least two modules "
                 "(the producer's Tarjan floor drops self-loops)"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CloneItemRow:
+    """One member of an emitted clone group: the unit and its span.
+
+    The span IS part of the member's identity — the corpus's block group
+    carries an intra-function pair (one SYMBOL, two spans), so group arity
+    and item identity are different measurements and a span-blind member
+    would silently collapse the pair.  Per-kind item metrics (``loc``,
+    ``fingerprint``, ``size``, ``segment_hash``…) stay with the legacy
+    document for a later wave — the wave subset decides what is carried
+    (the candidate-scoring precedent).
+    """
+
+    symbol: SymbolId
+    start_line: int
+    end_line: int
+
+    def __post_init__(self) -> None:
+        if isinstance(self.start_line, bool) or self.start_line < 1:
+            raise CanonicalModelError(
+                f"clone item start line must be a positive int: {self.start_line!r}"
+            )
+        if isinstance(self.end_line, bool) or self.end_line < self.start_line:
+            raise CanonicalModelError(
+                "clone item end line must be an int not before its start: "
+                f"{self.end_line!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CloneGroupRow:
+    """F8 emitted clone group fact (wave 4).
+
+    Logical key — the producer's own: ``(clone_kind, group_key)``.  The
+    kind is a KEY component (one producer key string may exist under two
+    kinds), and ``group_key`` is the producer's fp-v2 grouping key whose
+    meaning is owned by the clone fingerprint generation.  The family is
+    the EMITTED population only: ``clones.suppressed`` is a different
+    population (ruling 2026-08-24 §10) and never enters it.  A group names
+    at least two members — every detector tier groups occurrences, and a
+    group of one asserts a grouping the producer never made.
+    """
+
+    clone_kind: str
+    group_key: str
+    items: frozenset[CloneItemRow]
+
+    def __post_init__(self) -> None:
+        if self.clone_kind not in CLONE_KINDS:
+            raise CanonicalModelError(f"unknown clone kind: {self.clone_kind!r}")
+        if not self.group_key:
+            raise CanonicalModelError("clone group key must be non-empty")
+        if len(self.items) < 2:
+            raise CanonicalModelError(
+                "a clone group names at least two items (a group of one is "
+                "not a grouping the producer makes)"
             )
 
 
@@ -443,6 +503,7 @@ class AnalysisFacts:
         default_factory=frozenset
     )
     dependency_cycles: frozenset[DependencyCycleRow] = field(default_factory=frozenset)
+    clone_groups: frozenset[CloneGroupRow] = field(default_factory=frozenset)
     violations: frozenset[ViolationRow] = field(default_factory=frozenset)
     coupling_cohesion_observations: frozenset[CouplingCohesionRow] = field(
         default_factory=frozenset
@@ -562,6 +623,10 @@ def _dependency_cycle_set_key(row: DependencyCycleRow) -> tuple[object, ...]:
     return tuple(sorted(canonical_key(module) for module in row.modules))
 
 
+def _clone_group_natural_key(row: CloneGroupRow) -> tuple[object, ...]:
+    return (row.clone_kind.encode("utf-8"), row.group_key.encode("utf-8"))
+
+
 def _api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:
     # The ratified F5 key: the SYMBOL plus the canonical signature variant,
     # computed through its ONE formula owner — never a second spelling.
@@ -651,6 +716,9 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_endpoint(occurrence.relation.target)
     for cycle in facts.dependency_cycles:
         closure.modules.update(cycle.modules)
+    for group in facts.clone_groups:
+        for item in group.items:
+            closure.see_symbol(item.symbol)
     for violation in facts.violations:
         closure.see_violation(violation)
     for observation in facts.coupling_cohesion_observations:
@@ -691,6 +759,7 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         "dependency_cycles.modules",
         _dependency_cycle_set_key,
     )
+    _unique_by_key(facts.clone_groups, "clone_groups.key", _clone_group_natural_key)
     _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
     _unique_by_key(
         facts.coupling_cohesion_observations,

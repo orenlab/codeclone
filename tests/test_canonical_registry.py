@@ -71,6 +71,30 @@ def test_f1_discriminator_source_claim_is_executed_not_narrated() -> None:
     assert "start_line" in observation_fields
 
 
+def test_f7_cycle_kind_vocabulary_mirrors_the_producer() -> None:
+    """Executed cross-check: the closed DEPENDENCY_CYCLE_KINDS vocabulary
+    equals the producer's Literal — a drift on either side reds here."""
+    from typing import get_args
+
+    from codeclone.canonical.identity import DEPENDENCY_CYCLE_KINDS
+    from codeclone.models import DependencyCycleKind
+
+    assert get_args(DependencyCycleKind) == DEPENDENCY_CYCLE_KINDS
+
+
+def test_f8_clone_kind_vocabulary_mirrors_the_contract_constants() -> None:
+    """Executed cross-check: the closed CLONE_KINDS vocabulary equals the
+    contract's own clone-kind constants, in contract declaration order."""
+    from codeclone.canonical.identity import CLONE_KINDS
+    from codeclone.contracts import (
+        CLONE_KIND_BLOCK,
+        CLONE_KIND_FUNCTION,
+        CLONE_KIND_SEGMENT,
+    )
+
+    assert CLONE_KINDS == (CLONE_KIND_FUNCTION, CLONE_KIND_BLOCK, CLONE_KIND_SEGMENT)
+
+
 def test_f1_dimension_vocabulary_mirrors_the_producer() -> None:
     """Executed cross-check, not a narrated one: the closed RISK_DIMENSIONS
     vocabulary equals the dimension set the real producer emits for a unit

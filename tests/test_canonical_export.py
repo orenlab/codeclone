@@ -96,9 +96,12 @@ _TARGET = "worktree-a"
 # ``dependency_cycles`` family (slice 4, K1) replaced the F1 literals (run
 # 22bd2c6d..., artifact e8d701a8...) deliberately: the fixture gained two
 # module-set keyed dependency_cycle objects under the canonical_model
-# namespace, which moves the membership and the bytes.
-_FIXTURE_RUN_ID = "167aadde96de4e58f3f4c7a0f2a94c6114447c2549dba62a4fc39de5f8535a0f"
-_FIXTURE_ARTIFACT = "5b93927467c663a43de46f28d8bb3746f4bc6402ad6c5c5bc9e50f0c19578a0c"
+# namespace.  The F8 ``clone_groups`` family (slice 4, K2) replaced the K1
+# literals (run 167aadde..., artifact 5b939274...) deliberately: the
+# fixture gained three emitted clone_group objects under the
+# clone_fingerprint namespace, which moves the membership and the bytes.
+_FIXTURE_RUN_ID = "b23b09120911b8d6af81bf4825d5e269b28a7cf6acb6ef5759073e38631ad13c"
+_FIXTURE_ARTIFACT = "706330d93503db019ef4d711807c5ce0fe4241bb231f2e78e7e052fde32f1b79"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:
