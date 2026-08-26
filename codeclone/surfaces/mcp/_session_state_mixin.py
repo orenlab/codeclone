@@ -14,6 +14,7 @@ from ._intent import IntentRecord
 from ._report_section import (
     findings_section_payload,
     inventory_section_payload,
+    removed_report_resource_payload,
     removed_report_section_payload,
     require_mapping_section,
 )
@@ -51,6 +52,7 @@ from ._session_shared import (
     DEFAULT_SEGMENT_MIN_STMT,
     FAMILY_CLONE,
     REMOVED_REPORT_SECTIONS,
+    REMOVED_RESOURCE_SUFFIXES,
     REPORT_SCHEMA_VERSION,
     SOURCE_KIND_PRODUCTION,
     CacheStatus,
@@ -1512,7 +1514,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if uri.startswith(latest_prefix):
             latest = self._runs.resolve_any_root()
             suffix = _helpers._validate_resource_suffix(uri[len(latest_prefix) :])
-            return self._render_resource(latest, suffix)
+            return self._render_resource(latest, suffix, uri=uri)
         if not uri.startswith(run_prefix):
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
         remainder = uri[len(run_prefix) :]
@@ -1521,9 +1523,11 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
         suffix = _helpers._validate_resource_suffix(suffix)
         record = self._runs.resolve_any_root(run_id)
-        return self._render_resource(record, suffix)
+        return self._render_resource(record, suffix, uri=uri)
 
-    def _render_resource(self, record: MCPRunRecord, suffix: str) -> str:
+    def _render_resource(self, record: MCPRunRecord, suffix: str, *, uri: str) -> str:
+        if suffix in REMOVED_RESOURCE_SUFFIXES:
+            return _json_text_payload(removed_report_resource_payload(uri))
         if suffix == "summary":
             return _json_text_payload(
                 self._summary_payload(record.summary, record=record)
@@ -1550,8 +1554,6 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             return _json_text_payload(record.changed_projection)
         if suffix == "schema":
             return _json_text_payload(_helpers._schema_resource_payload())
-        if suffix == "report.json":
-            return _json_text_payload(record.report_document, sort_keys=False)
         if suffix == "overview":
             return _json_text_payload(
                 self.list_hotspots(kind="highest_spread", run_id=record.run_id)

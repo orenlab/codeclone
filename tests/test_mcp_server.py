@@ -19,7 +19,6 @@ import pytest
 
 import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
-from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
 from codeclone.surfaces.mcp.messages.help_topics import HELP_TOPIC_SPECS
 from codeclone.surfaces.mcp.messages.patch_contract import (
@@ -314,6 +313,38 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
 
 
+def test_published_resource_surface_no_longer_offers_the_whole_report() -> None:
+    """The registered surface stops advertising a route to the whole document.
+
+    Withdrawing the route only at the service dispatch would leave the URI in
+    every client's resource list — an advertised route whose only answer is a
+    refusal. It has to leave the registration too, so the surface a client
+    enumerates and the surface it can read say the same thing.
+
+    Read off the server rather than off the registration source: this asserts
+    what a client is told, and the two ``report.json`` spellings sat in
+    different registration blocks, which is exactly how one of them survives a
+    reader who checked only the other.
+    """
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=4)
+
+    concrete = [str(resource.uri) for resource in asyncio.run(server.list_resources())]
+    templates = [
+        str(template.uriTemplate)
+        for template in asyncio.run(server.list_resource_templates())
+    ]
+    published = [*concrete, *templates]
+
+    assert [uri for uri in published if uri.endswith("report.json")] == [], published
+    # The routes registered beside it stay published.
+    assert "codeclone://schema" in concrete
+    assert "codeclone://latest/summary" in concrete
+    assert "codeclone://runs/{run_id}/summary" in templates
+    assert "codeclone://runs/{run_id}/findings/{finding_id}" in templates
+
+
 def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     _require_mcp_runtime()
     _write_clone_fixture(tmp_path)
@@ -571,13 +602,6 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert patch_budget["mode"] == "budget"
     assert patch_budget["intent_id"] == intent_id
 
-    latest_report_resource = list(
-        asyncio.run(server.read_resource("codeclone://latest/report.json"))
-    )
-    assert (
-        json.loads(latest_report_resource[0].content)["report_schema_version"]
-        == REPORT_SCHEMA_VERSION
-    )
     latest_health_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/health"))
     )
@@ -592,13 +616,6 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         asyncio.run(server.read_resource("codeclone://latest/triage"))
     )
     assert json.loads(latest_triage_resource[0].content)["run_id"] == run_id
-
-    report_resource = list(
-        asyncio.run(server.read_resource(f"codeclone://runs/{run_id}/report.json"))
-    )
-    assert report_resource
-    report_payload = json.loads(report_resource[0].content)
-    assert report_payload["report_schema_version"] == REPORT_SCHEMA_VERSION
 
     finding_items = cast("list[dict[str, object]]", findings_result["items"])
     first_finding_id = str(finding_items[0]["id"])
@@ -675,19 +692,11 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert overloaded_modules_alias_page["family"] == "overloaded_modules"
     assert overloaded_modules_alias_page["items"] == overloaded_modules_page["items"]
     assert security_surfaces_page["family"] == "security_surfaces"
-    report_metrics = cast("dict[str, object]", report_payload["metrics"])
-    report_families = cast("dict[str, object]", report_metrics["families"])
-    report_overloaded_modules = cast(
-        "dict[str, object]", report_families["overloaded_modules"]
-    )
-    report_overloaded_module_items = cast(
-        "list[dict[str, object]]",
-        report_overloaded_modules["items"],
-    )
-    assert (
-        cast("list[dict[str, object]]", overloaded_modules_page["items"])[0]["path"]
-        == report_overloaded_module_items[0]["relative_path"]
-    )
+    # The page-against-canonical cross-check for this family lives in
+    # test_mcp_service.py, where the canonical document is reached through the
+    # run record. Its copy here read the document through the withdrawn
+    # report.json resource, which is the only thing it had that the surviving
+    # pin does not.
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))
     )

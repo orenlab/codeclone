@@ -40,6 +40,14 @@ _REMOVED_SECTION_MESSAGE: Final = (
     "reached tens of millions of tokens on large repositories."
 )
 
+_REMOVED_RESOURCE_MESSAGE: Final = (
+    "The report.json resource was withdrawn from this MCP surface. It served "
+    "the entire report document verbatim, which is unbounded by construction "
+    "and reached tens of millions of tokens on large repositories. Both the "
+    "codeclone://latest/report.json and codeclone://runs/{run_id}/report.json "
+    "spellings returned the same document and were withdrawn together."
+)
+
 _FINDINGS_SECTION_FAMILIES: Final = frozenset(
     {
         "clone",
@@ -199,6 +207,27 @@ def removed_report_section_payload(section: str) -> dict[str, object]:
     }
 
 
+def removed_report_resource_payload(uri: str) -> dict[str, object]:
+    """The in-band answer for the resource URI this surface no longer serves.
+
+    Shares the section refusal's remedy verbatim because it is the same
+    remedy: the content the whole document carried is reachable as bounded
+    named sections, or as the generated report on disk. Keeping one copy of
+    that step means the two refusals cannot drift into naming different routes
+    to the same content.
+    """
+
+    return {
+        "status": "removed_resource",
+        "resource": uri,
+        "removed": True,
+        "available_sections": sorted(_VALID_REPORT_SECTIONS),
+        "message": _REMOVED_RESOURCE_MESSAGE,
+        "next_tool": "get_report_section",
+        "next_step": _REMOVED_SECTION_NEXT_STEP,
+    }
+
+
 def require_mapping_section(
     report_document: Mapping[str, object],
     *,
@@ -216,6 +245,7 @@ __all__ = [
     "findings_section_payload",
     "inventory_section_payload",
     "normalize_findings_section_family",
+    "removed_report_resource_payload",
     "removed_report_section_payload",
     "require_mapping_section",
     "validate_findings_section_family",

@@ -4317,7 +4317,7 @@ def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
     assert gate_result["reasons"] == ["clone:threshold:1:0"]
 
 
-def test_mcp_service_resources_expose_latest_summary_and_report(tmp_path: Path) -> None:
+def test_mcp_service_resources_expose_latest_summary(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
     summary = service.analyze_repository(
@@ -4329,7 +4329,6 @@ def test_mcp_service_resources_expose_latest_summary_and_report(tmp_path: Path) 
     )
 
     latest_summary = json.loads(service.read_resource("codeclone://latest/summary"))
-    latest_report = json.loads(service.read_resource("codeclone://latest/report.json"))
 
     assert latest_summary["run_id"] == summary["run_id"]
     assert latest_summary["cache"]["freshness"] == "fresh"
@@ -4339,7 +4338,86 @@ def test_mcp_service_resources_expose_latest_summary_and_report(tmp_path: Path) 
         "functions",
         "classes",
     }
-    assert latest_report["report_schema_version"] == REPORT_SCHEMA_VERSION
+
+
+def test_withdrawn_report_resource_answers_with_a_typed_in_band_refusal(
+    tmp_path: Path,
+) -> None:
+    """The whole-report resource is withdrawn, and the withdrawal is a typed answer.
+
+    ``report.json`` returned ``record.report_document`` verbatim — the same
+    unbounded document the ``all`` section was withdrawn for, reaching tens of
+    millions of tokens on a large repository. A caller that still asks for it
+    has asked for something that existed and was retracted, so the answer has
+    to say that, name what does exist, and name a step it can execute — not a
+    raised contract error that reads like a mistyped URI, and not, silently,
+    the document the withdrawal exists to stop shipping.
+
+    Both spellings are pinned because both resolve to one branch: the ``latest``
+    alias and the ``runs/{run_id}`` form returned byte-identical bodies, so a
+    withdrawal that covers only one of them withdraws nothing.
+    """
+
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+
+    for uri in (
+        f"codeclone://runs/{run_id}/report.json",
+        "codeclone://latest/report.json",
+    ):
+        payload = json.loads(service.read_resource(uri))
+
+        assert payload["status"] == "removed_resource", uri
+        assert payload["resource"] == uri, uri
+        assert payload["removed"] is True, uri
+        available = cast("list[str]", payload["available_sections"])
+        assert "meta" in available, uri
+        assert "all" not in available, uri
+        assert payload["message"], uri
+        next_step = str(payload["next_step"])
+        for route in ("get_report_section(", "--json", ".codeclone/report.json"):
+            assert route in next_step, (uri, route)
+        # The refusal must not smuggle the document it refuses to return.
+        for document_key in (
+            "findings",
+            "inventory",
+            "metrics",
+            "report_schema_version",
+        ):
+            assert document_key not in payload, (uri, document_key)
+
+
+def test_withdrawing_the_report_resource_leaves_its_neighbours_serving(
+    tmp_path: Path,
+) -> None:
+    """The withdrawal is one suffix wide, proven against the resources beside it.
+
+    A refusal wired one dispatch arm too early would answer every resource, and
+    a suite that only asserts the refusal appears would stay green through it.
+    These are the three routes registered alongside the withdrawn one, each
+    pinned by the payload only a live route can produce.
+    """
+
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+
+    run_summary = json.loads(
+        service.read_resource(f"codeclone://runs/{run_id}/summary")
+    )
+    assert run_summary["run_id"] == run_id
+
+    schema = json.loads(service.read_resource("codeclone://schema"))
+    assert schema["title"] == "CodeCloneCanonicalReport"
+
+    finding_id = str(
+        cast("list[dict[str, object]]", service.list_findings(run_id=run_id)["items"])[
+            0
+        ]["id"]
+    )
+    finding = json.loads(
+        service.read_resource(f"codeclone://runs/{run_id}/findings/{finding_id}")
+    )
+    assert finding["id"] == finding_id
 
 
 def test_mcp_service_hotspot_summary_preserves_fixtures_source_kind(

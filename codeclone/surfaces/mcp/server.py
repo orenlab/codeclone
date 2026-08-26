@@ -1486,15 +1486,6 @@ def build_mcp_server(
         return service.read_resource("codeclone://latest/summary")
 
     @resource(
-        "codeclone://latest/report.json",
-        title=mcp_resources.TITLE_LATEST_REPORT,
-        description=mcp_resources.LATEST_REPORT,
-        mime_type="application/json",
-    )
-    def latest_report_resource() -> str:
-        return service.read_resource("codeclone://latest/report.json")
-
-    @resource(
         "codeclone://latest/health",
         title=mcp_resources.TITLE_LATEST_HEALTH,
         description=mcp_resources.LATEST_HEALTH,
@@ -1547,15 +1538,6 @@ def build_mcp_server(
     )
     def run_summary_resource(run_id: str) -> str:
         return service.read_resource(f"codeclone://runs/{run_id}/summary")
-
-    @resource(
-        "codeclone://runs/{run_id}/report.json",
-        title=mcp_resources.TITLE_RUN_REPORT,
-        description=mcp_resources.RUN_REPORT,
-        mime_type="application/json",
-    )
-    def run_report_resource(run_id: str) -> str:
-        return service.read_resource(f"codeclone://runs/{run_id}/report.json")
 
     @resource(
         "codeclone://runs/{run_id}/findings/{finding_id}",

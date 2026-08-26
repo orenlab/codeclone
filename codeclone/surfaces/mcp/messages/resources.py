@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Final
 
 LATEST_SUMMARY: Final = "Canonical JSON summary for the latest run in this MCP session."
-LATEST_REPORT: Final = "Canonical JSON report for the latest run in this MCP session."
 LATEST_HEALTH: Final = "Health snapshot for the latest run in this MCP session."
 LATEST_GATES: Final = "Gate evaluation for the latest run in this MCP session."
 LATEST_CHANGED: Final = (
@@ -22,16 +21,13 @@ REPORT_SCHEMA: Final = (
     "JSON schema-style descriptor for the canonical CodeClone report."
 )
 RUN_SUMMARY: Final = "Canonical JSON summary for a specific CodeClone MCP run."
-RUN_REPORT: Final = "Canonical JSON report for a specific CodeClone MCP run."
 RUN_FINDING: Final = "Canonical JSON finding group for a specific CodeClone MCP run."
 
 TITLE_LATEST_SUMMARY: Final = "Latest Run Summary"
-TITLE_LATEST_REPORT: Final = "Latest Canonical Report"
 TITLE_LATEST_HEALTH: Final = "Latest Health Snapshot"
 TITLE_LATEST_GATES: Final = "Latest Gate Evaluation"
 TITLE_LATEST_CHANGED: Final = "Latest Changed Findings"
 TITLE_LATEST_TRIAGE: Final = "Latest Production Triage"
 TITLE_REPORT_SCHEMA: Final = "CodeClone Report Schema"
 TITLE_RUN_SUMMARY: Final = "Run Summary"
-TITLE_RUN_REPORT: Final = "Run Canonical Report"
 TITLE_RUN_FINDING: Final = "Run Finding"

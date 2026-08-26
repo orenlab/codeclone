@@ -297,6 +297,13 @@ DEFAULT_REPORT_SECTION: Final[ReportSection] = "meta"
 # the bounded sections and the on-disk projection, instead of a raised contract
 # error that reads like a typo.
 REMOVED_REPORT_SECTIONS: Final[frozenset[str]] = frozenset({"all"})
+# The resource half of the same withdrawal. ``report.json`` served
+# ``record.report_document`` verbatim, so it was the withdrawn ``all`` section
+# wearing a URI, and it outlived that section by sitting on a different
+# dispatch. It is unregistered on the server, and the suffix stays recognised
+# here so that a client holding the old URI meets the same typed refusal rather
+# than a path-shaped contract error.
+REMOVED_RESOURCE_SUFFIXES: Final[frozenset[str]] = frozenset({"report.json"})
 _VALID_REPORT_SECTIONS = frozenset(
     {
         "meta",
@@ -1033,6 +1040,7 @@ __all__ = [
     "FAMILY_DESIGN",
     "FAMILY_STRUCTURAL",
     "REMOVED_REPORT_SECTIONS",
+    "REMOVED_RESOURCE_SUFFIXES",
     "REPORT_SCHEMA_VERSION",
     "SEVERITY_CRITICAL",
     "SEVERITY_INFO",
