@@ -1,0 +1,38 @@
+"""Security-surface probe: boundary evidence across kinds and scopes.
+
+Carriers, by design:
+
+* import evidence at MODULE scope (``pickle`` / ``subprocess``);
+* call evidence at MODULE scope (the boot ``subprocess.run``);
+* builtin evidence inside a callable, including TWO distinct evidence
+  symbols on ONE line (``eval`` + ``compile``) — the datum that proves
+  ``evidence_symbol`` is a key component, not display payload;
+* one evidence symbol on two lines of one callable (``pickle.loads``) —
+  the datum that proves ``start_line`` is a key component;
+* call evidence inside a class body and inside a method.
+"""
+
+import pickle
+import subprocess
+
+_BOOT = subprocess.run(["true"], check=False)
+
+
+def run_dynamic(source: str) -> object:
+    return eval(compile(source, "<probe>", "eval"))
+
+
+def decode_blob(blob: bytes) -> tuple[object, object]:
+    first = pickle.loads(blob)
+    second = pickle.loads(blob)
+    return (first, second)
+
+
+class ShellHelper:
+    BANNER = subprocess.check_output(["true"])
+
+    def sweep(self) -> int:
+        return subprocess.check_call(["true"])
+
+
+_PROBE = (run_dynamic("1"), decode_blob(b"x"), ShellHelper().sweep())

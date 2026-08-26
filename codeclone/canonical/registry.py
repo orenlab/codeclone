@@ -675,6 +675,111 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # F10 (wave 4, slice 5): key (FILE, start_line, evidence_symbol) —
+    # the packet's exhaustive 1-3-field enumeration found exactly six
+    # unique 3-keys, evidence_symbol in all (387/387 live; 11/11 on the
+    # s5 corpus).  The legacy row's ``module`` field is deliberately NOT
+    # declared: it is the registry's FILE-MODULE projection, verified at
+    # ingest and re-derivable from file_modules (the F7 member_paths
+    # precedent) — the projector cannot emit it.
+    "security_surfaces": (
+        FieldDeclaration(
+            "capability",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "the producer's catalog entry; open string payload whose "
+            "meaning is owned by SECURITY_SURFACE_CATALOG_VERSION",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "category",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "closed vocabulary (SECURITY_SURFACE_CATEGORIES); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "classification_mode",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "closed vocabulary (SECURITY_CLASSIFICATION_MODES); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "evidence span end; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "evidence_kind",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "closed vocabulary (SECURITY_EVIDENCE_KINDS); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "evidence_symbol",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "key component — two symbols may share one line (the s5 "
+            "eval+compile datum)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "file",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "FILE key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "location_scope",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "closed vocabulary (SECURITY_LOCATION_SCOPES); payload bound "
+            "to qualname by the model law (module scope has no local name)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "qualname",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "local name of the hosting unit, or absent on module scope "
+            "(empty wire string spells absence, the F5 returns precedent)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source_kind",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "classification VERDICT of the one producer owner "
+            "(SOURCE_KIND_POLICY_VERSION), stored as a fact and never "
+            "re-derived on read — the F7 kind precedent; closed "
+            "vocabulary (SECURITY_SOURCE_KINDS)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "security_surfaces_producer",
+            "key component — one symbol may repeat across lines "
+            "(the s5 pickle.loads datum)",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "semantic_edges": (
         FieldDeclaration(
             "source",

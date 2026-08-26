@@ -60,6 +60,7 @@ from codeclone.canonical import (
     ProducerRoot,
     RiskObservationRow,
     RunScalars,
+    SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
     SymbolId,
@@ -353,6 +354,92 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         AdoptionCountRow(fb, "typing.parameters", 1, 1),
         AdoptionCountRow(ModuleId("zzz.adoption.only"), "typing.returns", 3, 5),
     ]
+    security_surfaces = [
+        # F10 (wave 4, slice 5): the measured shapes verbatim — TWO distinct
+        # evidence symbols on ONE (file, line) (the s5 eval+compile datum:
+        # evidence_symbol is a key component), one symbol on two lines of
+        # one callable (start_line is a key component), a MODULE-scope row
+        # (qualname absent), a CLASS-scope row, and a row on the module-less
+        # separator-collision file with a non-production verdict.
+        SecuritySurfaceRow(
+            file=fa,
+            start_line=22,
+            end_line=22,
+            evidence_symbol="eval",
+            qualname="run_dynamic",
+            location_scope="callable",
+            category="dynamic_execution",
+            capability="dynamic_eval",
+            evidence_kind="builtin",
+            classification_mode="exact_builtin",
+            source_kind="production",
+        ),
+        SecuritySurfaceRow(
+            file=fa,
+            start_line=22,
+            end_line=22,
+            evidence_symbol="compile",
+            qualname="run_dynamic",
+            location_scope="callable",
+            category="dynamic_execution",
+            capability="dynamic_compile",
+            evidence_kind="builtin",
+            classification_mode="exact_builtin",
+            source_kind="production",
+        ),
+        SecuritySurfaceRow(
+            file=fa,
+            start_line=26,
+            end_line=27,
+            evidence_symbol="pickle.loads",
+            qualname="decode_blob",
+            location_scope="callable",
+            category="deserialization",
+            capability="pickle_loads",
+            evidence_kind="call",
+            classification_mode="exact_call",
+            source_kind="production",
+        ),
+        SecuritySurfaceRow(
+            file=fa,
+            start_line=27,
+            end_line=27,
+            evidence_symbol="pickle.loads",
+            qualname="ShellHelper",
+            location_scope="class",
+            category="deserialization",
+            capability="pickle_loads",
+            evidence_kind="call",
+            classification_mode="exact_call",
+            source_kind="production",
+        ),
+        SecuritySurfaceRow(
+            file=fb,
+            start_line=16,
+            end_line=16,
+            evidence_symbol="subprocess",
+            qualname=None,
+            location_scope="module",
+            category="process_boundary",
+            capability="subprocess_import",
+            evidence_kind="import",
+            classification_mode="exact_import",
+            source_kind="production",
+        ),
+        SecuritySurfaceRow(
+            file=fc,
+            start_line=3,
+            end_line=3,
+            evidence_symbol="subprocess.call",
+            qualname="probe",
+            location_scope="callable",
+            category="process_boundary",
+            capability="subprocess_call",
+            evidence_kind="call",
+            classification_mode="exact_call",
+            source_kind="tests",
+        ),
+    ]
     # F9 (wave 4): ONE run-scalars record per analysis snapshot — never a
     # table, no invented entity key.  Values pairwise distinct so a
     # cross-wired producer mapping cannot survive, and one zero: zero is a
@@ -386,6 +473,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         api_symbols = list(reversed(api_symbols))
         risk_observations = list(reversed(risk_observations))
         adoption_counts = list(reversed(adoption_counts))
+        security_surfaces = list(reversed(security_surfaces))
         coupled = list(reversed(coupled))
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
@@ -406,6 +494,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             api_symbols=frozenset(api_symbols),
             risk_observations=frozenset(risk_observations),
             adoption_counts=frozenset(adoption_counts),
+            security_surfaces=frozenset(security_surfaces),
             run_scalars=run_scalars,
         ),
         coupled_sets=frozenset(coupled),
@@ -448,15 +537,18 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     The F4 ``dead_code_observations`` family (slice 4, K3) then replaced
     the K2 literal deliberately (5219 bytes, sha256 073e3f58…): the draft
     gained the tagged-entity dead code family.  The F3 ``adoption_counts``
-    family (slice 5) then replaced the K3 literal deliberately: the draft
-    gained the tagged-ScopeRef adoption family, so every document's bytes
-    moved — the one announced transition of this commit.
+    family (slice 5) then replaced the K3 literal deliberately (5496
+    bytes, sha256 7e75e336…): the draft gained the tagged-ScopeRef
+    adoption family.  The F10 ``security_surfaces`` family (slice 5) then
+    replaced the F3 literal deliberately: the draft gained the
+    evidence-keyed surface family, so every document's bytes moved — the
+    one announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 5496
+    assert len(payload) == 6369
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "7e75e3368695ae7a1fadc890cbb26a1ab699e4fbd3b5c322dab9b0629a6399bb"
+        == "c30306a9f9083b75e89c88a8ad7cb3de7757fb3418cedd7640894bee79c40fd3"
     )
 
 
@@ -1630,6 +1722,151 @@ def test_adoption_scope_rides_the_wire_as_a_tagged_pair() -> None:
     ]
     assert table["numerator"] == [1, 2, 7, 0, 3]
     assert table["denominator"] == [1, 3, 9, 9, 5]
+
+
+def _surface(**overrides: object) -> SecuritySurfaceRow:
+    """One valid F10 row; overrides probe exactly one law at a time."""
+    values: dict[str, object] = {
+        "file": FileId("pkg/a.py"),
+        "start_line": 5,
+        "end_line": 7,
+        "evidence_symbol": "subprocess.run",
+        "qualname": "go",
+        "location_scope": "callable",
+        "category": "process_boundary",
+        "capability": "subprocess_run",
+        "evidence_kind": "call",
+        "classification_mode": "exact_call",
+        "source_kind": "production",
+    }
+    values.update(overrides)
+    return SecuritySurfaceRow(**values)  # type: ignore[arg-type]
+
+
+def test_model_refuses_two_surfaces_under_one_evidence_key() -> None:
+    """F10 key law: (FILE, start_line, evidence_symbol) names at most one
+    fact — rows differing only in payload are a producer defect."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            security_surfaces=frozenset({_surface(), _surface(end_line=9)})
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"security_surfaces\.key"):
+        model.normalize()
+
+
+def test_surfaces_differing_in_any_key_component_coexist() -> None:
+    """The measured discriminators: same line two symbols (the s5
+    eval+compile datum), same symbol two lines, same everything two
+    files — each is a distinct fact."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            security_surfaces=frozenset(
+                {
+                    _surface(),
+                    _surface(evidence_symbol="subprocess.check_call"),
+                    _surface(start_line=9, end_line=9),
+                    _surface(file=FileId("pkg/b.py")),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.security_surfaces) == 4
+
+
+def test_surface_refuses_unknown_vocabulary_tags() -> None:
+    for field_name in (
+        "category",
+        "location_scope",
+        "evidence_kind",
+        "classification_mode",
+        "source_kind",
+    ):
+        with pytest.raises(CanonicalModelError, match=field_name.replace("_", " ")):
+            _surface(**{field_name: "banana"})
+
+
+def test_surface_refuses_empty_evidence_and_capability() -> None:
+    with pytest.raises(CanonicalModelError, match="evidence symbol"):
+        _surface(evidence_symbol="")
+    with pytest.raises(CanonicalModelError, match="capability"):
+        _surface(capability="")
+
+
+def test_surface_refuses_a_bad_span() -> None:
+    with pytest.raises(CanonicalModelError, match="start line"):
+        _surface(start_line=0, end_line=0)
+    with pytest.raises(CanonicalModelError, match="end line"):
+        _surface(end_line=4)
+
+
+def test_surface_qualname_matches_the_location_scope() -> None:
+    """The producer's grammar: a MODULE-scope surface carries no local
+    name (the head is the file itself), and a class/callable surface
+    always carries one — both mismatches are refused, never repaired."""
+    with pytest.raises(CanonicalModelError, match="module-scope"):
+        _surface(location_scope="module")
+    with pytest.raises(CanonicalModelError, match="local name"):
+        _surface(qualname=None)
+    with pytest.raises(CanonicalModelError, match="glued"):
+        _surface(qualname="pkg.a:go")
+    assert _surface(location_scope="module", qualname=None).qualname is None
+
+
+def test_surface_wire_slots_spell_absence_and_order() -> None:
+    """The fixture surfaces on the wire: module-scope qualname rides the
+    empty string (the F5 returns precedent), the file slot is a plain FILE
+    ordinal, and rows order by (file, start_line, evidence_symbol)."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    table = document["facts"]["security_surfaces"]
+    assert table["file"] == [0, 0, 0, 0, 1, 2]
+    assert table["start_line"] == [22, 22, 26, 27, 3, 16]
+    assert table["evidence_symbol"] == [
+        "compile",
+        "eval",
+        "pickle.loads",
+        "pickle.loads",
+        "subprocess.call",
+        "subprocess",
+    ]
+    assert table["qualname"] == [
+        "run_dynamic",
+        "run_dynamic",
+        "decode_blob",
+        "ShellHelper",
+        "probe",
+        "",
+    ]
+    assert table["source_kind"] == ["production"] * 4 + ["tests", "production"]
+
+
+def test_tied_surface_rows_are_ordered_by_line_then_symbol_on_the_wire() -> None:
+    """Rows tied on (file, start_line) MUST order by evidence-symbol
+    bytes, and lines order within one file — 4 lines x 3 symbols = 12
+    tied bindings, shuffled under three seeds, one wire byte sequence."""
+    symbols = ("compile", "eval", "pickle.loads")
+    rows = [
+        _surface(start_line=line, end_line=line, evidence_symbol=symbol)
+        for line in (40, 10, 25, 90)
+        for symbol in symbols
+    ]
+    baseline: bytes | None = None
+    for seed in (1, 7, 42):
+        shuffled = list(rows)
+        random.Random(seed).shuffle(shuffled)
+        model = CanonicalModel(
+            facts=analysis_facts(security_surfaces=frozenset(shuffled))
+        )
+        payload = encode_canonical_json(model)
+        if baseline is None:
+            baseline = payload
+            table = json.loads(payload)["facts"]["security_surfaces"]
+            assert table["start_line"] == [
+                line for line in (10, 25, 40, 90) for _ in symbols
+            ]
+            assert table["evidence_symbol"] == list(symbols) * 4
+            assert table["file"] == [0] * 12
+        assert payload == baseline
 
 
 def test_tied_adoption_rows_are_ordered_by_scope_then_feature_on_the_wire() -> None:

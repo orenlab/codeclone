@@ -136,6 +136,37 @@ ADOPTION_FEATURES: Final = (
     "typing.parameters",
     "typing.returns",
 )
+# F10 security_surfaces (wave 4, slice 5): the producer's closed
+# vocabularies, mirrored verbatim in producer Literal order
+# (``codeclone.models``: SecuritySurfaceCategory / LocationScope /
+# ClassificationMode / EvidenceKind) and pinned against them by test.  The
+# wire refuses unknowns (W08); catalog meaning (which symbols and
+# capabilities exist) is owned by SECURITY_SURFACE_CATALOG_VERSION.  The
+# source-kind verdict vocabulary mirrors the domain's breakdown keys
+# (``codeclone.domain.source_scope``): the verdict is classified exactly
+# once by the one producer owner and stored as an analysis FACT, never
+# re-derived on read (the F7 kind precedent); its meaning is owned by
+# SOURCE_KIND_POLICY_VERSION.
+SECURITY_SURFACE_CATEGORIES: Final = (
+    "archive_extraction",
+    "crypto_transport",
+    "database_boundary",
+    "deserialization",
+    "dynamic_execution",
+    "dynamic_loading",
+    "filesystem_mutation",
+    "identity_token",
+    "network_boundary",
+    "process_boundary",
+)
+SECURITY_LOCATION_SCOPES: Final = ("module", "class", "callable")
+SECURITY_CLASSIFICATION_MODES: Final = (
+    "exact_builtin",
+    "exact_call",
+    "exact_import",
+)
+SECURITY_EVIDENCE_KINDS: Final = ("builtin", "call", "import")
+SECURITY_SOURCE_KINDS: Final = ("production", "tests", "fixtures", "other")
 # F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
 # verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
 # ApiVisibility / ApiParameterKind) and pinned against them by test — a

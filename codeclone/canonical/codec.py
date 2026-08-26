@@ -93,6 +93,11 @@ from codeclone.canonical.identity import (
     ROOT_FAMILY_OPERATION,
     ROOT_FAMILY_PRODUCER,
     ROOT_FAMILY_UNRESOLVED,
+    SECURITY_CLASSIFICATION_MODES,
+    SECURITY_EVIDENCE_KINDS,
+    SECURITY_LOCATION_SCOPES,
+    SECURITY_SOURCE_KINDS,
+    SECURITY_SURFACE_CATEGORIES,
     VIOLATION_KINDS,
     AnalysisFile,
     DependencyEndpoint,
@@ -134,6 +139,7 @@ from codeclone.canonical.model import (
     GraphNodeRow,
     RiskObservationRow,
     RunScalars,
+    SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
     ViolationRow,
@@ -799,6 +805,37 @@ def _adoption_count_rows(
     ]
 
 
+def _security_surface_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    # F10 key order: (file, start_line, evidence_symbol) -- file ordinals
+    # are assigned in canonical-key order; the absent module-scope local
+    # name rides the empty string (the F5 returns precedent).
+    return [
+        {
+            "capability": row.capability,
+            "category": row.category,
+            "classification_mode": row.classification_mode,
+            "end_line": row.end_line,
+            "evidence_kind": row.evidence_kind,
+            "evidence_symbol": row.evidence_symbol,
+            "file": plan.file_ordinal[row.file],
+            "location_scope": row.location_scope,
+            "qualname": row.qualname or "",
+            "source_kind": row.source_kind,
+            "start_line": row.start_line,
+        }
+        for row in sorted(
+            facts.security_surfaces,
+            key=lambda row: (
+                plan.file_ordinal[row.file],
+                row.start_line,
+                row.evidence_symbol.encode("utf-8"),
+            ),
+        )
+    ]
+
+
 def _contract_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
@@ -898,6 +935,7 @@ _FAMILY_ROW_BUILDERS: dict[
     "graph_nodes": _graph_node_rows,
     "risk_observations": _risk_observation_rows,
     "run_scalars": _run_scalars_rows,
+    "security_surfaces": _security_surface_rows,
     "semantic_edges": _semantic_edge_rows,
     "sink_roles": _sink_role_rows,
     "violations": _violation_rows,
@@ -2320,6 +2358,103 @@ def _decode_adoption_counts(
     return frozenset(rows)
 
 
+_SURFACE_VOCABULARIES: dict[str, tuple[str, ...]] = {
+    "category": SECURITY_SURFACE_CATEGORIES,
+    "classification_mode": SECURITY_CLASSIFICATION_MODES,
+    "evidence_kind": SECURITY_EVIDENCE_KINDS,
+    "location_scope": SECURITY_LOCATION_SCOPES,
+    "source_kind": SECURITY_SOURCE_KINDS,
+}
+
+
+def _decode_security_surface_row(
+    columns: Mapping[str, list[object]],
+    index: int,
+    files: Sequence[FileId],
+) -> tuple[SecuritySurfaceRow, tuple[object, ...]]:
+    prefix = "facts.security_surfaces"
+    vocabulary_values: dict[str, str] = {}
+    for column, vocabulary in _SURFACE_VOCABULARIES.items():
+        value = _expect_string(columns[column][index], f"{prefix}.{column}[{index}]")
+        if value not in vocabulary:
+            raise _refuse(
+                "W08", f"unknown surface {column.replace('_', ' ')} tag {value!r}"
+            )
+        vocabulary_values[column] = value
+    ordinal = _expect_ordinal(
+        columns["file"][index], len(files), f"{prefix}.file[{index}]"
+    )
+    evidence_symbol = _expect_string(
+        columns["evidence_symbol"][index], f"{prefix}.evidence_symbol[{index}]"
+    )
+    if not evidence_symbol:
+        raise _refuse("W18", f"{prefix}.evidence_symbol[{index}] is empty")
+    capability = _expect_string(
+        columns["capability"][index], f"{prefix}.capability[{index}]"
+    )
+    if not capability:
+        raise _refuse("W18", f"{prefix}.capability[{index}] is empty")
+    start_line = _expect_wire_int(
+        columns["start_line"][index], f"{prefix}.start_line[{index}]"
+    )
+    if start_line < 1:
+        raise _refuse(
+            "W07",
+            f"{prefix}.start_line[{index}] is {start_line}, outside the "
+            "span domain [1, 2**31-1]",
+        )
+    end_line = _expect_wire_int(
+        columns["end_line"][index], f"{prefix}.end_line[{index}]"
+    )
+    if end_line < start_line:
+        raise _refuse("W18", f"{prefix}.end_line[{index}] precedes its start")
+    qualname_raw = _expect_string(
+        columns["qualname"][index], f"{prefix}.qualname[{index}]"
+    )
+    location_scope = vocabulary_values["location_scope"]
+    if location_scope == "module" and qualname_raw:
+        raise _refuse(
+            "W20",
+            f"{prefix}[{index}] is module-scope and carries a local name "
+            "-- the head is the file itself",
+        )
+    if location_scope != "module" and not qualname_raw:
+        raise _refuse(
+            "W20",
+            f"{prefix}[{index}] is {location_scope}-scope and carries no local name",
+        )
+    row = SecuritySurfaceRow(
+        file=files[ordinal],
+        start_line=start_line,
+        end_line=end_line,
+        evidence_symbol=evidence_symbol,
+        qualname=qualname_raw or None,
+        location_scope=location_scope,
+        category=vocabulary_values["category"],
+        capability=capability,
+        evidence_kind=vocabulary_values["evidence_kind"],
+        classification_mode=vocabulary_values["classification_mode"],
+        source_kind=vocabulary_values["source_kind"],
+    )
+    return row, (ordinal, start_line, evidence_symbol.encode("utf-8"))
+
+
+def _decode_security_surfaces(
+    facts: Mapping[str, object], files: Sequence[FileId]
+) -> frozenset[SecuritySurfaceRow]:
+    columns, _flags, row_count = _decode_columns(
+        "security_surfaces", facts["security_surfaces"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        row, key = _decode_security_surface_row(columns, index, files)
+        rows.append(row)
+        keys.append(key)
+    _expect_strictly_increasing(keys, "facts.security_surfaces")
+    return frozenset(rows)
+
+
 def _decode_run_scalars(facts: Mapping[str, object]) -> RunScalars | None:
     """The F9 record member: one record object, or its typed absence."""
     value = facts["run_scalars"]
@@ -2571,6 +2706,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     api_symbols = _decode_api_symbols(facts_section, symbols)
     risk_observations = _decode_risk_observations(facts_section, symbols)
     adoption_counts = _decode_adoption_counts(facts_section, files, modules)
+    security_surfaces = _decode_security_surfaces(facts_section, files)
     run_scalars = _decode_run_scalars(facts_section)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
@@ -2603,6 +2739,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 api_symbols=api_symbols,
                 risk_observations=risk_observations,
                 adoption_counts=adoption_counts,
+                security_surfaces=security_surfaces,
                 run_scalars=run_scalars,
             )
         ),

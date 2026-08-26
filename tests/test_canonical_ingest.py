@@ -63,6 +63,54 @@ def legacy_document() -> dict[str, Any]:
         "unresolved",
     ]
     roots_run = ["producer:scripts/tool.py:run"]
+    security_items = [
+        # F10 items verbatim from the producer's payload shape: the module
+        # row's qualname IS the head (no local name asserted); the callable
+        # rows glue head:local through the ModuleKey colon; module is the
+        # registry projection (the path itself for a module-less file).
+        {
+            "category": "process_boundary",
+            "capability": "subprocess_import",
+            "module": "pkg.mod",
+            "relative_path": "pkg/mod.py",
+            "qualname": "pkg.mod",
+            "start_line": 2,
+            "end_line": 2,
+            "source_kind": "production",
+            "location_scope": "module",
+            "classification_mode": "exact_import",
+            "evidence_kind": "import",
+            "evidence_symbol": "subprocess",
+        },
+        {
+            "category": "dynamic_execution",
+            "capability": "dynamic_eval",
+            "module": "pkg.mod",
+            "relative_path": "pkg/mod.py",
+            "qualname": "pkg.mod:make",
+            "start_line": 8,
+            "end_line": 8,
+            "source_kind": "production",
+            "location_scope": "callable",
+            "classification_mode": "exact_builtin",
+            "evidence_kind": "builtin",
+            "evidence_symbol": "eval",
+        },
+        {
+            "category": "deserialization",
+            "capability": "pickle_loads",
+            "module": "scripts/tool.py",
+            "relative_path": "scripts/tool.py",
+            "qualname": "scripts/tool.py:Runner.load",
+            "start_line": 12,
+            "end_line": 14,
+            "source_kind": "other",
+            "location_scope": "class",
+            "classification_mode": "exact_call",
+            "evidence_kind": "call",
+            "evidence_symbol": "pickle.loads",
+        },
+    ]
     return {
         "source_facts": {
             "analysis_scope": [
@@ -431,6 +479,10 @@ def legacy_document() -> dict[str, Any]:
                         {"coupled_classes": ["Token"]},
                     ]
                 },
+                "security_surfaces": {
+                    "summary": {"items": len(security_items)},
+                    "items": security_items,
+                },
             }
         },
         # F8: the emitted clone population verbatim from the producer's
@@ -584,6 +636,93 @@ def test_ingest_builds_the_measured_families() -> None:
     assert {row.function for row in facts.analysis.contracts} == {make, run}
     candidate = next(iter(facts.analysis.candidates))
     assert candidate.producer_set == frozenset({make, run})
+
+
+def test_ingest_builds_the_security_family_on_the_evidence_key() -> None:
+    """F10: module-scope rows drop the head-only qualname (None spells
+    the file itself), glued callable/class qualnames resolve through the
+    document's OWN registry to the local name, and the source-kind verdict
+    is carried verbatim — classified once, never re-derived."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    rows = model.facts.analysis.security_surfaces
+    assert {
+        (
+            row.file.path,
+            row.start_line,
+            row.evidence_symbol,
+            row.qualname,
+            row.location_scope,
+            row.source_kind,
+        )
+        for row in rows
+    } == {
+        ("pkg/mod.py", 2, "subprocess", None, "module", "production"),
+        ("pkg/mod.py", 8, "eval", "make", "callable", "production"),
+        ("scripts/tool.py", 12, "pickle.loads", "Runner.load", "class", "other"),
+    }
+
+
+def _security_item(document: dict[str, Any]) -> dict[str, Any]:
+    items = document["metrics"]["families"]["security_surfaces"]["items"]
+    row: dict[str, Any] = items[1]  # the callable row
+    return row
+
+
+def test_ingest_refuses_a_surface_qualname_disagreeing_with_its_path() -> None:
+    """The glued qualname resolves to a file; when that file is not the
+    row's own relative_path the document is at war with itself — refused,
+    never repaired toward either spelling (the clone-item precedent)."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _security_item(document)["qualname"] = "pkg.other:make"
+
+    with pytest.raises(LegacyIngestError, match="disagrees"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_surface_module_disagreeing_with_the_registry() -> None:
+    """The module field is the registry's projection of the row's file —
+    a disagreement is refused, never silently preferred."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _security_item(document)["module"] = "pkg.other"
+
+    with pytest.raises(LegacyIngestError, match="registry"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_module_scope_surface_with_a_foreign_head() -> None:
+    """A MODULE-scope row's qualname is the head itself; a row whose
+    qualname is not its own head asserts a location the producer's
+    grammar cannot mean."""
+
+    def swap(document: dict[str, Any]) -> None:
+        items = document["metrics"]["families"]["security_surfaces"]["items"]
+        items[0]["qualname"] = "pkg.other"
+
+    with pytest.raises(LegacyIngestError, match="module-scope"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_surface_on_an_unanalyzed_path() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        item = _security_item(document)
+        item["relative_path"] = "pkg/ghost.py"
+        item["module"] = "pkg/ghost.py"
+        item["qualname"] = "pkg/ghost.py:make"
+
+    with pytest.raises(LegacyIngestError, match="not an analyzed path"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_unknown_surface_vocabulary_tag() -> None:
+    """The model law owns the vocabularies; ingest routes the refusal."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _security_item(document)["source_kind"] = "banana"
+
+    with pytest.raises(CanonicalModelError, match="source kind"):
+        canonical_model_from_legacy_document(_mutated(swap))
 
 
 def test_ingest_builds_the_adoption_family_on_the_tagged_scope() -> None:

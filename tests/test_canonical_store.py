@@ -530,6 +530,36 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'"numerator":3,"scope":["module","pkg.a"]}',
             "exceed",
         ),
+        # F10 shape guard: a non-int span member is refused by the store
+        (
+            "security_surface",
+            b'{"capability":"subprocess_run","category":"process_boundary",'
+            b'"classification_mode":"exact_call","end_line":"7",'
+            b'"evidence_kind":"call","evidence_symbol":"subprocess.run",'
+            b'"file":"pkg/a.py","location_scope":"callable","qualname":"go",'
+            b'"source_kind":"production","start_line":5}',
+            "'end_line' is not an int",
+        ),
+        # F10 model law through the store wrapper: unknown source kind
+        (
+            "security_surface",
+            b'{"capability":"subprocess_run","category":"process_boundary",'
+            b'"classification_mode":"exact_call","end_line":7,'
+            b'"evidence_kind":"call","evidence_symbol":"subprocess.run",'
+            b'"file":"pkg/a.py","location_scope":"callable","qualname":"go",'
+            b'"source_kind":"banana","start_line":5}',
+            "source kind",
+        ),
+        # F10 model law through the store wrapper: module scope with a name
+        (
+            "security_surface",
+            b'{"capability":"subprocess_run","category":"process_boundary",'
+            b'"classification_mode":"exact_call","end_line":7,'
+            b'"evidence_kind":"call","evidence_symbol":"subprocess.run",'
+            b'"file":"pkg/a.py","location_scope":"module","qualname":"go",'
+            b'"source_kind":"production","start_line":5}',
+            "module-scope",
+        ),
         # F9 shape guard: a non-int scalar is refused by the store
         (
             "run_scalar",
@@ -574,6 +604,9 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "adoption-unknown-scope-tag-shape-guard",
         "adoption-zero-denominator-model-law",
         "adoption-numerator-above-denominator-model-law",
+        "surface-non-int-span-shape-guard",
+        "surface-unknown-source-kind-model-law",
+        "surface-module-scope-with-name-model-law",
         "run-scalar-non-int-shape-guard",
         "run-scalar-negative-model-law",
     ],

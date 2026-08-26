@@ -183,6 +183,57 @@ def test_f3_scope_ref_is_the_tagged_module_file_union() -> None:
     assert endpoint_key(file_scope)[0] == "file"
 
 
+def test_f10_family_is_a_wire_family_with_the_ratified_columns() -> None:
+    """F10 landed (wave 4, slice 5): key ``(FILE, start_line,
+    evidence_symbol)`` — the packet's exhaustive 1-3-field enumeration
+    found exactly SIX unique 3-keys, ``evidence_symbol`` in all of them
+    (re-measured live at HEAD: 387/387; on the s5 corpus: 11/11).  Wire
+    columns are born mechanically from the registry."""
+    assert "security_surfaces" in FACT_FAMILY_FIELDS
+    assert "security_surfaces" in wire_fact_family_order()
+    assert wire_columns("security_surfaces") == (
+        "capability",
+        "category",
+        "classification_mode",
+        "end_line",
+        "evidence_kind",
+        "evidence_symbol",
+        "file",
+        "location_scope",
+        "qualname",
+        "source_kind",
+        "start_line",
+    )
+
+
+def test_f10_vocabularies_mirror_the_producer_and_the_domain() -> None:
+    """Executed cross-check: the four closed F10 vocabularies equal the
+    producer's Literal types, and the source-kind verdict vocabulary
+    equals the domain's breakdown keys — a drift on either side reds."""
+    from typing import get_args
+
+    from codeclone.canonical.identity import (
+        SECURITY_CLASSIFICATION_MODES,
+        SECURITY_EVIDENCE_KINDS,
+        SECURITY_LOCATION_SCOPES,
+        SECURITY_SOURCE_KINDS,
+        SECURITY_SURFACE_CATEGORIES,
+    )
+    from codeclone.domain.source_scope import SOURCE_KIND_BREAKDOWN_KEYS
+    from codeclone.models import (
+        SecuritySurfaceCategory,
+        SecuritySurfaceClassificationMode,
+        SecuritySurfaceEvidenceKind,
+        SecuritySurfaceLocationScope,
+    )
+
+    assert get_args(SecuritySurfaceCategory) == SECURITY_SURFACE_CATEGORIES
+    assert get_args(SecuritySurfaceLocationScope) == SECURITY_LOCATION_SCOPES
+    assert get_args(SecuritySurfaceClassificationMode) == SECURITY_CLASSIFICATION_MODES
+    assert get_args(SecuritySurfaceEvidenceKind) == SECURITY_EVIDENCE_KINDS
+    assert SECURITY_SOURCE_KINDS == SOURCE_KIND_BREAKDOWN_KEYS
+
+
 def test_f1_dimension_vocabulary_mirrors_the_producer() -> None:
     """Executed cross-check, not a narrated one: the closed RISK_DIMENSIONS
     vocabulary equals the dimension set the real producer emits for a unit

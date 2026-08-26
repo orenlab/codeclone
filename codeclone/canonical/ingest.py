@@ -83,6 +83,7 @@ from codeclone.canonical.model import (
     GraphNodeRow,
     RiskObservationRow,
     RunScalars,
+    SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
     ViolationRow,
@@ -453,6 +454,22 @@ def canonical_model_from_legacy_document(
         dead_code_observations,
     ) = _observation_lane_families(source_facts, index)
 
+    security_rows = _sequence(
+        _field(
+            _mapping(
+                _field(families, "security_surfaces", "metrics.families"),
+                "metrics.families.security_surfaces",
+            ),
+            "items",
+            "metrics.families.security_surfaces",
+        ),
+        "security_surfaces.items",
+    )
+    security_surfaces = frozenset(
+        _security_surface(_mapping(row, "security_surfaces item"), index)
+        for row in security_rows
+    )
+
     run_scalars = _run_scalars(document)
 
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
@@ -482,11 +499,78 @@ def canonical_model_from_legacy_document(
                 api_symbols=api_symbols,
                 risk_observations=risk_observations,
                 adoption_counts=adoption_counts,
+                security_surfaces=security_surfaces,
                 run_scalars=run_scalars,
             )
         ),
         coupled_sets=coupled_sets,
     ).normalize()
+
+
+def _surface_head(path: str, index: _RegistryIndex, where: str) -> str:
+    """The one legacy head of an analyzed FILE: its registry module when
+    one exists, the path itself otherwise (the ``_legacy_symbol_keys``
+    law).  A path outside the document's own analysis scope is refused."""
+    if path not in index.analyzed_paths:
+        raise LegacyIngestError(
+            f"{where}: {path!r} is not an analyzed path; refusing to guess an identity"
+        )
+    return index.path_to_module.get(path, path)
+
+
+def _security_surface(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> SecuritySurfaceRow:
+    """One F10 fact from the producer's own security_surfaces item.
+
+    Three registry-consistency laws, each a refusal and never a repair:
+    the row's ``module`` field must be the registry projection of its own
+    file; a MODULE-scope qualname must be that head itself (no local name
+    asserted); a class/callable qualname resolves through the document's
+    OWN registry and must land on the row's own file (the clone-item
+    precedent).  The ``source_kind`` verdict is carried verbatim —
+    classified once by the producer, never re-derived here.
+    """
+    where = "security_surfaces item"
+    path = _string(row, "relative_path", where)
+    head = _surface_head(path, index, f"{where}.relative_path")
+    declared_module = _string(row, "module", where)
+    if declared_module != head:
+        raise LegacyIngestError(
+            f"{where}: module {declared_module!r} disagrees with the "
+            f"document's own registry projection {head!r} for {path!r}"
+        )
+    location_scope = _string(row, "location_scope", where)
+    qualname_text = _string(row, "qualname", where)
+    qualname: str | None
+    if location_scope == "module":
+        if qualname_text != head:
+            raise LegacyIngestError(
+                f"{where}: module-scope qualname {qualname_text!r} is not "
+                f"the row's own head {head!r}"
+            )
+        qualname = None
+    else:
+        symbol = _symbol(qualname_text, index, f"{where}.qualname")
+        if symbol.file.path != path:
+            raise LegacyIngestError(
+                f"{where}: qualname {qualname_text!r} disagrees with the "
+                f"item's own file {path!r}"
+            )
+        qualname = symbol.qualname
+    return SecuritySurfaceRow(
+        file=FileId(path),
+        start_line=_lane_int(row, "start_line", where),
+        end_line=_lane_int(row, "end_line", where),
+        evidence_symbol=_string(row, "evidence_symbol", where),
+        qualname=qualname,
+        location_scope=location_scope,
+        category=_string(row, "category", where),
+        capability=_string(row, "capability", where),
+        evidence_kind=_string(row, "evidence_kind", where),
+        classification_mode=_string(row, "classification_mode", where),
+        source_kind=_string(row, "source_kind", where),
+    )
 
 
 def _lane_rows(

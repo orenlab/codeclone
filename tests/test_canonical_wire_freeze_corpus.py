@@ -30,6 +30,7 @@ from codeclone.canonical import (
     ModuleId,
     ModuleSymbol,
     OpaqueEntity,
+    SecuritySurfaceRow,
     SymbolId,
     canonical_model_from_legacy_document,
 )
@@ -121,6 +122,72 @@ def test_f3_canonical_family_carries_the_corpus_adoption_scopes(
         in rows
     )
     assert sum(1 for row in rows if row.numerator == 0) == 16
+
+
+def test_f10_canonical_family_carries_the_s5_corpus_surfaces(
+    corpus_s5_report: dict[str, object],
+) -> None:
+    """F10 from the REAL producer document over the slice-5 stage.
+
+    Measured ground truth (2026-08-26): 11 rows, key (FILE, start_line,
+    evidence_symbol) 11/11 distinct; every location scope populated
+    (module 4 / callable 6 / class 1); both source-kind verdicts present
+    (production 9 / tests 2); TWO evidence symbols share ONE (file, line)
+    — the eval+compile datum — and one symbol repeats across two lines of
+    one callable."""
+    model = canonical_model_from_legacy_document(corpus_s5_report)
+    rows = model.facts.analysis.security_surfaces
+    assert len(rows) == 11
+    keys = {(row.file, row.start_line, row.evidence_symbol) for row in rows}
+    assert len(keys) == 11
+    by_scope: dict[str, int] = {}
+    for row in rows:
+        by_scope[row.location_scope] = by_scope.get(row.location_scope, 0) + 1
+    assert by_scope == {"module": 4, "callable": 6, "class": 1}
+    assert {row.source_kind for row in rows} == {"production", "tests"}
+    probe = FileId("pkg/security_probe.py")
+    same_line = {
+        row.evidence_symbol
+        for row in rows
+        if row.file == probe and row.start_line == 22
+    }
+    assert same_line == {"eval", "compile"}
+    loads_lines = sorted(
+        row.start_line for row in rows if row.evidence_symbol == "pickle.loads"
+    )
+    assert loads_lines == [26, 27]
+
+
+def test_f10_s5_corpus_scopes_bind_their_local_names(
+    corpus_s5_report: dict[str, object],
+) -> None:
+    """The scope/local-name binding on REAL rows: the tests-kind carrier
+    row verbatim, the one class-scope row, and every module-scope row
+    with its local name absent."""
+    model = canonical_model_from_legacy_document(corpus_s5_report)
+    rows = model.facts.analysis.security_surfaces
+    assert (
+        SecuritySurfaceRow(
+            file=FileId("tests/test_shell_probe.py"),
+            start_line=11,
+            end_line=11,
+            evidence_symbol="subprocess.call",
+            qualname="test_shell_probe",
+            location_scope="callable",
+            category="process_boundary",
+            capability="subprocess_call",
+            evidence_kind="call",
+            classification_mode="exact_call",
+            source_kind="tests",
+        )
+        in rows
+    )
+    class_rows = [row for row in rows if row.location_scope == "class"]
+    assert [(row.qualname, row.evidence_symbol) for row in class_rows] == [
+        ("ShellHelper", "subprocess.check_output")
+    ]
+    module_rows = {row.qualname for row in rows if row.location_scope == "module"}
+    assert module_rows == {None}
 
 
 def test_dead_code_canonical_family_carries_the_tagged_variants(

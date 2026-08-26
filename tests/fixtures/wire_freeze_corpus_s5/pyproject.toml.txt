@@ -1,0 +1,5 @@
+[tool.codeclone]
+# Security-surface projection rides the semantic event walk, which the
+# analyzer runs only under semantic authority — the same switch the base
+# repository uses.
+semantic_authority = true

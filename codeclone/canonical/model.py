@@ -74,6 +74,11 @@ from codeclone.canonical.identity import (
     IMPORT_TYPES,
     LIVE_ROOT_REASONS,
     RISK_DIMENSIONS,
+    SECURITY_CLASSIFICATION_MODES,
+    SECURITY_EVIDENCE_KINDS,
+    SECURITY_LOCATION_SCOPES,
+    SECURITY_SOURCE_KINDS,
+    SECURITY_SURFACE_CATEGORIES,
     VIOLATION_KINDS,
     AnalysisFile,
     DeadCodeEntity,
@@ -559,6 +564,91 @@ class AdoptionCountRow:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SecuritySurfaceRow:
+    """F10 security-surface fact (wave 4, slice 5).
+
+    Logical key — measured, never invented: ``(FILE, start_line,
+    evidence_symbol)``.  The packet's exhaustive 1-3-field enumeration
+    found exactly SIX unique 3-keys with ``evidence_symbol`` in every one
+    (377/377 at recon; re-measured live at HEAD 387/387 and 11/11 on the
+    s5 corpus), and this is the ratified pick.  Two symbols may share one
+    line (the s5 ``eval(compile(...))`` datum) and one symbol may repeat
+    across lines — both key components carry measured weight.
+
+    ``source_kind`` is the classification VERDICT of the one producer
+    owner, stored as an analysis fact and never re-derived on read (the F7
+    kind precedent); its meaning is owned by SOURCE_KIND_POLICY_VERSION.
+    ``capability`` is the producer's catalog entry — an open string whose
+    meaning is owned by SECURITY_SURFACE_CATALOG_VERSION, never a wire
+    vocabulary.  ``qualname`` is the LOCAL name of the hosting unit and is
+    absent exactly on module-scope rows (the head is the file itself);
+    the producer's glued ``head:local`` spelling never enters the model.
+    The legacy row's ``module`` field is the registry's FILE-MODULE
+    projection — verified at ingest, re-derivable from ``file_modules``,
+    never stored (the F7 ``member_paths`` precedent).
+    """
+
+    file: FileId
+    start_line: int
+    end_line: int
+    evidence_symbol: str
+    qualname: str | None
+    location_scope: str
+    category: str
+    capability: str
+    evidence_kind: str
+    classification_mode: str
+    source_kind: str
+
+    def __post_init__(self) -> None:
+        if self.category not in SECURITY_SURFACE_CATEGORIES:
+            raise CanonicalModelError(f"unknown surface category: {self.category!r}")
+        if self.location_scope not in SECURITY_LOCATION_SCOPES:
+            raise CanonicalModelError(
+                f"unknown surface location scope: {self.location_scope!r}"
+            )
+        if self.evidence_kind not in SECURITY_EVIDENCE_KINDS:
+            raise CanonicalModelError(
+                f"unknown surface evidence kind: {self.evidence_kind!r}"
+            )
+        if self.classification_mode not in SECURITY_CLASSIFICATION_MODES:
+            raise CanonicalModelError(
+                f"unknown surface classification mode: {self.classification_mode!r}"
+            )
+        if self.source_kind not in SECURITY_SOURCE_KINDS:
+            raise CanonicalModelError(
+                f"unknown surface source kind: {self.source_kind!r}"
+            )
+        if not self.evidence_symbol:
+            raise CanonicalModelError("surface evidence symbol must be non-empty")
+        if not self.capability:
+            raise CanonicalModelError("surface capability must be non-empty")
+        if isinstance(self.start_line, bool) or self.start_line < 1:
+            raise CanonicalModelError(
+                f"surface start line must be a positive int: {self.start_line!r}"
+            )
+        if isinstance(self.end_line, bool) or self.end_line < self.start_line:
+            raise CanonicalModelError(
+                "surface end line must be an int not before its start: "
+                f"{self.end_line!r}"
+            )
+        if self.location_scope == "module":
+            if self.qualname is not None:
+                raise CanonicalModelError(
+                    "a module-scope surface carries no local name (the head "
+                    f"is the file itself): {self.qualname!r}"
+                )
+        elif not self.qualname:
+            raise CanonicalModelError(
+                f"a {self.location_scope}-scope surface requires a local name"
+            )
+        elif ":" in self.qualname:
+            raise CanonicalModelError(
+                f"surface local name must not be a glued identity: {self.qualname!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RunScalars:
     """F9 run-level analysis scalars (wave 4) — ONE record per snapshot.
 
@@ -625,6 +715,7 @@ class AnalysisFacts:
     api_symbols: frozenset[ApiSymbolRow] = field(default_factory=frozenset)
     risk_observations: frozenset[RiskObservationRow] = field(default_factory=frozenset)
     adoption_counts: frozenset[AdoptionCountRow] = field(default_factory=frozenset)
+    security_surfaces: frozenset[SecuritySurfaceRow] = field(default_factory=frozenset)
     # F9: one record per analysis snapshot; None is the absent record —
     # never an all-zero fake (zero is measured in this family).
     run_scalars: RunScalars | None = None
@@ -857,6 +948,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_symbol(risk_observation.symbol)
     for adoption in facts.adoption_counts:
         closure.see_endpoint(adoption.scope)
+    for surface in facts.security_surfaces:
+        closure.files.add(surface.file)
     closure.files.update(model.analyzed_files)
     return closure
 
@@ -911,6 +1004,11 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         facts.adoption_counts,
         "adoption_counts.key",
         lambda row: (endpoint_key(row.scope), row.feature),
+    )
+    _unique_by_key(
+        facts.security_surfaces,
+        "security_surfaces.key",
+        lambda row: (*canonical_key(row.file), row.start_line, row.evidence_symbol),
     )
 
 

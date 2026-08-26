@@ -1,0 +1,11 @@
+"""Tests-kind probe: one boundary call under a test-named tree.
+
+The datum that keeps ``source_kind`` a VERDICT with variance: the same
+boundary evidence classifies ``tests`` here and ``production`` in ``pkg``.
+"""
+
+import subprocess
+
+
+def test_shell_probe() -> int:
+    return subprocess.call(["true"])

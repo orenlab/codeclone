@@ -139,6 +139,7 @@ from codeclone.canonical.model import (
     GraphNodeRow,
     RiskObservationRow,
     RunScalars,
+    SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
     ViolationRow,
@@ -155,6 +156,8 @@ from codeclone.contracts import (
     DESIGN_METRICS_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
     MODULE_IDENTITY_VERSION,
+    SECURITY_SURFACE_CATALOG_VERSION,
+    SOURCE_KIND_POLICY_VERSION,
     STATEMENT_REACHABILITY_POLICY_VERSION,
     STORAGE_SCHEMA_REVISION,
 )
@@ -231,6 +234,15 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     # silently share content addresses across generations.
     "risk_observation": f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
     "run_scalar": f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    # F10: TWO policy owners give this family meaning -- the detector
+    # catalog (which symbols and capabilities exist) and the source-kind
+    # classification verdict -- so both revisions enter the
+    # content-address namespace and neither can bump silently under the
+    # other (the F4 two-owner precedent).
+    "security_surface": (
+        f"security_surface_catalog:{SECURITY_SURFACE_CATALOG_VERSION}"
+        f":source_kind:{SOURCE_KIND_POLICY_VERSION}"
+    ),
     "semantic_edge": f"contract_ir:{CONTRACT_IR_VERSION}",
     "sink_role": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     "violation": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
@@ -679,6 +691,30 @@ def _observation_model_rows(
                 "scope": _endpoint_value(adoption.scope),
             },
         )
+    for surface in sorted(
+        facts.security_surfaces,
+        key=lambda row: (
+            canonical_key(row.file),
+            row.start_line,
+            row.evidence_symbol,
+        ),
+    ):
+        yield (
+            "security_surface",
+            {
+                "capability": surface.capability,
+                "category": surface.category,
+                "classification_mode": surface.classification_mode,
+                "end_line": surface.end_line,
+                "evidence_kind": surface.evidence_kind,
+                "evidence_symbol": surface.evidence_symbol,
+                "file": surface.file.path,
+                "location_scope": surface.location_scope,
+                "qualname": surface.qualname,
+                "source_kind": surface.source_kind,
+                "start_line": surface.start_line,
+            },
+        )
     for api_symbol in sorted(
         facts.api_symbols,
         key=lambda row: (
@@ -1013,6 +1049,31 @@ def _decode_api_symbol_row(row: Mapping[str, object], where: str) -> ApiSymbolRo
     )
 
 
+def _decode_security_surface_row(
+    row: Mapping[str, object], where: str
+) -> SecuritySurfaceRow:
+    """Shape guards only: the vocabularies, span floors, and the
+    scope/local-name binding have exactly one owner -- the model law
+    (``SecuritySurfaceRow``), whose refusal ``_decode_row`` wraps into a
+    typed integrity error."""
+    qualname = _require_field(row, "qualname", where)
+    if qualname is not None and not isinstance(qualname, str):
+        raise StoreIntegrityError(f"{where}: stored field 'qualname' is not a string")
+    return SecuritySurfaceRow(
+        file=FileId(_require_str(row, "file", where)),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        evidence_symbol=_require_str(row, "evidence_symbol", where),
+        qualname=qualname,
+        location_scope=_require_str(row, "location_scope", where),
+        category=_require_str(row, "category", where),
+        capability=_require_str(row, "capability", where),
+        evidence_kind=_require_str(row, "evidence_kind", where),
+        classification_mode=_require_str(row, "classification_mode", where),
+        source_kind=_require_str(row, "source_kind", where),
+    )
+
+
 def _decode_run_scalar_row(row: Mapping[str, object], where: str) -> RunScalars:
     return RunScalars(
         classes=_require_line(row, "classes", where),
@@ -1069,6 +1130,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "module": _decode_module_row,
     "risk_observation": _decode_risk_observation_row,
     "run_scalar": _decode_run_scalar_row,
+    "security_surface": _decode_security_surface_row,
     "semantic_edge": _decode_semantic_edge_row,
     "sink_role": _decode_sink_role_row,
     "violation": _decode_violation_row,
@@ -1147,6 +1209,9 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 ),
                 adoption_counts=frozenset(
                     cast("list[AdoptionCountRow]", family("adoption_count"))
+                ),
+                security_surfaces=frozenset(
+                    cast("list[SecuritySurfaceRow]", family("security_surface"))
                 ),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
             )
@@ -1453,6 +1518,7 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "graph_nodes": "graph_node",
     "risk_observations": "risk_observation",
     "run_scalars": "run_scalar",
+    "security_surfaces": "security_surface",
     "semantic_edges": "semantic_edge",
     "sink_roles": "sink_role",
     "violations": "violation",

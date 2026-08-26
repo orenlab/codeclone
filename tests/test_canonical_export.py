@@ -105,12 +105,15 @@ _TARGET = "worktree-a"
 # dead_code_observation objects under the composite liveness plus
 # statement-reachability namespace, which moves the membership and the
 # bytes.  The F3 ``adoption_counts`` family (slice 5) replaced the K3
-# literals (run 8d81ec9d..., artifact eb94d00b...) deliberately: the
-# fixture gained four tagged-ScopeRef adoption_count objects under the
-# adoption_coverage namespace, which moves the membership and the bytes —
-# the one announced transition of this commit.
-_FIXTURE_RUN_ID = "b09805dd6e721079f82096e9bf399f2b0b5549f3529536332787ec627506e27e"
-_FIXTURE_ARTIFACT = "d064f5f7d838be0d9772c16b3be9ddfbd83eda98a55f3851fec8bff1b51aae43"
+# literals (run b09805dd..., artifact d064f5f7...) deliberately: the
+# fixture gained five tagged-ScopeRef adoption_count objects under the
+# adoption_coverage namespace.  The F10 ``security_surfaces`` family
+# (slice 5) replaced the F3 literals deliberately: the fixture gained six
+# evidence-keyed security_surface objects under the composite
+# catalog-plus-source-kind namespace, which moves the membership and the
+# bytes — the one announced transition of this commit.
+_FIXTURE_RUN_ID = "4b82a70002840dd76ad9f8743ac9763fe8237390ca497619a071f01092b4c3eb"
+_FIXTURE_ARTIFACT = "297ee1ff4d0a3a61eaeef5c6cabe570a7469f212f77b608dbc09d104f1c38069"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:
