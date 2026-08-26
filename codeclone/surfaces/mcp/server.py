@@ -996,7 +996,7 @@ def build_mcp_server(
     )
     def get_report_section(
         run_id: RunIdParam = None,
-        section: ReportSectionParam = "all",
+        section: ReportSectionParam = "meta",
         family: FamilyParam = None,
         path: PathFilterParam = None,
         offset: OffsetParam = 0,

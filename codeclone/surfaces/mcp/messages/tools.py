@@ -208,9 +208,12 @@ EVALUATE_GATES: Final = (
 )
 
 GET_REPORT_SECTION: Final = (
-    "Return one canonical report section. inventory paginates file_registry; "
-    "findings requires family= for group pages; metrics_detail paginates "
-    "metric items. Prefer metrics, changed, list_findings over section=all."
+    "Return one bounded canonical report section; defaults to meta. inventory "
+    "paginates file_registry; findings requires family= for group pages; "
+    "metrics_detail paginates metric items. This tool no longer returns the "
+    "whole report: the removed 'all' section answers with a typed refusal. "
+    "For the full document, generate it on disk with "
+    "`codeclone <root> --json .codeclone/report.json` and read the file."
 )
 
 LIST_FINDINGS: Final = (
@@ -257,11 +260,15 @@ CHECK_COMPLEXITY: Final = (
 )
 
 CHECK_CLONES: Final = (
-    "Return clone findings from a compatible stored run. "
+    "Return findings from the baseline-tracked clone lanes — function, block "
+    "and segment groups — of a compatible stored run. "
     "Use analyze_repository first if no compatible run is available. "
     "When filtering by root without run_id, pass an absolute root. "
+    "The advisory near_miss and renamed_structure tiers sit beside the clone "
+    "lane rather than inside it and are not returned here, nor by any other "
+    "MCP tool; read them from a generated report.json. "
     "Prefer this narrower tool instead of list_findings when you only need "
-    "clone findings."
+    "clone-lane findings."
 )
 
 CHECK_COUPLING: Final = (

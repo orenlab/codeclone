@@ -9,12 +9,12 @@ from __future__ import annotations
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
 from ._code_provenance import code_provenance_payload
-from ._context_governance import attach_passive_context_governance
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
 from ._report_section import (
     findings_section_payload,
     inventory_section_payload,
+    removed_report_section_payload,
     require_mapping_section,
 )
 from ._session_baseline import (
@@ -46,9 +46,11 @@ from ._session_shared import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    DEFAULT_REPORT_SECTION,
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
     FAMILY_CLONE,
+    REMOVED_REPORT_SECTIONS,
     REPORT_SCHEMA_VERSION,
     SOURCE_KIND_PRODUCTION,
     CacheStatus,
@@ -1113,12 +1115,18 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         self,
         *,
         run_id: str | None = None,
-        section: ReportSection = "all",
+        section: ReportSection = DEFAULT_REPORT_SECTION,
         family: MetricsDetailFamily | None = None,
         path: str | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> dict[str, object]:
+        # Withdrawn values are answered before validation, so that asking for
+        # one meets the surface's refusal typology instead of a contract error
+        # that cannot tell "removed" from "misspelled".
+        requested_section = str(section).strip()
+        if requested_section in REMOVED_REPORT_SECTIONS:
+            return removed_report_section_payload(requested_section)
         validated_section = _helpers._validate_choice(
             "section",
             section,
@@ -1126,16 +1134,6 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         )
         record = self._runs.resolve_any_root(run_id)
         report_document = record.report_document
-        if validated_section == "all":
-            return attach_passive_context_governance(
-                dict(report_document),
-                response={
-                    "tool": "get_report_section",
-                    "budget_scope": "whole_response",
-                    "evidence_policy": "observe_only_unpaginated",
-                    "section": "all",
-                },
-            )
         if validated_section == "changed":
             if record.changed_projection is None:
                 raise MCPServiceContractError(

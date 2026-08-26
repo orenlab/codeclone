@@ -180,7 +180,6 @@ MetricsDetailFamily = Literal[
     "health",
 ]
 ReportSection = Literal[
-    "all",
     "meta",
     "inventory",
     "findings",
@@ -205,13 +204,12 @@ _FOCUS_CHANGED_PATHS: Final[SummaryFocus] = "changed_paths"
 # delivery path: they bypassed the resolver, so autodetection, normalization and
 # precedence never ran on MCP, and a key was absent either by policy or because
 # nobody had added its name.
-_RESOURCE_SECTION_MAP: Final[dict[str, ReportSection]] = {
-    "report.json": "all",
-    "summary": "meta",
-    "health": "metrics",
-    "changed": "changed",
-    "overview": "derived",
-}
+#
+# A ``_RESOURCE_SECTION_MAP`` used to sit here, translating resource suffixes
+# into report sections. Nothing ever read it — ``_render_resource`` dispatches
+# on the suffix directly — so it was a second, silent record of the resource
+# vocabulary, and its ``report.json -> all`` entry outlived the section it
+# named. Resource routing has exactly one owner, and it is ``_render_resource``.
 _SEVERITY_WEIGHT: Final[dict[str, float]] = {
     SEVERITY_CRITICAL: 1.0,
     SEVERITY_WARNING: 0.6,
@@ -278,9 +276,15 @@ MAX_MCP_HISTORY_LIMIT = 10
 # counts: releasing a pin that a live intent still needs would break that
 # intent, so this is a backstop against abandonment, not a working limit.
 MAX_PINNED_MCP_RUNS = 10
+DEFAULT_REPORT_SECTION: Final[ReportSection] = "meta"
+# ``all`` is withdrawn, not forgotten. The whole document reached 37M tokens on
+# this repository, so the tool stopped serving it — but the value stays a
+# recognised input so that asking for it meets a typed in-band refusal naming
+# the bounded sections and the on-disk projection, instead of a raised contract
+# error that reads like a typo.
+REMOVED_REPORT_SECTIONS: Final[frozenset[str]] = frozenset({"all"})
 _VALID_REPORT_SECTIONS = frozenset(
     {
-        "all",
         "meta",
         "inventory",
         "findings",
@@ -1000,6 +1004,7 @@ __all__ = [
     "DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD",
     "DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD",
     "DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD",
+    "DEFAULT_REPORT_SECTION",
     "DEFAULT_SEGMENT_MIN_LOC",
     "DEFAULT_SEGMENT_MIN_STMT",
     "EFFORT_EASY",
@@ -1010,6 +1015,7 @@ __all__ = [
     "FAMILY_DEAD_CODE",
     "FAMILY_DESIGN",
     "FAMILY_STRUCTURAL",
+    "REMOVED_REPORT_SECTIONS",
     "REPORT_SCHEMA_VERSION",
     "SEVERITY_CRITICAL",
     "SEVERITY_INFO",

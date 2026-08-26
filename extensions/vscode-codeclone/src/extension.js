@@ -2524,8 +2524,11 @@ class CodeCloneController {
                     finding_id: resolved.findingId,
                     detail_level: "normal",
                 }));
-            if (payload && payload.html_anchor) {
-                anchor = String(payload.html_anchor);
+            // The HTML report anchors findings by canonical id, and the tree
+            // node carries the short id, so the canonical id from the detail
+            // payload is what makes the deep link land.
+            if (payload && payload.canonical_id) {
+                anchor = `finding-${String(payload.canonical_id)}`;
             }
         } catch {
             // Keep the deterministic fallback anchor when detail lookup fails.

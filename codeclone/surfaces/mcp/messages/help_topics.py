@@ -134,8 +134,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             ("Use get_finding and get_remediation only after selecting an issue."),
             (
-                "get_report_section(section='all') is an exception path, not "
-                "a default first step."
+                "get_report_section returns one bounded section; the whole "
+                "report document is not available through MCP."
             ),
         ),
         recommended_tools=(
@@ -162,7 +162,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         anti_patterns=(
             "Starting exploration with list_findings on a noisy repository.",
-            "Using get_report_section(section='all') as the default first step.",
+            (
+                "Asking get_report_section for the whole document instead of "
+                "one named section."
+            ),
             (
                 "Escalating detail on larger lists instead of opening one "
                 "finding with get_finding."

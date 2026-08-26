@@ -20,10 +20,25 @@ from ...domain.findings import (
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ...utils.payload_narrow import is_record_mapping
-from ._session_shared import MCPServiceContractError
+from ._session_shared import _VALID_REPORT_SECTIONS, MCPServiceContractError
 from .payloads import paginate
 
 _REPORT_SECTION_MAX_LIMIT: Final = 200
+
+_REMOVED_SECTION_NEXT_STEP: Final = (
+    "Request one bounded section instead: "
+    "get_report_section(section='meta'|'inventory'|'findings'|'metrics'|"
+    "'metrics_detail'|'changed'|'derived'|'module_map'|'integrity'). "
+    "For the whole canonical document, generate it on disk with "
+    "`codeclone <root> --json .codeclone/report.json` and read the file; "
+    "MCP no longer serves the full report."
+)
+
+_REMOVED_SECTION_MESSAGE: Final = (
+    "Report section 'all' was removed from this tool. It returned the entire "
+    "report document in one response, which is unbounded by construction and "
+    "reached tens of millions of tokens on large repositories."
+)
 
 _FINDINGS_SECTION_FAMILIES: Final = frozenset(
     {
@@ -164,6 +179,26 @@ def findings_section_payload(
     }
 
 
+def removed_report_section_payload(section: str) -> dict[str, object]:
+    """The in-band answer for a section this tool no longer serves.
+
+    A raised contract error would read as "you mistyped a section name"; the
+    caller asked for something that existed and was withdrawn, so the answer
+    has to say that, list what does exist, and name a step that reaches the
+    same content — the bounded sections here, or the generated report on disk.
+    """
+
+    return {
+        "status": "unsupported_section",
+        "section": section,
+        "removed": True,
+        "available_sections": sorted(_VALID_REPORT_SECTIONS),
+        "message": _REMOVED_SECTION_MESSAGE,
+        "next_tool": "get_report_section",
+        "next_step": _REMOVED_SECTION_NEXT_STEP,
+    }
+
+
 def require_mapping_section(
     report_document: Mapping[str, object],
     *,
@@ -181,6 +216,7 @@ __all__ = [
     "findings_section_payload",
     "inventory_section_payload",
     "normalize_findings_section_family",
+    "removed_report_section_payload",
     "require_mapping_section",
     "validate_findings_section_family",
 ]

@@ -339,7 +339,7 @@ ReportSectionParam = Annotated[
     Field(
         description=(
             "meta, inventory, findings, metrics, metrics_detail, changed, "
-            "derived, module_map, integrity, or all."
+            "derived, module_map, or integrity. Defaults to meta."
         )
     ),
 ]

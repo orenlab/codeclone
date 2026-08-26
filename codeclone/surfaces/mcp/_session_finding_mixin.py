@@ -573,7 +573,6 @@ class _MCPSessionFindingMixin:
             canonical_to_short=canonical_to_short,
         )
         payload["canonical_id"] = canonical_id
-        payload["short_id"] = short_finding_id
         payload["priority_score"] = resolved_priority_payload["score"]
         payload["priority_factors"] = resolved_priority_payload["factors"]
         payload["locations"] = self._locations_for_finding(
@@ -581,7 +580,6 @@ class _MCPSessionFindingMixin:
             finding,
             include_uri=detail_level == "full",
         )
-        payload["html_anchor"] = f"finding-{canonical_id}"
         payload["novelty"] = self._finding_novelty(finding)
         if resolved_remediation is not None:
             payload["remediation"] = resolved_remediation
@@ -589,6 +587,7 @@ class _MCPSessionFindingMixin:
             record,
             payload,
             detail_level=detail_level,
+            short_finding_id=short_finding_id,
         )
 
     def _project_finding_detail(
@@ -597,27 +596,28 @@ class _MCPSessionFindingMixin:
         finding: Mapping[str, object],
         *,
         detail_level: DetailLevel,
+        short_finding_id: str | None = None,
     ) -> dict[str, object]:
+        # ``id`` carries the short form, including the disambiguated form when
+        # two canonical ids share a base short name, so a separate ``short_id``
+        # field can only ever repeat it. ``html_anchor`` was likewise
+        # ``finding-`` prefixed onto ``canonical_id`` and nothing else; both are
+        # derivable by the caller and are no longer paid for per finding card.
         canonical_id = str(finding.get("canonical_id") or finding.get("id", "")).strip()
-        short_finding_id = str(
-            finding.get("short_id") or self._short_finding_id(record, canonical_id)
+        resolved_short_id = (
+            str(short_finding_id)
+            if short_finding_id is not None
+            else self._short_finding_id(record, canonical_id)
         )
-        html_anchor = str(
-            finding.get("html_anchor") or f"finding-{canonical_id}"
-        ).strip()
         if detail_level == "full":
             full_payload = dict(finding)
-            full_payload["id"] = short_finding_id
-            full_payload["short_id"] = short_finding_id
+            full_payload["id"] = resolved_short_id
             full_payload["canonical_id"] = canonical_id
-            full_payload["html_anchor"] = html_anchor
             full_payload["novelty"] = self._finding_novelty(finding)
             return full_payload
         payload: dict[str, object] = {
-            "id": short_finding_id,
-            "short_id": short_finding_id,
+            "id": resolved_short_id,
             "canonical_id": canonical_id,
-            "html_anchor": html_anchor,
             "kind": _helpers._finding_kind_label(finding),
             "severity": str(finding.get("severity", "")),
             "novelty": self._finding_novelty(finding),
@@ -676,7 +676,15 @@ class _MCPSessionFindingMixin:
         record: MCPRunRecord,
         finding: Mapping[str, object],
     ) -> dict[str, object]:
-        return self._project_finding_detail(record, finding, detail_level="summary")
+        # ``finding`` here is an already-projected full payload, so its ``id``
+        # is the short form and re-deriving it would rebuild the whole run's
+        # id map per card.
+        return self._project_finding_detail(
+            record,
+            finding,
+            detail_level="summary",
+            short_finding_id=str(finding.get("id", "")),
+        )
 
     def _comparison_finding_card(
         self,
@@ -1695,6 +1703,7 @@ class _MCPSessionFindingMixin:
                         record,
                         finding,
                         detail_level="summary",
+                        short_finding_id=str(finding.get("id", "")),
                     ),
                 }
             )

@@ -55,7 +55,7 @@ Analyze only changed files from an explicit `changed_paths` list or a `git_diff_
 Return a compact snapshot of a stored run (latest or specified by 8-char short id or full digest). Includes health score, top findings, and artifact locations.
 
 **`get_report_section(section, family, limit, ...)`**
-Retrieve one canonical report section by name. Common sections: `inventory` (file registry), `findings` (grouped by family when specified), `metrics_detail` (with pagination). Prefer this over retrieving the full report.
+Retrieve one bounded canonical report section by name; `section` defaults to `meta`. Sections: `meta`, `inventory` (file registry), `findings` (grouped by family when specified), `metrics`, `metrics_detail` (with pagination), `changed`, `derived`, `module_map`, `integrity`. The whole report document is not served over MCP — the withdrawn `all` section answers with a typed refusal (`status: "unsupported_section"`) that names the bounded sections and the on-disk route. For the full document, generate it with `codeclone <root> --json .codeclone/report.json` and read the file.
 
 **`get_implementation_context(root, paths, symbols, include, ...)`**
 Return deterministic, bounded implementation context for explicit repo-relative `paths` or `module:symbol` qualnames (via `symbols`) from an existing run. Projects module dependencies, API surfaces, callers, blast radius, cache origin, and workspace freshness. Does not authorize edits or re-analyze.

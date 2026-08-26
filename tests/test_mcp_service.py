@@ -3063,8 +3063,8 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
             ),
             ("Use get_finding and get_remediation only after selecting an issue."),
             (
-                "get_report_section(section='all') is an exception path, not "
-                "a default first step."
+                "get_report_section returns one bounded section; the whole "
+                "report document is not available through MCP."
             ),
         ],
         "recommended_tools": [
@@ -3090,7 +3090,10 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
         ],
         "anti_patterns": [
             "Starting exploration with list_findings on a noisy repository.",
-            "Using get_report_section(section='all') as the default first step.",
+            (
+                "Asking get_report_section for the whole document instead of "
+                "one named section."
+            ),
             (
                 "Escalating detail on larger lists instead of opening one "
                 "finding with get_finding."
@@ -3642,17 +3645,17 @@ def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
     assert findings_total >= 1
     first = cast("list[dict[str, object]]", findings["items"])[0]
     assert str(first["id"]).startswith("fn:")
-    assert first["id"] == first["short_id"]
+    assert "short_id" not in first
     assert str(first["canonical_id"]).startswith("clone:function:")
-    assert first["html_anchor"] == f"finding-{first['canonical_id']}"
+    assert "html_anchor" not in first
     assert first["novelty"] in {"known", "new", "unavailable"}
     assert first["kind"] == "function_clone"
 
     finding = service.get_finding(finding_id=str(first["id"]))
     assert finding["id"] == first["id"]
-    assert finding["short_id"] == first["id"]
+    assert "short_id" not in finding
     assert finding["canonical_id"] == first["canonical_id"]
-    assert finding["html_anchor"] == f"finding-{finding['canonical_id']}"
+    assert "html_anchor" not in finding
     assert "remediation" in finding
 
     hotspots = service.list_hotspots(kind="highest_spread")
@@ -3859,13 +3862,12 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         )
     )
     run_id = str(summary["run_id"])
-    report_document = service.get_report_section(run_id=run_id, section="all")
+    report_meta = service.get_report_section(run_id=run_id, section="meta")
     design_thresholds = cast(
         "dict[str, dict[str, object]]",
-        cast(
-            "dict[str, object]",
-            cast("dict[str, object]", report_document["meta"])["analysis_thresholds"],
-        )["design_findings"],
+        cast("dict[str, object]", report_meta["analysis_thresholds"])[
+            "design_findings"
+        ],
     )
     assert design_thresholds == {
         "complexity": {
@@ -3884,15 +3886,15 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
             "value": 4,
         },
     }
+    record = service._runs.resolve_any_root(run_id)
     finding_groups = cast(
         "dict[str, object]",
-        cast("dict[str, object]", report_document["findings"])["groups"],
+        cast("dict[str, object]", record.report_document["findings"])["groups"],
     )
     design_groups = cast(
         "list[dict[str, object]]",
         cast("dict[str, object]", finding_groups["design"])["groups"],
     )
-    record = service._runs.resolve_any_root(run_id)
     canonical_design_ids = {
         service._short_finding_id(record, str(group["id"])) for group in design_groups
     }
@@ -4269,17 +4271,29 @@ def test_get_report_section_inventory_and_findings_are_paginated(
     assert "clones" not in structural_page
 
 
-def test_get_report_section_all_includes_passive_context_governance(
+def test_removed_report_section_refusal_carries_no_report_payload(
     tmp_path: Path,
 ) -> None:
+    """What replaced the unpaginated ``all`` response.
+
+    That response was the surface's one observe-only, unpaginated projection
+    and wore a passive context-governance envelope to say so. Nothing is
+    projected any more, so there is no envelope to attach — and the refusal
+    must not grow one, because an envelope here would suggest a payload was
+    measured and returned.
+    """
+
     service, summary = _analyze_quality_repository(tmp_path)
+
     payload = service.get_report_section(
         run_id=str(summary["run_id"]),
         section="all",
     )
-    governance = cast("dict[str, object]", payload["context_governance"])
-    assert governance["mode"] == "observe"
-    assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
+
+    assert payload["status"] == "unsupported_section"
+    assert "context_governance" not in payload
+    assert payload["message"]
+    assert REPORT_SCHEMA_VERSION not in payload.values()
 
 
 def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
@@ -4954,12 +4968,11 @@ def test_mcp_analyze_releases_cache_before_report_without_json_roundtrip(
     assert events == ["release", "report"]
     assert forbidden_report_json.call_count == 0
     assert forbidden_report_load.call_count == 0
-    assert service.get_report_section(section="all")["report_schema_version"] == (
-        REPORT_SCHEMA_VERSION
-    )
+    assert service.get_run_summary()["schema"] == REPORT_SCHEMA_VERSION
+    assert service.get_report_section(section="meta")["codeclone_version"]
 
 
-def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> None:
+def test_mcp_service_meta_section_and_optional_path_overrides(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
     service.analyze_repository(
@@ -4970,8 +4983,9 @@ def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> 
         )
     )
 
-    report_document = service.get_report_section(section="all")
-    assert report_document["report_schema_version"] == REPORT_SCHEMA_VERSION
+    report_meta = service.get_report_section(section="meta")
+    assert report_meta["codeclone_version"]
+    assert service.get_run_summary()["schema"] == REPORT_SCHEMA_VERSION
 
     args = service._build_args(
         root_path=tmp_path,
@@ -19348,3 +19362,151 @@ def _nested_mapping(payload: object, *keys: str) -> dict[str, object]:
         current = current[key]
     assert isinstance(current, dict)
     return current
+
+
+def test_get_report_section_all_is_refused_in_band_with_executable_next_step(
+    tmp_path: Path,
+) -> None:
+    """``section="all"`` is withdrawn, and the withdrawal is a typed answer.
+
+    The removed value keeps a reachable input form on purpose: a caller that
+    asks for it must meet the surface's own refusal typology — a status, the
+    sections that do exist, and a step it can execute — not a raised contract
+    error and not, silently, the 37M-token document the removal exists to
+    stop shipping.
+    """
+
+    service, summary = _analyze_quality_repository(tmp_path)
+
+    payload = service.get_report_section(
+        run_id=str(summary["run_id"]),
+        section="all",
+    )
+
+    assert payload["status"] == "unsupported_section"
+    assert payload["section"] == "all"
+    available = cast("list[str]", payload["available_sections"])
+    assert "all" not in available
+    assert "meta" in available
+    next_step = str(payload["next_step"])
+    for route in ("get_report_section(", "--json", ".codeclone/report.json"):
+        assert route in next_step, route
+    # The refusal must not smuggle the document it refuses to return.
+    for document_key in ("findings", "inventory", "metrics", "report_schema_version"):
+        assert document_key not in payload, document_key
+
+
+def test_get_report_section_default_is_the_bounded_meta_section(
+    tmp_path: Path,
+) -> None:
+    """An argument-less call answers with identity, not with the whole report."""
+
+    service, summary = _analyze_quality_repository(tmp_path)
+
+    payload = service.get_report_section(run_id=str(summary["run_id"]))
+
+    assert payload.get("status") != "unsupported_section"
+    assert "codeclone_version" in payload
+    assert "analysis_thresholds" in payload
+    for other_section in ("findings", "inventory", "metrics"):
+        assert other_section not in payload, other_section
+
+
+def test_report_section_vocabulary_no_longer_admits_all() -> None:
+    """The vocabulary itself drops the value; the refusal is not a second list."""
+
+    assert "all" not in mcp_shared_mod._VALID_REPORT_SECTIONS
+    assert "meta" in mcp_shared_mod._VALID_REPORT_SECTIONS
+
+
+def test_finding_payloads_drop_short_id_and_html_anchor(tmp_path: Path) -> None:
+    """Identity derivatives are withdrawn from every projected finding payload.
+
+    ``short_id`` is byte-identical to ``id`` by construction — the projection
+    assigns ``id`` from the short form — and ``html_anchor`` is a pure function
+    of ``canonical_id``. Both were paid for in every card of every list.
+    """
+
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+
+    listed = service.list_findings(run_id=run_id, family="clone")
+    items = cast("list[dict[str, object]]", listed["items"])
+    assert items, "fixture produced no clone findings, so nothing was checked"
+    for item in items:
+        assert "short_id" not in item
+        assert "html_anchor" not in item
+        assert str(item["id"])
+        assert str(item["canonical_id"])
+
+    for detail in ("summary", "normal", "full"):
+        finding = service.get_finding(
+            run_id=run_id,
+            finding_id=str(items[0]["id"]),
+            detail_level=detail,
+        )
+        assert "short_id" not in finding, detail
+        assert "html_anchor" not in finding, detail
+        assert finding["id"] == items[0]["id"], detail
+        assert finding["canonical_id"] == items[0]["canonical_id"], detail
+
+
+def test_get_finding_still_accepts_short_and_canonical_id_forms(
+    tmp_path: Path,
+) -> None:
+    """Withdrawing the echo does not withdraw the input form it echoed."""
+
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+    items = cast(
+        "list[dict[str, object]]",
+        service.list_findings(run_id=run_id, family="clone")["items"],
+    )
+    assert items, "fixture produced no clone findings, so nothing was checked"
+    short_form = str(items[0]["id"])
+    canonical_form = str(items[0]["canonical_id"])
+    assert short_form != canonical_form
+
+    by_short = service.get_finding(run_id=run_id, finding_id=short_form)
+    by_canonical = service.get_finding(run_id=run_id, finding_id=canonical_form)
+
+    assert by_short["canonical_id"] == canonical_form
+    assert by_canonical["canonical_id"] == canonical_form
+    assert by_short["id"] == by_canonical["id"] == short_form
+
+
+def test_disambiguated_short_id_still_reaches_the_payload_through_id(
+    tmp_path: Path,
+) -> None:
+    """The collision case the withdrawal must not lose.
+
+    ``short_id`` was said to be worth keeping when disambiguation makes it
+    differ from the base short form. It is the ``id`` field that carries the
+    disambiguated value, so the collision case survives the withdrawal — this
+    pins that, on a corpus built to collide, rather than assuming it.
+    """
+
+    service, summary = _analyze_quality_repository(tmp_path)
+    record = service._runs.resolve_any_root(str(summary["run_id"]))
+    first = "structural:long_function:aaaaaa1111"
+    second = "structural:long_function:aaaaaa2222"
+
+    canonical_to_short, short_to_canonical = service._finding_id_maps_for_findings(
+        [{"id": first}, {"id": second}]
+    )
+
+    assert canonical_to_short[first] == "struct:long_function:aaaaaa1111"
+    assert canonical_to_short[second] == "struct:long_function:aaaaaa2222"
+    assert short_to_canonical["struct:long_function:aaaaaa1111"] == first
+
+    projected = service._project_finding_detail(
+        record,
+        {"id": first, "canonical_id": first, "severity": "medium"},
+        detail_level="summary",
+        short_finding_id=canonical_to_short[first],
+    )
+
+    assert projected["id"] == "struct:long_function:aaaaaa1111"
+    assert projected["canonical_id"] == first
+    assert "short_id" not in projected
+    assert "html_anchor" not in projected

@@ -291,7 +291,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["list_hotspots"].description
     )
     assert "Prefer format='markdown'" in str(tools["generate_pr_summary"].description)
-    assert "section=all" in str(tools["get_report_section"].description)
+    assert "one bounded canonical report section" in str(
+        tools["get_report_section"].description
+    )
     analyze_repository_schema = cast(
         "dict[str, object]",
         tools["analyze_repository"].inputSchema,
@@ -1281,3 +1283,48 @@ def test_help_topics_recommend_tools_this_server_registers() -> None:
             assert named, f"{lane} recommends no tool to call"
             unknown = sorted(set(named) - registered)
             assert not unknown, f"{lane} recommends unregistered tools: {unknown}"
+
+
+def test_get_report_section_tool_defaults_to_meta_and_withdraws_all() -> None:
+    """The advertised contract carries the withdrawal, not just the runtime.
+
+    An agent picks the default off the schema and the vocabulary off the
+    description. If either still says ``all``, the removal is invisible where
+    the decision is actually made.
+    """
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=4)
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+    schema = cast("dict[str, object]", tools["get_report_section"].inputSchema)
+    properties = cast("dict[str, dict[str, object]]", schema["properties"])
+    section = properties["section"]
+
+    assert section["default"] == "meta"
+    assert "all" not in str(section["description"]).split(", ")
+
+    description = str(tools["get_report_section"].description)
+    assert "section=all" not in description
+    assert "no longer returns the whole report" in description
+    assert ".codeclone/report.json" in description
+
+
+def test_check_clones_description_names_the_lanes_it_actually_covers() -> None:
+    """The tool covers baseline-tracked clone lanes, and says so.
+
+    ``near_miss`` and ``renamed_structure`` are siblings of the clone lane in
+    the report document, not members of it, and no MCP tool returns them.
+    A description promising "clone findings" promises the tiers too.
+    """
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=4)
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+    description = str(tools["check_clones"].description)
+
+    assert "baseline-tracked clone lanes" in description
+    assert "near_miss" in description
+    assert "renamed_structure" in description
+    assert "not returned" in description

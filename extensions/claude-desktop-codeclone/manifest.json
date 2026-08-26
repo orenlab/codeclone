@@ -130,7 +130,7 @@
     },
     {
       "name": "get_report_section",
-      "description": "Return a canonical report section for the latest or specified run."
+      "description": "Return one bounded canonical report section (default meta) for the latest or specified run; the whole report document is not served."
     },
     {
       "name": "get_review_receipt",
@@ -138,7 +138,7 @@
     },
     {
       "name": "check_clones",
-      "description": "Return clone findings from a compatible stored run."
+      "description": "Return findings from the baseline-tracked clone lanes (function, block, segment) of a compatible stored run; the advisory near_miss and renamed_structure tiers are not covered."
     },
     {
       "name": "check_complexity",
