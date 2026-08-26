@@ -55,7 +55,7 @@ def test_finish_propose_memory_writes_attested_evidence(tmp_path: Path) -> None:
         hook = service.finish_propose_memory(
             root_path=root,
             changed_files=["pkg/mod.py"],
-            claims_text=None,
+            claims_text="Patch keeps the module surface stable.",
             review_text=None,
             verification_profile="python_structural",
             attested_evidence={
@@ -65,12 +65,16 @@ def test_finish_propose_memory_writes_attested_evidence(tmp_path: Path) -> None:
             },
         )
         candidates = cast("list[dict[str, object]]", hook["memory_candidates"])
-        module_role_id = next(
-            str(item["id"]) for item in candidates if item.get("type") == "module_role"
+        # Evidence rides the candidates that assert something. The scope walk
+        # used to also mint a contentless module_role echo and this pin read it;
+        # the claims-derived change_rationale is the carrier now.
+        carrier_id = next(
+            str(item["id"])
+            for item in candidates
+            if item.get("type") == "change_rationale"
         )
         by_kind = {
-            row.evidence_kind: row
-            for row in store.list_evidence_for_memory(module_role_id)
+            row.evidence_kind: row for row in store.list_evidence_for_memory(carrier_id)
         }
 
     assert by_kind["receipt"].digest == _RECEIPT_DIGEST

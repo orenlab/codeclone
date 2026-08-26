@@ -48,29 +48,41 @@ def _attested_bundle() -> dict[str, str]:
     }
 
 
-def _module_role(candidates: list[dict[str, object]]) -> dict[str, object]:
+_CLAIMS = "Patch keeps the module surface stable."
+
+
+def _carrier(candidates: list[dict[str, object]]) -> dict[str, object]:
+    """The record the attested evidence hangs on.
+
+    Evidence attaches to candidates that assert something. The scope walk used
+    to also mint a contentless ``module_role`` echo and that echo was the
+    carrier these pins read; it is gone, so the carrier is the claims-derived
+    ``change_rationale``. The invariant under test is unchanged: the attested
+    identifiers reach durable ``memory_evidence`` rows on a proposed candidate.
+    """
     return next(
         item
         for item in candidates
-        if isinstance(item, dict) and item.get("type") == "module_role"
+        if isinstance(item, dict) and item.get("type") == "change_rationale"
     )
 
 
-def test_finish_payload_module_role_carries_attested_evidence(tmp_path: Path) -> None:
-    """The scope-derived module_role candidate carries the change's evidence."""
+def test_finish_payload_candidate_carries_attested_evidence(tmp_path: Path) -> None:
+    """A proposed finish candidate carries the change's evidence."""
     with memory_store(tmp_path) as (_root, project, store, _db_path):
         candidates = propose_memory_from_finish_payload(
             store,
             project=project,
             finish_payload={
                 "scope_check": {"declared_scope": ["pkg/mod.py"]},
+                "claims_text": _CLAIMS,
                 "attested_evidence": _attested_bundle(),
             },
             max_candidates=20,
             max_statement_chars=1000,
         )
-        module_role = _module_role(candidates)
-        rows = store.list_evidence_for_memory(str(module_role["id"]))
+        carrier = _carrier(candidates)
+        rows = store.list_evidence_for_memory(str(carrier["id"]))
 
     kinds = {row.evidence_kind for row in rows}
     digests = {row.digest for row in rows}
@@ -127,16 +139,15 @@ def test_approved_finish_candidate_keeps_attested_evidence_not_stub(
             project=project,
             finish_payload={
                 "scope_check": {"declared_scope": ["pkg/mod.py"]},
+                "claims_text": _CLAIMS,
                 "attested_evidence": _attested_bundle(),
             },
             max_candidates=20,
             max_statement_chars=1000,
         )
-        module_role = _module_role(candidates)
-        approve_record(
-            store, record_id=str(module_role["id"]), approved_by="maintainer"
-        )
-        rows = store.list_evidence_for_memory(str(module_role["id"]))
+        carrier = _carrier(candidates)
+        approve_record(store, record_id=str(carrier["id"]), approved_by="maintainer")
+        rows = store.list_evidence_for_memory(str(carrier["id"]))
 
     refs = {row.ref for row in rows}
     digests = {row.digest for row in rows}
@@ -152,12 +163,15 @@ def test_finish_payload_without_attested_evidence_writes_no_rows(
         candidates = propose_memory_from_finish_payload(
             store,
             project=project,
-            finish_payload={"scope_check": {"declared_scope": ["pkg/mod.py"]}},
+            finish_payload={
+                "scope_check": {"declared_scope": ["pkg/mod.py"]},
+                "claims_text": _CLAIMS,
+            },
             max_candidates=20,
             max_statement_chars=1000,
         )
-        module_role = _module_role(candidates)
-        assert store.count_evidence_for_memory(str(module_role["id"])) == 0
+        carrier = _carrier(candidates)
+        assert store.count_evidence_for_memory(str(carrier["id"])) == 0
 
 
 def test_changed_paths_forwards_attested_evidence(tmp_path: Path) -> None:
@@ -167,16 +181,16 @@ def test_changed_paths_forwards_attested_evidence(tmp_path: Path) -> None:
             store,
             project=project,
             changed_paths=["pkg/feature.py"],
-            claims_text=None,
+            claims_text=_CLAIMS,
             review_text=None,
             verification_profile="python_structural",
             max_candidates=20,
             max_statement_chars=1000,
             attested_evidence=_attested_bundle(),
         )
-        module_role = _module_role(candidates)
+        carrier = _carrier(candidates)
         digests = {
-            row.digest for row in store.list_evidence_for_memory(str(module_role["id"]))
+            row.digest for row in store.list_evidence_for_memory(str(carrier["id"]))
         }
     assert _RECEIPT_DIGEST in digests
     assert _PATCH_TRAIL_DIGEST in digests
@@ -189,15 +203,15 @@ def test_finish_workflow_forwards_attested_evidence(tmp_path: Path) -> None:
             store,
             project=project,
             changed_paths=["pkg/feature.py"],
-            claims_text=None,
+            claims_text=_CLAIMS,
             review_text=None,
             verification_profile="python_structural",
             max_candidates=20,
             max_statement_chars=1000,
             attested_evidence=_attested_bundle(),
         )
-        module_role = _module_role(result.candidates)
-        rows = store.list_evidence_for_memory(str(module_role["id"]))
+        carrier = _carrier(result.candidates)
+        rows = store.list_evidence_for_memory(str(carrier["id"]))
     digests = {row.digest for row in rows}
     commit_refs = {row.ref for row in rows if row.evidence_kind == "git_commit"}
     assert _RECEIPT_DIGEST in digests
@@ -317,15 +331,15 @@ def test_prefix_store_survives_evidence_fix_untouched(tmp_path: Path) -> None:
             project=project,
             finish_payload={
                 "scope_check": {"declared_scope": ["pkg/newmod.py"]},
+                "claims_text": _CLAIMS,
                 "attested_evidence": _attested_bundle(),
             },
             max_candidates=100,
             max_statement_chars=1000,
         )
-        new_module_role = _module_role(candidates)
+        new_carrier_id = str(_carrier(candidates)["id"])
         new_digests = {
-            row.digest
-            for row in store2.list_evidence_for_memory(str(new_module_role["id"]))
+            row.digest for row in store2.list_evidence_for_memory(new_carrier_id)
         }
         preserved = store2.list_evidence_for_memory(approved.id)
     finally:

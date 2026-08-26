@@ -472,7 +472,9 @@ def test_memory_candidates_carry_statement_format(tmp_path: Path) -> None:
             max_candidates=100,
             max_statement_chars=1000,
         )
-        assert len(candidates) >= 3, "expected scope + claims + proposal"
+        # The declared scope no longer mints a record of its own (it only elects
+        # the subject path), so the finish batch is claims + the proposal.
+        assert len(candidates) >= 2, "expected claims + proposal"
         for node in candidates:
             if node.get("proposal_only"):
                 # Synthetic in-response proposal: plain machine text.

@@ -177,6 +177,26 @@ def _try_append_text_candidate(
     return summary
 
 
+def _elect_subject_path(finish_payload: Mapping[str, object]) -> str | None:
+    """Return the declared-scope path the finish candidates are filed against.
+
+    The first Python path among the first ten declared-scope entries — the same
+    election the scope walk has always made. It is the subject for the claims
+    and review candidates: ``record_candidate`` refuses a record without a
+    ``subject_path``, so losing this election silently drops those candidates.
+    """
+    scope_check = finish_payload.get("scope_check")
+    if not isinstance(scope_check, Mapping):
+        return None
+    declared = scope_check.get("declared_scope")
+    if not isinstance(declared, list):
+        return None
+    for path in declared[:10]:
+        if isinstance(path, str) and path.endswith(".py"):
+            return path
+    return None
+
+
 def propose_memory_from_finish_payload(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -185,46 +205,25 @@ def propose_memory_from_finish_payload(
     max_candidates: int,
     max_statement_chars: int,
 ) -> list[dict[str, object]]:
-    """Extract draft memory candidates from a neutral finish payload."""
+    """Extract draft memory candidates from a neutral finish payload.
+
+    Only text the caller actually authored becomes a record: the claims digest
+    and the review narrative. The declared scope elects the subject path those
+    are filed against; it does not itself mint a record.
+
+    This path also used to stamp one ``module_role`` draft per Python path in
+    the declared scope, reading "Patch touched scope includes <path>; review
+    module role after change." That sentence asserts nothing about the module:
+    its only variable is the path, which the record already carries as its
+    subject and which the patch trail already records. So each one cost a human
+    a governance decision and bought retrieval noise, and approving one bought a
+    row that later went stale. The substantive producer of this record type is
+    ``extractors.extract_module_roles``, which states an analyzed fact about the
+    module; do not reintroduce a scope echo here.
+    """
     candidates: list[dict[str, object]] = []
-    primary_subject_path: str | None = None
     attested = _read_attested_evidence(finish_payload)
-    scope_check = finish_payload.get("scope_check")
-    if isinstance(scope_check, Mapping):
-        declared = scope_check.get("declared_scope")
-        if isinstance(declared, list):
-            for path in declared[:10]:
-                if not isinstance(path, str) or not path.endswith(".py"):
-                    continue
-                if primary_subject_path is None:
-                    primary_subject_path = path
-                try:
-                    record = record_candidate(
-                        store,
-                        project=project,
-                        record_type="module_role",
-                        statement=(
-                            f"Patch touched scope includes {path}; "
-                            "review module role after change."
-                        ),
-                        subject_path=path,
-                        created_by="finish_hook",
-                        max_candidates=max_candidates,
-                        max_statement_chars=max_statement_chars,
-                    )
-                except Exception:
-                    continue
-                _attach_attested_evidence(store, memory_id=record.id, bundle=attested)
-                summary: dict[str, object] = {
-                    "id": record.id,
-                    "type": record.type,
-                    "status": record.status,
-                    "statement": record.statement,
-                }
-                marker = resolve_statement_format(record.statement, record.payload)
-                if marker is not None:
-                    summary[STATEMENT_FORMAT_PAYLOAD_KEY] = marker
-                candidates.append(summary)
+    primary_subject_path = _elect_subject_path(finish_payload)
 
     claims_text = finish_payload.get("claims_text")
     claims_candidate = _try_append_text_candidate(

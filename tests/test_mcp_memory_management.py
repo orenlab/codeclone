@@ -677,8 +677,17 @@ def test_mcp_manage_memory_promote_experience_requires_a_full_id(
 
 
 def test_mcp_manage_memory_propose_scope_check_variants(tmp_path: Path) -> None:
-    """Without an intent the proposal carries no scope-derived candidate;
-    a live intent's declared scope produces one naming the scoped file."""
+    """The declared scope files the proposal; without one there is nothing to file.
+
+    ``propose_from_receipt`` records only text the caller authored. The live
+    intent's declared scope elects the subject path that text is filed against,
+    so with no intent (and no text) the batch is empty, and with both the
+    candidate exists and is subjected to the scoped file. It used to also mint a
+    contentless ``module_role`` echo reading "Patch touched scope includes
+    <path>; review module role after change." — the string this pin read. That
+    echo is gone; the pin now reads the surviving, substantive candidate and
+    asserts the echo does not come back.
+    """
 
     from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
 
@@ -713,7 +722,10 @@ def test_mcp_manage_memory_propose_scope_check_variants(tmp_path: Path) -> None:
         )
         candidates = cast("list[dict[str, object]]", scoped["memory_candidates"])
         statements = [str(item["statement"]) for item in candidates]
-        assert any("scope includes pkg/mod.py" in statement for statement in statements)
+        types = {str(item["type"]) for item in candidates}
+    assert types == {"change_rationale"}
+    assert any("Scoped change to pkg/mod.py." in statement for statement in statements)
+    assert not any("review module role after change" in text for text in statements)
 
 
 def test_mcp_record_candidate_markdown_security_reject_is_typed(
