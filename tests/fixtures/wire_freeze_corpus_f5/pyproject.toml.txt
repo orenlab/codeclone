@@ -1,0 +1,12 @@
+[tool.codeclone]
+# The switch that made this stage necessary: api-surface collection is OFF
+# by default, so neither wire-freeze corpus carried a single api_surface
+# row (measured 0 of 0 on both) and the lane's identity spelling was never
+# seen by the ingest oracle on real producer output.  Turning it on here is
+# the whole point of the stage.
+api_surface = true
+# Semantic authority is required, not decorative: the full-run ingest
+# oracle refuses a document whose ``source_facts.semantic`` is null
+# (measured verbatim: "source_facts.semantic is not an object"), so a stage
+# meant to be ingested whole must carry it — as both stages above do.
+semantic_authority = true

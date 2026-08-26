@@ -306,7 +306,7 @@ def _encode_api_surface_lane(
     ) -> tuple[str, str, str, str, tuple[int, str], tuple[object, ...]]:
         return (
             item.owner.file.path,
-            item.symbol.rsplit(":", 1)[-1],
+            item.symbol,
             item.symbol_kind,
             item.visibility,
             _null_first(
@@ -337,7 +337,10 @@ def _encode_api_surface_lane(
         parameter_defs=definitions,
         parameter_lists=lists,
         owner=tuple(index[item.owner.file.path] for item in rows),
-        name=tuple(item.symbol.rsplit(":", 1)[-1] for item in rows),
+        # F5: the row already carries the bare symbol, so the encoder has no
+        # split site left.  The emitted bytes are unchanged by that
+        # migration — this column always held the bare half.
+        name=tuple(item.symbol for item in rows),
         symbol_kind=tuple(kind_index[item.symbol_kind] for item in rows),
         visibility=tuple(visibility_index[item.visibility] for item in rows),
         returns_digest=tuple(

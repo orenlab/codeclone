@@ -44,6 +44,16 @@ _WIRE_FREEZE_CORPUS = Path(__file__).parent / "fixtures" / "wire_freeze_corpus"
 # measured base-corpus pin — new carriers live beside it, never inside it.
 _WIRE_FREEZE_CORPUS_S5 = Path(__file__).parent / "fixtures" / "wire_freeze_corpus_s5"
 
+# The F5 distinguishing stage (its own tree, its own CLI run).  Measured
+# 2026-08-26: api-surface collection is OFF unless a project asks for it, so
+# the base corpus and the slice-5 stage each carried 0 api_surface rows and
+# the lane's identity spelling was never seen by the ingest oracle on real
+# producer output.  This stage turns the switch on and carries @overload
+# groups, so the ratified F5 key is exercised where a SYMBOL-only key would
+# collapse rows.  Beside the others, never inside them — the same rule the
+# slice-5 note above states.
+_WIRE_FREEZE_CORPUS_F5 = Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f5"
+
 # The post-baseline stage: materialized only after the baseline is written,
 # so its clone pair is the corpus's one genuinely NEW novelty row.
 _WIRE_FREEZE_POST_BASELINE = "pkg/clones_three.py"
@@ -135,6 +145,21 @@ def corpus_s5_report(
     root = tmp_path_factory.mktemp("wire_freeze_corpus_s5")
     report_path = root / "corpus.report.json"
     _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_S5, root)
+    _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
+    return _corpus_document(report_path)
+
+
+@pytest.fixture(scope="session")
+def corpus_f5_report(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, object]:
+    """One single-stage F5 corpus run (no baseline: the api_surface lane is
+    an analysis-tier fact of the current run).  The stage's own
+    ``pyproject.toml`` turns api-surface collection on; without it the lane
+    is empty and the run proves nothing."""
+    root = tmp_path_factory.mktemp("wire_freeze_corpus_f5")
+    report_path = root / "corpus.report.json"
+    _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F5, root)
     _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
     return _corpus_document(report_path)
 

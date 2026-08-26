@@ -654,6 +654,17 @@ def _import_dependency(item: ImportObservation) -> ModuleDep:
 
 
 def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot | None:
+    """Rebuild the stored api surface the way a run names its symbols.
+
+    The api half of the identity join (`F5`, ruling 2026-08-26).  The lane
+    keeps the source identity apart from the bare symbol and nothing the
+    container hands out may glue them, but ``compare_api_surfaces`` keys on
+    the producer's ``module:qualname``, so the join lives here — the one
+    place where lane rows meet run identities — and nowhere in the decode
+    path.  The report vocabulary is deliberately untouched: this is a
+    lane-contract migration, not a report-schema change.
+    """
+
     payload = _lane_payload(container, "api_surface")
     if not isinstance(payload, ApiSurfaceObservationPayload):
         return None
@@ -665,7 +676,7 @@ def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot 
         key = (module.module, item.owner.file.path)
         rows.setdefault(key, []).append(
             PublicSymbol(
-                qualname=item.symbol,
+                qualname=glued_observation_identity(item.owner, item.symbol),
                 kind=item.symbol_kind,
                 start_line=0,
                 end_line=0,

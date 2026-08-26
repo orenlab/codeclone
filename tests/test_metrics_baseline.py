@@ -30,8 +30,11 @@ from codeclone.contracts import (
     METRICS_BASELINE_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
+from codeclone.metrics.api_surface import compare_api_surfaces
 from codeclone.models import (
+    ApiParamSpec,
     ApiSurfaceObservationPayload,
+    ApiSurfaceSnapshot,
     ApiSymbolObservation,
     BaselineContainerV3,
     BaselineLaneIndex,
@@ -43,12 +46,14 @@ from codeclone.models import (
     HealthScore,
     ImportObservation,
     LaneTrust,
+    ModuleApiSurface,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     ObservationBundle,
     ObservationContract,
     ObservationLaneDescriptor,
     ProjectMetrics,
+    PublicSymbol,
     ResolvedSourceIdentity,
     RiskColumnarPayload,
     RiskObservationPayload,
@@ -1146,3 +1151,108 @@ def test_baseline_reader_keeps_overload_declarations_distinct() -> None:
     value_rows, population = metrics_mod._integer_lane(container, "risk_observations")
     assert population == 2
     assert len(value_rows) == 4
+
+
+# ---------------------------------------------------------------------------
+# F5: the baseline reader's identity join (ruling 2026-08-26).
+# ---------------------------------------------------------------------------
+
+#: The producer's own public surface for the fixture module.  Stated once so
+#: the stored half and the run half of the comparison below cannot drift into
+#: two different fixtures — the drift would hide the very defect this pins.
+_API_MODULES = (
+    ModuleApiSurface(
+        module="pkg.mod",
+        filepath="pkg/mod.py",
+        symbols=(
+            PublicSymbol(
+                qualname="pkg.mod:run",
+                kind="function",
+                start_line=1,
+                end_line=2,
+                params=(
+                    ApiParamSpec(
+                        name="left",
+                        kind="pos_or_kw",
+                        has_default=False,
+                        annotation_hash="1" * 64,
+                    ),
+                ),
+                returns_hash="2" * 64,
+                exported_via="all",
+            ),
+        ),
+    ),
+)
+
+
+def _api_bundle() -> ObservationBundle:
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    return build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=registry,
+        api_modules=_API_MODULES,
+    )
+
+
+def _stored_api_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> ApiSurfaceSnapshot:
+    """Publish the fixture bundle, read it back through the public loader."""
+
+    monkeypatch.setattr(container_mod, "current_python_tag", lambda: "cp314")
+    monkeypatch.setattr(container_mod, "_utc_now_z", lambda: "2026-07-20T00:00:00Z")
+    path = tmp_path / "baseline.json"
+    path.write_bytes(
+        canonical_container_bytes(build_container(_api_bundle(), _SCOPE_ID))
+    )
+    baseline = MetricsBaseline(path)
+    baseline.load()
+    stored = baseline.api_surface_snapshot
+    assert stored is not None
+    return stored
+
+
+def test_stored_api_surface_is_named_the_way_the_producer_names_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F5, half one: the reader rejoins the producer's identity spelling.
+
+    The lane stores the source identity apart from the BARE symbol, and the
+    report vocabulary is the glued ``module:qualname``, so the join lives in
+    the reader.  This measures the spelling alone; the consequence of losing
+    it is measured separately below, so neither pin can mask the other.
+    """
+
+    stored = _stored_api_snapshot(tmp_path, monkeypatch)
+    assert [
+        symbol.qualname for module in stored.modules for symbol in module.symbols
+    ] == ["pkg.mod:run"]
+
+
+def test_stored_api_surface_compares_clean_against_the_run_that_named_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F5, half two: the consequence, driven through the real comparison.
+
+    ``compare_api_surfaces`` keys on the producer's glued qualname, so a
+    reader that hands it the bare half compares two vocabularies and reports
+    every symbol the baseline already knows as removed AND added on an
+    unchanged repository.  This pin never inspects the spelling — it asserts
+    only the comparison outcome, both sides of it, so it dies on the harm
+    rather than on the spelling that causes it.
+    """
+
+    stored = _stored_api_snapshot(tmp_path, monkeypatch)
+    # One assertion over BOTH outcome fields: written as two statements the
+    # first failure would hide whether the second still had teeth.
+    assert compare_api_surfaces(
+        baseline=stored,
+        current=ApiSurfaceSnapshot(modules=_API_MODULES),
+        strict_types=True,
+    ) == ((), ())

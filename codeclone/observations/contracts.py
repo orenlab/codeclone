@@ -63,7 +63,24 @@ _DESIGN_METRIC_LANES: frozenset[ObservationLaneName] = frozenset(
 # previously encodable identity still derives byte-identically.
 _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     "adoption_counts": "2",
-    "api_surface": "3",
+    # F5 lane-contract migration (ruling 2026-08-26): the lane's rows name
+    # their entity with the owning source identity plus a BARE symbol, the
+    # way the ratified family key ``(SYMBOL, canonical_signature_variant)``
+    # does.  Through "3" the lane's own fact type carried the producer's
+    # glued ``module:qualname`` and the decoder re-glued the head back on,
+    # so the lane owned two spellings of one identity and the canonical
+    # ingest oracle refused every real report at its first api row.
+    #
+    # This is a READER bump, like "dependencies": "7" below, and the
+    # distinction is worth stating because the next reader will look for a
+    # new column and find none: the wire is byte-identical to "3" — the
+    # encoder already split the glue on its way in (measured: 0 of 10 974
+    # stored names carried a colon).  What moved is the identity a consumer
+    # derives from these rows, and the declared schema is where that
+    # disagreement is recorded, so a stored "3" lane reads
+    # payload_schema_outdated / unavailable until it is regenerated rather
+    # than being read under a spelling its publisher did not mean.
+    "api_surface": "4",
     "coupling_cohesion_observations": "4",
     # 39Y cycle 2b: one coordinated bump per the P1-7 consolidation ruling,
     # carrying rule-3 abstentions, live-root reasons, and the observation-kind

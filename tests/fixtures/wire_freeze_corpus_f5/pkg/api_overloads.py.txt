@@ -1,0 +1,57 @@
+"""The F5 distinguishing carrier: one qualname, several signatures.
+
+Every public symbol here exists to separate a key that reads the SYMBOL
+alone from the ratified ``(SYMBOL, canonical_signature_variant)``:
+
+* ``render`` is declared three times — two ``@overload`` stubs plus the
+  implementation.  All three share ``pkg.api_overloads:render``, so a
+  SYMBOL-only key names one entity where the producer emitted three, and
+  only the signature tells them apart.
+* ``Renderer.emit`` repeats the same shape one level down, inside a class,
+  so the method path is distinguished too and not only the module path.
+* ``describe`` is a lone public function: the neighbour that proves the
+  key still names a single row when nothing overloads it.
+
+The module is deliberately trivial otherwise: no clone-sized bodies, no
+security surfaces, no cycles — the stage measures the api_surface lane and
+the families that ride every run, nothing else.
+"""
+
+from __future__ import annotations
+
+from typing import overload
+
+__all__ = ["Renderer", "describe", "render"]
+
+
+@overload
+def render(value: int) -> str: ...
+
+
+@overload
+def render(value: str, *, upper: bool = False) -> str: ...
+
+
+def render(value: int | str, *, upper: bool = False) -> str:
+    """Render one value; the implementation behind the two stubs."""
+    text = str(value)
+    return text.upper() if upper else text
+
+
+def describe(value: object) -> str:
+    """A single-declaration public function — the unambiguous neighbour."""
+    return type(value).__name__
+
+
+class Renderer:
+    """A public class whose method carries the same overload shape."""
+
+    @overload
+    def emit(self, value: int) -> str: ...
+
+    @overload
+    def emit(self, value: str, *, upper: bool = False) -> str: ...
+
+    def emit(self, value: int | str, *, upper: bool = False) -> str:
+        """Emit one value; the implementation behind the two stubs."""
+        return render(value, upper=upper)

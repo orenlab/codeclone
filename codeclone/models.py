@@ -658,7 +658,20 @@ class ApiParameterDef:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ApiSurfaceColumnarPayload:
-    """Wire form of the api-surface lane (payload schema 2)."""
+    """Wire form of the api-surface lane.
+
+    The payload schema is declared per lane in
+    ``observations/contracts.py`` (currently "4"), never here — this
+    docstring said "payload schema 2" while the table said "3", which is
+    the drift a second spelling always buys.
+
+    ``name`` is the BARE symbol: since the F5 lane-contract migration the
+    producer stores what the row means instead of the glued
+    ``module:qualname``, and the decoder no longer re-joins it.  The wire
+    bytes are unchanged by that migration — the encoder already split the
+    glue on its way in — so the declared schema is what tells a reader
+    which spelling the publisher meant.
+    """
 
     identities: ThinIdentityTable
     digests: tuple[str, ...]
@@ -731,6 +744,13 @@ class ApiSurfaceColumnarPayload:
             _validate_column_references(
                 definition_list, len(self.parameter_defs), "parameter_lists"
             )
+        if any(not value for value in self.name):
+            raise ValueError("observation symbols must be non-empty")
+        if any(":" in value for value in self.name):
+            # F5: the wire refuses the glue too, so a hand-built or
+            # hand-edited payload cannot smuggle a ModuleKey colon into a
+            # stored artifact past the fact type's own guard.
+            raise ValueError("observation symbols must not be glued identities")
         order = tuple(
             (self.identities.paths[self.owner[row]], self.name[row])
             for row in range(rows)
@@ -3027,12 +3047,40 @@ class ApiParameterObservation:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ApiSymbolObservation:
+    """One api-surface lane row: the owning source identity plus a BARE symbol.
+
+    F5 lane-contract migration (ruling 2026-08-26).  Every observation lane
+    keeps the source identity in one column and the bare name in another —
+    :class:`IntegerObservation` and :class:`RiskObservation` have refused a
+    ModuleKey colon since they were written, and
+    ``observations.projection.glued_observation_identity`` is the declared
+    inverse for readers that need the producer's spelling back.  This lane
+    alone stored the glued ``module:qualname``, which the module head of
+    ``owner.python_module`` already spells (measured 11 087/11 087 rows of a
+    live self-repo report: head == owner module, exactly one colon each), so
+    the glue was a second spelling of a fact the row already carried — and
+    the canonical ingest oracle refused every real report at its first api
+    row.  ``symbol_kind`` and ``visibility`` stay payload; the ratified
+    family key is ``(SYMBOL, canonical_signature_variant)``, and the
+    signature enters it through ``canonical.api_identity`` — the one formula
+    owner — never through this column.
+    """
+
     owner: ResolvedSourceIdentity
     symbol: str
     symbol_kind: ApiSymbolKind
     visibility: ApiVisibility
     parameters: tuple[ApiParameterObservation, ...]
     returns_digest: DigestObject | None
+
+    def __post_init__(self) -> None:
+        path = self.owner.file.path
+        if not path or path.startswith("/"):
+            raise ValueError("observation source paths must be repository-relative")
+        if not self.symbol:
+            raise ValueError("observation symbols must be non-empty")
+        if ":" in self.symbol:
+            raise ValueError("observation symbols must not be glued identities")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

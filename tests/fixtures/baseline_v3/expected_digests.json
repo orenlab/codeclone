@@ -1,7 +1,7 @@
 {
   "lanes": {
     "adoption_counts": "31383188ba8105c9279ad102c1d274aca6cff7ddb1cab690c134c2d70e9adae5",
-    "api_surface": "f2a39b7ffc924262386c29e02b44b1668c75c678d108037cf2cbfd8e00e993aa",
+    "api_surface": "a60c2f3320e6072e09eaea5d11a239edb389f0990aff38345d4769d1d638d348",
     "clones.blocks": "3228a790a891e1386c9496d907017e075fe43eb089b1c8c7b43f37308256d7b6",
     "clones.functions": "aa95ee01f5db4619c58082c5fb3f668935ca8114e1ad7e91ea56b0c1509bbae8",
     "coupling_cohesion_observations": "e06f021207cf831fbd5cc964f30906427c8bf3fcf94d81ca5e761c87d6fbcf53",
@@ -10,5 +10,5 @@
     "module_identity": "8ceeb5acc2cc27d49efed33e5cafacb4ae39876dc1493b591cfbd6d3c1904b46",
     "risk_observations": "5c9b5d506e84ae8b41901dc788c7c846f32de954e46c7a25bad651f493d004fa"
   },
-  "root": "287350745560e8bdaee1ff2173214bf488c85d470bb37f8b89f3b454fe56f847"
+  "root": "86b07c72718484ba38037b0ad20303eabeecc0fbfc5f9626f7c2425514a8ade4"
 }

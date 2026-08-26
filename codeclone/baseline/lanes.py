@@ -47,7 +47,6 @@ from ..models import (
     ObservationLaneDescriptorInput,
     ObservationLaneName,
     OpaqueLanePayload,
-    ResolvedSourceIdentity,
     RiskColumnarPayload,
     RiskObservation,
     RiskObservationPayload,
@@ -258,9 +257,13 @@ def decode_api_surface_lane(
         symbols=tuple(
             ApiSymbolObservation(
                 owner=payload.identities.identity(payload.owner[row]),
-                symbol=_api_symbol(
-                    payload.identities.identity(payload.owner[row]), payload.name[row]
-                ),
+                # F5: decode is the exact inverse of encode again.  This
+                # used to re-glue the module head onto the name, so a
+                # decoded row disagreed with the row the producer built and
+                # the lane owned two spellings of one identity.  Readers
+                # that need the producer's spelling call
+                # ``glued_observation_identity`` at their own join site.
+                symbol=payload.name[row],
                 symbol_kind=_narrowed(
                     payload.symbol_kinds[payload.symbol_kind[row]],
                     _API_SYMBOL_KINDS,
@@ -277,11 +280,6 @@ def decode_api_surface_lane(
             for row in range(len(payload.owner))
         )
     )
-
-
-def _api_symbol(owner: ResolvedSourceIdentity, name: str) -> str:
-    module = owner.python_module
-    return f"{module.module}:{name}" if module is not None else name
 
 
 _DEAD_CODE_KINDS: Final[tuple[DeadCodeCandidateKind, ...]] = (

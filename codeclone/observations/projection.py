@@ -180,7 +180,13 @@ def _api_surface_observations(
         rows.extend(
             ApiSymbolObservation(
                 owner=entry.identity,
-                symbol=symbol.qualname,
+                # F5: the producer names a public symbol by its glued
+                # ``module:qualname``; the lane keeps the two halves apart,
+                # exactly as the risk and coupling lanes do.  The head is
+                # ``entry.identity.python_module`` and nothing else, so
+                # ``glued_observation_identity`` puts it back wherever a
+                # reader needs the producer's spelling.
+                symbol=_bare_qualname(symbol.qualname),
                 symbol_kind=symbol.kind,
                 visibility=symbol.exported_via,
                 parameters=tuple(

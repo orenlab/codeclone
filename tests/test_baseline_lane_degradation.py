@@ -198,16 +198,24 @@ def downgrade_lane_payload_schema(
 
 
 def downgrade_api_surface_lane(baseline_path: Path) -> None:
-    """Move only the api_surface lane payload schema 3 -> 2, re-authenticating.
+    """Move only the api_surface lane payload schema 4 -> 3, re-authenticating.
 
     The container stays root-authentic; exactly one lane becomes semantically
     outdated against the current runtime contract.
+
+    The label alone is the authentic pre-F5 artifact here, and that is not
+    sloppiness: the F5 migration moved the identity the lane's *fact type*
+    spells, and the wire bytes it produces are unchanged (the encoder always
+    split the glue on its way in).  A "3" publisher and a "4" publisher write
+    the same payload, so the declared schema is the only thing that says
+    which spelling the artifact meant — exactly the state the reader has to
+    refuse to guess about.
     """
 
     downgrade_lane_payload_schema(
         baseline_path,
         lane_name="api_surface",
-        payload_schema="2",
+        payload_schema="3",
     )
 
 

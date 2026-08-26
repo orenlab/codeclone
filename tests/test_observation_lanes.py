@@ -66,6 +66,7 @@ from codeclone.models import (
     SemanticAuthorityResult,
     ThinIdentityTable,
     derive_python_module_identity,
+    parse_api_surface_columnar_payload,
     parse_risk_columnar_payload,
 )
 from codeclone.observations.contracts import ObservationContractError
@@ -73,7 +74,10 @@ from codeclone.observations.lanes import (
     build_observation_lanes,
     canonical_observation_lane_bytes,
 )
-from codeclone.observations.projection import build_observation_bundle
+from codeclone.observations.projection import (
+    build_observation_bundle,
+    glued_observation_identity,
+)
 from tests._ast_metrics_helpers import module_registry_context
 
 
@@ -544,11 +548,18 @@ def test_columnar_lanes_round_trip_every_row_and_derive_every_identity() -> None
         for position, path in enumerate(table.paths):
             assert table.identity(position).file.path == path
 
-    # The glued strings are rebuilt from their split components.
+    # F5: the api row's symbol is the bare column, decoded verbatim — the
+    # decoder used to re-glue the owner's module head onto it, which made a
+    # decoded row disagree with the row the producer built.  The head is
+    # still there, spelled once, on the owner.
     for row, symbol in enumerate(decode_api_surface_lane(api).symbols):
         owner = symbol.owner.python_module
         assert owner is not None
-        assert symbol.symbol == f"{owner.module}:{api.name[row]}"
+        assert symbol.symbol == api.name[row]
+        assert ":" not in symbol.symbol
+        assert glued_observation_identity(symbol.owner, symbol.symbol) == (
+            f"{owner.module}:{api.name[row]}"
+        )
     for row, candidate in enumerate(decode_dead_code_lane(dead).candidates):
         prefix = dead.prefixes[dead.prefix[row]]
         assert candidate.entity == f"{prefix}:{dead.qualname[row]}"
@@ -720,7 +731,7 @@ def test_api_surface_lane_refuses_two_digest_domains() -> None:
     def symbol(name: str, digest: DigestObject) -> ApiSymbolObservation:
         return ApiSymbolObservation(
             owner=owner,
-            symbol=f"pkg.mod:{name}",
+            symbol=name,
             symbol_kind="function",
             visibility="all",
             parameters=(),
@@ -1300,3 +1311,154 @@ def test_projection_refuses_a_unit_without_a_declaration_site() -> None:
                 },
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# F5 api_surface lane-contract migration (ruling 2026-08-26): the lane row
+# names the entity with the source identity and a BARE symbol, never the
+# producer's glued ``module:qualname``.  The two integer lanes have carried
+# that law since they were written; this lane did not, and the ingest
+# oracle refused every real report at its first api row.
+# ---------------------------------------------------------------------------
+
+
+def _overload_api_modules() -> tuple[ModuleApiSurface, ...]:
+    """Two declarations of one qualname differing only in signature.
+
+    Independent witness: the shapes are stated here, in the fixture, never
+    derived from the code under test.  ``run`` is declared twice — the
+    ``@overload`` class — and ``other`` once, so a pin can tell a rule that
+    keys on the symbol apart from one that keys on the signature too.
+    """
+
+    return (
+        ModuleApiSurface(
+            module="pkg.mod",
+            filepath="pkg/mod.py",
+            symbols=(
+                PublicSymbol(
+                    qualname="pkg.mod:other",
+                    kind="function",
+                    start_line=1,
+                    end_line=2,
+                    exported_via="all",
+                ),
+                PublicSymbol(
+                    qualname="pkg.mod:run",
+                    kind="function",
+                    start_line=10,
+                    end_line=11,
+                    params=(
+                        ApiParamSpec(
+                            name="value",
+                            kind="pos_or_kw",
+                            has_default=False,
+                            annotation_hash="1" * 64,
+                        ),
+                    ),
+                    returns_hash="2" * 64,
+                    exported_via="all",
+                ),
+                PublicSymbol(
+                    qualname="pkg.mod:run",
+                    kind="function",
+                    start_line=20,
+                    end_line=24,
+                    params=(
+                        ApiParamSpec(
+                            name="value",
+                            kind="pos_or_kw",
+                            has_default=False,
+                            annotation_hash="3" * 64,
+                        ),
+                    ),
+                    returns_hash="2" * 64,
+                    exported_via="all",
+                ),
+            ),
+        ),
+    )
+
+
+def test_api_rows_carry_the_bare_symbol_beside_their_owner() -> None:
+    """F5: the observation names the entity the ratified family key does."""
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        api_modules=_overload_api_modules(),
+    )
+    rows = bundle.structural.api_surface
+    assert tuple(row.symbol for row in rows) == ("other", "run", "run")
+    assert {row.owner.file.path for row in rows} == {"pkg/mod.py"}
+    # The module head is not lost — it is the owner's, spelled once.
+    assert {
+        None if row.owner.python_module is None else row.owner.python_module.module
+        for row in rows
+    } == {"pkg.mod"}
+    # The overload pair stays two facts: nothing about the bare symbol
+    # merges declarations that differ in signature.
+    assert len(set(rows)) == 3
+
+
+def test_api_symbol_observation_refuses_a_glued_identity() -> None:
+    """The lane law, enforced on the fact type — the two integer lanes have
+    refused a colon since they were written; this one now does too."""
+
+    owner = ResolvedSourceIdentity(
+        file=FileIdentity(path="pkg/mod.py"),
+        python_module=derive_python_module_identity("pkg/mod.py"),
+    )
+    with pytest.raises(ValueError, match="glued identities"):
+        ApiSymbolObservation(
+            owner=owner,
+            symbol="pkg.mod:run",
+            symbol_kind="function",
+            visibility="all",
+            parameters=(),
+            returns_digest=None,
+        )
+
+
+def test_api_surface_wire_round_trips_the_bare_symbol() -> None:
+    """K1 round trip: encode -> JSON -> parse validator -> decode == rows,
+    with the migrated payload schema declared on the lane."""
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        api_modules=_overload_api_modules(),
+    )
+    lane = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "api_surface"
+    )
+    assert lane.descriptor.payload_schema == "4"
+    payload = lane.payload
+    assert isinstance(payload, ApiSurfaceColumnarPayload)
+    assert payload.name == ("other", "run", "run")
+    parsed = parse_api_surface_columnar_payload(orjson.loads(orjson.dumps(payload)))
+    assert parsed == payload
+    decoded = decode_api_surface_lane(parsed)
+    assert decoded.symbols == bundle.structural.api_surface
+
+
+def test_api_surface_wire_refuses_a_glued_name_column() -> None:
+    """The wire refuses the glue too: a hand-built payload cannot smuggle a
+    ModuleKey colon past the lane law into a stored artifact."""
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        api_modules=_overload_api_modules(),
+    )
+    lane = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "api_surface"
+    )
+    payload = lane.payload
+    assert isinstance(payload, ApiSurfaceColumnarPayload)
+    with pytest.raises(ValueError, match="glued identities"):
+        replace(payload, name=("other", "pkg.mod:run", "run"))

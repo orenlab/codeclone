@@ -21,6 +21,8 @@ Phase 39S test-import law.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from codeclone.canonical import (
     ADOPTION_FEATURES,
     AdoptionCountRow,
@@ -30,9 +32,13 @@ from codeclone.canonical import (
     ModuleId,
     ModuleSymbol,
     OpaqueEntity,
+    RunStore,
     SecuritySurfaceRow,
     SymbolId,
     canonical_model_from_legacy_document,
+    decode_canonical_json,
+    encode_canonical_json,
+    signature_variant,
 )
 
 
@@ -241,3 +247,85 @@ def test_dead_code_canonical_family_carries_the_tagged_variants(
         )
         in rows
     )
+
+
+# ---------------------------------------------------------------------------
+# F5 lane-contract migration (ruling 2026-08-26): the api_surface lane row
+# names its entity the way the ratified family key does, on REAL producer
+# output.  Both wire-freeze stages above carry ZERO api_surface rows
+# (measured: api-surface collection is off unless a project asks for it), so
+# until this stage existed the lane's identity spelling had never met the
+# ingest oracle on a live document.
+# ---------------------------------------------------------------------------
+
+
+def test_f5_canonical_family_carries_the_overload_corpus_symbols(
+    corpus_f5_report: dict[str, object],
+) -> None:
+    """F5 from the REAL producer document over the overload stage.
+
+    Measured ground truth (2026-08-26): 8 api_surface rows; the ratified
+    key ``(SYMBOL, canonical_signature_variant)`` is 8/8 distinct while the
+    SYMBOL alone is 4/8 and the variant alone is 5/8 — so BOTH halves of
+    the key are load-bearing on this fixture, in both directions.  The row
+    identity is the FILE-headed SYMBOL: a producer emitting the glued
+    ``module:qualname`` spelling is refused by the ingest oracle, which is
+    exactly what a full self-repo report used to do.
+    """
+    model = canonical_model_from_legacy_document(corpus_f5_report)
+    rows = model.facts.analysis.api_symbols
+    assert len(rows) == 8
+    carrier = FileId("pkg/api_overloads.py")
+    assert {row.symbol.file for row in rows} == {carrier}
+    assert {row.symbol.qualname for row in rows} == {
+        "Renderer",
+        "Renderer.emit",
+        "describe",
+        "render",
+    }
+    # The collapse the ratified key exists to prevent: three declarations
+    # of one qualname at module level, three more inside the class.
+    by_qualname: dict[str, int] = {}
+    for row in rows:
+        by_qualname[row.symbol.qualname] = by_qualname.get(row.symbol.qualname, 0) + 1
+    assert by_qualname == {
+        "Renderer": 1,
+        "Renderer.emit": 3,
+        "describe": 1,
+        "render": 3,
+    }
+    variants = {
+        signature_variant(parameters=row.parameters, returns_digest=row.returns_digest)
+        for row in rows
+    }
+    # 5 distinct variants over 8 rows: ``render`` and ``Renderer.emit``
+    # share their three signatures pairwise, so the variant alone cannot
+    # name a row either.
+    assert len(variants) == 5
+    assert {row.symbol_kind for row in rows} == {"class", "function", "method"}
+    assert {row.visibility for row in rows} == {"all"}
+
+
+def test_f5_overload_corpus_ingests_whole_and_satisfies_l8(
+    corpus_f5_report: dict[str, object], tmp_path: Path
+) -> None:
+    """The live-document half of law L8, on a real producer report.
+
+    L8 (``project(store) == project(model)``) was proven on the synthetic
+    fixture model and on the corpus families; this pins it end to end from
+    a document the CLI actually wrote — the coverage that the glued
+    api_surface identity used to make impossible, because the ingest
+    refused before a model ever existed.
+    """
+    model = canonical_model_from_legacy_document(corpus_f5_report)
+    model_bytes = encode_canonical_json(model)
+    with RunStore(tmp_path / "runs.sqlite") as store:
+        receipt = store.write_full_run(
+            model,
+            namespace="f5-corpus",
+            target="overload-stage",
+            expected_generation=0,
+        )
+        assert store.project_run(receipt.run_id) == model_bytes
+        assert decode_canonical_json(model_bytes) == model.normalize()
+        assert store.read_run(receipt.run_id) == model.normalize()

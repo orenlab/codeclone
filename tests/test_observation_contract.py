@@ -92,7 +92,19 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     "adoption_counts": (
         "cd311dcc7e9739a99c41b8a5a6e3728c305b5ab50586581e7b95cb5b44ec37bc"
     ),
-    "api_surface": ("b51e5ccbe85a2e79aacb8ddc924452569c64ba966d2547033a87fdfec9addea1"),
+    # SANCTIONED golden change, F5 lane-contract migration (ruling
+    # 2026-08-26).  The lane moved payload_schema "3" -> "4": its rows name
+    # their entity with the owning source identity plus the BARE symbol,
+    # the way the ratified ``(SYMBOL, canonical_signature_variant)`` key
+    # does, instead of the producer's glued ``module:qualname``.  This is a
+    # descriptor-only move — the payload bytes are byte-identical, the
+    # encoder always split the glue on its way in — so the declared schema
+    # is the only record that a stored artifact meant the other spelling.
+    # Confinement is proven by this table, not asserted: exactly this
+    # digest moves and the other nine stay at the values pinned here.
+    # Pre-bump digest was
+    # b51e5ccbe85a2e79aacb8ddc924452569c64ba966d2547033a87fdfec9addea1.
+    "api_surface": ("769e1ac73b8b454af0e3cc98fec991668cbb90dadbb7a8b9d5c21f97d07e136c"),
     # SANCTIONED golden change, 39Y item 3. The two design-metric lanes moved
     # to DESIGN_METRICS_ALGORITHM_REVISION "2": their metric VALUES changed
     # meaning (metric facts are no longer gated by clone floors, CBO counts the
@@ -203,7 +215,12 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         if descriptor.payload_schema != "1"
     } == {
         "adoption_counts": "2",
-        "api_surface": "3",
+        # F5 lane-contract migration: "4" is a READER bump — the wire stays
+        # byte-identical to "3", but the row's identity spelling moved from
+        # the producer's glued ``module:qualname`` to the bare symbol the
+        # ratified family key names, so a stored "3" lane reads
+        # payload_schema_outdated / unavailable until it is regenerated.
+        "api_surface": "4",
         "coupling_cohesion_observations": "4",
         # 39Y cycle 2b: the single consolidated bump this phase owes.
         "dead_code": "3",
