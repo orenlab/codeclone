@@ -88,8 +88,37 @@ _WINDOW_PLANES: Final[Mapping[str, str]] = {
 }
 
 
+def _context_unit_estimator(warnings: list[str]) -> dict[str, object]:
+    """Name the estimator behind every context-unit number in this response.
+
+    ``applies_to`` is not decoration. The rows come out of a store other
+    processes wrote, so this states one honest thing — how *this* reader is
+    configured — instead of implying the stored numbers were taken that way.
+    A downgrade is reported rather than swallowed: an exact-tokenizer request
+    that quietly produced approximated units is a number wearing a unit it
+    never had.
+    """
+    config = resolve_observability_config()
+    state: dict[str, object] = {
+        "effective": config.token_estimator,
+        "applies_to": "reader_process_configuration",
+    }
+    if config.token_estimator_downgraded:
+        state["requested"] = "tiktoken"
+        state["downgrade_reason"] = "tiktoken_not_installed"
+        warnings.append(
+            "requested token estimator 'tiktoken' is not installed; "
+            "context units are the chars_approx estimate"
+        )
+    return state
+
+
 def _envelope(
-    section: str, detail_level: str, window: str, plane: str | None
+    section: str,
+    detail_level: str,
+    window: str,
+    plane: str | None,
+    warnings: list[str],
 ) -> dict[str, object]:
     envelope: dict[str, object] = {
         "surface": "platform_observability",
@@ -100,6 +129,7 @@ def _envelope(
         "section": section,
         "detail_level": detail_level,
         "window": window,
+        "context_unit_estimator": _context_unit_estimator(warnings),
     }
     if plane is not None:
         envelope["plane"] = plane
@@ -650,7 +680,7 @@ def query_platform_observability(
     clamped = _clamp_limit(limit, warnings)
     row_cap = min(clamped, _COMPACT_ROWS) if detail == "compact" else clamped
 
-    response = _envelope(section, detail, window, _WINDOW_PLANES.get(window))
+    response = _envelope(section, detail, window, _WINDOW_PLANES.get(window), warnings)
     if detail != detail_level:
         response["requested_detail_level"] = detail_level
     ignored = _ignored_parameters(section, operation_id, span_id)

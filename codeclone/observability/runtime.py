@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..config.observability import resolve_observability_config
-from ..models import ObservabilityConfig
+from ..models import DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR, ObservabilityConfig
 from .db_fingerprint import fingerprint_sql
 from .models import OperationRecord, ProfileSample, SpanRecord
 from .reason_kind import ReasonKind
@@ -379,6 +379,20 @@ def payload_capture_enabled() -> bool:
     )
 
 
+def payload_token_estimator() -> str:
+    """Effective payload token-estimator mode frozen for this process.
+
+    Frozen at ``bootstrap`` like the enabled decision, not resolved per call: a
+    payload footprint whose unit changed halfway through a session is not a
+    measurement. Returns the approximation default when observability is off,
+    so callers need no separate disabled branch.
+    """
+    runtime = _RUNTIME
+    if not _ENABLED or runtime is None:
+        return DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR
+    return runtime.config.token_estimator
+
+
 def _profile_baseline() -> tuple[int, float, float, int | None] | None:
     """Capture an rss/cpu/peak baseline when profiling is on (else None, no psutil)."""
     runtime = _RUNTIME
@@ -619,6 +633,7 @@ __all__ = [
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",
+    "payload_token_estimator",
     "record_counter",
     "record_db_query",
     "record_elapsed_span",

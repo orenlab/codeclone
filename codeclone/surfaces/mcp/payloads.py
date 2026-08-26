@@ -5,13 +5,19 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import ceil
 from typing import Generic, TypeVar
 
-from ...budget.estimator import estimate_payload
+from ...budget.estimator import (
+    TOKEN_ESTIMATOR_CHARS_APPROX,
+    TOKEN_ESTIMATOR_TIKTOKEN,
+    TokenEstimatorMode,
+    canonical_payload_json,
+    estimate_payload,
+)
+from ...observability import payload_token_estimator
 from ._context_governance import (
     CONTEXT_GOVERNANCE_CONTRACT_VERSION,
     CONTEXT_GOVERNANCE_ESTIMATOR,
@@ -23,8 +29,10 @@ T = TypeVar("T")
 def measure_payload(payload: Mapping[str, object]) -> tuple[int, int]:
     """Return ``(byte_size, context_unit_estimate)`` for canonical JSON.
 
-    ``byte_size`` is the UTF-8 length of the canonical JSON; context units reuse
-    the shared deterministic estimator or a valid ``context_governance`` envelope.
+    Both numbers describe the same canonical text: ``byte_size`` is its UTF-8
+    length, and the context units are counted over that same text by the shared
+    estimator in the mode this process was configured with — or taken from a
+    valid ``context_governance`` envelope, which declares its own estimator.
     Never raises: payload measurement must never break the tool call it wraps.
     """
     text = _canonical_payload_text(payload)
@@ -36,9 +44,22 @@ def measure_payload(payload: Mapping[str, object]) -> tuple[int, int]:
 
 def _canonical_payload_text(payload: Mapping[str, object]) -> str | None:
     try:
-        return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return canonical_payload_json(payload)
     except (TypeError, ValueError):
         return None
+
+
+def _configured_estimator() -> TokenEstimatorMode:
+    """Narrow the process-wide configured mode to the estimator's vocabulary.
+
+    The observability config carries the mode as a plain string because the
+    model store may only reach the contract ring. Anything other than the exact
+    mode resolves to the approximation here, so an unrecognised value can never
+    reach the estimator as an error, and never as a claim of exactness.
+    """
+    if payload_token_estimator() == TOKEN_ESTIMATOR_TIKTOKEN:
+        return TOKEN_ESTIMATOR_TIKTOKEN
+    return TOKEN_ESTIMATOR_CHARS_APPROX
 
 
 def _payload_context_units(payload: Mapping[str, object], text: str) -> int:
@@ -46,8 +67,13 @@ def _payload_context_units(payload: Mapping[str, object], text: str) -> int:
     if governed_estimate is not None:
         return governed_estimate
     try:
-        return estimate_payload(payload).tokens
-    except (TypeError, ValueError):
+        return estimate_payload(payload, estimator=_configured_estimator()).tokens
+    except Exception:
+        # Deliberately wider than the estimator's own typed failures. The exact
+        # mode reaches for a BPE table on first use, so this call can now fail
+        # in ways the approximation never could, and this measurement wraps
+        # every MCP tool call. The instrument degrades to the approximation
+        # rather than taking the tool down with it.
         return ceil(len(text) / 4)
 
 

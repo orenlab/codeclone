@@ -53,7 +53,7 @@ def estimate_payload(
     requested. If exact estimation is requested but unavailable, the function
     falls back to approximation without failing audit writes.
     """
-    text = _canonical_json(payload)
+    text = canonical_payload_json(payload)
     return estimate_text_token(
         text,
         encoding=encoding,
@@ -99,7 +99,15 @@ def approx_tokens_from_chars(characters: int) -> int:
     return -(-characters // 4)  # ceil division
 
 
-def _canonical_json(payload: Mapping[str, object]) -> str:
+def canonical_payload_json(payload: Mapping[str, object]) -> str:
+    """Return the one canonical JSON text a payload is measured on.
+
+    Public because a byte count and a token count taken from two different
+    serializations of the same payload are not two views of one footprint —
+    they are two numbers about two strings. ``ensure_ascii=False`` is the
+    load-bearing part: with the default escaping, one non-ASCII character
+    measures as six ASCII bytes it is never sent as.
+    """
     return json.dumps(
         payload,
         sort_keys=True,
@@ -156,6 +164,7 @@ __all__ = [
     "TokenEstimate",
     "TokenEstimatorMode",
     "approx_tokens_from_chars",
+    "canonical_payload_json",
     "estimate_payload",
     "estimate_text_token",
     "estimate_texts_token_counts",

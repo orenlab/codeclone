@@ -795,3 +795,42 @@ def test_analysis_diagnostic_reports_phase_heavy_extract_share() -> None:
     assert diagnostic is not None
     assert diagnostic["kind"] == "analysis"
     assert "unit_cfg consumed 75%" in str(diagnostic["message"])
+
+
+def test_query_names_the_effective_context_unit_estimator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The numbers are context units; the response must say whose units."""
+    monkeypatch.setattr(
+        query_mod,
+        "resolve_observability_config",
+        lambda: ObservabilityConfig(enabled=True, token_estimator="tiktoken"),
+    )
+    out = query_platform_observability(root=tmp_path, section="summary")
+    assert out["context_unit_estimator"] == {
+        "effective": "tiktoken",
+        "applies_to": "reader_process_configuration",
+    }
+
+
+def test_query_names_a_downgraded_context_unit_estimator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A downgrade the reader cannot see is a number with a false unit on it."""
+    monkeypatch.setattr(
+        query_mod,
+        "resolve_observability_config",
+        lambda: ObservabilityConfig(
+            enabled=True,
+            token_estimator="chars_approx",
+            token_estimator_downgraded=True,
+        ),
+    )
+    out = query_platform_observability(root=tmp_path, section="summary")
+    assert out["context_unit_estimator"] == {
+        "effective": "chars_approx",
+        "requested": "tiktoken",
+        "downgrade_reason": "tiktoken_not_installed",
+        "applies_to": "reader_process_configuration",
+    }
+    assert any("tiktoken" in warning for warning in _texts(out["warnings"]))

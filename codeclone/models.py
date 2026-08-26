@@ -21,6 +21,12 @@ from .contracts import HealthPopulation
 DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
 DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
 DEFAULT_OBSERVABILITY_MAX_SPANS = 100
+# Restated, not imported: this module may only reach the contract ring, and the
+# estimator vocabulary lives in codeclone.budget.estimator (r2). The restatement
+# is pinned against its owner in tests/test_observability_config.py so the two
+# spellings cannot drift apart unnoticed. Validation of the configured value
+# also belongs to the owner side, in codeclone.config.observability.
+DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR = "chars_approx"
 
 ConfigCliKind = Literal[
     "positional",
@@ -1535,6 +1541,14 @@ class ObservabilityConfig:
     retention_days: int = DEFAULT_OBSERVABILITY_RETENTION_DAYS
     max_operations_per_process: int = DEFAULT_OBSERVABILITY_MAX_OPERATIONS
     max_spans_per_operation: int = DEFAULT_OBSERVABILITY_MAX_SPANS
+    #: Effective payload token-estimator mode, never the requested one: when
+    #: tiktoken is asked for and absent this already reads "chars_approx", so no
+    #: reader can publish an exact-tokenizer claim over approximated numbers.
+    token_estimator: str = DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR
+    #: True when the requested estimator was unavailable and the effective one
+    #: above is the fallback. The fact travels with the config so the downgrade
+    #: is reportable instead of silent.
+    token_estimator_downgraded: bool = False
 
     def __post_init__(self) -> None:
         bounded = (

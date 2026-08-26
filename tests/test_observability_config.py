@@ -10,11 +10,16 @@ import sys
 
 import pytest
 
+from codeclone.budget.estimator import (
+    TOKEN_ESTIMATOR_CHARS_APPROX,
+    TOKEN_ESTIMATOR_MODES,
+    TOKEN_ESTIMATOR_TIKTOKEN,
+)
 from codeclone.config.observability import (
     ObservabilityConfigError,
     resolve_observability_config,
 )
-from codeclone.models import ObservabilityConfig
+from codeclone.models import DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR, ObservabilityConfig
 
 
 def _resolve(**env: str) -> ObservabilityConfig:
@@ -35,6 +40,10 @@ def test_enabled_via_env_defaults() -> None:
     assert cfg.retention_days == 7
     assert cfg.max_operations_per_process == 2000
     assert cfg.max_spans_per_operation == 100
+    # chars_approx stays the default: the MCP server is long-lived and must not
+    # keep tiktoken's native encoding state resident just because it is present.
+    assert cfg.token_estimator == TOKEN_ESTIMATOR_CHARS_APPROX
+    assert cfg.token_estimator_downgraded is False
 
 
 def test_retention_and_caps_resolve_from_env() -> None:
@@ -117,6 +126,71 @@ def test_disabled_resolution_does_not_import_psutil() -> None:
     sys.modules.pop("psutil", None)
     resolve_observability_config(environ={})
     assert "psutil" not in sys.modules
+
+
+def test_token_estimator_resolves_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "codeclone.config.observability.find_spec", lambda _name: object()
+    )
+    cfg = _resolve(
+        CODECLONE_OBSERVABILITY_ENABLED="1",
+        CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR="tiktoken",
+    )
+    assert cfg.token_estimator == TOKEN_ESTIMATOR_TIKTOKEN
+    assert cfg.token_estimator_downgraded is False
+
+
+def test_token_estimator_downgrades_without_tiktoken(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing optional package is a downgrade, not a crash — and it is named.
+
+    ``profile`` raises for a missing ``psutil`` because profiling silently off
+    would be read as "this build has no memory cost". A token estimator has a
+    correct weaker answer, so it falls back — but the config carries the fact,
+    so nothing downstream can report ``tiktoken`` numbers that were never taken.
+    """
+    monkeypatch.setattr("codeclone.config.observability.find_spec", lambda _name: None)
+    cfg = _resolve(
+        CODECLONE_OBSERVABILITY_ENABLED="1",
+        CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR="tiktoken",
+    )
+    assert cfg.token_estimator == TOKEN_ESTIMATOR_CHARS_APPROX
+    assert cfg.token_estimator_downgraded is True
+
+
+def test_token_estimator_rejects_unknown_value() -> None:
+    with pytest.raises(ObservabilityConfigError, match="token estimator"):
+        _resolve(
+            CODECLONE_OBSERVABILITY_ENABLED="1",
+            CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR="bpe",
+        )
+
+
+def test_chars_approx_default_is_not_a_second_vocabulary() -> None:
+    """``models`` may only import ``contracts``, so it restates the default.
+
+    A restated literal drifts silently: a set of relative pins ("the default is
+    not tiktoken") stays green whatever the string says. This re-derives the
+    default from the estimator that owns the vocabulary.
+    """
+    assert DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR == TOKEN_ESTIMATOR_CHARS_APPROX
+    assert DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR in TOKEN_ESTIMATOR_MODES
+
+
+def test_default_resolution_does_not_probe_for_tiktoken(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default path must not pay for a package it will not use."""
+    probed: list[str] = []
+
+    def _tracking_find_spec(name: str) -> object:
+        probed.append(name)
+        return object()
+
+    monkeypatch.setattr("codeclone.config.observability.find_spec", _tracking_find_spec)
+    _resolve(CODECLONE_OBSERVABILITY_ENABLED="1")
+    assert probed == []
 
 
 def test_observability_persist_can_be_disabled_explicitly() -> None:

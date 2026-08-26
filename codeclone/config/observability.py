@@ -19,10 +19,16 @@ import os
 from collections.abc import Mapping
 from importlib.util import find_spec
 
+from ..budget.estimator import (
+    TOKEN_ESTIMATOR_CHARS_APPROX,
+    TOKEN_ESTIMATOR_MODES,
+    TOKEN_ESTIMATOR_TIKTOKEN,
+)
 from ..models import (
     DEFAULT_OBSERVABILITY_MAX_OPERATIONS,
     DEFAULT_OBSERVABILITY_MAX_SPANS,
     DEFAULT_OBSERVABILITY_RETENTION_DAYS,
+    DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR,
     ObservabilityConfig,
 )
 from ..utils.ci import is_ci_environment
@@ -64,6 +70,31 @@ def _positive_env_int(environ: Mapping[str, str], key: str, *, default: int) -> 
     return value
 
 
+def _resolve_token_estimator(environ: Mapping[str, str]) -> tuple[str, bool]:
+    """Return ``(effective_mode, downgraded)`` for the payload token estimator.
+
+    ``chars_approx`` stays the default: the MCP server is a long-lived process
+    and tiktoken keeps native encoding state resident once imported. The probe
+    for tiktoken therefore runs only when the exact mode is actually requested.
+
+    A missing tiktoken downgrades rather than raising — unlike ``profile``,
+    which has no weaker correct answer and must not be silently off. The
+    downgrade is returned as a fact so nothing downstream can present
+    approximated units as an exact tokenizer count.
+    """
+    raw = environ.get("CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR", "").strip().lower()
+    if not raw:
+        return DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR, False
+    if raw not in TOKEN_ESTIMATOR_MODES:
+        expected = ", ".join(sorted(TOKEN_ESTIMATOR_MODES))
+        raise ObservabilityConfigError(
+            f"observability token estimator must be one of: {expected}"
+        )
+    if raw == TOKEN_ESTIMATOR_TIKTOKEN and find_spec("tiktoken") is None:
+        return TOKEN_ESTIMATOR_CHARS_APPROX, True
+    return raw, False
+
+
 def resolve_observability_config(
     *, environ: Mapping[str, str] | None = None
 ) -> ObservabilityConfig:
@@ -91,6 +122,7 @@ def resolve_observability_config(
         raise ObservabilityConfigError(
             "observability profile=true requires the codeclone[perf] extra (psutil)."
         )
+    token_estimator, token_estimator_downgraded = _resolve_token_estimator(env)
     return ObservabilityConfig(
         enabled=True,
         persist=_env_flag(env, "CODECLONE_OBSERVABILITY_PERSIST", default=True),
@@ -113,6 +145,8 @@ def resolve_observability_config(
             "CODECLONE_OBSERVABILITY_MAX_SPANS_PER_OPERATION",
             default=DEFAULT_OBSERVABILITY_MAX_SPANS,
         ),
+        token_estimator=token_estimator,
+        token_estimator_downgraded=token_estimator_downgraded,
     )
 
 

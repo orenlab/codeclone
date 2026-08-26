@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import json
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import orjson
 import pytest
@@ -26,6 +28,7 @@ from codeclone.surfaces.mcp._context_governance import (
     CONTEXT_GOVERNANCE_CONTRACT_VERSION,
     CONTEXT_GOVERNANCE_ESTIMATOR,
 )
+from codeclone.surfaces.mcp.payloads import measure_payload
 from codeclone.surfaces.mcp.server import _instrument_tool, build_mcp_server
 
 
@@ -50,6 +53,112 @@ def get_relevant_memory(root: str) -> dict[str, object]:
             "mode": "observe",
         },
     }
+
+
+#: Non-ASCII payload: the only input that separates the canonical
+#: ``ensure_ascii=False`` serialization from the escaped one. Every ASCII
+#: payload measures identically under both, which is why the byte/token split
+#: below survived a suite that never fed the instrument a Cyrillic response.
+_CYRILLIC_PAYLOAD: dict[str, object] = {
+    "сообщение": "Результат анализа: структурных регрессий нет",
+    "статус": "принято",
+}
+
+
+def _canonical_text(payload: dict[str, object]) -> str:
+    """Re-derive canonical JSON here rather than importing the helper.
+
+    A pin that calls the production serializer is green for any serializer.
+    This states the canonical form independently: sorted keys, compact
+    separators, no ASCII escaping.
+    """
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def test_measure_payload_bytes_and_units_measure_one_serialization() -> None:
+    """``byte_size`` must count the bytes of the text the units were counted on.
+
+    ``json.dumps`` escapes non-ASCII by default, so a Cyrillic payload was
+    billed ~3 bytes per character it never sent while its unit count came from
+    the canonical text. Two measurements of two different strings, published
+    side by side as one payload footprint.
+    """
+    canonical = _canonical_text(_CYRILLIC_PAYLOAD)
+    byte_size, units = measure_payload(_CYRILLIC_PAYLOAD)
+
+    assert byte_size == len(canonical.encode("utf-8"))
+    assert units == -(-len(canonical) // 4)
+
+
+def test_measure_payload_uses_the_configured_token_estimator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The configured estimator must reach the estimator call, not just exist."""
+    seen: list[object] = []
+
+    def _spy(_payload: object, **kwargs: object) -> SimpleNamespace:
+        seen.append(kwargs.get("estimator"))
+        return SimpleNamespace(tokens=7)
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.payloads.estimate_payload",
+        _spy,
+    )
+    bootstrap(ObservabilityConfig(enabled=True, token_estimator="tiktoken"))
+    try:
+        measure_payload(_CYRILLIC_PAYLOAD)
+    finally:
+        shutdown()
+
+    assert seen == ["tiktoken"]
+
+
+def test_measure_payload_reports_exact_tokens_under_tiktoken() -> None:
+    """With the knob on, the number must be the BPE count, not the /4 estimate."""
+    pytest.importorskip("tiktoken")
+    canonical = _canonical_text(_CYRILLIC_PAYLOAD)
+    approx_units = -(-len(canonical) // 4)
+
+    bootstrap(ObservabilityConfig(enabled=True, token_estimator="tiktoken"))
+    try:
+        _byte_size, units = measure_payload(_CYRILLIC_PAYLOAD)
+    finally:
+        shutdown()
+
+    assert units > 0
+    assert units != approx_units
+
+
+def test_measure_payload_falls_back_when_the_estimator_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The instrument may never break the tool call it wraps.
+
+    ``tiktoken`` reaches for its BPE table on first use, so the enabled knob
+    puts a failure mode behind this call that the default never had. The
+    fallback is the char approximation, not a propagated exception.
+    """
+
+    def _boom(_payload: object, **_kwargs: object) -> object:
+        raise RuntimeError("encoding unavailable")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.payloads.estimate_payload",
+        _boom,
+    )
+    bootstrap(ObservabilityConfig(enabled=True, token_estimator="tiktoken"))
+    try:
+        byte_size, units = measure_payload(_CYRILLIC_PAYLOAD)
+    finally:
+        shutdown()
+
+    assert byte_size > 0
+    assert units == -(-len(_canonical_text(_CYRILLIC_PAYLOAD)) // 4)
 
 
 def test_registrar_records_operation_with_payload_sizes(tmp_path: Path) -> None:

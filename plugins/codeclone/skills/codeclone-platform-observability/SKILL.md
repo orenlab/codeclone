@@ -57,10 +57,16 @@ Human cockpit (not MCP): `codeclone observability trace --root . --last 50 --htm
 | row `verdict`                                        | `query_chatty` / `context_heavy` / `ok` — perf signal, NOT a code-quality verdict       |
 | `costly_noops`                                       | redundant-work hints                                                                    |
 | `affects_analysis_truth` / `affects_edit_permission` | always false — observer never gates or authorizes                                       |
+| `context_unit_estimator`                             | which estimator produced the context units — read it before naming them                 |
 
-MCP payload context metrics are estimated context units. For responses carrying
-`context_governance`, the observer uses that envelope's `estimated` value; do not
-describe it as an exact model tokenizer count.
+MCP payload context units are `chars_approx` estimates by default; with
+`CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR=tiktoken` (needs the `token-bench`
+extra) they are exact BPE counts. Read `context_unit_estimator.effective`
+before you call a number estimated or exact — never assume from the section.
+A `requested` / `downgrade_reason` pair there means tiktoken was asked for and
+is not installed, so the numbers are the approximation. For responses carrying
+`context_governance`, the observer uses that envelope's own `estimated` value
+in either mode; that one is never an exact model tokenizer count.
 
 ## Non-goals
 

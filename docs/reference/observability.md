@@ -36,6 +36,26 @@ error.
 | `CODECLONE_OBSERVABILITY_RETENTION_DAYS` | Retain persisted telemetry (days, default `7`) |
 | `CODECLONE_OBSERVABILITY_MAX_OPERATIONS_PER_PROCESS` | Cap captured operations per process (default `2000`) |
 | `CODECLONE_OBSERVABILITY_MAX_SPANS_PER_OPERATION` | Cap spans per operation (default `100`) |
+| `CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR` | Payload context-unit estimator: `chars_approx` (default) or `tiktoken` |
+
+!!! note "`tiktoken` is opt-in, and downgrades instead of failing"
+    `chars_approx` — `ceil(characters / 4)` over the canonical JSON — stays the
+    default because the MCP server is a long-lived process and importing
+    tiktoken keeps native encoding state resident for the rest of its life.
+
+    `CODECLONE_OBSERVABILITY_TOKEN_ESTIMATOR=tiktoken` switches payload context
+    units to exact BPE counts and needs the `codeclone[token-bench]` extra. When
+    the extra is missing the estimator falls back to `chars_approx` rather than
+    failing — unlike `CODECLONE_OBSERVABILITY_PROFILE`, which has no weaker
+    correct answer. The fallback is never silent: every
+    `query_platform_observability` response carries `context_unit_estimator`
+    with the `effective` mode, plus `requested` and `downgrade_reason` when a
+    downgrade happened.
+
+    `context_unit_estimator.applies_to` is `reader_process_configuration` — it
+    describes the process answering the query, not the processes that wrote the
+    stored rows. Responses carrying a `context_governance` envelope keep
+    reporting that envelope's own declared `estimated` value in either mode.
 
 !!! important "Memory columns need `CODECLONE_OBSERVABILITY_PROFILE`"
     `CODECLONE_OBSERVABILITY_ENABLED=1` on its own records spans with **NULL**
