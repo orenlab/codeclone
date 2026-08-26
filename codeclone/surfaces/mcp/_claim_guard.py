@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final, Literal
 
+from ...contracts import TIER_STATE_COMPLETE
 from ...utils import coerce as _coerce
 from ...utils.payload_narrow import is_record_mapping
 from .messages import claims as claim_msgs
@@ -18,8 +20,13 @@ from .messages import claims as claim_msgs
 MAX_REVIEW_CLAIM_TEXT_CHARS: Final = 50_000
 TEXT_WINDOW_RADIUS: Final = 80
 SECURITY_SURFACES_FAMILY: Final = "security_surfaces"
+#: Metric families are read out as words ("security surfaces"); clone tiers
+#: are habitually hyphenated ("near-miss"). Each vocabulary keeps its own
+#: relaxed separator so widening one never silently widens the other.
+METRIC_FAMILY_SEPARATOR: Final = r"\s+"
+CLONE_TIER_SEPARATOR: Final = r"[\s\-]+"
 
-CitationKind = Literal["finding", "metric_family"]
+CitationKind = Literal["finding", "metric_family", "clone_tier"]
 
 
 def _as_sequence(value: object) -> Sequence[object]:
@@ -83,6 +90,55 @@ STRUCTURAL_SCOPE_KEYWORDS: Final = (
     "all checks passed",
     "code quality verified",
 )
+# A claim about an advisory clone tier is a measurement claim when it names
+# an outcome AND the thing measured. Both halves are required: "the near_miss
+# tier is disabled" names no outcome, and "renamed_structure has no gate
+# relevance" names no measured subject — both are true sentences about the
+# tier's standing, and a guard that rejected them would only teach reviewers
+# to stop naming the tiers.
+TIER_OUTCOME_TERMS: Final = (
+    "absent",
+    "clean",
+    "clear",
+    "detect",
+    "detected",
+    "detects",
+    "find",
+    "finds",
+    "flagged",
+    "found",
+    "free",
+    "never",
+    "no",
+    "none",
+    "not",
+    "nothing",
+    "reported",
+    "reports",
+    "surfaced",
+    "without",
+    "zero",
+)
+TIER_SUBJECT_TERMS: Final = (
+    "candidate",
+    "candidates",
+    "clone",
+    "clones",
+    "duplicate",
+    "duplicates",
+    "finding",
+    "findings",
+    "group",
+    "groups",
+    "hit",
+    "hits",
+    "match",
+    "matches",
+    "pair",
+    "pairs",
+    "result",
+    "results",
+)
 
 _STRUCTURAL_PROFILES: Final[frozenset[str]] = frozenset({"python_structural"})
 
@@ -94,6 +150,20 @@ _NEGATION_WINDOW: Final = re.compile(
     r"(?:\w+\s+){0,4}$",
     re.IGNORECASE,
 )
+
+
+def _word_alternation(terms: Sequence[str]) -> re.Pattern[str]:
+    return re.compile(
+        r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b",
+        flags=re.IGNORECASE,
+    )
+
+
+_TIER_OUTCOME_RE: Final = _word_alternation(TIER_OUTCOME_TERMS)
+_TIER_SUBJECT_RE: Final = _word_alternation(TIER_SUBJECT_TERMS)
+# A bare count is an outcome on its own: "near_miss: 3 pairs" states a
+# measurement without any of the outcome verbs above.
+_TIER_COUNT_RE: Final = re.compile(r"\b\d+\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +194,15 @@ class ReportContext:
     metric_families: frozenset[str]
     verification_profile: str | None = None
     patch_health_delta: int | None = None
+    #: Advisory clone tier -> its container's execution ``state`` for this
+    #: run, exactly as the producers stamped it (T1, 2026-08-24). The guard
+    #: never restates which tiers exist: the mapping IS the vocabulary, so a
+    #: third tier container is covered the day the producers emit it. Empty
+    #: means the run's document carried no tier container at all, and the
+    #: guard then has nothing to check a tier claim against.
+    tier_states: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({}),
+    )
 
 
 def validate_claims(
@@ -206,18 +285,22 @@ def extract_citations(
             )
             for match in _find_literal_matches(text, finding_id)
         )
-    for family_name in sorted(report_context.metric_families):
-        for variant in _metric_family_patterns(family_name):
-            citations.extend(
-                Citation(
-                    cited_id=family_name,
-                    kind="metric_family",
-                    text_window=text_window(text, match.start(), match.end()),
-                    start_offset=match.start(),
-                    end_offset=match.end(),
-                )
-                for match in variant.finditer(text)
-            )
+    citations.extend(
+        _name_citations(
+            text,
+            names=report_context.metric_families,
+            kind="metric_family",
+            relaxed_separator=METRIC_FAMILY_SEPARATOR,
+        )
+    )
+    citations.extend(
+        _name_citations(
+            text,
+            names=report_context.tier_states,
+            kind="clone_tier",
+            relaxed_separator=CLONE_TIER_SEPARATOR,
+        )
+    )
     return tuple(
         sorted(
             _dedupe_citations(citations),
@@ -268,6 +351,7 @@ def _violations_for_citations(
         _check_known_debt_overclaim,
         _check_dead_code_reachability_overclaim,
         _check_fix_without_verification,
+        _check_tier_claim_without_measurement,
     )
     violations: list[Violation] = []
     for check in checks:
@@ -420,6 +504,67 @@ def _check_fix_without_verification(
     return tuple(violations)
 
 
+def _check_tier_claim_without_measurement(
+    *,
+    citations: Sequence[Citation],
+    report_context: ReportContext,
+) -> tuple[Violation, ...]:
+    """P-6: a tier claim standing on a measurement that never happened.
+
+    Same shape as P-5 one check up — a claim whose evidence does not exist —
+    read off the tier container's own execution witness. At ``complete`` the
+    producer ran, so ``count: 0`` is a real empty result and "no near-miss
+    clones" is simply true; at every other state (today only ``disabled``)
+    the container omits ``count`` entirely, and an absence that was never
+    measured is not an absence.
+
+    Matching here is deliberately negation-blind, unlike the sibling checks.
+    Those exist to spare a reviewer who *denies* an overclaim ("not a
+    vulnerability"). Here the negation IS the claim: "we did not find any
+    near-miss clones" is precisely the sentence the sanction names, and
+    routing it through :func:`_contains_keyword` would drop it as a denial.
+    """
+
+    violations: list[Violation] = []
+    for citation in citations:
+        state = str(report_context.tier_states.get(citation.cited_id, "")).strip()
+        if not _is_unmeasured_tier_claim(citation, state=state):
+            continue
+        reported_state = state or "unknown"
+        violations.append(
+            Violation(
+                pattern="P-6",
+                claim=citation.text_window,
+                cited_id=citation.cited_id,
+                reason=claim_msgs.VIOLATION_REASON_TIER_NOT_MEASURED.format(
+                    tier=citation.cited_id,
+                    state=reported_state,
+                ),
+                source_flag=(
+                    f"findings.groups.{citation.cited_id}.state={reported_state}"
+                ),
+            )
+        )
+    return tuple(violations)
+
+
+def _is_unmeasured_tier_claim(citation: Citation, *, state: str) -> bool:
+    return (
+        citation.kind == "clone_tier"
+        and state != TIER_STATE_COMPLETE
+        and _states_a_tier_measurement(citation.text_window)
+    )
+
+
+def _states_a_tier_measurement(window: str) -> bool:
+    if _TIER_SUBJECT_RE.search(window) is None:
+        return False
+    return (
+        _TIER_OUTCOME_RE.search(window) is not None
+        or _TIER_COUNT_RE.search(window) is not None
+    )
+
+
 def _warnings_for_text(
     *,
     text: str,
@@ -500,13 +645,51 @@ def _text_violations(
     )
 
 
-def _metric_family_patterns(family_name: str) -> tuple[re.Pattern[str], ...]:
-    canonical = re.compile(rf"\b{re.escape(family_name)}\b", flags=re.IGNORECASE)
-    if "_" not in family_name:
+def _name_patterns(
+    name: str,
+    *,
+    relaxed_separator: str,
+) -> tuple[re.Pattern[str], ...]:
+    """Match a wire name and the prose spelling reviewers actually write.
+
+    The separator is the caller's, because the two vocabularies are read in
+    different registers: a metric family is written out as words
+    ("security surfaces"), while a clone tier is habitually hyphenated
+    ("near-miss"). A matcher that only knew the wire spelling would be
+    escaped by ordinary English.
+    """
+
+    canonical = re.compile(rf"\b{re.escape(name)}\b", flags=re.IGNORECASE)
+    if "_" not in name:
         return (canonical,)
-    spaced_escaped = re.escape(family_name).replace("_", r"\s+")
-    spaced = re.compile(rf"\b{spaced_escaped}\b", flags=re.IGNORECASE)
-    return (canonical, spaced)
+    relaxed_escaped = re.escape(name).replace("_", relaxed_separator)
+    relaxed = re.compile(rf"\b{relaxed_escaped}\b", flags=re.IGNORECASE)
+    return (canonical, relaxed)
+
+
+def _name_citations(
+    text: str,
+    *,
+    names: Iterable[str],
+    kind: CitationKind,
+    relaxed_separator: str,
+) -> list[Citation]:
+    """Cite every mention of a closed vocabulary, in deterministic order."""
+
+    citations: list[Citation] = []
+    for name in sorted(names):
+        for variant in _name_patterns(name, relaxed_separator=relaxed_separator):
+            citations.extend(
+                Citation(
+                    cited_id=name,
+                    kind=kind,
+                    text_window=text_window(text, match.start(), match.end()),
+                    start_offset=match.start(),
+                    end_offset=match.end(),
+                )
+                for match in variant.finditer(text)
+            )
+    return citations
 
 
 def _find_literal_matches(text: str, literal: str) -> tuple[re.Match[str], ...]:

@@ -37,6 +37,13 @@ VIOLATION_REASON_FIX_WITHOUT_VERIFICATION: Final = (
     "Fix claimed but no post-patch analysis run is available. "
     "Run analysis after editing and verify the patch contract."
 )
+VIOLATION_REASON_TIER_NOT_MEASURED: Final = (
+    "The '{tier}' clone tier is not a completed measurement in this run "
+    "(state='{state}'), so its container carries no count. A claim about "
+    "what this tier did or did not find has no measurement behind it — "
+    "an absence that was never measured is not an absence. Enable the tier "
+    "and re-run, or drop the claim."
+)
 
 WARN_NO_CITATIONS: Final = (
     "No known CodeClone finding IDs or metric family citations were found in the text."

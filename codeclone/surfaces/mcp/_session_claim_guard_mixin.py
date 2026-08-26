@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import cast
 
 from ...audit import EVENT_CLAIM_COMPLETED, EVENT_CLAIM_VIOLATED
 from ...metrics.registry import METRIC_FAMILIES
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.payload_narrow import is_record_mapping
 from . import _session_helpers as _helpers
 from ._claim_guard import (
     ReportContext,
@@ -36,6 +40,34 @@ def _finding_session(
     session: _MCPSessionClaimGuardMixin,
 ) -> _MCPSessionFindingMixin:
     return cast(_MCPSessionFindingMixin, session)
+
+
+def _tier_states_from_report_document(
+    report_document: Mapping[str, object],
+) -> Mapping[str, str]:
+    """Read the advisory clone tiers and their execution states off the run.
+
+    The tier vocabulary is derived here, never restated: every tier container
+    declares its own ``tier`` name and its ``state`` witness (T1,
+    2026-08-24), so a third tier that stamps the same two fields is covered
+    the day it lands. A hardcoded second list would be a copy that rots
+    against the producers while the guard kept validating claims about a
+    vocabulary the report no longer uses.
+
+    A document with no tier container yields an empty mapping: the guard then
+    knows of no tier and checks no tier claim, which is the honest answer
+    rather than rejecting a claim on evidence it does not hold.
+    """
+
+    groups = _as_mapping(_as_mapping(report_document.get("findings")).get("groups"))
+    states: dict[str, str] = {}
+    for container in groups.values():
+        if not is_record_mapping(container):
+            continue
+        tier = str(container.get("tier", "")).strip()
+        if tier:
+            states[tier] = str(container.get("state", "")).strip()
+    return MappingProxyType(dict(sorted(states.items())))
 
 
 class _MCPSessionClaimGuardMixin:
@@ -138,6 +170,7 @@ class _MCPSessionClaimGuardMixin:
             metric_families=frozenset(sorted(METRIC_FAMILIES)),
             verification_profile=profile_value,
             patch_health_delta=patch_health_delta,
+            tier_states=_tier_states_from_report_document(record.report_document),
         )
 
     def _reachable_qualnames(self, record: MCPRunRecord) -> frozenset[str]:
