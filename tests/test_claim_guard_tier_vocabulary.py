@@ -53,6 +53,17 @@ from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
 _COMPLETE_RUN_ID = "claimguardtiercomplete0001"
 
+#: The tiers the producers ship today, as an INDEPENDENT witness of the
+#: universe. Every other pin in this file derives its tier set from the
+#: extractor, which makes the extractor's own output the universe of its
+#: coverage: drop a tier there and it leaves the pins' universe together
+#: with its coverage, so a silently halved vocabulary reads as green. A
+#: literal floor is the honest anchor precisely because the derivation is
+#: the thing under suspicion — the same shape as a born-empty composition
+#: pin. It is a fact of today's producer set and moves only by a declared
+#: tier transition, never to accommodate a mutation.
+KNOWN_TIERS = frozenset({"near_miss", "renamed_structure"})
+
 
 def _write_fixture(root: Path) -> None:
     package = root / "pkg"
@@ -141,14 +152,45 @@ def _cited_ids(payload: dict[str, object]) -> set[str]:
     return {str(item["cited_id"]) for item in violations}
 
 
+def _reason_for(payload: dict[str, object], tier: str) -> str:
+    violations = cast("list[dict[str, object]]", payload["violations"])
+    reasons = [
+        str(item["reason"]) for item in violations if str(item["cited_id"]) == tier
+    ]
+    assert reasons, f"no violation cited {tier!r}: {violations}"
+    return reasons[0]
+
+
+def _assert_reason_is_self_explaining(reason: str, *, tier: str) -> None:
+    """A refusal must carry its own explanation, not a bare label.
+
+    ``valid: False`` on its own tells an agent that something was rejected,
+    not what or why, and leaves nothing in-band to act on. The assertions
+    run against the RENDERED reason and deliberately NOT against the message
+    template: comparing the output to the template it was rendered from
+    passes even when the template has stopped interpolating the tier
+    entirely, which is the hollow shape this pin exists to avoid.
+    """
+
+    assert tier in reason, f"the rejection does not name the tier: {reason!r}"
+    assert TIER_STATE_DISABLED in reason, (
+        f"the rejection does not name the state it read: {reason!r}"
+    )
+
+
 def test_every_tier_reaching_mcp_is_disabled_and_names_its_own_state(
     tmp_path: Path,
 ) -> None:
-    """The vocabulary and the witness both come off a real run, not a literal.
+    """The witness comes off a real run; the universe is anchored independently.
 
-    A third tier container that the extractor cannot see reds here as an
-    empty or short vocabulary, instead of silently leaving the guard a tier
-    short.
+    ``assert states`` and "every value is disabled" are both satisfied by a
+    vocabulary missing a tier, so on their own they cannot see an extractor
+    that drops one. :data:`KNOWN_TIERS` is the independent floor that can:
+    a tier the extractor stops reporting reds here by name instead of
+    quietly shrinking every other pin's universe.
+
+    The floor is a floor, not an equality: a tier added later is expected to
+    appear here without a test edit, and is caught by the per-tier pin.
     """
 
     _service, record = _analyzed(tmp_path)
@@ -157,6 +199,10 @@ def test_every_tier_reaching_mcp_is_disabled_and_names_its_own_state(
     assert states, (
         "the run's report document carried no tier container the session can "
         "read; the guard would have nothing to check a tier claim against"
+    )
+    assert set(states) >= KNOWN_TIERS, (
+        "the derived vocabulary lost a tier the producers still ship: "
+        f"missing {sorted(KNOWN_TIERS - set(states))}, derived {sorted(states)}"
     )
     assert set(states.values()) == {TIER_STATE_DISABLED}, (
         f"MCP exposes no tier opt-in, so every tier must arrive unmeasured: {states}"
@@ -206,6 +252,10 @@ def test_absence_claim_about_a_disabled_tier_is_rejected(tmp_path: Path) -> None
     violations = cast("list[dict[str, object]]", payload["violations"])
     # The violation must name the container state it read, not merely assert.
     assert violations[0]["source_flag"] == "findings.groups.near_miss.state=disabled"
+    _assert_reason_is_self_explaining(
+        _reason_for(payload, "near_miss"),
+        tier="near_miss",
+    )
 
 
 def test_the_same_absence_claim_is_honest_when_the_tier_completed(
@@ -238,13 +288,18 @@ def test_every_disabled_tier_rejects_an_absence_claim_naming_it(
 ) -> None:
     """No tier is a special case: the rule is the container state, per tier.
 
-    Driven off the derived vocabulary, so ``renamed_structure`` — and any
-    tier added later — is covered without being spelled out here.
+    The loop runs over the independent floor UNION the derived vocabulary,
+    never the derived vocabulary alone. Iterating only what the extractor
+    reports makes the component under test the author of its own coverage:
+    a dropped tier is not tested rather than failing, which is how a halved
+    vocabulary passed 6875 tests. The union keeps the forward property —
+    a tier added later is covered without a test edit — while the floor
+    holds the two that exist today.
     """
 
     service, record = _analyzed(tmp_path)
 
-    for tier in sorted(_tier_states(record)):
+    for tier in sorted(KNOWN_TIERS | set(_tier_states(record))):
         payload = _validate(
             service,
             record,
@@ -253,6 +308,7 @@ def test_every_disabled_tier_rejects_an_absence_claim_naming_it(
         assert payload["valid"] is False, f"tier {tier!r} escaped the guard"
         assert _patterns(payload) == {"P-6"}
         assert _cited_ids(payload) == {tier}
+        _assert_reason_is_self_explaining(_reason_for(payload, tier), tier=tier)
 
 
 @pytest.mark.parametrize(
