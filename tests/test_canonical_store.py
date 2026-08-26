@@ -376,10 +376,25 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'{"effect_signature":"x","function":[1,2],"root_set":[]}',
             "stored symbol",
         ),
+        # F2, zero numerator: the store's shape guard admits the int, the
+        # MODEL law (the floor's one owner) refuses, and the store wraps it.
+        (
+            "coupling_cohesion_observation",
+            b'{"dimension":"cbo","numerator":0,"symbol":["pkg/a.py","A.run"]}',
+            "numerator",
+        ),
+        # F2, non-int numerator: the store's own shape guard refuses.
+        (
+            "coupling_cohesion_observation",
+            b'{"dimension":"cbo","numerator":"3","symbol":["pkg/a.py","A.run"]}',
+            "numerator",
+        ),
     ],
     ids=[
         "contract-not-a-pair",
         "contract-non-string-pair",
+        "coupling-zero-numerator-model-law",
+        "coupling-non-int-numerator-shape-guard",
     ],
 )
 def test_well_addressed_malformed_payload_is_refused(
@@ -534,6 +549,9 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
         assert counts["semantic_edge"] == len(model.facts.analysis.semantic_edges)
         assert counts["dependency_edge"] == len(model.facts.analysis.dependency_edges)
         assert counts["violation"] == len(model.facts.analysis.violations)
+        assert counts["coupling_cohesion_observation"] == len(
+            model.facts.analysis.coupling_cohesion_observations
+        )
         assert counts["file"] == len(model.files)
         assert counts["module"] == len(model.modules)
         assert counts["analyzed_file"] == len(model.analyzed_files)

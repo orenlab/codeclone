@@ -31,6 +31,7 @@ from codeclone.canonical import (
     CanonicalModel,
     CanonicalModelError,
     ContractRow,
+    CouplingCohesionRow,
     DependencyEdgeRow,
     EffectLabelRoot,
     EffectRoot,
@@ -146,6 +147,17 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             suppressed=True,
         ),
     ]
+    coupling_cohesion = [
+        # F2 (wave 4): two rows on one symbol differ only in dimension, two
+        # rows share (dimension, numerator) across symbols, one row lives on
+        # the module-less separator-collision file, and numerator 1 sits on
+        # the family's floor boundary.
+        CouplingCohesionRow(sa, "cbo", 3),
+        CouplingCohesionRow(sa, "lcom4", 1),
+        CouplingCohesionRow(sc, "cbo", 3),
+        CouplingCohesionRow(sb, "instance_variables", 1),
+        CouplingCohesionRow(se, "methods", 2),
+    ]
     coupled = [frozenset({"Token", "AccessToken"}), frozenset({"Token"})]
     if reverse_insertion:
         contracts = list(reversed(contracts))
@@ -155,6 +167,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         edges = list(reversed(edges))
         dependency_edges = list(reversed(dependency_edges))
         violations = list(reversed(violations))
+        coupling_cohesion = list(reversed(coupling_cohesion))
         coupled = list(reversed(coupled))
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
@@ -167,6 +180,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             semantic_edges=frozenset(edges),
             dependency_edges=frozenset(dependency_edges),
             violations=frozenset(violations),
+            coupling_cohesion_observations=frozenset(coupling_cohesion),
         ),
         coupled_sets=frozenset(coupled),
     )
@@ -184,14 +198,17 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     the two class-B handle columns, so every document's bytes moved.
 
     The three-house facts split (ruling variant v) deliberately did NOT
-    move this literal: the split is wire-neutral, and these bytes are the
-    proof.
+    move the wave-1.5 literal (2576 bytes, sha256 cfcf02bf…): the split is
+    wire-neutral, proven byte-for-byte across the split commit.  Wave 4's F2
+    family then replaced that literal deliberately: the draft gained
+    ``coupling_cohesion_observations``, so every document's bytes moved —
+    the one announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 2576
+    assert len(payload) == 2721
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "cfcf02bf680c6b941c6fde4b1f87646e9d5a4c9ca3092fbbd81aab305857d47a"
+        == "67da14d47d5ee3bff50f153ee2020ecf80eeff5e242158c746248469bb52de8f"
     )
 
 
@@ -231,6 +248,7 @@ def test_entity_counts_survive_the_round_trip() -> None:
         "semantic_edges",
         "dependency_edges",
         "violations",
+        "coupling_cohesion_observations",
     ):
         assert len(getattr(decoded.facts.analysis, field)) == len(
             getattr(model.facts.analysis, field)
@@ -478,6 +496,96 @@ def test_violations_differing_only_in_kind_are_distinct_rows() -> None:
         )
     )
     assert len(model.normalize().facts.analysis.violations) == 2
+
+
+def test_model_refuses_two_coupling_rows_under_one_logical_key() -> None:
+    """F2 key law: (SYMBOL, dimension) names at most one observation."""
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            coupling_cohesion_observations=frozenset(
+                {
+                    CouplingCohesionRow(sa, "cbo", 3),
+                    CouplingCohesionRow(sa, "cbo", 4),
+                }
+            )
+        )
+    )
+    with pytest.raises(
+        CanonicalModelError, match=r"coupling_cohesion_observations\.key"
+    ):
+        model.normalize()
+
+
+def test_coupling_rows_differing_in_either_key_component_coexist() -> None:
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    sb = SymbolId(FileId("pkg/a.py"), "B")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            coupling_cohesion_observations=frozenset(
+                {
+                    CouplingCohesionRow(sa, "cbo", 3),
+                    CouplingCohesionRow(sa, "lcom4", 3),
+                    CouplingCohesionRow(sb, "cbo", 3),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.coupling_cohesion_observations) == 3
+
+
+def test_coupling_row_refuses_a_zero_numerator() -> None:
+    """The producer never emits zero (absence means zero); a zero row would
+    smuggle the forbidden third state into the family."""
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    with pytest.raises(CanonicalModelError, match="numerator"):
+        CouplingCohesionRow(sa, "cbo", 0)
+
+
+def test_coupling_row_refuses_an_unknown_dimension() -> None:
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    with pytest.raises(CanonicalModelError, match="dimension"):
+        CouplingCohesionRow(sa, "banana", 1)
+
+
+def test_coupling_row_refuses_a_boolean_numerator() -> None:
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    with pytest.raises(CanonicalModelError, match="numerator"):
+        CouplingCohesionRow(sa, "cbo", True)
+
+
+def test_tied_coupling_rows_are_ordered_by_dimension_on_the_wire() -> None:
+    """Rows tied on the symbol MUST order by dimension bytes.
+
+    Eight tied rows across two symbols make a set-iteration coincidence
+    practically impossible (§6.2, the dependency-line precedent verbatim):
+    an encoder that drops ``dimension`` from its sort key leaks iteration
+    order into the wire and this pin reds.
+    """
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    sb = SymbolId(FileId("pkg/a.py"), "B")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            coupling_cohesion_observations=frozenset(
+                CouplingCohesionRow(symbol, dimension, 2)
+                for symbol in (sa, sb)
+                for dimension in ("cbo", "instance_variables", "lcom4", "methods")
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    table = document["facts"]["coupling_cohesion_observations"]
+    assert table["dimension"] == [
+        "cbo",
+        "instance_variables",
+        "lcom4",
+        "methods",
+        "cbo",
+        "instance_variables",
+        "lcom4",
+        "methods",
+    ]
+    assert table["symbol"] == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:

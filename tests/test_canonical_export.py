@@ -76,9 +76,12 @@ _TARGET = "worktree-a"
 # membership; the artifact digest hashes the wire bytes under the
 # wire-revision domain. Refreshing either literal to make the test pass is
 # forbidden: a change here IS an identity-contract change (run identity or
-# artifact domain) and needs its own review.
-_FIXTURE_RUN_ID = "591477af9a8ff945eee658f95d832174cda403e27176a4233acf26941a9c9bb5"
-_FIXTURE_ARTIFACT = "53f65a70b75f111ff79027d25a147ce2cd4d68d4c83197ffda4e4c9126792d22"
+# artifact domain) and needs its own review.  Wave 4 replaced the wave-3
+# literals (run 591477af..., artifact 53f65a70...) deliberately: the fixture
+# gained the F2 ``coupling_cohesion_observations`` family, which moves the
+# membership (five new content-addressed objects) and the wire bytes.
+_FIXTURE_RUN_ID = "174ed52d20dcef4943cbee98a975eb294b0235bec0bd2b8f91ec245b39461bc0"
+_FIXTURE_ARTIFACT = "fde286104d83d5188df034d79ab3471c690c6c250032f491c7bcf8a950c9afd3"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

@@ -45,6 +45,7 @@ from codeclone.canonical.export import (
     verify_export_artifact,
 )
 from codeclone.canonical.identity import (
+    COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     EFFECT_KINDS,
     IMPORT_TYPES,
@@ -77,6 +78,7 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ComparisonFacts,
     ContractRow,
+    CouplingCohesionRow,
     DependencyEdgeRow,
     EvaluationFacts,
     FileModuleRelation,
@@ -104,6 +106,7 @@ from codeclone.canonical.store import (
 
 __all__ = [
     "CANDIDATE_IDENTITY_CONTRACT",
+    "COUPLING_COHESION_DIMENSIONS",
     "DEPENDENCY_BINDINGS",
     "EFFECT_KINDS",
     "FACT_FAMILY_FIELDS",
@@ -120,6 +123,7 @@ __all__ = [
     "CanonicalModelError",
     "ComparisonFacts",
     "ContractRow",
+    "CouplingCohesionRow",
     "DependencyEdgeRow",
     "DependencyEndpoint",
     "EffectLabelRoot",

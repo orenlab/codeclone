@@ -78,6 +78,18 @@ VIOLATION_KINDS: Final = (
     "divergent_failure_semantics",
     "divergent_canonicalization",
 )
+# F2 coupling_cohesion_observations (wave 4): the producer's closed dimension
+# set (observations/projection.py `_coupling_cohesion_observations`), measured
+# 2 091/2 091 rows on the frozen corpus with every dimension populated.  The
+# wire refuses unknowns (W08); meaning is owned by
+# DESIGN_METRICS_ALGORITHM_REVISION (the Wave D lane split: complexity moved
+# to its own revision, this family stays on design metrics).
+COUPLING_COHESION_DIMENSIONS: Final = (
+    "cbo",
+    "instance_variables",
+    "lcom4",
+    "methods",
+)
 
 
 def _utf8(value: str) -> bytes:

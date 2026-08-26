@@ -130,6 +130,33 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    "coupling_cohesion_observations": (
+        FieldDeclaration(
+            "dimension",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "closed vocabulary (COUPLING_COHESION_DIMENSIONS); key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "numerator",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "observed positive count; payload, never key (zero rows dropped "
+            "by the producer — absence means zero)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "SYMBOL key component (measured 2091/2091 with dimension)",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "dependency_edges": (
         FieldDeclaration(
             "binding",

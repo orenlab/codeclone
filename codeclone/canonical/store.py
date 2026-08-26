@@ -120,6 +120,7 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     ContractRow,
+    CouplingCohesionRow,
     DependencyEdgeRow,
     FileModuleRelation,
     GraphNodeRow,
@@ -132,6 +133,7 @@ from codeclone.contracts import (
     CANONICAL_MODEL_REVISION,
     CANONICAL_WIRE_REVISION,
     CONTRACT_IR_VERSION,
+    DESIGN_METRICS_ALGORITHM_REVISION,
     MODULE_IDENTITY_VERSION,
     STORAGE_SCHEMA_REVISION,
 )
@@ -166,6 +168,12 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     "candidate": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     "contract": f"contract_ir:{CONTRACT_IR_VERSION}",
     "coupled_set": f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    # F2: the Wave D lane split put coupling/cohesion meaning on the design
+    # metrics revision (complexity moved to its own), so a design-metrics
+    # recount never lets these facts silently share content addresses.
+    "coupling_cohesion_observation": (
+        f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
+    ),
     "dependency_edge": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "file": f"module_identity:{MODULE_IDENTITY_VERSION}",
     "file_module": f"module_identity:{MODULE_IDENTITY_VERSION}",
@@ -470,6 +478,18 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "suppressed": violation.suppressed,
             },
         )
+    for observation in sorted(
+        facts.coupling_cohesion_observations,
+        key=lambda row: (canonical_key(row.symbol), row.dimension),
+    ):
+        yield (
+            "coupling_cohesion_observation",
+            {
+                "dimension": observation.dimension,
+                "numerator": observation.numerator,
+                "symbol": _symbol_value(observation.symbol),
+            },
+        )
 
 
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
@@ -593,6 +613,20 @@ def _decode_dependency_edge_row(
     )
 
 
+def _decode_coupling_cohesion_row(
+    row: Mapping[str, object], where: str
+) -> CouplingCohesionRow:
+    """Shape guards only: the numerator floor and the dimension vocabulary
+    have exactly one owner — the model law (``CouplingCohesionRow``), whose
+    refusal ``_decode_row`` wraps into a typed integrity error.  A second
+    spelling of either domain here would be the G2 drift class."""
+    return CouplingCohesionRow(
+        symbol=_row_symbol(row, "symbol", where),
+        dimension=_require_str(row, "dimension", where),
+        numerator=_require_line(row, "numerator", where),
+    )
+
+
 def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow:
     return ViolationRow(
         contract_id=_require_str(row, "contract_id", where),
@@ -618,6 +652,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "candidate": _decode_candidate_row,
     "contract": _decode_contract_row,
     "coupled_set": _decode_coupled_row,
+    "coupling_cohesion_observation": _decode_coupling_cohesion_row,
     "dependency_edge": _decode_dependency_edge_row,
     "file": _decode_file_row,
     "file_module": _decode_file_module_row,
@@ -663,6 +698,12 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                     cast("list[DependencyEdgeRow]", family("dependency_edge"))
                 ),
                 violations=frozenset(cast("list[ViolationRow]", family("violation"))),
+                coupling_cohesion_observations=frozenset(
+                    cast(
+                        "list[CouplingCohesionRow]",
+                        family("coupling_cohesion_observation"),
+                    )
+                ),
             )
         ),
         coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
@@ -955,6 +996,7 @@ _IDENTITY_FAMILIES: Final = frozenset(
 _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "candidates": "candidate",
     "contracts": "contract",
+    "coupling_cohesion_observations": "coupling_cohesion_observation",
     "dependency_edges": "dependency_edge",
     "file_modules": "file_module",
     "graph_nodes": "graph_node",

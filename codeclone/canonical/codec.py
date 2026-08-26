@@ -64,6 +64,7 @@ from codeclone.canonical.authority_identity import (
 )
 from codeclone.canonical.errors import CanonicalModelError, WireDecodeError
 from codeclone.canonical.identity import (
+    COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     DOMAIN_TAG_FILE,
     DOMAIN_TAG_MODULE,
@@ -99,6 +100,7 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     ContractRow,
+    CouplingCohesionRow,
     DependencyEdgeRow,
     FileModuleRelation,
     GraphNodeRow,
@@ -286,6 +288,7 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
         referenced.add(violation.sink_identity)
         referenced.add(violation.canonical_owner)
         referenced.update(violation.producer_set)
+    referenced.update(row.symbol for row in facts.coupling_cohesion_observations)
     return referenced
 
 
@@ -555,6 +558,25 @@ def _violation_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
     ]
 
 
+def _coupling_cohesion_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "dimension": row.dimension,
+            "numerator": row.numerator,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.coupling_cohesion_observations,
+            key=lambda row: (
+                plan.symbol_ordinal[row.symbol],
+                row.dimension.encode("utf-8"),
+            ),
+        )
+    ]
+
+
 def _contract_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
@@ -635,6 +657,7 @@ _FAMILY_ROW_BUILDERS: dict[
 ] = {
     "candidates": _candidate_rows,
     "contracts": _contract_rows,
+    "coupling_cohesion_observations": _coupling_cohesion_rows,
     "dependency_edges": _dependency_edge_rows,
     "file_modules": _file_module_rows,
     "graph_nodes": _graph_node_rows,
@@ -1567,6 +1590,46 @@ def _decode_dependency_edges(
     return frozenset(rows)
 
 
+def _decode_coupling_cohesion(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[CouplingCohesionRow]:
+    columns, _flags, row_count = _decode_columns(
+        "coupling_cohesion_observations", facts["coupling_cohesion_observations"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        dimension = _expect_string(
+            columns["dimension"][index],
+            f"facts.coupling_cohesion_observations.dimension[{index}]",
+        )
+        if dimension not in COUPLING_COHESION_DIMENSIONS:
+            raise _refuse(
+                "W08", f"unknown coupling/cohesion dimension tag {dimension!r}"
+            )
+        numerator = _expect_wire_int(
+            columns["numerator"][index],
+            f"facts.coupling_cohesion_observations.numerator[{index}]",
+        )
+        if numerator < 1:
+            raise _refuse(
+                "W07",
+                f"facts.coupling_cohesion_observations.numerator[{index}] "
+                f"is {numerator}, outside the family's declared domain "
+                "[1, 2**31-1] (a zero row would present absence as a "
+                "measured value)",
+            )
+        ordinal = _expect_ordinal(
+            columns["symbol"][index],
+            len(symbols),
+            f"facts.coupling_cohesion_observations.symbol[{index}]",
+        )
+        rows.append(CouplingCohesionRow(symbols[ordinal], dimension, numerator))
+        keys.append((ordinal, dimension.encode("utf-8")))
+    _expect_strictly_increasing(keys, "facts.coupling_cohesion_observations")
+    return frozenset(rows)
+
+
 def _decode_violations(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
@@ -1779,6 +1842,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     semantic_edges = _decode_semantic_edges(facts_section, symbols)
     sink_roles = _decode_sink_roles(facts_section, symbols)
     dependency_edges = _decode_dependency_edges(facts_section, files, modules)
+    coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
     )
@@ -1802,6 +1866,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 semantic_edges=semantic_edges,
                 dependency_edges=dependency_edges,
                 violations=frozenset(violations),
+                coupling_cohesion_observations=coupling_cohesion,
             )
         ),
         coupled_sets=frozenset(

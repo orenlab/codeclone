@@ -16,8 +16,9 @@ the frozen corpus, 1 157 of 12 244 rows are not sorted-deduplicated, so the
 producer's order is a fact and canonizing it away would lose an entity.
 
 Wave family subset: ``file_modules · contracts · graph_nodes · sink_roles
-· candidates · semantic_edges · dependency_edges · violations`` plus the
-standalone ``coupled_sets`` value sets.
+· candidates · semantic_edges · dependency_edges · violations ·
+coupling_cohesion_observations`` plus the standalone ``coupled_sets``
+value sets.
 
 ``dependency_edges`` (wave 1.5): the logical row key is **measured from the
 producer**, not invented — ``metrics/dependencies.py:_unique_sorted_edges``
@@ -50,6 +51,7 @@ from typing import TypeVar
 
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
+    COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     IMPORT_TYPES,
     VIOLATION_KINDS,
@@ -189,6 +191,36 @@ class ViolationRow:
 
 
 @dataclass(frozen=True, slots=True)
+class CouplingCohesionRow:
+    """F2 per-class design-metric observation (wave 4).
+
+    Logical key — measured from the producer, never invented:
+    ``(SYMBOL, dimension)``, 2 091/2 091 unique on the frozen corpus
+    (``observations/projection.py`` keys rows by source file, bare qualname
+    and dimension; SYMBOL is the ratified FILE-headed spelling of the same
+    entity).  ``numerator`` is payload and strictly positive: the producer
+    drops zero rows, so absence already means zero and a stored zero would
+    smuggle the forbidden third state into the family.  No FUNCTION-role
+    requirement: these symbols name classes, not contract functions.
+    """
+
+    symbol: SymbolId
+    dimension: str
+    numerator: int
+
+    def __post_init__(self) -> None:
+        if self.dimension not in COUPLING_COHESION_DIMENSIONS:
+            raise CanonicalModelError(
+                f"unknown coupling/cohesion dimension: {self.dimension!r}"
+            )
+        if isinstance(self.numerator, bool) or self.numerator < 1:
+            raise CanonicalModelError(
+                f"coupling/cohesion numerator must be a positive int: "
+                f"{self.numerator!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisFacts:
     """The analysis-tier record tables — the wire's ``facts`` section.
 
@@ -205,6 +237,9 @@ class AnalysisFacts:
     semantic_edges: frozenset[SemanticEdge] = field(default_factory=frozenset)
     dependency_edges: frozenset[DependencyEdgeRow] = field(default_factory=frozenset)
     violations: frozenset[ViolationRow] = field(default_factory=frozenset)
+    coupling_cohesion_observations: frozenset[CouplingCohesionRow] = field(
+        default_factory=frozenset
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +416,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_endpoint(dep.target)
     for violation in facts.violations:
         closure.see_violation(violation)
+    for observation in facts.coupling_cohesion_observations:
+        closure.see_symbol(observation.symbol)
     closure.files.update(model.analyzed_files)
     return closure
 
@@ -409,6 +446,11 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         _dependency_edge_key,
     )
     _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
+    _unique_by_key(
+        facts.coupling_cohesion_observations,
+        "coupling_cohesion_observations.key",
+        lambda row: (canonical_key(row.symbol), row.dimension),
+    )
 
 
 def _prove_function_roles(facts: AnalysisFacts) -> None:

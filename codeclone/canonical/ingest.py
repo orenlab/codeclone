@@ -66,6 +66,7 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     ContractRow,
+    CouplingCohesionRow,
     DependencyEdgeRow,
     FileModuleRelation,
     GraphNodeRow,
@@ -417,6 +418,24 @@ def canonical_model_from_legacy_document(
         if labels
     )
 
+    observation_rows = _sequence(
+        _field(
+            _mapping(
+                _field(source_facts, "source_fact_families", "source_facts"),
+                "source_facts.source_fact_families",
+            ),
+            "coupling_cohesion_observations",
+            "source_fact_families",
+        ),
+        "source_fact_families.coupling_cohesion_observations",
+    )
+    coupling_cohesion = frozenset(
+        _coupling_cohesion_observation(
+            _mapping(row, "coupling_cohesion observation"), index
+        )
+        for row in observation_rows
+    )
+
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
     file_modules = frozenset(
         FileModuleRelation(FileId(path), ModuleId(module))
@@ -436,6 +455,7 @@ def canonical_model_from_legacy_document(
                 semantic_edges=semantic_edges,
                 dependency_edges=dependency_edges,
                 violations=violations,
+                coupling_cohesion_observations=coupling_cohesion,
             )
         ),
         coupled_sets=coupled_sets,
@@ -475,6 +495,43 @@ def _dependency_edge(
         line=line,
         binding=_string(row, "binding", "dependencies item"),
         is_lazy=is_lazy,
+    )
+
+
+def _coupling_cohesion_observation(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> CouplingCohesionRow:
+    """One F2 observation from the producer's own lane row.
+
+    The lane carries ``source.file.path`` plus a BARE qualname (the producer
+    enforces "no glued identities" on its side); the SYMBOL is the ratified
+    FILE-headed spelling of the same entity.  A source path outside the
+    document's own analysis scope, or a qualname carrying a ModuleKey colon,
+    is a typed refusal — never a guessed identity.
+    """
+    source = _mapping(_field(row, "source", "coupling_cohesion observation"), "source")
+    file_value = _mapping(_field(source, "file", "observation source"), "source.file")
+    path = _string(file_value, "path", "observation source.file")
+    if path not in index.analyzed_paths:
+        raise LegacyIngestError(
+            f"coupling_cohesion observation source {path!r} is not an "
+            "analyzed path; refusing to guess an identity"
+        )
+    qualname = _string(row, "qualname", "coupling_cohesion observation")
+    if ":" in qualname:
+        raise LegacyIngestError(
+            f"coupling_cohesion observation qualname {qualname!r} is a glued "
+            "identity; the producer's lane law forbids it"
+        )
+    numerator = _field(row, "numerator", "coupling_cohesion observation")
+    if isinstance(numerator, bool) or not isinstance(numerator, int):
+        raise LegacyIngestError(
+            "coupling_cohesion observation numerator is not an integer"
+        )
+    return CouplingCohesionRow(
+        symbol=SymbolId(FileId(path), qualname),
+        dimension=_string(row, "dimension", "coupling_cohesion observation"),
+        numerator=numerator,
     )
 
 

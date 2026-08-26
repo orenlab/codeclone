@@ -175,6 +175,30 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     ),
     (
         "W08",
+        "unknown coupling dimension tag",
+        '"dimension":["cbo","lcom4"',
+        '"dimension":["banana","lcom4"',
+    ),
+    (
+        "W07",
+        "coupling numerator below the family floor",
+        '"numerator":[3,1,3,2,1]',
+        '"numerator":[0,1,3,2,1]',
+    ),
+    (
+        "W12",
+        "coupling rows out of key order",
+        '"dimension":["cbo","lcom4"',
+        '"dimension":["lcom4","cbo"',
+    ),
+    (
+        "W13",
+        "duplicate coupling key",
+        '"dimension":["cbo","lcom4"',
+        '"dimension":["cbo","cbo"',
+    ),
+    (
+        "W08",
         "unknown violation kind tag",
         '"kind":["owner_bypass","shadow_projection"]',
         '"kind":["banana","shadow_projection"]',

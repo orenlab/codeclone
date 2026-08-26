@@ -160,6 +160,40 @@ def legacy_document() -> dict[str, Any]:
                     }
                 ],
             },
+            "source_fact_families": {
+                # F2 lane verbatim from the producer's shape: source carries
+                # the file identity (module provenance rides beside it and is
+                # not identity), qualname is bare, zero rows never appear.
+                "coupling_cohesion_observations": [
+                    {
+                        "source": {
+                            "file": {"path": "pkg/mod.py"},
+                            "python_module": {"module": "pkg.mod"},
+                        },
+                        "qualname": "Writer",
+                        "dimension": "cbo",
+                        "numerator": 3,
+                    },
+                    {
+                        "source": {
+                            "file": {"path": "pkg/mod.py"},
+                            "python_module": {"module": "pkg.mod"},
+                        },
+                        "qualname": "Writer",
+                        "dimension": "lcom4",
+                        "numerator": 1,
+                    },
+                    {
+                        "source": {
+                            "file": {"path": "scripts/tool.py"},
+                            "python_module": None,
+                        },
+                        "qualname": "Runner",
+                        "dimension": "methods",
+                        "numerator": 2,
+                    },
+                ]
+            },
         },
         "metrics": {
             "families": {
@@ -206,6 +240,7 @@ def test_ingest_builds_the_measured_families() -> None:
     assert len(facts.analysis.semantic_edges) == 1
     assert len(facts.analysis.dependency_edges) == 2
     assert len(facts.analysis.violations) == 1
+    assert len(facts.analysis.coupling_cohesion_observations) == 3
     assert len(model.coupled_sets) == 2  # duplicates collapse, empty drops
     assert len(model.analyzed_files) == 3
     assert len(model.file_modules) == 2
@@ -375,3 +410,48 @@ def test_ingest_refuses_a_module_claiming_two_files() -> None:
 
     with pytest.raises(LegacyIngestError, match="two files"):
         canonical_model_from_legacy_document(_mutated(swap))
+
+
+def _observation_row(document: dict[str, Any]) -> dict[str, Any]:
+    families = document["source_facts"]["source_fact_families"]
+    row: dict[str, Any] = families["coupling_cohesion_observations"][0]
+    return row
+
+
+def test_ingest_refuses_a_glued_observation_qualname() -> None:
+    """The producer's lane law is executed, not narrated: a ModuleKey colon
+    inside an F2 qualname is a dialect defect, never an identity."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _observation_row(document)["qualname"] = "pkg.mod:Writer"
+
+    with pytest.raises(LegacyIngestError, match="glued"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_unanalyzed_observation_source() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _observation_row(document)["source"]["file"]["path"] = "vendored/x.py"
+
+    with pytest.raises(LegacyIngestError, match="not an analyzed path"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_non_integer_observation_numerator() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _observation_row(document)["numerator"] = True
+
+    with pytest.raises(LegacyIngestError, match="numerator"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_maps_observation_sources_to_file_headed_symbols() -> None:
+    model = canonical_model_from_legacy_document(legacy_document())
+    rows = model.facts.analysis.coupling_cohesion_observations
+    writer = SymbolId(FileId("pkg/mod.py"), "Writer")
+    runner = SymbolId(FileId("scripts/tool.py"), "Runner")
+    assert {row.symbol for row in rows} == {writer, runner}
+    assert {(row.dimension, row.numerator) for row in rows if row.symbol == writer} == {
+        ("cbo", 3),
+        ("lcom4", 1),
+    }
