@@ -448,6 +448,52 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     ),
     (
         "W08",
+        "unknown adoption feature tag",
+        '"feature":["typing.parameters","docstrings.public_symbols"',
+        '"feature":["banana","docstrings.public_symbols"',
+    ),
+    (
+        "W07",
+        "adoption denominator below the family floor",
+        '"denominator":[1,3,9,9,5]',
+        '"denominator":[0,3,9,9,5]',
+    ),
+    (
+        "W18",
+        "adoption numerator above its denominator",
+        '"denominator":[1,3,9,9,5],"feature"',
+        '"denominator":[1,1,9,9,5],"feature"',
+    ),
+    (
+        "W08",
+        "adoption scope tag unknown",
+        '"scope":[["file",2],["module",1]',
+        '"scope":[["banana",2],["module",1]',
+    ),
+    (
+        "W09",
+        "adoption scope tag not admitted",
+        '"scope":[["file",2],["module",1]',
+        '"scope":[["symbol",2],["module",1]',
+    ),
+    (
+        "W12",
+        "adoption rows out of scope-key order",
+        '"feature":["typing.parameters","docstrings.public_symbols",'
+        '"typing.parameters","typing.returns","typing.returns"]',
+        '"feature":["typing.parameters","typing.parameters",'
+        '"docstrings.public_symbols","typing.returns","typing.returns"]',
+    ),
+    (
+        "W13",
+        "duplicate adoption key",
+        '"feature":["typing.parameters","docstrings.public_symbols",'
+        '"typing.parameters","typing.returns","typing.returns"]',
+        '"feature":["typing.parameters","typing.parameters",'
+        '"typing.parameters","typing.returns","typing.returns"]',
+    ),
+    (
+        "W08",
         "unknown violation kind tag",
         '"kind":["owner_bypass","shadow_projection"]',
         '"kind":["banana","shadow_projection"]',
@@ -506,8 +552,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "null where forbidden",
-        '"module":["dead.only","pkg.a","tools.helper","zz.top"]',
-        '"module":[null,"pkg.a","tools.helper","zz.top"]',
+        '"module":["dead.only","pkg.a","tools.helper","zz.top","zzz.adoption.only"]',
+        '"module":[null,"pkg.a","tools.helper","zz.top","zzz.adoption.only"]',
     ),
     (
         "W18",
@@ -801,8 +847,8 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "empty module name",
-        '"module":["dead.only","pkg.a","tools.helper","zz.top"]',
-        '"module":["","pkg.a","tools.helper","zz.top"]',
+        '"module":["dead.only","pkg.a","tools.helper","zz.top","zzz.adoption.only"]',
+        '"module":["","pkg.a","tools.helper","zz.top","zzz.adoption.only"]',
     ),
     (
         "W08",

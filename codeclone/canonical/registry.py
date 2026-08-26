@@ -61,6 +61,48 @@ class FieldDeclaration:
 # names; the wire emits them in sorted(key) order — mechanically, from this
 # mapping, never from a hand-written list.
 FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
+    # F3 (wave 4): key (scope, feature) — measured live at HEAD,
+    # 2 614/2 614 unique; the scope is the ratified tagged ScopeRef over
+    # MODULE | FILE (ruling 2026-08-24 §2), never a polymorphic string.
+    "adoption_counts": (
+        FieldDeclaration(
+            "denominator",
+            ANALYSIS_FACT,
+            "adoption_coverage_producer",
+            "observed population count; payload, never key (zero-"
+            "denominator scopes are dropped by the producer — absence "
+            "already means unmeasured, so the family floor is 1)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "feature",
+            ANALYSIS_FACT,
+            "adoption_coverage_producer",
+            "closed vocabulary (ADOPTION_FEATURES); key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "numerator",
+            ANALYSIS_FACT,
+            "adoption_coverage_producer",
+            "observed adopted count; zero is MEASURED here (16 of 46 "
+            "corpus rows — unlike the F2 floor); payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "scope",
+            ANALYSIS_FACT,
+            "adoption_coverage_producer",
+            "key component: tagged ScopeRef MODULE | FILE (ruling §2) — "
+            "measured live at HEAD 914 module / 9 file scopes, zero "
+            "unresolvable; the variant IS identity",
+            stored=True,
+            wire=True,
+        ),
+    ),
     # F5 (wave 4, ratified form): key (SYMBOL, canonical_signature_variant);
     # one owner of the canonical signature identity — parameters and return
     # enter the variant by contract, never a bare (FILE, symbol,

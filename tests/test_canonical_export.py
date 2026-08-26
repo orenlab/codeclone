@@ -104,9 +104,13 @@ _TARGET = "worktree-a"
 # 706330d9...) deliberately: the fixture gained five tagged-entity
 # dead_code_observation objects under the composite liveness plus
 # statement-reachability namespace, which moves the membership and the
-# bytes.
-_FIXTURE_RUN_ID = "8d81ec9d8a4b7768c4c79758ff78f98dc14396f7410ebdd3dfee6ab7c31cac5f"
-_FIXTURE_ARTIFACT = "eb94d00bf18cc04da4431bf831b283bb84d4032437a482d69ea2b44c338f2cfd"
+# bytes.  The F3 ``adoption_counts`` family (slice 5) replaced the K3
+# literals (run 8d81ec9d..., artifact eb94d00b...) deliberately: the
+# fixture gained four tagged-ScopeRef adoption_count objects under the
+# adoption_coverage namespace, which moves the membership and the bytes —
+# the one announced transition of this commit.
+_FIXTURE_RUN_ID = "b09805dd6e721079f82096e9bf399f2b0b5549f3529536332787ec627506e27e"
+_FIXTURE_ARTIFACT = "d064f5f7d838be0d9772c16b3be9ddfbd83eda98a55f3851fec8bff1b51aae43"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

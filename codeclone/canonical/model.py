@@ -61,6 +61,7 @@ from typing import TypeVar
 from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
+    ADOPTION_FEATURES,
     API_PARAMETER_KINDS,
     API_SYMBOL_KINDS,
     API_VISIBILITIES,
@@ -84,6 +85,7 @@ from codeclone.canonical.identity import (
     ModuleSymbol,
     OperationRoot,
     ProducerRoot,
+    ScopeRef,
     SymbolId,
     canonical_key,
     dead_code_entity_key,
@@ -513,6 +515,49 @@ class ApiSymbolRow:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class AdoptionCountRow:
+    """F3 per-scope adoption count (wave 4).
+
+    Logical key — the producer's own, measured live at HEAD:
+    ``(scope, feature)``, 2 614/2 614 unique.  The scope is the RATIFIED
+    tagged ScopeRef (ruling 2026-08-24 §2): the producer resolves it as
+    ``identity.python_module.module`` when the file has a module identity
+    and the analyzed path otherwise (``analysis/units.py``), so the
+    reference is MODULE | FILE by construction — never a polymorphic
+    string, and the variant IS identity.  The counters are observed facts:
+    the producer drops zero-denominator scopes (absence already means
+    unmeasured), so the denominator floor is 1; a ZERO numerator is a
+    MEASURED value (a module with none of its N parameters annotated is a
+    fact — 16 of 46 corpus rows), unlike the F2 floor; and a numerator
+    above its denominator cannot be produced, so it is refused as a
+    defect, never clamped.
+    """
+
+    scope: ScopeRef
+    feature: str
+    numerator: int
+    denominator: int
+
+    def __post_init__(self) -> None:
+        if self.feature not in ADOPTION_FEATURES:
+            raise CanonicalModelError(f"unknown adoption feature: {self.feature!r}")
+        if isinstance(self.numerator, bool) or self.numerator < 0:
+            raise CanonicalModelError(
+                f"adoption numerator must be a non-negative int: {self.numerator!r}"
+            )
+        if isinstance(self.denominator, bool) or self.denominator < 1:
+            raise CanonicalModelError(
+                "adoption denominator must be a positive int (the producer "
+                f"drops zero-denominator scopes): {self.denominator!r}"
+            )
+        if self.numerator > self.denominator:
+            raise CanonicalModelError(
+                "adoption numerator cannot exceed its denominator: "
+                f"{self.numerator!r}/{self.denominator!r}"
+            )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RunScalars:
     """F9 run-level analysis scalars (wave 4) — ONE record per snapshot.
@@ -579,6 +624,7 @@ class AnalysisFacts:
     )
     api_symbols: frozenset[ApiSymbolRow] = field(default_factory=frozenset)
     risk_observations: frozenset[RiskObservationRow] = field(default_factory=frozenset)
+    adoption_counts: frozenset[AdoptionCountRow] = field(default_factory=frozenset)
     # F9: one record per analysis snapshot; None is the absent record —
     # never an all-zero fake (zero is measured in this family).
     run_scalars: RunScalars | None = None
@@ -809,6 +855,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_symbol(api_symbol.symbol)
     for risk_observation in facts.risk_observations:
         closure.see_symbol(risk_observation.symbol)
+    for adoption in facts.adoption_counts:
+        closure.see_endpoint(adoption.scope)
     closure.files.update(model.analyzed_files)
     return closure
 
@@ -858,6 +906,11 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         facts.risk_observations,
         "risk_observations.key",
         lambda row: (canonical_key(row.symbol), row.dimension, row.start_line),
+    )
+    _unique_by_key(
+        facts.adoption_counts,
+        "adoption_counts.key",
+        lambda row: (endpoint_key(row.scope), row.feature),
     )
 
 

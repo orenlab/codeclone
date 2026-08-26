@@ -502,6 +502,34 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
             "mutually exclusive",
         ),
+        # F3 shape guard: a non-int count is refused by the store
+        (
+            "adoption_count",
+            b'{"denominator":"4","feature":"typing.parameters",'
+            b'"numerator":3,"scope":["module","pkg.a"]}',
+            "'denominator' is not an int",
+        ),
+        # F3 shape guard: an unknown scope tag is refused by the store
+        (
+            "adoption_count",
+            b'{"denominator":4,"feature":"typing.parameters",'
+            b'"numerator":3,"scope":["banana","pkg.a"]}',
+            "unknown endpoint tag",
+        ),
+        # F3 model law through the store wrapper: the denominator floor
+        (
+            "adoption_count",
+            b'{"denominator":0,"feature":"typing.parameters",'
+            b'"numerator":0,"scope":["module","pkg.a"]}',
+            "denominator",
+        ),
+        # F3 model law through the store wrapper: numerator above denominator
+        (
+            "adoption_count",
+            b'{"denominator":2,"feature":"typing.parameters",'
+            b'"numerator":3,"scope":["module","pkg.a"]}',
+            "exceed",
+        ),
         # F9 shape guard: a non-int scalar is refused by the store
         (
             "run_scalar",
@@ -542,6 +570,10 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "dead-entity-not-a-triple-shape-guard",
         "dead-entity-unknown-tag-shape-guard",
         "dead-abstained-with-root-model-law",
+        "adoption-non-int-count-shape-guard",
+        "adoption-unknown-scope-tag-shape-guard",
+        "adoption-zero-denominator-model-law",
+        "adoption-numerator-above-denominator-model-law",
         "run-scalar-non-int-shape-guard",
         "run-scalar-negative-model-law",
     ],

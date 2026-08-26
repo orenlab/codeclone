@@ -116,6 +116,73 @@ def test_f4_dead_code_vocabularies_mirror_the_producer() -> None:
     assert get_args(LiveRootReason) == LIVE_ROOT_REASONS
 
 
+def test_f3_family_is_a_wire_family_with_the_ratified_columns() -> None:
+    """F3 landed (wave 4): key ``(scope, feature)`` — measured live at
+    HEAD, 2 614/2 614 unique — with the scope as the ratified tagged
+    ScopeRef (ruling 2026-08-24 §2), never a polymorphic string.  Wire
+    columns are born mechanically from the registry: the two key
+    components plus the two observed counters, nothing else."""
+    assert "adoption_counts" in FACT_FAMILY_FIELDS
+    assert "adoption_counts" in wire_fact_family_order()
+    assert wire_columns("adoption_counts") == (
+        "denominator",
+        "feature",
+        "numerator",
+        "scope",
+    )
+
+
+def test_f3_feature_vocabulary_mirrors_the_producer_source() -> None:
+    """Executed cross-check against the ONE producer: the closed
+    ADOPTION_FEATURES vocabulary equals the ``feature=`` literals of
+    ``observations/projection.py:_adoption_counts`` — no Literal type
+    exists for this lane, so the pin reads the producer's SOURCE (the
+    facts-composition AST precedent).  A drift on either side reds here."""
+    import ast
+    from pathlib import Path
+
+    import codeclone.canonical.registry as registry_module
+    from codeclone.canonical.identity import ADOPTION_FEATURES
+
+    package_root = Path(registry_module.__file__).resolve().parents[1]
+    source = (package_root / "observations" / "projection.py").read_text("utf-8")
+    tree = ast.parse(source)
+    producer = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_adoption_counts"
+    )
+    literals = {
+        keyword.value.value
+        for call in ast.walk(producer)
+        if isinstance(call, ast.Call)
+        for keyword in call.keywords
+        if keyword.arg == "feature" and isinstance(keyword.value, ast.Constant)
+    }
+    assert literals == set(ADOPTION_FEATURES)
+    assert len(ADOPTION_FEATURES) == 3
+    assert tuple(sorted(ADOPTION_FEATURES)) == ADOPTION_FEATURES
+
+
+def test_f3_scope_ref_is_the_tagged_module_file_union() -> None:
+    """The ratified ScopeRef (§2) admits exactly the MODULE | FILE domains
+    — measured live at HEAD: 914 module-headed and 9 path-headed scopes,
+    zero unresolvable — and orders through the ONE endpoint construction,
+    so two MODULE|FILE unions never grow two orderings."""
+    from codeclone.canonical.identity import (
+        FileId,
+        ModuleId,
+        ScopeRef,
+        endpoint_key,
+    )
+
+    module_scope: ScopeRef = ModuleId("pkg.a")
+    file_scope: ScopeRef = FileId("pkg.a")  # same text, different domain
+    assert endpoint_key(module_scope) != endpoint_key(file_scope)
+    assert endpoint_key(module_scope)[0] == "module"
+    assert endpoint_key(file_scope)[0] == "file"
+
+
 def test_f1_dimension_vocabulary_mirrors_the_producer() -> None:
     """Executed cross-check, not a narrated one: the closed RISK_DIMENSIONS
     vocabulary equals the dimension set the real producer emits for a unit

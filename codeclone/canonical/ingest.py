@@ -64,6 +64,7 @@ from codeclone.canonical.identity import (
     UnresolvedRoot,
 )
 from codeclone.canonical.model import (
+    AdoptionCountRow,
     AnalysisFacts,
     ApiParameterFact,
     ApiSymbolRow,
@@ -444,53 +445,13 @@ def canonical_model_from_legacy_document(
         if labels
     )
 
-    fact_families = _mapping(
-        _field(source_facts, "source_fact_families", "source_facts"),
-        "source_facts.source_fact_families",
-    )
-    observation_rows = _sequence(
-        _field(
-            fact_families,
-            "coupling_cohesion_observations",
-            "source_fact_families",
-        ),
-        "source_fact_families.coupling_cohesion_observations",
-    )
-    coupling_cohesion = frozenset(
-        _coupling_cohesion_observation(
-            _mapping(row, "coupling_cohesion observation"), index
-        )
-        for row in observation_rows
-    )
-
-    api_rows = _sequence(
-        _field(fact_families, "api_surface", "source_fact_families"),
-        "source_fact_families.api_surface",
-    )
-    api_symbols = frozenset(
-        _api_symbol_observation(_mapping(row, "api_surface observation"), index)
-        for row in api_rows
-    )
-
-    risk_rows = _sequence(
-        _field(fact_families, "risk_observations", "source_fact_families"),
-        "source_fact_families.risk_observations",
-    )
-    risk_observations = frozenset(
-        _risk_observation(_mapping(row, "risk observation"), index) for row in risk_rows
-    )
-
-    dead_rows = _sequence(
-        _field(fact_families, "dead_code", "source_fact_families"),
-        "source_fact_families.dead_code",
-    )
-    # The one measured byte-identical duplicate (12 970/12 971) is the same
-    # FACT stated twice: set semantics absorbs it losslessly, while two
-    # DIFFERING rows under one key stay refused by the model law.
-    dead_code_observations = frozenset(
-        _dead_code_observation(_mapping(row, "dead_code observation"), index)
-        for row in dead_rows
-    )
+    (
+        coupling_cohesion,
+        api_symbols,
+        risk_observations,
+        adoption_counts,
+        dead_code_observations,
+    ) = _observation_lane_families(source_facts, index)
 
     run_scalars = _run_scalars(document)
 
@@ -520,11 +481,77 @@ def canonical_model_from_legacy_document(
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
                 risk_observations=risk_observations,
+                adoption_counts=adoption_counts,
                 run_scalars=run_scalars,
             )
         ),
         coupled_sets=coupled_sets,
     ).normalize()
+
+
+def _lane_rows(
+    fact_families: Mapping[str, object], lane: str
+) -> Sequence[Mapping[str, object]]:
+    """One observation lane of ``source_fact_families``, as row mappings."""
+    return [
+        _mapping(row, f"{lane} observation")
+        for row in _sequence(
+            _field(fact_families, lane, "source_fact_families"),
+            f"source_fact_families.{lane}",
+        )
+    ]
+
+
+def _observation_lane_families(
+    source_facts: Mapping[str, object], index: _RegistryIndex
+) -> tuple[
+    frozenset[CouplingCohesionRow],
+    frozenset[ApiSymbolRow],
+    frozenset[RiskObservationRow],
+    frozenset[AdoptionCountRow],
+    frozenset[DeadCodeObservationRow],
+]:
+    """The five observation-lane families of ``source_fact_families``.
+
+    One reader per lane, one decoder per row — split from the document
+    walk so the walk stays a walk (the F3 landing pushed it over the
+    complexity gate's high-risk floor, and the honest answer is structure,
+    not a wider allowlist).  The one measured byte-identical dead-code
+    duplicate (12 970/12 971) is the same FACT stated twice: set semantics
+    absorbs it losslessly, while two DIFFERING rows under one key stay
+    refused by the model law.
+    """
+    fact_families = _mapping(
+        _field(source_facts, "source_fact_families", "source_facts"),
+        "source_facts.source_fact_families",
+    )
+    coupling_cohesion = frozenset(
+        _coupling_cohesion_observation(row, index)
+        for row in _lane_rows(fact_families, "coupling_cohesion_observations")
+    )
+    api_symbols = frozenset(
+        _api_symbol_observation(row, index)
+        for row in _lane_rows(fact_families, "api_surface")
+    )
+    risk_observations = frozenset(
+        _risk_observation(row, index)
+        for row in _lane_rows(fact_families, "risk_observations")
+    )
+    adoption_counts = frozenset(
+        _adoption_count(row, index)
+        for row in _lane_rows(fact_families, "adoption_counts")
+    )
+    dead_code_observations = frozenset(
+        _dead_code_observation(row, index)
+        for row in _lane_rows(fact_families, "dead_code")
+    )
+    return (
+        coupling_cohesion,
+        api_symbols,
+        risk_observations,
+        adoption_counts,
+        dead_code_observations,
+    )
 
 
 def _endpoint(text: str, index: _RegistryIndex, where: str) -> DependencyEndpoint:
@@ -823,6 +850,26 @@ def _risk_observation(
         dimension=_string(row, "dimension", "risk observation"),
         numerator=_lane_int(row, "numerator", "risk observation"),
         start_line=_lane_int(row, "start_line", "risk observation"),
+    )
+
+
+def _adoption_count(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> AdoptionCountRow:
+    """One F3 fact from the producer's own adoption lane row.
+
+    The scope resolves through the document's OWN registry via the one
+    endpoint spelling (:func:`_endpoint`) — the producer's scope string is
+    a registry module name or an analyzed path by construction
+    (``analysis/units.py``), so anything else is a typed refusal, never a
+    minted identity (the ScopeRef law, ruling 2026-08-24 §2).
+    """
+    where = "adoption observation"
+    return AdoptionCountRow(
+        scope=_endpoint(_string(row, "scope", where), index, "adoption_counts.scope"),
+        feature=_string(row, "feature", where),
+        numerator=_lane_int(row, "numerator", where),
+        denominator=_lane_int(row, "denominator", where),
     )
 
 

@@ -70,6 +70,7 @@ from codeclone.canonical.authority_identity import (
 )
 from codeclone.canonical.errors import CanonicalModelError, WireDecodeError
 from codeclone.canonical.identity import (
+    ADOPTION_FEATURES,
     API_PARAMETER_KINDS,
     API_SYMBOL_KINDS,
     API_VISIBILITIES,
@@ -114,6 +115,7 @@ from codeclone.canonical.identity import (
     root_family,
 )
 from codeclone.canonical.model import (
+    AdoptionCountRow,
     AnalysisFacts,
     ApiParameterFact,
     ApiSymbolRow,
@@ -775,6 +777,28 @@ def _api_symbol_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obj
     ]
 
 
+def _adoption_count_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    # F3 key order: (scope, feature) — the scope through the ONE endpoint
+    # construction (tag, then ordinal), the feature by bytes.
+    return [
+        {
+            "denominator": row.denominator,
+            "feature": row.feature,
+            "numerator": row.numerator,
+            "scope": _endpoint_value(row.scope, plan.module_ordinal, plan.file_ordinal),
+        }
+        for row in sorted(
+            facts.adoption_counts,
+            key=lambda row: (
+                _endpoint_sort_key(row.scope, plan.module_ordinal, plan.file_ordinal),
+                row.feature.encode("utf-8"),
+            ),
+        )
+    ]
+
+
 def _contract_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
@@ -860,6 +884,7 @@ def _sink_role_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
 _FAMILY_ROW_BUILDERS: dict[
     str, Callable[[AnalysisFacts, WirePlan], list[dict[str, object]]]
 ] = {
+    "adoption_counts": _adoption_count_rows,
     "api_symbols": _api_symbol_rows,
     "candidates": _candidate_rows,
     "clone_groups": _clone_group_rows,
@@ -1748,7 +1773,11 @@ def _decode_endpoint(
     files: Sequence[FileId],
     modules: Sequence[ModuleId],
     where: str,
+    what: str = "a dependency endpoint",
 ) -> tuple[DependencyEndpoint, tuple[str, int]]:
+    """One reading of a MODULE|FILE reference slot — the dependency
+    endpoints and the F3 ScopeRef share it, so two unions never grow two
+    decoders (``what`` only names the refused slot's contract)."""
     tag, slot = _expect_tagged_pair(value, where)
     table: Sequence[DependencyEndpoint]
     if tag == DOMAIN_TAG_MODULE:
@@ -1756,9 +1785,7 @@ def _decode_endpoint(
     elif tag == DOMAIN_TAG_FILE:
         table = files
     else:
-        raise _refuse(
-            "W09", f"reference tag {tag!r} is not admitted for a dependency endpoint"
-        )
+        raise _refuse("W09", f"reference tag {tag!r} is not admitted for {what}")
     ordinal = _expect_ordinal(slot, len(table), where)
     return table[ordinal], (tag, ordinal)
 
@@ -2241,6 +2268,58 @@ def _decode_api_symbols(
     return frozenset(rows)
 
 
+def _decode_adoption_counts(
+    facts: Mapping[str, object],
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+) -> frozenset[AdoptionCountRow]:
+    columns, _flags, row_count = _decode_columns(
+        "adoption_counts", facts["adoption_counts"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        scope, scope_key = _decode_endpoint(
+            columns["scope"][index],
+            files,
+            modules,
+            f"facts.adoption_counts.scope[{index}]",
+            what="an adoption scope",
+        )
+        feature = _expect_string(
+            columns["feature"][index], f"facts.adoption_counts.feature[{index}]"
+        )
+        if feature not in ADOPTION_FEATURES:
+            raise _refuse("W08", f"unknown adoption feature tag {feature!r}")
+        numerator = _expect_wire_int(
+            columns["numerator"][index],
+            f"facts.adoption_counts.numerator[{index}]",
+        )
+        denominator = _expect_wire_int(
+            columns["denominator"][index],
+            f"facts.adoption_counts.denominator[{index}]",
+        )
+        if denominator < 1:
+            raise _refuse(
+                "W07",
+                f"facts.adoption_counts.denominator[{index}] is "
+                f"{denominator}, outside the family's declared domain "
+                "[1, 2**31-1] (the producer drops zero-denominator scopes, "
+                "so a stored zero would present an unmeasured scope as "
+                "measured)",
+            )
+        if numerator > denominator:
+            raise _refuse(
+                "W18",
+                f"facts.adoption_counts.numerator[{index}] exceeds its "
+                f"denominator ({numerator} of {denominator})",
+            )
+        rows.append(AdoptionCountRow(scope, feature, numerator, denominator))
+        keys.append((*scope_key, feature.encode("utf-8")))
+    _expect_strictly_increasing(keys, "facts.adoption_counts")
+    return frozenset(rows)
+
+
 def _decode_run_scalars(facts: Mapping[str, object]) -> RunScalars | None:
     """The F9 record member: one record object, or its typed absence."""
     value = facts["run_scalars"]
@@ -2491,6 +2570,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
     risk_observations = _decode_risk_observations(facts_section, symbols)
+    adoption_counts = _decode_adoption_counts(facts_section, files, modules)
     run_scalars = _decode_run_scalars(facts_section)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
@@ -2522,6 +2602,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
                 risk_observations=risk_observations,
+                adoption_counts=adoption_counts,
                 run_scalars=run_scalars,
             )
         ),

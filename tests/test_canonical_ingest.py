@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from codeclone.canonical import (
+    AdoptionCountRow,
     AnalysisFile,
     CanonicalModelError,
     CloneGroupRow,
@@ -326,6 +327,31 @@ def legacy_document() -> dict[str, Any]:
                         "abstained": True,
                     },
                 ],
+                # F3 lane verbatim from the producer's shape: the scope is
+                # the producer's module-or-path string (analysis/units.py
+                # resolves it as python_module.module when the file has a
+                # module identity and the analyzed path otherwise); a zero
+                # numerator is a measured value.
+                "adoption_counts": [
+                    {
+                        "scope": "pkg.mod",
+                        "feature": "typing.parameters",
+                        "numerator": 3,
+                        "denominator": 4,
+                    },
+                    {
+                        "scope": "scripts/tool.py",
+                        "feature": "typing.returns",
+                        "numerator": 0,
+                        "denominator": 2,
+                    },
+                    {
+                        "scope": "pkg.mod",
+                        "feature": "docstrings.public_symbols",
+                        "numerator": 1,
+                        "denominator": 1,
+                    },
+                ],
                 "risk_observations": [
                     {
                         "source": {
@@ -558,6 +584,20 @@ def test_ingest_builds_the_measured_families() -> None:
     assert {row.function for row in facts.analysis.contracts} == {make, run}
     candidate = next(iter(facts.analysis.candidates))
     assert candidate.producer_set == frozenset({make, run})
+
+
+def test_ingest_builds_the_adoption_family_on_the_tagged_scope() -> None:
+    """F3: the scope resolves through the document's OWN registry onto the
+    ratified tagged ScopeRef — MODULE for a registry module, FILE for an
+    analyzed module-less path; the zero numerator is carried as measured."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    assert model.facts.analysis.adoption_counts == frozenset(
+        {
+            AdoptionCountRow(ModuleId("pkg.mod"), "typing.parameters", 3, 4),
+            AdoptionCountRow(FileId("scripts/tool.py"), "typing.returns", 0, 2),
+            AdoptionCountRow(ModuleId("pkg.mod"), "docstrings.public_symbols", 1, 1),
+        }
+    )
 
 
 def test_ingest_builds_the_cycle_family_rows() -> None:
@@ -1167,4 +1207,59 @@ def test_ingest_refuses_a_glued_risk_qualname() -> None:
         _risk_row(document)["qualname"] = "pkg.mod:make"
 
     with pytest.raises(LegacyIngestError, match="glued"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def _adoption_row(document: dict[str, Any]) -> dict[str, Any]:
+    rows = document["source_facts"]["source_fact_families"]["adoption_counts"]
+    row: dict[str, Any] = rows[0]
+    return row
+
+
+def test_ingest_refuses_an_unresolvable_adoption_scope() -> None:
+    """The ScopeRef law (§2): a scope that is neither a registry module
+    nor an analyzed path has no domain — refused, never minted (measured
+    live at HEAD: zero such scopes exist, so one IS a broken document)."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _adoption_row(document)["scope"] = "ext.lib"
+
+    with pytest.raises(LegacyIngestError, match="neither a registry module"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_unknown_adoption_feature() -> None:
+    """The model law owns the vocabulary; ingest routes its refusal."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _adoption_row(document)["feature"] = "typing.banana"
+
+    with pytest.raises(CanonicalModelError, match="adoption feature"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_adoption_numerator_above_its_denominator() -> None:
+    """The producer cannot emit more adopted than measured; a document
+    claiming it is refused by the model law, never clamped."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _adoption_row(document)["numerator"] = 9
+
+    with pytest.raises(CanonicalModelError, match="exceed"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_non_integer_adoption_count() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _adoption_row(document)["denominator"] = True
+
+    with pytest.raises(LegacyIngestError, match="denominator"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_document_missing_the_adoption_lane() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        del document["source_facts"]["source_fact_families"]["adoption_counts"]
+
+    with pytest.raises(LegacyIngestError, match="missing 'adoption_counts'"):
         canonical_model_from_legacy_document(_mutated(swap))

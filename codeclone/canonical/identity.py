@@ -123,6 +123,19 @@ CLONE_KINDS: Final = ("function", "block", "segment")
 DEAD_CODE_CANDIDATE_KINDS: Final = ("function", "class", "method", "import")
 DEAD_CODE_OBSERVATION_KINDS: Final = ("symbol", "unreachable_statement")
 LIVE_ROOT_REASONS: Final = ("external_decorator", "export_root")
+# F3 adoption_counts (wave 4): the closed feature vocabulary, mirrored
+# verbatim from the ONE producer (``observations/projection.py``
+# ``_adoption_counts``) and pinned against its source by test — no Literal
+# type exists for this lane, so the pin reads the producer's source.  The
+# wire refuses unknowns (W08); counting meaning is owned by
+# ADOPTION_COVERAGE_POLICY_VERSION (what counts as an annotated parameter
+# or a documented public symbol is that policy's business, never this
+# family's).
+ADOPTION_FEATURES: Final = (
+    "docstrings.public_symbols",
+    "typing.parameters",
+    "typing.returns",
+)
 # F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
 # verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
 # ApiVisibility / ApiParameterKind) and pinned against them by test — a
@@ -226,6 +239,17 @@ class OpaqueDottedHead:
 
 OperationHead = KnownModule | AnalysisFile | OpaqueDottedHead
 DependencyEndpoint = ModuleId | FileId
+
+#: F3 adoption scope — the ratified tagged ScopeRef (ruling 2026-08-24 §2):
+#: ``Module | File``, never a polymorphic string.  The producer resolves it
+#: as ``identity.python_module.module`` when the file has a module identity
+#: and the analyzed path otherwise (``analysis/units.py``), so the union is
+#: MODULE | FILE by construction — measured live at HEAD: 914 module-headed
+#: and 9 path-headed scopes, zero unresolvable.  Structurally the
+#: dependency-endpoint union, deliberately: ``endpoint_key`` is the ONE
+#: ordering construction for MODULE|FILE unions, so two unions never grow
+#: two orderings.
+ScopeRef = ModuleId | FileId
 
 
 @dataclass(frozen=True, slots=True)

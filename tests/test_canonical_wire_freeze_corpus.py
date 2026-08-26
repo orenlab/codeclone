@@ -22,6 +22,8 @@ Phase 39S test-import law.
 from __future__ import annotations
 
 from codeclone.canonical import (
+    ADOPTION_FEATURES,
+    AdoptionCountRow,
     DeadCodeObservationRow,
     DependencyCycleRow,
     FileId,
@@ -93,6 +95,32 @@ def test_f8_canonical_family_carries_the_emitted_corpus_groups(
         (host_one, 53, 67),
         (host_two, 9, 41),
     }
+
+
+def test_f3_canonical_family_carries_the_corpus_adoption_scopes(
+    corpus_report: dict[str, object],
+) -> None:
+    """F3 from the REAL producer document, on the ratified tagged ScopeRef.
+
+    Measured ground truth (2026-08-26): 46 rows over 16 scopes; every
+    feature of the closed vocabulary is populated; the hyphenated
+    module-less carrier (``pkg/dead-orphan-probe.py``) is the corpus's one
+    FILE-headed scope, and its docstring row carries a ZERO numerator —
+    zero is measured in this family, never smuggled absence."""
+    model = canonical_model_from_legacy_document(corpus_report)
+    rows = model.facts.analysis.adoption_counts
+    assert len(rows) == 46
+    assert len({row.scope for row in rows}) == 16
+    assert {row.feature for row in rows} == set(ADOPTION_FEATURES)
+    file_scopes = {row.scope.path for row in rows if isinstance(row.scope, FileId)}
+    assert file_scopes == {"pkg/dead-orphan-probe.py"}
+    assert (
+        AdoptionCountRow(
+            FileId("pkg/dead-orphan-probe.py"), "docstrings.public_symbols", 0, 1
+        )
+        in rows
+    )
+    assert sum(1 for row in rows if row.numerator == 0) == 16
 
 
 def test_dead_code_canonical_family_carries_the_tagged_variants(

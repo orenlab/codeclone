@@ -49,6 +49,7 @@ from codeclone.canonical.export import (
     verify_export_artifact,
 )
 from codeclone.canonical.identity import (
+    ADOPTION_FEATURES,
     API_PARAMETER_KINDS,
     API_SYMBOL_KINDS,
     API_VISIBILITIES,
@@ -79,6 +80,7 @@ from codeclone.canonical.identity import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    ScopeRef,
     SymbolId,
     UnresolvedRoot,
     canonical_key,
@@ -89,6 +91,7 @@ from codeclone.canonical.identity import (
 )
 from codeclone.canonical.ingest import canonical_model_from_legacy_document
 from codeclone.canonical.model import (
+    AdoptionCountRow,
     AnalysisFacts,
     ApiParameterFact,
     ApiSymbolRow,
@@ -133,6 +136,7 @@ from codeclone.canonical.store import (
 )
 
 __all__ = [
+    "ADOPTION_FEATURES",
     "API_PARAMETER_KINDS",
     "API_SIGNATURE_IDENTITY_CONTRACT",
     "API_SYMBOL_KINDS",
@@ -153,6 +157,7 @@ __all__ = [
     "RISK_DIMENSIONS",
     "VIOLATION_IDENTITY_CONTRACT",
     "VIOLATION_KINDS",
+    "AdoptionCountRow",
     "AnalysisFacts",
     "AnalysisFile",
     "ApiParameterFact",
@@ -198,6 +203,7 @@ __all__ = [
     "RunScalars",
     "RunStore",
     "RunStoreError",
+    "ScopeRef",
     "SemanticEdge",
     "SinkRoleRow",
     "StoreCompatibilityError",

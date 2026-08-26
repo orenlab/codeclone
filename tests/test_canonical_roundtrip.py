@@ -22,10 +22,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 
 import pytest
 
 from codeclone.canonical import (
+    ADOPTION_FEATURES,
+    AdoptionCountRow,
     AnalysisFacts,
     AnalysisFile,
     ApiParameterFact,
@@ -337,6 +340,19 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         # numerator and the site both on the family floor boundary (1/1)
         RiskObservationRow(se, "nesting_depth", 1, 1),
     ]
+    adoption_counts = [
+        # F3 (wave 4): the ratified tagged ScopeRef — a MODULE scope tied
+        # across all three features beside a FILE scope (the measured
+        # module-less fallback), a ZERO numerator (measured, unlike the F2
+        # floor), a full-adoption row on the denominator floor (1/1), and
+        # one scope module referenced by NO other family (the closure must
+        # admit it on its own — the F7 mz precedent).
+        AdoptionCountRow(ma, "typing.parameters", 7, 9),
+        AdoptionCountRow(ma, "typing.returns", 0, 9),
+        AdoptionCountRow(ma, "docstrings.public_symbols", 2, 3),
+        AdoptionCountRow(fb, "typing.parameters", 1, 1),
+        AdoptionCountRow(ModuleId("zzz.adoption.only"), "typing.returns", 3, 5),
+    ]
     # F9 (wave 4): ONE run-scalars record per analysis snapshot — never a
     # table, no invented entity key.  Values pairwise distinct so a
     # cross-wired producer mapping cannot survive, and one zero: zero is a
@@ -369,6 +385,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         coupling_cohesion = list(reversed(coupling_cohesion))
         api_symbols = list(reversed(api_symbols))
         risk_observations = list(reversed(risk_observations))
+        adoption_counts = list(reversed(adoption_counts))
         coupled = list(reversed(coupled))
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
@@ -388,6 +405,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
             risk_observations=frozenset(risk_observations),
+            adoption_counts=frozenset(adoption_counts),
             run_scalars=run_scalars,
         ),
         coupled_sets=frozenset(coupled),
@@ -428,15 +446,17 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     (slice 4, K2) then replaced the K1 literal deliberately (4605 bytes,
     sha256 db810d3d…): the draft gained the emitted clone-group family.
     The F4 ``dead_code_observations`` family (slice 4, K3) then replaced
-    the K2 literal deliberately: the draft gained the tagged-entity dead
-    code family, so every document's bytes moved — the one announced
-    transition of this commit.
+    the K2 literal deliberately (5219 bytes, sha256 073e3f58…): the draft
+    gained the tagged-entity dead code family.  The F3 ``adoption_counts``
+    family (slice 5) then replaced the K3 literal deliberately: the draft
+    gained the tagged-ScopeRef adoption family, so every document's bytes
+    moved — the one announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 5219
+    assert len(payload) == 5496
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "073e3f58d1e1117b4c50705d211c0fe3af7e6dcc1a66a174d9cf3acead6f6297"
+        == "7e75e3368695ae7a1fadc890cbb26a1ab699e4fbd3b5c322dab9b0629a6399bb"
     )
 
 
@@ -1517,3 +1537,130 @@ def test_tied_risk_rows_are_ordered_by_site_on_the_wire() -> None:
     assert table["start_line"] == sorted(sites) + sorted(sites)
     assert table["dimension"] == (["cyclomatic_complexity"] * 6 + ["nesting_depth"] * 6)
     assert table["symbol"] == [0] * 12
+
+
+def test_model_refuses_two_adoption_rows_under_one_scope_key() -> None:
+    """F3 key law: (scope, feature) names at most one fact."""
+    ma = ModuleId("pkg.a")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            adoption_counts=frozenset(
+                {
+                    AdoptionCountRow(ma, "typing.parameters", 3, 9),
+                    AdoptionCountRow(ma, "typing.parameters", 4, 9),
+                }
+            )
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"adoption_counts\.key"):
+        model.normalize()
+
+
+def test_adoption_rows_differing_only_in_scope_variant_coexist() -> None:
+    """The ratified ScopeRef law (§2): the variant IS identity.  One text
+    under the MODULE tag and under the FILE tag is two scopes — a string
+    key would silently merge them."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            adoption_counts=frozenset(
+                {
+                    AdoptionCountRow(ModuleId("pkg.a"), "typing.returns", 1, 2),
+                    AdoptionCountRow(FileId("pkg.a"), "typing.returns", 1, 2),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.adoption_counts) == 2
+
+
+def test_adoption_zero_numerator_is_a_measured_value() -> None:
+    """Unlike the F2 floor: the producer emits zero numerators (16 of 46
+    corpus rows), so zero is MEASURED here, never smuggled absence."""
+    row = AdoptionCountRow(ModuleId("pkg.a"), "docstrings.public_symbols", 0, 3)
+    assert row.numerator == 0
+
+
+def test_adoption_row_refuses_a_negative_numerator() -> None:
+    with pytest.raises(CanonicalModelError, match="non-negative"):
+        AdoptionCountRow(ModuleId("pkg.a"), "typing.parameters", -1, 3)
+
+
+def test_adoption_row_refuses_a_zero_denominator() -> None:
+    """The producer drops zero-denominator scopes — absence already means
+    unmeasured, so a stored zero would smuggle the forbidden state in."""
+    with pytest.raises(CanonicalModelError, match="denominator"):
+        AdoptionCountRow(ModuleId("pkg.a"), "typing.parameters", 0, 0)
+
+
+def test_adoption_row_refuses_a_numerator_above_its_denominator() -> None:
+    with pytest.raises(CanonicalModelError, match="exceed"):
+        AdoptionCountRow(ModuleId("pkg.a"), "typing.parameters", 4, 3)
+
+
+def test_adoption_row_refuses_an_unknown_feature() -> None:
+    with pytest.raises(CanonicalModelError, match="adoption feature"):
+        AdoptionCountRow(ModuleId("pkg.a"), "banana", 1, 2)
+
+
+def test_adoption_row_refuses_boolean_counts() -> None:
+    with pytest.raises(CanonicalModelError):
+        AdoptionCountRow(ModuleId("pkg.a"), "typing.parameters", True, 2)
+    with pytest.raises(CanonicalModelError):
+        AdoptionCountRow(ModuleId("pkg.a"), "typing.parameters", 1, True)
+
+
+def test_adoption_scope_rides_the_wire_as_a_tagged_pair() -> None:
+    """The wire scope slot is the polymorphic [tag, ordinal] pair over
+    MODULE | FILE — the dependency-endpoint construction, one spelling."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    table = document["facts"]["adoption_counts"]
+    assert table["scope"] == [
+        ["file", 2],
+        ["module", 1],
+        ["module", 1],
+        ["module", 1],
+        ["module", 4],
+    ]
+    assert table["feature"] == [
+        "typing.parameters",
+        "docstrings.public_symbols",
+        "typing.parameters",
+        "typing.returns",
+        "typing.returns",
+    ]
+    assert table["numerator"] == [1, 2, 7, 0, 3]
+    assert table["denominator"] == [1, 3, 9, 9, 5]
+
+
+def test_tied_adoption_rows_are_ordered_by_scope_then_feature_on_the_wire() -> None:
+    """Rows tied on scope MUST order by feature bytes; scopes order by the
+    one endpoint construction (tag, then ordinal).  Eight scopes times
+    three features = 24 tied bindings, shuffled under three seeds, one
+    wire byte sequence — an encoder that drops either sort component
+    leaks set/insertion order and reds here."""
+    scopes: list[object] = [
+        FileId("a/f1.py"),
+        FileId("a/f2.py"),
+        *(ModuleId(f"pkg.m{index}") for index in range(6)),
+    ]
+    rows = [
+        AdoptionCountRow(scope, feature, position, 9)  # type: ignore[arg-type]
+        for position, scope in enumerate(scopes)
+        for feature in ADOPTION_FEATURES
+    ]
+    baseline: bytes | None = None
+    for seed in (1, 7, 42):
+        shuffled = list(rows)
+        random.Random(seed).shuffle(shuffled)
+        model = CanonicalModel(
+            facts=analysis_facts(adoption_counts=frozenset(shuffled))
+        )
+        payload = encode_canonical_json(model)
+        if baseline is None:
+            baseline = payload
+            table = json.loads(payload)["facts"]["adoption_counts"]
+            assert table["feature"] == list(ADOPTION_FEATURES) * 8
+            assert table["scope"] == [
+                ["file", ordinal] for ordinal in (0, 1) for _ in range(3)
+            ] + [["module", ordinal] for ordinal in range(6) for _ in range(3)]
+        assert payload == baseline

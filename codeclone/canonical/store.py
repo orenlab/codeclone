@@ -120,6 +120,7 @@ from codeclone.canonical.identity import (
     dead_code_entity_key,
 )
 from codeclone.canonical.model import (
+    AdoptionCountRow,
     AnalysisFacts,
     ApiParameterFact,
     ApiSymbolRow,
@@ -143,6 +144,7 @@ from codeclone.canonical.model import (
     ViolationRow,
 )
 from codeclone.contracts import (
+    ADOPTION_COVERAGE_POLICY_VERSION,
     API_SURFACE_SIGNATURE_VERSION,
     AUTHORITY_ANALYSIS_REVISION,
     BASELINE_FINGERPRINT_VERSION,
@@ -183,6 +185,11 @@ _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
 # the revision of the contract that gives it meaning, so a fact identity
 # never silently crosses a producer revision.
 _FAMILY_NAMESPACE: Final[dict[str, str]] = {
+    # F3: counting meaning — what counts as an annotated parameter or a
+    # documented public symbol — is owned by the adoption-coverage policy,
+    # so a policy bump never lets these facts silently share content
+    # addresses across generations.
+    "adoption_count": f"adoption_coverage:{ADOPTION_COVERAGE_POLICY_VERSION}",
     "analyzed_file": f"module_identity:{MODULE_IDENTITY_VERSION}",
     # F5: signature meaning is owned by the API signature contract — a
     # signature-algorithm revision never lets these facts silently share
@@ -622,6 +629,18 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "suppressed": violation.suppressed,
             },
         )
+    yield from _observation_model_rows(facts)
+
+
+def _observation_model_rows(
+    facts: AnalysisFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """Storage rows of the observation-lane families (F1/F2/F3/F5/F9).
+
+    Split from :func:`_model_rows` so the row walk stays a walk — the F3
+    landing pushed it over the complexity gate's high-risk floor, and the
+    honest answer is structure, not a wider allowlist.
+    """
     for observation in sorted(
         facts.coupling_cohesion_observations,
         key=lambda row: (canonical_key(row.symbol), row.dimension),
@@ -645,6 +664,19 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "numerator": risk_observation.numerator,
                 "start_line": risk_observation.start_line,
                 "symbol": _symbol_value(risk_observation.symbol),
+            },
+        )
+    for adoption in sorted(
+        facts.adoption_counts,
+        key=lambda row: (_endpoint_value(row.scope), row.feature),
+    ):
+        yield (
+            "adoption_count",
+            {
+                "denominator": adoption.denominator,
+                "feature": adoption.feature,
+                "numerator": adoption.numerator,
+                "scope": _endpoint_value(adoption.scope),
             },
         )
     for api_symbol in sorted(
@@ -897,6 +929,20 @@ def _decode_dependency_cycle_row(
     )
 
 
+def _decode_adoption_count_row(
+    row: Mapping[str, object], where: str
+) -> AdoptionCountRow:
+    """Shape guards only: the feature vocabulary and both count floors
+    have exactly one owner — the model law (``AdoptionCountRow``), whose
+    refusal ``_decode_row`` wraps into a typed integrity error."""
+    return AdoptionCountRow(
+        scope=_decode_endpoint(_require_field(row, "scope", where), where),
+        feature=_require_str(row, "feature", where),
+        numerator=_require_line(row, "numerator", where),
+        denominator=_require_line(row, "denominator", where),
+    )
+
+
 def _decode_coupling_cohesion_row(
     row: Mapping[str, object], where: str
 ) -> CouplingCohesionRow:
@@ -1005,6 +1051,7 @@ def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow
 # Dispatch is total over _FAMILY_NAMESPACE; an unknown family is a typed
 # integrity refusal at the call site, never a silent skip.
 _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] = {
+    "adoption_count": _decode_adoption_count_row,
     "analyzed_file": _decode_file_row,
     "api_symbol": _decode_api_symbol_row,
     "candidate": _decode_candidate_row,
@@ -1097,6 +1144,9 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 api_symbols=frozenset(cast("list[ApiSymbolRow]", family("api_symbol"))),
                 risk_observations=frozenset(
                     cast("list[RiskObservationRow]", family("risk_observation"))
+                ),
+                adoption_counts=frozenset(
+                    cast("list[AdoptionCountRow]", family("adoption_count"))
                 ),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
             )
@@ -1389,6 +1439,7 @@ _IDENTITY_FAMILIES: Final = frozenset(
 # ``project_run`` catches (measured during wave 3: the first draft scanned
 # wire names and exported eight empty tables).
 _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
+    "adoption_counts": "adoption_count",
     "api_symbols": "api_symbol",
     "candidates": "candidate",
     "clone_groups": "clone_group",
