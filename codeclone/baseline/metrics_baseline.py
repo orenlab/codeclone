@@ -57,6 +57,8 @@ from ..models import (
     ObservationLaneName,
     ProjectMetrics,
     PublicSymbol,
+    RiskColumnarPayload,
+    RiskObservationPayload,
     cycle_kind_counts,
 )
 from ..observations.projection import glued_observation_identity
@@ -80,6 +82,7 @@ from .lanes import (
     decode_dependency_lane,
     decode_integer_lane,
     decode_module_identity_lane,
+    decode_risk_lane,
     lane_payload_is_opaque,
 )
 from .trust import current_python_tag
@@ -294,6 +297,8 @@ def _lane_payload(
         return None
     if isinstance(payload, IntegerColumnarPayload):
         return decode_integer_lane(payload)
+    if isinstance(payload, RiskColumnarPayload):
+        return decode_risk_lane(payload)
     if isinstance(payload, DeadCodeColumnarPayload):
         return decode_dead_code_lane(payload)
     if isinstance(payload, AdoptionColumnarPayload):
@@ -314,7 +319,7 @@ def _integer_lane(
     """Return the lane rows plus the entity population they were observed from."""
 
     payload = _lane_payload(container, name)
-    if not isinstance(payload, IntegerObservationPayload):
+    if not isinstance(payload, (IntegerObservationPayload, RiskObservationPayload)):
         return (), 0
     rows = tuple(
         (item.qualname, item.dimension, item.numerator) for item in payload.observations
@@ -339,7 +344,7 @@ def _entity_identity_rows(
     """
 
     payload = _lane_payload(container, name)
-    if not isinstance(payload, IntegerObservationPayload):
+    if not isinstance(payload, (IntegerObservationPayload, RiskObservationPayload)):
         return ()
     return tuple(
         (

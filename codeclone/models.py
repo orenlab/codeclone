@@ -880,7 +880,15 @@ class ModuleIdentityColumnarPayload:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IntegerColumnarPayload:
-    """Wire form of the two integer observation lanes (payload schema 3)."""
+    """Wire form of the coupling_cohesion_observations lane.
+
+    The payload schema is declared per lane in
+    ``observations/contracts.py`` (currently "4"), never here — this
+    docstring once said "schema 3" while the table said "4", which is the
+    drift a second spelling always buys.  Since the F1 migration the risk
+    lane no longer shares this wire form: risk rows carry the declaration
+    site and ride :class:`RiskColumnarPayload`.
+    """
 
     identities: ThinIdentityTable
     qualnames: tuple[str, ...]
@@ -920,6 +928,77 @@ class IntegerColumnarPayload:
         )
         if order != tuple(sorted(order)):
             raise ValueError("columnar rows must be sorted")
+        counts: dict[int, int] = {}
+        for index in self.dimension:
+            counts[index] = counts.get(index, 0) + 1
+        if any(count > self.entity_population for count in counts.values()):
+            raise ValueError(
+                "observation rows per dimension cannot exceed the entity population"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RiskColumnarPayload:
+    """Wire form of the risk_observations lane (F1 lane-contract migration).
+
+    The declared payload schema lives in ``observations/contracts.py``
+    ("5").  Beside the shared integer-lane frame this wire carries one more
+    column, ``start_line`` — the declaration site, which is part of each
+    row's identity (ruling 2026-08-26: two declarations sharing one
+    qualname are two facts).  Because the site completes the identity, the
+    row key ``(file, qualname, dimension, start_line)`` is total here and
+    a duplicate key is a producer defect the wire refuses, where the
+    coupling wire merely requires sorted rows.
+    """
+
+    identities: ThinIdentityTable
+    qualnames: tuple[str, ...]
+    dimensions: tuple[str, ...]
+    identity: tuple[int, ...]
+    qualname: tuple[int, ...]
+    dimension: tuple[int, ...]
+    numerator: tuple[int, ...]
+    start_line: tuple[int, ...]
+    entity_population: int
+
+    def __post_init__(self) -> None:
+        rows = _validate_columnar_frame(
+            tables={"qualnames": self.qualnames, "dimensions": self.dimensions},
+            columns={
+                "identity": len(self.identity),
+                "qualname": len(self.qualname),
+                "dimension": len(self.dimension),
+                "numerator": len(self.numerator),
+                "start_line": len(self.start_line),
+            },
+            references={
+                "identity": (self.identity, len(self.identities.paths)),
+                "qualname": (self.qualname, len(self.qualnames)),
+                "dimension": (self.dimension, len(self.dimensions)),
+            },
+        )
+        if any(value < 0 for value in self.numerator):
+            raise ValueError("observation numerators must be non-negative")
+        if any(value < 1 for value in self.start_line):
+            raise ValueError("risk observation declaration sites must be positive")
+        if self.entity_population < 0:
+            raise ValueError("observation entity population must be non-negative")
+        order = tuple(
+            (
+                self.identities.paths[self.identity[row]],
+                self.qualnames[self.qualname[row]],
+                self.dimensions[self.dimension[row]],
+                self.start_line[row],
+            )
+            for row in range(rows)
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("columnar rows must be sorted")
+        if len(set(order)) != rows:
+            raise ValueError(
+                "two risk rows share one declaration key "
+                "(file, qualname, dimension, start_line)"
+            )
         counts: dict[int, int] = {}
         for index in self.dimension:
             counts[index] = counts.get(index, 0) + 1
@@ -3002,6 +3081,43 @@ class IntegerObservation:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RiskObservation:
+    """One risk-lane row: an integer observation plus its declaration site.
+
+    F1 (ruling 2026-08-26): the bare ``(source, qualname, dimension)`` key is
+    blind to different declarations sharing one name — ``@overload`` groups
+    and property/setter pairs — and every measured collision is *different
+    declarations*, so deduplication is indefensible.  ``start_line`` is the
+    producer-native discriminator (the ``complexity.items`` precedent,
+    12 285/12 285 unique) and is part of this row's identity, not location
+    evidence.  The coupling lane deliberately keeps
+    :class:`IntegerObservation`: its wire stays byte-identical.
+    """
+
+    source: ResolvedSourceIdentity
+    qualname: str
+    dimension: str
+    numerator: int
+    start_line: int
+
+    def __post_init__(self) -> None:
+        if self.numerator < 0:
+            raise ValueError("observation numerators must be non-negative")
+        if self.start_line < 1:
+            raise ValueError(
+                "risk observations require a positive declaration site "
+                "(start_line is identity, not evidence)"
+            )
+        path = self.source.file.path
+        if not path or path.startswith("/"):
+            raise ValueError("observation source paths must be repository-relative")
+        if not self.qualname:
+            raise ValueError("observation qualnames must be non-empty")
+        if ":" in self.qualname:
+            raise ValueError("observation qualnames must not be glued identities")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AdoptionCount:
     scope: str
     feature: str
@@ -3049,7 +3165,7 @@ class StructuralObservationFacts:
     dependencies: tuple[ImportObservation, ...]
     api_surface: tuple[ApiSymbolObservation, ...]
     dead_code: tuple[DeadCodeObservation, ...]
-    risk_observations: tuple[IntegerObservation, ...]
+    risk_observations: tuple[RiskObservation, ...]
     risk_entity_population: int
     adoption_counts: tuple[AdoptionCount, ...]
     coupling_cohesion_observations: tuple[IntegerObservation, ...]
@@ -3105,23 +3221,43 @@ class DeadCodeObservationPayload:
     candidates: tuple[DeadCodeObservation, ...]
 
 
+def _validate_observation_population(
+    observations: Sequence[IntegerObservation | RiskObservation],
+    entity_population: int,
+) -> None:
+    """The one population law both decoded observation payloads share."""
+
+    if entity_population < 0:
+        raise ValueError("observation entity population must be non-negative")
+    rows_per_dimension: dict[str, int] = {}
+    for item in observations:
+        rows_per_dimension[item.dimension] = (
+            rows_per_dimension.get(item.dimension, 0) + 1
+        )
+    if any(count > entity_population for count in rows_per_dimension.values()):
+        raise ValueError(
+            "observation rows per dimension cannot exceed the entity population"
+        )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IntegerObservationPayload:
     observations: tuple[IntegerObservation, ...]
     entity_population: int
 
     def __post_init__(self) -> None:
-        if self.entity_population < 0:
-            raise ValueError("observation entity population must be non-negative")
-        rows_per_dimension: dict[str, int] = {}
-        for item in self.observations:
-            rows_per_dimension[item.dimension] = (
-                rows_per_dimension.get(item.dimension, 0) + 1
-            )
-        if any(count > self.entity_population for count in rows_per_dimension.values()):
-            raise ValueError(
-                "observation rows per dimension cannot exceed the entity population"
-            )
+        _validate_observation_population(self.observations, self.entity_population)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RiskObservationPayload:
+    """Typed risk-lane rows decoded from :class:`RiskColumnarPayload`."""
+
+    observations: tuple[RiskObservation, ...]
+    entity_population: int
+
+    def __post_init__(self) -> None:
+        _validate_observation_population(self.observations, self.entity_population)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -3151,6 +3287,7 @@ _APISURFACECOLUMNARPAYLOAD_ADAPTER = TypeAdapter(ApiSurfaceColumnarPayload)
 _DEADCODECOLUMNARPAYLOAD_ADAPTER = TypeAdapter(DeadCodeColumnarPayload)
 _DEPENDENCYCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(DependencyColumnarPayload)
 _INTEGERCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(IntegerColumnarPayload)
+_RISKCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(RiskColumnarPayload)
 _MODULEIDENTITYCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(ModuleIdentityColumnarPayload)
 _SEMANTIC_AUTHORITY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(
     SemanticAuthorityObservationPayload
@@ -3181,6 +3318,10 @@ def parse_integer_columnar_payload(value: object) -> IntegerColumnarPayload:
     return _INTEGERCOLUMNARPAYLOAD_ADAPTER.validate_python(value)
 
 
+def parse_risk_columnar_payload(value: object) -> RiskColumnarPayload:
+    return _RISKCOLUMNARPAYLOAD_ADAPTER.validate_python(value)
+
+
 def parse_module_identity_columnar_payload(
     value: object,
 ) -> ModuleIdentityColumnarPayload:
@@ -3193,8 +3334,8 @@ def parse_semantic_authority_observation_payload(
     return _SEMANTIC_AUTHORITY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
 
 
-# The closed set a lane payload may take on the wire: seven columnar forms, the
-# two record forms that stay, and the opaque form of an outdated lane.
+# The closed set a lane payload may take on the wire: eight columnar forms,
+# the two record forms that stay, and the opaque form of an outdated lane.
 LanePayload = (
     AdoptionColumnarPayload
     | ApiSurfaceColumnarPayload
@@ -3203,6 +3344,7 @@ LanePayload = (
     | DependencyColumnarPayload
     | IntegerColumnarPayload
     | ModuleIdentityColumnarPayload
+    | RiskColumnarPayload
     | SemanticAuthorityObservationPayload
 )
 

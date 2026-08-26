@@ -34,6 +34,8 @@ from codeclone.models import (
     ModuleRegistryHandle,
     ObservationBundle,
     ResolvedSourceIdentity,
+    RiskObservation,
+    RiskObservationPayload,
 )
 from codeclone.observations.contracts import (
     ObservationContractError,
@@ -145,12 +147,20 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # now the source-level decision count, so stored revision-"2" (CFG-McCabe)
     # values must stop comparing as trusted. Payload SHAPE did not move, so
     # this is an algorithm_revision bump and not a payload_schema bump.
-    # Confinement proven before repinning: exactly this one descriptor digest
-    # moves and the other nine stay byte-identical to the values pinned here.
-    # Pre-bump digest was
+    # Pre-Wave-D digest was
     # 7c5d29aa39c03fb2c3b7d18b0b48dfff387f36f349224d7ea734d0689d6553c6.
+    #
+    # SANCTIONED golden change, F1 lane-contract migration (ruling
+    # 2026-08-26, fork (b)): the risk lane left the shared integer wire for
+    # payload_schema "5" — rows carry the declaration-site ``start_line`` as
+    # a KEY column, because @overload groups and property/setter pairs are
+    # different declarations the bare key collapsed. Confinement proven
+    # before repinning: exactly this one descriptor digest moves and the
+    # other nine stay byte-identical to the values pinned here (the
+    # coupling lane's wire is byte-identical by sha pair). Pre-bump digest
+    # was 31d043fb8d49bad2a956fa786255769caf99e7eff843e8284ddab5b3ae70ed86.
     "risk_observations": (
-        "31d043fb8d49bad2a956fa786255769caf99e7eff843e8284ddab5b3ae70ed86"
+        "cf80f437896063ecdffb536180b12028d1b2171eb8b2ca0cbded0b4dbc19f881"
     ),
 }
 
@@ -204,7 +214,10 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         # did, and those now decide health, --fail-cycles, and novelty gating.
         "dependencies": "7",
         "module_identity": "4",
-        "risk_observations": "4",
+        # F1 lane-contract migration: "5" adds the declaration-site KEY
+        # column (start_line) to the risk wire; a stored "4" lane reads
+        # payload_schema_outdated / unavailable until regenerated.
+        "risk_observations": "5",
         "semantic_authority": "2",
     }
     # Both clone descriptors stay on the record wire.
@@ -677,6 +690,64 @@ def test_observation_models_reject_invalid_counts_and_evaluation_contracts() -> 
         AdoptionCount(scope="pkg.mod", feature="typing", numerator=2, denominator=1)
 
 
+def test_risk_observation_validators_refuse_the_known_bad_shapes() -> None:
+    """F1 row law: the declaration site is identity and must be positive;
+    the shared integer-row refusals hold unchanged beside it."""
+
+    source = ResolvedSourceIdentity(
+        file=FileIdentity(path="pkg/mod.py"),
+        python_module=None,
+    )
+    with pytest.raises(ValueError, match="declaration site"):
+        RiskObservation(
+            source=source,
+            qualname="run",
+            dimension="cyclomatic_complexity",
+            numerator=1,
+            start_line=0,
+        )
+    with pytest.raises(ValueError, match="numerators"):
+        RiskObservation(
+            source=source,
+            qualname="run",
+            dimension="cyclomatic_complexity",
+            numerator=-1,
+            start_line=1,
+        )
+    with pytest.raises(ValueError, match="glued identities"):
+        RiskObservation(
+            source=source,
+            qualname="pkg.mod:run",
+            dimension="cyclomatic_complexity",
+            numerator=1,
+            start_line=1,
+        )
+    with pytest.raises(ValueError, match="repository-relative"):
+        RiskObservation(
+            source=ResolvedSourceIdentity(
+                file=FileIdentity(path="/abs/pkg/mod.py"),
+                python_module=None,
+            ),
+            qualname="run",
+            dimension="cyclomatic_complexity",
+            numerator=1,
+            start_line=1,
+        )
+    with pytest.raises(ValueError, match="entity population"):
+        RiskObservationPayload(
+            observations=(
+                RiskObservation(
+                    source=source,
+                    qualname="run",
+                    dimension="cyclomatic_complexity",
+                    numerator=1,
+                    start_line=1,
+                ),
+            ),
+            entity_population=0,
+        )
+
+
 def test_bundle_rejects_invalid_cross_links_and_digest_contracts() -> None:
     bundle = TEST_OBSERVATION_BUNDLE
     with pytest.raises(ValueError, match="scope must be sorted and unique"):
@@ -776,6 +847,8 @@ def test_near_miss_tokens_never_reach_an_observation_lane() -> None:
                 "filepath": "pkg/mod.py",
                 "cyclomatic_complexity": 3,
                 "nesting_depth": 1,
+                "start_line": 1,
+                "end_line": 2,
                 "statement_sequence": ((token, 1, 2),),
             },
         ),

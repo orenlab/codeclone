@@ -24,6 +24,7 @@ from codeclone.baseline.lanes import (
     decode_dependency_lane,
     decode_integer_lane,
     decode_module_identity_lane,
+    decode_risk_lane,
 )
 from codeclone.models import (
     AdoptionColumnarPayload,
@@ -59,11 +60,13 @@ from codeclone.models import (
     PublicSymbol,
     PythonModuleIdentity,
     ResolvedSourceIdentity,
+    RiskColumnarPayload,
     RuntimeReachabilityFact,
     SemanticAuthorityObservationPayload,
     SemanticAuthorityResult,
     ThinIdentityTable,
     derive_python_module_identity,
+    parse_risk_columnar_payload,
 )
 from codeclone.observations.contracts import ObservationContractError
 from codeclone.observations.lanes import (
@@ -231,6 +234,8 @@ def _bundle() -> ObservationBundle:
                 "qualname": "pkg.mod:run",
                 "cyclomatic_complexity": 3,
                 "nesting_depth": 1,
+                "start_line": 1,
+                "end_line": 3,
             },
         ),
         class_metrics=(
@@ -405,6 +410,8 @@ def test_zero_observations_are_absent_while_the_population_still_counts_them() -
                 "qualname": "pkg.mod:flat",
                 "cyclomatic_complexity": 1,
                 "nesting_depth": 0,
+                "start_line": 1,
+                "end_line": 2,
             },
         ),
         class_metrics=(
@@ -426,9 +433,9 @@ def test_zero_observations_are_absent_while_the_population_still_counts_them() -
 
     risk = lanes["risk_observations"].payload
     coupling = lanes["coupling_cohesion_observations"].payload
-    assert isinstance(risk, IntegerColumnarPayload)
+    assert isinstance(risk, RiskColumnarPayload)
     assert isinstance(coupling, IntegerColumnarPayload)
-    risk_rows = decode_integer_lane(risk)
+    risk_rows = decode_risk_lane(risk)
     coupling_rows = decode_integer_lane(coupling)
 
     # The zero-valued nesting_depth row is absent; the observed function still counts.
@@ -501,14 +508,14 @@ def test_columnar_lanes_round_trip_every_row_and_derive_every_identity() -> None
     }
     facts = _columnar_bundle().structural
 
-    risk = _payload(lanes, "risk_observations", IntegerColumnarPayload)
+    risk = _payload(lanes, "risk_observations", RiskColumnarPayload)
     coupling = _payload(lanes, "coupling_cohesion_observations", IntegerColumnarPayload)
     dead = _payload(lanes, "dead_code", DeadCodeColumnarPayload)
     deps = _payload(lanes, "dependencies", DependencyColumnarPayload)
     api = _payload(lanes, "api_surface", ApiSurfaceColumnarPayload)
     adoption = _payload(lanes, "adoption_counts", AdoptionColumnarPayload)
 
-    assert sorted(decode_integer_lane(risk).observations, key=repr) == sorted(
+    assert sorted(decode_risk_lane(risk).observations, key=repr) == sorted(
         facts.risk_observations, key=repr
     )
     assert sorted(decode_integer_lane(coupling).observations, key=repr) == sorted(
@@ -1145,3 +1152,151 @@ def test_integer_columnar_payload_rejects_negative_entity_population() -> None:
     )
     with pytest.raises(ValueError, match="entity population must be non-negative"):
         replace(integer_payload, entity_population=-1)
+    risk_payload = next(
+        lane.payload for lane in lanes if isinstance(lane.payload, RiskColumnarPayload)
+    )
+    with pytest.raises(ValueError, match="entity population must be non-negative"):
+        replace(risk_payload, entity_population=-1)
+
+
+# ---------------------------------------------------------------------------
+# F1 risk lane: the declaration site is identity (ruling 2026-08-26, fork (b))
+# ---------------------------------------------------------------------------
+
+
+def _overload_units() -> tuple[dict[str, object], ...]:
+    """Two declarations of one qualname — the measured F1 defect class.
+
+    Independent witness: the sites and measures are stated here, in the
+    fixture, never derived from the code under test.  The measures are EQUAL
+    on purpose: that is the exact shape the bare (source, qualname,
+    dimension) key could not tell apart.
+    """
+
+    return (
+        {
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:parse_args",
+            "cyclomatic_complexity": 7,
+            "nesting_depth": 2,
+            "start_line": 10,
+            "end_line": 20,
+        },
+        {
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:parse_args",
+            "cyclomatic_complexity": 7,
+            "nesting_depth": 2,
+            "start_line": 40,
+            "end_line": 60,
+        },
+    )
+
+
+def test_risk_rows_carry_the_declaration_site_and_stay_distinct() -> None:
+    """F1: two declarations of one qualname are two facts, not one."""
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        units=_overload_units(),
+    )
+    rows = bundle.structural.risk_observations
+    assert tuple(
+        (row.qualname, row.dimension, row.numerator, row.start_line) for row in rows
+    ) == (
+        ("parse_args", "cyclomatic_complexity", 7, 10),
+        ("parse_args", "cyclomatic_complexity", 7, 40),
+        ("parse_args", "nesting_depth", 2, 10),
+        ("parse_args", "nesting_depth", 2, 40),
+    )
+    # The collapse pin proper: every row is a distinct fact under set() —
+    # exactly what the site-blind key could not provide.
+    assert len(set(rows)) == 4
+
+
+def test_risk_lane_wire_round_trips_the_declaration_site() -> None:
+    """K1 round trip: encode -> JSON -> parse validator -> decode == rows."""
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        units=_overload_units(),
+    )
+    lane = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "risk_observations"
+    )
+    assert lane.descriptor.payload_schema == "5"
+    payload = lane.payload
+    assert isinstance(payload, RiskColumnarPayload)
+    assert payload.start_line == (10, 40, 10, 40)
+    parsed = parse_risk_columnar_payload(orjson.loads(orjson.dumps(payload)))
+    assert parsed == payload
+    decoded = decode_risk_lane(parsed)
+    assert decoded.observations == bundle.structural.risk_observations
+    assert decoded.entity_population == 2
+    # Input-order independence must hold for rows equal in everything BUT
+    # the declaration site: an encoder that dropped start_line from its own
+    # sort key would emit those rows in arrival order and break here.
+    assert (
+        lanes_mod._encode_risk_lane(
+            tuple(reversed(bundle.structural.risk_observations)), 2
+        )
+        == payload
+    )
+
+
+def test_risk_wire_refuses_a_nonpositive_declaration_site() -> None:
+    """A zero site would spell "no declaration" as a declaration."""
+
+    with pytest.raises(ValueError, match="positive"):
+        RiskColumnarPayload(
+            identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+            qualnames=("run",),
+            dimensions=("cyclomatic_complexity",),
+            identity=(0,),
+            qualname=(0,),
+            dimension=(0,),
+            numerator=(3,),
+            start_line=(0,),
+            entity_population=1,
+        )
+
+
+def test_risk_wire_refuses_rows_sharing_one_declaration_key() -> None:
+    """Two wire rows sharing (file, qualname, dimension, start_line) are a
+    producer defect, refused by the wire law instead of surviving as silent
+    duplicates the reader would collapse."""
+
+    with pytest.raises(ValueError, match="declaration"):
+        RiskColumnarPayload(
+            identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+            qualnames=("parse_args",),
+            dimensions=("cyclomatic_complexity",),
+            identity=(0, 0),
+            qualname=(0, 0),
+            dimension=(0, 0),
+            numerator=(7, 7),
+            start_line=(10, 10),
+            entity_population=2,
+        )
+
+
+def test_projection_refuses_a_unit_without_a_declaration_site() -> None:
+    """Guard reachability: a real input reaches and trips the refusal."""
+
+    with pytest.raises(ObservationContractError, match="declaration site"):
+        build_observation_bundle(
+            scan_root=Path("."),
+            module_registry=_registry(),
+            units=(
+                {
+                    "filepath": "pkg/mod.py",
+                    "qualname": "pkg.mod:orphan",
+                    "cyclomatic_complexity": 3,
+                    "nesting_depth": 1,
+                },
+            ),
+        )

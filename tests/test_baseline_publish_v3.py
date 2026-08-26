@@ -149,6 +149,8 @@ def _checkout_bundle(root: Path) -> ObservationBundle:
                 "qualname": "pkg.mod:Thing.run",
                 "cyclomatic_complexity": 2,
                 "nesting_depth": 1,
+                "start_line": 2,
+                "end_line": 4,
             },
         ),
         class_metrics=(

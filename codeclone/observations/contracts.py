@@ -92,7 +92,16 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     # compared against facts it cannot produce.
     "dependencies": "7",
     "module_identity": "4",
-    "risk_observations": "4",
+    # F1 lane-contract migration (ruling 2026-08-26, fork (b)): risk rows
+    # carry the declaration site — ``start_line`` joins the wire as a KEY
+    # column, because two declarations sharing one qualname (@overload
+    # groups, property/setter pairs) are different entities and the bare
+    # (source, qualname, dimension) key collapsed them.  "4" rows cannot
+    # answer a "5" reader's identity question, so a stored "4" lane reads
+    # payload_schema_outdated / unavailable until regenerated — never a
+    # silent comparison.  The coupling lane below deliberately stays on the
+    # shared integer wire: its bytes are unchanged.
+    "risk_observations": "5",
     "semantic_authority": "2",
 }
 

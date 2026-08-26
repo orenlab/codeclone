@@ -44,6 +44,7 @@ from codeclone.baseline._metrics_baseline_payload import snapshot_from_project_m
 from codeclone.baseline.container import read_container_v3
 from codeclone.baseline.container_digest import (
     canonical_container_bytes,
+    canonical_value_bytes,
     compute_lane_digest,
     compute_root_digest,
 )
@@ -1160,3 +1161,136 @@ def test_cli_findings_are_untouched_by_an_opaque_non_clone_lane(
     # matching wrong words.
     assert _sole_function_clone(degraded)["novelty"] == "new"
     assert _sole_function_clone(degraded)["novelty_reason"] is None
+
+
+# ---------------------------------------------------------------------------
+# F1 lane-contract migration: a pre-migration (schema "4") risk lane reads
+# unavailable — not a crash, not a wrong number, not a silent comparison.
+# ---------------------------------------------------------------------------
+
+#: 24 sequential decisions — decision-count cyclomatic complexity 25, above
+#: DEFAULT_COMPLEXITY_THRESHOLD (20), so the report carries a complexity
+#: finding whose novelty this pin can read.
+_COMPLEX_MODULE_SOURCE = _MODULE_SOURCE + (
+    "\n\ndef triage(v: int) -> str:\n"
+    '    """Deliberately over the complexity threshold."""\n'
+    + "".join(
+        f'    if v == {index}:\n        return "x{index}"\n' for index in range(1, 25)
+    )
+    + '    return "z"\n'
+)
+
+
+def _write_complex_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "mod.py").write_text(_COMPLEX_MODULE_SOURCE, "utf-8")
+    (root / "pyproject.toml").write_text(
+        f'[tool.codeclone]\nbaseline_scope_id = "{_SCOPE_ID}"\n',
+        "utf-8",
+    )
+    return root
+
+
+def downgrade_risk_lane_to_schema4(baseline_path: Path) -> None:
+    """Rewrite the risk lane into its authentic pre-F1 shape.
+
+    Not only the label: the ``start_line`` column is removed too, so the
+    artifact on disk is exactly what a pre-migration publisher wrote — an
+    integer-wire lane under payload_schema "4" — re-authenticated at lane
+    and root so the reader answers the contract question, not integrity.
+    """
+
+    def _mutate(container: BaselineContainerV3) -> BaselineContainerV3:
+        lane = container.lanes["risk_observations"]
+        assert lane.descriptor.payload_schema == "5"
+        descriptor = replace(lane.descriptor, payload_schema="4")
+        old_shape = json.loads(canonical_value_bytes(lane.payload))
+        old_shape.pop("start_line")
+        lane = replace(lane, descriptor=descriptor, payload=old_shape)
+        lane = replace(lane, digest=compute_lane_digest(lane))
+        changed = replace(
+            container,
+            lanes=BaselineLaneIndex(
+                rows=tuple(
+                    (key, lane if key == "risk_observations" else existing)
+                    for key, existing in container.lanes.rows
+                )
+            ),
+        )
+        return replace(
+            changed,
+            observation_contract=replace(
+                changed.observation_contract,
+                descriptors=tuple(
+                    descriptor if item.name == "risk_observations" else item
+                    for item in changed.observation_contract.descriptors
+                ),
+            ),
+        )
+
+    _rewrite_container(baseline_path, _mutate)
+
+
+def test_schema4_risk_lane_degrades_to_unavailable_with_novelty_reason(
+    tmp_path: Path,
+) -> None:
+    """F1 K1 pin: the stored schema-4 risk lane is a typed absence.
+
+    Four verdicts in one artifact run: the run completes (no crash), the
+    opaque lane is named once (payload_schema_outdated), the complexity
+    family loses its baseline comparison honestly (no silent comparison),
+    and the complexity finding says ``unavailable`` with the
+    ``lane_unavailable`` reason instead of guessing ``known`` or ``new``.
+    """
+
+    root = _write_complex_repo(tmp_path)
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    published = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--update-baseline",
+        "--no-progress",
+    )
+    assert published.returncode == 0, published.stdout + published.stderr
+    read_back = read_container_v3(
+        baseline_path, limit_bytes=baseline_path.stat().st_size
+    )
+    assert isinstance(read_back, ContainerReadSuccess)
+    # The red-first anchor: the current publisher writes the F1 wire.
+    assert (
+        read_back.container.lanes["risk_observations"].descriptor.payload_schema == "5"
+    )
+
+    downgrade_risk_lane_to_schema4(baseline_path)
+
+    report_path = tmp_path / "report.json"
+    result = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--json",
+        str(report_path),
+        "--no-progress",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Baseline lanes are opaque for this run" in result.stdout
+    assert result.stdout.count("risk_observations:payload_schema_outdated") == 1
+
+    document = json.loads(report_path.read_text("utf-8"))
+    summary = document["metrics"]["summary"]
+    assert summary["complexity"]["baseline_diff_available"] is False
+    # The risk lane feeds health, so the stored score is withheld too.
+    assert summary["health"]["baseline_diff_available"] is False
+    for family in ("coupling", "dependencies", "dead_code"):
+        assert summary[family]["baseline_diff_available"] is True, family
+
+    design_groups = document["findings"]["groups"]["design"]["groups"]
+    complexity_findings = [
+        group for group in design_groups if group["category"] == "complexity"
+    ]
+    assert complexity_findings, "the fixture repo must carry a complexity finding"
+    for group in complexity_findings:
+        assert group["novelty"] == "unavailable"
+        assert group["novelty_reason"] == "lane_unavailable"

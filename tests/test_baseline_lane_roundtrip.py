@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -35,6 +36,7 @@ from codeclone.baseline.lanes import (
     decode_dependency_lane,
     decode_integer_lane,
     decode_module_identity_lane,
+    decode_risk_lane,
 )
 from codeclone.models import (
     AdoptionColumnarPayload,
@@ -61,6 +63,7 @@ from codeclone.models import (
     ModuleTypingCoverage,
     ObservationBundle,
     PublicSymbol,
+    RiskColumnarPayload,
     RuntimeReachabilityFact,
     SemanticAuthorityObservationPayload,
     SemanticAuthorityResult,
@@ -249,6 +252,8 @@ def _edge_state_bundle() -> ObservationBundle:
                 "qualname": "pkg.mod:flat",
                 "cyclomatic_complexity": 2,
                 "nesting_depth": 1,
+                "start_line": 5,
+                "end_line": 14,
                 "unreachable_statements": (
                     UnreachableStatementItem(
                         reason="after_terminator",
@@ -306,6 +311,15 @@ def _empty_bundle() -> ObservationBundle:
     )
 
 
+#: The two integer-shaped wires share one decode/encode round-trip contract;
+#: only the risk wire carries the declaration site.  A table keeps the pair
+#: selection out of duplicated branch bodies.
+_INTEGER_SHAPED_ROUNDTRIP: dict[type, tuple[Callable[..., Any], Callable[..., Any]]] = {
+    IntegerColumnarPayload: (decode_integer_lane, lanes_mod._encode_integer_lane),
+    RiskColumnarPayload: (decode_risk_lane, lanes_mod._encode_risk_lane),
+}
+
+
 def _reencoded(name: str, lane: BaselineLane) -> object:
     """Decode one stored lane and encode the decoded rows again.
 
@@ -323,11 +337,11 @@ def _reencoded(name: str, lane: BaselineLane) -> object:
         return lanes_mod._encode_dead_code_lane(
             decode_dead_code_lane(payload).candidates
         )
-    if isinstance(payload, IntegerColumnarPayload):
-        decoded = decode_integer_lane(payload)
-        return lanes_mod._encode_integer_lane(
-            decoded.observations, decoded.entity_population
-        )
+    integer_shaped = _INTEGER_SHAPED_ROUNDTRIP.get(type(payload))
+    if integer_shaped is not None:
+        decode, encode = integer_shaped
+        rows = decode(payload)
+        return encode(rows.observations, rows.entity_population)
     if isinstance(payload, AdoptionColumnarPayload):
         return lanes_mod._encode_adoption_lane(decode_adoption_lane(payload).counts)
     if isinstance(payload, ApiSurfaceColumnarPayload):

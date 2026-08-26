@@ -48,6 +48,9 @@ from ..models import (
     ObservationLaneName,
     OpaqueLanePayload,
     ResolvedSourceIdentity,
+    RiskColumnarPayload,
+    RiskObservation,
+    RiskObservationPayload,
     SemanticAuthorityObservationPayload,
     parse_adoption_columnar_payload,
     parse_api_surface_columnar_payload,
@@ -56,6 +59,7 @@ from ..models import (
     parse_dependency_columnar_payload,
     parse_integer_columnar_payload,
     parse_module_identity_columnar_payload,
+    parse_risk_columnar_payload,
     parse_semantic_authority_observation_payload,
 )
 from ..observations.contracts import lane_payload_schema
@@ -140,6 +144,24 @@ def decode_integer_lane(payload: IntegerColumnarPayload) -> IntegerObservationPa
                 qualname=payload.qualnames[payload.qualname[row]],
                 dimension=payload.dimensions[payload.dimension[row]],
                 numerator=payload.numerator[row],
+            )
+            for row in range(len(payload.identity))
+        ),
+        entity_population=payload.entity_population,
+    )
+
+
+def decode_risk_lane(payload: RiskColumnarPayload) -> RiskObservationPayload:
+    """Rebuild the typed risk observations, declaration site included."""
+
+    return RiskObservationPayload(
+        observations=tuple(
+            RiskObservation(
+                source=payload.identities.identity(payload.identity[row]),
+                qualname=payload.qualnames[payload.qualname[row]],
+                dimension=payload.dimensions[payload.dimension[row]],
+                numerator=payload.numerator[row],
+                start_line=payload.start_line[row],
             )
             for row in range(len(payload.identity))
         ),
@@ -461,6 +483,7 @@ def payload_from_input(
     | DependencyColumnarPayload
     | IntegerColumnarPayload
     | ModuleIdentityColumnarPayload
+    | RiskColumnarPayload
     | SemanticAuthorityObservationPayload
 ):
     payload: (
@@ -471,6 +494,7 @@ def payload_from_input(
         | DependencyColumnarPayload
         | IntegerColumnarPayload
         | ModuleIdentityColumnarPayload
+        | RiskColumnarPayload
         | SemanticAuthorityObservationPayload
     )
     try:
@@ -485,7 +509,11 @@ def payload_from_input(
             payload = parse_api_surface_columnar_payload(raw)
         elif name == "dead_code":
             payload = parse_dead_code_columnar_payload(raw)
-        elif name in {"risk_observations", "coupling_cohesion_observations"}:
+        elif name == "risk_observations":
+            # F1: the risk lane left the shared integer wire — its rows key
+            # on the declaration site, which the integer wire cannot carry.
+            payload = parse_risk_columnar_payload(raw)
+        elif name == "coupling_cohesion_observations":
             payload = parse_integer_columnar_payload(raw)
         elif name == "adoption_counts":
             payload = parse_adoption_columnar_payload(raw)
@@ -540,6 +568,7 @@ def lane_from_input(
         | DependencyColumnarPayload
         | IntegerColumnarPayload
         | ModuleIdentityColumnarPayload
+        | RiskColumnarPayload
         | SemanticAuthorityObservationPayload
         | OpaqueLanePayload
     )
@@ -580,6 +609,7 @@ __all__ = [
     "decode_dependency_lane",
     "decode_integer_lane",
     "decode_module_identity_lane",
+    "decode_risk_lane",
     "descriptor_from_input",
     "is_observation_lane_name",
     "lane_from_input",

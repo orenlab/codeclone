@@ -38,6 +38,8 @@ from ..models import (
     ObservationLaneDescriptor,
     PythonModuleNodeKind,
     ResolvedSourceIdentity,
+    RiskColumnarPayload,
+    RiskObservation,
     SemanticAuthorityObservation,
     SemanticAuthorityObservationPayload,
     ThinIdentityTable,
@@ -113,6 +115,44 @@ def _encode_integer_lane(
         qualname=tuple(qualname_index[item.qualname] for item in rows),
         dimension=tuple(dimension_index[item.dimension] for item in rows),
         numerator=tuple(item.numerator for item in rows),
+        entity_population=entity_population,
+    )
+
+
+def _encode_risk_lane(
+    observations: Sequence[RiskObservation],
+    entity_population: int,
+) -> RiskColumnarPayload:
+    """Encode the risk lane, keeping the declaration site beside each row.
+
+    F1 (payload schema "5"): ``start_line`` is a key component, so rows sort
+    and dedupe by ``(path, qualname, dimension, start_line)`` — the wire
+    refuses a duplicate key instead of letting two declarations collapse.
+    """
+
+    table, index = _identity_table([item.source for item in observations])
+    qualnames = tuple(sorted({item.qualname for item in observations}))
+    dimensions = tuple(sorted({item.dimension for item in observations}))
+    qualname_index = {value: position for position, value in enumerate(qualnames)}
+    dimension_index = {value: position for position, value in enumerate(dimensions)}
+    rows = sorted(
+        observations,
+        key=lambda item: (
+            item.source.file.path,
+            item.qualname,
+            item.dimension,
+            item.start_line,
+        ),
+    )
+    return RiskColumnarPayload(
+        identities=table,
+        qualnames=qualnames,
+        dimensions=dimensions,
+        identity=tuple(index[item.source.file.path] for item in rows),
+        qualname=tuple(qualname_index[item.qualname] for item in rows),
+        dimension=tuple(dimension_index[item.dimension] for item in rows),
+        numerator=tuple(item.numerator for item in rows),
+        start_line=tuple(item.start_line for item in rows),
         entity_population=entity_population,
     )
 
@@ -462,9 +502,7 @@ def _lane_payload(
     if name == "dead_code":
         return _encode_dead_code_lane(facts.dead_code)
     if name == "risk_observations":
-        return _encode_integer_lane(
-            facts.risk_observations, facts.risk_entity_population
-        )
+        return _encode_risk_lane(facts.risk_observations, facts.risk_entity_population)
     if name == "adoption_counts":
         return _encode_adoption_lane(facts.adoption_counts)
     if name == "coupling_cohesion_observations":
@@ -529,6 +567,8 @@ def observation_lane_item_count(lane: ObservationLane) -> int:
     if isinstance(payload, DeadCodeColumnarPayload):
         return len(payload.prefix)
     if isinstance(payload, IntegerColumnarPayload):
+        return len(payload.identity)
+    if isinstance(payload, RiskColumnarPayload):
         return len(payload.identity)
     if isinstance(payload, AdoptionColumnarPayload):
         return len(payload.scope)

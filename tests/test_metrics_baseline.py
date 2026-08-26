@@ -42,8 +42,6 @@ from codeclone.models import (
     FileIdentity,
     HealthScore,
     ImportObservation,
-    IntegerColumnarPayload,
-    IntegerObservationPayload,
     LaneTrust,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
@@ -52,6 +50,8 @@ from codeclone.models import (
     ObservationLaneDescriptor,
     ProjectMetrics,
     ResolvedSourceIdentity,
+    RiskColumnarPayload,
+    RiskObservationPayload,
     TrustVector,
 )
 
@@ -873,12 +873,16 @@ def test_lane_averages_over_entity_population_equal_the_pre_39u_row_averages() -
             "qualname": "pkg.mod:flat",
             "cyclomatic_complexity": 3,
             "nesting_depth": 0,
+            "start_line": 1,
+            "end_line": 4,
         },
         {
             "filepath": "pkg/mod.py",
             "qualname": "pkg.mod:deep",
             "cyclomatic_complexity": 7,
             "nesting_depth": 2,
+            "start_line": 6,
+            "end_line": 14,
         },
     )
     class_metrics = (
@@ -942,6 +946,8 @@ def test_consumers_receive_decoded_rows_never_columns() -> None:
             "qualname": "pkg.mod:run",
             "cyclomatic_complexity": 4,
             "nesting_depth": 2,
+            "start_line": 3,
+            "end_line": 9,
         },
     )
     class_metrics = (_class_metric("pkg.mod:Thing", cbo=3, lcom4=2, methods=1),)
@@ -954,11 +960,9 @@ def test_consumers_receive_decoded_rows_never_columns() -> None:
     container = build_container(bundle, _SCOPE_ID)
 
     # The stored lane is columnar; what the consumer reads is not.
-    assert isinstance(
-        container.lanes["risk_observations"].payload, IntegerColumnarPayload
-    )
+    assert isinstance(container.lanes["risk_observations"].payload, RiskColumnarPayload)
     risk_payload = metrics_mod._lane_payload(container, "risk_observations")
-    assert isinstance(risk_payload, IntegerObservationPayload)
+    assert isinstance(risk_payload, RiskObservationPayload)
     assert sorted(risk_payload.observations, key=repr) == sorted(
         bundle.structural.risk_observations, key=repr
     )
@@ -1036,6 +1040,8 @@ def _high_risk_bundle() -> ObservationBundle:
                 "filepath": "pkg/mod.py",
                 "cyclomatic_complexity": COMPLEXITY_RISK_MEDIUM_MAX + 5,
                 "nesting_depth": 3,
+                "start_line": 12,
+                "end_line": 40,
             },
         ),
         class_metrics=(

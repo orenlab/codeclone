@@ -34,6 +34,7 @@ from ..models import (
     ModuleTypingCoverage,
     ObservationBundle,
     ResolvedSourceIdentity,
+    RiskObservation,
     RuntimeReachabilityFact,
     SemanticAuthorityResult,
     StructuralObservationFacts,
@@ -89,6 +90,14 @@ def glued_observation_identity(source: ResolvedSourceIdentity, qualname: str) ->
 
 def _integer_observation_sort_key(row: IntegerObservation) -> tuple[str, str, str]:
     return (row.source.file.path, row.qualname, row.dimension)
+
+
+def _risk_observation_sort_key(
+    row: RiskObservation,
+) -> tuple[str, str, str, int]:
+    """The ratified F1 key order: (file, qualname, dimension, start_line)."""
+
+    return (row.source.file.path, row.qualname, row.dimension, row.start_line)
 
 
 def _source_identity(
@@ -271,24 +280,34 @@ def _risk_observations(
     units: Sequence[GroupItemLike],
     registry: ModuleRegistryHandle,
     scan_root: Path,
-) -> tuple[IntegerObservation, ...]:
-    rows: list[IntegerObservation] = []
+) -> tuple[RiskObservation, ...]:
+    rows: list[RiskObservation] = []
     for unit in units:
         source = _observation_source(as_str(unit.get("filepath")), registry, scan_root)
         qualname = _bare_qualname(as_str(unit.get("qualname")))
+        start_line = as_int(unit.get("start_line"))
+        if start_line < 1:
+            # F1: the declaration site is part of the row's identity, so a
+            # unit that cannot name it cannot name the entity — refuse
+            # instead of minting a guessed or collapsed identity.
+            raise ObservationContractError(
+                f"risk observation for {qualname!r} carries no declaration "
+                "site (unit start_line is absent or non-positive)"
+            )
         for dimension in ("cyclomatic_complexity", "nesting_depth"):
             numerator = max(0, as_int(unit.get(dimension)))
             if not numerator:
                 continue
             rows.append(
-                IntegerObservation(
+                RiskObservation(
                     source=source,
                     qualname=qualname,
                     dimension=dimension,
                     numerator=numerator,
+                    start_line=start_line,
                 )
             )
-    return tuple(sorted(rows, key=_integer_observation_sort_key))
+    return tuple(sorted(rows, key=_risk_observation_sort_key))
 
 
 def _adoption_counts(
