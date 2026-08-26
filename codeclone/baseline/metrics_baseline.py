@@ -341,16 +341,48 @@ def _entity_identity_rows(
 
     Without it the comparison silently reads two different things and reports
     every entity the baseline already knows as new.
+
+    This is the coupling/cohesion half: class symbols are declared once per
+    name, so the triple is the whole key.  Risk rows carry a declaration
+    site and are keyed by :func:`_risk_entity_identity_rows` instead.
     """
 
     payload = _lane_payload(container, name)
-    if not isinstance(payload, (IntegerObservationPayload, RiskObservationPayload)):
+    if not isinstance(payload, IntegerObservationPayload):
         return ()
     return tuple(
         (
             glued_observation_identity(item.source, item.qualname),
             item.dimension,
             item.numerator,
+        )
+        for item in payload.observations
+    )
+
+
+def _risk_entity_identity_rows(
+    container: BaselineContainerV3,
+) -> tuple[tuple[str, str, int, int], ...]:
+    """The risk half of the identity join, keyed with the declaration site.
+
+    F1 (ruling 2026-08-26): two declarations sharing one qualname —
+    ``@overload`` groups, property/setter pairs — are different entities,
+    and a site-blind row key makes their rows byte-identical, so any keyed
+    consumer collapses two facts into one.  ``start_line`` completes the
+    row key here, in the baseline-reader join; the GLUED IDENTITY SPELLING
+    deliberately does not change — the report vocabulary is untouched
+    (lane-contract migration, not a report-schema change).
+    """
+
+    payload = _lane_payload(container, "risk_observations")
+    if not isinstance(payload, RiskObservationPayload):
+        return ()
+    return tuple(
+        (
+            glued_observation_identity(item.source, item.qualname),
+            item.dimension,
+            item.numerator,
+            item.start_line,
         )
         for item in payload.observations
     )
@@ -402,8 +434,11 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
     )
     # Values are read from the stored rows; the three sets below name entities
     # that a run's own sets are differenced against, so they read the rejoined
-    # identity instead.
-    risk_identity_rows = _entity_identity_rows(container, "risk_observations")
+    # identity instead.  Risk rows arrive keyed with their declaration site
+    # (F1): two @overload declarations of one qualname are two facts here,
+    # never one byte-identical row, while the glued identity string each
+    # contributes stays the report's unchanged vocabulary.
+    risk_identity_rows = _risk_entity_identity_rows(container)
     class_identity_rows = _entity_identity_rows(
         container, "coupling_cohesion_observations"
     )
@@ -415,7 +450,7 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
     high_risk = tuple(
         sorted(
             identity
-            for identity, dim, value in risk_identity_rows
+            for identity, dim, value, _site in risk_identity_rows
             if dim == "cyclomatic_complexity" and value > COMPLEXITY_RISK_MEDIUM_MAX
         )
     )

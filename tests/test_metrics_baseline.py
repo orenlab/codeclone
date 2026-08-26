@@ -1091,3 +1091,58 @@ def test_published_high_risk_entities_read_as_known_on_the_next_run(
 
     assert diff.new_high_risk_functions == ("pkg.mod:fresh",)
     assert diff.new_high_coupling_classes == ("pkg.mod:Fresh",)
+
+
+def test_baseline_reader_keeps_overload_declarations_distinct() -> None:
+    """F1 K2: the baseline reader keys risk rows with the declaration site.
+
+    Distinguishing input — the ruling's own defect shape: two declarations
+    of one qualname with different start_lines and EQUAL measures.  The K1
+    wire carries all four facts (2 declarations x 2 dimensions); the
+    reader's row key must keep them distinct all the way to the comparison,
+    where a site-blind key made the pairs byte-identical (measured red:
+    ``len(set(rows)) == 2``).  The glued identity SPELLING deliberately
+    stays the same — the report vocabulary does not move.
+    """
+
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    container = build_container(
+        build_observation_bundle(
+            scan_root=Path("."),
+            module_registry=registry,
+            units=(
+                {
+                    "filepath": "pkg/mod.py",
+                    "qualname": "pkg.mod:parse_args",
+                    "cyclomatic_complexity": 7,
+                    "nesting_depth": 2,
+                    "start_line": 10,
+                    "end_line": 20,
+                },
+                {
+                    "filepath": "pkg/mod.py",
+                    "qualname": "pkg.mod:parse_args",
+                    "cyclomatic_complexity": 7,
+                    "nesting_depth": 2,
+                    "start_line": 40,
+                    "end_line": 60,
+                },
+            ),
+        ),
+        _SCOPE_ID,
+    )
+
+    rows = metrics_mod._risk_entity_identity_rows(container)
+    assert len(rows) == 4
+    # Both declarations reach the comparison separately: every row is a
+    # distinct fact under set(), keyed by its declaration site.
+    assert len(set(rows)) == 4
+    assert {row[0] for row in rows} == {"pkg.mod:parse_args"}
+    assert {row[3] for row in rows} == {10, 40}
+    # The value reader beside it still sees all four surviving rows.
+    value_rows, population = metrics_mod._integer_lane(container, "risk_observations")
+    assert population == 2
+    assert len(value_rows) == 4
