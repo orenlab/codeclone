@@ -314,6 +314,67 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"target":{"3":0}',
     ),
     (
+        "W08",
+        "unknown api symbol kind tag",
+        '"symbol_kind":["method"',
+        '"symbol_kind":["banana"',
+    ),
+    (
+        "W08",
+        "unknown api visibility tag",
+        '"visibility":["name","all","all","name","name"]',
+        '"visibility":["banana","all","all","name","name"]',
+    ),
+    (
+        "W08",
+        "unknown api parameter kind tag",
+        '["self","pos_only",0]',
+        '["self","banana",0]',
+    ),
+    (
+        "W18",
+        "api default marker outside 0/1",
+        '["self","pos_only",0]',
+        '["self","pos_only",7]',
+    ),
+    (
+        "W18",
+        "api parameter cell of a wrong arity",
+        '["self","pos_only",0]',
+        '["self","pos_only"]',
+    ),
+    (
+        "W18",
+        "empty api parameter name",
+        '["self","pos_only",0]',
+        '["","pos_only",0]',
+    ),
+    (
+        "W18",
+        "empty api annotation digest",
+        '["extra","kw_only",1,'
+        '"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]',
+        '["extra","kw_only",1,""]',
+    ),
+    (
+        "W25",
+        "api signature variant does not match its formula owner",
+        '"90dec1a3883d07ad11a7e7119810ab7316456cd9388c20076f0d28b02a222416"',
+        '"00dec1a3883d07ad11a7e7119810ab7316456cd9388c20076f0d28b02a222416"',
+    ),
+    (
+        "W12",
+        "api symbol rows out of key order",
+        '"symbol":[0,1,2,3,3],"symbol_kind"',
+        '"symbol":[0,1,2,3,2],"symbol_kind"',
+    ),
+    (
+        "W18",
+        "api parameters cell is not an array",
+        ',[],[],[["value"',
+        ',7,[],[["value"',
+    ),
+    (
         "W21",
         "incompatible revision value",
         '"canonical_model":"1"',

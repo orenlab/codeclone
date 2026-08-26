@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, TypeVar, cast
 
+from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.authority_identity import (
     candidate_handle,
     legacy_symbol_key,
@@ -69,6 +70,9 @@ from codeclone.canonical.authority_identity import (
 )
 from codeclone.canonical.errors import CanonicalModelError, WireDecodeError
 from codeclone.canonical.identity import (
+    API_PARAMETER_KINDS,
+    API_SYMBOL_KINDS,
+    API_VISIBILITIES,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     DOMAIN_TAG_FILE,
@@ -101,6 +105,8 @@ from codeclone.canonical.identity import (
 )
 from codeclone.canonical.model import (
     AnalysisFacts,
+    ApiParameterFact,
+    ApiSymbolRow,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -295,6 +301,7 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
         referenced.add(violation.canonical_owner)
         referenced.update(violation.producer_set)
     referenced.update(row.symbol for row in facts.coupling_cohesion_observations)
+    referenced.update(row.symbol for row in facts.api_symbols)
     return referenced
 
 
@@ -605,6 +612,47 @@ def _coupling_cohesion_rows(
     ]
 
 
+def _api_parameter_cell(parameter: ApiParameterFact) -> list[object]:
+    """One wire cell per parameter: ``[name, kind, default, annotation?]``.
+
+    The annotation slot is OMITTED when absent (the producer's own
+    bijection: an empty basis is absence, never a value) and the default
+    marker is an integer — wire revision 0 declares no boolean slots.
+    """
+    cell: list[object] = [
+        parameter.name,
+        parameter.kind,
+        1 if parameter.has_default else 0,
+    ]
+    if parameter.annotation_digest is not None:
+        cell.append(parameter.annotation_digest)
+    return cell
+
+
+def _api_symbol_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
+    keyed = sorted(
+        (
+            plan.symbol_ordinal[row.symbol],
+            signature_variant(
+                parameters=row.parameters, returns_digest=row.returns_digest
+            ),
+            row,
+        )
+        for row in facts.api_symbols
+    )
+    return [
+        {
+            "parameters": [_api_parameter_cell(p) for p in row.parameters],
+            "returns_digest": row.returns_digest or "",
+            "signature_variant": variant,
+            "symbol": ordinal,
+            "symbol_kind": row.symbol_kind,
+            "visibility": row.visibility,
+        }
+        for ordinal, variant, row in keyed
+    ]
+
+
 def _contract_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     return [
         {
@@ -683,6 +731,7 @@ def _sink_role_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
 _FAMILY_ROW_BUILDERS: dict[
     str, Callable[[AnalysisFacts, WirePlan], list[dict[str, object]]]
 ] = {
+    "api_symbols": _api_symbol_rows,
     "candidates": _candidate_rows,
     "contracts": _contract_rows,
     "coupling_cohesion_observations": _coupling_cohesion_rows,
@@ -1695,6 +1744,88 @@ def _decode_coupling_cohesion(
     return frozenset(rows)
 
 
+def _decode_api_parameter(value: object, where: str) -> ApiParameterFact:
+    cell = _expect_list(value, where)
+    if len(cell) not in (3, 4):
+        raise _refuse(
+            "W18", f"{where} is not a [name, kind, default, annotation?] cell"
+        )
+    name = _expect_string(cell[0], f"{where}.name")
+    if not name:
+        raise _refuse("W18", f"{where}.name is empty")
+    kind = _expect_string(cell[1], f"{where}.kind")
+    if kind not in API_PARAMETER_KINDS:
+        raise _refuse("W08", f"unknown api parameter kind tag {kind!r}")
+    default_marker = _expect_wire_int(cell[2], f"{where}.default")
+    if default_marker not in (0, 1):
+        raise _refuse("W18", f"{where}.default is not a 0/1 marker")
+    annotation: str | None = None
+    if len(cell) == 4:
+        annotation = _expect_string(cell[3], f"{where}.annotation")
+        if not annotation:
+            # An empty annotation digest would spell absence as a value;
+            # the canonical spelling of absence is the omitted slot.
+            raise _refuse("W18", f"{where}.annotation is empty")
+    return ApiParameterFact(name, kind, default_marker == 1, annotation)
+
+
+def _decode_api_symbols(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[ApiSymbolRow]:
+    columns, _flags, row_count = _decode_columns("api_symbols", facts["api_symbols"])
+    rows = []
+    keys = []
+    for index in range(row_count):
+        ordinal = _expect_ordinal(
+            columns["symbol"][index],
+            len(symbols),
+            f"facts.api_symbols.symbol[{index}]",
+        )
+        symbol_kind = _expect_string(
+            columns["symbol_kind"][index], f"facts.api_symbols.symbol_kind[{index}]"
+        )
+        if symbol_kind not in API_SYMBOL_KINDS:
+            raise _refuse("W08", f"unknown api symbol kind tag {symbol_kind!r}")
+        visibility = _expect_string(
+            columns["visibility"][index], f"facts.api_symbols.visibility[{index}]"
+        )
+        if visibility not in API_VISIBILITIES:
+            raise _refuse("W08", f"unknown api visibility tag {visibility!r}")
+        parameters = tuple(
+            _decode_api_parameter(item, f"facts.api_symbols.parameters[{index}]")
+            for item in _expect_list(
+                columns["parameters"][index],
+                f"facts.api_symbols.parameters[{index}]",
+            )
+        )
+        returns_raw = _expect_string(
+            columns["returns_digest"][index],
+            f"facts.api_symbols.returns_digest[{index}]",
+        )
+        declared_variant = _expect_string(
+            columns["signature_variant"][index],
+            f"facts.api_symbols.signature_variant[{index}]",
+        )
+        returns_digest = returns_raw or None
+        expected_variant = signature_variant(
+            parameters=parameters, returns_digest=returns_digest
+        )
+        if declared_variant != expected_variant:
+            raise _refuse(
+                "W25",
+                f"facts.api_symbols.signature_variant[{index}] does not "
+                "match its formula owner",
+            )
+        rows.append(
+            ApiSymbolRow(
+                symbols[ordinal], symbol_kind, visibility, parameters, returns_digest
+            )
+        )
+        keys.append((ordinal, declared_variant.encode("utf-8")))
+    _expect_strictly_increasing(keys, "facts.api_symbols")
+    return frozenset(rows)
+
+
 def _decode_violations(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
@@ -1913,6 +2044,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
         facts_section, files, modules, relation_keys
     )
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
+    api_symbols = _decode_api_symbols(facts_section, symbols)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
     )
@@ -1938,6 +2070,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 dependency_occurrences=dependency_occurrences,
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
+                api_symbols=api_symbols,
             )
         ),
         coupled_sets=frozenset(

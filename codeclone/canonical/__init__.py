@@ -12,6 +12,10 @@ never a previous run plus a patch, storage identifiers never escape into the
 wire, and the normalized wire is never the expanded legacy object.
 """
 
+from codeclone.canonical.api_identity import (
+    API_SIGNATURE_IDENTITY_CONTRACT,
+    signature_variant,
+)
 from codeclone.canonical.authority_identity import (
     CANDIDATE_IDENTITY_CONTRACT,
     VIOLATION_IDENTITY_CONTRACT,
@@ -45,6 +49,9 @@ from codeclone.canonical.export import (
     verify_export_artifact,
 )
 from codeclone.canonical.identity import (
+    API_PARAMETER_KINDS,
+    API_SYMBOL_KINDS,
+    API_VISIBILITIES,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     EFFECT_KINDS,
@@ -73,6 +80,8 @@ from codeclone.canonical.identity import (
 from codeclone.canonical.ingest import canonical_model_from_legacy_document
 from codeclone.canonical.model import (
     AnalysisFacts,
+    ApiParameterFact,
+    ApiSymbolRow,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -106,6 +115,10 @@ from codeclone.canonical.store import (
 )
 
 __all__ = [
+    "API_PARAMETER_KINDS",
+    "API_SIGNATURE_IDENTITY_CONTRACT",
+    "API_SYMBOL_KINDS",
+    "API_VISIBILITIES",
     "CANDIDATE_IDENTITY_CONTRACT",
     "COUPLING_COHESION_DIMENSIONS",
     "DEPENDENCY_BINDINGS",
@@ -117,6 +130,8 @@ __all__ = [
     "VIOLATION_KINDS",
     "AnalysisFacts",
     "AnalysisFile",
+    "ApiParameterFact",
+    "ApiSymbolRow",
     "ByteSink",
     "CandidateRow",
     "CanonicalFacts",
@@ -177,6 +192,7 @@ __all__ = [
     "head_tag",
     "legacy_symbol_key",
     "root_family",
+    "signature_variant",
     "sparse_bool_wire_columns",
     "verify_export_artifact",
     "violation_handle",

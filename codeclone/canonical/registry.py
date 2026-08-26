@@ -61,6 +61,62 @@ class FieldDeclaration:
 # names; the wire emits them in sorted(key) order — mechanically, from this
 # mapping, never from a hand-written list.
 FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
+    # F5 (wave 4, ratified form): key (SYMBOL, canonical_signature_variant);
+    # one owner of the canonical signature identity — parameters and return
+    # enter the variant by contract, never a bare (FILE, symbol,
+    # returns_digest) key.
+    "api_symbols": (
+        FieldDeclaration(
+            "parameters",
+            ANALYSIS_FACT,
+            "api_surface_producer",
+            "ordered signature parameters; variant preimage component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "returns_digest",
+            ANALYSIS_FACT,
+            "api_surface_producer",
+            "return digest under ccapi1:sig; variant preimage component "
+            "(empty wire string spells the producer's absence)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "signature_variant",
+            CONTRACT_DERIVED,
+            "api_signature_identity_contract.v1",
+            "sha256 over (signature version, arity, parameters, returns)",
+            stored=False,
+            wire=True,
+            public_handle=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "api_surface_producer",
+            "SYMBOL key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol_kind",
+            ANALYSIS_FACT,
+            "api_surface_producer",
+            "closed vocabulary (API_SYMBOL_KINDS); payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "visibility",
+            ANALYSIS_FACT,
+            "api_surface_producer",
+            "closed vocabulary (API_VISIBILITIES); payload, never key",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "candidates": (
         FieldDeclaration(
             "level",

@@ -14,10 +14,15 @@ from collections.abc import Callable
 import pytest
 
 from codeclone.canonical import (
+    API_PARAMETER_KINDS,
+    API_SYMBOL_KINDS,
+    API_VISIBILITIES,
     DEPENDENCY_BINDINGS,
     IMPORT_TYPES,
     VIOLATION_KINDS,
     AnalysisFile,
+    ApiParameterFact,
+    ApiSymbolRow,
     CanonicalModelError,
     DependencyOccurrenceRow,
     DependencyRelationRow,
@@ -202,6 +207,15 @@ def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
             "import_time",
             False,
         ),
+        # F5: every closed vocabulary and both empty-as-value refusals
+        lambda: ApiSymbolRow(SymbolId(FileId("a.py"), "f"), "banana", "name", (), None),
+        lambda: ApiSymbolRow(
+            SymbolId(FileId("a.py"), "f"), "function", "banana", (), None
+        ),
+        lambda: ApiSymbolRow(SymbolId(FileId("a.py"), "f"), "function", "name", (), ""),
+        lambda: ApiParameterFact("value", "banana", False, None),
+        lambda: ApiParameterFact("", "pos_or_kw", False, None),
+        lambda: ApiParameterFact("value", "pos_or_kw", False, ""),
         lambda: ViolationRow(
             contract_id="",
             kind="owner_bypass",
@@ -291,9 +305,19 @@ def test_fact_vocabularies_mirror_the_producer_literals() -> None:
     signal, one place, one interpretation)."""
     from typing import get_args, get_type_hints
 
-    from codeclone.models import AuthorityViolationKind, DependencyBinding, ModuleDep
+    from codeclone.models import (
+        ApiParameterKind,
+        ApiSymbolKind,
+        ApiVisibility,
+        AuthorityViolationKind,
+        DependencyBinding,
+        ModuleDep,
+    )
 
     hints = get_type_hints(ModuleDep)
     assert get_args(hints["import_type"]) == IMPORT_TYPES
     assert get_args(DependencyBinding) == DEPENDENCY_BINDINGS
     assert get_args(AuthorityViolationKind) == VIOLATION_KINDS
+    assert get_args(ApiSymbolKind) == API_SYMBOL_KINDS
+    assert get_args(ApiVisibility) == API_VISIBILITIES
+    assert get_args(ApiParameterKind) == API_PARAMETER_KINDS

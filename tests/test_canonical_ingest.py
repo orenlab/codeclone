@@ -192,7 +192,68 @@ def legacy_document() -> dict[str, Any]:
                         "dimension": "methods",
                         "numerator": 2,
                     },
-                ]
+                ],
+                # F5 lane verbatim from the producer's shape: owner carries
+                # the file identity, the symbol is bare, digests ride the
+                # producer's one ccapi1:sig identity, absence is None.
+                "api_surface": [
+                    {
+                        "owner": {
+                            "file": {"path": "pkg/mod.py"},
+                            "python_module": {"module": "pkg.mod"},
+                        },
+                        "symbol": "make",
+                        "symbol_kind": "function",
+                        "visibility": "name",
+                        "parameters": [
+                            {
+                                "name": "value",
+                                "kind": "pos_or_kw",
+                                "has_default": False,
+                                "annotation_digest": {
+                                    "domain": "ccapi1:sig",
+                                    "algorithm": "sha256",
+                                    "value": "aa" * 32,
+                                },
+                            },
+                            {
+                                "name": "extra",
+                                "kind": "kw_only",
+                                "has_default": True,
+                                "annotation_digest": None,
+                            },
+                        ],
+                        "returns_digest": {
+                            "domain": "ccapi1:sig",
+                            "algorithm": "sha256",
+                            "value": "bb" * 32,
+                        },
+                    },
+                    {
+                        # the @overload sibling: same owner and symbol,
+                        # different canonical signature variant
+                        "owner": {
+                            "file": {"path": "pkg/mod.py"},
+                            "python_module": {"module": "pkg.mod"},
+                        },
+                        "symbol": "make",
+                        "symbol_kind": "function",
+                        "visibility": "name",
+                        "parameters": [],
+                        "returns_digest": None,
+                    },
+                    {
+                        "owner": {
+                            "file": {"path": "scripts/tool.py"},
+                            "python_module": None,
+                        },
+                        "symbol": "Runner",
+                        "symbol_kind": "class",
+                        "visibility": "all",
+                        "parameters": [],
+                        "returns_digest": None,
+                    },
+                ],
             },
         },
         "metrics": {
@@ -245,6 +306,7 @@ def test_ingest_builds_the_measured_families() -> None:
     )
     assert len(facts.analysis.violations) == 1
     assert len(facts.analysis.coupling_cohesion_observations) == 3
+    assert len(facts.analysis.api_symbols) == 3
     assert len(model.coupled_sets) == 2  # duplicates collapse, empty drops
     assert len(model.analyzed_files) == 3
     assert len(model.file_modules) == 2
@@ -446,6 +508,73 @@ def test_ingest_refuses_a_non_integer_observation_numerator() -> None:
         _observation_row(document)["numerator"] = True
 
     with pytest.raises(LegacyIngestError, match="numerator"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def _api_row(document: dict[str, Any], position: int = 0) -> dict[str, Any]:
+    families = document["source_facts"]["source_fact_families"]
+    row: dict[str, Any] = families["api_surface"][position]
+    return row
+
+
+def test_ingest_maps_api_overloads_to_two_rows_on_one_symbol() -> None:
+    """The F5 oracle keeps both @overload declarations: one FILE-headed
+    SYMBOL, two canonical signature variants — nothing deduplicated."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    make = SymbolId(FileId("pkg/mod.py"), "make")
+    rows = [row for row in model.facts.analysis.api_symbols if row.symbol == make]
+    assert len(rows) == 2
+    long_row = next(row for row in rows if row.parameters)
+    assert [p.name for p in long_row.parameters] == ["value", "extra"]
+    assert long_row.parameters[0].annotation_digest == "aa" * 32
+    assert long_row.parameters[1].annotation_digest is None
+    assert long_row.returns_digest == "bb" * 32
+    short_row = next(row for row in rows if not row.parameters)
+    assert short_row.returns_digest is None
+    runner = SymbolId(FileId("scripts/tool.py"), "Runner")
+    assert any(row.symbol == runner for row in model.facts.analysis.api_symbols)
+
+
+def test_ingest_refuses_a_glued_api_symbol() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _api_row(document)["symbol"] = "pkg.mod:make"
+
+    with pytest.raises(LegacyIngestError, match="glued"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_unanalyzed_api_owner() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _api_row(document)["owner"]["file"]["path"] = "vendored/x.py"
+
+    with pytest.raises(LegacyIngestError, match="not an analyzed"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_non_boolean_api_default_marker() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _api_row(document)["parameters"][0]["has_default"] = "no"
+
+    with pytest.raises(LegacyIngestError, match="has_default"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_foreign_api_digest_identity() -> None:
+    """A digest under another domain is a different fact — reading it as a
+    signature would silently merge two identity spaces."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _api_row(document)["returns_digest"]["domain"] = "ccsem1:other"
+
+    with pytest.raises(LegacyIngestError, match="foreign digest identity"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_empty_api_digest_value() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _api_row(document)["parameters"][0]["annotation_digest"]["value"] = ""
+
+    with pytest.raises(LegacyIngestError, match="digest value is empty"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 

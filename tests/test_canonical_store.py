@@ -389,12 +389,65 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'{"dimension":"cbo","numerator":"3","symbol":["pkg/a.py","A.run"]}',
             "numerator",
         ),
+        # F5 sub-guards, one probe each (masked-sibling law: a passing set
+        # exercising two guards must isolate each).
+        (
+            "api_symbol",
+            b'{"parameters":7,"returns_digest":null,"symbol":["pkg/a.py","A"],'
+            b'"symbol_kind":"class","visibility":"all"}',
+            "'parameters' is not an array",
+        ),
+        (
+            "api_symbol",
+            b'{"parameters":[["value","pos_or_kw"]],"returns_digest":null,'
+            b'"symbol":["pkg/a.py","A"],"symbol_kind":"class","visibility":"all"}',
+            "stored api parameter is not a",
+        ),
+        (
+            "api_symbol",
+            b'{"parameters":[[7,"pos_or_kw",false,null]],"returns_digest":null,'
+            b'"symbol":["pkg/a.py","A"],"symbol_kind":"class","visibility":"all"}',
+            "api parameter names are not strings",
+        ),
+        (
+            "api_symbol",
+            b'{"parameters":[["value","pos_or_kw","no",null]],'
+            b'"returns_digest":null,"symbol":["pkg/a.py","A"],'
+            b'"symbol_kind":"class","visibility":"all"}',
+            "default marker is not a boolean",
+        ),
+        (
+            "api_symbol",
+            b'{"parameters":[["value","pos_or_kw",false,7]],"returns_digest":null,'
+            b'"symbol":["pkg/a.py","A"],"symbol_kind":"class","visibility":"all"}',
+            "annotation is not a string",
+        ),
+        (
+            "api_symbol",
+            b'{"parameters":[],"returns_digest":7,"symbol":["pkg/a.py","A"],'
+            b'"symbol_kind":"class","visibility":"all"}',
+            "'returns_digest' is not a string",
+        ),
+        # model law through the store wrapper: unknown symbol kind
+        (
+            "api_symbol",
+            b'{"parameters":[],"returns_digest":null,"symbol":["pkg/a.py","A"],'
+            b'"symbol_kind":"banana","visibility":"all"}',
+            "unknown api symbol kind",
+        ),
     ],
     ids=[
         "contract-not-a-pair",
         "contract-non-string-pair",
         "coupling-zero-numerator-model-law",
         "coupling-non-int-numerator-shape-guard",
+        "api-parameters-not-array",
+        "api-parameter-not-a-quad",
+        "api-parameter-non-string-names",
+        "api-default-marker-not-bool",
+        "api-annotation-not-string",
+        "api-returns-not-string",
+        "api-unknown-kind-model-law",
     ],
 )
 def test_well_addressed_malformed_payload_is_refused(
@@ -557,6 +610,7 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
         assert counts["coupling_cohesion_observation"] == len(
             model.facts.analysis.coupling_cohesion_observations
         )
+        assert counts["api_symbol"] == len(model.facts.analysis.api_symbols)
         assert counts["file"] == len(model.files)
         assert counts["module"] == len(model.modules)
         assert counts["analyzed_file"] == len(model.analyzed_files)

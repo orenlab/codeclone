@@ -74,6 +74,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Final, cast
 
+from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.codec import (
     WirePlan,
     encode_canonical_json,
@@ -116,6 +117,8 @@ from codeclone.canonical.identity import (
 )
 from codeclone.canonical.model import (
     AnalysisFacts,
+    ApiParameterFact,
+    ApiSymbolRow,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -130,6 +133,7 @@ from codeclone.canonical.model import (
     ViolationRow,
 )
 from codeclone.contracts import (
+    API_SURFACE_SIGNATURE_VERSION,
     AUTHORITY_ANALYSIS_REVISION,
     CANONICAL_MODEL_REVISION,
     CANONICAL_WIRE_REVISION,
@@ -166,6 +170,10 @@ _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
 # never silently crosses a producer revision.
 _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     "analyzed_file": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    # F5: signature meaning is owned by the API signature contract — a
+    # signature-algorithm revision never lets these facts silently share
+    # content addresses across generations.
+    "api_symbol": f"api_surface_signature:{API_SURFACE_SIGNATURE_VERSION}",
     "candidate": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     "contract": f"contract_ir:{CONTRACT_IR_VERSION}",
     "coupled_set": f"canonical_model:{CANONICAL_MODEL_REVISION}",
@@ -508,6 +516,28 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "symbol": _symbol_value(observation.symbol),
             },
         )
+    for api_symbol in sorted(
+        facts.api_symbols,
+        key=lambda row: (
+            canonical_key(row.symbol),
+            signature_variant(
+                parameters=row.parameters, returns_digest=row.returns_digest
+            ),
+        ),
+    ):
+        yield (
+            "api_symbol",
+            {
+                "parameters": [
+                    [p.name, p.kind, p.has_default, p.annotation_digest]
+                    for p in api_symbol.parameters
+                ],
+                "returns_digest": api_symbol.returns_digest,
+                "symbol": _symbol_value(api_symbol.symbol),
+                "symbol_kind": api_symbol.symbol_kind,
+                "visibility": api_symbol.visibility,
+            },
+        )
 
 
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
@@ -653,6 +683,46 @@ def _decode_coupling_cohesion_row(
     )
 
 
+def _decode_api_parameter_value(value: object, where: str) -> ApiParameterFact:
+    if not isinstance(value, list) or len(value) != 4:
+        raise StoreIntegrityError(
+            f"{where}: stored api parameter is not a "
+            "[name, kind, has_default, annotation] row"
+        )
+    name, kind, has_default, annotation = value
+    if not isinstance(name, str) or not isinstance(kind, str):
+        raise StoreIntegrityError(
+            f"{where}: stored api parameter names are not strings"
+        )
+    if not isinstance(has_default, bool):
+        raise StoreIntegrityError(
+            f"{where}: stored api default marker is not a boolean"
+        )
+    if annotation is not None and not isinstance(annotation, str):
+        raise StoreIntegrityError(f"{where}: stored api annotation is not a string")
+    return ApiParameterFact(name, kind, has_default, annotation)
+
+
+def _decode_api_symbol_row(row: Mapping[str, object], where: str) -> ApiSymbolRow:
+    parameters = _require_field(row, "parameters", where)
+    if not isinstance(parameters, list):
+        raise StoreIntegrityError(f"{where}: stored field 'parameters' is not an array")
+    returns_digest = _require_field(row, "returns_digest", where)
+    if returns_digest is not None and not isinstance(returns_digest, str):
+        raise StoreIntegrityError(
+            f"{where}: stored field 'returns_digest' is not a string"
+        )
+    return ApiSymbolRow(
+        symbol=_row_symbol(row, "symbol", where),
+        symbol_kind=_require_str(row, "symbol_kind", where),
+        visibility=_require_str(row, "visibility", where),
+        parameters=tuple(
+            _decode_api_parameter_value(item, where) for item in parameters
+        ),
+        returns_digest=returns_digest,
+    )
+
+
 def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow:
     return ViolationRow(
         contract_id=_require_str(row, "contract_id", where),
@@ -675,6 +745,7 @@ def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow
 # integrity refusal at the call site, never a silent skip.
 _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] = {
     "analyzed_file": _decode_file_row,
+    "api_symbol": _decode_api_symbol_row,
     "candidate": _decode_candidate_row,
     "contract": _decode_contract_row,
     "coupled_set": _decode_coupled_row,
@@ -737,6 +808,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                         family("coupling_cohesion_observation"),
                     )
                 ),
+                api_symbols=frozenset(cast("list[ApiSymbolRow]", family("api_symbol"))),
             )
         ),
         coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
@@ -1027,6 +1099,7 @@ _IDENTITY_FAMILIES: Final = frozenset(
 # ``project_run`` catches (measured during wave 3: the first draft scanned
 # wire names and exported eight empty tables).
 _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
+    "api_symbols": "api_symbol",
     "candidates": "candidate",
     "contracts": "contract",
     "coupling_cohesion_observations": "coupling_cohesion_observation",

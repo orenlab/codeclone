@@ -62,6 +62,8 @@ from codeclone.canonical.identity import (
 )
 from codeclone.canonical.model import (
     AnalysisFacts,
+    ApiParameterFact,
+    ApiSymbolRow,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -426,12 +428,13 @@ def canonical_model_from_legacy_document(
         if labels
     )
 
+    fact_families = _mapping(
+        _field(source_facts, "source_fact_families", "source_facts"),
+        "source_facts.source_fact_families",
+    )
     observation_rows = _sequence(
         _field(
-            _mapping(
-                _field(source_facts, "source_fact_families", "source_facts"),
-                "source_facts.source_fact_families",
-            ),
+            fact_families,
             "coupling_cohesion_observations",
             "source_fact_families",
         ),
@@ -442,6 +445,15 @@ def canonical_model_from_legacy_document(
             _mapping(row, "coupling_cohesion observation"), index
         )
         for row in observation_rows
+    )
+
+    api_rows = _sequence(
+        _field(fact_families, "api_surface", "source_fact_families"),
+        "source_fact_families.api_surface",
+    )
+    api_symbols = frozenset(
+        _api_symbol_observation(_mapping(row, "api_surface observation"), index)
+        for row in api_rows
     )
 
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
@@ -465,6 +477,7 @@ def canonical_model_from_legacy_document(
                 dependency_occurrences=dependency_occurrences,
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
+                api_symbols=api_symbols,
             )
         ),
         coupled_sets=coupled_sets,
@@ -510,40 +523,128 @@ def _dependency_occurrence(
     )
 
 
+def _lane_symbol(
+    row: Mapping[str, object],
+    index: _RegistryIndex,
+    *,
+    source_key: str,
+    name_key: str,
+    lane: str,
+) -> SymbolId:
+    """The ONE spelling of the lane identity law (F2 and F5 share it).
+
+    A lane row carries a resolved source identity (``source`` / ``owner``)
+    plus a BARE qualname; the SYMBOL is the ratified FILE-headed spelling of
+    the same entity.  A path outside the document's own analysis scope, or a
+    name carrying a ModuleKey colon, is a typed refusal — never a guessed
+    identity.
+    """
+    holder = _mapping(_field(row, source_key, f"{lane} observation"), source_key)
+    file_value = _mapping(
+        _field(holder, "file", f"{lane} {source_key}"), f"{source_key}.file"
+    )
+    path = _string(file_value, "path", f"{lane} {source_key}.file")
+    if path not in index.analyzed_paths:
+        raise LegacyIngestError(
+            f"{lane} observation {source_key} {path!r} is not an "
+            "analyzed path; refusing to guess an identity"
+        )
+    name = _string(row, name_key, f"{lane} observation")
+    if ":" in name:
+        raise LegacyIngestError(
+            f"{lane} observation {name_key} {name!r} is a glued "
+            "identity; the producer's lane law forbids it"
+        )
+    return SymbolId(FileId(path), name)
+
+
 def _coupling_cohesion_observation(
     row: Mapping[str, object], index: _RegistryIndex
 ) -> CouplingCohesionRow:
-    """One F2 observation from the producer's own lane row.
-
-    The lane carries ``source.file.path`` plus a BARE qualname (the producer
-    enforces "no glued identities" on its side); the SYMBOL is the ratified
-    FILE-headed spelling of the same entity.  A source path outside the
-    document's own analysis scope, or a qualname carrying a ModuleKey colon,
-    is a typed refusal — never a guessed identity.
-    """
-    source = _mapping(_field(row, "source", "coupling_cohesion observation"), "source")
-    file_value = _mapping(_field(source, "file", "observation source"), "source.file")
-    path = _string(file_value, "path", "observation source.file")
-    if path not in index.analyzed_paths:
-        raise LegacyIngestError(
-            f"coupling_cohesion observation source {path!r} is not an "
-            "analyzed path; refusing to guess an identity"
-        )
-    qualname = _string(row, "qualname", "coupling_cohesion observation")
-    if ":" in qualname:
-        raise LegacyIngestError(
-            f"coupling_cohesion observation qualname {qualname!r} is a glued "
-            "identity; the producer's lane law forbids it"
-        )
+    """One F2 observation from the producer's own lane row; the identity
+    law lives in :func:`_lane_symbol`."""
+    symbol = _lane_symbol(
+        row, index, source_key="source", name_key="qualname", lane="coupling_cohesion"
+    )
     numerator = _field(row, "numerator", "coupling_cohesion observation")
     if isinstance(numerator, bool) or not isinstance(numerator, int):
         raise LegacyIngestError(
             "coupling_cohesion observation numerator is not an integer"
         )
     return CouplingCohesionRow(
-        symbol=SymbolId(FileId(path), qualname),
+        symbol=symbol,
         dimension=_string(row, "dimension", "coupling_cohesion observation"),
         numerator=numerator,
+    )
+
+
+# The producer's one digest identity for API signature components
+# (``observations/projection.py:_component_digest``): a foreign domain or
+# algorithm here is a different fact, never silently the same identity.
+_API_DIGEST_DOMAIN = "ccapi1:sig"
+_API_DIGEST_ALGORITHM = "sha256"
+
+
+def _api_digest_value(value: object, where: str) -> str | None:
+    """One component digest of the api_surface lane, or its typed absence."""
+    if value is None:
+        return None
+    digest = _mapping(value, where)
+    domain = _string(digest, "domain", where)
+    algorithm = _string(digest, "algorithm", where)
+    if domain != _API_DIGEST_DOMAIN or algorithm != _API_DIGEST_ALGORITHM:
+        raise LegacyIngestError(
+            f"{where} carries a foreign digest identity "
+            f"{domain!r}/{algorithm!r}; refusing to read it as a signature"
+        )
+    text = _string(digest, "value", where)
+    if not text:
+        raise LegacyIngestError(f"{where} digest value is empty")
+    return text
+
+
+def _api_parameter(row: Mapping[str, object]) -> ApiParameterFact:
+    has_default = _field(row, "has_default", "api parameter")
+    if not isinstance(has_default, bool):
+        raise LegacyIngestError("api parameter has_default is not a boolean")
+    return ApiParameterFact(
+        name=_string(row, "name", "api parameter"),
+        kind=_string(row, "kind", "api parameter"),
+        has_default=has_default,
+        annotation_digest=_api_digest_value(
+            _field(row, "annotation_digest", "api parameter"),
+            "api parameter.annotation_digest",
+        ),
+    )
+
+
+def _api_symbol_observation(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> ApiSymbolRow:
+    """One F5 fact from the producer's own api_surface lane row.
+
+    The identity law lives in :func:`_lane_symbol` (the C5 oracle
+    discipline verbatim: no guessed identities).
+    """
+    symbol = _lane_symbol(
+        row, index, source_key="owner", name_key="symbol", lane="api_surface"
+    )
+    parameters = tuple(
+        _api_parameter(_mapping(item, "api parameter"))
+        for item in _sequence(
+            _field(row, "parameters", "api_surface observation"),
+            "api_surface.parameters",
+        )
+    )
+    return ApiSymbolRow(
+        symbol=symbol,
+        symbol_kind=_string(row, "symbol_kind", "api_surface observation"),
+        visibility=_string(row, "visibility", "api_surface observation"),
+        parameters=parameters,
+        returns_digest=_api_digest_value(
+            _field(row, "returns_digest", "api_surface observation"),
+            "api_surface.returns_digest",
+        ),
     )
 
 

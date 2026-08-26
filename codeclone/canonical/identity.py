@@ -90,6 +90,15 @@ COUPLING_COHESION_DIMENSIONS: Final = (
     "lcom4",
     "methods",
 )
+# F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
+# verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
+# ApiVisibility / ApiParameterKind) and pinned against them by test — a
+# silent drift on either side is loud, never absorbed.  The wire refuses
+# unknowns (W08); signature meaning is owned by
+# ``api_signature_identity_contract.v1`` (API_SURFACE_SIGNATURE_VERSION).
+API_SYMBOL_KINDS: Final = ("function", "class", "method", "constant")
+API_VISIBILITIES: Final = ("all", "name")
+API_PARAMETER_KINDS: Final = ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg")
 
 
 def _utf8(value: str) -> bytes:

@@ -57,8 +57,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TypeVar
 
+from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
+    API_PARAMETER_KINDS,
+    API_SYMBOL_KINDS,
+    API_VISIBILITIES,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
     IMPORT_TYPES,
@@ -250,6 +254,64 @@ class CouplingCohesionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ApiParameterFact:
+    """One parameter of an F5 API symbol signature (wave 4).
+
+    ``annotation_digest`` follows the producer's own bijection
+    (``observations/projection.py:_component_digest``): an empty annotation
+    basis IS absence, so an empty digest string here would spell absence as
+    a value and is refused.
+    """
+
+    name: str
+    kind: str
+    has_default: bool
+    annotation_digest: str | None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise CanonicalModelError("api parameter name must be non-empty")
+        if self.kind not in API_PARAMETER_KINDS:
+            raise CanonicalModelError(f"unknown api parameter kind: {self.kind!r}")
+        if self.annotation_digest is not None and not self.annotation_digest:
+            raise CanonicalModelError(
+                "api parameter annotation digest must be non-empty when "
+                "present (the producer spells absence as absence)"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ApiSymbolRow:
+    """F5 public API symbol fact (wave 4).
+
+    Logical key — the RATIFIED form, not the bare measured one:
+    ``(SYMBOL, canonical_signature_variant)``.  The bare ``(FILE, symbol)``
+    key is 10 140/10 143 on the frozen corpus — the three lost groups are
+    ``@overload`` declarations differing only in signature, so the variant
+    (one formula owner: ``api_signature_identity_contract.v1``) is the
+    discriminator.  ``symbol_kind`` and ``visibility`` are payload, never
+    key.  No FUNCTION-role requirement: API symbols name modules' public
+    surface, not contract functions.
+    """
+
+    symbol: SymbolId
+    symbol_kind: str
+    visibility: str
+    parameters: tuple[ApiParameterFact, ...]
+    returns_digest: str | None
+
+    def __post_init__(self) -> None:
+        if self.symbol_kind not in API_SYMBOL_KINDS:
+            raise CanonicalModelError(f"unknown api symbol kind: {self.symbol_kind!r}")
+        if self.visibility not in API_VISIBILITIES:
+            raise CanonicalModelError(f"unknown api visibility: {self.visibility!r}")
+        if self.returns_digest is not None and not self.returns_digest:
+            raise CanonicalModelError(
+                "api returns digest must be non-empty when present"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisFacts:
     """The analysis-tier record tables — the wire's ``facts`` section.
 
@@ -274,6 +336,7 @@ class AnalysisFacts:
     coupling_cohesion_observations: frozenset[CouplingCohesionRow] = field(
         default_factory=frozenset
     )
+    api_symbols: frozenset[ApiSymbolRow] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,6 +439,15 @@ def _dependency_occurrence_key(row: DependencyOccurrenceRow) -> tuple[object, ..
     return (*_dependency_relation_key(row.relation), row.line)
 
 
+def _api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:
+    # The ratified F5 key: the SYMBOL plus the canonical signature variant,
+    # computed through its ONE formula owner — never a second spelling.
+    return (
+        canonical_key(row.symbol),
+        signature_variant(parameters=row.parameters, returns_digest=row.returns_digest),
+    )
+
+
 def _violation_natural_key(row: ViolationRow) -> tuple[object, ...]:
     return (
         row.contract_id,
@@ -458,6 +530,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_violation(violation)
     for observation in facts.coupling_cohesion_observations:
         closure.see_symbol(observation.symbol)
+    for api_symbol in facts.api_symbols:
+        closure.see_symbol(api_symbol.symbol)
     closure.files.update(model.analyzed_files)
     return closure
 
@@ -491,6 +565,7 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         "coupling_cohesion_observations.key",
         lambda row: (canonical_key(row.symbol), row.dimension),
     )
+    _unique_by_key(facts.api_symbols, "api_symbols.key", _api_symbol_natural_key)
 
 
 def _prove_occurrence_relations(facts: AnalysisFacts) -> None:

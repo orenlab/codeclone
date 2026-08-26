@@ -28,6 +28,8 @@ import pytest
 from codeclone.canonical import (
     AnalysisFacts,
     AnalysisFile,
+    ApiParameterFact,
+    ApiSymbolRow,
     CandidateRow,
     CanonicalFacts,
     CanonicalModel,
@@ -171,6 +173,44 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         CouplingCohesionRow(sb, "instance_variables", 1),
         CouplingCohesionRow(se, "methods", 2),
     ]
+    api_symbols = [
+        # F5 (wave 4): the measured @overload class verbatim — one SYMBOL,
+        # two canonical signature variants; the bare (FILE, symbol) key
+        # loses one of these two rows, the ratified key keeps both.
+        ApiSymbolRow(
+            sb,
+            "function",
+            "name",
+            (ApiParameterFact("value", "pos_or_kw", False, "aa" * 32),),
+            "bb" * 32,
+        ),
+        ApiSymbolRow(
+            sb,
+            "function",
+            "name",
+            (
+                ApiParameterFact("value", "pos_or_kw", False, None),
+                ApiParameterFact("extra", "kw_only", True, "cc" * 32),
+            ),
+            None,
+        ),
+        # a class on the module-less separator-collision file, no signature
+        ApiSymbolRow(se, "class", "all", (), None),
+        # a constant: a return digest with zero parameters
+        ApiSymbolRow(sc, "constant", "all", (), "dd" * 32),
+        # a method covering the remaining parameter kinds
+        ApiSymbolRow(
+            sa,
+            "method",
+            "name",
+            (
+                ApiParameterFact("self", "pos_only", False, None),
+                ApiParameterFact("args", "vararg", False, None),
+                ApiParameterFact("kw", "kwarg", False, None),
+            ),
+            None,
+        ),
+    ]
     coupled = [frozenset({"Token", "AccessToken"}), frozenset({"Token"})]
     if reverse_insertion:
         contracts = list(reversed(contracts))
@@ -182,6 +222,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         dependency_occurrences = list(reversed(dependency_occurrences))
         violations = list(reversed(violations))
         coupling_cohesion = list(reversed(coupling_cohesion))
+        api_symbols = list(reversed(api_symbols))
         coupled = list(reversed(coupled))
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
@@ -196,6 +237,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             dependency_occurrences=frozenset(dependency_occurrences),
             violations=frozenset(violations),
             coupling_cohesion_observations=frozenset(coupling_cohesion),
+            api_symbols=frozenset(api_symbols),
         ),
         coupled_sets=frozenset(coupled),
     )
@@ -219,15 +261,18 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     67da14d4…): the draft gained ``coupling_cohesion_observations``.
 
     The ratified dependency split (ruling 2026-08-24 §2) replaced the F2
-    literal deliberately — ``dependency_edges`` was rebuilt into the
-    ``dependency_relations`` + ``dependency_occurrences`` families, so every
-    document's bytes moved — the one announced transition of this commit.
+    literal deliberately (2946 bytes, sha256 8cc76938…): ``dependency_edges``
+    was rebuilt into the ``dependency_relations`` + ``dependency_occurrences``
+    families.  Wave 4's F5 family then replaced that literal deliberately:
+    the draft gained ``api_symbols`` with its contract-derived
+    ``signature_variant`` column, so every document's bytes moved — the one
+    announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 2946
+    assert len(payload) == 3906
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "8cc76938dd6ec350c71a82e31e224da9c629708c1ae4734b0670bd1a3345408a"
+        == "4db95d8ea46c294a1be6996d0e5799d702b3bd556df1b89074ffb53123056c87"
     )
 
 
@@ -269,6 +314,7 @@ def test_entity_counts_survive_the_round_trip() -> None:
         "dependency_occurrences",
         "violations",
         "coupling_cohesion_observations",
+        "api_symbols",
     ):
         assert len(getattr(decoded.facts.analysis, field)) == len(
             getattr(model.facts.analysis, field)
@@ -650,6 +696,123 @@ def test_tied_coupling_rows_are_ordered_by_dimension_on_the_wire() -> None:
         "methods",
     ]
     assert table["symbol"] == [0, 0, 0, 0, 1, 1, 1, 1]
+
+
+def test_api_overload_variants_coexist_under_one_symbol() -> None:
+    """The F5 raison d'être: the measured @overload class — one SYMBOL, two
+    canonical signature variants — survives the round trip as TWO rows.
+    The bare (FILE, symbol) key measured 10 140/10 143 loses them."""
+    decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
+    sb = SymbolId(FileId("tools/b.py"), "helper")
+    overloads = [row for row in decoded.facts.analysis.api_symbols if row.symbol == sb]
+    assert len(overloads) == 2
+    assert {row.returns_digest for row in overloads} == {"bb" * 32, None}
+
+
+def test_model_refuses_two_api_symbols_under_one_signature_key() -> None:
+    """(SYMBOL, canonical_signature_variant) names at most one fact:
+    symbol_kind and visibility are payload, never key."""
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    signature = (ApiParameterFact("value", "pos_or_kw", False, None),)
+    model = CanonicalModel(
+        facts=analysis_facts(
+            api_symbols=frozenset(
+                {
+                    ApiSymbolRow(sa, "function", "name", signature, None),
+                    ApiSymbolRow(sa, "class", "all", signature, None),
+                }
+            )
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"api_symbols\.key"):
+        model.normalize()
+
+
+def test_api_symbols_differing_in_any_signature_component_coexist() -> None:
+    """Every signature component moves the variant: parameter name, kind,
+    default marker, annotation digest, and the return digest each separate
+    two rows on one SYMBOL."""
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    base = ApiParameterFact("value", "pos_or_kw", False, None)
+    rows = {
+        ApiSymbolRow(sa, "function", "name", (base,), None),
+        ApiSymbolRow(
+            sa,
+            "function",
+            "name",
+            (ApiParameterFact("other", "pos_or_kw", False, None),),
+            None,
+        ),
+        ApiSymbolRow(
+            sa,
+            "function",
+            "name",
+            (ApiParameterFact("value", "kw_only", False, None),),
+            None,
+        ),
+        ApiSymbolRow(
+            sa,
+            "function",
+            "name",
+            (ApiParameterFact("value", "pos_or_kw", True, None),),
+            None,
+        ),
+        ApiSymbolRow(
+            sa,
+            "function",
+            "name",
+            (ApiParameterFact("value", "pos_or_kw", False, "ee" * 32),),
+            None,
+        ),
+        ApiSymbolRow(sa, "function", "name", (base,), "ff" * 32),
+    }
+    model = CanonicalModel(facts=analysis_facts(api_symbols=frozenset(rows)))
+    assert len(model.normalize().facts.analysis.api_symbols) == 6
+
+
+def test_tied_api_symbol_rows_are_ordered_by_variant_on_the_wire() -> None:
+    """Rows tied on the symbol MUST order by signature-variant bytes.
+
+    Eight tied rows across one symbol make a set-iteration coincidence
+    practically impossible (§6.2, the dependency-line precedent verbatim):
+    an encoder that drops the variant from its sort key leaks iteration
+    order into the wire and this pin reds.
+    """
+    sa = SymbolId(FileId("pkg/a.py"), "A")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            api_symbols=frozenset(
+                ApiSymbolRow(
+                    sa,
+                    "function",
+                    "name",
+                    (ApiParameterFact(f"p{index}", "pos_or_kw", False, None),),
+                    None,
+                )
+                for index in range(8)
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    table = document["facts"]["api_symbols"]
+    assert table["symbol"] == [0] * 8
+    variants = table["signature_variant"]
+    assert len(set(variants)) == 8
+    assert variants == sorted(variants)
+
+
+def test_api_parameter_cell_omits_an_absent_annotation_on_the_wire() -> None:
+    """The producer's own bijection (``_component_digest``): an absent
+    annotation digest is a 3-element cell, a present one a 4-element cell —
+    absence is never spelled as a value."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    table = document["facts"]["api_symbols"]
+    cells = [cell for row in table["parameters"] for cell in row]
+    assert {len(cell) for cell in cells} == {3, 4}
+    assert all(cell[2] in (0, 1) for cell in cells)
+    # returns_digest spells absence as the empty string, never as null
+    assert "" in table["returns_digest"]
+    assert any(value for value in table["returns_digest"])
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:
