@@ -22,9 +22,12 @@ Phase 39S test-import law.
 from __future__ import annotations
 
 from codeclone.canonical import (
+    DeadCodeObservationRow,
     DependencyCycleRow,
     FileId,
     ModuleId,
+    ModuleSymbol,
+    OpaqueEntity,
     SymbolId,
     canonical_model_from_legacy_document,
 )
@@ -90,3 +93,56 @@ def test_f8_canonical_family_carries_the_emitted_corpus_groups(
         (host_one, 53, 67),
         (host_two, 9, 41),
     }
+
+
+def test_dead_code_canonical_family_carries_the_tagged_variants(
+    corpus_report: dict[str, object],
+) -> None:
+    """F4 from the REAL producer document, with the three K3 carriers.
+
+    Measured ground truth (2026-08-26): 23 rows; the module-headed carrier
+    contributes a ``symbol`` row AND an ``unreachable_statement`` row over
+    the same glued head (span suffix ``#14-15``); the hyphenated carrier is
+    the ONE FILE-headed entity of this corpus; the external-shim method is
+    the one abstention.  The opaque variant stays corpus-unpopulated — a
+    fact about the corpus, not the contract (synthetic inputs reach it).
+    """
+    model = canonical_model_from_legacy_document(corpus_report)
+    rows = model.facts.analysis.dead_code_observations
+    assert len(rows) == 23
+    by_entity = {row.entity: row for row in rows}
+    assert (
+        by_entity[
+            ModuleSymbol(ModuleId("pkg.dead_kinds"), "holds_unreachable")
+        ].observation_kind
+        == "symbol"
+    )
+    unreachable = by_entity[
+        ModuleSymbol(ModuleId("pkg.dead_kinds"), "holds_unreachable#14-15")
+    ]
+    assert unreachable.observation_kind == "unreachable_statement"
+    assert unreachable.source_markers == (("unreachable_reason", "after_terminator"),)
+    file_headed = [row for row in rows if isinstance(row.entity, SymbolId)]
+    assert [row.entity for row in file_headed] == [
+        SymbolId(FileId("pkg/dead-orphan-probe.py"), "orphan_probe")
+    ]
+    abstained = [row for row in rows if row.abstained]
+    assert [row.entity for row in abstained] == [
+        ModuleSymbol(ModuleId("pkg.external_shim"), "ShimOverExternal.maybe_called")
+    ]
+    assert abstained[0].candidate_kind == "method"
+    assert not any(isinstance(row.entity, OpaqueEntity) for row in rows)
+    assert (
+        DeadCodeObservationRow(
+            entity=ModuleSymbol(ModuleId("pkg.external_shim"), "ShimOverExternal"),
+            observation_kind="symbol",
+            candidate_kind="class",
+            reference_count=0,
+            reachable=False,
+            runtime_marker_count=0,
+            source_markers=(),
+            live_root_reason=None,
+            abstained=False,
+        )
+        in rows
+    )

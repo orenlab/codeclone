@@ -246,6 +246,90 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # F4 (wave 4, slice K3): key (entity, observation_kind); the entity is
+    # the ratified tagged reference — the variant is identity (§2).
+    "dead_code_observations": (
+        FieldDeclaration(
+            "abstained",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "rule-3 tri-state abstention; payload boolean, mutually "
+            "exclusive with live_root_reason by contract",
+            stored=True,
+            wire=True,
+            wire_shape="sparse_bool_positions",
+        ),
+        FieldDeclaration(
+            "candidate_kind",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (DEAD_CODE_CANDIDATE_KINDS); payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "entity",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "key component: tagged entity reference FileSymbol(FILE, "
+            "qualname) | ModuleSymbol(MODULE, qualname) | opaque variant — "
+            "the variant is part of the identity (§2)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "live_root_reason",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (LIVE_ROOT_REASONS) or absent (empty wire "
+            "string spells the producer's absence, the F5 returns precedent)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "observation_kind",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (DEAD_CODE_OBSERVATION_KINDS); key component "
+            "— symbol rows and unreachable-statement rows are two meanings "
+            "with two policy owners",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "reachable",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "runtime reachability verdict; payload boolean",
+            stored=True,
+            wire=True,
+            wire_shape="sparse_bool_positions",
+        ),
+        FieldDeclaration(
+            "reference_count",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "observed count (zero is measured); payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "runtime_marker_count",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "observed count (zero is measured); payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source_markers",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "sorted unique (key, value) evidence pairs; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+    ),
     # The ratified dependency split (ruling 2026-08-24 §2): the relation is
     # the entity gate/SCC read; the occurrence is location evidence bound to
     # it.  ``line`` never enters the relation — location is evidence, not

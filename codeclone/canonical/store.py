@@ -100,13 +100,16 @@ from codeclone.canonical.export import (
 )
 from codeclone.canonical.identity import (
     AnalysisFile,
+    DeadCodeEntity,
     DependencyEndpoint,
     EffectLabelRoot,
     EffectRoot,
     FileId,
     KnownModule,
     ModuleId,
+    ModuleSymbol,
     OpaqueDottedHead,
+    OpaqueEntity,
     OperationHead,
     OperationRoot,
     OperationTarget,
@@ -114,6 +117,7 @@ from codeclone.canonical.identity import (
     SymbolId,
     UnresolvedRoot,
     canonical_key,
+    dead_code_entity_key,
 )
 from codeclone.canonical.model import (
     AnalysisFacts,
@@ -126,6 +130,7 @@ from codeclone.canonical.model import (
     CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
+    DeadCodeObservationRow,
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
@@ -146,7 +151,9 @@ from codeclone.contracts import (
     COMPLEXITY_ALGORITHM_REVISION,
     CONTRACT_IR_VERSION,
     DESIGN_METRICS_ALGORITHM_REVISION,
+    LIVENESS_POLICY_VERSION,
     MODULE_IDENTITY_VERSION,
+    STATEMENT_REACHABILITY_POLICY_VERSION,
     STORAGE_SCHEMA_REVISION,
 )
 from codeclone.utils.sqlite_store import open_sqlite_db
@@ -193,6 +200,14 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     # recount never lets these facts silently share content addresses.
     "coupling_cohesion_observation": (
         f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
+    ),
+    # F4: TWO policy owners give this family meaning — liveness for symbol
+    # rows, statement reachability for unreachable-statement rows — so both
+    # revisions enter the content-address namespace and neither can bump
+    # silently under the other.
+    "dead_code_observation": (
+        f"liveness:{LIVENESS_POLICY_VERSION}"
+        f":statement_reachability:{STATEMENT_REACHABILITY_POLICY_VERSION}"
     ),
     # F7: the cycle verdict is a canonical-model analysis fact over the
     # relation graph; no separate cycle-algorithm revision exists, and the
@@ -372,6 +387,37 @@ def _decode_root(value: object, where: str) -> EffectRoot:
     raise StoreIntegrityError(f"{where}: unknown stored root family {family!r}")
 
 
+def _dead_code_entity_value(entity: DeadCodeEntity) -> list[str]:
+    if isinstance(entity, SymbolId):
+        return ["symbol", entity.file.path, entity.qualname]
+    if isinstance(entity, ModuleSymbol):
+        return ["module", entity.module.module, entity.qualname]
+    return ["opaque", entity.head, entity.qualname]
+
+
+def _decode_dead_code_entity_value(value: object, where: str) -> DeadCodeEntity:
+    if not isinstance(value, list) or len(value) != 3:
+        raise StoreIntegrityError(
+            f"{where}: stored dead-code entity is not a [tag, head, qualname]"
+        )
+    tag, head, qualname = value
+    if (
+        not isinstance(tag, str)
+        or not isinstance(head, str)
+        or not isinstance(qualname, str)
+    ):
+        raise StoreIntegrityError(
+            f"{where}: stored dead-code entity is not a [tag, head, qualname]"
+        )
+    if tag == "symbol":
+        return SymbolId(FileId(head), qualname)
+    if tag == "module":
+        return ModuleSymbol(ModuleId(head), qualname)
+    if tag == "opaque":
+        return OpaqueEntity(head, qualname)
+    raise StoreIntegrityError(f"{where}: unknown dead-code entity tag {tag!r}")
+
+
 def _sorted_symbols(symbols: frozenset[SymbolId]) -> list[list[str]]:
     return [_symbol_value(s) for s in sorted(symbols, key=canonical_key)]
 
@@ -530,6 +576,26 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                     [*_symbol_value(item.symbol), item.start_line, item.end_line]
                     for item in group.items
                 ),
+            },
+        )
+    for dead_observation in sorted(
+        facts.dead_code_observations,
+        key=lambda row: (*dead_code_entity_key(row.entity), row.observation_kind),
+    ):
+        yield (
+            "dead_code_observation",
+            {
+                "abstained": dead_observation.abstained,
+                "candidate_kind": dead_observation.candidate_kind,
+                "entity": _dead_code_entity_value(dead_observation.entity),
+                "live_root_reason": dead_observation.live_root_reason,
+                "observation_kind": dead_observation.observation_kind,
+                "reachable": dead_observation.reachable,
+                "reference_count": dead_observation.reference_count,
+                "runtime_marker_count": dead_observation.runtime_marker_count,
+                "source_markers": [
+                    list(pair) for pair in dead_observation.source_markers
+                ],
             },
         )
     for violation in sorted(
@@ -737,6 +803,54 @@ def _decode_dependency_occurrence_row(
     )
 
 
+def _decode_dead_code_markers_value(
+    value: object, where: str
+) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list):
+        raise StoreIntegrityError(f"{where}: stored markers are not an array")
+    pairs = []
+    for item in value:
+        if not isinstance(item, list) or len(item) != 2:
+            raise StoreIntegrityError(
+                f"{where}: stored marker is not a [key, value] pair"
+            )
+        key, marker = item
+        if not isinstance(key, str) or not isinstance(marker, str):
+            raise StoreIntegrityError(
+                f"{where}: stored marker is not a [key, value] pair"
+            )
+        pairs.append((key, marker))
+    return tuple(pairs)
+
+
+def _decode_dead_code_observation_row(
+    row: Mapping[str, object], where: str
+) -> DeadCodeObservationRow:
+    """Shape guards only: vocabularies, count floors, and the
+    abstention/root exclusivity have exactly one owner — the model law
+    (``DeadCodeObservationRow``), wrapped by ``_decode_row``."""
+    reason = _require_field(row, "live_root_reason", where)
+    if reason is not None and not isinstance(reason, str):
+        raise StoreIntegrityError(
+            f"{where}: stored field 'live_root_reason' is not a string"
+        )
+    return DeadCodeObservationRow(
+        entity=_decode_dead_code_entity_value(
+            _require_field(row, "entity", where), where
+        ),
+        observation_kind=_require_str(row, "observation_kind", where),
+        candidate_kind=_require_str(row, "candidate_kind", where),
+        reference_count=_require_line(row, "reference_count", where),
+        reachable=_require_bool(row, "reachable", where),
+        runtime_marker_count=_require_line(row, "runtime_marker_count", where),
+        source_markers=_decode_dead_code_markers_value(
+            _require_field(row, "source_markers", where), where
+        ),
+        live_root_reason=reason,
+        abstained=_require_bool(row, "abstained", where),
+    )
+
+
 def _decode_clone_item_value(value: object, where: str) -> CloneItemRow:
     if not isinstance(value, list) or len(value) != 4:
         raise StoreIntegrityError(
@@ -898,6 +1012,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "contract": _decode_contract_row,
     "coupled_set": _decode_coupled_row,
     "coupling_cohesion_observation": _decode_coupling_cohesion_row,
+    "dead_code_observation": _decode_dead_code_observation_row,
     "dependency_cycle": _decode_dependency_cycle_row,
     "dependency_occurrence": _decode_dependency_occurrence_row,
     "dependency_relation": _decode_dependency_relation_row,
@@ -965,6 +1080,12 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 ),
                 clone_groups=frozenset(
                     cast("list[CloneGroupRow]", family("clone_group"))
+                ),
+                dead_code_observations=frozenset(
+                    cast(
+                        "list[DeadCodeObservationRow]",
+                        family("dead_code_observation"),
+                    )
                 ),
                 violations=frozenset(cast("list[ViolationRow]", family("violation"))),
                 coupling_cohesion_observations=frozenset(
@@ -1273,6 +1394,7 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "clone_groups": "clone_group",
     "contracts": "contract",
     "coupling_cohesion_observations": "coupling_cohesion_observation",
+    "dead_code_observations": "dead_code_observation",
     "dependency_cycles": "dependency_cycle",
     "dependency_occurrences": "dependency_occurrence",
     "dependency_relations": "dependency_relation",

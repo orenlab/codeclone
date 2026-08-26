@@ -475,6 +475,33 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'"items":[["pkg/a.py","A.run",1,5]]}',
             "at least two",
         ),
+        # F4 shape guard: an entity that is not a tagged triple
+        (
+            "dead_code_observation",
+            b'{"abstained":false,"candidate_kind":"function",'
+            b'"entity":["module","pkg.m"],"live_root_reason":null,'
+            b'"observation_kind":"symbol","reachable":false,'
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            "tag, head, qualname",
+        ),
+        # F4 shape guard: an unknown entity tag
+        (
+            "dead_code_observation",
+            b'{"abstained":false,"candidate_kind":"function",'
+            b'"entity":["banana","pkg.m","f"],"live_root_reason":null,'
+            b'"observation_kind":"symbol","reachable":false,'
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            "unknown dead-code entity tag",
+        ),
+        # F4 model law through the store wrapper: abstention with a root
+        (
+            "dead_code_observation",
+            b'{"abstained":true,"candidate_kind":"function",'
+            b'"entity":["module","pkg.m","f"],"live_root_reason":"export_root",'
+            b'"observation_kind":"symbol","reachable":false,'
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            "mutually exclusive",
+        ),
         # F9 shape guard: a non-int scalar is refused by the store
         (
             "run_scalar",
@@ -512,6 +539,9 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "clone-item-not-a-quad-shape-guard",
         "clone-unknown-kind-model-law",
         "clone-single-item-model-law",
+        "dead-entity-not-a-triple-shape-guard",
+        "dead-entity-unknown-tag-shape-guard",
+        "dead-abstained-with-root-model-law",
         "run-scalar-non-int-shape-guard",
         "run-scalar-negative-model-law",
     ],
@@ -728,6 +758,18 @@ def test_ratified_pragmas_hold_on_reopen_of_an_existing_store(tmp_path: Path) ->
 # -- Receipt counts ---------------------------------------------------------
 
 
+def test_receipt_counts_the_slice4_families(tmp_path: Path) -> None:
+    """The wave-4 slice families ride the same receipt accounting."""
+    model = fixture_model().normalize()
+    with _store(tmp_path) as store:
+        counts = _publish(store, model).family_counts
+        assert counts["dependency_cycle"] == len(model.facts.analysis.dependency_cycles)
+        assert counts["clone_group"] == len(model.facts.analysis.clone_groups)
+        assert counts["dead_code_observation"] == len(
+            model.facts.analysis.dead_code_observations
+        )
+
+
 def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
     model = fixture_model().normalize()
     with _store(tmp_path) as store:
@@ -744,8 +786,7 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
         assert counts["dependency_occurrence"] == len(
             model.facts.analysis.dependency_occurrences
         )
-        assert counts["dependency_cycle"] == len(model.facts.analysis.dependency_cycles)
-        assert counts["clone_group"] == len(model.facts.analysis.clone_groups)
+
         assert counts["violation"] == len(model.facts.analysis.violations)
         assert counts["coupling_cohesion_observation"] == len(
             model.facts.analysis.coupling_cohesion_observations

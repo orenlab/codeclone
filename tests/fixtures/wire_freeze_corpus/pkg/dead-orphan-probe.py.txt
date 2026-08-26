@@ -1,0 +1,13 @@
+"""Module-less carrier: the FILE-headed dead-code entity variant.
+
+The hyphen keeps this file out of the module registry (no importable
+name), so its dead candidate is addressed by PATH head — measured:
+``pkg/dead-orphan-probe.py:orphan_probe`` (the 88-row class of the frozen
+self-repo corpus, populated here with one row).
+"""
+
+
+def orphan_probe(flag: bool) -> int:
+    if flag:
+        return 21
+    return 34

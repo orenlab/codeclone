@@ -99,9 +99,14 @@ _TARGET = "worktree-a"
 # namespace.  The F8 ``clone_groups`` family (slice 4, K2) replaced the K1
 # literals (run 167aadde..., artifact 5b939274...) deliberately: the
 # fixture gained three emitted clone_group objects under the
-# clone_fingerprint namespace, which moves the membership and the bytes.
-_FIXTURE_RUN_ID = "b23b09120911b8d6af81bf4825d5e269b28a7cf6acb6ef5759073e38631ad13c"
-_FIXTURE_ARTIFACT = "706330d93503db019ef4d711807c5ce0fe4241bb231f2e78e7e052fde32f1b79"
+# clone_fingerprint namespace.  The F4 ``dead_code_observations`` family
+# (slice 4, K3) replaced the K2 literals (run b23b0912..., artifact
+# 706330d9...) deliberately: the fixture gained five tagged-entity
+# dead_code_observation objects under the composite liveness plus
+# statement-reachability namespace, which moves the membership and the
+# bytes.
+_FIXTURE_RUN_ID = "8d81ec9d8a4b7768c4c79758ff78f98dc14396f7410ebdd3dfee6ab7c31cac5f"
+_FIXTURE_ARTIFACT = "eb94d00bf18cc04da4431bf831b283bb84d4032437a482d69ea2b44c338f2cfd"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

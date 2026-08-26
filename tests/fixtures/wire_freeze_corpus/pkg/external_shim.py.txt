@@ -1,0 +1,14 @@
+"""Abstention carrier: rule-3 tri-state on an unresolved external base.
+
+``ShimOverExternal`` inherits an external base the analysis cannot
+resolve, and nothing proves ``maybe_called`` is called - measured: the
+method row carries ``abstained: true`` (and no live_root_reason; the two
+are mutually exclusive by contract).
+"""
+
+import argparse
+
+
+class ShimOverExternal(argparse.ArgumentParser):
+    def maybe_called(self) -> str:
+        return "shim-answer"

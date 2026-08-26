@@ -75,13 +75,17 @@ from codeclone.canonical.identity import (
     API_VISIBILITIES,
     CLONE_KINDS,
     COUPLING_COHESION_DIMENSIONS,
+    DEAD_CODE_CANDIDATE_KINDS,
+    DEAD_CODE_OBSERVATION_KINDS,
     DEPENDENCY_BINDINGS,
     DEPENDENCY_CYCLE_KINDS,
     DOMAIN_TAG_FILE,
     DOMAIN_TAG_MODULE,
+    DOMAIN_TAG_SYMBOL,
     EFFECT_KINDS,
     HEAD_TAG_OPAQUE,
     IMPORT_TYPES,
+    LIVE_ROOT_REASONS,
     OPERATION_KINDS,
     RISK_DIMENSIONS,
     ROOT_FAMILY_EFFECT,
@@ -96,7 +100,9 @@ from codeclone.canonical.identity import (
     FileId,
     KnownModule,
     ModuleId,
+    ModuleSymbol,
     OpaqueDottedHead,
+    OpaqueEntity,
     OperationHead,
     OperationRoot,
     OperationTarget,
@@ -104,6 +110,7 @@ from codeclone.canonical.identity import (
     SymbolId,
     UnresolvedRoot,
     canonical_key,
+    dead_code_entity_key,
     root_family,
 )
 from codeclone.canonical.model import (
@@ -117,6 +124,7 @@ from codeclone.canonical.model import (
     CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
+    DeadCodeObservationRow,
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
@@ -311,6 +319,11 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
         referenced.update(violation.producer_set)
     for group in facts.clone_groups:
         referenced.update(item.symbol for item in group.items)
+    referenced.update(
+        row.entity
+        for row in facts.dead_code_observations
+        if isinstance(row.entity, SymbolId)
+    )
     referenced.update(row.symbol for row in facts.coupling_cohesion_observations)
     referenced.update(row.symbol for row in facts.api_symbols)
     referenced.update(row.symbol for row in facts.risk_observations)
@@ -566,6 +579,43 @@ def _dependency_occurrence_rows(
     ]
 
 
+def _dead_code_entity_value(entity: object, plan: WirePlan) -> list[object]:
+    """The tagged wire slot of one dead-code entity — the variant IS the
+    identity, so the tag is emitted, never re-derived by a reader."""
+    if isinstance(entity, SymbolId):
+        return [DOMAIN_TAG_SYMBOL, plan.symbol_ordinal[entity]]
+    if isinstance(entity, ModuleSymbol):
+        return [DOMAIN_TAG_MODULE, plan.module_ordinal[entity.module], entity.qualname]
+    if isinstance(entity, OpaqueEntity):
+        return [HEAD_TAG_OPAQUE, entity.head, entity.qualname]
+    raise CanonicalModelError(f"value is not a dead-code entity: {entity!r}")
+
+
+def _dead_code_observation_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "abstained": row.abstained,
+            "candidate_kind": row.candidate_kind,
+            "entity": _dead_code_entity_value(row.entity, plan),
+            "live_root_reason": row.live_root_reason or "",
+            "observation_kind": row.observation_kind,
+            "reachable": row.reachable,
+            "reference_count": row.reference_count,
+            "runtime_marker_count": row.runtime_marker_count,
+            "source_markers": [list(pair) for pair in row.source_markers],
+        }
+        for row in sorted(
+            facts.dead_code_observations,
+            key=lambda row: (
+                *dead_code_entity_key(row.entity),
+                row.observation_kind.encode("utf-8"),
+            ),
+        )
+    ]
+
+
 def _clone_group_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     # Row order is the (clone_kind, group_key) byte key; every item cell is
     # [symbol ordinal, start, end], sorted — two levels, neither of which
@@ -815,6 +865,7 @@ _FAMILY_ROW_BUILDERS: dict[
     "clone_groups": _clone_group_rows,
     "contracts": _contract_rows,
     "coupling_cohesion_observations": _coupling_cohesion_rows,
+    "dead_code_observations": _dead_code_observation_rows,
     "dependency_cycles": _dependency_cycle_rows,
     "dependency_occurrences": _dependency_occurrence_rows,
     "dependency_relations": _dependency_relation_rows,
@@ -1796,6 +1847,136 @@ def _decode_dependency_occurrences(
     return frozenset(rows)
 
 
+_DEAD_CODE_ENTITY_TAGS = frozenset(
+    {DOMAIN_TAG_SYMBOL, DOMAIN_TAG_MODULE, HEAD_TAG_OPAQUE}
+)
+
+
+def _decode_dead_code_entity(
+    value: object,
+    symbols: Sequence[SymbolId],
+    modules: Sequence[ModuleId],
+    where: str,
+) -> SymbolId | ModuleSymbol | OpaqueEntity:
+    slot = _expect_list(value, where)
+    if not slot:
+        raise _refuse("W18", f"{where} entity slot is empty")
+    tag = _expect_string(slot[0], f"{where}.tag")
+    if tag not in _KNOWN_REFERENCE_TAGS:
+        raise _refuse("W08", f"unknown reference tag {tag!r}")
+    if tag not in _DEAD_CODE_ENTITY_TAGS:
+        raise _refuse(
+            "W09", f"reference tag {tag!r} is not admitted for a dead-code entity"
+        )
+    if tag == DOMAIN_TAG_SYMBOL:
+        if len(slot) != 2:
+            raise _refuse("W18", f"{where} is not a [symbol, ordinal] slot")
+        return symbols[_expect_ordinal(slot[1], len(symbols), where)]
+    if len(slot) != 3:
+        raise _refuse("W18", f"{where} is not a [tag, head, qualname] slot")
+    qualname = _expect_string(slot[2], f"{where}.qualname")
+    if not qualname:
+        raise _refuse("W18", f"{where}.qualname is empty")
+    if tag == DOMAIN_TAG_MODULE:
+        return ModuleSymbol(
+            modules[_expect_ordinal(slot[1], len(modules), where)], qualname
+        )
+    head = _expect_string(slot[1], f"{where}.head")
+    if not head:
+        raise _refuse("W18", f"{where}.head is empty")
+    return OpaqueEntity(head, qualname)
+
+
+def _decode_dead_code_markers(value: object, where: str) -> tuple[tuple[str, str], ...]:
+    pairs = []
+    for position, item in enumerate(_expect_list(value, where)):
+        cell = _expect_list(item, f"{where}[{position}]")
+        if len(cell) != 2:
+            raise _refuse("W18", f"{where}[{position}] is not a [key, value] pair")
+        key = _expect_string(cell[0], f"{where}[{position}].key")
+        marker = _expect_string(cell[1], f"{where}[{position}].value")
+        if not key or not marker:
+            raise _refuse("W18", f"{where}[{position}] carries an empty member")
+        pairs.append((key, marker))
+    _expect_strictly_increasing(
+        [(key.encode("utf-8"), marker.encode("utf-8")) for key, marker in pairs],
+        where,
+    )
+    return tuple(pairs)
+
+
+def _decode_dead_code_row(
+    columns: Mapping[str, list[object]],
+    flags: Mapping[str, set[int]],
+    index: int,
+    symbols: Sequence[SymbolId],
+    modules: Sequence[ModuleId],
+) -> DeadCodeObservationRow:
+    prefix = "facts.dead_code_observations"
+    observation_kind = _expect_string(
+        columns["observation_kind"][index], f"{prefix}.observation_kind[{index}]"
+    )
+    if observation_kind not in DEAD_CODE_OBSERVATION_KINDS:
+        raise _refuse("W08", f"unknown dead-code observation kind {observation_kind!r}")
+    candidate_kind = _expect_string(
+        columns["candidate_kind"][index], f"{prefix}.candidate_kind[{index}]"
+    )
+    if candidate_kind not in DEAD_CODE_CANDIDATE_KINDS:
+        raise _refuse("W08", f"unknown dead-code candidate kind {candidate_kind!r}")
+    reason_raw = _expect_string(
+        columns["live_root_reason"][index], f"{prefix}.live_root_reason[{index}]"
+    )
+    if reason_raw and reason_raw not in LIVE_ROOT_REASONS:
+        raise _refuse("W08", f"unknown live root reason {reason_raw!r}")
+    abstained = index in flags["abstained"]
+    if abstained and reason_raw:
+        raise _refuse(
+            "W20",
+            f"{prefix}[{index}] is abstained and carries a live root — the "
+            "two are mutually exclusive by contract",
+        )
+    return DeadCodeObservationRow(
+        entity=_decode_dead_code_entity(
+            columns["entity"][index], symbols, modules, f"{prefix}.entity[{index}]"
+        ),
+        observation_kind=observation_kind,
+        candidate_kind=candidate_kind,
+        reference_count=_expect_wire_int(
+            columns["reference_count"][index], f"{prefix}.reference_count[{index}]"
+        ),
+        reachable=index in flags["reachable"],
+        runtime_marker_count=_expect_wire_int(
+            columns["runtime_marker_count"][index],
+            f"{prefix}.runtime_marker_count[{index}]",
+        ),
+        source_markers=_decode_dead_code_markers(
+            columns["source_markers"][index], f"{prefix}.source_markers[{index}]"
+        ),
+        live_root_reason=reason_raw or None,
+        abstained=abstained,
+    )
+
+
+def _decode_dead_code_observations(
+    facts: Mapping[str, object],
+    symbols: Sequence[SymbolId],
+    modules: Sequence[ModuleId],
+) -> frozenset[DeadCodeObservationRow]:
+    columns, flags, row_count = _decode_columns(
+        "dead_code_observations", facts["dead_code_observations"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        row = _decode_dead_code_row(columns, flags, index, symbols, modules)
+        rows.append(row)
+        keys.append(
+            (*dead_code_entity_key(row.entity), row.observation_kind.encode("utf-8"))
+        )
+    _expect_strictly_increasing(keys, "facts.dead_code_observations")
+    return frozenset(rows)
+
+
 def _decode_clone_item(
     value: object, symbols: Sequence[SymbolId], where: str
 ) -> tuple[tuple[int, int, int], CloneItemRow]:
@@ -2304,6 +2485,9 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     )
     dependency_cycles = _decode_dependency_cycles(facts_section, modules)
     clone_groups = _decode_clone_groups(facts_section, symbols)
+    dead_code_observations = _decode_dead_code_observations(
+        facts_section, symbols, modules
+    )
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
     risk_observations = _decode_risk_observations(facts_section, symbols)
@@ -2333,6 +2517,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 dependency_occurrences=dependency_occurrences,
                 dependency_cycles=dependency_cycles,
                 clone_groups=clone_groups,
+                dead_code_observations=dead_code_observations,
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,

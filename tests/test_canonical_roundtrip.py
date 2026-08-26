@@ -38,6 +38,7 @@ from codeclone.canonical import (
     CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
+    DeadCodeObservationRow,
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
@@ -48,7 +49,9 @@ from codeclone.canonical import (
     GraphNodeRow,
     KnownModule,
     ModuleId,
+    ModuleSymbol,
     OpaqueDottedHead,
+    OpaqueEntity,
     OperationRoot,
     OperationTarget,
     ProducerRoot,
@@ -181,6 +184,71 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             frozenset({CloneItemRow(sa, 5, 9), CloneItemRow(sy, 7, 11)}),
         ),
     ]
+    # F4 (wave 4, slice K3): the tagged entity union with every variant
+    # populated.  One MODULE-headed entity carries BOTH observation kinds
+    # (the kind is a key component); its module exists in no other family
+    # (the closure must admit it); one FILE-headed row rides a symbol
+    # referenced nowhere else; the opaque variant is contract-declared and
+    # carried here even while corpus-unpopulated (unpopulated tags stay).
+    md = ModuleId("dead.only")
+    sz = SymbolId(fc, "dead_probe")  # referenced only by a dead-code row
+    dead_code_observations = [
+        DeadCodeObservationRow(
+            entity=ModuleSymbol(md, "Exported.helper"),
+            observation_kind="symbol",
+            candidate_kind="method",
+            reference_count=1,
+            reachable=False,
+            runtime_marker_count=0,
+            source_markers=(),
+            live_root_reason="export_root",
+            abstained=False,
+        ),
+        DeadCodeObservationRow(
+            entity=ModuleSymbol(md, "Exported.helper"),
+            observation_kind="unreachable_statement",
+            candidate_kind="function",
+            reference_count=0,
+            reachable=False,
+            runtime_marker_count=0,
+            source_markers=(("unreachable_reason", "after_terminator"),),
+            live_root_reason=None,
+            abstained=False,
+        ),
+        DeadCodeObservationRow(
+            entity=sz,
+            observation_kind="symbol",
+            candidate_kind="function",
+            reference_count=0,
+            reachable=True,
+            runtime_marker_count=3,
+            source_markers=(("aa", "bb"), ("cc", "dd")),
+            live_root_reason=None,
+            abstained=False,
+        ),
+        DeadCodeObservationRow(
+            entity=SymbolId(fa, "A.maybe"),
+            observation_kind="symbol",
+            candidate_kind="method",
+            reference_count=0,
+            reachable=False,
+            runtime_marker_count=0,
+            source_markers=(),
+            live_root_reason=None,
+            abstained=True,
+        ),
+        DeadCodeObservationRow(
+            entity=OpaqueEntity("ext.vendor.mod", "Shim.call"),
+            observation_kind="symbol",
+            candidate_kind="import",
+            reference_count=2,
+            reachable=False,
+            runtime_marker_count=0,
+            source_markers=(),
+            live_root_reason="external_decorator",
+            abstained=False,
+        ),
+    ]
     violations = [
         ViolationRow(
             contract_id="governance.report_write",
@@ -296,6 +364,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         dependency_occurrences = list(reversed(dependency_occurrences))
         dependency_cycles = list(reversed(dependency_cycles))
         clone_groups = list(reversed(clone_groups))
+        dead_code_observations = list(reversed(dead_code_observations))
         violations = list(reversed(violations))
         coupling_cohesion = list(reversed(coupling_cohesion))
         api_symbols = list(reversed(api_symbols))
@@ -314,6 +383,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             dependency_occurrences=frozenset(dependency_occurrences),
             dependency_cycles=frozenset(dependency_cycles),
             clone_groups=frozenset(clone_groups),
+            dead_code_observations=frozenset(dead_code_observations),
             violations=frozenset(violations),
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
@@ -355,15 +425,18 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     The F7 ``dependency_cycles`` family (slice 4, K1) then replaced the F1
     literal deliberately (4388 bytes, sha256 bdd06ad1…): the draft gained
     the module-set keyed cycle family.  The F8 ``clone_groups`` family
-    (slice 4, K2) then replaced the K1 literal deliberately: the draft
-    gained the emitted clone-group family, so every document's bytes moved
-    — the one announced transition of this commit.
+    (slice 4, K2) then replaced the K1 literal deliberately (4605 bytes,
+    sha256 db810d3d…): the draft gained the emitted clone-group family.
+    The F4 ``dead_code_observations`` family (slice 4, K3) then replaced
+    the K2 literal deliberately: the draft gained the tagged-entity dead
+    code family, so every document's bytes moved — the one announced
+    transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 4605
+    assert len(payload) == 5219
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "db810d3d2663897c0464798c9909014a1ceb3292bd69ee747eb963755d036c3b"
+        == "073e3f58d1e1117b4c50705d211c0fe3af7e6dcc1a66a174d9cf3acead6f6297"
     )
 
 
@@ -405,6 +478,7 @@ def test_entity_counts_survive_the_round_trip() -> None:
         "dependency_occurrences",
         "dependency_cycles",
         "clone_groups",
+        "dead_code_observations",
         "violations",
         "coupling_cohesion_observations",
         "api_symbols",
@@ -1209,6 +1283,152 @@ def test_clone_family_survives_the_round_trip() -> None:
     model = fixture_model().normalize()
     decoded = decode_canonical_json(encode_canonical_json(model))
     assert decoded.facts.analysis.clone_groups == model.facts.analysis.clone_groups
+
+
+def _dead_row(
+    entity: object,
+    observation_kind: str = "symbol",
+    **overrides: object,
+) -> DeadCodeObservationRow:
+    values: dict[str, object] = {
+        "entity": entity,
+        "observation_kind": observation_kind,
+        "candidate_kind": "function",
+        "reference_count": 0,
+        "reachable": False,
+        "runtime_marker_count": 0,
+        "source_markers": (),
+        "live_root_reason": None,
+        "abstained": False,
+    }
+    values.update(overrides)
+    return DeadCodeObservationRow(**values)  # type: ignore[arg-type]
+
+
+def test_model_refuses_two_dead_rows_under_one_entity_and_kind() -> None:
+    """F4 key law: (entity, observation_kind) names at most one fact; two
+    DIFFERING rows under one key are refused (the one measured
+    byte-identical duplicate merges losslessly instead)."""
+    entity = ModuleSymbol(ModuleId("pkg.m"), "f")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dead_code_observations=frozenset(
+                {
+                    _dead_row(entity, reference_count=0),
+                    _dead_row(entity, reference_count=1),
+                }
+            )
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"dead_code_observations\.key"):
+        model.normalize()
+
+
+def test_one_qualname_under_two_entity_variants_is_two_facts() -> None:
+    """The union's raison d'etre: the VARIANT is identity — a MODULE-headed
+    reference and the FILE-headed SYMBOL of the same qualname are two
+    entities, never normalized into one."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dead_code_observations=frozenset(
+                {
+                    _dead_row(ModuleSymbol(ModuleId("pkg.m"), "helper")),
+                    _dead_row(SymbolId(FileId("pkg/m.py"), "helper")),
+                    _dead_row(OpaqueEntity("pkg.m", "helper")),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.dead_code_observations) == 3
+
+
+def test_same_entity_under_two_observation_kinds_is_two_facts() -> None:
+    entity = ModuleSymbol(ModuleId("pkg.m"), "f")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dead_code_observations=frozenset(
+                {
+                    _dead_row(entity, "symbol"),
+                    _dead_row(entity, "unreachable_statement"),
+                }
+            )
+        )
+    )
+    assert len(model.normalize().facts.analysis.dead_code_observations) == 2
+
+
+def test_dead_row_refuses_vocabulary_and_contract_violations() -> None:
+    entity = ModuleSymbol(ModuleId("pkg.m"), "f")
+    with pytest.raises(CanonicalModelError, match="observation kind"):
+        _dead_row(entity, "banana")
+    with pytest.raises(CanonicalModelError, match="candidate kind"):
+        _dead_row(entity, candidate_kind="banana")
+    with pytest.raises(CanonicalModelError, match="non-negative"):
+        _dead_row(entity, reference_count=-1)
+    with pytest.raises(CanonicalModelError, match="sorted and unique"):
+        _dead_row(entity, source_markers=(("b", "1"), ("a", "2")))
+    with pytest.raises(CanonicalModelError, match="live root reason"):
+        _dead_row(entity, live_root_reason="banana")
+    with pytest.raises(CanonicalModelError, match="mutually exclusive"):
+        _dead_row(entity, live_root_reason="export_root", abstained=True)
+
+
+def test_dead_entities_ride_the_wire_as_tagged_slots() -> None:
+    """The variant tag is EMITTED — module and opaque slots carry their
+    head and qualname, the FILE variant interns through the SYMBOL domain,
+    and absence of a live root is the empty string, never null."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    table = document["facts"]["dead_code_observations"]
+    tags = [slot[0] for slot in table["entity"]]
+    assert tags == ["module", "module", "opaque", "symbol", "symbol"]
+    assert table["entity"][0] == ["module", 0, "Exported.helper"]
+    assert table["entity"][2] == ["opaque", "ext.vendor.mod", "Shim.call"]
+    assert table["observation_kind"][0] == "symbol"
+    assert table["observation_kind"][1] == "unreachable_statement"
+    assert table["live_root_reason"] == [
+        "export_root",
+        "",
+        "external_decorator",
+        "",
+        "",
+    ]
+    assert table["abstained"] == [3]
+    assert table["reachable"] == [4]
+    assert table["source_markers"][1] == [["unreachable_reason", "after_terminator"]]
+
+
+def test_tied_dead_rows_are_ordered_by_observation_kind_on_the_wire() -> None:
+    """Rows tied on the entity MUST order by observation kind.
+
+    Eight tied pairs make a set-iteration coincidence practically
+    impossible (§6.2, the dependency-line precedent verbatim; measured
+    during K3: with ONE tied pair the kind-blind encoder survived
+    PYTHONHASHSEED=2) — an encoder that drops the kind from its sort key
+    leaks iteration order into the wire and this pin reds."""
+    entities = [ModuleSymbol(ModuleId(f"pkg.m{index}"), "f") for index in range(8)]
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dead_code_observations=frozenset(
+                _dead_row(entity, kind)
+                for entity in entities
+                for kind in ("symbol", "unreachable_statement")
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    table = document["facts"]["dead_code_observations"]
+    assert table["observation_kind"] == ["symbol", "unreachable_statement"] * 8
+
+
+def test_dead_code_family_survives_the_round_trip() -> None:
+    model = fixture_model().normalize()
+    decoded = decode_canonical_json(encode_canonical_json(model))
+    assert (
+        decoded.facts.analysis.dead_code_observations
+        == model.facts.analysis.dead_code_observations
+    )
+    # the dead-only module and the dead-only FILE symbol entered the domains
+    assert ModuleId("dead.only") in decoded.modules
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:

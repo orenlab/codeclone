@@ -46,13 +46,16 @@ from typing import cast
 from codeclone.canonical.errors import LegacyIngestError
 from codeclone.canonical.identity import (
     AnalysisFile,
+    DeadCodeEntity,
     DependencyEndpoint,
     EffectLabelRoot,
     EffectRoot,
     FileId,
     KnownModule,
     ModuleId,
+    ModuleSymbol,
     OpaqueDottedHead,
+    OpaqueEntity,
     OperationHead,
     OperationRoot,
     OperationTarget,
@@ -71,6 +74,7 @@ from codeclone.canonical.model import (
     CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
+    DeadCodeObservationRow,
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
@@ -476,6 +480,18 @@ def canonical_model_from_legacy_document(
         _risk_observation(_mapping(row, "risk observation"), index) for row in risk_rows
     )
 
+    dead_rows = _sequence(
+        _field(fact_families, "dead_code", "source_fact_families"),
+        "source_fact_families.dead_code",
+    )
+    # The one measured byte-identical duplicate (12 970/12 971) is the same
+    # FACT stated twice: set semantics absorbs it losslessly, while two
+    # DIFFERING rows under one key stay refused by the model law.
+    dead_code_observations = frozenset(
+        _dead_code_observation(_mapping(row, "dead_code observation"), index)
+        for row in dead_rows
+    )
+
     run_scalars = _run_scalars(document)
 
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
@@ -499,6 +515,7 @@ def canonical_model_from_legacy_document(
                 dependency_occurrences=dependency_occurrences,
                 dependency_cycles=dependency_cycles,
                 clone_groups=clone_groups,
+                dead_code_observations=dead_code_observations,
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
@@ -586,6 +603,70 @@ def _dependency_cycle(
     return DependencyCycleRow(
         kind=_string(row, "kind", "cycle_details row"),
         modules=frozenset(ModuleId(module) for module in modules),
+    )
+
+
+def _dead_code_entity(text: str, index: _RegistryIndex) -> DeadCodeEntity:
+    """The ratified tagged entity reference (ruling 2026-08-24 §2).
+
+    The producer glues ``head:local``; the head decides the variant through
+    the document's OWN registry: a registry module keeps its MODULE head
+    (the variant is identity — never normalized into the FILE spelling the
+    producer did not make), an analyzed path is the FILE-headed SYMBOL, and
+    everything else rides the opaque variant verbatim.  A string that does
+    not parse under the producer's grammar is refused, never guessed.
+    """
+    head, separator, local = text.partition(":")
+    if not separator or not local or not head:
+        raise LegacyIngestError(
+            f"dead_code entity {text!r} is not a head:local glued reference"
+        )
+    if ":" in local:
+        raise LegacyIngestError(
+            f"dead_code entity {text!r} carries a second ModuleKey colon; "
+            "refusing to classify it"
+        )
+    if head in index.module_to_path:
+        return ModuleSymbol(ModuleId(head), local)
+    if head in index.analyzed_paths:
+        return SymbolId(FileId(head), local)
+    return OpaqueEntity(head, local)
+
+
+def _dead_code_markers(value: object, where: str) -> tuple[tuple[str, str], ...]:
+    pairs = []
+    for item in _sequence(value, where):
+        pair = _sequence(item, f"{where} pair")
+        if len(pair) != 2 or not all(isinstance(part, str) for part in pair):
+            raise LegacyIngestError(f"{where} carries a non [key, value] pair")
+        pairs.append((str(pair[0]), str(pair[1])))
+    return tuple(pairs)
+
+
+def _dead_code_observation(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> DeadCodeObservationRow:
+    """One F4 fact from the producer's own dead_code lane row."""
+    where = "dead_code observation"
+    reachable = _field(row, "reachable", where)
+    abstained = _field(row, "abstained", where)
+    if not isinstance(reachable, bool) or not isinstance(abstained, bool):
+        raise LegacyIngestError(f"{where} reachable/abstained are not booleans")
+    reason = _field(row, "live_root_reason", where)
+    if reason is not None and not isinstance(reason, str):
+        raise LegacyIngestError(f"{where} live_root_reason is not a string")
+    return DeadCodeObservationRow(
+        entity=_dead_code_entity(_string(row, "entity", where), index),
+        observation_kind=_string(row, "observation_kind", where),
+        candidate_kind=_string(row, "candidate_kind", where),
+        reference_count=_lane_int(row, "reference_count", where),
+        reachable=reachable,
+        runtime_marker_count=_lane_int(row, "runtime_marker_count", where),
+        source_markers=_dead_code_markers(
+            _field(row, "source_markers", where), f"{where} source_markers"
+        ),
+        live_root_reason=reason,
+        abstained=abstained,
     )
 
 

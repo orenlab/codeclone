@@ -95,6 +95,27 @@ def test_f8_clone_kind_vocabulary_mirrors_the_contract_constants() -> None:
     assert CLONE_KINDS == (CLONE_KIND_FUNCTION, CLONE_KIND_BLOCK, CLONE_KIND_SEGMENT)
 
 
+def test_f4_dead_code_vocabularies_mirror_the_producer() -> None:
+    """Executed cross-check: the three closed F4 vocabularies equal the
+    producer's Literal types — a drift on either side reds here."""
+    from typing import get_args
+
+    from codeclone.canonical.identity import (
+        DEAD_CODE_CANDIDATE_KINDS,
+        DEAD_CODE_OBSERVATION_KINDS,
+        LIVE_ROOT_REASONS,
+    )
+    from codeclone.models import (
+        DeadCodeCandidateKind,
+        DeadCodeObservationKind,
+        LiveRootReason,
+    )
+
+    assert get_args(DeadCodeCandidateKind) == DEAD_CODE_CANDIDATE_KINDS
+    assert get_args(DeadCodeObservationKind) == DEAD_CODE_OBSERVATION_KINDS
+    assert get_args(LiveRootReason) == LIVE_ROOT_REASONS
+
+
 def test_f1_dimension_vocabulary_mirrors_the_producer() -> None:
     """Executed cross-check, not a narrated one: the closed RISK_DIMENSIONS
     vocabulary equals the dimension set the real producer emits for a unit

@@ -35,7 +35,9 @@ from codeclone.canonical import (
     KnownModule,
     LegacyIngestError,
     ModuleId,
+    ModuleSymbol,
     OpaqueDottedHead,
+    OpaqueEntity,
     OperationRoot,
     OperationTarget,
     RunScalars,
@@ -273,6 +275,57 @@ def legacy_document() -> dict[str, Any]:
                 # the @overload pair shares source, qualname, dimension
                 # AND numerator — only the declaration site tells the two
                 # facts apart; the third row rides the module-less file.
+                # F4 lane verbatim from the producer's shape: glued
+                # head:local entities with MIXED heads (module, analyzed
+                # path, and one head outside both — the opaque variant), a
+                # span-suffixed unreachable row, a live root, and an
+                # abstention.
+                "dead_code": [
+                    {
+                        "entity": "pkg.mod:make",
+                        "candidate_kind": "function",
+                        "reference_count": 1,
+                        "reachable": False,
+                        "runtime_marker_count": 0,
+                        "source_markers": [],
+                        "observation_kind": "symbol",
+                        "live_root_reason": "export_root",
+                        "abstained": False,
+                    },
+                    {
+                        "entity": "pkg.mod:make#12-15",
+                        "candidate_kind": "function",
+                        "reference_count": 0,
+                        "reachable": False,
+                        "runtime_marker_count": 0,
+                        "source_markers": [["unreachable_reason", "after_terminator"]],
+                        "observation_kind": "unreachable_statement",
+                        "live_root_reason": None,
+                        "abstained": False,
+                    },
+                    {
+                        "entity": "scripts/tool.py:run",
+                        "candidate_kind": "function",
+                        "reference_count": 0,
+                        "reachable": True,
+                        "runtime_marker_count": 2,
+                        "source_markers": [],
+                        "observation_kind": "symbol",
+                        "live_root_reason": None,
+                        "abstained": False,
+                    },
+                    {
+                        "entity": "ext.vendor:Shim.call",
+                        "candidate_kind": "method",
+                        "reference_count": 0,
+                        "reachable": False,
+                        "runtime_marker_count": 0,
+                        "source_markers": [],
+                        "observation_kind": "symbol",
+                        "live_root_reason": None,
+                        "abstained": True,
+                    },
+                ],
                 "risk_observations": [
                     {
                         "source": {
@@ -611,6 +664,77 @@ def test_ingest_refuses_a_document_missing_the_clone_container() -> None:
         del document["findings"]["groups"]["clones"]["blocks"]
 
     with pytest.raises(LegacyIngestError, match="missing 'blocks'"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_maps_dead_entities_onto_the_tagged_union() -> None:
+    """The §2 union executed against the document's own registry: a module
+    head KEEPS its MODULE variant, an analyzed path is the FILE-headed
+    SYMBOL, and a head outside both rides opaque — verbatim, no guessing."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    assert len(model.facts.analysis.dead_code_observations) == 4
+    entities = {row.entity for row in model.facts.analysis.dead_code_observations}
+    assert entities == {
+        ModuleSymbol(ModuleId("pkg.mod"), "make"),
+        ModuleSymbol(ModuleId("pkg.mod"), "make#12-15"),
+        SymbolId(FileId("scripts/tool.py"), "run"),
+        OpaqueEntity("ext.vendor", "Shim.call"),
+    }
+    abstained = next(
+        row
+        for row in model.facts.analysis.dead_code_observations
+        if row.entity == OpaqueEntity("ext.vendor", "Shim.call")
+    )
+    assert abstained.abstained is True
+    assert abstained.live_root_reason is None
+
+
+def _dead_lane_row(document: dict[str, Any]) -> dict[str, Any]:
+    families = document["source_facts"]["source_fact_families"]
+    row: dict[str, Any] = families["dead_code"][0]
+    return row
+
+
+def test_ingest_refuses_an_unglued_dead_entity() -> None:
+    """A dead-code reference without the producer's ModuleKey colon does
+    not parse under the grammar: refused, never guessed into a variant."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _dead_lane_row(document)["entity"] = "just_a_name"
+
+    with pytest.raises(LegacyIngestError, match="head:local"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_dead_entity_with_an_empty_local() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _dead_lane_row(document)["entity"] = "pkg.mod:"
+
+    with pytest.raises(LegacyIngestError, match="head:local"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_dead_entity_with_a_second_colon() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _dead_lane_row(document)["entity"] = "pkg.mod:make:extra"
+
+    with pytest.raises(LegacyIngestError, match="second ModuleKey colon"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_non_boolean_dead_flag() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _dead_lane_row(document)["reachable"] = "no"
+
+    with pytest.raises(LegacyIngestError, match="booleans"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_malformed_dead_marker_pair() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _dead_lane_row(document)["source_markers"] = [["only-key"]]
+
+    with pytest.raises(LegacyIngestError, match="pair"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 

@@ -1,0 +1,15 @@
+"""Dead-lane carrier: the second observation kind.
+
+Measured on this corpus (2026-08-26): ``holds_unreachable`` contributes one
+``symbol`` row (module-headed entity ``pkg.dead_kinds:holds_unreachable``)
+plus one ``unreachable_statement`` row whose entity carries the region span
+suffix — the producer's own ``#start-end`` grammar over the SAME glued head.
+"""
+
+
+def holds_unreachable(value: int) -> int:
+    if value > 12:
+        return value + 3
+    return value - 7
+    value *= 2
+    return value

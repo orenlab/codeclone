@@ -66,21 +66,27 @@ from codeclone.canonical.identity import (
     API_VISIBILITIES,
     CLONE_KINDS,
     COUPLING_COHESION_DIMENSIONS,
+    DEAD_CODE_CANDIDATE_KINDS,
+    DEAD_CODE_OBSERVATION_KINDS,
     DEPENDENCY_BINDINGS,
     DEPENDENCY_CYCLE_KINDS,
     IMPORT_TYPES,
+    LIVE_ROOT_REASONS,
     RISK_DIMENSIONS,
     VIOLATION_KINDS,
     AnalysisFile,
+    DeadCodeEntity,
     DependencyEndpoint,
     EffectRoot,
     FileId,
     KnownModule,
     ModuleId,
+    ModuleSymbol,
     OperationRoot,
     ProducerRoot,
     SymbolId,
     canonical_key,
+    dead_code_entity_key,
     endpoint_key,
 )
 
@@ -290,6 +296,66 @@ class CloneGroupRow:
             raise CanonicalModelError(
                 "a clone group names at least two items (a group of one is "
                 "not a grouping the producer makes)"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class DeadCodeObservationRow:
+    """F4 dead-code observation fact (wave 4, slice K3).
+
+    Logical key — measured on the frozen corpus: ``(entity,
+    observation_kind)`` (12 970/12 971; the one lost row was byte-identical,
+    which set semantics absorbs losslessly).  The entity is the RATIFIED
+    tagged reference (ruling 2026-08-24 §2): the variant is part of the
+    identity, and an unclassifiable reference is refused at the oracle, not
+    guessed into a domain.  The counts are observed facts (zero measured);
+    ``abstained`` and ``live_root_reason`` are mutually exclusive by the
+    producer's contract — an abstention outranks a root reason and the two
+    never coexist on one row.
+    """
+
+    entity: DeadCodeEntity
+    observation_kind: str
+    candidate_kind: str
+    reference_count: int
+    reachable: bool
+    runtime_marker_count: int
+    source_markers: tuple[tuple[str, str], ...]
+    live_root_reason: str | None
+    abstained: bool
+
+    def __post_init__(self) -> None:
+        if self.observation_kind not in DEAD_CODE_OBSERVATION_KINDS:
+            raise CanonicalModelError(
+                f"unknown dead-code observation kind: {self.observation_kind!r}"
+            )
+        if self.candidate_kind not in DEAD_CODE_CANDIDATE_KINDS:
+            raise CanonicalModelError(
+                f"unknown dead-code candidate kind: {self.candidate_kind!r}"
+            )
+        for count in (self.reference_count, self.runtime_marker_count):
+            if isinstance(count, bool) or count < 0:
+                raise CanonicalModelError(
+                    f"dead-code counts must be non-negative ints: {count!r}"
+                )
+        if self.source_markers != tuple(sorted(set(self.source_markers))):
+            raise CanonicalModelError(
+                "dead-code source markers must be sorted and unique"
+            )
+        if any(not key or not value for key, value in self.source_markers):
+            raise CanonicalModelError(
+                "dead-code source markers must be non-empty pairs"
+            )
+        if self.live_root_reason is not None and (
+            self.live_root_reason not in LIVE_ROOT_REASONS
+        ):
+            raise CanonicalModelError(
+                f"unknown live root reason: {self.live_root_reason!r}"
+            )
+        if self.abstained and self.live_root_reason is not None:
+            raise CanonicalModelError(
+                "an abstained dead-code observation cannot also carry a "
+                "live root (the two are mutually exclusive by contract)"
             )
 
 
@@ -504,6 +570,9 @@ class AnalysisFacts:
     )
     dependency_cycles: frozenset[DependencyCycleRow] = field(default_factory=frozenset)
     clone_groups: frozenset[CloneGroupRow] = field(default_factory=frozenset)
+    dead_code_observations: frozenset[DeadCodeObservationRow] = field(
+        default_factory=frozenset
+    )
     violations: frozenset[ViolationRow] = field(default_factory=frozenset)
     coupling_cohesion_observations: frozenset[CouplingCohesionRow] = field(
         default_factory=frozenset
@@ -627,6 +696,10 @@ def _clone_group_natural_key(row: CloneGroupRow) -> tuple[object, ...]:
     return (row.clone_kind.encode("utf-8"), row.group_key.encode("utf-8"))
 
 
+def _dead_code_observation_key(row: DeadCodeObservationRow) -> tuple[object, ...]:
+    return (*dead_code_entity_key(row.entity), row.observation_kind)
+
+
 def _api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:
     # The ratified F5 key: the SYMBOL plus the canonical signature variant,
     # computed through its ONE formula owner — never a second spelling.
@@ -674,6 +747,13 @@ class _DomainClosure:
         for root in root_set:
             self.see_root(root)
 
+    def see_dead_code_entity(self, entity: DeadCodeEntity) -> None:
+        if isinstance(entity, SymbolId):
+            self.see_symbol(entity)
+        elif isinstance(entity, ModuleSymbol):
+            self.modules.add(entity.module)
+        # OpaqueEntity: the head has no domain to admit — that is its point.
+
     def see_endpoint(self, endpoint: DependencyEndpoint) -> None:
         if isinstance(endpoint, ModuleId):
             self.modules.add(endpoint)
@@ -719,6 +799,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
     for group in facts.clone_groups:
         for item in group.items:
             closure.see_symbol(item.symbol)
+    for dead_observation in facts.dead_code_observations:
+        closure.see_dead_code_entity(dead_observation.entity)
     for violation in facts.violations:
         closure.see_violation(violation)
     for observation in facts.coupling_cohesion_observations:
@@ -760,6 +842,11 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         _dependency_cycle_set_key,
     )
     _unique_by_key(facts.clone_groups, "clone_groups.key", _clone_group_natural_key)
+    _unique_by_key(
+        facts.dead_code_observations,
+        "dead_code_observations.key",
+        _dead_code_observation_key,
+    )
     _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
     _unique_by_key(
         facts.coupling_cohesion_observations,

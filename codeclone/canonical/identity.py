@@ -113,6 +113,16 @@ DEPENDENCY_CYCLE_KINDS: Final = ("import_cycle", "deferred_cycle")
 # population (ruling 2026-08-24 §10 — the known dialect root) and never
 # enters it.
 CLONE_KINDS: Final = ("function", "block", "segment")
+# F4 dead_code_observations (wave 4, slice K3): the producer's closed
+# vocabularies (``codeclone.models``: DeadCodeCandidateKind /
+# DeadCodeObservationKind / LiveRootReason), mirrored verbatim and pinned
+# against them by test.  The wire refuses unknowns (W08).  Meaning is owned
+# by LIVENESS_POLICY_VERSION for symbol rows and by
+# STATEMENT_REACHABILITY_POLICY_VERSION for unreachable-statement rows —
+# both enter the family's content-address namespace.
+DEAD_CODE_CANDIDATE_KINDS: Final = ("function", "class", "method", "import")
+DEAD_CODE_OBSERVATION_KINDS: Final = ("symbol", "unreachable_statement")
+LIVE_ROOT_REASONS: Final = ("external_decorator", "export_root")
 # F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
 # verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
 # ApiVisibility / ApiParameterKind) and pinned against them by test — a
@@ -219,6 +229,51 @@ DependencyEndpoint = ModuleId | FileId
 
 
 @dataclass(frozen=True, slots=True)
+class ModuleSymbol:
+    """Dead-code entity variant: a qualname under a MODULE head.
+
+    The ratified tagged entity reference (ruling 2026-08-24 §2):
+    ``FileSymbol(FILE, qualname) | ModuleSymbol(MODULE, qualname) |
+    unresolved/opaque variant`` — the VARIANT is part of the identity, so a
+    module-headed reference never silently becomes the FILE-headed SYMBOL
+    of the same unit (string equality is not entity equality without a
+    domain, and neither is a normalized spelling the producer never made).
+    """
+
+    module: ModuleId
+    qualname: str
+
+    def __post_init__(self) -> None:
+        if not self.qualname:
+            raise CanonicalModelError("module symbol qualname must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class OpaqueEntity:
+    """Dead-code entity variant: the producer's unresolved/opaque reference.
+
+    The head is neither a registry module nor an analyzed path; the split
+    at the producer's own ModuleKey colon is kept (the grammar asserted
+    it), and the head text rides opaque — never promoted to a MODULE or
+    FILE identity it does not have.
+    """
+
+    head: str
+    qualname: str
+
+    def __post_init__(self) -> None:
+        if not self.head:
+            raise CanonicalModelError("opaque entity head must be non-empty")
+        if not self.qualname:
+            raise CanonicalModelError("opaque entity qualname must be non-empty")
+
+
+#: The ratified dead-code entity union (§2): FILE-headed symbols ARE the
+#: frozen SYMBOL domain; the other two variants never leak into it.
+DeadCodeEntity = SymbolId | ModuleSymbol | OpaqueEntity
+
+
+@dataclass(frozen=True, slots=True)
 class OperationTarget:
     """Target of an ``operation:`` root — never a SYMBOL (0 of 1 080).
 
@@ -320,6 +375,20 @@ def endpoint_key(endpoint: DependencyEndpoint) -> tuple[str, bytes]:
     if isinstance(endpoint, FileId):
         return (DOMAIN_TAG_FILE, _utf8(endpoint.path))
     raise CanonicalModelError(f"value is not a dependency endpoint: {endpoint!r}")
+
+
+def dead_code_entity_key(entity: DeadCodeEntity) -> tuple[object, ...]:
+    """Total canonical key of a dead-code entity across the ratified tagged
+    union: the variant tag first (the variant IS identity), then the
+    variant's own key bytes — the endpoint-key construction, so unions
+    never grow a second ordering."""
+    if isinstance(entity, SymbolId):
+        return (DOMAIN_TAG_SYMBOL, _utf8(entity.file.path), _utf8(entity.qualname))
+    if isinstance(entity, ModuleSymbol):
+        return (DOMAIN_TAG_MODULE, _utf8(entity.module.module), _utf8(entity.qualname))
+    if isinstance(entity, OpaqueEntity):
+        return (HEAD_TAG_OPAQUE, _utf8(entity.head), _utf8(entity.qualname))
+    raise CanonicalModelError(f"value is not a dead-code entity: {entity!r}")
 
 
 def canonical_key(value: object) -> tuple[object, ...]:
