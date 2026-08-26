@@ -73,6 +73,7 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    RunScalars,
     SemanticEdge,
     SinkRoleRow,
     ViolationRow,
@@ -456,6 +457,8 @@ def canonical_model_from_legacy_document(
         for row in api_rows
     )
 
+    run_scalars = _run_scalars(document)
+
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
     file_modules = frozenset(
         FileModuleRelation(FileId(path), ModuleId(module))
@@ -478,6 +481,7 @@ def canonical_model_from_legacy_document(
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
+                run_scalars=run_scalars,
             )
         ),
         coupled_sets=coupled_sets,
@@ -644,6 +648,41 @@ def _api_symbol_observation(
         returns_digest=_api_digest_value(
             _field(row, "returns_digest", "api_surface observation"),
             "api_surface.returns_digest",
+        ),
+    )
+
+
+def _inventory_scalar(container: Mapping[str, object], key: str, where: str) -> int:
+    value = _field(container, key, where)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise LegacyIngestError(f"{where}.{key} is not an integer")
+    return value
+
+
+def _run_scalars(document: Mapping[str, object]) -> RunScalars:
+    """The F9 record from the document's own inventory scalars.
+
+    Only the observed scalar counters enter the record (ruling 2026-08-24
+    §1: strictly derivable values stay out); the witness lists and the file
+    registry beside them are identity/witness state, not run scalars.
+    """
+    inventory = _mapping(_field(document, "inventory", "document"), "inventory")
+    files_section = _mapping(_field(inventory, "files", "inventory"), "inventory.files")
+    code_section = _mapping(_field(inventory, "code", "inventory"), "inventory.code")
+    return RunScalars(
+        classes=_inventory_scalar(code_section, "classes", "inventory.code"),
+        files_analyzed=_inventory_scalar(files_section, "analyzed", "inventory.files"),
+        files_cached=_inventory_scalar(files_section, "cached", "inventory.files"),
+        files_found=_inventory_scalar(files_section, "total_found", "inventory.files"),
+        files_skipped=_inventory_scalar(files_section, "skipped", "inventory.files"),
+        functions=_inventory_scalar(code_section, "functions", "inventory.code"),
+        methods=_inventory_scalar(code_section, "methods", "inventory.code"),
+        parsed_lines=_inventory_scalar(code_section, "parsed_lines", "inventory.code"),
+        source_io_skipped=_inventory_scalar(
+            files_section, "source_io_skipped", "inventory.files"
+        ),
+        unsupported_construct_skipped=_inventory_scalar(
+            files_section, "unsupported_construct_skipped", "inventory.files"
         ),
     )
 

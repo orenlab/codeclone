@@ -54,7 +54,7 @@ scope, and the standalone value sets.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import TypeVar
 
 from codeclone.canonical.api_identity import signature_variant
@@ -311,6 +311,40 @@ class ApiSymbolRow:
             )
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunScalars:
+    """F9 run-level analysis scalars (wave 4) — ONE record per snapshot.
+
+    The ratified form (ruling 2026-08-24 §1): a run-level analysis fact,
+    never a tabular entity — there is no entity key because there is no
+    entity row; inventing one would manufacture identity the producer never
+    asserted.  Every scalar is an observed count of the realized run
+    population; zero is a MEASURED value here (a run with zero classes is a
+    fact), unlike the F2 floor where the producer drops zero rows.
+    Strictly derivable values are deliberately NOT included (later derived).
+    """
+
+    classes: int
+    files_analyzed: int
+    files_cached: int
+    files_found: int
+    files_skipped: int
+    functions: int
+    methods: int
+    parsed_lines: int
+    source_io_skipped: int
+    unsupported_construct_skipped: int
+
+    def __post_init__(self) -> None:
+        for scalar_field in fields(self):
+            value = getattr(self, scalar_field.name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CanonicalModelError(
+                    f"run scalar {scalar_field.name} must be a "
+                    f"non-negative int: {value!r}"
+                )
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisFacts:
     """The analysis-tier record tables — the wire's ``facts`` section.
@@ -337,6 +371,9 @@ class AnalysisFacts:
         default_factory=frozenset
     )
     api_symbols: frozenset[ApiSymbolRow] = field(default_factory=frozenset)
+    # F9: one record per analysis snapshot; None is the absent record —
+    # never an all-zero fake (zero is measured in this family).
+    run_scalars: RunScalars | None = None
 
 
 @dataclass(frozen=True, slots=True)

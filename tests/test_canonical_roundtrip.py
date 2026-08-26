@@ -49,6 +49,7 @@ from codeclone.canonical import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    RunScalars,
     SemanticEdge,
     SinkRoleRow,
     SymbolId,
@@ -211,6 +212,22 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             None,
         ),
     ]
+    # F9 (wave 4): ONE run-scalars record per analysis snapshot — never a
+    # table, no invented entity key.  Values pairwise distinct so a
+    # cross-wired producer mapping cannot survive, and one zero: zero is a
+    # MEASURED value here (unlike the F2 floor).
+    run_scalars = RunScalars(
+        classes=7,
+        files_analyzed=2,
+        files_cached=1,
+        files_found=3,
+        files_skipped=0,
+        functions=41,
+        methods=13,
+        parsed_lines=905,
+        source_io_skipped=4,
+        unsupported_construct_skipped=5,
+    )
     coupled = [frozenset({"Token", "AccessToken"}), frozenset({"Token"})]
     if reverse_insertion:
         contracts = list(reversed(contracts))
@@ -238,6 +255,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             violations=frozenset(violations),
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
+            run_scalars=run_scalars,
         ),
         coupled_sets=frozenset(coupled),
     )
@@ -263,16 +281,18 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     The ratified dependency split (ruling 2026-08-24 §2) replaced the F2
     literal deliberately (2946 bytes, sha256 8cc76938…): ``dependency_edges``
     was rebuilt into the ``dependency_relations`` + ``dependency_occurrences``
-    families.  Wave 4's F5 family then replaced that literal deliberately:
-    the draft gained ``api_symbols`` with its contract-derived
-    ``signature_variant`` column, so every document's bytes moved — the one
-    announced transition of this commit.
+    families.  Wave 4's F5 family then replaced that literal deliberately
+    (3906 bytes, sha256 4db95d8e…): the draft gained ``api_symbols`` with
+    its contract-derived ``signature_variant`` column.  Wave 4's F9 family
+    then replaced that literal deliberately: the draft gained the
+    ``run_scalars`` record member, so every document's bytes moved — the
+    one announced transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 3906
+    assert len(payload) == 4107
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "4db95d8ea46c294a1be6996d0e5799d702b3bd556df1b89074ffb53123056c87"
+        == "3f4af32e8b1011b9d4c50da457dbaa450bd88f8c0898eafaa912214f7ee9a044"
     )
 
 
@@ -813,6 +833,76 @@ def test_api_parameter_cell_omits_an_absent_annotation_on_the_wire() -> None:
     # returns_digest spells absence as the empty string, never as null
     assert "" in table["returns_digest"]
     assert any(value for value in table["returns_digest"])
+
+
+def test_run_scalars_record_survives_the_round_trip() -> None:
+    """F9: the ONE record per snapshot round-trips verbatim — every scalar,
+    the measured zero included."""
+    decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
+    record = decoded.facts.analysis.run_scalars
+    assert record is not None
+    assert record == RunScalars(
+        classes=7,
+        files_analyzed=2,
+        files_cached=1,
+        files_found=3,
+        files_skipped=0,
+        functions=41,
+        methods=13,
+        parsed_lines=905,
+        source_io_skipped=4,
+        unsupported_construct_skipped=5,
+    )
+
+
+def test_absent_run_scalars_is_the_empty_member_never_a_zero_record() -> None:
+    """A model carrying no run-scalars record encodes the EMPTY member and
+    decodes back to None — absence is never spelled as an all-zero record
+    (zero is a measured value in this family)."""
+    model = CanonicalModel(
+        facts=analysis_facts(
+            contracts=frozenset(
+                {ContractRow(SymbolId(FileId("pkg/a.py"), "f"), "sig", frozenset())}
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    assert document["facts"]["run_scalars"] == {}
+    decoded = decode_canonical_json(encode_canonical_json(model))
+    assert decoded.facts.analysis.run_scalars is None
+
+
+def test_run_scalars_wire_member_is_one_record_object() -> None:
+    """The wire member is a record object in canonical column order — not a
+    columnar table: no rows, no invented entity key."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    member = document["facts"]["run_scalars"]
+    assert isinstance(member, dict)
+    assert list(member.keys()) == sorted(member.keys())
+    assert all(isinstance(value, int) for value in member.values())
+    assert member["files_skipped"] == 0  # measured zero rides the wire
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [("files_found", -1), ("classes", True)],
+)
+def test_run_scalars_refuses_non_scalar_values(field_name: str, value: object) -> None:
+    values: dict[str, object] = {
+        "classes": 7,
+        "files_analyzed": 2,
+        "files_cached": 1,
+        "files_found": 3,
+        "files_skipped": 0,
+        "functions": 41,
+        "methods": 13,
+        "parsed_lines": 905,
+        "source_io_skipped": 4,
+        "unsupported_construct_skipped": 5,
+    }
+    values[field_name] = value
+    with pytest.raises(CanonicalModelError, match="run scalar"):
+        RunScalars(**values)  # type: ignore[arg-type]
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:

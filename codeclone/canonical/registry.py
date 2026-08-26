@@ -355,6 +355,91 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # F9 (wave 4, ratified form): ONE record per analysis snapshot — a
+    # run-level analysis fact, not a tabular entity; no invented entity key.
+    # The wire member is a record object (see RECORD_WIRE_FAMILIES).
+    "run_scalars": (
+        FieldDeclaration(
+            "classes",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "files_analyzed",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "files_cached",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "files_found",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "files_skipped",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "functions",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "methods",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "parsed_lines",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source_io_skipped",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "unsupported_construct_skipped",
+            ANALYSIS_FACT,
+            "run_inventory_producer",
+            "observed run-population scalar (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "semantic_edges": (
         FieldDeclaration(
             "source",
@@ -519,6 +604,18 @@ RISK_OBSERVATIONS_KEY: Final[tuple[str, ...]] = (
     "dimension",
     "start_line",
 )
+
+
+#: Families whose wire member is ONE record object, never a columnar table
+#: (F9: one record per analysis snapshot — there are no rows to key, and a
+#: fake entity key is never invented; ruling 2026-08-24 §1).  The absent
+#: record is the empty member.
+RECORD_WIRE_FAMILIES: Final[frozenset[str]] = frozenset({"run_scalars"})
+
+
+def is_record_family(family: str) -> bool:
+    """True for single-record wire families (no rows, no row keys)."""
+    return family in RECORD_WIRE_FAMILIES
 
 
 def wire_fact_family_order() -> tuple[str, ...]:

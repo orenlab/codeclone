@@ -435,6 +435,24 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'"symbol_kind":"banana","visibility":"all"}',
             "unknown api symbol kind",
         ),
+        # F9 shape guard: a non-int scalar is refused by the store
+        (
+            "run_scalar",
+            b'{"classes":"7","files_analyzed":2,"files_cached":1,'
+            b'"files_found":3,"files_skipped":0,"functions":41,"methods":13,'
+            b'"parsed_lines":905,"source_io_skipped":4,'
+            b'"unsupported_construct_skipped":5}',
+            "'classes' is not an int",
+        ),
+        # F9 model law through the store wrapper: a negative scalar
+        (
+            "run_scalar",
+            b'{"classes":-7,"files_analyzed":2,"files_cached":1,'
+            b'"files_found":3,"files_skipped":0,"functions":41,"methods":13,'
+            b'"parsed_lines":905,"source_io_skipped":4,'
+            b'"unsupported_construct_skipped":5}',
+            "run scalar classes",
+        ),
     ],
     ids=[
         "contract-not-a-pair",
@@ -448,6 +466,8 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "api-annotation-not-string",
         "api-returns-not-string",
         "api-unknown-kind-model-law",
+        "run-scalar-non-int-shape-guard",
+        "run-scalar-negative-model-law",
     ],
 )
 def test_well_addressed_malformed_payload_is_refused(
@@ -479,6 +499,78 @@ def test_well_addressed_malformed_payload_is_refused(
         pytest.raises(StoreIntegrityError, match=match),
     ):
         store.read_run(run_id)
+
+
+def test_two_run_scalar_records_in_one_run_are_refused(tmp_path: Path) -> None:
+    """F9 law at the storage face: ONE record per analysis snapshot.
+
+    The forgery is SELF-CONSISTENT (membership and run identity are refit
+    through the store's own formulas), so every digest check passes and the
+    one-record guard is the only wall left — without it the reader would
+    silently pick one of the two records.
+    """
+    from codeclone.canonical.store import (
+        _membership_digest,
+        _object_id,
+        _payload_bytes,
+        _run_id,
+    )
+
+    path = tmp_path / "runs.sqlite"
+    with RunStore(path) as store:
+        _publish(store, fixture_model())
+    second = _payload_bytes(
+        {
+            "classes": 8,
+            "files_analyzed": 2,
+            "files_cached": 1,
+            "files_found": 3,
+            "files_skipped": 0,
+            "functions": 41,
+            "methods": 13,
+            "parsed_lines": 905,
+            "source_io_skipped": 4,
+            "unsupported_construct_skipped": 5,
+        }
+    )
+    with sqlite3.connect(path) as connection:
+        run_pk, namespace_pk = connection.execute(
+            "SELECT run_pk, namespace_pk FROM runs"
+        ).fetchone()
+        cursor = connection.execute(
+            "INSERT INTO objects (namespace_pk, object_id, family, payload) "
+            "VALUES (?, ?, ?, ?)",
+            (namespace_pk, _object_id(_NS, "run_scalar", second), "run_scalar", second),
+        )
+        connection.execute(
+            "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
+            (run_pk, cursor.lastrowid),
+        )
+        object_ids = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT o.object_id FROM run_members m "
+                "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
+                (run_pk,),
+            )
+        ]
+        scope_digest = str(
+            connection.execute(
+                "SELECT analysis_scope_digest FROM runs WHERE run_pk = ?", (run_pk,)
+            ).fetchone()[0]
+        )
+        membership = _membership_digest(object_ids)
+        forged = _run_id(_NS, scope_digest, membership)
+        connection.execute(
+            "UPDATE runs SET membership_digest = ?, run_id = ? WHERE run_pk = ?",
+            (membership, forged, run_pk),
+        )
+        connection.commit()
+    with (
+        RunStore(path) as store,
+        pytest.raises(StoreIntegrityError, match="one record per analysis snapshot"),
+    ):
+        store.read_run(forged)
 
 
 def test_intact_store_raises_no_integrity_refusal(tmp_path: Path) -> None:
@@ -611,6 +703,7 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
             model.facts.analysis.coupling_cohesion_observations
         )
         assert counts["api_symbol"] == len(model.facts.analysis.api_symbols)
+        assert counts["run_scalar"] == 1  # F9: ONE record per snapshot
         assert counts["file"] == len(model.files)
         assert counts["module"] == len(model.modules)
         assert counts["analyzed_file"] == len(model.analyzed_files)

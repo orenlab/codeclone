@@ -69,7 +69,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Final, cast
@@ -128,6 +128,7 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    RunScalars,
     SemanticEdge,
     SinkRoleRow,
     ViolationRow,
@@ -189,6 +190,7 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     "file_module": f"module_identity:{MODULE_IDENTITY_VERSION}",
     "graph_node": f"contract_ir:{CONTRACT_IR_VERSION}",
     "module": f"module_identity:{MODULE_IDENTITY_VERSION}",
+    "run_scalar": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "semantic_edge": f"contract_ir:{CONTRACT_IR_VERSION}",
     "sink_role": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     "violation": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
@@ -538,6 +540,9 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "visibility": api_symbol.visibility,
             },
         )
+    if facts.run_scalars is not None:
+        # F9: exactly one record per snapshot — a run-level fact, no rows.
+        yield ("run_scalar", dict(sorted(asdict(facts.run_scalars).items())))
 
 
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
@@ -723,6 +728,23 @@ def _decode_api_symbol_row(row: Mapping[str, object], where: str) -> ApiSymbolRo
     )
 
 
+def _decode_run_scalar_row(row: Mapping[str, object], where: str) -> RunScalars:
+    return RunScalars(
+        classes=_require_line(row, "classes", where),
+        files_analyzed=_require_line(row, "files_analyzed", where),
+        files_cached=_require_line(row, "files_cached", where),
+        files_found=_require_line(row, "files_found", where),
+        files_skipped=_require_line(row, "files_skipped", where),
+        functions=_require_line(row, "functions", where),
+        methods=_require_line(row, "methods", where),
+        parsed_lines=_require_line(row, "parsed_lines", where),
+        source_io_skipped=_require_line(row, "source_io_skipped", where),
+        unsupported_construct_skipped=_require_line(
+            row, "unsupported_construct_skipped", where
+        ),
+    )
+
+
 def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow:
     return ViolationRow(
         contract_id=_require_str(row, "contract_id", where),
@@ -756,6 +778,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "file_module": _decode_file_module_row,
     "graph_node": _decode_graph_node_row,
     "module": _decode_module_row,
+    "run_scalar": _decode_run_scalar_row,
     "semantic_edge": _decode_semantic_edge_row,
     "sink_role": _decode_sink_role_row,
     "violation": _decode_violation_row,
@@ -778,6 +801,14 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
     def family(name: str) -> list[object]:
         return collected.get(name, [])
 
+    run_scalar_rows = cast("list[RunScalars]", family("run_scalar"))
+    if len(run_scalar_rows) > 1:
+        # F9 law: ONE record per analysis snapshot — two stored records are
+        # a writer defect, refused loudly, never last-reader-silenced.
+        raise StoreIntegrityError(
+            "run carries more than one run_scalars record; the family is "
+            "one record per analysis snapshot"
+        )
     return CanonicalModel(
         files=frozenset(cast("list[FileId]", family("file"))),
         modules=frozenset(cast("list[ModuleId]", family("module"))),
@@ -809,6 +840,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                     )
                 ),
                 api_symbols=frozenset(cast("list[ApiSymbolRow]", family("api_symbol"))),
+                run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
             )
         ),
         coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
@@ -1107,6 +1139,7 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "dependency_relations": "dependency_relation",
     "file_modules": "file_module",
     "graph_nodes": "graph_node",
+    "run_scalars": "run_scalar",
     "semantic_edges": "semantic_edge",
     "sink_roles": "sink_role",
     "violations": "violation",

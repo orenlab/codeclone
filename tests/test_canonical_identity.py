@@ -292,6 +292,17 @@ def test_registry_declares_the_two_class_b_handles_and_their_owners() -> None:
     }
 
 
+def test_registry_declares_the_one_record_family() -> None:
+    """F9 is the ONE record-shaped wire family: a record has no rows, so no
+    row key is invented; every table family stays columnar."""
+    from codeclone.canonical import RECORD_WIRE_FAMILIES, is_record_family
+
+    assert frozenset({"run_scalars"}) == RECORD_WIRE_FAMILIES
+    assert is_record_family("run_scalars")
+    assert not is_record_family("dependency_relations")
+    assert not is_record_family("api_symbols")
+
+
 def test_registry_declares_the_sparse_boolean_columns() -> None:
     assert sparse_bool_wire_columns("dependency_occurrences") == ("is_lazy",)
     assert sparse_bool_wire_columns("dependency_relations") == ()

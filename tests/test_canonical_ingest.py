@@ -34,6 +34,7 @@ from codeclone.canonical import (
     OpaqueDottedHead,
     OperationRoot,
     OperationTarget,
+    RunScalars,
     SymbolId,
     UnresolvedRoot,
     canonical_model_from_legacy_document,
@@ -288,6 +289,27 @@ def legacy_document() -> dict[str, Any]:
                 },
             }
         },
+        # F9: the document's inventory scalars verbatim (values pairwise
+        # distinct so a cross-wired mapping cannot survive; the witness
+        # list and file_registry beside them are deliberately not scalars).
+        "inventory": {
+            "files": {
+                "total_found": 3,
+                "analyzed": 2,
+                "cached": 1,
+                "skipped": 0,
+                "source_io_skipped": 4,
+                "unsupported_construct_skipped": 5,
+                "unsupported_constructs": [],
+            },
+            "code": {
+                "parsed_lines": 905,
+                "functions": 41,
+                "methods": 13,
+                "classes": 7,
+            },
+            "file_registry": {"encoding": "relative_path", "items": []},
+        },
     }
 
 
@@ -307,6 +329,18 @@ def test_ingest_builds_the_measured_families() -> None:
     assert len(facts.analysis.violations) == 1
     assert len(facts.analysis.coupling_cohesion_observations) == 3
     assert len(facts.analysis.api_symbols) == 3
+    assert facts.analysis.run_scalars == RunScalars(
+        classes=7,
+        files_analyzed=2,
+        files_cached=1,
+        files_found=3,
+        files_skipped=0,
+        functions=41,
+        methods=13,
+        parsed_lines=905,
+        source_io_skipped=4,
+        unsupported_construct_skipped=5,
+    )
     assert len(model.coupled_sets) == 2  # duplicates collapse, empty drops
     assert len(model.analyzed_files) == 3
     assert len(model.file_modules) == 2
@@ -575,6 +609,22 @@ def test_ingest_refuses_an_empty_api_digest_value() -> None:
         _api_row(document)["parameters"][0]["annotation_digest"]["value"] = ""
 
     with pytest.raises(LegacyIngestError, match="digest value is empty"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_document_missing_an_inventory_scalar() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        del document["inventory"]["files"]["total_found"]
+
+    with pytest.raises(LegacyIngestError, match="missing 'total_found'"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_boolean_inventory_scalar() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        document["inventory"]["code"]["classes"] = True
+
+    with pytest.raises(LegacyIngestError, match="classes is not an integer"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 

@@ -86,9 +86,11 @@ _TARGET = "worktree-a"
 # which moves the membership (the storage families changed) and the bytes.
 # The F5 ``api_symbols`` family replaced the split literals (run
 # 08900b4d..., artifact dc22f46b...) deliberately: the fixture gained five
-# api_symbol objects under the api_surface_signature namespace.
-_FIXTURE_RUN_ID = "f4a7c24b39963f5e5a1b858299ad897e72e52d8fa41f49df381cd481081bb7ad"
-_FIXTURE_ARTIFACT = "2072e74242f0eb52eb6ff3df11a5e90b8cd7746d1ff19baa7adf9d9ad697c597"
+# api_symbol objects under the api_surface_signature namespace.  The F9
+# ``run_scalars`` record replaced the F5 literals (run f4a7c24b..., artifact
+# 2072e742...) deliberately: the fixture gained its one run_scalar object.
+_FIXTURE_RUN_ID = "c3e2d21cf173cf59a959b8b4545c699b630165337c56ad1db2aacf589c856bcc"
+_FIXTURE_ARTIFACT = "642922b38e5249e6eeebc0386610756d5070da282105ef89a3b91102dbc5b695"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

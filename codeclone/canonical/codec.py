@@ -58,7 +58,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from itertools import pairwise
 from typing import Any, TypeVar, cast
 
@@ -116,11 +116,13 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    RunScalars,
     SemanticEdge,
     SinkRoleRow,
     ViolationRow,
 )
 from codeclone.canonical.registry import (
+    is_record_family,
     sparse_bool_wire_columns,
     wire_columns,
     wire_fact_family_order,
@@ -698,6 +700,13 @@ def _graph_node_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obj
     ]
 
 
+def _run_scalars_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
+    del plan  # a record has no ordinals to resolve
+    if facts.run_scalars is None:
+        return []
+    return [asdict(facts.run_scalars)]
+
+
 def _semantic_edge_rows(
     facts: AnalysisFacts, plan: WirePlan
 ) -> list[dict[str, object]]:
@@ -739,6 +748,7 @@ _FAMILY_ROW_BUILDERS: dict[
     "dependency_relations": _dependency_relation_rows,
     "file_modules": _file_module_rows,
     "graph_nodes": _graph_node_rows,
+    "run_scalars": _run_scalars_rows,
     "semantic_edges": _semantic_edge_rows,
     "sink_roles": _sink_role_rows,
     "violations": _violation_rows,
@@ -864,7 +874,16 @@ def _leading_members(plan: WirePlan) -> list[tuple[str, object]]:
 
 def _family_member(family: str, rows: Sequence[dict[str, object]]) -> _Obj:
     """The wire member of one fact family: columnar, sparse booleans as
-    strictly increasing true positions, omitted when no row is true."""
+    strictly increasing true positions, omitted when no row is true.
+
+    A RECORD family (F9) is ONE record object instead: its members are the
+    record's scalars in canonical column order, and the absent record is
+    the empty member — never an all-zero fake."""
+    if is_record_family(family):
+        if not rows:
+            return _Obj([])
+        (record,) = rows
+        return _Obj([(column, record[column]) for column in wire_columns(family)])
     sparse = set(sparse_bool_wire_columns(family))
     members: list[tuple[str, object]] = []
     for column in wire_columns(family):
@@ -1826,6 +1845,31 @@ def _decode_api_symbols(
     return frozenset(rows)
 
 
+def _decode_run_scalars(facts: Mapping[str, object]) -> RunScalars | None:
+    """The F9 record member: one record object, or its typed absence."""
+    value = facts["run_scalars"]
+    if not isinstance(value, dict):
+        raise _refuse("W01", "facts.run_scalars is not an object")
+    table = cast("dict[str, object]", value)
+    keys = list(table.keys())
+    if not keys:
+        return None
+    declared = list(wire_columns("run_scalars"))
+    if set(keys) != set(declared):
+        raise _refuse(
+            "W01",
+            f"facts.run_scalars keys {keys!r} do not match the declared "
+            f"set {declared!r}",
+        )
+    if keys != declared:
+        raise _refuse("W02", "facts.run_scalars keys are not in canonical order")
+    values = {
+        name: _expect_wire_int(table[name], f"facts.run_scalars.{name}")
+        for name in declared
+    }
+    return RunScalars(**values)
+
+
 def _decode_violations(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
@@ -2045,6 +2089,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     )
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
+    run_scalars = _decode_run_scalars(facts_section)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
     )
@@ -2071,6 +2116,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
+                run_scalars=run_scalars,
             )
         ),
         coupled_sets=frozenset(

@@ -375,6 +375,30 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         ',7,[],[["value"',
     ),
     (
+        "W01",
+        "run_scalars record missing a scalar",
+        '"run_scalars":{"classes":7,',
+        '"run_scalars":{',
+    ),
+    (
+        "W02",
+        "run_scalars keys out of canonical order",
+        '"run_scalars":{"classes":7,"files_analyzed":2,',
+        '"run_scalars":{"files_analyzed":2,"classes":7,',
+    ),
+    (
+        "W18",
+        "run_scalars boolean scalar",
+        '"run_scalars":{"classes":7,',
+        '"run_scalars":{"classes":true,',
+    ),
+    (
+        "W07",
+        "run_scalars scalar out of wire range",
+        '"files_skipped":0,"functions":41,',
+        '"files_skipped":-1,"functions":41,',
+    ),
+    (
         "W21",
         "incompatible revision value",
         '"canonical_model":"1"',
@@ -677,6 +701,11 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
             "facts table is not an object",
             lambda doc: doc["facts"].__setitem__("dependency_relations", 7),
         ),
+        (
+            "W01",
+            "run_scalars member is not an object",
+            lambda doc: doc["facts"].__setitem__("run_scalars", 7),
+        ),
     ],
     ids=[
         "W01-effect-roots-not-object",
@@ -688,6 +717,7 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
         "W01-facts-missing-column",
         "W02-facts-columns-unsorted",
         "W01-facts-table-not-object",
+        "W01-run-scalars-not-object",
     ],
 )
 def test_structural_refusals_on_reserialized_documents(
