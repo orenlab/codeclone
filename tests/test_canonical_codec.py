@@ -127,9 +127,15 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     ("W10", "ordinal beyond its table", '"file":[0,0,1,2,2]', '"file":[0,0,1,2,9]'),
     (
         "W08",
-        "unknown import_type tag",
-        '"import_type":["from_import","from_import","import","import"]',
-        '"import_type":["banana","from_import","import","import"]',
+        "unknown occurrence dependency_type tag",
+        '"type_checking"],"dependency_type":["from_import"',
+        '"type_checking"],"dependency_type":["banana"',
+    ),
+    (
+        "W08",
+        "unknown relation dependency_type tag",
+        '"dependency_relations":{"dependency_type":["from_import"',
+        '"dependency_relations":{"dependency_type":["banana"',
     ),
     (
         "W08",
@@ -140,26 +146,48 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W08",
         "endpoint tag unknown",
-        '"source":[["file",2],',
-        '"source":[["banana",2],',
+        '"source":[["file",2],["module",0],["module",0],["module",0]]',
+        '"source":[["banana",2],["module",0],["module",0],["module",0]]',
     ),
     (
         "W09",
         "endpoint tag not admitted",
-        '"source":[["file",2],',
-        '"source":[["symbol",2],',
+        '"source":[["file",2],["module",0],["module",0],["module",0]]',
+        '"source":[["symbol",2],["module",0],["module",0],["module",0]]',
     ),
     (
         "W12",
-        "dependency edges out of producer-key order",
-        '"import_type":["from_import","from_import","import","import"]',
-        '"import_type":["from_import","import","from_import","import"]',
+        "occurrences out of producer-key order",
+        '"line":[2,4,4,9]',
+        '"line":[2,4,9,4]',
     ),
     (
         "W13",
-        "duplicate dependency producer key",
+        "duplicate occurrence producer key",
         '"line":[2,4,4,9]',
         '"line":[2,4,4,4]',
+    ),
+    (
+        "W12",
+        "relations out of canonical key order",
+        '"dependency_relations":{"dependency_type":'
+        '["from_import","from_import","import","import"]',
+        '"dependency_relations":{"dependency_type":'
+        '["from_import","import","from_import","import"]',
+    ),
+    (
+        "W13",
+        "duplicate relation key",
+        '"dependency_relations":{"dependency_type":'
+        '["from_import","from_import","import","import"]',
+        '"dependency_relations":{"dependency_type":'
+        '["from_import","import","import","import"]',
+    ),
+    (
+        "W26",
+        "occurrence names a relation the table does not carry",
+        '"dependency_relations":{"dependency_type":["from_import","from_import"',
+        '"dependency_relations":{"dependency_type":["import","from_import"',
     ),
     (
         "W10",
@@ -453,8 +481,8 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "endpoint is not a pair",
-        '"source":[["file",2],',
-        '"source":[["file",2,1],',
+        '"source":[["file",2],["module",0],["module",0],["module",0]]',
+        '"source":[["file",2,1],["module",0],["module",0],["module",0]]',
     ),
     ("W18", "empty opaque head", '["opaque","x.y"]', '["opaque",""]'),
     (
@@ -586,7 +614,7 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
         (
             "W01",
             "facts table is not an object",
-            lambda doc: doc["facts"].__setitem__("dependency_edges", 7),
+            lambda doc: doc["facts"].__setitem__("dependency_relations", 7),
         ),
     ],
     ids=[

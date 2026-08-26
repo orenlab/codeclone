@@ -36,7 +36,8 @@ from codeclone.canonical import (
     CanonicalModel,
     CanonicalModelError,
     ContractRow,
-    DependencyEdgeRow,
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
     EffectLabelRoot,
     EffectRoot,
     ExportEnvelope,
@@ -78,10 +79,13 @@ _TARGET = "worktree-a"
 # forbidden: a change here IS an identity-contract change (run identity or
 # artifact domain) and needs its own review.  Wave 4 replaced the wave-3
 # literals (run 591477af..., artifact 53f65a70...) deliberately: the fixture
-# gained the F2 ``coupling_cohesion_observations`` family, which moves the
-# membership (five new content-addressed objects) and the wire bytes.
-_FIXTURE_RUN_ID = "174ed52d20dcef4943cbee98a975eb294b0235bec0bd2b8f91ec245b39461bc0"
-_FIXTURE_ARTIFACT = "fde286104d83d5188df034d79ab3471c690c6c250032f491c7bcf8a950c9afd3"
+# gained the F2 ``coupling_cohesion_observations`` family.  The ratified
+# dependency split (ruling 2026-08-24 §2) then replaced the wave-4 literals
+# (run 174ed52d..., artifact fde28610...) deliberately: ``dependency_edges``
+# was rebuilt into ``dependency_relations`` + ``dependency_occurrences``,
+# which moves the membership (the storage families changed) and the bytes.
+_FIXTURE_RUN_ID = "08900b4d0c5886d426aa076999d6ad4c1847525244b19a34c3973aae9057ce65"
+_FIXTURE_ARTIFACT = "dc22f46be6e1344d4e3a5089175d7440a35cdc67441add50355d1200acce4b74"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:
@@ -574,11 +578,15 @@ def _bulk_model(rows: int = 1500) -> CanonicalModel:
             semantic_edges=frozenset(
                 SemanticEdge(symbols[i], symbols[(i + 1) % rows]) for i in range(rows)
             ),
-            dependency_edges=frozenset(
-                DependencyEdgeRow(
-                    modules[i % 40],
-                    modules[(i + 1) % 40],
-                    "import",
+            dependency_relations=frozenset(
+                DependencyRelationRow(modules[i % 40], modules[(i + 1) % 40], "import")
+                for i in range(rows)
+            ),
+            dependency_occurrences=frozenset(
+                DependencyOccurrenceRow(
+                    DependencyRelationRow(
+                        modules[i % 40], modules[(i + 1) % 40], "import"
+                    ),
                     i,
                     "import_time",
                     False,

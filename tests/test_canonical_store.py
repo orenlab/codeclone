@@ -547,7 +547,12 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
         assert counts["sink_role"] == len(model.facts.analysis.sink_roles)
         assert counts["candidate"] == len(model.facts.analysis.candidates)
         assert counts["semantic_edge"] == len(model.facts.analysis.semantic_edges)
-        assert counts["dependency_edge"] == len(model.facts.analysis.dependency_edges)
+        assert counts["dependency_relation"] == len(
+            model.facts.analysis.dependency_relations
+        )
+        assert counts["dependency_occurrence"] == len(
+            model.facts.analysis.dependency_occurrences
+        )
         assert counts["violation"] == len(model.facts.analysis.violations)
         assert counts["coupling_cohesion_observation"] == len(
             model.facts.analysis.coupling_cohesion_observations

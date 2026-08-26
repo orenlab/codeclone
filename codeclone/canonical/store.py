@@ -121,7 +121,8 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ContractRow,
     CouplingCohesionRow,
-    DependencyEdgeRow,
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
     SemanticEdge,
@@ -174,7 +175,8 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     "coupling_cohesion_observation": (
         f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
     ),
-    "dependency_edge": f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    "dependency_occurrence": f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    "dependency_relation": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "file": f"module_identity:{MODULE_IDENTITY_VERSION}",
     "file_module": f"module_identity:{MODULE_IDENTITY_VERSION}",
     "graph_node": f"contract_ir:{CONTRACT_IR_VERSION}",
@@ -434,24 +436,40 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "target": _symbol_value(edge.target),
             },
         )
-    for dep in sorted(
-        facts.dependency_edges,
+    for dependency_relation in sorted(
+        facts.dependency_relations,
         key=lambda row: (
             _endpoint_value(row.source),
             _endpoint_value(row.target),
-            row.import_type,
+            row.dependency_type,
+        ),
+    ):
+        yield (
+            "dependency_relation",
+            {
+                "dependency_type": dependency_relation.dependency_type,
+                "source": _endpoint_value(dependency_relation.source),
+                "target": _endpoint_value(dependency_relation.target),
+            },
+        )
+    for occurrence in sorted(
+        facts.dependency_occurrences,
+        key=lambda row: (
+            _endpoint_value(row.relation.source),
+            _endpoint_value(row.relation.target),
+            row.relation.dependency_type,
             row.line,
         ),
     ):
         yield (
-            "dependency_edge",
+            "dependency_occurrence",
             {
-                "binding": dep.binding,
-                "import_type": dep.import_type,
-                "is_lazy": dep.is_lazy,
-                "line": dep.line,
-                "source": _endpoint_value(dep.source),
-                "target": _endpoint_value(dep.target),
+                "binding": occurrence.binding,
+                "dependency_type": occurrence.relation.dependency_type,
+                "is_lazy": occurrence.is_lazy,
+                "line": occurrence.line,
+                "source": _endpoint_value(occurrence.relation.source),
+                "target": _endpoint_value(occurrence.relation.target),
             },
         )
     for violation in sorted(
@@ -600,13 +618,21 @@ def _decode_semantic_edge_row(row: Mapping[str, object], where: str) -> Semantic
     )
 
 
-def _decode_dependency_edge_row(
+def _decode_dependency_relation_row(
     row: Mapping[str, object], where: str
-) -> DependencyEdgeRow:
-    return DependencyEdgeRow(
+) -> DependencyRelationRow:
+    return DependencyRelationRow(
         source=_decode_endpoint(_require_field(row, "source", where), where),
         target=_decode_endpoint(_require_field(row, "target", where), where),
-        import_type=_require_str(row, "import_type", where),
+        dependency_type=_require_str(row, "dependency_type", where),
+    )
+
+
+def _decode_dependency_occurrence_row(
+    row: Mapping[str, object], where: str
+) -> DependencyOccurrenceRow:
+    return DependencyOccurrenceRow(
+        relation=_decode_dependency_relation_row(row, where),
         line=_require_line(row, "line", where),
         binding=_require_str(row, "binding", where),
         is_lazy=_require_bool(row, "is_lazy", where),
@@ -653,7 +679,8 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "contract": _decode_contract_row,
     "coupled_set": _decode_coupled_row,
     "coupling_cohesion_observation": _decode_coupling_cohesion_row,
-    "dependency_edge": _decode_dependency_edge_row,
+    "dependency_occurrence": _decode_dependency_occurrence_row,
+    "dependency_relation": _decode_dependency_relation_row,
     "file": _decode_file_row,
     "file_module": _decode_file_module_row,
     "graph_node": _decode_graph_node_row,
@@ -694,8 +721,14 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 semantic_edges=frozenset(
                     cast("list[SemanticEdge]", family("semantic_edge"))
                 ),
-                dependency_edges=frozenset(
-                    cast("list[DependencyEdgeRow]", family("dependency_edge"))
+                dependency_relations=frozenset(
+                    cast("list[DependencyRelationRow]", family("dependency_relation"))
+                ),
+                dependency_occurrences=frozenset(
+                    cast(
+                        "list[DependencyOccurrenceRow]",
+                        family("dependency_occurrence"),
+                    )
                 ),
                 violations=frozenset(cast("list[ViolationRow]", family("violation"))),
                 coupling_cohesion_observations=frozenset(
@@ -997,7 +1030,8 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "candidates": "candidate",
     "contracts": "contract",
     "coupling_cohesion_observations": "coupling_cohesion_observation",
-    "dependency_edges": "dependency_edge",
+    "dependency_occurrences": "dependency_occurrence",
+    "dependency_relations": "dependency_relation",
     "file_modules": "file_module",
     "graph_nodes": "graph_node",
     "semantic_edges": "semantic_edge",

@@ -67,7 +67,8 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ContractRow,
     CouplingCohesionRow,
-    DependencyEdgeRow,
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
     SemanticEdge,
@@ -390,9 +391,16 @@ def canonical_model_from_legacy_document(
         ),
         "dependencies.items",
     )
-    dependency_edges = frozenset(
-        _dependency_edge(_mapping(row, "dependency item"), index)
+    # The ratified split (ruling 2026-08-24 §2): every producer item is one
+    # occurrence (location evidence); the relation entity is the item's own
+    # triple — projected here, never guessed, so the two families cannot
+    # disagree at the source.
+    dependency_occurrences = frozenset(
+        _dependency_occurrence(_mapping(row, "dependency item"), index)
         for row in dependency_rows
+    )
+    dependency_relations = frozenset(
+        occurrence.relation for occurrence in dependency_occurrences
     )
 
     coupling_rows = _sequence(
@@ -453,7 +461,8 @@ def canonical_model_from_legacy_document(
                 sink_roles=sink_roles,
                 candidates=candidates,
                 semantic_edges=semantic_edges,
-                dependency_edges=dependency_edges,
+                dependency_relations=dependency_relations,
+                dependency_occurrences=dependency_occurrences,
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
             )
@@ -475,23 +484,26 @@ def _endpoint(text: str, index: _RegistryIndex, where: str) -> DependencyEndpoin
     )
 
 
-def _dependency_edge(
+def _dependency_occurrence(
     row: Mapping[str, object], index: _RegistryIndex
-) -> DependencyEdgeRow:
+) -> DependencyOccurrenceRow:
     line = _field(row, "line", "dependencies item")
     if isinstance(line, bool) or not isinstance(line, int):
         raise LegacyIngestError("dependencies item line is not an integer")
     is_lazy = _field(row, "is_lazy", "dependencies item")
     if not isinstance(is_lazy, bool):
         raise LegacyIngestError("dependencies item is_lazy is not a boolean")
-    return DependencyEdgeRow(
+    relation = DependencyRelationRow(
         source=_endpoint(
             _string(row, "source", "dependencies item"), index, "dependencies.source"
         ),
         target=_endpoint(
             _string(row, "target", "dependencies item"), index, "dependencies.target"
         ),
-        import_type=_string(row, "import_type", "dependencies item"),
+        dependency_type=_string(row, "import_type", "dependencies item"),
+    )
+    return DependencyOccurrenceRow(
+        relation=relation,
         line=line,
         binding=_string(row, "binding", "dependencies item"),
         is_lazy=is_lazy,

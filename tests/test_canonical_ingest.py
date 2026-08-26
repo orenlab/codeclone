@@ -238,7 +238,11 @@ def test_ingest_builds_the_measured_families() -> None:
     assert len(facts.analysis.sink_roles) == 2
     assert len(facts.analysis.candidates) == 1
     assert len(facts.analysis.semantic_edges) == 1
-    assert len(facts.analysis.dependency_edges) == 2
+    assert len(facts.analysis.dependency_relations) == 2
+    assert len(facts.analysis.dependency_occurrences) == 2
+    assert {o.relation for o in facts.analysis.dependency_occurrences} == set(
+        facts.analysis.dependency_relations
+    )
     assert len(facts.analysis.violations) == 1
     assert len(facts.analysis.coupling_cohesion_observations) == 3
     assert len(model.coupled_sets) == 2  # duplicates collapse, empty drops

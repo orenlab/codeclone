@@ -16,17 +16,25 @@ the frozen corpus, 1 157 of 12 244 rows are not sorted-deduplicated, so the
 producer's order is a fact and canonizing it away would lose an entity.
 
 Wave family subset: ``file_modules · contracts · graph_nodes · sink_roles
-· candidates · semantic_edges · dependency_edges · violations ·
-coupling_cohesion_observations`` plus the standalone ``coupled_sets``
-value sets.
+· candidates · semantic_edges · dependency_relations ·
+dependency_occurrences · violations · coupling_cohesion_observations``
+plus the standalone ``coupled_sets`` value sets.
 
-``dependency_edges`` (wave 1.5): the logical row key is **measured from the
-producer**, not invented — ``metrics/dependencies.py:_unique_sorted_edges``
-dedups and sorts on ``(source, target, import_type, line)``; on the frozen
-corpus the key is unique on 5 244 of 5 244 rows, dropping ``line`` collides
-926 of them, and the 861 distinct endpoints split MODULE 860 / FILE 1 —
-the ratified ``DependencyEndpoint`` union.  ``binding`` and ``is_lazy`` are
-payload, not key: two rows under one producer key may not disagree.
+``dependency_relations`` / ``dependency_occurrences`` (ratified split,
+ruling 2026-08-24 §2): dependencies are TWO objects.  The **relation**
+``(source, target, dependency_type)`` is the semantic entity — the graph
+that gate and SCC read; ``line`` is never added to it (that would merely
+reproduce the metrics dialect).  The **occurrence** is location evidence
+bound to a relation: its producer row key is measured, not invented —
+``metrics/dependencies.py:_unique_sorted_edges`` dedups on
+``(source, target, import_type, line)``, unique on 5 244 of 5 244 corpus
+rows; dropping ``line`` collides 926 (two occurrences of one relation),
+and the 861 distinct endpoints split MODULE 860 / FILE 1 — the ratified
+``DependencyEndpoint`` union.  ``binding`` and ``is_lazy`` are occurrence
+payload, not key: two occurrences under one producer key may not disagree.
+Location is evidence, never identity: the row key dedups evidence rows and
+never names the entity.  A relation may stand with zero occurrences; an
+occurrence whose relation the model does not carry is refused.
 
 ``violations`` (wave 1.5): natural key ``(contract_id, kind, sink_identity,
 PRODUCER_SET)`` under the ``AUTHORITY_ANALYSIS_REVISION`` namespace — the
@@ -133,25 +141,46 @@ class SemanticEdge:
 
 
 @dataclass(frozen=True, slots=True)
-class DependencyEdgeRow:
-    """Module dependency fact over the ratified endpoint union.
+class DependencyRelationRow:
+    """The dependency ENTITY: ``(source, target, dependency_type)``.
 
-    Logical key — measured from the producer's own dedup, never invented:
-    ``(source, target, import_type, line)``.  ``binding`` and ``is_lazy``
-    are payload; two rows sharing the key with different payload are a
-    producer defect and are refused, not last-writer-silenced.
+    The ratified split (ruling 2026-08-24 §2): the relation is the whole
+    fact — the triple is both logical key and full content, like
+    :class:`SemanticEdge`.  Gate and SCC consume this graph.  ``line`` is
+    deliberately NOT here: adding it would reproduce the metrics dialect
+    and turn one entity into as many rows as it has evidence sites.
     """
 
     source: DependencyEndpoint
     target: DependencyEndpoint
-    import_type: str
+    dependency_type: str
+
+    def __post_init__(self) -> None:
+        if self.dependency_type not in IMPORT_TYPES:
+            raise CanonicalModelError(
+                f"unknown dependency_type: {self.dependency_type!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyOccurrenceRow:
+    """Location EVIDENCE bound to one dependency relation.
+
+    ``location is evidence, not identity``: the entity is ``relation``;
+    ``line`` only distinguishes evidence rows (producer row key
+    ``(relation, line)``, measured — 926 corpus collisions without it).
+    ``binding`` and ``is_lazy`` are occurrence payload: one relation may
+    bind at import time on one line and deferred on another.  Two
+    occurrences sharing the row key with different payload are a producer
+    defect and are refused, not last-writer-silenced.
+    """
+
+    relation: DependencyRelationRow
     line: int
     binding: str
     is_lazy: bool
 
     def __post_init__(self) -> None:
-        if self.import_type not in IMPORT_TYPES:
-            raise CanonicalModelError(f"unknown import_type: {self.import_type!r}")
         if self.binding not in DEPENDENCY_BINDINGS:
             raise CanonicalModelError(f"unknown dependency binding: {self.binding!r}")
         if isinstance(self.line, bool) or self.line < 0:
@@ -235,7 +264,12 @@ class AnalysisFacts:
     sink_roles: frozenset[SinkRoleRow] = field(default_factory=frozenset)
     candidates: frozenset[CandidateRow] = field(default_factory=frozenset)
     semantic_edges: frozenset[SemanticEdge] = field(default_factory=frozenset)
-    dependency_edges: frozenset[DependencyEdgeRow] = field(default_factory=frozenset)
+    dependency_relations: frozenset[DependencyRelationRow] = field(
+        default_factory=frozenset
+    )
+    dependency_occurrences: frozenset[DependencyOccurrenceRow] = field(
+        default_factory=frozenset
+    )
     violations: frozenset[ViolationRow] = field(default_factory=frozenset)
     coupling_cohesion_observations: frozenset[CouplingCohesionRow] = field(
         default_factory=frozenset
@@ -328,15 +362,18 @@ def _candidate_natural_key(row: CandidateRow) -> tuple[object, ...]:
     )
 
 
-def _dependency_edge_key(row: DependencyEdgeRow) -> tuple[object, ...]:
-    # The producer's dedup key, verbatim (metrics/dependencies.py):
-    # (source, target, import_type, line) — binding and is_lazy are payload.
+def _dependency_relation_key(row: DependencyRelationRow) -> tuple[object, ...]:
     return (
         endpoint_key(row.source),
         endpoint_key(row.target),
-        row.import_type,
-        row.line,
+        row.dependency_type,
     )
+
+
+def _dependency_occurrence_key(row: DependencyOccurrenceRow) -> tuple[object, ...]:
+    # The producer's dedup key, verbatim (metrics/dependencies.py):
+    # (source, target, import_type, line) — binding and is_lazy are payload.
+    return (*_dependency_relation_key(row.relation), row.line)
 
 
 def _violation_natural_key(row: ViolationRow) -> tuple[object, ...]:
@@ -411,9 +448,12 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
     for edge in facts.semantic_edges:
         closure.see_symbol(edge.source)
         closure.see_symbol(edge.target)
-    for dep in facts.dependency_edges:
-        closure.see_endpoint(dep.source)
-        closure.see_endpoint(dep.target)
+    for dependency_relation in facts.dependency_relations:
+        closure.see_endpoint(dependency_relation.source)
+        closure.see_endpoint(dependency_relation.target)
+    for occurrence in facts.dependency_occurrences:
+        closure.see_endpoint(occurrence.relation.source)
+        closure.see_endpoint(occurrence.relation.target)
     for violation in facts.violations:
         closure.see_violation(violation)
     for observation in facts.coupling_cohesion_observations:
@@ -441,9 +481,9 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
     )
     _unique_by_key(facts.candidates, "candidates.natural_key", _candidate_natural_key)
     _unique_by_key(
-        facts.dependency_edges,
-        "dependency_edges.producer_key",
-        _dependency_edge_key,
+        facts.dependency_occurrences,
+        "dependency_occurrences.producer_key",
+        _dependency_occurrence_key,
     )
     _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
     _unique_by_key(
@@ -451,6 +491,21 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         "coupling_cohesion_observations.key",
         lambda row: (canonical_key(row.symbol), row.dimension),
     )
+
+
+def _prove_occurrence_relations(facts: AnalysisFacts) -> None:
+    """Stage 2-bis: every occurrence is BOUND to a carried relation.
+
+    Evidence without its entity is a dangling row; normalization refuses it
+    rather than inventing the relation (it never invents facts).  The
+    converse is free: a relation may stand with zero occurrences.
+    """
+    for occurrence in facts.dependency_occurrences:
+        if occurrence.relation not in facts.dependency_relations:
+            raise CanonicalModelError(
+                "dependency occurrence references a relation the model does "
+                f"not carry: {occurrence.relation!r}"
+            )
 
 
 def _prove_function_roles(facts: AnalysisFacts) -> None:
@@ -479,6 +534,7 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     projection concern)."""
     closure = _close_domains(model)
     _prove_logical_keys(model.facts.analysis)
+    _prove_occurrence_relations(model.facts.analysis)
     _prove_function_roles(model.facts.analysis)
     return replace(
         model,

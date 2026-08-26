@@ -19,7 +19,8 @@ from codeclone.canonical import (
     VIOLATION_KINDS,
     AnalysisFile,
     CanonicalModelError,
-    DependencyEdgeRow,
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
     EffectLabelRoot,
     EffectRoot,
     FileId,
@@ -188,14 +189,18 @@ def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
 @pytest.mark.parametrize(
     "build",
     [
-        lambda: DependencyEdgeRow(
-            ModuleId("a"), ModuleId("b"), "banana", 1, "import_time", False
+        lambda: DependencyRelationRow(ModuleId("a"), ModuleId("b"), "banana"),
+        lambda: DependencyOccurrenceRow(
+            DependencyRelationRow(ModuleId("a"), ModuleId("b"), "import"),
+            1,
+            "banana",
+            False,
         ),
-        lambda: DependencyEdgeRow(
-            ModuleId("a"), ModuleId("b"), "import", 1, "banana", False
-        ),
-        lambda: DependencyEdgeRow(
-            ModuleId("a"), ModuleId("b"), "import", -1, "import_time", False
+        lambda: DependencyOccurrenceRow(
+            DependencyRelationRow(ModuleId("a"), ModuleId("b"), "import"),
+            -1,
+            "import_time",
+            False,
         ),
         lambda: ViolationRow(
             contract_id="",
@@ -274,7 +279,8 @@ def test_registry_declares_the_two_class_b_handles_and_their_owners() -> None:
 
 
 def test_registry_declares_the_sparse_boolean_columns() -> None:
-    assert sparse_bool_wire_columns("dependency_edges") == ("is_lazy",)
+    assert sparse_bool_wire_columns("dependency_occurrences") == ("is_lazy",)
+    assert sparse_bool_wire_columns("dependency_relations") == ()
     assert sparse_bool_wire_columns("violations") == ("suppressed",)
     assert sparse_bool_wire_columns("candidates") == ()
 

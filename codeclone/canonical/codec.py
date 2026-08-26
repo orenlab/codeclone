@@ -36,9 +36,14 @@ Canonical byte laws implemented here:
 
 Wave-1.5 additions:
 
-* ``dependency_edges`` — endpoint slots are the ratified polymorphic
-  ``[tag, ordinal]`` pairs over ``MODULE | FILE``; the row key is the
-  producer's measured dedup key ``(source, target, import_type, line)``;
+* dependency facts — endpoint slots are the ratified polymorphic
+  ``[tag, ordinal]`` pairs over ``MODULE | FILE``.  The ratified split
+  (ruling 2026-08-24 §2) carries them as TWO tables:
+  ``dependency_relations`` (the entity triple ``source · target ·
+  dependency_type``) and ``dependency_occurrences`` (location evidence
+  bound to a relation; producer row key ``(relation, line)``).  An
+  occurrence whose triple names no relation row is refused (W26) — the
+  wire never carries dangling evidence;
 * ``violations`` — the second class-B handle family;
 * sparse boolean columns (``is_lazy``, ``suppressed``): a strictly
   increasing list of true row positions, omitted when no row is true;
@@ -101,7 +106,8 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ContractRow,
     CouplingCohesionRow,
-    DependencyEdgeRow,
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
     SemanticEdge,
@@ -488,18 +494,22 @@ def _candidate_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
     ]
 
 
-def _dependency_edge_rows(
+def _relation_sort_key(
+    relation: DependencyRelationRow, plan: WirePlan
+) -> tuple[object, ...]:
+    return (
+        *_endpoint_sort_key(relation.source, plan.module_ordinal, plan.file_ordinal),
+        *_endpoint_sort_key(relation.target, plan.module_ordinal, plan.file_ordinal),
+        relation.dependency_type,
+    )
+
+
+def _dependency_relation_rows(
     facts: AnalysisFacts, plan: WirePlan
 ) -> list[dict[str, object]]:
-    def endpoint_ref(endpoint: DependencyEndpoint) -> tuple[str, int]:
-        return _endpoint_sort_key(endpoint, plan.module_ordinal, plan.file_ordinal)
-
     return [
         {
-            "binding": row.binding,
-            "import_type": row.import_type,
-            "is_lazy": row.is_lazy,
-            "line": row.line,
+            "dependency_type": row.dependency_type,
             "source": _endpoint_value(
                 row.source, plan.module_ordinal, plan.file_ordinal
             ),
@@ -508,13 +518,31 @@ def _dependency_edge_rows(
             ),
         }
         for row in sorted(
-            facts.dependency_edges,
-            key=lambda row: (
-                *endpoint_ref(row.source),
-                *endpoint_ref(row.target),
-                row.import_type,
-                row.line,
+            facts.dependency_relations,
+            key=lambda row: _relation_sort_key(row, plan),
+        )
+    ]
+
+
+def _dependency_occurrence_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "binding": row.binding,
+            "dependency_type": row.relation.dependency_type,
+            "is_lazy": row.is_lazy,
+            "line": row.line,
+            "source": _endpoint_value(
+                row.relation.source, plan.module_ordinal, plan.file_ordinal
             ),
+            "target": _endpoint_value(
+                row.relation.target, plan.module_ordinal, plan.file_ordinal
+            ),
+        }
+        for row in sorted(
+            facts.dependency_occurrences,
+            key=lambda row: (*_relation_sort_key(row.relation, plan), row.line),
         )
     ]
 
@@ -658,7 +686,8 @@ _FAMILY_ROW_BUILDERS: dict[
     "candidates": _candidate_rows,
     "contracts": _contract_rows,
     "coupling_cohesion_observations": _coupling_cohesion_rows,
-    "dependency_edges": _dependency_edge_rows,
+    "dependency_occurrences": _dependency_occurrence_rows,
+    "dependency_relations": _dependency_relation_rows,
     "file_modules": _file_module_rows,
     "graph_nodes": _graph_node_rows,
     "semantic_edges": _semantic_edge_rows,
@@ -1542,51 +1571,87 @@ def _decode_endpoint(
     return table[ordinal], (tag, ordinal)
 
 
-def _decode_dependency_edges(
+def _decode_relation_triple(
+    columns: Mapping[str, list[object]],
+    index: int,
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+    family: str,
+) -> tuple[DependencyRelationRow, tuple[object, ...]]:
+    """One reading of the relation triple, shared by both dependency tables."""
+    source, source_key = _decode_endpoint(
+        columns["source"][index], files, modules, f"facts.{family}.source[{index}]"
+    )
+    target, target_key = _decode_endpoint(
+        columns["target"][index], files, modules, f"facts.{family}.target[{index}]"
+    )
+    dependency_type = _expect_string(
+        columns["dependency_type"][index],
+        f"facts.{family}.dependency_type[{index}]",
+    )
+    if dependency_type not in IMPORT_TYPES:
+        raise _refuse("W08", f"unknown dependency_type tag {dependency_type!r}")
+    relation = DependencyRelationRow(source, target, dependency_type)
+    return relation, (*source_key, *target_key, dependency_type)
+
+
+def _decode_dependency_relations(
     facts: Mapping[str, object],
     files: Sequence[FileId],
     modules: Sequence[ModuleId],
-) -> frozenset[DependencyEdgeRow]:
+) -> tuple[frozenset[DependencyRelationRow], set[tuple[object, ...]]]:
+    columns, _flags, row_count = _decode_columns(
+        "dependency_relations", facts["dependency_relations"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        relation, key = _decode_relation_triple(
+            columns, index, files, modules, "dependency_relations"
+        )
+        rows.append(relation)
+        keys.append(key)
+    _expect_strictly_increasing(keys, "facts.dependency_relations")
+    return frozenset(rows), set(keys)
+
+
+def _decode_dependency_occurrences(
+    facts: Mapping[str, object],
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+    relation_keys: set[tuple[object, ...]],
+) -> frozenset[DependencyOccurrenceRow]:
     columns, flags, row_count = _decode_columns(
-        "dependency_edges", facts["dependency_edges"]
+        "dependency_occurrences", facts["dependency_occurrences"]
     )
     lazy_positions = flags["is_lazy"]
     rows = []
     keys = []
     for index in range(row_count):
-        source, source_key = _decode_endpoint(
-            columns["source"][index],
-            files,
-            modules,
-            f"facts.dependency_edges.source[{index}]",
+        relation, relation_key = _decode_relation_triple(
+            columns, index, files, modules, "dependency_occurrences"
         )
-        target, target_key = _decode_endpoint(
-            columns["target"][index],
-            files,
-            modules,
-            f"facts.dependency_edges.target[{index}]",
-        )
-        import_type = _expect_string(
-            columns["import_type"][index],
-            f"facts.dependency_edges.import_type[{index}]",
-        )
-        if import_type not in IMPORT_TYPES:
-            raise _refuse("W08", f"unknown import_type tag {import_type!r}")
+        if relation_key not in relation_keys:
+            # The occurrence is evidence BOUND to a relation: a triple that
+            # names no relation row is dangling evidence, refused loudly.
+            raise _refuse(
+                "W26",
+                f"facts.dependency_occurrences[{index}] names a relation "
+                "the dependency_relations table does not carry",
+            )
         binding = _expect_string(
-            columns["binding"][index], f"facts.dependency_edges.binding[{index}]"
+            columns["binding"][index], f"facts.dependency_occurrences.binding[{index}]"
         )
         if binding not in DEPENDENCY_BINDINGS:
             raise _refuse("W08", f"unknown dependency binding tag {binding!r}")
         line = _expect_wire_int(
-            columns["line"][index], f"facts.dependency_edges.line[{index}]"
+            columns["line"][index], f"facts.dependency_occurrences.line[{index}]"
         )
         rows.append(
-            DependencyEdgeRow(
-                source, target, import_type, line, binding, index in lazy_positions
-            )
+            DependencyOccurrenceRow(relation, line, binding, index in lazy_positions)
         )
-        keys.append((*source_key, *target_key, import_type, line))
-    _expect_strictly_increasing(keys, "facts.dependency_edges")
+        keys.append((*relation_key, line))
+    _expect_strictly_increasing(keys, "facts.dependency_occurrences")
     return frozenset(rows)
 
 
@@ -1841,7 +1906,12 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     graph_nodes = _decode_graph_nodes(facts_section, symbols, roots, root_tables)
     semantic_edges = _decode_semantic_edges(facts_section, symbols)
     sink_roles = _decode_sink_roles(facts_section, symbols)
-    dependency_edges = _decode_dependency_edges(facts_section, files, modules)
+    dependency_relations, relation_keys = _decode_dependency_relations(
+        facts_section, files, modules
+    )
+    dependency_occurrences = _decode_dependency_occurrences(
+        facts_section, files, modules, relation_keys
+    )
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
@@ -1864,7 +1934,8 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 sink_roles=sink_roles,
                 candidates=frozenset(candidates),
                 semantic_edges=semantic_edges,
-                dependency_edges=dependency_edges,
+                dependency_relations=dependency_relations,
+                dependency_occurrences=dependency_occurrences,
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
             )

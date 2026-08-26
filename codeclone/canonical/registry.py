@@ -157,20 +157,24 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
-    "dependency_edges": (
+    # The ratified dependency split (ruling 2026-08-24 §2): the relation is
+    # the entity gate/SCC read; the occurrence is location evidence bound to
+    # it.  ``line`` never enters the relation — location is evidence, not
+    # identity.
+    "dependency_occurrences": (
         FieldDeclaration(
             "binding",
             ANALYSIS_FACT,
             "dependency_producer",
-            "classified binding time; payload, never part of the row key",
+            "classified binding time; occurrence payload, never key",
             stored=True,
             wire=True,
         ),
         FieldDeclaration(
-            "import_type",
+            "dependency_type",
             ANALYSIS_FACT,
             "dependency_producer",
-            "producer row-key component (measured dedup key)",
+            "relation-triple component binding this evidence to its entity",
             stored=True,
             wire=True,
         ),
@@ -178,7 +182,7 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "is_lazy",
             ANALYSIS_FACT,
             "dependency_producer",
-            "raw PEP 810 marker; payload boolean",
+            "raw PEP 810 marker; occurrence payload boolean",
             stored=True,
             wire=True,
             wire_shape="sparse_bool_positions",
@@ -187,7 +191,8 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "line",
             ANALYSIS_FACT,
             "dependency_producer",
-            "producer row-key component (926 corpus collisions without it)",
+            "evidence location; occurrence row-key component (926 corpus "
+            "collisions without it), never relation identity",
             stored=True,
             wire=True,
         ),
@@ -195,7 +200,7 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "source",
             ANALYSIS_FACT,
             "dependency_producer",
-            "DependencyEndpoint union MODULE | FILE (measured 860/1)",
+            "relation-triple component; DependencyEndpoint MODULE | FILE",
             stored=True,
             wire=True,
         ),
@@ -203,7 +208,33 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "target",
             ANALYSIS_FACT,
             "dependency_producer",
-            "DependencyEndpoint union MODULE | FILE",
+            "relation-triple component; DependencyEndpoint MODULE | FILE",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    "dependency_relations": (
+        FieldDeclaration(
+            "dependency_type",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "entity-key component; closed vocabulary (IMPORT_TYPES)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "entity-key component; DependencyEndpoint MODULE | FILE (measured 860/1)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "target",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "entity-key component; DependencyEndpoint MODULE | FILE",
             stored=True,
             wire=True,
         ),
