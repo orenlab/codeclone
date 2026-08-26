@@ -435,6 +435,24 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'"symbol_kind":"banana","visibility":"all"}',
             "unknown api symbol kind",
         ),
+        # F7 shape guard: a non-string module member is refused by the store
+        (
+            "dependency_cycle",
+            b'{"kind":"import_cycle","modules":["pkg.a",7]}',
+            "carries a non-string",
+        ),
+        # F7 model law through the store wrapper: unknown cycle kind
+        (
+            "dependency_cycle",
+            b'{"kind":"banana","modules":["pkg.a","pkg.b"]}',
+            "cycle kind",
+        ),
+        # F7 model law through the store wrapper: the two-module floor
+        (
+            "dependency_cycle",
+            b'{"kind":"import_cycle","modules":["pkg.a"]}',
+            "at least two",
+        ),
         # F9 shape guard: a non-int scalar is refused by the store
         (
             "run_scalar",
@@ -466,6 +484,9 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "api-annotation-not-string",
         "api-returns-not-string",
         "api-unknown-kind-model-law",
+        "cycle-non-string-module-shape-guard",
+        "cycle-unknown-kind-model-law",
+        "cycle-single-module-model-law",
         "run-scalar-non-int-shape-guard",
         "run-scalar-negative-model-law",
     ],
@@ -698,6 +719,7 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
         assert counts["dependency_occurrence"] == len(
             model.facts.analysis.dependency_occurrences
         )
+        assert counts["dependency_cycle"] == len(model.facts.analysis.dependency_cycles)
         assert counts["violation"] == len(model.facts.analysis.violations)
         assert counts["coupling_cohesion_observation"] == len(
             model.facts.analysis.coupling_cohesion_observations

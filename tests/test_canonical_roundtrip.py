@@ -36,6 +36,7 @@ from codeclone.canonical import (
     CanonicalModelError,
     ContractRow,
     CouplingCohesionRow,
+    DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
     EffectLabelRoot,
@@ -137,6 +138,15 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         # same relation as the first row: differs only in line, and is lazy
         DependencyOccurrenceRow(rel_import, 9, "type_checking", True),
         DependencyOccurrenceRow(rel_file, 2, "lazy_syntax", True),
+    ]
+    # F7 (wave 4): one row per module set, kind classified once.  The two
+    # rows share a module (their sets overlap without being equal), the
+    # deferred 3-cycle carries a module referenced by NO other family (the
+    # closure must admit it), and both producer kinds are present.
+    mz = ModuleId("zz.top")
+    dependency_cycles = [
+        DependencyCycleRow("import_cycle", frozenset({ma, mh})),
+        DependencyCycleRow("deferred_cycle", frozenset({ma, mh, mz})),
     ]
     violations = [
         ViolationRow(
@@ -251,6 +261,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         edges = list(reversed(edges))
         dependency_relations = list(reversed(dependency_relations))
         dependency_occurrences = list(reversed(dependency_occurrences))
+        dependency_cycles = list(reversed(dependency_cycles))
         violations = list(reversed(violations))
         coupling_cohesion = list(reversed(coupling_cohesion))
         api_symbols = list(reversed(api_symbols))
@@ -267,6 +278,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             semantic_edges=frozenset(edges),
             dependency_relations=frozenset(dependency_relations),
             dependency_occurrences=frozenset(dependency_occurrences),
+            dependency_cycles=frozenset(dependency_cycles),
             violations=frozenset(violations),
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
@@ -304,14 +316,17 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     the draft gained the ``run_scalars`` record member.  The F1
     ``risk_observations`` family (ruling 2026-08-26, fork (b)) then
     replaced the F9 literal deliberately: the draft gained the
-    declaration-site keyed risk family, so every document's bytes moved —
-    the one announced transition of this commit.
+    declaration-site keyed risk family (4290 bytes, sha256 873a0a42…).
+    The F7 ``dependency_cycles`` family (slice 4, K1) then replaced the F1
+    literal deliberately: the draft gained the module-set keyed cycle
+    family, so every document's bytes moved — the one announced transition
+    of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 4290
+    assert len(payload) == 4388
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "873a0a42f0500978177d3ad8494ba8294a58d2c1399a84462253472f4e97d924"
+        == "bdd06ad1bb85c94ffdb432b822d61240e6e96383be1d7be78db6db799168f30d"
     )
 
 
@@ -351,6 +366,7 @@ def test_entity_counts_survive_the_round_trip() -> None:
         "semantic_edges",
         "dependency_relations",
         "dependency_occurrences",
+        "dependency_cycles",
         "violations",
         "coupling_cohesion_observations",
         "api_symbols",
@@ -922,6 +938,110 @@ def test_run_scalars_refuses_non_scalar_values(field_name: str, value: object) -
     values[field_name] = value
     with pytest.raises(CanonicalModelError, match="run scalar"):
         RunScalars(**values)  # type: ignore[arg-type]
+
+
+def test_model_refuses_two_cycle_kinds_on_one_module_set() -> None:
+    """F7 family law (corpus-pinned): ONE row per module set, the kind
+    classified exactly once.  Two rows disagreeing only in kind are a
+    producer defect — a deferred back-edge over a pair that already carries
+    an import-time cycle never births a second row."""
+    ma, mb = ModuleId("pkg.a"), ModuleId("pkg.b")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dependency_cycles=frozenset(
+                {
+                    DependencyCycleRow("import_cycle", frozenset({ma, mb})),
+                    DependencyCycleRow("deferred_cycle", frozenset({ma, mb})),
+                }
+            )
+        )
+    )
+    with pytest.raises(CanonicalModelError, match=r"dependency_cycles\.modules"):
+        model.normalize()
+
+
+def test_cycle_rows_differing_in_module_set_coexist() -> None:
+    """The module SET names the entity: overlapping sets — even a strict
+    subset next to its superset — are distinct cycles."""
+    ma, mb, mc = ModuleId("pkg.a"), ModuleId("pkg.b"), ModuleId("pkg.c")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dependency_cycles=frozenset(
+                {
+                    DependencyCycleRow("import_cycle", frozenset({ma, mb})),
+                    DependencyCycleRow("import_cycle", frozenset({ma, mb, mc})),
+                    DependencyCycleRow("deferred_cycle", frozenset({ma, mc})),
+                }
+            )
+        )
+    )
+    normalized = model.normalize()
+    assert len(normalized.facts.analysis.dependency_cycles) == 3
+    # the closure admits every cycle member into the MODULE domain
+    assert {ma, mb, mc} <= normalized.modules
+
+
+def test_cycle_row_refuses_an_unknown_kind() -> None:
+    with pytest.raises(CanonicalModelError, match="cycle kind"):
+        DependencyCycleRow("banana", frozenset({ModuleId("a"), ModuleId("b")}))
+
+
+def test_cycle_row_refuses_fewer_than_two_modules() -> None:
+    """The producer's Tarjan floor (``len(component) > 1``): a cycle names
+    at least two modules; a one-module row asserts a self-loop the producer
+    never emits."""
+    with pytest.raises(CanonicalModelError, match="at least two"):
+        DependencyCycleRow("import_cycle", frozenset({ModuleId("pkg.a")}))
+
+
+def test_cycle_rows_are_ordered_by_module_set_on_the_wire() -> None:
+    """Wire row order is the module-set ordinal tuple — the entity key.
+
+    The kind deliberately does NOT enter the sort key: one set carries one
+    row, so kind can never be a tiebreaker; an encoder that sorts by kind
+    first leaks the classification into row order and this pin reds.
+    """
+    ma, mb, mc, md = (ModuleId(f"pkg.{c}") for c in "abcd")
+    # The middle row's kind sorts BEFORE the first row's kind while its
+    # module set sorts after: a kind-first encoder reorders these rows and
+    # the pin reds directly, not only through the byte sentinel.
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dependency_cycles=frozenset(
+                {
+                    DependencyCycleRow("import_cycle", frozenset({ma, mb})),
+                    DependencyCycleRow("deferred_cycle", frozenset({ma, mc})),
+                    DependencyCycleRow("import_cycle", frozenset({mc, md})),
+                }
+            )
+        )
+    )
+    document = json.loads(encode_canonical_json(model))
+    table = document["facts"]["dependency_cycles"]
+    assert table["modules"] == [[0, 1], [0, 2], [2, 3]]
+    assert table["kind"] == ["import_cycle", "deferred_cycle", "import_cycle"]
+
+
+def test_cycle_member_paths_never_reach_the_wire() -> None:
+    """``member_paths`` is the registry's FILE-MODULE projection — a table,
+    never a column (§2.3), declared representation_projection: the wire
+    member carries exactly the kind and the module set."""
+    document = json.loads(encode_canonical_json(fixture_model()))
+    table = document["facts"]["dependency_cycles"]
+    assert list(table.keys()) == ["kind", "modules"]
+
+
+def test_cycle_family_survives_the_round_trip() -> None:
+    decoded = decode_canonical_json(encode_canonical_json(fixture_model()))
+    ma, mh, mz = ModuleId("pkg.a"), ModuleId("tools.helper"), ModuleId("zz.top")
+    assert decoded.facts.analysis.dependency_cycles == frozenset(
+        {
+            DependencyCycleRow("import_cycle", frozenset({ma, mh})),
+            DependencyCycleRow("deferred_cycle", frozenset({ma, mh, mz})),
+        }
+    )
+    # the closure-only module (no other family references it) survived
+    assert mz in decoded.modules
 
 
 def test_model_refuses_a_violation_sink_without_the_function_role() -> None:

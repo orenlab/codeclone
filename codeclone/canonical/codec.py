@@ -75,6 +75,7 @@ from codeclone.canonical.identity import (
     API_VISIBILITIES,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
+    DEPENDENCY_CYCLE_KINDS,
     DOMAIN_TAG_FILE,
     DOMAIN_TAG_MODULE,
     EFFECT_KINDS,
@@ -113,6 +114,7 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ContractRow,
     CouplingCohesionRow,
+    DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
     FileModuleRelation,
@@ -559,6 +561,19 @@ def _dependency_occurrence_rows(
     ]
 
 
+def _dependency_cycle_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    # Row order IS the entity key: the module-set ordinal tuple.  The kind
+    # deliberately never enters the sort key — one set carries one row, so
+    # a kind tiebreaker could only leak classification into row order.
+    keyed = sorted(
+        (tuple(sorted(plan.module_ordinal[m] for m in row.modules)), row.kind)
+        for row in facts.dependency_cycles
+    )
+    return [{"kind": kind, "modules": list(ordinals)} for ordinals, kind in keyed]
+
+
 def _violation_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     handle_symbols: set[SymbolId] = set()
     for violation in facts.violations:
@@ -771,6 +786,7 @@ _FAMILY_ROW_BUILDERS: dict[
     "candidates": _candidate_rows,
     "contracts": _contract_rows,
     "coupling_cohesion_observations": _coupling_cohesion_rows,
+    "dependency_cycles": _dependency_cycle_rows,
     "dependency_occurrences": _dependency_occurrence_rows,
     "dependency_relations": _dependency_relation_rows,
     "file_modules": _file_module_rows,
@@ -1751,6 +1767,40 @@ def _decode_dependency_occurrences(
     return frozenset(rows)
 
 
+def _decode_dependency_cycles(
+    facts: Mapping[str, object], modules: Sequence[ModuleId]
+) -> frozenset[DependencyCycleRow]:
+    columns, _flags, row_count = _decode_columns(
+        "dependency_cycles", facts["dependency_cycles"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        kind = _expect_string(
+            columns["kind"][index], f"facts.dependency_cycles.kind[{index}]"
+        )
+        if kind not in DEPENDENCY_CYCLE_KINDS:
+            raise _refuse("W08", f"unknown dependency cycle kind tag {kind!r}")
+        where = f"facts.dependency_cycles.modules[{index}]"
+        ordinals = [
+            _expect_ordinal(item, len(modules), where)
+            for item in _expect_list(columns["modules"][index], where)
+        ]
+        _expect_increasing_elements(ordinals, where)
+        if len(ordinals) < 2:
+            raise _refuse(
+                "W18",
+                f"{where} names fewer than two modules (a cycle has no "
+                "self-loops: the producer's Tarjan floor)",
+            )
+        rows.append(DependencyCycleRow(kind, frozenset(modules[o] for o in ordinals)))
+        keys.append(tuple(ordinals))
+    # The module-set tuple is the entity key: a duplicate set — with any
+    # kind — refuses in-band (W13), spelling the classified-once law.
+    _expect_strictly_increasing(keys, "facts.dependency_cycles")
+    return frozenset(rows)
+
+
 def _decode_coupling_cohesion(
     facts: Mapping[str, object], symbols: Sequence[SymbolId]
 ) -> frozenset[CouplingCohesionRow]:
@@ -2167,6 +2217,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     dependency_occurrences = _decode_dependency_occurrences(
         facts_section, files, modules, relation_keys
     )
+    dependency_cycles = _decode_dependency_cycles(facts_section, modules)
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
     risk_observations = _decode_risk_observations(facts_section, symbols)
@@ -2194,6 +2245,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 semantic_edges=semantic_edges,
                 dependency_relations=dependency_relations,
                 dependency_occurrences=dependency_occurrences,
+                dependency_cycles=dependency_cycles,
                 violations=frozenset(violations),
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,

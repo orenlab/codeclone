@@ -27,6 +27,7 @@ import pytest
 from codeclone.canonical import (
     AnalysisFile,
     CanonicalModelError,
+    DependencyCycleRow,
     EffectLabelRoot,
     FileId,
     KnownModule,
@@ -62,6 +63,7 @@ def legacy_document() -> dict[str, Any]:
             "analysis_scope": [
                 {"path": "pkg/mod.py"},
                 {"path": "pkg/other.py"},
+                {"path": "pkg/third.py"},
                 {"path": "scripts/tool.py"},
             ],
             "module_registry": {
@@ -82,6 +84,15 @@ def legacy_document() -> dict[str, Any]:
                                 "identity": {
                                     "file": {"path": "pkg/other.py"},
                                     "python_module": {"module": "pkg.other"},
+                                }
+                            },
+                        ],
+                        [
+                            "pkg/third.py",
+                            {
+                                "identity": {
+                                    "file": {"path": "pkg/third.py"},
+                                    "python_module": {"module": "pkg.third"},
                                 }
                             },
                         ],
@@ -314,7 +325,22 @@ def legacy_document() -> dict[str, Any]:
                             "binding": "type_checking",
                             "is_lazy": True,
                         },
-                    ]
+                    ],
+                    # F7 verbatim from the producer's shape: modules and the
+                    # aligned registry member paths; one set per row, the
+                    # kind classified once, two sets sharing a module.
+                    "cycle_details": [
+                        {
+                            "modules": ["pkg.mod", "pkg.other"],
+                            "kind": "import_cycle",
+                            "member_paths": ["pkg/mod.py", "pkg/other.py"],
+                        },
+                        {
+                            "modules": ["pkg.mod", "pkg.third"],
+                            "kind": "deferred_cycle",
+                            "member_paths": ["pkg/mod.py", "pkg/third.py"],
+                        },
+                    ],
                 },
                 "coupling": {
                     "items": [
@@ -379,13 +405,33 @@ def test_ingest_builds_the_measured_families() -> None:
         unsupported_construct_skipped=5,
     )
     assert len(model.coupled_sets) == 2  # duplicates collapse, empty drops
-    assert len(model.analyzed_files) == 3
-    assert len(model.file_modules) == 2
+    assert len(model.analyzed_files) == 4
+    assert len(model.file_modules) == 3
     make = SymbolId(FileId("pkg/mod.py"), "make")
     run = SymbolId(FileId("scripts/tool.py"), "run")
     assert {row.function for row in facts.analysis.contracts} == {make, run}
     candidate = next(iter(facts.analysis.candidates))
     assert candidate.producer_set == frozenset({make, run})
+
+
+def test_ingest_builds_the_cycle_family_rows() -> None:
+    """F7: both producer kinds, MODULE-domain sets, overlapping but
+    distinct — carried verbatim from the document's cycle_details rows."""
+    model = canonical_model_from_legacy_document(legacy_document())
+    rows = model.facts.analysis.dependency_cycles
+    assert len(rows) == 2
+    assert rows == frozenset(
+        {
+            DependencyCycleRow(
+                "import_cycle",
+                frozenset({ModuleId("pkg.mod"), ModuleId("pkg.other")}),
+            ),
+            DependencyCycleRow(
+                "deferred_cycle",
+                frozenset({ModuleId("pkg.mod"), ModuleId("pkg.third")}),
+            ),
+        }
+    )
 
 
 def test_ingest_keeps_both_overload_risk_declarations() -> None:
@@ -561,6 +607,91 @@ def test_ingest_refuses_a_module_claiming_two_files() -> None:
         )
 
     with pytest.raises(LegacyIngestError, match="two files"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def _cycle_row(document: dict[str, Any]) -> dict[str, Any]:
+    dependencies = document["metrics"]["families"]["dependencies"]
+    row: dict[str, Any] = dependencies["cycle_details"][0]
+    return row
+
+
+def test_ingest_refuses_a_cycle_module_outside_the_registry() -> None:
+    """MODULE-domain law: a cycle member that is not a registry module has
+    no MODULE identity; the oracle refuses instead of minting one from a
+    string."""
+
+    def swap(document: dict[str, Any]) -> None:
+        row = _cycle_row(document)
+        row["modules"] = ["pkg.mod", "ghost.mod"]
+        row["member_paths"] = ["pkg/mod.py", None]
+
+    with pytest.raises(LegacyIngestError, match="not a registry module"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_misaligned_cycle_member_paths() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        _cycle_row(document)["member_paths"] = ["pkg/mod.py"]
+
+    with pytest.raises(LegacyIngestError, match="align"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_member_path_disagreeing_with_the_registry() -> None:
+    """member_paths is the registry's own projection; a document whose row
+    disagrees with its own registry is at war with itself — refused, never
+    silently repaired (the projection is representation, not a fact to keep)."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _cycle_row(document)["member_paths"] = ["pkg/other.py", "pkg/other.py"]
+
+    with pytest.raises(LegacyIngestError, match="disagrees"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_cycle_naming_one_module_twice() -> None:
+    """The row asserts a SET; a repeated member is a producer defect that a
+    frozenset would silently absorb.  Three members with one repeat reach
+    ONLY the arity guard: the collapsed set still clears the two-module
+    floor, so a dropped guard would absorb the defect silently."""
+
+    def swap(document: dict[str, Any]) -> None:
+        row = _cycle_row(document)
+        row["modules"] = ["pkg.mod", "pkg.mod", "pkg.other"]
+        row["member_paths"] = ["pkg/mod.py", "pkg/mod.py", "pkg/other.py"]
+
+    with pytest.raises(LegacyIngestError, match="twice"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_two_cycle_rows_over_one_module_set() -> None:
+    """The corpus-pinned family law routed through normalization: a second
+    row on the same set — even with the other kind — is refused."""
+
+    def swap(document: dict[str, Any]) -> None:
+        rows = document["metrics"]["families"]["dependencies"]["cycle_details"]
+        rows.append(dict(rows[0], kind="deferred_cycle"))
+
+    with pytest.raises(CanonicalModelError, match=r"dependency_cycles\.modules"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_an_unknown_cycle_kind() -> None:
+    """The model law owns the vocabulary; ingest routes its refusal."""
+
+    def swap(document: dict[str, Any]) -> None:
+        _cycle_row(document)["kind"] = "banana"
+
+    with pytest.raises(CanonicalModelError, match="cycle kind"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_refuses_a_document_missing_cycle_details() -> None:
+    def swap(document: dict[str, Any]) -> None:
+        del document["metrics"]["families"]["dependencies"]["cycle_details"]
+
+    with pytest.raises(LegacyIngestError, match="missing 'cycle_details'"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 

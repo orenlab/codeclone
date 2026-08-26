@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from collections.abc import Callable, Generator
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +23,84 @@ from tests._sqlite_cleanup import (
 )
 
 ReportMetaFactory = Callable[..., dict[str, object]]
+
+# ---------------------------------------------------------------------------
+# The wire-freeze distinguishing corpus (ruling 2026-08-24 §10, step 2b).
+#
+# Shared session infrastructure: the corpus tree is materialized from inert
+# ``*.txt`` carriers and analyzed once through the real CLI; the resulting
+# report document feeds BOTH the report-shape pins (an r4-subject module,
+# ``test_wire_freeze_corpus``) and the canonical-family pins (an r2-subject
+# module, ``test_canonical_wire_freeze_corpus``).  The builder lives here so
+# each test module binds to exactly one architectural ring — the Phase 39S
+# test-import law — while sharing one corpus run.
+# ---------------------------------------------------------------------------
+
+_WIRE_FREEZE_CORPUS = Path(__file__).parent / "fixtures" / "wire_freeze_corpus"
+
+# The post-baseline stage: materialized only after the baseline is written,
+# so its clone pair is the corpus's one genuinely NEW novelty row.
+_WIRE_FREEZE_POST_BASELINE = "pkg/clones_three.py"
+
+
+def materialize_wire_freeze_corpus(target: Path, *, post_baseline: bool) -> None:
+    """Write the corpus tree from its inert carriers.
+
+    Every ``*.txt`` carrier becomes the file named by stripping the
+    trailing ``.txt``; ``post_baseline=False`` withholds the stage-B file.
+    """
+    for carrier in sorted(_WIRE_FREEZE_CORPUS.rglob("*.txt")):
+        relative = carrier.relative_to(_WIRE_FREEZE_CORPUS).with_suffix("")
+        if not post_baseline and relative.as_posix() == _WIRE_FREEZE_POST_BASELINE:
+            continue
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(carrier.read_text("utf-8"), "utf-8")
+
+
+@pytest.fixture(scope="session")
+def corpus_report(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, object]:
+    """One two-stage corpus run: baseline on stage A, report on stage B."""
+    import codeclone.surfaces.cli.workflow as cli
+
+    root = tmp_path_factory.mktemp("wire_freeze_corpus")
+    baseline = root / "corpus.baseline.json"
+    report_path = root / "corpus.report.json"
+    monkeypatch = pytest.MonkeyPatch()
+
+    def _run_cli(args: list[str]) -> None:
+        monkeypatch.setattr(sys, "argv", ["codeclone", *args])
+        cli.main()
+
+    try:
+        materialize_wire_freeze_corpus(root, post_baseline=False)
+        _run_cli(
+            [
+                str(root),
+                "--baseline",
+                str(baseline),
+                "--update-baseline",
+                "--no-progress",
+            ]
+        )
+        materialize_wire_freeze_corpus(root, post_baseline=True)
+        _run_cli(
+            [
+                str(root),
+                "--baseline",
+                str(baseline),
+                "--json",
+                str(report_path),
+                "--no-progress",
+            ]
+        )
+    finally:
+        monkeypatch.undo()
+    document = json.loads(report_path.read_text("utf-8"))
+    assert isinstance(document, dict)
+    return document
 
 
 @pytest.fixture(autouse=True)

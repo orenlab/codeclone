@@ -92,9 +92,13 @@ _TARGET = "worktree-a"
 # The F1 ``risk_observations`` family (ruling 2026-08-26, fork (b))
 # replaced the F9 literals (run c3e2d21c..., artifact 642922b3...)
 # deliberately: the fixture gained four declaration-site keyed
-# risk_observation objects under the complexity_metrics namespace.
-_FIXTURE_RUN_ID = "22bd2c6d13510b00a3bc189125052aefc2758d256c8ebd8e2ac7e16e48192bf4"
-_FIXTURE_ARTIFACT = "e8d701a8f1388d7208ce1a2cbeff975a1a6338c0ebba1651df8b5315049fa98c"
+# risk_observation objects under the complexity_metrics namespace.  The F7
+# ``dependency_cycles`` family (slice 4, K1) replaced the F1 literals (run
+# 22bd2c6d..., artifact e8d701a8...) deliberately: the fixture gained two
+# module-set keyed dependency_cycle objects under the canonical_model
+# namespace, which moves the membership and the bytes.
+_FIXTURE_RUN_ID = "167aadde96de4e58f3f4c7a0f2a94c6114447c2549dba62a4fc39de5f8535a0f"
+_FIXTURE_ARTIFACT = "5b93927467c663a43de46f28d8bb3746f4bc6402ad6c5c5bc9e50f0c19578a0c"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

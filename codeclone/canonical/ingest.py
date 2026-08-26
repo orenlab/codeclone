@@ -69,6 +69,7 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ContractRow,
     CouplingCohesionRow,
+    DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
     FileModuleRelation,
@@ -384,15 +385,12 @@ def canonical_model_from_legacy_document(
         )
     )
 
+    dependencies_family = _mapping(
+        _field(families, "dependencies", "metrics.families"),
+        "metrics.families.dependencies",
+    )
     dependency_rows = _sequence(
-        _field(
-            _mapping(
-                _field(families, "dependencies", "metrics.families"),
-                "metrics.families.dependencies",
-            ),
-            "items",
-            "metrics.families.dependencies",
-        ),
+        _field(dependencies_family, "items", "metrics.families.dependencies"),
         "dependencies.items",
     )
     # The ratified split (ruling 2026-08-24 §2): every producer item is one
@@ -405,6 +403,14 @@ def canonical_model_from_legacy_document(
     )
     dependency_relations = frozenset(
         occurrence.relation for occurrence in dependency_occurrences
+    )
+    cycle_rows = _sequence(
+        _field(dependencies_family, "cycle_details", "metrics.families.dependencies"),
+        "dependencies.cycle_details",
+    )
+    dependency_cycles = frozenset(
+        _dependency_cycle(_mapping(row, "cycle_details row"), index)
+        for row in cycle_rows
     )
 
     coupling_rows = _sequence(
@@ -487,6 +493,7 @@ def canonical_model_from_legacy_document(
                 semantic_edges=semantic_edges,
                 dependency_relations=dependency_relations,
                 dependency_occurrences=dependency_occurrences,
+                dependency_cycles=dependency_cycles,
                 violations=violations,
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
@@ -534,6 +541,46 @@ def _dependency_occurrence(
         line=line,
         binding=_string(row, "binding", "dependencies item"),
         is_lazy=is_lazy,
+    )
+
+
+def _dependency_cycle(
+    row: Mapping[str, object], index: _RegistryIndex
+) -> DependencyCycleRow:
+    """One F7 fact from the producer's own ``cycle_details`` row.
+
+    The oracle proves the row against the document's OWN registry: every
+    member must be a registry module (MODULE-domain law — no identity is
+    minted from a string), the aligned ``member_paths`` must be exactly the
+    registry's projection (a document at war with its own registry is
+    refused, never repaired), and a repeated member is refused loudly — a
+    frozenset would silently absorb the arity defect.
+    """
+    modules = _string_tuple(
+        _field(row, "modules", "cycle_details row"), "cycle_details.modules"
+    )
+    member_paths = _sequence(
+        _field(row, "member_paths", "cycle_details row"), "cycle_details.member_paths"
+    )
+    if len(member_paths) != len(modules):
+        raise LegacyIngestError("cycle_details member_paths do not align with modules")
+    if len(set(modules)) != len(modules):
+        raise LegacyIngestError("cycle_details row names one module twice")
+    for module, path in zip(modules, member_paths, strict=True):
+        if module not in index.module_to_path:
+            raise LegacyIngestError(
+                f"cycle_details member {module!r} is not a registry module; "
+                "refusing to guess an identity"
+            )
+        expected = index.module_to_path[module]
+        if path != expected:
+            raise LegacyIngestError(
+                f"cycle_details member path {path!r} disagrees with the "
+                f"document's own registry ({expected!r} for {module!r})"
+            )
+    return DependencyCycleRow(
+        kind=_string(row, "kind", "cycle_details row"),
+        modules=frozenset(ModuleId(module) for module in modules),
     )
 
 

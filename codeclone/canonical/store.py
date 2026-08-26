@@ -124,6 +124,7 @@ from codeclone.canonical.model import (
     CanonicalModel,
     ContractRow,
     CouplingCohesionRow,
+    DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
     FileModuleRelation,
@@ -186,6 +187,10 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     "coupling_cohesion_observation": (
         f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
     ),
+    # F7: the cycle verdict is a canonical-model analysis fact over the
+    # relation graph; no separate cycle-algorithm revision exists, and the
+    # relation families it reads share this namespace.
+    "dependency_cycle": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "dependency_occurrence": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "dependency_relation": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "file": f"module_identity:{MODULE_IDENTITY_VERSION}",
@@ -380,9 +385,10 @@ def _decode_root_set(value: object, where: str) -> frozenset[EffectRoot]:
     return frozenset(_decode_root(item, where) for item in value)
 
 
-def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
-    """Every storage row of one normalized model, deterministically ordered."""
-    facts = model.facts.analysis
+def _identity_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
+    """Identity and scope rows of one model — the storage spelling of the
+    export's ``_IDENTITY_FAMILIES``, split from the fact tables so neither
+    half re-derives the other."""
     for file_id in sorted(model.files, key=canonical_key):
         yield "file", {"path": file_id.path}
     for module in sorted(model.modules, key=canonical_key):
@@ -399,6 +405,12 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
         )
     for labels in sorted(sorted(group) for group in model.coupled_sets):
         yield "coupled_set", {"labels": list(labels)}
+
+
+def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
+    """Every storage row of one normalized model, deterministically ordered."""
+    facts = model.facts.analysis
+    yield from _identity_rows(model)
     for contract in sorted(
         facts.contracts, key=lambda row: canonical_key(row.function)
     ):
@@ -486,6 +498,17 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "line": occurrence.line,
                 "source": _endpoint_value(occurrence.relation.source),
                 "target": _endpoint_value(occurrence.relation.target),
+            },
+        )
+    for cycle in sorted(
+        facts.dependency_cycles,
+        key=lambda row: sorted(module.module for module in row.modules),
+    ):
+        yield (
+            "dependency_cycle",
+            {
+                "kind": cycle.kind,
+                "modules": sorted(module.module for module in cycle.modules),
             },
         )
     for violation in sorted(
@@ -693,6 +716,20 @@ def _decode_dependency_occurrence_row(
     )
 
 
+def _decode_dependency_cycle_row(
+    row: Mapping[str, object], where: str
+) -> DependencyCycleRow:
+    """Shape guards only: the kind vocabulary and the two-module floor have
+    exactly one owner — the model law (``DependencyCycleRow``), whose
+    refusal ``_decode_row`` wraps into a typed integrity error."""
+    return DependencyCycleRow(
+        kind=_require_str(row, "kind", where),
+        modules=frozenset(
+            ModuleId(module) for module in _require_str_list(row, "modules", where)
+        ),
+    )
+
+
 def _decode_coupling_cohesion_row(
     row: Mapping[str, object], where: str
 ) -> CouplingCohesionRow:
@@ -807,6 +844,7 @@ _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] =
     "contract": _decode_contract_row,
     "coupled_set": _decode_coupled_row,
     "coupling_cohesion_observation": _decode_coupling_cohesion_row,
+    "dependency_cycle": _decode_dependency_cycle_row,
     "dependency_occurrence": _decode_dependency_occurrence_row,
     "dependency_relation": _decode_dependency_relation_row,
     "file": _decode_file_row,
@@ -867,6 +905,9 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                         "list[DependencyOccurrenceRow]",
                         family("dependency_occurrence"),
                     )
+                ),
+                dependency_cycles=frozenset(
+                    cast("list[DependencyCycleRow]", family("dependency_cycle"))
                 ),
                 violations=frozenset(cast("list[ViolationRow]", family("violation"))),
                 coupling_cohesion_observations=frozenset(
@@ -1174,6 +1215,7 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "candidates": "candidate",
     "contracts": "contract",
     "coupling_cohesion_observations": "coupling_cohesion_observation",
+    "dependency_cycles": "dependency_cycle",
     "dependency_occurrences": "dependency_occurrence",
     "dependency_relations": "dependency_relation",
     "file_modules": "file_module",

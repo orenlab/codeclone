@@ -96,6 +96,14 @@ COUPLING_COHESION_DIMENSIONS: Final = (
 # COMPLEXITY_ALGORITHM_REVISION (the Wave D lane split: the risk lane rides
 # the complexity revision, never the shared design-metrics one).
 RISK_DIMENSIONS: Final = ("cyclomatic_complexity", "nesting_depth")
+# F7 dependency_cycles (wave 4): the producer's closed cycle-kind vocabulary
+# (``codeclone.models.DependencyCycleKind``), mirrored verbatim and pinned
+# against it by test.  The wire refuses unknowns (W08).  The classification
+# law — ``import_cycle`` iff the import-time edges still cycle among the
+# members — is applied exactly once by the one producer owner
+# (``metrics/dependencies.runtime_cycle_facts``); the family stores the
+# verdict as an analysis FACT and never re-derives it on read.
+DEPENDENCY_CYCLE_KINDS: Final = ("import_cycle", "deferred_cycle")
 # F5 api_symbols (wave 4): the producer's closed vocabularies, mirrored
 # verbatim in producer Literal order (``codeclone.models``: ApiSymbolKind /
 # ApiVisibility / ApiParameterKind) and pinned against them by test — a

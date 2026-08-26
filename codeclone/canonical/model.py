@@ -66,6 +66,7 @@ from codeclone.canonical.identity import (
     API_VISIBILITIES,
     COUPLING_COHESION_DIMENSIONS,
     DEPENDENCY_BINDINGS,
+    DEPENDENCY_CYCLE_KINDS,
     IMPORT_TYPES,
     RISK_DIMENSIONS,
     VIOLATION_KINDS,
@@ -192,6 +193,43 @@ class DependencyOccurrenceRow:
         if isinstance(self.line, bool) or self.line < 0:
             raise CanonicalModelError(
                 f"dependency line must be a non-negative int: {self.line!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyCycleRow:
+    """F7 runtime dependency cycle fact (wave 4).
+
+    The family law, pinned by the distinguishing corpus: ONE row per module
+    set, the kind classified exactly once by the one producer owner
+    (``metrics/dependencies.runtime_cycle_facts``) — a deferred back-edge
+    over a pair that already carries an import-time cycle never births a
+    second row.  The natural key spells ``(kind, sorted module set)`` on the
+    wire, but uniqueness is proven on the module SET alone, so two rows
+    disagreeing only in kind are refused as a producer defect.  Gate and
+    SCC read the relation graph; this family stores the classification
+    VERDICT as an analysis fact and never re-derives it on read.
+
+    ``modules`` is MODULE-domain, never strings (ruling 2026-08-24 §2), and
+    carries at least two members (the producer's Tarjan floor:
+    ``len(component) > 1`` — a self-loop is never emitted).  The legacy
+    row's ``member_paths`` is deliberately NOT here: it is the registry's
+    FILE-MODULE projection — a table, never a column (§2.3) — declared
+    ``representation_projection`` in the registry and re-derivable from
+    ``file_modules``; storing it per row would be a second spelling of the
+    same relation.
+    """
+
+    kind: str
+    modules: frozenset[ModuleId]
+
+    def __post_init__(self) -> None:
+        if self.kind not in DEPENDENCY_CYCLE_KINDS:
+            raise CanonicalModelError(f"unknown dependency cycle kind: {self.kind!r}")
+        if len(self.modules) < 2:
+            raise CanonicalModelError(
+                "a dependency cycle names at least two modules "
+                "(the producer's Tarjan floor drops self-loops)"
             )
 
 
@@ -404,6 +442,7 @@ class AnalysisFacts:
     dependency_occurrences: frozenset[DependencyOccurrenceRow] = field(
         default_factory=frozenset
     )
+    dependency_cycles: frozenset[DependencyCycleRow] = field(default_factory=frozenset)
     violations: frozenset[ViolationRow] = field(default_factory=frozenset)
     coupling_cohesion_observations: frozenset[CouplingCohesionRow] = field(
         default_factory=frozenset
@@ -515,6 +554,14 @@ def _dependency_occurrence_key(row: DependencyOccurrenceRow) -> tuple[object, ..
     return (*_dependency_relation_key(row.relation), row.line)
 
 
+def _dependency_cycle_set_key(row: DependencyCycleRow) -> tuple[object, ...]:
+    # The family law: the module SET alone names the entity (one row per
+    # set, kind classified once).  Keying on (kind, modules) instead would
+    # let the two kinds coexist on one set — the exact defect the corpus
+    # pins out of existence.
+    return tuple(sorted(canonical_key(module) for module in row.modules))
+
+
 def _api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:
     # The ratified F5 key: the SYMBOL plus the canonical signature variant,
     # computed through its ONE formula owner — never a second spelling.
@@ -602,6 +649,8 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
     for occurrence in facts.dependency_occurrences:
         closure.see_endpoint(occurrence.relation.source)
         closure.see_endpoint(occurrence.relation.target)
+    for cycle in facts.dependency_cycles:
+        closure.modules.update(cycle.modules)
     for violation in facts.violations:
         closure.see_violation(violation)
     for observation in facts.coupling_cohesion_observations:
@@ -636,6 +685,11 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         facts.dependency_occurrences,
         "dependency_occurrences.producer_key",
         _dependency_occurrence_key,
+    )
+    _unique_by_key(
+        facts.dependency_cycles,
+        "dependency_cycles.modules",
+        _dependency_cycle_set_key,
     )
     _unique_by_key(facts.violations, "violations.natural_key", _violation_natural_key)
     _unique_by_key(

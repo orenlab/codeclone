@@ -203,6 +203,42 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     ),
     (
         "W08",
+        "unknown dependency cycle kind tag",
+        '"dependency_cycles":{"kind":["import_cycle"',
+        '"dependency_cycles":{"kind":["banana"',
+    ),
+    (
+        "W13",
+        "duplicate cycle module set (classified-once law in-band)",
+        '"modules":[[0,1],[0,1,2]]',
+        '"modules":[[0,1],[0,1]]',
+    ),
+    (
+        "W12",
+        "cycle rows out of module-set order",
+        '"modules":[[0,1],[0,1,2]]',
+        '"modules":[[0,1,2],[0,1]]',
+    ),
+    (
+        "W14",
+        "cycle members not strictly increasing",
+        '"modules":[[0,1],[0,1,2]]',
+        '"modules":[[1,0],[0,1,2]]',
+    ),
+    (
+        "W18",
+        "cycle with fewer than two modules",
+        '"modules":[[0,1],[0,1,2]]',
+        '"modules":[[0],[0,1,2]]',
+    ),
+    (
+        "W10",
+        "cycle module ordinal beyond the table",
+        '"modules":[[0,1],[0,1,2]]',
+        '"modules":[[0,1],[0,1,9]]',
+    ),
+    (
+        "W08",
         "unknown coupling dimension tag",
         '"dimension":["cbo","lcom4"',
         '"dimension":["banana","lcom4"',
@@ -315,8 +351,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "null where forbidden",
-        '"module":["pkg.a","tools.helper"]',
-        '"module":[null,"tools.helper"]',
+        '"module":["pkg.a","tools.helper","zz.top"]',
+        '"module":[null,"tools.helper","zz.top"]',
     ),
     (
         "W18",
@@ -610,8 +646,8 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "empty module name",
-        '"module":["pkg.a","tools.helper"]',
-        '"module":["","tools.helper"]',
+        '"module":["pkg.a","tools.helper","zz.top"]',
+        '"module":["","tools.helper","zz.top"]',
     ),
     (
         "W08",

@@ -269,6 +269,41 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # F7 (wave 4): one row per module set, the kind classified once by the
+    # one producer owner.  ``member_paths`` of the legacy row is declared
+    # here as what it is — the registry's FILE-MODULE projection, a table
+    # and never a column (§2.3) — so the projector CANNOT emit it.
+    "dependency_cycles": (
+        FieldDeclaration(
+            "kind",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "classified once by the one cycle owner (import_cycle iff the "
+            "import-time edges still cycle among the members); closed "
+            "vocabulary (DEPENDENCY_CYCLE_KINDS); payload of the set, "
+            "never a second row",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "member_paths",
+            REPRESENTATION,
+            "module_registry",
+            "registry FILE-MODULE projection per member; re-derivable from "
+            "file_modules — a table, never a column (§2.3)",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "modules",
+            ANALYSIS_FACT,
+            "dependency_producer",
+            "entity key: the module SET (one row per set); MODULE domain, "
+            "never strings; at least two members (Tarjan floor)",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "dependency_relations": (
         FieldDeclaration(
             "dependency_type",
