@@ -27,7 +27,6 @@ from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import computed_metric_families as _computed_metric_families
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
-from ._blast_radius import BlastRadiusResult
 from ._code_provenance import process_code_provenance
 from ._implementation_context import build_unit_location_inventory
 from ._implementation_context_pages import ContextProjectionArtifact
@@ -37,7 +36,10 @@ from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
-from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
+from ._session_blast_radius_mixin import (
+    BlastRadiusCache,
+    _MCPSessionBlastRadiusMixin,
+)
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_context_mixin import _MCPSessionContextMixin
 from ._session_finding_mixin import _StateLock
@@ -163,10 +165,7 @@ class MCPSession(
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
         self._last_gate_results: dict[str, dict[str, object]] = {}
         self._spread_max_cache: dict[str, int] = {}
-        self._blast_radius_cache: dict[
-            tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
-            BlastRadiusResult,
-        ] = {}
+        self._blast_radius_cache: BlastRadiusCache = {}
         self._context_projection_pages: dict[str, ContextProjectionArtifact] = {}
         self._memory_continuation_requests: dict[str, dict[str, object]] = {}
         self._active_intents: dict[str, IntentRecord] = {}

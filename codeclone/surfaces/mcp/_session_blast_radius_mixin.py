@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import cast
 
+from ...api.memory import blast_radius_cache_limit
 from . import _session_helpers as _helpers
 from ._blast_radius import (
     DEFAULT_BLAST_RADIUS_INCLUDE,
@@ -27,7 +28,32 @@ from ._session_shared import (
     MCPServiceContractError,
 )
 
-MAX_BLAST_RADIUS_CACHE_ENTRIES = 64
+#: Identity of one cached blast-radius answer:
+#: ``(root, run_id, files, depth, forbidden, allowed_scope)``.
+#:
+#: ``root`` leads for the same reason ``run_store_key`` puts it in the store
+#: key: run ids are content-addressed, so two checkouts at one commit present
+#: the same id to one session, and the store already refuses to resolve such
+#: an id without a root. A cache keyed on the bare id has no such refusal --
+#: it simply answers one root's question with the other root's dependency
+#: graph. Root is a correctness boundary here first, and the quota partition
+#: second. It is stored resolved, matching ``run_store_key``: one checkout
+#: reached under an alias is one partition, not two.
+BlastRadiusCacheKey = tuple[
+    str,
+    str,
+    tuple[str, ...],
+    str,
+    tuple[str, ...],
+    tuple[str, ...],
+]
+BlastRadiusCache = dict[BlastRadiusCacheKey, BlastRadiusResult]
+
+#: Every consumer names the slot it reads through these, never a bare index.
+#: A bare index is how the previous shape broke: the pruner read slot 0 as a
+#: run id, and it kept reading slot 0 after the meaning of slot 0 changed.
+BLAST_RADIUS_CACHE_KEY_ROOT = 0
+BLAST_RADIUS_CACHE_KEY_RUN_ID = 1
 
 
 def _finding_session(
@@ -39,10 +65,7 @@ def _finding_session(
 class _MCPSessionBlastRadiusMixin:
     _runs: CodeCloneMCPRunStore
     _state_lock: _StateLock
-    _blast_radius_cache: dict[
-        tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
-        BlastRadiusResult,
-    ]
+    _blast_radius_cache: BlastRadiusCache
 
     def get_blast_radius(
         self,
@@ -85,7 +108,8 @@ class _MCPSessionBlastRadiusMixin:
             sorted(set(forbidden_patterns).difference(default_forbidden))
         )
         normalized_allowed_scope = tuple(sorted(set(allowed_scope)))
-        cache_key = (
+        cache_key: BlastRadiusCacheKey = (
+            str(record.root.resolve()),
             record.run_id,
             normalized_files,
             depth,
@@ -107,11 +131,36 @@ class _MCPSessionBlastRadiusMixin:
             forbidden_patterns=normalized_forbidden,
             allowed_scope=normalized_allowed_scope,
         )
+        limit = blast_radius_cache_limit(root_path=record.root)
         with self._state_lock:
-            while len(self._blast_radius_cache) >= MAX_BLAST_RADIUS_CACHE_ENTRIES:
-                self._blast_radius_cache.pop(next(iter(self._blast_radius_cache)))
-            self._blast_radius_cache[cache_key] = result
+            self._retain_in_partition(cache_key, result, limit=limit)
         return result
+
+    def _retain_in_partition(
+        self,
+        cache_key: BlastRadiusCacheKey,
+        result: BlastRadiusResult,
+        *,
+        limit: int,
+    ) -> None:
+        """Retain *result* within this root's own quota. Call under the lock.
+
+        Insertion order is the LRU order, so filtering it by root yields this
+        root's partition oldest-first. Entries belonging to other roots are
+        never candidates for eviction. A non-positive bound is a configured
+        refusal to retain: the partition is emptied and nothing is stored.
+        """
+
+        root = cache_key[BLAST_RADIUS_CACHE_KEY_ROOT]
+        partition = [
+            key
+            for key in self._blast_radius_cache
+            if key[BLAST_RADIUS_CACHE_KEY_ROOT] == root
+        ]
+        while partition and len(partition) >= limit:
+            self._blast_radius_cache.pop(partition.pop(0), None)
+        if limit > 0:
+            self._blast_radius_cache[cache_key] = result
 
     def _validated_blast_radius_depth(self, depth: str) -> BlastRadiusDepth:
         if depth not in VALID_BLAST_RADIUS_DEPTHS:
@@ -139,4 +188,10 @@ class _MCPSessionBlastRadiusMixin:
         return tuple(sorted(set(include)))
 
 
-__all__ = ["_MCPSessionBlastRadiusMixin"]
+__all__ = [
+    "BLAST_RADIUS_CACHE_KEY_ROOT",
+    "BLAST_RADIUS_CACHE_KEY_RUN_ID",
+    "BlastRadiusCache",
+    "BlastRadiusCacheKey",
+    "_MCPSessionBlastRadiusMixin",
+]

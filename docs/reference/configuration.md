@@ -252,7 +252,7 @@ analyzed root itself. MCP memory responses report the branch taken in
 | `memory.max_candidates` | int | `1000` | Maximum draft candidates |
 | `memory.max_evidence_per_record` | int | `20` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
 | `memory.max_statement_chars` | int | `1000` | Hard limit on statement length |
-| `memory.max_blast_radius_cache_entries` | int | `500` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
+| `memory.max_blast_radius_cache_entries` | int | `64` | Maximum cached blast-radius answers retained **per repository root** by one MCP session (see note below) |
 | `memory.git_hotspot_period_days` | int | `90` | Git hotspot lookback window (days) |
 | `memory.git_hotspot_min_changes` | int | `5` | Minimum changes for hotspot status |
 | `memory.trajectories_enabled` | bool | `true` | Record workflow trajectories |
@@ -279,6 +279,15 @@ one has no effect — CodeClone does not warn you, and the documented limit or r
 window is not applied. They are listed here so the contract stays visible and
 stable, not because they work. Do not rely on them to bound store growth or to
 expire records.
+
+`memory.max_blast_radius_cache_entries` bounds one repository root's own
+partition of the MCP session blast-radius cache, not the session-wide total.
+The key is per root, so applying it to the shared dictionary would let the
+configuration of whichever root was read last govern another root's residency.
+Roots are counted separately and evicted separately; a value of `0` or less
+means that root keeps no cached answers at all. A repository whose
+`[tool.codeclone.memory]` table cannot be read falls back to the default rather
+than making blast radius unavailable.
 
 Retention that **is** enforced covers `draft`, `rejected` and `archived`
 records only, applied by `codeclone memory vacuum`.

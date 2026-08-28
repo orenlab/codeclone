@@ -48,7 +48,11 @@ DEFAULT_MEMORY_MAX_STATEMENT_CHARS: Final = 1_000
 # 200 leaves honest headroom while still catching essay drift.
 DEFAULT_MEMORY_BATCH_MEAN_STATEMENT_CHARS: Final = 200
 DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS: Final = 160
-DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES: Final = 500
+# Per-root bound on the MCP session's blast-radius cache, enforced in
+# codeclone/surfaces/mcp/_session_blast_radius_mixin.py. 64 is the bound
+# that was actually executing while 500 was only documented; the declared
+# default states the residency the session really keeps.
+DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES: Final = 64
 DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS: Final = 90
 DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES: Final = 5
 DEFAULT_MEMORY_MCP_SYNC_POLICY: Final[MemoryMcpSyncPolicy] = "bootstrap_if_missing"

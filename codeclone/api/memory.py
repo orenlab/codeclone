@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""R3 door for the semantic-index rebuild workflow."""
+"""R3 door for memory-configuration reads that surfaces depend on."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..config.memory import resolve_memory_config
+from ..config.memory_defaults import DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES
 from ..memory.semantic.rebuild_workflow import execute_semantic_index_rebuild
 
 SemanticIndexRebuildStatus = Literal["ok", "skipped", "unavailable"]
@@ -79,4 +80,34 @@ def rebuild_semantic_index(*, root_path: Path) -> SemanticIndexRebuildDTO:
     )
 
 
-__all__ = ["SemanticIndexRebuildDTO", "rebuild_semantic_index"]
+def blast_radius_cache_limit(*, root_path: Path) -> int:
+    """Bound on one root's cached blast-radius answers, from that root's config.
+
+    The only reader of ``memory.max_blast_radius_cache_entries``, and the door
+    the MCP session reaches it through: R4 surfaces may not import the R2
+    configuration owner directly, so the enforcement path for this key runs
+    ``config.memory`` -> here -> the session cache and nowhere else.
+
+    The bound is per root because the cache key is per root. Applied to the
+    session-wide dictionary it would mean that, with two checkouts in one
+    session, whichever configuration was read last governs the other
+    checkout's residency.
+
+    A memory table that cannot be read at all yields the declared default.
+    Blast radius carries ``start_controlled_change``,
+    ``get_implementation_context`` and ``finish_controlled_change``; none of
+    them should become unavailable because an unrelated memory key was
+    mistyped.
+    """
+
+    try:
+        return resolve_memory_config(root_path).max_blast_radius_cache_entries
+    except ValueError:
+        return DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES
+
+
+__all__ = [
+    "SemanticIndexRebuildDTO",
+    "blast_radius_cache_limit",
+    "rebuild_semantic_index",
+]

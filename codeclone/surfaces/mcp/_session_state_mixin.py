@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from . import _session_helpers as _helpers
-from ._blast_radius import BlastRadiusResult
 from ._code_provenance import code_provenance_payload
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
@@ -21,6 +20,10 @@ from ._report_section import (
 from ._session_baseline import (
     CloneBaselineState,
     MetricsBaselineState,
+)
+from ._session_blast_radius_mixin import (
+    BLAST_RADIUS_CACHE_KEY_RUN_ID,
+    BlastRadiusCache,
 )
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_runtime import validate_numeric_args
@@ -1031,10 +1034,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
-    _blast_radius_cache: dict[
-        tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
-        BlastRadiusResult,
-    ]
+    _blast_radius_cache: BlastRadiusCache
     _context_projection_pages: dict[str, ContextProjectionArtifact]
     _memory_continuation_requests: dict[str, dict[str, object]]
     _active_intents: dict[str, IntentRecord]
@@ -1584,10 +1584,14 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 ]
                 for run_id in stale_run_ids:
                     state_map.pop(run_id, None)
+            # Root leads the cache key, so slot zero is a checkout path. The
+            # run id is named through the key owner's constant: a bare 0 here
+            # would compare a path against live run ids and prune every entry
+            # the session holds.
             stale_blast_radius_keys = [
                 cache_key
                 for cache_key in self._blast_radius_cache
-                if cache_key[0] not in active_run_ids
+                if cache_key[BLAST_RADIUS_CACHE_KEY_RUN_ID] not in active_run_ids
             ]
             for cache_key in stale_blast_radius_keys:
                 self._blast_radius_cache.pop(cache_key, None)

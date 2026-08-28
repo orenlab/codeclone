@@ -37,7 +37,6 @@ import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
-import codeclone.surfaces.mcp._session_blast_radius_mixin as mcp_blast_session_mod
 import codeclone.surfaces.mcp._session_context_mixin as mcp_context_session_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
@@ -5793,11 +5792,13 @@ def test_mcp_service_blast_radius_cache_keys_intent_scope(
     assert len(service._blast_radius_cache) == 2
 
 
-def test_mcp_service_blast_radius_cache_is_bounded(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(mcp_blast_session_mod, "MAX_BLAST_RADIUS_CACHE_ENTRIES", 2)
+def test_mcp_service_blast_radius_cache_is_bounded(tmp_path: Path) -> None:
+    """The bound is this root's configured one; see the root-partition module."""
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone.memory]\nmax_blast_radius_cache_entries = 2\n",
+        encoding="utf-8",
+    )
     service = CodeCloneMCPService(history_limit=2)
     record = _blast_radius_run_record(tmp_path)
     service._runs.register(record)
@@ -15096,6 +15097,7 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
 
     service._blast_radius_cache[
         (
+            str(tmp_path.resolve()),
             stale.run_id,
             ("README.md",),
             "direct",
