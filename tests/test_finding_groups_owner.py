@@ -513,6 +513,163 @@ def test_the_section_renderers_follow_the_owner(
 
 
 # --------------------------------------------------------------------------
+# The text artifact's two family-summary lines
+# --------------------------------------------------------------------------
+#
+# The section walk above was converted; the two *summary* lines were not.
+# They enumerate the families over ``findings.summary.families`` -- a mapping,
+# not the group container -- so the mechanical ratchet at the bottom of this
+# module cannot see them by construction, and they kept a private four-family
+# list while the total printed beside them counted five. On this repository
+# the ``authority`` family is empty, so the breakdown and the total agree for
+# the wrong reason; the fixtures below carry a non-empty one.
+
+
+#: A key no family and no tier will ever use. It answers in the probe mapping
+#: below so that a renderer which widened its universe to *anything* shows it.
+_DECOY_FAMILY_KEY = "not_a_family"
+
+
+def _text_family_lines(rendered: str) -> tuple[tuple[tuple[str, str], ...], ...]:
+    """Every ``Families:`` line of the text artifact, as key/value pairs.
+
+    Two lines carry this label -- the FINDINGS SUMMARY breakdown and the
+    DERIVED OVERVIEW one -- and they are read together on purpose: they render
+    the same mapping through two call sites, which is how one of them could
+    have been converted and the other left behind.
+    """
+
+    lines: list[tuple[tuple[str, str], ...]] = []
+    for line in rendered.splitlines():
+        if not line.startswith("Families:"):
+            continue
+        body = line.split(":", 1)[1].strip()
+        lines.append(
+            tuple(
+                (token.split("=", 1)[0], token.split("=", 1)[1])
+                for token in body.split(" ")
+                if "=" in token
+            )
+        )
+    return tuple(lines)
+
+
+def _rendered_text(document: Mapping[str, object]) -> str:
+    from codeclone.report.renderers.text import render_text_report_document
+
+    return render_text_report_document(dict(document))
+
+
+def _findings_summary(document: Mapping[str, object]) -> Mapping[str, object]:
+    findings = cast("dict[str, object]", dict(document)["findings"])
+    return cast("dict[str, object]", findings["summary"])
+
+
+def test_the_text_family_breakdown_accounts_for_the_total_beside_it() -> None:
+    """The published breakdown and the published total are one artifact.
+
+    ``_producer_document`` is the distinguishing fixture: its two findings sit
+    in *different* families and one of them is ``authority``. A document whose
+    ``authority`` family is empty -- every document this repository produces
+    for itself -- makes both numbers agree whether or not the family is named,
+    which is precisely why a four-family enumeration survived here.
+    """
+
+    document = _producer_document()
+    summary = _findings_summary(document)
+    families = cast("dict[str, object]", summary["families"])
+    assert int(cast("int", summary["total"])) == 2
+    assert int(cast("int", families["authority"])) == 1, (
+        "the fixture stopped distinguishing: the pin needs a non-empty "
+        "authority family, or it passes for the wrong reason"
+    )
+
+    breakdowns = _text_family_lines(_rendered_text(document))
+    assert len(breakdowns) == 2, "the text artifact publishes two Families lines"
+    for pairs in breakdowns:
+        assert sum(int(value) for _key, value in pairs) == 2, (
+            "a Families line published a breakdown that does not add up to the "
+            f"total printed beside it: {pairs}"
+        )
+
+
+def _document_answering_every_family_key() -> dict[str, object]:
+    """A document whose family summary answers *any* key a renderer asks for.
+
+    The text renderer prints a key only when the mapping carries it, so
+    against a document that answers the five real families a renderer which
+    had widened its universe to an advisory tier renders identically -- the
+    widening is unobservable, and a pin that never sees it is theatre. This
+    document therefore answers every family, both tiers and a decoy, so the
+    rendered line *is* the set of keys the renderer asked for.
+
+    The producer never writes a tier key into ``findings.summary.families``.
+    This is an instrument for reading a renderer's universe, not a claim about
+    the document the producer emits.
+    """
+
+    document = _producer_document()
+    answers: dict[str, object] = {
+        **dict.fromkeys(_CONTAINER_KEYS, 0),
+        **dict.fromkeys(_TIER_KEYS, 0),
+        _DECOY_FAMILY_KEY: 0,
+    }
+    summary = cast("dict[str, object]", _findings_summary(document))
+    summary["families"] = dict(answers)
+    derived = cast("dict[str, object]", document["derived"])
+    overview = cast("dict[str, object]", derived["overview"])
+    overview["families"] = dict(answers)
+    return document
+
+
+def test_the_text_family_lines_name_the_declared_universe_and_nothing_else() -> None:
+    """Both lines list the owner's families, in the owner's order.
+
+    Mutated in both directions against the probe document: dropping a family
+    shortens the line, and admitting a tier -- or the decoy -- lengthens it.
+    Invariant 3 is the half that a normal document cannot show.
+    """
+
+    owner = _owner()
+    expected = tuple(owner.BASELINE_TRACKED_GROUP_KEYS)
+    lines = _text_family_lines(_rendered_text(_document_answering_every_family_key()))
+
+    assert len(lines) == 2
+    for pairs in lines:
+        assert tuple(key for key, _value in pairs) == expected, (
+            "a Families line does not publish the declared family universe"
+        )
+        for tier in _TIER_KEYS:
+            assert tier not in dict(pairs), (
+                f"an advisory tier reached a published family breakdown: {tier}"
+            )
+        assert _DECOY_FAMILY_KEY not in dict(pairs)
+
+
+def test_the_text_family_lines_follow_the_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutation: give either line back its own list and it reds.
+
+    The redirected universe is reordered as well as narrowed, so a consumer
+    that kept a private tuple cannot match by accident even if the tuple
+    happened to hold the same names.
+    """
+
+    document = _document_answering_every_family_key()
+    monkeypatch.setattr(
+        _owner(), "BASELINE_TRACKED_GROUP_KEYS", ("dead_code", "clones")
+    )
+
+    lines = _text_family_lines(_rendered_text(document))
+    assert len(lines) == 2
+    for pairs in lines:
+        assert tuple(key for key, _value in pairs) == ("dead_code", "clones"), (
+            "a Families line kept its own family enumeration"
+        )
+
+
+# --------------------------------------------------------------------------
 # Invariant 2 -- published totals do not move
 # --------------------------------------------------------------------------
 

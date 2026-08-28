@@ -457,9 +457,14 @@ def _append_overview(
     families = _as_mapping(overview.get("families"))
     lines.append(
         proj.TEXT_OVERVIEW_FAMILIES
+        # The universe is the owner's, resolved on this call -- not a list
+        # spelled here. A private enumeration on this line and on its twin in
+        # FINDINGS SUMMARY published a four-family breakdown beside a
+        # five-family total, and the family it dropped is empty on this
+        # repository, so the artifact only contradicted itself elsewhere.
         + _format_key_values(
             families,
-            ("clones", "structural", "dead_code", "design"),
+            baseline_tracked_group_keys(),
         )
     )
     source_breakdown = _as_mapping(overview.get("source_scope_breakdown"))
@@ -978,10 +983,12 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             proj.TEXT_FINDINGS_SCOPE_NOTE,
             proj.TEXT_FINDINGS_TOTAL_GROUPS
             + f"{format_meta_text_value(findings_summary.get('total'))}",
+            # The breakdown of the total printed directly above it, over the
+            # same declared universe that total was computed on.
             proj.TEXT_FINDINGS_FAMILIES
             + _format_key_values(
                 findings_families,
-                ("clones", "structural", "dead_code", "design"),
+                baseline_tracked_group_keys(),
             ),
             proj.TEXT_FINDINGS_SEVERITY
             + _format_key_values(
