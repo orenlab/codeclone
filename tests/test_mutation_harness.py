@@ -84,6 +84,26 @@ _TEST_BROKEN = """def test_already_red() -> None:
     raise AssertionError("this home was red before anybody mutated anything")
 """
 
+_TWIN = '''"""Two byte-identical sites; only the first one is pinned."""
+
+
+def first() -> int:
+    """Return the pinned sum."""
+    return 1 + 1
+
+
+def second() -> int:
+    """Return the unpinned sum."""
+    return 1 + 1
+'''
+
+_TEST_TWIN = """from twin import first
+
+
+def test_first_site() -> None:
+    assert first() == 2
+"""
+
 _TEST_OBSERVER = """import os
 from pathlib import Path
 
@@ -406,6 +426,75 @@ def test_a_narrow_home_downgrades_a_survivor(sandbox: _Sandbox) -> None:
     full_code, full_report = _drive(sandbox, _mutant())
     assert _text(_only(full_report), "verdict") == "kill"
     assert full_code == 0
+
+
+# --------------------------------------------------------------------------
+# occurrence names a site, and the site it names is the one that changes.
+# --------------------------------------------------------------------------
+
+
+def _twin_sandbox(sandbox: _Sandbox) -> None:
+    sandbox.add("twin.py", _TWIN)
+    sandbox.add("test_twin.py", _TEST_TWIN)
+    sandbox.commit()
+
+
+def test_occurrence_one_reaches_the_pinned_site(sandbox: _Sandbox) -> None:
+    _twin_sandbox(sandbox)
+    twin = _mutant(target="twin.py", find="return 1 + 1", replace="return 1 + 2")
+    code, report = _drive(sandbox, dict(twin, occurrence=1))
+    assert _text(_only(report), "verdict") == "kill"
+    assert code == 0
+
+
+def test_occurrence_two_reaches_the_unpinned_site(sandbox: _Sandbox) -> None:
+    _twin_sandbox(sandbox)
+    twin = _mutant(target="twin.py", find="return 1 + 1", replace="return 1 + 2")
+    _first_code, first_report = _drive(sandbox, dict(twin, occurrence=1))
+    second_code, second_report = _drive(sandbox, dict(twin, occurrence=2))
+    assert _text(_only(second_report), "verdict") == "survive"
+    assert second_code == 1
+    # Same file, same replacement, different site: the bytes must differ.
+    assert _text(_only(first_report), "mutated_sha256") != _text(
+        _only(second_report), "mutated_sha256"
+    )
+
+
+# --------------------------------------------------------------------------
+# The purge spares exactly the trees it declares, and clears the rest.
+# --------------------------------------------------------------------------
+
+
+def test_the_purge_spares_the_directories_it_declares(sandbox: _Sandbox) -> None:
+    for spared in (".git", ".venv"):
+        cache = sandbox.root / spared / "__pycache__"
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "keep.pyc").write_bytes(b"keep")
+    swept = sandbox.root / "__pycache__"
+    swept.mkdir()
+    (swept / "gone.pyc").write_bytes(b"gone")
+    _drive(sandbox, _mutant())
+    assert not swept.exists()
+    assert (sandbox.root / ".git" / "__pycache__" / "keep.pyc").exists()
+    assert (sandbox.root / ".venv" / "__pycache__" / "keep.pyc").exists()
+
+
+# --------------------------------------------------------------------------
+# A battery is worth exactly its weakest mutant.
+# --------------------------------------------------------------------------
+
+
+def test_a_battery_reports_its_weakest_mutant(sandbox: _Sandbox) -> None:
+    narrow = {"declared": "narrow", "nodes": ["test_other.py"]}
+    code, report = _drive(
+        sandbox, _mutant(id="killed"), _mutant(id="survivor", home=narrow)
+    )
+    assert [_text(row, "verdict") for row in _rows(report, "mutants")] == [
+        "kill",
+        "survive_narrow",
+    ]
+    assert _text(report, "verdict") == "survive_narrow"
+    assert code == 1
 
 
 # --------------------------------------------------------------------------
