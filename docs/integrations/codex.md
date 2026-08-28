@@ -60,7 +60,10 @@ result = analyze_repository(root="/abs/path/to/repo")
 # Step 2: Declare change intent with scope
 response = start_controlled_change(
     root="/abs/path/to/repo",
-    scope={"allowed_files": ["src/module.py", "tests/"]},
+    # Concrete repo-relative files: the finish scope check matches
+    # changed files against these entries exactly, so a directory or a
+    # glob here is accepted at start and then reported out of scope.
+    scope={"allowed_files": ["src/module.py", "tests/test_module.py"]},
     intent="Fix concurrency bug in worker queue",
 )
 
