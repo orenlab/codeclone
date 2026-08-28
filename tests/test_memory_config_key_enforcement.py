@@ -33,6 +33,12 @@ Three failure classes are guarded here:
    ``vacuum``'s own status tuples for retention, and from a mechanical AST
    scan for readers everywhere else — never restated as a literal list here,
    because a hand-maintained list is the drift it is meant to catch.
+4. **Authority edge.** A configuration key is enforced only if a structural
+   path exists from its canonical config owner to the production decision it
+   claims to control. Validation, documentation, reporting, or a field on a
+   policy object are not enforcement witnesses. The vacuum must therefore take
+   its governed population *from* :class:`MemoryRetentionPolicy`, not restate
+   one of its own.
 
 Deliberate design notes:
 
@@ -49,6 +55,19 @@ Deliberate design notes:
   through SQLite: the claim under test is "no DELETE is *issued* for these
   statuses", and observing the issued calls pins that directly, without
   depending on which rows a fixture happened to contain.
+- The authority edge is pinned by *substituting the owner*, not by reading
+  source text and not by watching a private helper. It was measured that
+  reverting the vacuum loop to a literal ``("draft", "rejected", "archived")``
+  leaves every public-API observation byte-identical — same delete calls, same
+  commit, same ``VacuumReport`` — because a withheld status contributes
+  nothing downstream by construction. While ``VacuumReport`` is fixed no
+  public-API pin for this axis can exist, so the discriminating witness is the
+  edge itself: hand the vacuum a policy governing a population no inlined list
+  could restate, and require the vacuum to follow it.
+- That formulation survives legitimate renaming. It couples only to the
+  declared owner and the two questions the vacuum may ask it, never to the
+  spelling of a loop or the name of a private helper, and it fails only when
+  the edge is severed.
 """
 
 from __future__ import annotations
@@ -165,25 +184,44 @@ def _documented_memory_rows() -> dict[str, str]:
     return rows
 
 
-def test_retention_status_tuples_partition_every_configured_retention_key(
+class _RecordingPolicy:
+    """Stand-in retention owner that records what the vacuum asked it.
+
+    Its population is deliberately disjoint from the ratified statuses, so a
+    consumer that restates a population of its own cannot accidentally agree
+    with it.
+    """
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+        self.enforced: tuple[str, ...] = ("active", "superseded")
+        self.withheld: tuple[str, ...] = ("historical",)
+
+    @property
+    def governed_statuses(self) -> tuple[str, ...]:
+        return (*self.enforced, *self.withheld)
+
+    def deletion_days(self, status: str) -> int | None:
+        self.asked.append(status)
+        return 0 if status in self.enforced else None
+
+
+def test_governed_population_is_derived_from_the_config_keys(
     aggressive: MemoryApplicationContext,
 ) -> None:
-    """Owner coverage is exhaustive: no configured retention silently absent.
+    """The config edge: the owner governs exactly the keys config declares."""
+    policy = vacuum_module.MemoryRetentionPolicy.from_config(aggressive.config)
 
-    Pins the derivation rule rather than a literal roster, so adding a
-    ``<status>_retention_days`` key without giving it an owner fails here.
-    """
-    enforced = set(vacuum_module.RETENTION_ENFORCED_STATUSES)
-    unenforced = set(vacuum_module.RETENTION_UNENFORCED_STATUSES)
-
-    assert not enforced & unenforced, "a status cannot be both enforced and not"
+    assert not set(policy.enforced) & set(policy.withheld), (
+        "a status cannot be both ratified and withheld"
+    )
 
     configured = {
         status
         for status in MEMORY_STATUS_VALUES
         if f"{status}_retention_days" in _memory_config_field_names(aggressive)
     }
-    assert enforced | unenforced == configured
+    assert set(policy.governed_statuses) == configured
 
 
 def test_configured_retention_reaches_the_owner_for_withheld_statuses(
@@ -215,32 +253,47 @@ def test_negative_retention_is_absent_rather_than_reported_as_withheld(
     assert vacuum_module.unenforced_retention_days(config) == {"stale": 7}
 
 
-def test_owner_declines_every_unratified_status(
+def test_owner_declines_every_withheld_status(
     aggressive: MemoryApplicationContext,
 ) -> None:
-    """The gate sits on the resolution path and fires for withheld statuses."""
-    withheld = sorted(vacuum_module.RETENTION_UNENFORCED_STATUSES)
-    assert withheld, "no status is withheld; the gate would be unreachable"
+    """Withheld statuses resolve to no permitted deletion age."""
+    policy = vacuum_module.MemoryRetentionPolicy.from_config(aggressive.config)
+    withheld = sorted(policy.withheld)
+    assert withheld, "nothing is withheld; the decision would be vacuous"
 
-    resolved = {
-        status: vacuum_module._retention_days_for_status(status, aggressive.config)
-        for status in withheld
-    }
+    resolved = {status: policy.deletion_days(status) for status in withheld}
     assert resolved == dict.fromkeys(withheld, None)
 
 
-def test_owner_resolves_every_ratified_status(
+def test_owner_permits_every_ratified_status(
     aggressive: MemoryApplicationContext,
 ) -> None:
-    """The same gate must not swallow statuses whose policy is ratified."""
-    ratified = sorted(vacuum_module.RETENTION_ENFORCED_STATUSES)
-    assert ratified, "no status is enforced; the vacuum would be inert"
+    """The same decision must not swallow the statuses whose policy is set."""
+    policy = vacuum_module.MemoryRetentionPolicy.from_config(aggressive.config)
+    ratified = sorted(policy.enforced)
+    assert ratified, "nothing is ratified; the vacuum would be inert"
 
-    resolved = {
-        status: vacuum_module._retention_days_for_status(status, aggressive.config)
-        for status in ratified
-    }
+    resolved = {status: policy.deletion_days(status) for status in ratified}
     assert resolved == dict.fromkeys(ratified, 0)
+
+
+def test_governed_status_without_a_configured_key_has_no_retention() -> None:
+    """A status the policy governs but configuration does not carry.
+
+    Keeps the "no configured value" arm of the owner reachable: without an
+    input that lands on it, the arm would be unreachable prose rather than a
+    rule, which is the same defect class this module exists to catch.
+    """
+    policy = vacuum_module.MemoryRetentionPolicy(
+        enforced=("draft",),
+        withheld=("historical",),
+        days_by_status={"draft": 5},
+    )
+
+    assert policy.configured_days("historical") is None
+    assert policy.deletion_days("historical") is None
+    assert policy.withheld_days() == {}
+    assert policy.deletion_days("draft") == 5
 
 
 def test_vacuum_issues_no_delete_for_active_or_stale(
@@ -259,6 +312,36 @@ def test_vacuum_issues_no_delete_for_active_or_stale(
     withheld = set(vacuum_module.RETENTION_UNENFORCED_STATUSES)
     assert not withheld & set(store.deleted_statuses)
     assert set(store.deleted_statuses) == set(vacuum_module.RETENTION_ENFORCED_STATUSES)
+
+
+def test_vacuum_takes_its_population_from_the_policy_owner(
+    aggressive: MemoryApplicationContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The authority edge: change the owner and the vacuum must follow.
+
+    The owner is replaced by one governing statuses that appear in no ratified
+    list. A vacuum that reads its population from the owner asks about exactly
+    those and deletes exactly the owner's ratified subset. A vacuum that
+    restates a population of its own keeps deleting the same rows in
+    production — observably identical — yet cannot follow the substitution,
+    and fails here.
+    """
+    probe = _RecordingPolicy()
+    monkeypatch.setattr(
+        vacuum_module.MemoryRetentionPolicy,
+        "from_config",
+        classmethod(lambda cls, config: probe),
+    )
+    store = _RecordingStore()
+
+    vacuum_module.run_memory_vacuum(store, aggressive.config, commit=True)  # type: ignore[arg-type]
+
+    assert tuple(probe.asked) == probe.governed_statuses, (
+        "the vacuum did not take its population from the policy owner: the "
+        "authority edge config -> retention policy -> vacuum is severed"
+    )
+    assert store.deleted_statuses == list(probe.enforced)
 
 
 def test_configuration_doc_marks_exactly_the_unenforced_memory_keys(

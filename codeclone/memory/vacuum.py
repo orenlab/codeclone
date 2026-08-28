@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Final
@@ -26,29 +27,113 @@ RETENTION_ENFORCED_STATUSES: Final[tuple[MemoryStatus, ...]] = (
 #: Statuses whose retention is configurable and deliberately not applied.
 #:
 #: ``memory.active_retention_days`` and ``memory.stale_retention_days`` are
-#: declared, validated and materialized onto :class:`MemoryConfig`, and this
-#: module is their owner of record. They are withheld from the vacuum on
-#: purpose: "older than N days" is a plausible reading of the names and a
-#: destructive one. ``active`` is live, approved knowledge, and ``stale`` is a
-#: reviewable state that staleness refresh can move back out — neither is
-#: terminal, so age alone does not establish that a record is disposable.
-#: Engineering Memory already carries lifecycle semantics (supersession,
-#: archival, staleness) that a bare age threshold would cut across.
+#: declared, validated and materialized onto :class:`MemoryConfig`, and
+#: :class:`MemoryRetentionPolicy` is their owner of record. They are withheld
+#: from deletion on purpose: "older than N days" is a plausible reading of the
+#: names and a destructive one. ``active`` is live, approved knowledge, and
+#: ``stale`` is a reviewable state that staleness refresh can move back out —
+#: neither is terminal, so age alone does not establish that a record is
+#: disposable. Engineering Memory already carries lifecycle semantics
+#: (supersession, archival, staleness) that a bare age threshold would cut
+#: across.
 #:
 #: Applying a policy here requires an explicit retention ruling, not an
 #: inference from the key names. Until then the configured value is resolved
-#: and reportable through :func:`unenforced_retention_days` but never deletes.
+#: and reportable but never deletes.
 RETENTION_UNENFORCED_STATUSES: Final[tuple[MemoryStatus, ...]] = (
     "active",
     "stale",
 )
 
-#: Every status carrying a ``<status>_retention_days`` config key. Enforced
-#: statuses lead so the ratified deletion order is unchanged by the gate.
-RETENTION_CONFIGURED_STATUSES: Final[tuple[MemoryStatus, ...]] = (
-    *RETENTION_ENFORCED_STATUSES,
-    *RETENTION_UNENFORCED_STATUSES,
-)
+
+class MemoryRetentionPolicy:
+    """Canonical owner of memory retention authority.
+
+    A configuration key is enforced only if a structural path exists from its
+    canonical config owner to the production decision it claims to control.
+    Validation, documentation, reporting, or a field on a policy object are
+    not enforcement witnesses.
+
+    This class is that path's middle term. It resolves the retention keys off
+    :class:`MemoryConfig`, it declares which statuses the deletion policy is
+    ratified for, and it answers the only two questions the vacuum is allowed
+    to ask: which statuses are governed at all, and how old a record of a
+    given status must be before deletion is permitted.
+
+    The vacuum must take its population from :attr:`governed_statuses` rather
+    than restate one. A consumer that iterates its own list still deletes the
+    same rows today, but the authority edge is severed: the withheld statuses
+    stop reaching the decision, and this class plus its rationale decay into
+    unreachable prose while every observable byte stays identical.
+    """
+
+    __slots__ = ("days_by_status", "enforced", "withheld")
+
+    def __init__(
+        self,
+        *,
+        enforced: tuple[MemoryStatus, ...],
+        withheld: tuple[MemoryStatus, ...],
+        days_by_status: Mapping[MemoryStatus, int],
+    ) -> None:
+        self.enforced = enforced
+        self.withheld = withheld
+        self.days_by_status = days_by_status
+
+    @classmethod
+    def from_config(cls, config: MemoryConfig) -> MemoryRetentionPolicy:
+        """Resolve the policy from configuration — the config edge."""
+        return cls(
+            enforced=RETENTION_ENFORCED_STATUSES,
+            withheld=RETENTION_UNENFORCED_STATUSES,
+            days_by_status={
+                "active": config.active_retention_days,
+                "stale": config.stale_retention_days,
+                "draft": config.draft_retention_days,
+                "rejected": config.rejected_retention_days,
+                "archived": config.archived_retention_days,
+            },
+        )
+
+    @property
+    def governed_statuses(self) -> tuple[MemoryStatus, ...]:
+        """Every status this policy governs, ratified or withheld.
+
+        The single source of truth about the population that must reach the
+        retention decision. Enforced statuses lead so the ratified deletion
+        order is unchanged by the withheld ones.
+        """
+        return (*self.enforced, *self.withheld)
+
+    def configured_days(self, status: MemoryStatus) -> int | None:
+        """The configured retention for *status*, ratified or not.
+
+        ``None`` when the status carries no retention key or the configured
+        value is negative, which means "keep forever".
+        """
+        days = self.days_by_status.get(status)
+        if days is None or days < 0:
+            return None
+        return days
+
+    def deletion_days(self, status: MemoryStatus) -> int | None:
+        """Age after which deleting *status* is permitted, else ``None``.
+
+        Withheld statuses resolve to ``None`` here even when configured: the
+        value reached its owner and the owner declined to act on it.
+        """
+        if status not in self.enforced:
+            return None
+        return self.configured_days(status)
+
+    def withheld_days(self) -> dict[str, int]:
+        """Configured retentions that no ratified policy applies."""
+        resolved: dict[str, int] = {}
+        for status in self.withheld:
+            days = self.configured_days(status)
+            if days is not None:
+                resolved[status] = days
+        return dict(sorted(resolved.items()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,49 +142,13 @@ class VacuumReport:
     total_deleted: int
 
 
-def configured_retention_days(
-    status: MemoryStatus,
-    config: MemoryConfig,
-) -> int | None:
-    """Resolve the configured retention for *status*, enforced or not.
-
-    Returns ``None`` when the status carries no retention key or when the
-    configured value is negative, which means "keep forever".
-    """
-    mapping: dict[MemoryStatus, int] = {
-        "active": config.active_retention_days,
-        "stale": config.stale_retention_days,
-        "draft": config.draft_retention_days,
-        "rejected": config.rejected_retention_days,
-        "archived": config.archived_retention_days,
-    }
-    days = mapping.get(status)
-    if days is None or days < 0:
-        return None
-    return days
-
-
 def unenforced_retention_days(config: MemoryConfig) -> dict[str, int]:
     """Report configured retentions that no ratified policy applies.
 
     These values are read from configuration and deliberately not acted on.
     See :data:`RETENTION_UNENFORCED_STATUSES` for why.
     """
-    resolved: dict[str, int] = {}
-    for status in RETENTION_UNENFORCED_STATUSES:
-        days = configured_retention_days(status, config)
-        if days is not None:
-            resolved[status] = days
-    return dict(sorted(resolved.items()))
-
-
-def _retention_days_for_status(
-    status: MemoryStatus,
-    config: MemoryConfig,
-) -> int | None:
-    if status not in RETENTION_ENFORCED_STATUSES:
-        return None
-    return configured_retention_days(status, config)
+    return MemoryRetentionPolicy.from_config(config).withheld_days()
 
 
 def run_memory_vacuum(
@@ -108,11 +157,12 @@ def run_memory_vacuum(
     *,
     commit: bool = True,
 ) -> VacuumReport:
+    policy = MemoryRetentionPolicy.from_config(config)
     now = datetime.now(tz=timezone.utc)
     deleted_by_status: dict[str, int] = {}
     total = 0
-    for status in RETENTION_CONFIGURED_STATUSES:
-        days = _retention_days_for_status(status, config)
+    for status in policy.governed_statuses:
+        days = policy.deletion_days(status)
         if days is None:
             continue
         cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -133,11 +183,10 @@ def run_memory_vacuum(
 
 
 __all__ = [
-    "RETENTION_CONFIGURED_STATUSES",
     "RETENTION_ENFORCED_STATUSES",
     "RETENTION_UNENFORCED_STATUSES",
+    "MemoryRetentionPolicy",
     "VacuumReport",
-    "configured_retention_days",
     "run_memory_vacuum",
     "unenforced_retention_days",
 ]
