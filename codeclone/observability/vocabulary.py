@@ -125,6 +125,7 @@ SPAN_NAMES: Final[frozenset[str]] = frozenset(
         "cache.segment_projection",
         "cache.stat",
         "cache.validate_envelope",
+        "canonical.store.publish",
         "compatibility.check",
         "config.resolve",
         "controller.registry_bind",
@@ -286,6 +287,47 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "cache_profile_hit",
         "cache_profile_miss",
         "cache_stat_fast_reject",
+        # The canonical backend run-store, instrumented before its rollout
+        # flag and before any sweep exists: without this the backend's own
+        # first operational line — first publish, republish, content
+        # sharing, database growth, head contention — would have to be
+        # reconstructed afterwards from an experiment nobody can repeat.
+        # Deliberately NOT a second telemetry surface: one span name inside
+        # the one observation point, and no name is minted for a mechanism
+        # this build does not execute (there is no GC family here, because
+        # there is no sweep to emit it).
+        #
+        # Magnitudes are always written, zero included — an absent magnitude
+        # cannot be told apart from a span that never reached the site.
+        # Outcomes are exclusive and only the one that fired is written.
+        #
+        #  *_attempts / *_successes / *_failures  one publish call; a stale
+        #      publisher is NOT a failure, it stored a valid immutable run
+        #      and lost only the head race.
+        #  *_ingest_duration   whole microseconds of the staging phase
+        #      (normalize, row encode, content addresses, run identity).
+        #  *_write_duration    whole microseconds of the fenced transaction,
+        #      measured from before BEGIN IMMEDIATE — where a second
+        #      publisher waits, so contention lands here and nowhere else.
+        #  *_new_objects / *_reused_objects   the content-sharing split of
+        #      one run's objects.
+        #  *_membership_rows   membership rows this publish actually wrote:
+        #      the per-run cost that content sharing does NOT save, and zero
+        #      for a republish of a run the store already holds.
+        #  *_db_bytes          page_count * page_size after the commit, not
+        #      the file size, which lags a WAL commit until a checkpoint.
+        #  *_head_advance_*    compare-and-swap outcome of the target head.
+        "canonical_store_db_bytes",
+        "canonical_store_head_advance_conflicts",
+        "canonical_store_head_advance_successes",
+        "canonical_store_ingest_duration",
+        "canonical_store_membership_rows",
+        "canonical_store_new_objects",
+        "canonical_store_publish_attempts",
+        "canonical_store_publish_failures",
+        "canonical_store_publish_successes",
+        "canonical_store_reused_objects",
+        "canonical_store_write_duration",
         "compatibility_status_compatible",
         "compatibility_status_incompatible",
         "compatibility_status_migration_required",

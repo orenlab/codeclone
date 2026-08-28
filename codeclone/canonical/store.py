@@ -68,6 +68,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -161,6 +162,7 @@ from codeclone.contracts import (
     STATEMENT_REACHABILITY_POLICY_VERSION,
     STORAGE_SCHEMA_REVISION,
 )
+from codeclone.observability import SpanHandle, span
 from codeclone.utils.sqlite_store import open_sqlite_db
 
 _DOMAIN_PREFIX: Final = f"cc-run-store:{STORAGE_SCHEMA_REVISION}\x00".encode()
@@ -1382,6 +1384,31 @@ def _fence_guard(cursor: sqlite3.Cursor, fence: tuple[int, str, str]) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Operational measurement.  Diagnostics only: the store's state produces
+# these numbers, and nothing reads them back — no canonical fact, no run
+# identity and no publish decision depends on a measurement or on whether
+# the observer is running at all (pinned by the observer OFF/ON witness).
+# ---------------------------------------------------------------------------
+
+
+def _elapsed_us(started: float) -> int:
+    """Whole microseconds since ``started``; the counter lane is integral."""
+    return int((time.perf_counter() - started) * 1_000_000)
+
+
+def _database_bytes(cursor: sqlite3.Cursor) -> int:
+    """The database's own page arithmetic.
+
+    Not the file size: in WAL mode the main file only grows at a
+    checkpoint, so a publish's growth would be attributed to whichever
+    later publish happened to trigger one.
+    """
+    page_count = int(cursor.execute("PRAGMA page_count").fetchone()[0])
+    page_size = int(cursor.execute("PRAGMA page_size").fetchone()[0])
+    return page_count * page_size
+
+
 def _require_publish_inputs(namespace: str, target: str) -> None:
     if not namespace:
         raise RunStoreError("namespace must be non-empty")
@@ -1900,8 +1927,47 @@ class RunStore:
         The head advances only from ``expected_generation`` (CAS, law 8);
         a stale publisher's run stays stored, unpublished to no one —
         readable by ``run_id`` — but the head does not move.
+
+        This wrapper owns the outcome of one publish call and nothing
+        else.  A stale publisher is a head conflict, never a failure: it
+        stored a valid immutable run and lost only the race for the head,
+        and folding the two together would hide contention inside an
+        error rate.  ``_publish_full_run`` owns the measurements.
+        """
+        with span(name="canonical.store.publish") as publish_span:
+            publish_span.set_counter("canonical_store_publish_attempts", 1)
+            try:
+                receipt = self._publish_full_run(
+                    publish_span,
+                    model,
+                    namespace=namespace,
+                    target=target,
+                    expected_generation=expected_generation,
+                )
+            except BaseException:
+                publish_span.set_counter("canonical_store_publish_failures", 1)
+                raise
+            publish_span.set_counter("canonical_store_publish_successes", 1)
+            return receipt
+
+    def _publish_full_run(
+        self,
+        publish_span: SpanHandle,
+        model: CanonicalModel,
+        *,
+        namespace: str,
+        target: str,
+        expected_generation: int,
+    ) -> PublishReceipt:
+        """The publish itself, measured in its two operational phases.
+
+        Staging is CPU over the model; the transaction is where a second
+        publisher waits.  They are timed apart because one publish that
+        got slower answers a different question depending on which half
+        moved, and the span's own duration cannot separate them.
         """
         _require_publish_inputs(namespace, target)
+        ingest_started = time.perf_counter()
         model = model.normalize()
 
         staged: dict[str, tuple[str, bytes]] = {}
@@ -1914,8 +1980,15 @@ class RunStore:
         scope_digest = analysis_scope_digest(model.analyzed_files)
         membership = _membership_digest(list(staged))
         run_id = _run_id(namespace, scope_digest, membership)
+        publish_span.set_counter(
+            "canonical_store_ingest_duration", _elapsed_us(ingest_started)
+        )
 
         cursor = self._connection.cursor()
+        membership_rows = 0
+        # Started before BEGIN IMMEDIATE on purpose: the wait for the write
+        # lock is the contention this number exists to show.
+        write_started = time.perf_counter()
         cursor.execute("BEGIN IMMEDIATE")
         try:
             _fence_guard(cursor, self._fence)
@@ -1959,6 +2032,7 @@ class RunStore:
                     "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
                     [(run_pk, object_pk) for object_pk in object_pks],
                 )
+                membership_rows = len(object_pks)
             else:
                 run_pk = int(existing_run[0])
             self._before_publish()
@@ -1976,6 +2050,22 @@ class RunStore:
         except BaseException:
             cursor.execute("ROLLBACK")
             raise
+        finally:
+            publish_span.set_counter(
+                "canonical_store_write_duration", _elapsed_us(write_started)
+            )
+        # Magnitudes are written even when they are zero: an absent count
+        # cannot be told apart from a span that never reached this line.
+        publish_span.set_counter("canonical_store_new_objects", new_objects)
+        publish_span.set_counter(
+            "canonical_store_reused_objects", len(staged) - new_objects
+        )
+        publish_span.set_counter("canonical_store_membership_rows", membership_rows)
+        publish_span.set_counter("canonical_store_db_bytes", _database_bytes(cursor))
+        if head_advanced:
+            publish_span.set_counter("canonical_store_head_advance_successes", 1)
+        else:
+            publish_span.set_counter("canonical_store_head_advance_conflicts", 1)
         return PublishReceipt(
             run_id=run_id,
             analysis_scope_digest=scope_digest,
