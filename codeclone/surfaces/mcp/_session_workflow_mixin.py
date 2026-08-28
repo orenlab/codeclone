@@ -178,19 +178,26 @@ class _MCPSessionWorkflowMixin:
         intent_session = _intent_session(self)
         blast_session = _blast_session(self)
         patch_session = _patch_session(self)
-        request_key = _start_replay_request_key(
-            root_path=root_path,
-            scope=scope,
-            intent=intent,
-            expected_effects=expected_effects,
-            on_conflict=on_conflict,
-            strictness=strictness,
-            blast_radius_depth=validated_depth,
-            blast_radius_detail=validated_blast_detail,
-            dirty_scope_policy=validated_dirty_scope_policy,
-            actor_pid=self._agent_pid,
-            actor_start_epoch=self._agent_start_epoch,
-        )
+        # The replay key normalises the scope, so an entry outside the ratified
+        # grammar is refused here -- before declare, which owns the same
+        # translation. Without this the refusal left `start` as a bare
+        # ValueError and the caller lost the typed reason and the next step.
+        try:
+            request_key = _start_replay_request_key(
+                root_path=root_path,
+                scope=scope,
+                intent=intent,
+                expected_effects=expected_effects,
+                on_conflict=on_conflict,
+                strictness=strictness,
+                blast_radius_depth=validated_depth,
+                blast_radius_detail=validated_blast_detail,
+                dirty_scope_policy=validated_dirty_scope_policy,
+                actor_pid=self._agent_pid,
+                actor_start_epoch=self._agent_start_epoch,
+            )
+        except ValueError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
 
         # 1. Workspace check (lazy close inside list_workspace)
         # Dirty summary is unused on the start path (not surfaced, not in the

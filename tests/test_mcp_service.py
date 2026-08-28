@@ -8278,6 +8278,61 @@ def test_normalize_intent_scope_edge_cases() -> None:
         )
 
 
+def _analyzed_clone_service(root: Path) -> CodeCloneMCPService:
+    """A service holding one analysed run over the clone fixture."""
+
+    _write_clone_fixture(root)
+    service = CodeCloneMCPService(history_limit=2)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    return service
+
+
+def test_start_controlled_change_refuses_a_glob_scope_entry(tmp_path: Path) -> None:
+    """The product door, end to end, not just its normaliser.
+
+    Written because the live MCP probe cannot answer this from a worktree: the
+    running server executes the code of whatever checkout it was launched from,
+    so ``root`` selects the repository analysed, never the code deciding. The
+    only place this worktree's door can be observed is in process.
+    """
+
+    service = _analyzed_clone_service(tmp_path)
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        service.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["pkg/**/*.py"]},
+            intent="glob scope",
+        )
+    message = str(excinfo.value)
+    assert "pkg/**/*.py" in message
+    assert "scope_entry_glob_forbidden" in message
+    assert "next_step:" in message
+    assert "directory prefix" in message
+
+
+def test_start_controlled_change_accepts_a_directory_prefix(tmp_path: Path) -> None:
+    """The form the refusal points at is the form the door takes."""
+
+    service = _analyzed_clone_service(tmp_path)
+
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/"]},
+        intent="directory scope",
+    )
+    assert started["status"] == "active"
+    assert started["edit_allowed"] is True
+    scope = cast(dict[str, object], started["scope"])
+    assert scope["allowed_files"] == ["pkg/"]
+
+
 def test_normalize_expected_effects_rejects_string() -> None:
     """expected_effects must be a list, not a bare string."""
     with pytest.raises(ValueError, match="list of strings"):
