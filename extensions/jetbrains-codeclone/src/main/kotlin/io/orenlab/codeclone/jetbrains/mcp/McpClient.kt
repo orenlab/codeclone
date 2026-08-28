@@ -126,7 +126,7 @@ class McpClient {
             )
         }
         val resultObject = result.jsonObject
-        if (resultObject["isError"]?.jsonPrimitive?.booleanOrNull == true) {
+        if (isToolErrorResult(resultObject)) {
             throw McpClientException(extractToolError(resultObject, name) ?: "Tool $name failed.")
         }
         parseToolPayload(resultObject)
@@ -241,12 +241,6 @@ class McpClient {
         }
         pending.clear()
     }
-
-    private val JsonPrimitive.booleanOrNull: Boolean?
-        get() = when {
-            isString -> content.equals("true", ignoreCase = true)
-            else -> null
-        }
 
     private val JsonPrimitive.intOrNull: Int?
         get() = content.toIntOrNull()
