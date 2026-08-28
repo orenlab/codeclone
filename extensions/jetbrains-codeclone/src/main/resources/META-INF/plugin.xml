@@ -1,0 +1,155 @@
+<idea-plugin>
+    <id>io.orenlab.codeclone.jetbrains</id>
+    <name>CodeClone</name>
+    <vendor url="https://github.com/orenlab/codeclone">orenlab</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.python</depends>
+
+    <resource-bundle>messages.CodeCloneBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <iconMapper mappingFile="CodeCloneIconMappings.json"/>
+
+        <postStartupActivity implementation="io.orenlab.codeclone.jetbrains.CodeCloneStartupActivity"/>
+
+        <projectService
+                serviceImplementation="io.orenlab.codeclone.jetbrains.service.CodeCloneProjectService"/>
+        <projectService
+                serviceImplementation="io.orenlab.codeclone.jetbrains.toolwindow.CodeCloneToolWindowPanels"/>
+
+        <toolWindow
+                id="CodeClone"
+                anchor="right"
+                icon="/icons/codeclone.svg"
+                factoryClass="io.orenlab.codeclone.jetbrains.toolwindow.CodeCloneToolWindowFactory"/>
+
+        <applicationConfigurable
+                parentId="tools"
+                instance="io.orenlab.codeclone.jetbrains.settings.CodeCloneSettingsConfigurable"
+                id="io.orenlab.codeclone.jetbrains.settings"
+                displayName="CodeClone"/>
+
+        <statusBarWidgetFactory
+                id="CodeCloneStatusBar"
+                implementation="io.orenlab.codeclone.jetbrains.ui.CodeCloneStatusBarWidgetFactory"/>
+
+        <notificationGroup id="CodeClone" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="CodeClone.OpenSettings"
+                class="io.orenlab.codeclone.jetbrains.actions.OpenCodeCloneSettingsAction"
+                icon="AllIcons.General.Settings"
+                text="Open CodeClone Settings"
+                description="Open CodeClone MCP, analysis profile, and coverage settings"/>
+        <action id="CodeClone.Connect"
+                class="io.orenlab.codeclone.jetbrains.actions.ConnectMcpAction"
+                icon="/icons/codeclone.svg"
+                text="Verify Local Server"
+                description="Connect to the local codeclone-mcp server"/>
+        <action id="CodeClone.AnalyzeWorkspace"
+                class="io.orenlab.codeclone.jetbrains.actions.AnalyzeWorkspaceAction"
+                icon="AllIcons.Actions.Execute"
+                text="Analyze Workspace"
+                description="Run a full workspace analysis"/>
+        <action id="CodeClone.AnalyzeChangedFiles"
+                class="io.orenlab.codeclone.jetbrains.actions.AnalyzeChangedFilesAction"
+                icon="AllIcons.Actions.Diff"
+                text="Analyze Changed Files"
+                description="Run analysis scoped to changed files"/>
+        <action id="CodeClone.OpenTriage"
+                class="io.orenlab.codeclone.jetbrains.actions.OpenProductionTriageAction"
+                icon="AllIcons.Toolwindows.ToolWindowStructure"
+                text="Open Production Triage"
+                description="Open production triage summary"/>
+        <action id="CodeClone.RefreshRun"
+                class="io.orenlab.codeclone.jetbrains.actions.RefreshRunAction"
+                text="Refresh Current Run"
+                description="Re-run the last analysis scope"/>
+        <action id="CodeClone.ClearSession"
+                class="io.orenlab.codeclone.jetbrains.actions.ClearSessionAction"
+                text="Clear Session State"
+                description="Clear MCP session-local review state"/>
+        <action id="CodeClone.RevealFinding"
+                class="io.orenlab.codeclone.jetbrains.actions.RevealFindingAction"
+                text="Reveal Source"
+                description="Open the finding source location"/>
+        <action id="CodeClone.ShowRemediation"
+                class="io.orenlab.codeclone.jetbrains.actions.ShowRemediationAction"
+                text="Show Remediation"
+                description="Show remediation guidance for the selected finding"/>
+        <action id="CodeClone.RefreshMemory"
+                class="io.orenlab.codeclone.jetbrains.actions.RefreshMemoryAction"
+                text="Refresh Memory"
+                description="Reload Engineering Memory inbox from MCP"/>
+        <action id="CodeClone.SyncMemoryFromRun"
+                class="io.orenlab.codeclone.jetbrains.actions.SyncMemoryFromRunAction"
+                text="Sync Memory From Run"
+                description="Refresh Engineering Memory store from the latest analysis run"/>
+        <action id="CodeClone.ApproveMemory"
+                class="io.orenlab.codeclone.jetbrains.actions.ApproveMemoryRecordAction"
+                text="Approve Memory Record"
+                description="Approve the selected Engineering Memory draft"/>
+        <action id="CodeClone.RejectMemory"
+                class="io.orenlab.codeclone.jetbrains.actions.RejectMemoryRecordAction"
+                text="Reject Memory Record"
+                description="Reject the selected Engineering Memory draft"/>
+        <action id="CodeClone.MarkFindingReviewed"
+                class="io.orenlab.codeclone.jetbrains.actions.MarkFindingReviewedAction"
+                text="Mark Finding Reviewed"
+                description="Mark the selected finding as reviewed for this MCP session"/>
+        <action id="CodeClone.OpenSessionStats"
+                class="io.orenlab.codeclone.jetbrains.actions.OpenSessionStatsAction"
+                icon="AllIcons.Actions.ListFiles"
+                text="Open Session Stats"
+                description="Open workspace session stats report (IDE-only MCP tool)"/>
+        <action id="CodeClone.OpenAuditTrail"
+                class="io.orenlab.codeclone.jetbrains.actions.OpenAuditTrailAction"
+                icon="AllIcons.Actions.Preview"
+                text="Open Controller Audit Trail"
+                description="Open controller audit trail report (IDE-only MCP tool)"/>
+
+        <group id="CodeClone.Toolbar" class="com.intellij.openapi.actionSystem.DefaultActionGroup" popup="false">
+            <reference ref="CodeClone.OpenSettings"/>
+            <reference ref="CodeClone.Connect"/>
+            <reference ref="CodeClone.AnalyzeWorkspace"/>
+            <reference ref="CodeClone.AnalyzeChangedFiles"/>
+            <reference ref="CodeClone.OpenTriage"/>
+            <reference ref="CodeClone.RefreshRun"/>
+            <separator/>
+            <reference ref="CodeClone.RefreshMemory"/>
+            <reference ref="CodeClone.OpenSessionStats"/>
+            <reference ref="CodeClone.OpenAuditTrail"/>
+        </group>
+
+        <group id="CodeClone.MainMenu"
+               class="io.orenlab.codeclone.jetbrains.actions.CodeCloneMainMenuGroup"
+               popup="false"
+               compact="false">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <separator/>
+            <reference ref="CodeClone.OpenSettings"/>
+            <reference ref="CodeClone.Connect"/>
+            <reference ref="CodeClone.AnalyzeWorkspace"/>
+            <reference ref="CodeClone.AnalyzeChangedFiles"/>
+            <reference ref="CodeClone.OpenTriage"/>
+            <reference ref="CodeClone.RefreshRun"/>
+            <reference ref="CodeClone.RefreshMemory"/>
+            <reference ref="CodeClone.SyncMemoryFromRun"/>
+            <reference ref="CodeClone.OpenSessionStats"/>
+            <reference ref="CodeClone.OpenAuditTrail"/>
+            <reference ref="CodeClone.ClearSession"/>
+        </group>
+
+        <group id="CodeClone.MemoryPopup" popup="true">
+            <reference ref="CodeClone.ApproveMemory"/>
+            <reference ref="CodeClone.RejectMemory"/>
+        </group>
+        <group id="CodeClone.HotspotsPopup" popup="true">
+            <reference ref="CodeClone.RevealFinding"/>
+            <reference ref="CodeClone.ShowRemediation"/>
+            <reference ref="CodeClone.MarkFindingReviewed"/>
+        </group>
+    </actions>
+</idea-plugin>

@@ -1,0 +1,10 @@
+{
+  "icons": {
+    "expui": {
+      "toolwindows": {
+        "codeclone.svg": "icons/codeclone.svg",
+        "codeclone@20x20.svg": "icons/codeclone@20x20.svg"
+      }
+    }
+  }
+}
