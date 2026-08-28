@@ -7,12 +7,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Final
 
 from ..config.memory import MemoryConfig
 from .enums import MemoryStatus
+from .retention_eligibility import (
+    ArtifactKind,
+    artifact_sweep_eligibility,
+    production_artifact_reference_graph,
+)
 from .sqlite_store import SqliteEngineeringMemoryStore
 
 #: Statuses whose age-based deletion policy is ratified. These are terminal or
@@ -45,6 +50,32 @@ RETENTION_UNENFORCED_STATUSES: Final[tuple[MemoryStatus, ...]] = (
     "stale",
 )
 
+#: Artifact lifecycle states whose age-based deletion is ratified, per kind.
+#:
+#: Empty for every kind, and that emptiness is the ruling, not an oversight.
+#: ``memory.receipt_retention_days`` and ``memory.trajectory_retention_days``
+#: make age a *condition* of eligibility; they are not an authority to destroy
+#: a receipt or a trajectory history. Declaring a state disposable here is a
+#: retention decision about evidence, and no such decision has been taken, so
+#: the owner answers "none" and the eligibility rule refuses.
+#:
+#: A kind is listed even with an empty tuple: the entry is the record that the
+#: question was asked for that kind and answered, which a missing key would
+#: not be.
+RATIFIED_DELETABLE_ARTIFACT_LIFECYCLES: Final[
+    Mapping[ArtifactKind, tuple[str, ...]]
+] = {
+    "receipt": (),
+    "trajectory": (),
+}
+
+
+def _positive_days(days: int | None) -> int | None:
+    """A configured retention, or ``None`` for absent and "keep forever"."""
+    if days is None or days < 0:
+        return None
+    return days
+
 
 class MemoryRetentionPolicy:
     """Canonical owner of memory retention authority.
@@ -60,6 +91,14 @@ class MemoryRetentionPolicy:
     to ask: which statuses are governed at all, and how old a record of a
     given status must be before deletion is permitted.
 
+    Stored artifacts — receipts and trajectories — are governed on the same
+    path but a different footing. For them age is a *condition* of
+    eligibility, never an authority, so this class hands
+    :mod:`codeclone.memory.retention_eligibility` two facts and no verdict:
+    the configured age, and which artifact lifecycle states a ruling has
+    declared disposable. The verdict is the rule's, and today it is always a
+    refusal.
+
     The vacuum must take its population from :attr:`governed_statuses` rather
     than restate one. A consumer that iterates its own list still deletes the
     same rows today, but the authority edge is severed: the withheld statuses
@@ -67,7 +106,7 @@ class MemoryRetentionPolicy:
     unreachable prose while every observable byte stays identical.
     """
 
-    __slots__ = ("days_by_status", "enforced", "withheld")
+    __slots__ = ("days_by_artifact", "days_by_status", "enforced", "withheld")
 
     def __init__(
         self,
@@ -75,10 +114,14 @@ class MemoryRetentionPolicy:
         enforced: tuple[MemoryStatus, ...],
         withheld: tuple[MemoryStatus, ...],
         days_by_status: Mapping[MemoryStatus, int],
+        days_by_artifact: Mapping[ArtifactKind, int] | None = None,
     ) -> None:
         self.enforced = enforced
         self.withheld = withheld
         self.days_by_status = days_by_status
+        self.days_by_artifact: Mapping[ArtifactKind, int] = (
+            {} if days_by_artifact is None else days_by_artifact
+        )
 
     @classmethod
     def from_config(cls, config: MemoryConfig) -> MemoryRetentionPolicy:
@@ -93,6 +136,10 @@ class MemoryRetentionPolicy:
                 "rejected": config.rejected_retention_days,
                 "archived": config.archived_retention_days,
             },
+            days_by_artifact={
+                "receipt": config.receipt_retention_days,
+                "trajectory": config.trajectory_retention_days,
+            },
         )
 
     @property
@@ -105,16 +152,43 @@ class MemoryRetentionPolicy:
         """
         return (*self.enforced, *self.withheld)
 
+    @property
+    def governed_artifacts(self) -> tuple[ArtifactKind, ...]:
+        """Every stored artifact kind whose retention configuration exists.
+
+        Derived from the resolved keys rather than restated, so the population
+        that reaches the eligibility rule cannot drift from the population
+        configuration declares.
+        """
+        return tuple(sorted(self.days_by_artifact))
+
     def configured_days(self, status: MemoryStatus) -> int | None:
         """The configured retention for *status*, ratified or not.
 
         ``None`` when the status carries no retention key or the configured
         value is negative, which means "keep forever".
         """
-        days = self.days_by_status.get(status)
-        if days is None or days < 0:
-            return None
-        return days
+        return _positive_days(self.days_by_status.get(status))
+
+    def eligibility_days(self, kind: ArtifactKind) -> int | None:
+        """Age after which an artifact of *kind* may be *considered*, else None.
+
+        Not a deletion age. This value is one conjunct of the eligibility rule
+        in :mod:`codeclone.memory.retention_eligibility`, which still has to
+        establish that nothing references or roots the artifact before any
+        deletion could follow. ``None`` means "keep forever" — the key is
+        absent or configured negative.
+        """
+        return _positive_days(self.days_by_artifact.get(kind))
+
+    def deletable_lifecycles(self, kind: ArtifactKind) -> tuple[str, ...]:
+        """Lifecycle states of *kind* whose age-based deletion is ratified.
+
+        Empty for every kind on this build. See
+        :data:`RATIFIED_DELETABLE_ARTIFACT_LIFECYCLES` for why that is a
+        decision rather than a gap.
+        """
+        return RATIFIED_DELETABLE_ARTIFACT_LIFECYCLES.get(kind, ())
 
     def deletion_days(self, status: MemoryStatus) -> int | None:
         """Age after which deleting *status* is permitted, else ``None``.
@@ -140,6 +214,11 @@ class MemoryRetentionPolicy:
 class VacuumReport:
     deleted_by_status: dict[str, int]
     total_deleted: int
+    #: Per artifact kind, the retention outcome the vacuum was given for it.
+    #: Every value is a refusal on this build; ``eligible`` would mean the
+    #: eligibility rule found nothing left to object to, not that anything was
+    #: swept — the vacuum deletes records only.
+    artifact_sweep: dict[str, str] = field(default_factory=dict)
 
 
 def unenforced_retention_days(config: MemoryConfig) -> dict[str, int]:
@@ -158,6 +237,16 @@ def run_memory_vacuum(
     commit: bool = True,
 ) -> VacuumReport:
     policy = MemoryRetentionPolicy.from_config(config)
+    # Artifacts first, and only as a question. The rule is asked whether age
+    # has made receipts or trajectories deletable at all; it answers with a
+    # refusal naming what it could not prove, and the vacuum has no artifact
+    # deletion to gate on the answer. Building one belongs to whoever can
+    # first resolve the referrer and root sources the refusal names.
+    graph = production_artifact_reference_graph()
+    artifact_sweep: dict[str, str] = {
+        kind: artifact_sweep_eligibility(policy=policy, kind=kind, graph=graph).outcome
+        for kind in policy.governed_artifacts
+    }
     now = datetime.now(tz=timezone.utc)
     deleted_by_status: dict[str, int] = {}
     total = 0
@@ -179,10 +268,12 @@ def run_memory_vacuum(
     return VacuumReport(
         deleted_by_status=dict(sorted(deleted_by_status.items())),
         total_deleted=total,
+        artifact_sweep=artifact_sweep,
     )
 
 
 __all__ = [
+    "RATIFIED_DELETABLE_ARTIFACT_LIFECYCLES",
     "RETENTION_ENFORCED_STATUSES",
     "RETENTION_UNENFORCED_STATUSES",
     "MemoryRetentionPolicy",

@@ -133,6 +133,8 @@ def _aggressive(tmp_path: Path) -> MemoryApplicationContext:
             draft_retention_days=0,
             rejected_retention_days=0,
             archived_retention_days=0,
+            receipt_retention_days=0,
+            trajectory_retention_days=0,
         ),
     )
 
@@ -169,10 +171,21 @@ def _expected_unenforced_keys(context: MemoryApplicationContext) -> frozenset[st
         f"{status}_retention_days"
         for status in getattr(vacuum_module, "RETENTION_UNENFORCED_STATUSES", ())
     }
+    # An artifact kind for which no lifecycle state has been ratified as
+    # disposable can never become eligible, whatever its retention says, so
+    # its key still enforces nothing. Derived from the ruling table rather
+    # than listed, so ratifying a state flips the doc requirement by itself.
+    unsweepable_artifacts = {
+        f"{kind}_retention_days"
+        for kind, lifecycles in getattr(
+            vacuum_module, "RATIFIED_DELETABLE_ARTIFACT_LIFECYCLES", {}
+        ).items()
+        if not lifecycles
+    }
     unread = _memory_config_field_names(context) - _fields_read_outside_config_package(
         context
     )
-    return frozenset(withheld_retention | unread)
+    return frozenset(withheld_retention | unsweepable_artifacts | unread)
 
 
 def _documented_memory_rows() -> dict[str, str]:
@@ -187,15 +200,19 @@ def _documented_memory_rows() -> dict[str, str]:
 class _RecordingPolicy:
     """Stand-in retention owner that records what the vacuum asked it.
 
-    Its population is deliberately disjoint from the ratified statuses, so a
+    Both populations are deliberately disjoint from the ratified ones, so a
     consumer that restates a population of its own cannot accidentally agree
-    with it.
+    with it. The artifact population also names a kind that declares no
+    reference or root sources, which must fail closed rather than sail
+    through the completeness checks with an empty requirement.
     """
 
     def __init__(self) -> None:
         self.asked: list[str] = []
+        self.artifacts_asked: list[str] = []
         self.enforced: tuple[str, ...] = ("active", "superseded")
         self.withheld: tuple[str, ...] = ("historical",)
+        self.governed_artifacts: tuple[str, ...] = ("blast_cache", "snapshot")
 
     @property
     def governed_statuses(self) -> tuple[str, ...]:
@@ -204,6 +221,14 @@ class _RecordingPolicy:
     def deletion_days(self, status: str) -> int | None:
         self.asked.append(status)
         return 0 if status in self.enforced else None
+
+    def eligibility_days(self, kind: str) -> int | None:
+        self.artifacts_asked.append(kind)
+        return 0
+
+    def deletable_lifecycles(self, kind: str) -> tuple[str, ...]:
+        del kind
+        return ()
 
 
 def test_governed_population_is_derived_from_the_config_keys(
@@ -335,13 +360,19 @@ def test_vacuum_takes_its_population_from_the_policy_owner(
     )
     store = _RecordingStore()
 
-    vacuum_module.run_memory_vacuum(store, aggressive.config, commit=True)  # type: ignore[arg-type]
+    report = vacuum_module.run_memory_vacuum(store, aggressive.config, commit=True)  # type: ignore[arg-type]
 
     assert tuple(probe.asked) == probe.governed_statuses, (
         "the vacuum did not take its population from the policy owner: the "
         "authority edge config -> retention policy -> vacuum is severed"
     )
     assert store.deleted_statuses == list(probe.enforced)
+    assert tuple(probe.artifacts_asked) == probe.governed_artifacts, (
+        "the vacuum did not take its artifact population from the policy "
+        "owner: the authority edge config -> retention policy -> eligibility "
+        "is severed"
+    )
+    assert set(report.artifact_sweep) == set(probe.governed_artifacts)
 
 
 def test_configuration_doc_marks_exactly_the_unenforced_memory_keys(
