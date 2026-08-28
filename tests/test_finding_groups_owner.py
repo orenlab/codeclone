@@ -27,8 +27,12 @@ The four frozen invariants of t4-a are pinned here too, because this is
 exactly the change that could move them by accident:
 
 1. ``family="all"`` stays the five baseline-tracked families;
-2. published totals do not move (including the changed-scope subset, which
-   stays four families **by declaration** rather than by omission);
+2. published totals do not move as a side effect of the reduction. The
+   changed-scope subset was the one exception, and it was closed on its own
+   evidence rather than by tidying: once the ``authority`` group was shown to
+   carry the very address the changed-scope predicate reads, the gate stopped
+   subtracting it and now walks the whole universe
+   (``tests/test_changed_scope_authority_membership.py``);
 3. the advisory tiers are never members of the clone family and never enter a
    total;
 4. the tier state witness still reaches the surfaces it reached.
@@ -484,6 +488,7 @@ def test_the_changed_scope_gate_follows_the_owner(
         "st-1",
         "dc-1",
         "ds-1",
+        "au-1",
     }
     _clone_only(monkeypatch)
     assert _ids(_flatten_report_findings(document)) == {"cl-1"}
@@ -674,25 +679,30 @@ def test_the_text_family_lines_follow_the_owner(
 # --------------------------------------------------------------------------
 
 
-def test_the_changed_scope_universe_is_a_declared_subset_not_an_omission() -> None:
-    """``findings_total`` on ``--changed-only`` stays four families.
+def test_the_changed_scope_universe_subtracts_no_family_from_the_owner() -> None:
+    """``findings_total`` on ``--changed-only`` is now the whole universe.
 
-    The CLI gate never counted the ``authority`` family. That total reaches
-    the user, so widening it is a contract decision and not a side effect of
-    removing a copy. The subset is therefore named and derived from the
-    owner's tuple, so the omission is a declaration a reader can see.
+    The subset this test used to guard was the reduction's one surviving
+    omission: the gate never counted ``authority``, and the total reaches the
+    user, so it was left declared rather than widened by tidying. It was
+    widened afterwards on its own evidence -- an authority group carries the
+    ``items[*]["relative_path"]`` the changed-scope predicate reads, so the
+    family is scope-decidable and the published word "total" is true of it.
+    The membership proof itself lives in
+    ``tests/test_changed_scope_authority_membership.py``, on a producer-built
+    group; what stays pinned here is that no family is subtracted on the way.
     """
 
     from codeclone.surfaces.cli import changed_scope
 
     owner = _owner()
     assert changed_scope.changed_scope_group_keys() == tuple(
-        key for key in owner.BASELINE_TRACKED_GROUP_KEYS if key != "authority"
+        owner.BASELINE_TRACKED_GROUP_KEYS
     )
     gate = changed_scope._changed_clone_gate_from_report(
         _document(), changed_paths=("pkg/mod.py",)
     )
-    assert gate.findings_total == 4
+    assert gate.findings_total == 5
 
 
 def test_the_producer_total_stays_five_family() -> None:

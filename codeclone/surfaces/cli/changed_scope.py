@@ -17,7 +17,7 @@ from ...api.novelty import (
     CLONE_NOVELTY_NEW,
     CLONE_NOVELTY_UNAVAILABLE,
 )
-from ...contracts import GROUP_KEY_AUTHORITY, ExitCode
+from ...contracts import ExitCode
 from ...utils import coerce as _coerce
 from ...utils.finding_groups import (
     baseline_tracked_group_keys,
@@ -141,18 +141,34 @@ def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str,
 
 
 def changed_scope_group_keys() -> tuple[str, ...]:
-    """The family universe ``--changed-only`` counts.
+    """The family universe ``--changed-only`` counts: the owner's, entire.
 
-    Deliberately not the full one: this gate has never counted the
-    ``authority`` family, and ``ChangedCloneGate.findings_total`` is printed
-    to the user. Widening it would move a published number, which is a
-    contract decision and not a side effect of removing a duplicated walk --
-    so the omission is stated here, as a named subset of the owner's universe,
-    instead of being invisible inside a hand-written list. Derived on each
-    call so the subset cannot outlive the universe it is taken from.
+    This gate used to subtract ``authority`` -- lost when the family was added,
+    then left in place because ``ChangedCloneGate.findings_total`` is printed
+    to the user, so widening it moves a published number. What widening needed
+    first was not a tidier sum but a proof: a family belongs in a
+    *changed-scope* total only if a changed path can decide its membership.
+
+    That edge is proven, and pinned. The authority producer fills each group's
+    ``items[*]["relative_path"]`` from the violation's own locations, and that
+    is the single address ``_finding_touches_changed_paths`` reads -- the same
+    address the other four families are decided by, needing no coercion, and
+    matched on whole path segments, so a partial component does not count as a
+    hit. A real authority group therefore answers "does the diff touch it?"
+    totally, which is why the number below is now every finding the diff
+    touches instead of four families' worth of it
+    (``tests/test_changed_scope_authority_membership.py`` pins that on a
+    producer-built group, because this repository's own run has none).
+
+    Still resolved on every call, so the universe is provably the owner's:
+    redirecting ``BASELINE_TRACKED_GROUP_KEYS`` moves this gate with it, and a
+    private enumeration here would stay behind and red. The advisory tiers are
+    absent for the reason they are absent from the owner -- they are not
+    families, they reach no baseline lane, and they must never widen a
+    published total.
     """
 
-    return baseline_tracked_group_keys(exclude=(GROUP_KEY_AUTHORITY,))
+    return baseline_tracked_group_keys()
 
 
 def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
