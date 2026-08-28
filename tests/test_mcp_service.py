@@ -8245,8 +8245,15 @@ def test_normalize_intent_scope_hint_on_invalid_type() -> None:
 
 
 def test_normalize_intent_scope_edge_cases() -> None:
-    """Path normalization: traversal, absolute, leading ./ prefix."""
-    assert mcp_intent_mod._normalize_path(".") == ""
+    """Scope entry parsing: traversal, absolute, leading ./ prefix.
+
+    ``.`` used to normalise to ``""`` -- an entry that matched nothing and was
+    accepted anyway. The grammar refuses it; the deny-pattern normaliser, which
+    the grammar deliberately does not govern, keeps the old behaviour.
+    """
+    assert mcp_intent_mod._normalize_pattern(".") == ""
+    with pytest.raises(ValueError, match="scope_entry_empty"):
+        mcp_intent_mod.normalize_intent_scope({"allowed_files": ["."]})
 
     # leading ./ stripped
     scope = mcp_intent_mod.normalize_intent_scope({"allowed_files": ["./pkg/a.py"]})

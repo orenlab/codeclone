@@ -13,6 +13,9 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Final
 
+from ...contracts.scope_grammar import (
+    normalize_scope_entry_text,
+)
 from ...paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
 
 DEFAULT_FORBIDDEN: Final[tuple[str, ...]] = (
@@ -125,7 +128,16 @@ class IntentRecord:
         return payload
 
 
-def _normalize_path(value: object) -> str:
+def _normalize_pattern(value: object) -> str:
+    """Normalise one ``forbidden`` deny pattern.
+
+    ``forbidden`` is a different field with different semantics: a deny list
+    matched with :func:`fnmatch.fnmatchcase`, which is what the default
+    ``.codeclone/**`` guard is written in. The scope grammar governs
+    ``allowed_files`` -- the write-authority boundary -- and deliberately does
+    not reach here.
+    """
+
     text = str(value).replace("\\", "/").strip()
     if text == ".":
         return ""
@@ -139,23 +151,54 @@ def _normalize_path(value: object) -> str:
     return text
 
 
-def _normalize_required_paths(value: object, *, field_name: str) -> tuple[str, ...]:
+def _normalize_required_entries(value: object, *, field_name: str) -> tuple[str, ...]:
+    """Parse a required scope list through the grammar owner.
+
+    This is the input door. An entry outside the ratified grammar is refused
+    here, with a typed reason and an executable next step, rather than accepted
+    silently and then read four different ways downstream.
+    """
+
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise ValueError(f"scope.{field_name} must be a list of relative paths.")
     paths = tuple(
-        sorted({_normalize_path(item) for item in value if str(item).strip()})
+        sorted(
+            {
+                normalize_scope_entry_text(str(item))
+                for item in value
+                if str(item).strip()
+            }
+        )
     )
     if not paths:
         raise ValueError(f"scope.{field_name} must contain at least one path.")
     return paths
 
 
-def _normalize_optional_paths(value: object, *, field_name: str) -> tuple[str, ...]:
+def _normalize_optional_entries(value: object, *, field_name: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise ValueError(f"scope.{field_name} must be a list of relative paths.")
-    return tuple(sorted({_normalize_path(item) for item in value if str(item).strip()}))
+    return tuple(
+        sorted(
+            {
+                normalize_scope_entry_text(str(item))
+                for item in value
+                if str(item).strip()
+            }
+        )
+    )
+
+
+def _normalize_optional_patterns(value: object, *, field_name: str) -> tuple[str, ...]:
+    """Normalise a supplied ``forbidden`` list. The caller checks for ``None``."""
+
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise ValueError(f"scope.{field_name} must be a list of relative paths.")
+    return tuple(
+        sorted({_normalize_pattern(item) for item in value if str(item).strip()})
+    )
 
 
 def normalize_intent_scope(scope: object) -> IntentScope:
@@ -163,11 +206,11 @@ def normalize_intent_scope(scope: object) -> IntentScope:
         raise ValueError(
             'scope must be an object, e.g. {"allowed_files": ["path/to/file.py"]}.'
         )
-    allowed_files = _normalize_required_paths(
+    allowed_files = _normalize_required_entries(
         scope.get("allowed_files"),
         field_name="allowed_files",
     )
-    allowed_related = _normalize_optional_paths(
+    allowed_related = _normalize_optional_entries(
         scope.get("allowed_related"),
         field_name="allowed_related",
     )
@@ -175,7 +218,7 @@ def normalize_intent_scope(scope: object) -> IntentScope:
     forbidden = (
         (
             *DEFAULT_FORBIDDEN,
-            *_normalize_optional_paths(raw_forbidden, field_name="forbidden"),
+            *_normalize_optional_patterns(raw_forbidden, field_name="forbidden"),
         )
         if raw_forbidden is not None
         else DEFAULT_FORBIDDEN

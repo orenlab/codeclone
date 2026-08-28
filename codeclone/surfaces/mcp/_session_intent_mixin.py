@@ -29,6 +29,13 @@ from ...audit import (
     EVENT_WORKSPACE_CONFLICT,
     EVENT_WORKSPACE_GC,
 )
+from ...contracts.scope_grammar import (
+    entry_contains_path,
+    overlapping_entries,
+    read_scope_entries,
+    render_scope_entry,
+    scope_contains_path,
+)
 from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
 from ._blast_radius import blast_radius_to_payload
@@ -616,8 +623,15 @@ class _MCPSessionIntentMixin:
         scope: IntentScope,
         workspace_existing: tuple[WorkspaceIntentRecord, ...],
     ) -> list[dict[str, object]]:
-        """Return advisory info about queued intents with overlapping scope."""
-        new_allowed = set(scope.allowed_files)
+        """Return advisory info about queued intents with overlapping scope.
+
+        Asks the grammar owner, like the conflict detector beside it: a caller
+        declaring ``tests/`` used to be told nothing was queued on
+        ``tests/test_api.py``, because the two spellings were intersected as
+        strings.
+        """
+
+        new_allowed = sorted(scope.allowed_files)
         if not new_allowed:
             return []
         context: list[dict[str, object]] = []
@@ -629,9 +643,11 @@ class _MCPSessionIntentMixin:
                 continue
             raw_existing = record.scope.get("allowed_files")
             existing_allowed = (
-                set(raw_existing) if isinstance(raw_existing, list) else set()
+                sorted(str(entry) for entry in raw_existing)
+                if isinstance(raw_existing, list)
+                else []
             )
-            overlap = sorted(new_allowed & existing_allowed)
+            overlap = list(overlapping_entries(new_allowed, existing_allowed))
             if overlap:
                 context.append(
                     {
@@ -1612,8 +1628,11 @@ class _MCPSessionIntentMixin:
     ) -> IntentCheckResult:
         actual_files = tuple(sorted(set(actual)))
         declared_scope = intent.scope.allowed_files
-        allowed = set(intent.scope.allowed_files)
-        related = set(intent.scope.allowed_related)
+        # One owner for "is this path inside that scope": the grammar in
+        # codeclone.contracts. Exact set membership here is what made a
+        # declared directory prefix report its own files as out of scope.
+        allowed = read_scope_entries(intent.scope.allowed_files)
+        related = read_scope_entries(intent.scope.allowed_related)
         forbidden = forbidden_touched(
             changed_files=actual_files,
             forbidden_patterns=intent.scope.forbidden,
@@ -1621,13 +1640,15 @@ class _MCPSessionIntentMixin:
         unexpected = tuple(
             path
             for path in actual_files
-            if path not in allowed
-            and path not in related
+            if not scope_contains_path(allowed, path)
+            and not scope_contains_path(related, path)
             and not any(
                 fnmatchcase(path, pattern) for pattern in intent.scope.forbidden
             )
         )
-        expanded = tuple(path for path in actual_files if path in related)
+        expanded = tuple(
+            path for path in actual_files if scope_contains_path(related, path)
+        )
         if forbidden or unexpected:
             status = IntentStatus.VIOLATED
             required_action = "human_approval"
@@ -1640,7 +1661,16 @@ class _MCPSessionIntentMixin:
             status = IntentStatus.CLEAN
             required_action = None
             message = intent_msgs.SCOPE_CHECK_CLEAN
-        untouched_in_declared = tuple(sorted(set(declared_scope) - set(actual_files)))
+        # A directory entry is touched when a file inside it changed. Comparing
+        # the declared text against changed paths reported every prefix entry
+        # as untouched forever.
+        untouched_in_declared = tuple(
+            sorted(
+                render_scope_entry(entry)
+                for entry in allowed
+                if not any(entry_contains_path(entry, path) for path in actual_files)
+            )
+        )
         return IntentCheckResult(
             status=status,
             declared_scope=declared_scope,

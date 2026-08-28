@@ -63,6 +63,66 @@ def test_intent_scope_model_skips_blank_entries() -> None:
     assert scope.allowed_files == ["pkg/a.py"]
 
 
+def test_intent_scope_model_keeps_the_directory_form_of_a_declared_entry() -> None:
+    """A persisted directory prefix survives the record round trip.
+
+    Stripping the trailing slash here would erase the difference between an
+    exact file and a directory tree, and would leave ``scope_digest``
+    disagreeing with the scope the input door wrote.
+    """
+
+    scope = IntentScopeModel.model_validate(
+        {
+            "allowed_files": ["tests/", "pkg/a.py"],
+            "allowed_related": ["docs/"],
+            "forbidden": [],
+        }
+    )
+    assert scope.allowed_files == ["pkg/a.py", "tests/"]
+    assert scope.allowed_related == ["docs/"]
+
+
+def test_intent_scope_model_still_reads_a_record_holding_a_legacy_glob() -> None:
+    """Records written before the grammar was ratified must stay readable.
+
+    The refusal belongs at the input door. A stored intent that cannot be read
+    is a coordination boundary that has silently disappeared.
+    """
+
+    scope = IntentScopeModel.model_validate(
+        {
+            "allowed_files": ["src/**/*.py", "foo?.py"],
+            "allowed_related": [],
+            "forbidden": [],
+        }
+    )
+    assert scope.allowed_files == ["foo?.py", "src/**/*.py"]
+
+
+def test_intent_scope_model_normalises_forbidden_patterns_separately() -> None:
+    """``forbidden`` keeps the deny-pattern normalisation, blanks and all."""
+
+    scope = IntentScopeModel.model_validate(
+        {
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": [],
+            "forbidden": ["docs/", "", "  ", ".codeclone/**"],
+        }
+    )
+    assert scope.forbidden == [".codeclone/**", "docs"]
+
+
+def test_intent_scope_model_rejects_an_absolute_forbidden_pattern() -> None:
+    with pytest.raises(ValidationError, match="repo-relative"):
+        IntentScopeModel.model_validate(
+            {
+                "allowed_files": ["pkg/a.py"],
+                "allowed_related": [],
+                "forbidden": ["/etc/passwd"],
+            }
+        )
+
+
 def test_intent_integrity_model_rejects_invalid_digest() -> None:
     with pytest.raises(ValidationError, match="64-char hex digest"):
         IntentIntegrityModel.model_validate({"payload_sha256": "not-a-digest"})

@@ -18,6 +18,11 @@ from ...api.workspace import (
     collect_workspace_dirty_paths,
     collect_workspace_dirty_snapshot,
 )
+from ...contracts.scope_grammar import (
+    read_scope_entries,
+    render_scope_entry,
+    scope_contains_path,
+)
 from ...observability import span
 from ._verification_profile import (
     _is_python_source,  # single owner of "this path is Python source"
@@ -295,7 +300,7 @@ def collect_dirty_paths(
             return DirtyPathsResult(git_available=False, dirty_paths=())
         dirty = projection.dirty_paths
         if scoped_paths is not None:
-            scope_set = {_normalize_path(path) for path in scoped_paths if path.strip()}
+            scope_set = _scope_entry_texts(scoped_paths)
             dirty = tuple(
                 sorted(path for path in dirty if _path_in_scope(path, scope_set))
             )
@@ -416,14 +421,24 @@ def dirty_summary_from_snapshot(snapshot: DirtySnapshot | None) -> dict[str, obj
     }
 
 
+def _scope_entry_texts(entries: Sequence[str]) -> set[str]:
+    """Canonical text for declared scope entries.
+
+    Distinct from :func:`_normalize_path`, which normalises a *path* reported
+    by git. A scope entry is not a path: ``"tests/"`` and ``"tests"`` are two
+    different declarations, and stripping the slash is what erased the
+    directory form before any consumer could see it.
+    """
+
+    return {render_scope_entry(entry) for entry in read_scope_entries(entries)}
+
+
 def _declared_scope_sets(
     allowed_files: Sequence[str],
     allowed_related: Sequence[str] | None,
 ) -> tuple[set[str], set[str], set[str]]:
-    blocking_scope = {_normalize_path(path) for path in allowed_files if path.strip()}
-    related_scope = {
-        _normalize_path(path) for path in (allowed_related or ()) if path.strip()
-    } - blocking_scope
+    blocking_scope = _scope_entry_texts(allowed_files)
+    related_scope = _scope_entry_texts(allowed_related or ()) - blocking_scope
     return blocking_scope, related_scope, blocking_scope | related_scope
 
 
@@ -435,9 +450,14 @@ def paths_in_declared_scope(
 ) -> tuple[str, ...]:
     """Return the subset of ``paths`` covered by a declared scope.
 
-    One owner for "is this path inside that intent's scope", shared by finish
-    hygiene and by the start-time check that refuses to replace an unfinished
-    intent whose scope still holds uncommitted work.
+    Used by finish hygiene and by the start-time check that refuses to replace
+    an unfinished intent whose scope still holds uncommitted work. The owner of
+    "is this path inside that intent's scope" is
+    :mod:`codeclone.contracts.scope_grammar`, which this function and the
+    finish scope check, the patch contract, the intent conflict detector and
+    the controller-insights contested verdict all ask. This docstring used to
+    claim the ownership for itself while three other consumers answered
+    differently.
     """
 
     _blocking, _related, declared = _declared_scope_sets(allowed_files, allowed_related)
@@ -958,10 +978,14 @@ def _normalize_path(path: str) -> str:
 
 
 def _path_in_scope(path: str, scope_paths: set[str]) -> bool:
-    return any(
-        path == candidate or path.startswith(f"{candidate}/")
-        for candidate in scope_paths
-    )
+    """Membership, decided by the grammar owner in ``codeclone.contracts``.
+
+    Hygiene used to be the only consumer that understood a directory prefix,
+    which is precisely why its answer differed from the two consumers that
+    decide whether a patch is in scope.
+    """
+
+    return scope_contains_path(read_scope_entries(scope_paths), path)
 
 
 def _bounded_sample(

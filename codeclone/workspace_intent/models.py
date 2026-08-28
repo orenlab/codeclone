@@ -55,7 +55,13 @@ def _scope_path_violation(path: str) -> str | None:
     return None
 
 
-def _normalize_path_list(value: list[str], *, required: bool) -> list[str]:
+def _normalize_pattern_list(value: list[str]) -> list[str]:
+    """Validate a ``forbidden`` deny-pattern list on a persisted document.
+
+    Never required: an empty deny list is a legitimate scope, so there is no
+    emptiness guard here to reach.
+    """
+
     paths: list[str] = []
     for item in value:
         path = item.replace("\\", "/").strip()
@@ -65,7 +71,36 @@ def _normalize_path_list(value: list[str], *, required: bool) -> list[str]:
         if violation is not None:
             raise ValueError(violation)
         paths.append(path.rstrip("/"))
-    deduped = sorted(set(paths))
+    return sorted(set(paths))
+
+
+def _normalize_scope_entry_list(value: list[str], *, required: bool) -> list[str]:
+    """Validate a declared scope list on a persisted document.
+
+    Two deliberate differences from :func:`_normalize_pattern_list`.
+
+    The trailing slash is kept: it is the entire difference between an exact
+    file and a directory prefix, and stripping it here would make the record's
+    ``scope_digest`` disagree with the scope the door wrote.
+
+    The grammar is **not** enforced. Records written before the grammar was
+    ratified may hold a glob, and a stored intent that cannot be read is a
+    coordination boundary that has silently disappeared -- foreign scope would
+    stop being seen at all. The refusal belongs at the input door, where a
+    caller can still act on it; here the total reader gives such an entry its
+    conservative, literal reading.
+    """
+
+    entries: list[str] = []
+    for item in value:
+        path = item.replace("\\", "/").strip()
+        if not path:
+            continue
+        violation = _scope_path_violation(path)
+        if violation is not None:
+            raise ValueError(violation)
+        entries.append(path)
+    deduped = sorted(set(entries))
     if required and not deduped:
         raise ValueError("allowed_files must not be empty")
     return deduped
@@ -138,12 +173,17 @@ class IntentScopeModel(BaseModel):
     @field_validator("allowed_files")
     @classmethod
     def validate_allowed_files(cls, value: list[str]) -> list[str]:
-        return _normalize_path_list(value, required=True)
+        return _normalize_scope_entry_list(value, required=True)
 
-    @field_validator("allowed_related", "forbidden")
+    @field_validator("allowed_related")
     @classmethod
-    def validate_optional_paths(cls, value: list[str]) -> list[str]:
-        return _normalize_path_list(value, required=False)
+    def validate_allowed_related(cls, value: list[str]) -> list[str]:
+        return _normalize_scope_entry_list(value, required=False)
+
+    @field_validator("forbidden")
+    @classmethod
+    def validate_forbidden(cls, value: list[str]) -> list[str]:
+        return _normalize_pattern_list(value)
 
 
 class IntentIntegrityModel(BaseModel):

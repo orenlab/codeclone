@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ..audit.reader import AnalysisRunSnapshot
     from ..surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 
+from ..contracts.scope_grammar import overlapping_entries
 from ..paths.workspace import REPORT_JSON_PARTS as _REPORT_PATH_PARTS
 from ..utils.run_identity import ReportRunIdentityError, report_run_identity
 from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
@@ -264,18 +265,26 @@ def _classify_workspace_health(
 
 
 def _has_scope_overlap(agents: list[AgentSnapshot]) -> bool:
-    all_files: list[set[str]] = []
+    """Whether two live agents hold scopes that authorise the same file.
+
+    Set intersection answered this before, so an agent holding ``tests/`` and
+    an agent holding ``tests/test_api.py`` were reported as an uncontested
+    workspace while both were authorised to write the same file. The grammar
+    owner normalises both spellings into one IR and then compares.
+    """
+
+    all_files: list[list[str]] = []
     for agent in agents:
         agent_files: set[str] = set()
         for intent in agent.intents:
             if intent.status == "active":
                 agent_files.update(intent.allowed_files)
         if agent_files:
-            all_files.append(agent_files)
+            all_files.append(sorted(agent_files))
 
-    for i in range(len(all_files)):
-        for j in range(i + 1, len(all_files)):
-            if all_files[i] & all_files[j]:
+    for index, left in enumerate(all_files):
+        for right in all_files[index + 1 :]:
+            if overlapping_entries(left, right):
                 return True
     return False
 

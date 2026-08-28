@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import cast
 
@@ -29,6 +28,7 @@ from ...budget.patch_contract import (
     budgets_for_strictness,
     detect_baseline_abuse,
 )
+from ...contracts.scope_grammar import read_scope_entries, scope_contains_path
 from ...utils.coerce import as_int as _coerce_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
@@ -1304,10 +1304,15 @@ class _MCPSessionPatchContractMixin:
         return any(self._path_in_scope(path=path, scope=scope) for path in paths)
 
     def _path_in_scope(self, *, path: str, scope: IntentScope) -> bool:
-        patterns = (*scope.allowed_files, *scope.allowed_related)
-        return any(
-            path == pattern or fnmatchcase(path, pattern) for pattern in patterns
-        )
+        """Ask the grammar owner, exactly as the finish scope check does.
+
+        ``fnmatchcase`` used to answer here and nowhere else, so a stored glob
+        entry covered a whole subtree for this consumer and nothing for the two
+        beside it -- the same intent both inside and outside its own scope.
+        """
+
+        entries = read_scope_entries((*scope.allowed_files, *scope.allowed_related))
+        return scope_contains_path(entries, path)
 
     def _normalized_report_path(self, value: object) -> str:
         path = str(value or "").replace("\\", "/").strip()

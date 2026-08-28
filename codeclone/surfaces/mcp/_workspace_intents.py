@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._workspace_intent_store import WorkspaceIntentStore
 
+from ...contracts.scope_grammar import (
+    overlapping_entries,
+    read_scope_entry,
+    render_scope_entry,
+)
 from ...workspace_intent.contract import (
     DEFAULT_LEASE_SECONDS,
     DEFAULT_TTL_SECONDS,
@@ -459,12 +464,18 @@ def _detect_scope_state(
         existing_allowed, existing_related, existing_forbidden = _scope_all_sets(
             record.scope
         )
-        hard_overlap = tuple(sorted(new_allowed.intersection(existing_allowed)))
+        # Overlap is decided by the grammar owner, never by literal string
+        # intersection: `tests/` and `tests/test_api.py` are two spellings of
+        # one authorised region, and a set intersection reported them disjoint.
+        hard_overlap = overlapping_entries(
+            sorted(new_allowed), sorted(existing_allowed)
+        )
         soft_overlap = tuple(
             sorted(
-                new_allowed.intersection(existing_related).union(
-                    new_related.intersection(existing_allowed)
-                )
+                {
+                    *overlapping_entries(sorted(new_allowed), sorted(existing_related)),
+                    *overlapping_entries(sorted(new_related), sorted(existing_allowed)),
+                }
             )
         )
         if hard_overlap or soft_overlap:
@@ -636,6 +647,8 @@ def _intent_store(root: Path) -> WorkspaceIntentStore:
 
 
 def _valid_path_list(value: object, *, required: bool) -> list[str] | None:
+    """Validate a ``forbidden`` deny-pattern list from an untrusted payload."""
+
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return None
     paths: list[str] = []
@@ -654,13 +667,35 @@ def _valid_path_list(value: object, *, required: bool) -> list[str] | None:
     return deduped
 
 
+def _valid_scope_entry_list(value: object) -> list[str] | None:
+    """Validate a declared scope list, keeping each entry's grammatical form.
+
+    ``_valid_path_list`` strips the trailing slash, which is the whole
+    difference between an exact file and a directory prefix. Reading a stored
+    record must not refuse a form the door no longer accepts, so the total
+    reader is used here and the refusal stays at the door.
+    """
+
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    entries: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            return None
+        path = item.replace("\\", "/").strip()
+        if not path:
+            continue
+        if Path(path).is_absolute() or ".." in Path(path).parts:
+            return None
+        entries.append(render_scope_entry(read_scope_entry(path)))
+    return sorted(set(entries))
+
+
 def _scope_all_sets(
     scope: Mapping[str, object],
 ) -> tuple[set[str], set[str], tuple[str, ...]]:
-    allowed = set(_valid_path_list(scope.get("allowed_files"), required=False) or [])
-    related = set(
-        _valid_path_list(scope.get("allowed_related", ()), required=False) or []
-    )
+    allowed = set(_valid_scope_entry_list(scope.get("allowed_files")) or [])
+    related = set(_valid_scope_entry_list(scope.get("allowed_related", ())) or [])
     forbidden = tuple(
         _valid_path_list(scope.get("forbidden", ()), required=False) or []
     )
