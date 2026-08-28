@@ -22,17 +22,29 @@ from ...contracts.scope_grammar import (
     render_scope_entry,
 )
 from ...workspace_intent.contract import (
+    CURRENT_GRAMMAR,
     DEFAULT_LEASE_SECONDS,
     DEFAULT_TTL_SECONDS,
+    HISTORICAL_PRODUCER_SPECIFIC,
+    HISTORICAL_UNAMBIGUOUS,
+    LEGACY_AMBIGUOUS,
     LEGACY_REGISTRY_VERSION,
     MAX_LEASE_SECONDS,
     MAX_TTL_SECONDS,
     MIN_LEASE_SECONDS,
     MIN_TTL_SECONDS,
     REGISTRY_VERSION,
+    SCOPE_INTERPRETER_FIELD,
+    AuditScopeEntry,
+    ScopeRelation,
     WorkspaceIntentRecord,
+    audit_scope_payload,
+    audit_scope_relation,
     compute_intent_digest,
     compute_scope_digest,
+    read_audit_scope,
+    read_audit_scope_entry,
+    scope_interpreter_from_record,
     verify_intent_integrity,
 )
 from ...workspace_intent.lifecycle import (
@@ -122,6 +134,15 @@ def workspace_intent_to_payload(
         now=current_time,
     )
     payload = record.unsigned_payload()
+    # The forensic projection of an already-written scope. It rides beside the
+    # raw scope, never instead of it: an audit reader that met a pre-grammar
+    # entry used to get the total reader's literal answer, which reads as a
+    # measured "outside this scope" while being a verdict today's grammar has
+    # no standing to give about a record that predates it.
+    payload["scope_audit"] = audit_scope_payload(
+        record.scope,
+        interpreter=scope_interpreter_from_record(payload),
+    )
     payload["ownership"] = ownership.value
     payload["is_own"] = ownership in {
         IntentOwnership.OWN_ACTIVE,
@@ -713,16 +734,23 @@ def _overlap_type(*, hard: bool, soft: bool) -> str:
 
 
 __all__ = [
+    "CURRENT_GRAMMAR",
     "DEFAULT_LEASE_SECONDS",
     "DEFAULT_TTL_SECONDS",
+    "HISTORICAL_PRODUCER_SPECIFIC",
+    "HISTORICAL_UNAMBIGUOUS",
+    "LEGACY_AMBIGUOUS",
     "LEGACY_REGISTRY_VERSION",
     "MAX_LEASE_SECONDS",
     "MAX_TTL_SECONDS",
     "MIN_LEASE_SECONDS",
     "MIN_TTL_SECONDS",
     "REGISTRY_VERSION",
+    "SCOPE_INTERPRETER_FIELD",
+    "AuditScopeEntry",
     "IntentOwnership",
     "PidLiveness",
+    "ScopeRelation",
     "WorkspaceIntentRecord",
     "WorkspaceIntentStatus",
     "_is_pid_alive",
@@ -734,6 +762,8 @@ __all__ = [
     "_read_payload",
     "_ttl_expired",
     "_unlink",
+    "audit_scope_payload",
+    "audit_scope_relation",
     "classify_intent_ownership",
     "compute_intent_digest",
     "compute_scope_digest",
@@ -750,6 +780,8 @@ __all__ = [
     "list_workspace_intent_records_for_recovery",
     "list_workspace_intent_records_raw",
     "list_workspace_intents",
+    "read_audit_scope",
+    "read_audit_scope_entry",
     "registry_dir",
     "remove_workspace_intent",
     "remove_workspace_record",
@@ -757,6 +789,7 @@ __all__ = [
     "resolved_lease_seconds",
     "resolved_ttl_seconds",
     "safe_remove_own_intent",
+    "scope_interpreter_from_record",
     "signed_payload",
     "stale_reason",
     "update_workspace_intent_status",
