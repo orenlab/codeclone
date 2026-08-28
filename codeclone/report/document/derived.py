@@ -15,6 +15,10 @@ from ...contracts import (
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
     FAMILY_CLONES,
+    GROUP_KEY_AUTHORITY,
+    GROUP_KEY_DEAD_CODE,
+    GROUP_KEY_DESIGN,
+    GROUP_KEY_STRUCTURAL,
 )
 from ...domain.findings import (
     CATEGORY_COHESION,
@@ -57,6 +61,11 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.finding_groups import (
+    flatten_finding_groups,
+    groups_root_of_findings,
+    iter_family_groups,
+)
 from ..overview import build_directory_hotspots
 from ._common import (
     _contract_report_location_path,
@@ -294,30 +303,20 @@ def _build_derived_overview(
     findings: Mapping[str, object],
     metrics_payload: Mapping[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get(FAMILY_CLONES))
-    clone_groups = [
-        *_as_sequence(clones.get("functions")),
-        *_as_sequence(clones.get("blocks")),
-        *_as_sequence(clones.get("segments")),
-    ]
-    structural_groups = _as_sequence(
-        _as_mapping(groups.get(FAMILY_STRUCTURAL)).get("groups")
-    )
-    dead_code_groups = _as_sequence(
-        _as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")
-    )
-    design_groups = _as_sequence(_as_mapping(groups.get("design")).get("groups"))
-    authority_groups = _as_sequence(
-        _as_mapping(groups.get(FAMILY_AUTHORITY)).get("groups")
-    )
-    flat_groups = [
-        *clone_groups,
-        *structural_groups,
-        *dead_code_groups,
-        *design_groups,
-        *authority_groups,
-    ]
+    # The owner walks the families; this overview only decides what to do with
+    # each one. Reading them family by family keeps the per-family risk inputs
+    # below and the flat count above provably the same population.
+    by_family = iter_family_groups(groups_root_of_findings(findings))
+    # ``get``, not ``[]``: a family outside the declared universe contributes
+    # no risk input, which is a different statement from "this overview cannot
+    # be built" -- and the universe is the owner's to declare, not this
+    # function's to assume.
+    clone_groups = by_family.get(FAMILY_CLONES, ())
+    structural_groups = by_family.get(GROUP_KEY_STRUCTURAL, ())
+    dead_code_groups = by_family.get(GROUP_KEY_DEAD_CODE, ())
+    design_groups = by_family.get(GROUP_KEY_DESIGN, ())
+    authority_groups = by_family.get(GROUP_KEY_AUTHORITY, ())
+    flat_groups = [group for groups in by_family.values() for group in groups]
     dominant_kind_counts: Counter[str] = Counter(
         str(
             _as_mapping(_as_mapping(group).get("source_scope")).get(
@@ -534,25 +533,9 @@ def _humanize(value: str) -> str:
 def _flatten_finding_groups(
     findings: Mapping[str, object],
 ) -> list[Mapping[str, object]]:
-    """Canonical findings across families, flattened (mirrors overview)."""
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get(FAMILY_CLONES))
-    flat: list[Mapping[str, object]] = [
-        _as_mapping(group)
-        for key in ("functions", "blocks", "segments")
-        for group in _as_sequence(clones.get(key))
-    ]
-    for family_key in (
-        FAMILY_STRUCTURAL,
-        FAMILY_DEAD_CODE,
-        "design",
-        FAMILY_AUTHORITY,
-    ):
-        flat.extend(
-            _as_mapping(group)
-            for group in _as_sequence(_as_mapping(groups.get(family_key)).get("groups"))
-        )
-    return flat
+    """Canonical findings across families, flattened, through the owner."""
+
+    return list(flatten_finding_groups(groups_root_of_findings(findings)))
 
 
 def _finding_first_item(group: Mapping[str, object]) -> Mapping[str, object]:

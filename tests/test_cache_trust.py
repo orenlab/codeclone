@@ -596,6 +596,27 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "CLONE_KIND_FUNCTION": (_LANE_NONE, "report-wire clone kind, post-cache"),
     "CLONE_KIND_SEGMENT": (_LANE_NONE, "report-wire clone kind, post-cache"),
     "FAMILY_CLONES": (_LANE_NONE, "report-wire family name, post-cache"),
+    "BASELINE_TRACKED_GROUP_KEYS": (
+        _LANE_NONE,
+        "report-wire family container keys: the universe consumers walk in the "
+        "assembled document, never a cached unit",
+    ),
+    "GROUP_KEY_STRUCTURAL": (_LANE_NONE, "report-wire container key, post-cache"),
+    "GROUP_KEY_DEAD_CODE": (_LANE_NONE, "report-wire container key, post-cache"),
+    "GROUP_KEY_DESIGN": (_LANE_NONE, "report-wire container key, post-cache"),
+    "GROUP_KEY_AUTHORITY": (_LANE_NONE, "report-wire container key, post-cache"),
+    "CLONE_GROUP_BUCKET_KEYS": (
+        _LANE_NONE,
+        "report-wire bucket keys of the clone family container, post-cache",
+    ),
+    "NESTED_GROUPS_KEY": (
+        _LANE_NONE,
+        "report-wire key each non-clone family nests its groups under, post-cache",
+    ),
+    "FINDING_GROUPS_PATH": (
+        _LANE_NONE,
+        "report-wire container address, built from the two names above",
+    ),
     "SUPPRESSED_CONTAINER_KEY": (
         _LANE_NONE,
         "report-wire container key: it names where the report document nests "

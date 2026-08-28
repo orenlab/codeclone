@@ -8,17 +8,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from ...contracts import FAMILY_CLONES
-from ...domain.findings import (
-    FAMILY_AUTHORITY,
-    FAMILY_DEAD_CODE,
-    FAMILY_STRUCTURAL,
-)
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.finding_groups import (
+    baseline_tracked_group_keys,
+    family_group_list,
+    groups_root_of_findings,
+)
 from ...utils.payload_narrow import is_record_mapping
 from ._session_shared import _VALID_REPORT_SECTIONS, MCPServiceContractError
 from .payloads import paginate
@@ -48,22 +48,12 @@ _REMOVED_RESOURCE_MESSAGE: Final = (
     "spellings returned the same document and were withdrawn together."
 )
 
-_FINDINGS_SECTION_FAMILIES: Final = frozenset(
-    {
-        "clone",
-        FAMILY_CLONES,
-        FAMILY_STRUCTURAL,
-        FAMILY_DEAD_CODE,
-        "design",
-        FAMILY_AUTHORITY,
-    }
-)
-
+#: The singular spelling a caller may use for the clone family. The document
+#: keys the container in the plural, so the alias is a courtesy of this tool
+#: and not a second vocabulary.
 _FINDINGS_FAMILY_ALIASES: Final[dict[str, str]] = {
     "clone": FAMILY_CLONES,
 }
-
-_GroupCollector = Callable[[Mapping[str, object]], list[dict[str, object]]]
 
 
 def normalize_findings_section_family(family: str | None) -> str | None:
@@ -74,10 +64,14 @@ def normalize_findings_section_family(family: str | None) -> str | None:
 
 def validate_findings_section_family(family: str) -> str:
     normalized = normalize_findings_section_family(family)
-    if normalized not in _FINDINGS_SECTION_FAMILIES:
+    families = baseline_tracked_group_keys()
+    if normalized not in families:
+        # The refusal names the families this run actually serves rather than
+        # a list written beside it: a hand-written remedy is how a caller is
+        # told to ask for something the tool no longer answers.
+        accepted = ", ".join((*_FINDINGS_FAMILY_ALIASES, *families))
         raise MCPServiceContractError(
-            "Invalid family for findings section. "
-            "Use clone, structural, dead_code, design, or authority."
+            f"Invalid family for findings section. Use one of: {accepted}."
         )
     return normalized
 
@@ -105,34 +99,22 @@ def _paginated_items_payload(
     }
 
 
-def _clone_groups(groups_root: Mapping[str, object]) -> list[dict[str, object]]:
-    clones = _as_mapping(groups_root.get(FAMILY_CLONES))
-    items: list[dict[str, object]] = []
-    for bucket in ("functions", "blocks", "segments"):
-        items.extend(
-            dict(_as_mapping(group)) for group in _as_sequence(clones.get(bucket))
-        )
-    items.sort(key=lambda group: str(group.get("id", "")))
-    return items
-
-
-def _nested_groups(
+def _family_groups(
     groups_root: Mapping[str, object],
-    family_key: str,
+    family: str,
 ) -> list[dict[str, object]]:
-    family_payload = _as_mapping(groups_root.get(family_key))
-    return [
-        dict(_as_mapping(group)) for group in _as_sequence(family_payload.get("groups"))
-    ]
+    """One family's groups, read through the owner and paged by this tool.
 
+    The clone family is additionally ordered by id: a page is a slice, and a
+    slice of an unordered sequence is not a stable answer. That order is this
+    tool's contract with its caller, which is why it lives here and not in the
+    owner.
+    """
 
-_GROUP_COLLECTORS: Final[dict[str, _GroupCollector]] = {
-    FAMILY_CLONES: _clone_groups,
-    FAMILY_STRUCTURAL: lambda root: _nested_groups(root, FAMILY_STRUCTURAL),
-    FAMILY_DEAD_CODE: lambda root: _nested_groups(root, FAMILY_DEAD_CODE),
-    "design": lambda root: _nested_groups(root, "design"),
-    FAMILY_AUTHORITY: lambda root: _nested_groups(root, FAMILY_AUTHORITY),
-}
+    groups = [dict(group) for group in family_group_list(groups_root, family)]
+    if family == FAMILY_CLONES:
+        groups.sort(key=lambda group: str(group.get("id", "")))
+    return groups
 
 
 def inventory_section_payload(
@@ -173,10 +155,9 @@ def findings_section_payload(
             ),
         }
     validated_family = validate_findings_section_family(family)
-    collector = _GROUP_COLLECTORS[validated_family]
-    groups_root = _as_mapping(findings.get("groups"))
+    groups_root = groups_root_of_findings(findings)
     page_payload = _paginated_items_payload(
-        items=collector(groups_root),
+        items=_family_groups(groups_root, validated_family),
         offset=offset,
         limit=limit,
     )

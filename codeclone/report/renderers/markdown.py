@@ -13,7 +13,18 @@ from ...api.metric_families import (
     presentation_metric_families,
     withheld_metric_families,
 )
+from ...contracts import (
+    FAMILY_CLONES,
+    GROUP_KEY_AUTHORITY,
+    GROUP_KEY_DEAD_CODE,
+    GROUP_KEY_DESIGN,
+    GROUP_KEY_STRUCTURAL,
+)
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
+from ...utils.finding_groups import (
+    baseline_tracked_group_keys,
+    family_group_list,
+)
 from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import markdown as md_msgs
@@ -32,6 +43,17 @@ _as_int = as_int
 _as_float = as_float
 _as_mapping = as_mapping
 _as_sequence = as_sequence
+
+#: The anchor each non-clone family's section is published under. Keyed by the
+#: container key the owner names: a family the owner drops loses its section,
+#: and a family the owner gains has to be given an anchor here rather than
+#: appearing unlinked.
+_FAMILY_FINDING_ANCHORS: dict[str, str] = {
+    GROUP_KEY_STRUCTURAL: "structural-findings",
+    GROUP_KEY_DEAD_CODE: "dead-code-findings",
+    GROUP_KEY_DESIGN: "design-findings",
+    GROUP_KEY_AUTHORITY: "authority-findings",
+}
 
 _ANCHOR_MAP: dict[str, tuple[str, str, int]] = {
     anchor_id: (anchor_id, title, level)
@@ -359,13 +381,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 md_msgs.MD_LABEL_FAMILIES,
                 ", ".join(
                     f"{name}={_text(family_summary.get(name))}"
-                    for name in (
-                        "clones",
-                        "structural",
-                        "dead_code",
-                        "design",
-                        "authority",
-                    )
+                    for name in baseline_tracked_group_keys()
                 ),
             ),
             # Stated beside the total it qualifies, not in a footnote: a
@@ -425,13 +441,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 md_msgs.MD_LABEL_BY_FAMILY,
                 ", ".join(
                     f"{name}={_text(family_summary.get(name))}"
-                    for name in (
-                        "clones",
-                        "structural",
-                        "dead_code",
-                        "design",
-                        "authority",
-                    )
+                    for name in baseline_tracked_group_keys()
                 ),
             ),
             (
@@ -525,35 +535,16 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         lines.append("")
         _append_suppressed_clone_findings(lines, groups=suppressed.groups)
 
-    _append_anchor(lines, *_anchor("structural-findings"))
-    _append_findings_section(
-        lines,
-        groups=_as_sequence(
-            _as_mapping(findings_groups.get("structural")).get("groups")
-        ),
-    )
-
-    _append_anchor(lines, *_anchor("dead-code-findings"))
-    _append_findings_section(
-        lines,
-        groups=_as_sequence(
-            _as_mapping(findings_groups.get("dead_code")).get("groups")
-        ),
-    )
-
-    _append_anchor(lines, *_anchor("design-findings"))
-    _append_findings_section(
-        lines,
-        groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
-    )
-
-    _append_anchor(lines, *_anchor("authority-findings"))
-    _append_findings_section(
-        lines,
-        groups=_as_sequence(
-            _as_mapping(findings_groups.get("authority")).get("groups")
-        ),
-    )
+    # One section per family the owner names, in the owner's order. The anchor
+    # each family is published under is this artifact's contract and stays
+    # here; which families exist is not, and a renderer that enumerated them
+    # itself could print a set of sections its own totals do not describe.
+    for family in baseline_tracked_group_keys(exclude=(FAMILY_CLONES,)):
+        _append_anchor(lines, *_anchor(_FAMILY_FINDING_ANCHORS[family]))
+        _append_findings_section(
+            lines,
+            groups=family_group_list(findings_groups, family),
+        )
 
     _append_anchor(lines, *_anchor("metrics"))
     # One owner interprets the declaration's three key states; this renderer

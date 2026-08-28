@@ -17,7 +17,6 @@ from ...contracts import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     DOCS_URL,
-    FAMILY_CLONES,
     REPOSITORY_URL,
 )
 from ...domain.findings import (
@@ -58,6 +57,10 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.finding_groups import (
+    flatten_finding_groups,
+    groups_root_of_document,
+)
 from ..messages import sarif as sarif_msgs
 
 SARIF_VERSION = "2.1.0"
@@ -131,22 +134,14 @@ def _scan_root_uri(payload: Mapping[str, object]) -> str:
 
 
 def _flatten_findings(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
-    findings = _as_mapping(payload.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get(FAMILY_CLONES))
-    structural = _as_mapping(groups.get(FAMILY_STRUCTURAL))
-    dead_code = _as_mapping(groups.get(FAMILY_DEAD_CODE))
-    design = _as_mapping(groups.get(FAMILY_DESIGN))
-    authority = _as_mapping(groups.get(FAMILY_AUTHORITY))
-    return [
-        *map(_as_mapping, _as_sequence(clones.get("functions"))),
-        *map(_as_mapping, _as_sequence(clones.get("blocks"))),
-        *map(_as_mapping, _as_sequence(clones.get("segments"))),
-        *map(_as_mapping, _as_sequence(structural.get("groups"))),
-        *map(_as_mapping, _as_sequence(dead_code.get("groups"))),
-        *map(_as_mapping, _as_sequence(design.get("groups"))),
-        *map(_as_mapping, _as_sequence(authority.get("groups"))),
-    ]
+    """The baseline-tracked universe this artifact declares, through the owner.
+
+    ``resultScope`` tells the SARIF consumer these results are the
+    baseline-tracked families; asking the owner is what keeps that declaration
+    and the results it describes the same set.
+    """
+
+    return list(flatten_finding_groups(groups_root_of_document(payload)))
 
 
 def _artifact_catalog(

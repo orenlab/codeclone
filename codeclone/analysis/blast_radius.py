@@ -16,6 +16,9 @@ from typing import Final, Literal
 from ..paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
+from ..utils.finding_groups import (
+    iter_published_group_lists as _iter_published_group_lists,
+)
 from ..utils.mapping_paths import sections
 from ..utils.suppressed_clone_groups import (
     suppressed_clone_container as _suppressed_clone_container,
@@ -417,14 +420,24 @@ def _finding_paths(finding: Mapping[str, object]) -> tuple[str, ...]:
 def _all_finding_groups(
     report_document: Mapping[str, object],
 ) -> tuple[Mapping[str, object], ...]:
-    findings = _as_mapping(report_document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    result: list[Mapping[str, object]] = []
-    for family_payload in groups.values():
-        family_map = _as_mapping(family_payload)
-        for value in family_map.values():
-            result.extend(_as_mapping(item) for item in _as_sequence(value))
-    return tuple(result)
+    """Every group the document publishes, whatever family it belongs to.
+
+    Read through the shared structural walk rather than the declared
+    five-family universe, and that is the point: review context must not go
+    blind to a family the document gains later. What is excluded is stated
+    where it is decided -- the caller keeps only groups the baseline calls
+    ``known`` -- so an advisory tier, which reaches no baseline lane and can be
+    neither ``new`` nor ``known``, is declined on a fact rather than missed on
+    a hard-coded list.
+    """
+
+    return tuple(
+        _as_mapping(item)
+        for _family, _container_key, entries in _iter_published_group_lists(
+            report_document
+        )
+        for item in entries
+    )
 
 
 def _append_boundary_entry(

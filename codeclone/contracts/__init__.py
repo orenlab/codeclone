@@ -383,14 +383,48 @@ CLONE_KIND_FUNCTION: Final = "function"
 CLONE_KIND_BLOCK: Final = "block"
 CLONE_KIND_SEGMENT: Final = "segment"
 FAMILY_CLONES: Final = "clones"
+# The address of the finding-group container, and the shape of what is inside
+# it. Both sides of the wire need these: the producer writes the container in
+# the analysis ring, and eleven readers -- renderers, MCP surfaces, the CLI
+# changed-scope gate, the derived overview -- walked it from four rings that
+# share only this module and ``utils``. Every one of them spelled the five
+# container keys itself, and one had already lost a family from a published
+# total that way, so the vocabulary lives here and the walk lives in
+# ``codeclone.utils.finding_groups``.
+FINDING_GROUPS_PATH: Final[tuple[str, ...]] = ("findings", "groups")
+# The container keys of the baseline-tracked families, in the order every
+# consumer presents them. This is the document's spelling, which is NOT the
+# finding-family vocabulary: a group says ``family: "clone"`` and its container
+# is keyed ``clones``. ``domain.findings.BASELINE_TRACKED_FAMILIES`` owns the
+# family values; the two are pinned to each other in
+# ``tests/test_finding_groups_owner.py`` so neither can drift alone.
+#
+# The advisory tiers are deliberately absent. They key sibling containers under
+# the same root, reach no baseline lane, and must never widen a published
+# total.
+GROUP_KEY_STRUCTURAL: Final = "structural"
+GROUP_KEY_DEAD_CODE: Final = "dead_code"
+GROUP_KEY_DESIGN: Final = "design"
+GROUP_KEY_AUTHORITY: Final = "authority"
+BASELINE_TRACKED_GROUP_KEYS: Final[tuple[str, ...]] = (
+    FAMILY_CLONES,
+    GROUP_KEY_STRUCTURAL,
+    GROUP_KEY_DEAD_CODE,
+    GROUP_KEY_DESIGN,
+    GROUP_KEY_AUTHORITY,
+)
+# The clone family holds three sibling lists; every other family nests its
+# groups under one key. That asymmetry is the whole reason a hand-written walk
+# gets the container wrong.
+CLONE_GROUP_BUCKET_KEYS: Final[tuple[str, ...]] = ("functions", "blocks", "segments")
+NESTED_GROUPS_KEY: Final = "groups"
 # The key under which the clone family nests its suppressed buckets, and the
 # full document path of that container. This is the single site in the codebase
 # that spells either: a consumer navigating there takes the address from here
 # instead of restating it, so a rename moves every reader at once.
 SUPPRESSED_CONTAINER_KEY: Final = "suppressed"
 SUPPRESSED_CONTAINER_PATH: Final[tuple[str, ...]] = (
-    "findings",
-    "groups",
+    *FINDING_GROUPS_PATH,
     FAMILY_CLONES,
     SUPPRESSED_CONTAINER_KEY,
 )
@@ -768,9 +802,11 @@ __all__ = [
     "BASELINE_LANE_DIGEST_DOMAIN",
     "BASELINE_ROOT_DIGEST_DOMAIN",
     "BASELINE_SCHEMA_VERSION",
+    "BASELINE_TRACKED_GROUP_KEYS",
     "CACHE_VERSION",
     "CANONICAL_MODEL_REVISION",
     "CANONICAL_WIRE_REVISION",
+    "CLONE_GROUP_BUCKET_KEYS",
     "CLONE_KIND_BLOCK",
     "CLONE_KIND_FUNCTION",
     "CLONE_KIND_SEGMENT",
@@ -819,8 +855,13 @@ __all__ = [
     "ENGINEERING_MEMORY_SCHEMA_VERSION",
     "EXPERIENCE_DISTILLATION_VERSION",
     "FAMILY_CLONES",
+    "FINDING_GROUPS_PATH",
     "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION",
     "GATE_LANE_MATRIX_VERSION",
+    "GROUP_KEY_AUTHORITY",
+    "GROUP_KEY_DEAD_CODE",
+    "GROUP_KEY_DESIGN",
+    "GROUP_KEY_STRUCTURAL",
     "HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE",
     "HEALTH_COMPLEXITY_ELEVATED_WEIGHT",
     "HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE",
@@ -852,6 +893,7 @@ __all__ = [
     "MODULE_IDENTITY_VERSION",
     "NEAR_MISS_ALGORITHM_REVISION",
     "NEAR_MISS_MAX_EDIT_STATEMENTS",
+    "NESTED_GROUPS_KEY",
     "OBSERVATION_DIGEST_VERSION",
     "OBSERVER_VOCABULARY_VERSION",
     "PATCH_TRAIL_SCHEMA_VERSION",

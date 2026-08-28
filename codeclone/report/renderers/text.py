@@ -18,9 +18,24 @@ from ...api.metric_families import (
     presentation_metric_families,
     withheld_metric_families,
 )
-from ...contracts import CLONE_KIND_BLOCK, CLONE_KIND_FUNCTION, CLONE_KIND_SEGMENT
+from ...contracts import (
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    FAMILY_CLONES,
+    GROUP_KEY_AUTHORITY,
+    GROUP_KEY_DEAD_CODE,
+    GROUP_KEY_DESIGN,
+    GROUP_KEY_STRUCTURAL,
+)
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
+from ...utils.finding_groups import (
+    baseline_tracked_group_keys,
+    family_group_list,
+    flatten_finding_groups,
+    groups_root_of_findings,
+)
 from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import explain as explain_msgs
@@ -383,30 +398,9 @@ def _append_suppressed_dead_code_items(
 
 
 def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, object]]:
-    groups = _as_mapping(findings.get("groups"))
-    clone_groups = _as_mapping(groups.get("clones"))
-    flat_groups = [
-        *map(_as_mapping, _as_sequence(clone_groups.get("functions"))),
-        *map(_as_mapping, _as_sequence(clone_groups.get("blocks"))),
-        *map(_as_mapping, _as_sequence(clone_groups.get("segments"))),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get("structural")).get("groups")),
-        ),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get("dead_code")).get("groups")),
-        ),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get("design")).get("groups")),
-        ),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get("authority")).get("groups")),
-        ),
-    ]
-    return flat_groups
+    """The declared family universe, through the owner."""
+
+    return list(flatten_finding_groups(groups_root_of_findings(findings)))
 
 
 def _append_suggestions(
@@ -692,6 +686,33 @@ def _append_metric_family_sections(
         )
 
 
+#: How this artifact draws each uniform family section. Keyed by the container
+#: key the owner names, so a family the owner drops loses its section and a
+#: family the owner gains must be given a presentation here instead of
+#: appearing untitled. ``structural`` is absent on purpose: it is drawn by its
+#: own routine.
+_SINGLE_ITEM_FAMILY_SECTIONS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
+    GROUP_KEY_DEAD_CODE: (
+        proj.TEXT_SECTION_DEAD_CODE_FINDINGS,
+        ("kind", "confidence"),
+    ),
+    GROUP_KEY_DESIGN: (
+        proj.TEXT_SECTION_DESIGN_FINDINGS,
+        ("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
+    ),
+    GROUP_KEY_AUTHORITY: (
+        proj.TEXT_SECTION_AUTHORITY_FINDINGS,
+        (
+            "contract_id",
+            "violation_kind",
+            "canonical_owner",
+            "authority_status",
+            "resolution_state",
+        ),
+    ),
+}
+
+
 def _append_findings_sections(
     lines: list[str],
     *,
@@ -746,49 +767,34 @@ def _append_findings_sections(
                 metric_name=metric_name,
             )
 
-    lines.append("")
-    _append_structural_findings(
-        lines,
-        _as_sequence(_as_mapping(findings_groups.get("structural")).get("groups")),
-    )
-    lines.append("")
-    _append_single_item_findings(
-        lines,
-        title=proj.TEXT_SECTION_DEAD_CODE_FINDINGS,
-        groups=_as_sequence(
-            _as_mapping(findings_groups.get("dead_code")).get("groups")
-        ),
-        fact_keys=("kind", "confidence"),
-    )
-    if "dead_code" not in withheld_families:
+    # One section per family the owner names, in the owner's order. The
+    # presentation of each family stays here -- title, fact keys, and the one
+    # family drawn by a different routine -- but which families exist is not
+    # this renderer's opinion: a family it enumerated itself is a family that
+    # can silently disagree with the total printed above.
+    for family in baseline_tracked_group_keys(exclude=(FAMILY_CLONES,)):
+        groups = family_group_list(findings_groups, family)
         lines.append("")
-        dead_code_family = _as_mapping(metrics_families.get("dead_code"))
-        _append_suppressed_dead_code_items(
-            lines,
-            items=_as_sequence(dead_code_family.get("suppressed_items")),
-        )
-    lines.append("")
-    _append_single_item_findings(
-        lines,
-        title=proj.TEXT_SECTION_DESIGN_FINDINGS,
-        groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
-        fact_keys=("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
-    )
-    lines.append("")
-    _append_single_item_findings(
-        lines,
-        title=proj.TEXT_SECTION_AUTHORITY_FINDINGS,
-        groups=_as_sequence(
-            _as_mapping(findings_groups.get("authority")).get("groups")
-        ),
-        fact_keys=(
-            "contract_id",
-            "violation_kind",
-            "canonical_owner",
-            "authority_status",
-            "resolution_state",
-        ),
-    )
+        if family == GROUP_KEY_STRUCTURAL:
+            _append_structural_findings(lines, groups)
+        else:
+            title, fact_keys = _SINGLE_ITEM_FAMILY_SECTIONS[family]
+            _append_single_item_findings(
+                lines,
+                title=title,
+                groups=groups,
+                fact_keys=fact_keys,
+            )
+        if (
+            family == GROUP_KEY_DEAD_CODE
+            and GROUP_KEY_DEAD_CODE not in withheld_families
+        ):
+            lines.append("")
+            dead_code_family = _as_mapping(metrics_families.get(GROUP_KEY_DEAD_CODE))
+            _append_suppressed_dead_code_items(
+                lines,
+                items=_as_sequence(dead_code_family.get("suppressed_items")),
+            )
 
 
 def render_text_report_document(payload: Mapping[str, object]) -> str:

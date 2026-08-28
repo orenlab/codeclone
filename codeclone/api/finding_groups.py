@@ -56,6 +56,9 @@ from ..contracts import (
 )
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
+from ..utils.finding_groups import (
+    iter_published_group_lists as _iter_published_group_lists,
+)
 from ..utils.suppressed_clone_groups import (
     suppressed_clone_container as _suppressed_clone_container,
 )
@@ -181,33 +184,27 @@ def iter_finding_groups(
 ) -> tuple[FindingGroupRef, ...]:
     """Walk every finding group in the document, active and suppressed.
 
-    The clone family's ``suppressed`` container is descended into rather than
-    read as a list of groups, which is what silently yielded nothing to a
-    consumer running a sequence coercion over a mapping.
+    The structural walk is shared with the blast-radius computation, so the
+    two cannot disagree about which lists a document publishes. What stays
+    here is this door's policy: the clone family's ``suppressed`` container is
+    skipped in the walk and re-entered below through the reading law, because
+    it is a mapping of buckets rather than a list of groups -- the shape that
+    silently yielded nothing to a consumer coercing it to a sequence.
     """
 
-    findings = _as_mapping(document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
     refs: list[FindingGroupRef] = []
-    for family, family_payload in sorted(groups.items(), key=lambda item: str(item[0])):
-        family_name = str(family)
-        for container_key, container_payload in sorted(
-            _as_mapping(family_payload).items(), key=lambda item: str(item[0])
-        ):
-            if (
-                family_name == FAMILY_CLONES
-                and str(container_key) == SUPPRESSED_CONTAINER_KEY
-            ):
-                continue
-            refs.extend(
-                FindingGroupRef(
-                    family=family_name,
-                    category=_group_category(group),
-                    suppressed=False,
-                    group=group,
-                )
-                for group in _groups_in(container_payload)
+    for family, container_key, entries in _iter_published_group_lists(document):
+        if family == FAMILY_CLONES and container_key == SUPPRESSED_CONTAINER_KEY:
+            continue
+        refs.extend(
+            FindingGroupRef(
+                family=family,
+                category=_group_category(group),
+                suppressed=False,
+                group=group,
             )
+            for group in _groups_in(entries)
+        )
 
     refs.extend(
         FindingGroupRef(

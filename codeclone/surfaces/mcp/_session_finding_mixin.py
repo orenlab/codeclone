@@ -10,6 +10,11 @@ from types import TracebackType
 from typing import Protocol
 
 from ...contracts import TIER_STATE_COMPLETE
+from ...utils.finding_groups import (
+    baseline_tracked_group_keys,
+    flatten_finding_groups,
+    groups_root_of_document,
+)
 from ...utils.mapping_paths import section
 from ...utils.repo_paths import RepoPathError, RepoPathPolicy, resolve_under_repo_root
 from . import _session_helpers as _helpers
@@ -43,11 +48,7 @@ from ._session_shared import (
     CATEGORY_COUPLING,
     CONFIDENCE_MEDIUM,
     EFFORT_MODERATE,
-    FAMILY_AUTHORITY,
     FAMILY_CLONES,
-    FAMILY_DEAD_CODE,
-    FAMILY_DESIGN,
-    FAMILY_STRUCTURAL,
     SOURCE_KIND_OTHER,
     AnalysisMode,
     CodeCloneMCPRunStore,
@@ -73,14 +74,12 @@ from ._session_shared import (
 )
 from .messages import tools as mcp_tools
 
-_NON_CLONE_FINDING_FAMILIES = (
-    FAMILY_STRUCTURAL,
-    FAMILY_DEAD_CODE,
-    FAMILY_DESIGN,
-    FAMILY_AUTHORITY,
-)
-_EXTRA_FINDING_FAMILIES_BY_MODE = {
-    "clones_only": (),
+#: The family universe each analysis mode answers over. ``full`` takes the
+#: owner's declared universe; ``clones_only`` analysed nothing else, so it
+#: answers over the clone family alone. Both are resolved from the owner at
+#: call time, so this surface cannot drift from the document it is reading.
+_FINDING_FAMILIES_BY_MODE = {
+    "clones_only": (FAMILY_CLONES,),
 }
 
 
@@ -365,27 +364,23 @@ class _MCPSessionFindingMixin:
         )
 
     def _base_findings(self, record: MCPRunRecord) -> list[dict[str, object]]:
-        report_document = record.report_document
-        findings = _helpers._as_mapping(report_document.get("findings"))
-        groups = _helpers._as_mapping(findings.get("groups"))
-        clone_groups = _helpers._as_mapping(groups.get(FAMILY_CLONES))
-        clone_findings = [
-            *_helpers._dict_list(clone_groups.get("functions")),
-            *_helpers._dict_list(clone_groups.get("blocks")),
-            *_helpers._dict_list(clone_groups.get("segments")),
-        ]
+        """The run's finding rows, over the family universe the owner declares.
+
+        ``family="all"`` is exactly this population, so the universe is read
+        from the owner rather than restated here: a private enumeration is how
+        a surface comes to publish a total the document does not support.
+        """
+
+        families = _FINDING_FAMILIES_BY_MODE.get(
+            record.request.analysis_mode,
+            baseline_tracked_group_keys(),
+        )
         return [
-            *clone_findings,
-            *[
-                item
-                for family in _EXTRA_FINDING_FAMILIES_BY_MODE.get(
-                    record.request.analysis_mode,
-                    _NON_CLONE_FINDING_FAMILIES,
-                )
-                for item in _helpers._dict_list(
-                    _helpers._as_mapping(groups.get(family)).get("groups")
-                )
-            ],
+            dict(group)
+            for group in flatten_finding_groups(
+                groups_root_of_document(record.report_document),
+                families=families,
+            )
         ]
 
     def _ordered_finding_rows(

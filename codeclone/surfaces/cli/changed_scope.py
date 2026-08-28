@@ -17,8 +17,13 @@ from ...api.novelty import (
     CLONE_NOVELTY_NEW,
     CLONE_NOVELTY_UNAVAILABLE,
 )
-from ...contracts import ExitCode
+from ...contracts import GROUP_KEY_AUTHORITY, ExitCode
 from ...utils import coerce as _coerce
+from ...utils.finding_groups import (
+    baseline_tracked_group_keys,
+    flatten_finding_groups,
+    groups_root_of_document,
+)
 from ...utils.git_diff import validate_git_diff_ref
 from . import state as cli_state
 from .attrs import bool_attr, optional_text_attr, set_bool_attr
@@ -135,6 +140,21 @@ def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str,
     return _normalize_changed_paths(root_path=root_path, paths=lines)
 
 
+def changed_scope_group_keys() -> tuple[str, ...]:
+    """The family universe ``--changed-only`` counts.
+
+    Deliberately not the full one: this gate has never counted the
+    ``authority`` family, and ``ChangedCloneGate.findings_total`` is printed
+    to the user. Widening it would move a published number, which is a
+    contract decision and not a side effect of removing a duplicated walk --
+    so the omission is stated here, as a named subset of the owner's universe,
+    instead of being invisible inside a hand-written list. Derived on each
+    call so the subset cannot outlive the universe it is taken from.
+    """
+
+    return baseline_tracked_group_keys(exclude=(GROUP_KEY_AUTHORITY,))
+
+
 def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
     return any(
         relative_path == candidate or relative_path.startswith(candidate + "/")
@@ -145,33 +165,14 @@ def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
 def _flatten_report_findings(
     report_document: Mapping[str, object],
 ) -> list[dict[str, object]]:
-    findings = _as_mapping(report_document.get("findings"))
-    groups = _as_mapping(findings.get("groups"))
-    clone_groups = _as_mapping(groups.get("clones"))
+    """The findings this gate counts, over its declared family subset."""
+
     return [
-        *[
-            dict(_as_mapping(item))
-            for item in _as_sequence(clone_groups.get("functions"))
-        ],
-        *[dict(_as_mapping(item)) for item in _as_sequence(clone_groups.get("blocks"))],
-        *[
-            dict(_as_mapping(item))
-            for item in _as_sequence(clone_groups.get("segments"))
-        ],
-        *[
-            dict(_as_mapping(item))
-            for item in _as_sequence(
-                _as_mapping(groups.get("structural")).get("groups")
-            )
-        ],
-        *[
-            dict(_as_mapping(item))
-            for item in _as_sequence(_as_mapping(groups.get("dead_code")).get("groups"))
-        ],
-        *[
-            dict(_as_mapping(item))
-            for item in _as_sequence(_as_mapping(groups.get("design")).get("groups"))
-        ],
+        dict(group)
+        for group in flatten_finding_groups(
+            groups_root_of_document(report_document),
+            families=changed_scope_group_keys(),
+        )
     ]
 
 

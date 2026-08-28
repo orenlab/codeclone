@@ -48,6 +48,10 @@ from ..report.explain_contract import (
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
+from ..utils.finding_groups import (
+    flatten_finding_groups,
+    groups_root_of_findings,
+)
 from .derived import (
     classify_source_kind,
     format_spread_location_label,
@@ -86,29 +90,9 @@ def serialize_suggestion_card(suggestion: Suggestion) -> dict[str, object]:
 
 
 def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, object]]:
-    groups = _as_mapping(findings.get("groups"))
-    clone_groups = _as_mapping(groups.get(FAMILY_CLONES))
-    return [
-        *map(_as_mapping, _as_sequence(clone_groups.get("functions"))),
-        *map(_as_mapping, _as_sequence(clone_groups.get("blocks"))),
-        *map(_as_mapping, _as_sequence(clone_groups.get("segments"))),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get(FAMILY_STRUCTURAL)).get("groups")),
-        ),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")),
-        ),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get(FAMILY_DESIGN)).get("groups")),
-        ),
-        *map(
-            _as_mapping,
-            _as_sequence(_as_mapping(groups.get(FAMILY_AUTHORITY)).get("groups")),
-        ),
-    ]
+    """Every finding group of the declared family universe, through the owner."""
+
+    return list(flatten_finding_groups(groups_root_of_findings(findings)))
 
 
 _DIRECTORY_HOTSPOT_BUCKETS: tuple[str, ...] = (
