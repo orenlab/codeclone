@@ -1421,8 +1421,13 @@ def test_api_symbol_observation_refuses_a_glued_identity() -> None:
 
 
 def test_api_surface_wire_round_trips_the_bare_symbol() -> None:
-    """K1 round trip: encode -> JSON -> parse validator -> decode == rows,
-    with the migrated payload schema declared on the lane."""
+    """K1 round trip: encode -> JSON -> parse validator -> decode == rows.
+
+    The lane stays on payload_schema "3": the bare-symbol migration moved
+    the identity the lane's *fact type* spells, not the bytes it writes —
+    the encoder always split the glue on its way in — so a stored "3"
+    artifact is still readable, and the declared schema does not move.
+    """
 
     bundle = build_observation_bundle(
         scan_root=Path("."),
@@ -1434,7 +1439,7 @@ def test_api_surface_wire_round_trips_the_bare_symbol() -> None:
         for lane in build_observation_lanes(bundle)
         if lane.descriptor.name == "api_surface"
     )
-    assert lane.descriptor.payload_schema == "4"
+    assert lane.descriptor.payload_schema == "3"
     payload = lane.payload
     assert isinstance(payload, ApiSurfaceColumnarPayload)
     assert payload.name == ("other", "run", "run")
