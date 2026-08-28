@@ -301,6 +301,15 @@ CREATE TABLE IF NOT EXISTS heads (
 
 
 def _payload_bytes(value: object) -> bytes:
+    """The one storage byte form; ``_object_id`` hashes exactly this.
+
+    ``sort_keys=True`` is a determinism owner, not tidiness: it is what
+    makes two spellings of the same row map to one content address.  No
+    family in :func:`_model_rows` currently reaches it (every row dict is
+    written alphabetically already), so only
+    ``test_storage_payload_bytes_ignore_mapping_key_order`` keeps it
+    honest — the guard was measured to survive the full suite without it.
+    """
     try:
         return json.dumps(
             value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -460,7 +469,15 @@ def _decode_root_set(value: object, where: str) -> frozenset[EffectRoot]:
 def _identity_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
     """Identity and scope rows of one model — the storage spelling of the
     export's ``_IDENTITY_FAMILIES``, split from the fact tables so neither
-    half re-derives the other."""
+    half re-derives the other.
+
+    The doubled ``sorted`` over ``coupled_sets`` is two different jobs, not
+    one redundancy: the INNER call orders the labels that land in the
+    payload and therefore in the content address (a determinism owner —
+    dropping it moves ``run_id`` between interpreters), the OUTER call only
+    orders rows (a passenger, see :func:`_model_rows`).  Collapsing the two
+    into one call silently deletes an owner.
+    """
     for file_id in sorted(model.files, key=canonical_key):
         yield "file", {"path": file_id.path}
     for module in sorted(model.modules, key=canonical_key):
@@ -480,7 +497,27 @@ def _identity_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, objec
 
 
 def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]]:
-    """Every storage row of one normalized model, deterministically ordered."""
+    """Every storage row of one normalized model, in a fixed row order.
+
+    That row order is INSURANCE against arbitrary ``frozenset`` iteration,
+    not the owner of determinism, and it reaches no observable output:
+    ``write_full_run`` keys the staged rows by content address, inserts
+    them under ``sorted(staged)``, every member read orders by
+    ``object_id``, and :func:`_membership_digest` sorts its own input.
+    Measured twice — dropping a component of a sort key here (wave F10) and
+    reversing the whole walk (ruling C1, 2026-08-28) both survive the full
+    suite.  **Do not build a pin on this order**: it would be hollow by
+    construction, and the C1 ruling says storage row order is not guarded.
+
+    The owners live downstream, each with its own pin:
+
+    * :func:`_payload_bytes` — mapping key order inside a row payload;
+    * :func:`_sorted_symbols`, :func:`_sorted_roots` and the inner label
+      sort of :func:`_identity_rows` — set order inside a row payload;
+    * :func:`analysis_scope_digest` and :func:`_membership_digest` — the
+      two digests ``run_id`` is derived from;
+    * the codec's ``_sorted_domain`` and per-family row keys — the wire.
+    """
     facts = model.facts.analysis
     yield from _identity_rows(model)
     for contract in sorted(
@@ -1239,12 +1276,26 @@ def _object_id(namespace: str, family: str, payload: bytes) -> str:
 
 def analysis_scope_digest(analyzed_files: frozenset[FileId]) -> str:
     """Scope receipt digest (brief §7.1, wave-2 minimal honest input): the
-    canonical digest of the analyzed-file identity set."""
+    canonical digest of the analyzed-file identity set.
+
+    The sort is a determinism owner: it is the only thing standing between
+    ``run_id`` and the interpreter's ``frozenset`` layout.  Dropping it was
+    measured to move ``run_id`` between hash seeds while staying green on
+    the known-answer literals at seed 1 — the hash-seed pin in
+    ``tests/test_canonical_store.py`` is what catches it by construction.
+    """
     paths = sorted(file_id.path for file_id in analyzed_files)
     return hashlib.sha256(_DOMAIN_SCOPE + _payload_bytes(paths)).hexdigest()
 
 
 def _membership_digest(object_ids: Sequence[str]) -> str:
+    """Digest of a run's member set — order-free by owning its own sort.
+
+    Because the sort lives here, no caller has to supply an ordered list:
+    ``write_full_run`` passes staged-dict order and
+    :func:`_verify_staged_membership` passes SQL order, and the two must
+    agree.  Dropping the sort splits them and publish refuses.
+    """
     joined = "\x00".join(sorted(object_ids)).encode("utf-8")
     return hashlib.sha256(_DOMAIN_MEMBERSHIP + joined).hexdigest()
 
@@ -1871,6 +1922,10 @@ class RunStore:
             namespace_pk = self._namespace_pk(cursor, namespace)
             new_objects = 0
             object_pks: list[int] = []
+            # Insertion order is insurance, not identity: it decides rowids
+            # only, and rowids never escape (wall 3).  Measured — reversing
+            # this sort survives the full suite, so nothing pins it and the
+            # C1 ruling says nothing should.
             for object_id_value in sorted(staged):
                 family, payload = staged[object_id_value]
                 existing = cursor.execute(

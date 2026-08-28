@@ -14,7 +14,10 @@ the same canonical bytes.
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,10 +35,12 @@ from codeclone.canonical import (
     decode_canonical_json,
     encode_canonical_json,
 )
+from codeclone.canonical.store import _payload_bytes
 from tests.test_canonical_roundtrip import fixture_model
 
 _NS = "lineage-alpha"
 _TARGET = "worktree-a"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:
@@ -81,7 +86,13 @@ def test_square_decode_of_store_projection_is_the_model(tmp_path: Path) -> None:
 
 def test_run_identity_is_content_derived_and_deterministic(tmp_path: Path) -> None:
     """Law 6 (cross-process convergence) in miniature: two stores, one
-    model, byte-identical projection and identical run identity."""
+    model, byte-identical projection and identical run identity.
+
+    "In miniature" is literal: both models are built in ONE interpreter, so
+    both spell the same ``frozenset``s into the same hash-table layout.
+    That makes this pin blind to every owner that turns a set into an
+    ordered payload — see the hash-seed pin below, which is not.
+    """
     model = fixture_model()
     with _store(tmp_path, "a.sqlite") as first, _store(tmp_path, "b.sqlite") as second:
         receipt_a = _publish(first, model)
@@ -90,6 +101,74 @@ def test_run_identity_is_content_derived_and_deterministic(tmp_path: Path) -> No
         assert first.project_run(receipt_a.run_id) == second.project_run(
             receipt_b.run_id
         )
+
+
+_CONVERGENCE_CHILD = """
+import hashlib, io, pathlib, sys, tempfile
+from codeclone.canonical import RunStore, export_run
+from tests.test_canonical_roundtrip import fixture_model
+
+model = fixture_model()
+with tempfile.TemporaryDirectory() as directory:
+    with RunStore(pathlib.Path(directory) / "runs.sqlite") as store:
+        receipt = store.write_full_run(
+            model, namespace="conv", target="head", expected_generation=0
+        )
+        wire = store.project_run(receipt.run_id)
+        sink = io.BytesIO()
+        envelope = export_run(store, receipt.run_id, sink)
+print(receipt.run_id, receipt.analysis_scope_digest,
+      hashlib.sha256(wire).hexdigest(), envelope.artifact_digest)
+"""
+
+
+def test_law6_identity_and_bytes_are_hash_seed_independent() -> None:
+    """Law 6 across PROCESSES — the axis the in-process pin cannot reach.
+
+    Set-to-payload owners (``analysis_scope_digest``'s path sort,
+    ``_sorted_symbols`` / ``_sorted_roots``, the inner label sort of
+    ``_identity_rows``) only show themselves when a FRESH interpreter
+    re-lays the same ``frozenset`` out under a different string hash seed.
+    Dropping any one of them was measured green under some seeds and red
+    under others, so the known-answer literals catch them by luck, not by
+    construction; these three seeds are the measured triple that separates
+    all three owners.
+
+    Deliberately an invariance pin, not a value pin: run identity, scope
+    receipt, projected bytes and the export artifact digest each get their
+    frozen value elsewhere.  Here they only have to agree with themselves.
+    """
+    observed: list[str] = []
+    for seed in ("1", "2", "3"):
+        environment = dict(os.environ)
+        environment["PYTHONHASHSEED"] = seed
+        completed = subprocess.run(
+            (sys.executable, "-c", _CONVERGENCE_CHILD),
+            cwd=_REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        observed.append(completed.stdout.strip())
+    assert len(observed) == 3
+    assert len(set(observed)) == 1, observed
+
+
+def test_storage_payload_bytes_ignore_mapping_key_order() -> None:
+    """``_payload_bytes`` owns the byte form the content address hashes.
+
+    Every family ``_model_rows`` yields happens to spell its row dict in
+    alphabetical key order today, so ``sort_keys=True`` is a guard NO
+    production input reaches — measured: flipping it to ``False`` survives
+    the whole suite.  This pin supplies the input that does reach it, so
+    the guard cannot decay into decoration while the families drift.
+    """
+    ascending = {"alpha": 1, "beta": [2, 3], "gamma": "x"}
+    descending = {"gamma": "x", "beta": [2, 3], "alpha": 1}
+    assert list(descending) != list(ascending)  # the input really is disordered
+    assert _payload_bytes(descending) == _payload_bytes(ascending)
+    assert _payload_bytes(descending) == b'{"alpha":1,"beta":[2,3],"gamma":"x"}'
 
 
 # -- Wall 3: SQLite id is never canonical id --------------------------------
