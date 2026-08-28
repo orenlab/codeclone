@@ -119,6 +119,103 @@ _SEVERITY: tuple[Verdict, ...] = (
 )
 
 
+# Every outcome carries the one step that follows from it.  Longest matching
+# reason prefix wins; the verdict default catches the rest.
+_NEXT_STEP_BY_REASON: tuple[tuple[str, str], ...] = (
+    (
+        "tree_not_restored",
+        "Stop. The worktree was not put back: restore every path in "
+        "residual_paths by hand and re-run. No measurement on this tree counts.",
+    ),
+    (
+        "home_already_red",
+        "The home was red before anything was mutated. Make it green first: a "
+        "red home reds for every mutant and kills nothing.",
+    ),
+    (
+        "target_is_git_ignored",
+        "git cannot witness an ignored path, so the restore proof would be "
+        "vacuous. Point the mutant at a tracked file.",
+    ),
+    (
+        "no_tests_collected",
+        "The home collected zero tests. Fix home.nodes until a real, non-empty "
+        "selection runs; a run that collected nothing is not evidence.",
+    ),
+    (
+        "no_junit_report",
+        "pytest wrote no report, so the collected count does not exist. Check "
+        "home.nodes for a path or node id that is not there.",
+    ),
+    (
+        "find_not_found",
+        "The site moved. Re-read the target and re-state find.",
+    ),
+    (
+        "ambiguous_find",
+        "find matches more than one site. Lengthen it, or name occurrence.",
+    ),
+    (
+        "occurrence_out_of_range",
+        "The target holds fewer sites than occurrence names. Re-read it.",
+    ),
+    (
+        "mutation_not_applied",
+        "The file on disk did not change: replace produced the original bytes.",
+    ),
+    (
+        "equivalence_claim_without_survivor",
+        "Equivalence annotates a survivor. Drop equivalence_claim.",
+    ),
+    (
+        "equivalence_justification_too_short",
+        "State, in a sentence, which observable output the mutated behaviour "
+        "cannot reach. A word is not a justification.",
+    ),
+    (
+        "timeout_",
+        "The home did not finish inside timeout_seconds. Raise it or narrow the "
+        "home, then re-run: a timeout measured nothing.",
+    ),
+    (
+        "runner_fault_rc_",
+        "pytest exited with a code that carries no result. Fix the invocation "
+        "before reading anything into it.",
+    ),
+    (
+        "interrupted_",
+        "The run was interrupted and the tree was restored. Re-run it.",
+    ),
+)
+
+_NEXT_STEP_BY_VERDICT: Mapping[str, str] = {
+    "kill": (
+        "Record this mutant, its home and its digest in the mutation table of "
+        "the delivery report."
+    ),
+    "survive": (
+        "The home does not pin this behaviour. Strengthen a test until this "
+        "mutant reds, or state equivalence_claim -- which annotates the "
+        "survivor and never turns it into a kill."
+    ),
+    "survive_narrow": (
+        "Re-run this mutant with home.declared=full and no nodes before "
+        "reporting anything about it: a survivor in a narrowed home is unknown, "
+        "not survived."
+    ),
+    "void": ("Nothing ran. Fix the home and re-run; do not report this mutant."),
+    "error": ("The mutant was not measured. Read reason, fix the cause and re-run."),
+}
+
+
+def next_step(verdict: Verdict, reason: str) -> str:
+    """The single deterministic action this outcome obliges."""
+    for prefix, step in _NEXT_STEP_BY_REASON:
+        if reason.startswith(prefix):
+            return step
+    return _NEXT_STEP_BY_VERDICT[verdict.value]
+
+
 class PlanError(Exception):
     """The plan does not describe a runnable mutation battery."""
 
@@ -370,6 +467,22 @@ def _file_digest(path: Path) -> str:
         return "ABSENT"
 
 
+def is_git_ignored(root: Path, relative: str) -> bool:
+    """Whether git refuses to witness this path.
+
+    ``git status`` never reports an ignored path, so a mutant planted in one
+    would pass the restore proof without ever being looked at.  Such a target is
+    refused rather than measured.
+    """
+    completed = subprocess.run(
+        ["git", "-C", str(root), "check-ignore", "-q", "--", relative],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
 def _porcelain_entries(root: Path) -> tuple[tuple[str, str], ...]:
     """Every non-ignored path git reports as changed, with its status code."""
     fields = _git(root, "status", "--porcelain=v1", "-uall", "-z").split("\0")
@@ -454,6 +567,8 @@ def _apply_mutation(root: Path, mutant: Mutant) -> AppliedMutation:
         raise MutationError("target_outside_root")
     if not path.is_file():
         raise MutationError("target_not_a_file")
+    if is_git_ignored(root, mutant.target):
+        raise MutationError("target_is_git_ignored")
     original = path.read_bytes()
     try:
         text = original.decode("utf-8")
@@ -729,6 +844,7 @@ def run_mutant(
         **stable,
         "digest": canonical_digest(stable),
         "exit_code": _EXIT_CODE[verdict],
+        "next_step": next_step(verdict, reason),
         "residual_paths": list(residual),
         "equivalence": {
             "claimed": mutant.equivalence_claim is not None,
@@ -766,10 +882,11 @@ def _battery_verdict(reports: Sequence[Mapping[str, object]]) -> Verdict:
 
 
 def _summarize(reports: Sequence[Mapping[str, object]], verdict: Verdict) -> str:
-    lines = [
-        f"{report['id']}: {report['verdict']} ({report['reason']})"
-        for report in reports
-    ]
+    lines: list[str] = []
+    for report in reports:
+        lines.append(f"{report['id']}: {report['verdict']} ({report['reason']})")
+        if report["verdict"] != Verdict.KILL.value:
+            lines.append(f"    next step: {report['next_step']}")
     lines.append(f"battery: {verdict.value} -> exit {_EXIT_CODE[verdict]}")
     return "\n".join(lines)
 
@@ -840,17 +957,59 @@ def _install_interrupt_guard() -> None:
         signal.signal(number, _raise_interrupt)
 
 
+PLAN_TEMPLATE = """\
+{
+  "mutants": [
+    {
+      "id": "m01-short-name-of-what-you-broke",
+      "target": "codeclone/some/module.py",
+      "find": "the exact source text to replace, matching exactly one site",
+      "replace": "the text that breaks the behaviour the test claims to pin",
+      "occurrence": null,
+      "home": {"declared": "full", "nodes": []},
+      "seeds": [0],
+      "timeout_seconds": 1800,
+      "equivalence_claim": null
+    }
+  ]
+}
+
+home is declared, never inferred.  A full home names no nodes; a narrow home
+names pytest node ids or paths and can only ever yield survive_narrow.
+occurrence, seeds, timeout_seconds and equivalence_claim may be omitted.
+"""
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--root", required=True, help="absolute worktree root")
-    parser.add_argument("--plan", required=True, help="battery plan, JSON")
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        epilog="Run with --protocol for the full protocol and a plan template.",
+    )
+    parser.add_argument("--root", default=None, help="absolute worktree root")
+    parser.add_argument("--plan", default=None, help="battery plan, JSON")
     parser.add_argument("--report", default=None, help="write the JSON report here")
+    parser.add_argument(
+        "--protocol",
+        action="store_true",
+        help="print the protocol and a plan template, then exit",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a battery plan and return the exit code its worst verdict earns."""
-    arguments = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    arguments = parser.parse_args(argv)
+    if arguments.protocol:
+        print(f"{__doc__}\n{PLAN_TEMPLATE}")
+        return 0
+    missing = [name for name in ("root", "plan") if getattr(arguments, name) is None]
+    if missing:
+        print(
+            f"--{' and --'.join(missing)} required; --protocol explains the plan",
+            file=sys.stderr,
+        )
+        return _EXIT_CODE[Verdict.ERROR]
     try:
         mutants = load_plan(Path(arguments.plan))
     except PlanError as exc:

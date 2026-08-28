@@ -593,6 +593,58 @@ def test_an_unjustified_equivalence_claim_is_an_error(sandbox: _Sandbox) -> None
 
 
 # --------------------------------------------------------------------------
+# The git witness has a blind spot, and the harness refuses to stand in it.
+# --------------------------------------------------------------------------
+
+
+def test_a_git_ignored_target_is_refused(sandbox: _Sandbox) -> None:
+    """git never reports an ignored path, so restore could not be proven there."""
+    sandbox.add(".gitignore", _GITIGNORE + "ignored.py\n")
+    sandbox.add("ignored.py", _SUBJECT)
+    sandbox.commit()
+    narrow = {"declared": "narrow", "nodes": ["test_other.py"]}
+    code, report = _drive(sandbox, _mutant(target="ignored.py", home=narrow))
+    mutant = _only(report)
+    assert _text(mutant, "verdict") == "error"
+    assert _text(mutant, "reason") == "target_is_git_ignored"
+    assert not _flag(_entry(mutant, "checks"), "mutation_applied")
+    assert (sandbox.root / "ignored.py").read_text(encoding="utf-8") == _SUBJECT
+    assert code == 3
+
+
+# --------------------------------------------------------------------------
+# The protocol travels with the tool: no brief, no specs/ directory, no memory.
+# --------------------------------------------------------------------------
+
+
+def test_the_protocol_and_a_plan_template_travel_with_the_tool(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["--protocol"]) == 0
+    printed = capsys.readouterr().out
+    for required in ('"home"', '"declared"', '"mutants"', "survive_narrow", "seeds"):
+        assert required in printed
+
+
+def test_a_call_without_a_plan_refuses_instead_of_defaulting(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([]) == 3
+    assert "--protocol" in capsys.readouterr().err
+
+
+def test_every_non_kill_outcome_names_the_step_it_obliges(sandbox: _Sandbox) -> None:
+    narrow = {"declared": "narrow", "nodes": ["test_other.py"]}
+    _, survived = _drive(sandbox, _mutant(home=narrow))
+    assert "full" in _text(_only(survived), "next_step")
+    empty = {"declared": "narrow", "nodes": ["-k", "no_such_test_name"]}
+    _, void = _drive(sandbox, _mutant(home=empty))
+    assert "collected zero tests" in _text(_only(void), "next_step")
+    _, killed = _drive(sandbox, _mutant())
+    assert "mutation table" in _text(_only(killed), "next_step")
+
+
+# --------------------------------------------------------------------------
 # The plan is the contract: a typo must not become a default.
 # --------------------------------------------------------------------------
 
