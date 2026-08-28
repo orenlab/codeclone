@@ -13,7 +13,6 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -191,7 +190,7 @@ class McpClient {
     private fun dispatchLine(line: String) {
         val message = json.parseToJsonElement(line).jsonObject
         if (message.containsKey("id") && (message.containsKey("result") || message.containsKey("error"))) {
-            val id = message["id"]?.jsonPrimitive?.intOrNull ?: return
+            val id = decodeResponseId(message) ?: return
             val deferred = pending.remove(id) ?: return
             val error = message["error"]?.jsonObject
             if (error != null) {
@@ -241,7 +240,4 @@ class McpClient {
         }
         pending.clear()
     }
-
-    private val JsonPrimitive.intOrNull: Int?
-        get() = content.toIntOrNull()
 }
