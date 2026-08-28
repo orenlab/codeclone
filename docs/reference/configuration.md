@@ -242,21 +242,21 @@ analyzed root itself. MCP memory responses report the branch taken in
 | `memory.backend` | str | `sqlite` | Memory store backend (`sqlite` or `postgres`) |
 | `memory.db_path` | str | `.codeclone/memory/engineering_memory.sqlite3` | Memory database path; the default is shared across git worktrees (anchored at the main checkout), an explicit value stays per-checkout |
 | `memory.mcp_sync_policy` | str | `bootstrap_if_missing` | MCP store sync: `off`, `bootstrap_if_missing`, or `refresh_when_stale` |
-| `memory.active_retention_days` | int | `-1` (keep forever) | Retain active records (days) |
-| `memory.stale_retention_days` | int | `180` | Retain stale records (days) |
+| `memory.active_retention_days` | int | `-1` (keep forever) | **Not enforced.** Accepted and validated; no policy deletes `active` records (see note below) |
+| `memory.stale_retention_days` | int | `180` | **Not enforced.** Accepted and validated; no policy deletes `stale` records (see note below) |
 | `memory.draft_retention_days` | int | `14` | Retain draft candidates (days) |
 | `memory.rejected_retention_days` | int | `30` | Retain rejected records (days) |
 | `memory.archived_retention_days` | int | `365` | Retain archived records (days) |
-| `memory.receipt_retention_days` | int | `90` | Retain review receipts (days) |
-| `memory.max_records` | int | `10000` | Maximum stored records |
+| `memory.receipt_retention_days` | int | `90` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
+| `memory.max_records` | int | `10000` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
 | `memory.max_candidates` | int | `1000` | Maximum draft candidates |
-| `memory.max_evidence_per_record` | int | `20` | Maximum evidence links per record |
+| `memory.max_evidence_per_record` | int | `20` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
 | `memory.max_statement_chars` | int | `1000` | Hard limit on statement length |
-| `memory.max_blast_radius_cache_entries` | int | `500` | Blast-radius cache entries |
+| `memory.max_blast_radius_cache_entries` | int | `500` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
 | `memory.git_hotspot_period_days` | int | `90` | Git hotspot lookback window (days) |
 | `memory.git_hotspot_min_changes` | int | `5` | Minimum changes for hotspot status |
 | `memory.trajectories_enabled` | bool | `true` | Record workflow trajectories |
-| `memory.trajectory_retention_days` | int | `365` | Retain trajectories (days) |
+| `memory.trajectory_retention_days` | int | `365` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
 | `memory.trajectory_export_enabled` | bool | `false` | Enable trajectory export |
 | `memory.trajectory_export_include_payloads` | bool | `false` | Include payloads in exports |
 | `memory.trajectory_export_max_record_bytes` | int | `65536` | Export record size cap (bytes) |
@@ -266,6 +266,23 @@ analyzed root itself. MCP memory responses report the branch taken in
 | `memory.projection_rebuild_spawn_worker` | bool | `true` | Spawn a background rebuild worker |
 | `memory.projection_rebuild_coalesce_window_seconds` | int | `60` | Coalesce sub-threshold rebuilds into one window (`0` disables) |
 | `memory.projection_rebuild_coalesce_min_delta` | int | `25` | Active-record delta that bypasses the coalesce window |
+
+**Keys marked "Not enforced" change nothing today.** They are part of the
+declared `[tool.codeclone.memory]` contract: accepted, type-validated, and
+rejected when misspelled. But no code consumes them, so setting one has no
+effect — CodeClone does not warn you, and the documented limit or retention
+window is not applied. They are listed here so the contract stays visible and
+stable, not because they work. Do not rely on them to bound store growth or to
+expire records.
+
+Retention that **is** enforced covers `draft`, `rejected` and `archived`
+records only, applied by `codeclone memory vacuum`.
+`memory.active_retention_days` and `memory.stale_retention_days` reach their
+owner in `codeclone/memory/vacuum.py`, which deliberately withholds them:
+`active` records are live approved knowledge and `stale` records are reviewable
+rather than terminal, so deleting either on age alone would cut across the
+lifecycle semantics Engineering Memory already has. Applying a policy to them
+requires an explicit retention ruling.
 
 `[tool.codeclone.memory.semantic]` configures the optional semantic retrieval
 index:
