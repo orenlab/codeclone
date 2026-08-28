@@ -546,18 +546,21 @@ def _nth_index(text: str, needle: str, occurrence: int) -> int:
     return index
 
 
-def _substitute(text: str, mutant: Mutant) -> str:
+def _site_index(text: str, mutant: Mutant) -> int:
+    """The offset of the single site this mutant names, or a typed refusal."""
     total = text.count(mutant.find)
+    wanted = mutant.occurrence
     if total == 0:
         raise MutationError("find_not_found")
-    if mutant.occurrence is None:
-        if total > 1:
-            raise MutationError("ambiguous_find")
-        index = text.index(mutant.find)
-    else:
-        if total < mutant.occurrence:
-            raise MutationError("occurrence_out_of_range")
-        index = _nth_index(text, mutant.find, mutant.occurrence)
+    if wanted is None and total > 1:
+        raise MutationError("ambiguous_find")
+    if wanted is not None and total < wanted:
+        raise MutationError("occurrence_out_of_range")
+    return _nth_index(text, mutant.find, wanted or 1)
+
+
+def _substitute(text: str, mutant: Mutant) -> str:
+    index = _site_index(text, mutant)
     return text[:index] + mutant.replace + text[index + len(mutant.find) :]
 
 
@@ -680,9 +683,7 @@ def _mutate_and_run(
     try:
         applied = _apply_mutation(root, mutant)
         runs = tuple(_run_seed(root, mutant, seed) for seed in mutant.seeds)
-    except MutationError as exc:
-        failure = exc.reason
-    except Interrupted as exc:
+    except (MutationError, Interrupted) as exc:
         failure = exc.reason
     finally:
         if applied is not None:
@@ -706,9 +707,7 @@ def _attempt(
         baselines = tuple(
             _baseline_run(root, mutant, seed, cache) for seed in mutant.seeds
         )
-    except MutationError as exc:
-        return Attempt((), (), None, None, exc.reason, None)
-    except Interrupted as exc:
+    except (MutationError, Interrupted) as exc:
         return Attempt((), (), None, None, exc.reason, None)
     for run in baselines:
         refusal = _baseline_refusal(run)
