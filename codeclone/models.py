@@ -780,6 +780,10 @@ class DependencyColumnarPayload:
     resolved_target: tuple[int | None, ...]
     syntax_kind: tuple[int, ...]
     level: tuple[int, ...]
+    # Payload_schema "8" (F6): the occurrence site, a KEY column. Required,
+    # because a row that cannot name its site cannot be told apart from the
+    # next occurrence of the same import.
+    line: tuple[int, ...]
     inventory_expansion: tuple[int, ...] = ()
     mechanism_dynamic: tuple[int, ...] = ()
     # Payload_schema "6" columns (cycle-honesty wave): sparse row-position
@@ -805,6 +809,7 @@ class DependencyColumnarPayload:
                 "resolved_target": len(self.resolved_target),
                 "syntax_kind": len(self.syntax_kind),
                 "level": len(self.level),
+                "line": len(self.line),
             }
         )
         _validate_column_references(self.source, len(self.identities.paths), "source")
@@ -827,6 +832,8 @@ class DependencyColumnarPayload:
             _validate_column_references(names, len(self.modules), "requested_names")
         if any(value < 0 for value in self.level):
             raise ValueError("dependency import level must be non-negative")
+        if any(value < 1 for value in self.line):
+            raise ValueError("import occurrence sites must be positive")
         _validate_ascending_indices(
             self.inventory_expansion, rows, "inventory_expansion"
         )
@@ -865,11 +872,17 @@ class DependencyColumnarPayload:
                     else self.modules[target]
                 ),
                 row in frozenset(self.inventory_expansion),
+                self.line[row],
             )
             for row in range(rows)
         )
         if order != tuple(sorted(order)):
             raise ValueError("columnar rows must be sorted")
+        if len(set(order)) != rows:
+            # F6: the site completes the occurrence key, so a repeated key is
+            # a producer defect the wire refuses rather than a duplicate a
+            # keyed reader gets to discover later.
+            raise ValueError("two dependency rows share one occurrence key")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2054,6 +2067,45 @@ class ImportObservation:
             raise ValueError("only a dynamic load can be unresolved_dynamic")
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ImportOccurrenceObservation(ImportObservation):
+    """One import OCCURRENCE: the observation plus the site it was written at.
+
+    F6 (ruling 2026-08-28), measured on this repository at 2fe5e38d: the
+    twelve fields :class:`ImportObservation` carries cannot tell two
+    occurrences of one import apart.  9689 lane rows collapse to 9319
+    distinct values -- 370 rows in 186 groups -- and every one of those 186
+    groups is a set of DIFFERENT sites (366 of the 370 are one deferred
+    import repeated in different function bodies).  ``line`` is the
+    producer's own discriminator, it is present on every row (no row has
+    ``line == 0``), and with it the same corpus is 9689/9689 distinguishable
+    with zero collisions.
+
+    It discriminates an OCCURRENCE and nothing else.  The dependency
+    RELATION -- ``(source, target, dependency_type)`` -- is a different
+    entity with its own key, and the site never joins it merely because it
+    became reachable; :class:`~codeclone.canonical.model.DependencyRelationRow`
+    states the same law from the other side.
+
+    :class:`ImportObservation` deliberately keeps its shape: the module walk
+    builds one before the site is known, and this is the lane's row, not the
+    walker's.
+    """
+
+    line: int
+
+    def __post_init__(self) -> None:
+        # Called explicitly rather than through a zero-argument ``super()``:
+        # ``slots=True`` rebuilds the class object, which leaves that form's
+        # ``__class__`` cell pointing at the pre-slots class.
+        ImportObservation.__post_init__(self)
+        if isinstance(self.line, bool) or self.line < 1:
+            raise ValueError(
+                "import occurrence sites must be positive "
+                "(the site completes the row key, so it is never guessed)"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class DependencyCycleDetail:
     """One runtime dependency cycle with its classification and honest paths.
@@ -3210,7 +3262,7 @@ def _is_fp_v2_block_clone_id(value: str) -> bool:
 class StructuralObservationFacts:
     function_clone_keys: tuple[str, ...]
     block_clone_keys: tuple[str, ...]
-    dependencies: tuple[ImportObservation, ...]
+    dependencies: tuple[ImportOccurrenceObservation, ...]
     api_surface: tuple[ApiSymbolObservation, ...]
     dead_code: tuple[DeadCodeObservation, ...]
     risk_observations: tuple[RiskObservation, ...]
@@ -3256,7 +3308,7 @@ class ModuleIdentityObservationPayload:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DependencyObservationPayload:
-    observations: tuple[ImportObservation, ...]
+    observations: tuple[ImportOccurrenceObservation, ...]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

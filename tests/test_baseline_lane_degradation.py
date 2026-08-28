@@ -34,7 +34,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import pytest
@@ -1192,28 +1192,40 @@ def _write_complex_repo(tmp_path: Path) -> Path:
     return root
 
 
-def downgrade_risk_lane_to_schema4(baseline_path: Path) -> None:
-    """Rewrite the risk lane into its authentic pre-F1 shape.
+def downgrade_lane_to_its_pre_migration_shape(
+    baseline_path: Path,
+    *,
+    lane_name: ObservationLaneName,
+    published_schema: str,
+    stored_schema: str,
+    dropped_column: str,
+) -> None:
+    """Rewrite one lane into the authentic shape it had before a migration.
 
-    Not only the label: the ``start_line`` column is removed too, so the
-    artifact on disk is exactly what a pre-migration publisher wrote — an
-    integer-wire lane under payload_schema "4" — re-authenticated at lane
-    and root so the reader answers the contract question, not integrity.
+    Not only the label: the KEY column the migration added is removed too,
+    so the artifact on disk is exactly what a pre-migration publisher
+    wrote — re-authenticated at lane and root so the reader answers the
+    contract question, not integrity.
+
+    One helper for both migrations on purpose. Writing the four steps out
+    per lane made the F1 and F6 forgeries a clone group of their own, and
+    a second spelling of one forgery is the thing this suite exists to
+    refuse elsewhere.
     """
 
     def _mutate(container: BaselineContainerV3) -> BaselineContainerV3:
-        lane = container.lanes["risk_observations"]
-        assert lane.descriptor.payload_schema == "5"
-        descriptor = replace(lane.descriptor, payload_schema="4")
+        lane = container.lanes[lane_name]
+        assert lane.descriptor.payload_schema == published_schema
+        descriptor = replace(lane.descriptor, payload_schema=stored_schema)
         old_shape = json.loads(canonical_value_bytes(lane.payload))
-        old_shape.pop("start_line")
+        old_shape.pop(dropped_column)
         lane = replace(lane, descriptor=descriptor, payload=old_shape)
         lane = replace(lane, digest=compute_lane_digest(lane))
         changed = replace(
             container,
             lanes=BaselineLaneIndex(
                 rows=tuple(
-                    (key, lane if key == "risk_observations" else existing)
+                    (key, lane if key == lane_name else existing)
                     for key, existing in container.lanes.rows
                 )
             ),
@@ -1223,13 +1235,91 @@ def downgrade_risk_lane_to_schema4(baseline_path: Path) -> None:
             observation_contract=replace(
                 changed.observation_contract,
                 descriptors=tuple(
-                    descriptor if item.name == "risk_observations" else item
+                    descriptor if item.name == lane_name else item
                     for item in changed.observation_contract.descriptors
                 ),
             ),
         )
 
     _rewrite_container(baseline_path, _mutate)
+
+
+def _publish_baseline(root: Path, baseline_path: Path) -> BaselineContainerV3:
+    """Publish a baseline for ``root`` and hand back the artifact on disk."""
+
+    published = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--update-baseline",
+        "--no-progress",
+    )
+    assert published.returncode == 0, published.stdout + published.stderr
+    read_back = read_container_v3(
+        baseline_path, limit_bytes=baseline_path.stat().st_size
+    )
+    assert isinstance(read_back, ContainerReadSuccess)
+    return read_back.container
+
+
+def assert_pre_migration_lane_is_a_typed_absence(
+    tmp_path: Path,
+    *,
+    root: Path,
+    lane_name: ObservationLaneName,
+    published_schema: str,
+    stored_schema: str,
+    dropped_column: str,
+    withheld_families: tuple[str, ...],
+    compared_families: tuple[str, ...],
+) -> Mapping[str, Any]:
+    """The three verdicts every lane migration owes, checked in one place.
+
+    Publish, forge the authentic pre-migration lane, re-run, and assert:
+    the run completes (no crash), the opaque lane is named exactly once,
+    and the families that read it lose their baseline comparison instead
+    of comparing against a wire that cannot answer the identity question.
+    Returns the report so a caller can add the assertions only its own
+    lane can make.
+
+    One body for both migrations deliberately: spelled out per lane, the
+    F1 and F6 pins were a measured clone group, and the second spelling
+    would have had to be kept in step by hand.
+    """
+
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    container = _publish_baseline(root, baseline_path)
+    # The red-first anchor: the current publisher writes the migrated wire.
+    assert container.lanes[lane_name].descriptor.payload_schema == published_schema
+
+    downgrade_lane_to_its_pre_migration_shape(
+        baseline_path,
+        lane_name=lane_name,
+        published_schema=published_schema,
+        stored_schema=stored_schema,
+        dropped_column=dropped_column,
+    )
+
+    report_path = tmp_path / "report.json"
+    result = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--json",
+        str(report_path),
+        "--no-progress",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Baseline lanes are opaque for this run" in result.stdout
+    assert result.stdout.count(f"{lane_name}:payload_schema_outdated") == 1
+
+    document: Mapping[str, Any] = json.loads(report_path.read_text("utf-8"))
+    summary = document["metrics"]["summary"]
+    for family in withheld_families:
+        assert summary[family]["baseline_diff_available"] is False, family
+    for family in compared_families:
+        assert summary[family]["baseline_diff_available"] is True, family
+    return document
 
 
 def test_schema4_risk_lane_degrades_to_unavailable_with_novelty_reason(
@@ -1244,47 +1334,17 @@ def test_schema4_risk_lane_degrades_to_unavailable_with_novelty_reason(
     ``lane_unavailable`` reason instead of guessing ``known`` or ``new``.
     """
 
-    root = _write_complex_repo(tmp_path)
-    baseline_path = tmp_path / "codeclone.baseline.json"
-    published = _run_cli(
-        str(root),
-        "--baseline",
-        str(baseline_path),
-        "--update-baseline",
-        "--no-progress",
-    )
-    assert published.returncode == 0, published.stdout + published.stderr
-    read_back = read_container_v3(
-        baseline_path, limit_bytes=baseline_path.stat().st_size
-    )
-    assert isinstance(read_back, ContainerReadSuccess)
-    # The red-first anchor: the current publisher writes the F1 wire.
-    assert (
-        read_back.container.lanes["risk_observations"].descriptor.payload_schema == "5"
-    )
-
-    downgrade_risk_lane_to_schema4(baseline_path)
-
-    report_path = tmp_path / "report.json"
-    result = _run_cli(
-        str(root),
-        "--baseline",
-        str(baseline_path),
-        "--json",
-        str(report_path),
-        "--no-progress",
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Baseline lanes are opaque for this run" in result.stdout
-    assert result.stdout.count("risk_observations:payload_schema_outdated") == 1
-
-    document = json.loads(report_path.read_text("utf-8"))
-    summary = document["metrics"]["summary"]
-    assert summary["complexity"]["baseline_diff_available"] is False
     # The risk lane feeds health, so the stored score is withheld too.
-    assert summary["health"]["baseline_diff_available"] is False
-    for family in ("coupling", "dependencies", "dead_code"):
-        assert summary[family]["baseline_diff_available"] is True, family
+    document = assert_pre_migration_lane_is_a_typed_absence(
+        tmp_path,
+        root=_write_complex_repo(tmp_path),
+        lane_name="risk_observations",
+        published_schema="5",
+        stored_schema="4",
+        dropped_column="start_line",
+        withheld_families=("complexity", "health"),
+        compared_families=("coupling", "dependencies", "dead_code"),
+    )
 
     design_groups = document["findings"]["groups"]["design"]["groups"]
     complexity_findings = [
@@ -1294,3 +1354,103 @@ def test_schema4_risk_lane_degrades_to_unavailable_with_novelty_reason(
     for group in complexity_findings:
         assert group["novelty"] == "unavailable"
         assert group["novelty_reason"] == "lane_unavailable"
+
+
+_IMPORT_MODULE_SOURCE = '''"""A module that defers one import at two different sites."""
+
+from __future__ import annotations
+
+
+def first(name: str) -> str:
+    """Return a greeting from the first site."""
+    from helper import greet
+
+    return greet(name)
+
+
+def second(name: str) -> str:
+    """Return the same greeting from a second site."""
+    from helper import greet
+
+    return greet(name)
+'''
+
+_HELPER_MODULE_SOURCE = '''"""The helper both sites import."""
+
+
+def greet(name: str) -> str:
+    """Return a greeting."""
+    return f"hello {name}"
+'''
+
+
+def _write_two_occurrence_repo(tmp_path: Path) -> Path:
+    """A repository whose dependency lane needs the occurrence site.
+
+    ``mod.py`` defers ``from helper import greet`` inside two function
+    bodies. Every dependency field except the site is equal between the
+    two imports, so this fixture is the end-to-end half of the F6
+    distinguishing corpus: if the site is not on the wire, the published
+    lane cannot tell a reader that this repository imports ``helper``
+    twice.
+    """
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "mod.py").write_text(_IMPORT_MODULE_SOURCE, "utf-8")
+    (root / "helper.py").write_text(_HELPER_MODULE_SOURCE, "utf-8")
+    (root / "pyproject.toml").write_text(
+        f'[tool.codeclone]\nbaseline_scope_id = "{_SCOPE_ID}"\n',
+        "utf-8",
+    )
+    return root
+
+
+def test_the_published_dependency_lane_names_both_import_occurrences(
+    tmp_path: Path,
+) -> None:
+    """F6 red-first, end to end: the site reaches the published artifact.
+
+    The projection is where ``ModuleDep.line`` used to be dropped, so this
+    asserts on what a reader actually receives — the lane inside a real
+    published baseline — rather than on an in-memory row the wire may
+    still flatten.
+    """
+
+    root = _write_two_occurrence_repo(tmp_path)
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    lane = _publish_baseline(root, baseline_path).lanes["dependencies"]
+    assert lane.descriptor.payload_schema == "8"
+    payload = json.loads(canonical_value_bytes(lane.payload))
+    sites = [
+        payload["line"][row]
+        for row, target in enumerate(payload["resolved_target"])
+        if target is not None and payload["modules"][target] == "helper"
+    ]
+    assert len(sites) == 2
+    assert len(set(sites)) == 2
+
+
+def test_schema7_dependency_lane_degrades_to_unavailable_not_silently(
+    tmp_path: Path,
+) -> None:
+    """F6 K1 pin: a stored schema-7 dependency lane is a typed absence.
+
+    Three verdicts in one artifact run: the run completes (no crash), the
+    opaque lane is named exactly once (payload_schema_outdated), and the
+    families that read this lane lose their baseline comparison honestly
+    instead of comparing today's rows against a wire that cannot answer
+    the identity question.
+    """
+
+    # The dependency lane is a health input, so the stored score goes too.
+    assert_pre_migration_lane_is_a_typed_absence(
+        tmp_path,
+        root=_write_two_occurrence_repo(tmp_path),
+        lane_name="dependencies",
+        published_schema="8",
+        stored_schema="7",
+        dropped_column="line",
+        withheld_families=("dependencies", "health"),
+        compared_families=("complexity", "coupling", "dead_code"),
+    )

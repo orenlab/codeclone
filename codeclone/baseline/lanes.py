@@ -34,7 +34,7 @@ from ..models import (
     DependencyObservationPayload,
     DependencyResolution,
     DigestObject,
-    ImportObservation,
+    ImportOccurrenceObservation,
     ImportSyntaxKind,
     IntegerColumnarPayload,
     IntegerObservation,
@@ -345,7 +345,7 @@ def decode_dependency_lane(
 
     return DependencyObservationPayload(
         observations=tuple(
-            ImportObservation(
+            ImportOccurrenceObservation(
                 source=payload.identities.identity(payload.source[row]),
                 syntax_kind=_narrowed(
                     payload.syntax_kinds[payload.syntax_kind[row]],
@@ -370,6 +370,7 @@ def decode_dependency_lane(
                 mechanism="dynamic" if row in dynamic else "static",
                 binding=binding_by_row.get(row, "import_time"),
                 is_lazy=row in lazy_rows,
+                line=payload.line[row],
             )
             for row in range(len(payload.source))
         )

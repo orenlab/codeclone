@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -46,7 +47,7 @@ from codeclone.models import (
     DigestObject,
     DynamicLoadArgument,
     FileIdentity,
-    ImportObservation,
+    ImportOccurrenceObservation,
     IntegerColumnarPayload,
     LanePayload,
     ModuleApiSurface,
@@ -69,7 +70,10 @@ from codeclone.models import (
     parse_api_surface_columnar_payload,
     parse_risk_columnar_payload,
 )
-from codeclone.observations.contracts import ObservationContractError
+from codeclone.observations.contracts import (
+    ObservationContractError,
+    lane_payload_schema,
+)
 from codeclone.observations.lanes import (
     build_observation_lanes,
     canonical_observation_lane_bytes,
@@ -464,6 +468,64 @@ def _lane_bytes(bundle: ObservationBundle) -> dict[str, bytes]:
     return {
         lane.descriptor.name: canonical_observation_lane_bytes(lane)
         for lane in build_observation_lanes(bundle)
+    }
+
+
+#: sha256 of every lane's canonical bytes for :func:`_bundle`, measured on
+#: the pre-F6 tree (2fe5e38d, dependencies payload_schema "7") BEFORE the
+#: occurrence-site column existed.  Frozen here so the F6 migration has to
+#: prove its confinement instead of asserting it: exactly one entry is
+#: allowed to move.
+_PRE_F6_LANE_DIGESTS = {
+    "adoption_counts": (
+        "54d23368033a138f4edc781fd0ccddbb4479ef55afa4f58794b1fcadea3ea720"
+    ),
+    "api_surface": ("b19f3e7e67d150a02c26b2c18a387bd343eb4a368a9678927d63c48843df7da7"),
+    "clones.blocks": (
+        "e49b99d4861b1f16c2c41fe3e996ec605d7b86d76df2ff447ed0517104d1baea"
+    ),
+    "clones.functions": (
+        "a0da09fdc06177aaba2f772c277b5dd1e1a3c45b973f58c7423b8bd57b879338"
+    ),
+    "coupling_cohesion_observations": (
+        "cef5cb821ab5e4936bc243c472682dcdc821d30022d18f7efc7e27e11e32b12b"
+    ),
+    "dead_code": ("9bbd78ee16bd222ae14ceb08d304afeb7e43db4c4bf615d3208aca4bf736c86f"),
+    "dependencies": (
+        "e838a807c39ed1cc320a35d7cdefe510b6352bf30e9c170360c49fa31277b0b2"
+    ),
+    "module_identity": (
+        "cf7dbd5bc162b346ac71a86ec2667e478cf7fa1a86218ca91d17639b243d5459"
+    ),
+    "risk_observations": (
+        "3332de6b9485b9d48806e432bd89e02198afeaf1a520bc1af7c7bae9d2428927"
+    ),
+}
+
+
+def test_the_f6_site_column_moves_the_dependency_wire_and_nothing_else() -> None:
+    """Two verdicts one assertion apart, and both are load-bearing.
+
+    The first is the one the rolled-back F5 bump lacked: the dependency
+    lane's BYTES really change, so declaring a new payload_schema is a
+    statement about the wire and not a label over an identical artifact.
+    The second is its confinement: eight sibling lanes are byte-identical
+    to their pre-F6 values, so no other baseline is invalidated by this
+    migration.
+    """
+
+    digests = {
+        name: hashlib.sha256(raw).hexdigest()
+        for name, raw in _lane_bytes(_bundle()).items()
+    }
+
+    assert digests["dependencies"] != _PRE_F6_LANE_DIGESTS["dependencies"]
+    assert {
+        name: digest for name, digest in digests.items() if name != "dependencies"
+    } == {
+        name: digest
+        for name, digest in _PRE_F6_LANE_DIGESTS.items()
+        if name != "dependencies"
     }
 
 
@@ -931,6 +993,7 @@ def test_dependency_decode_derives_empty_candidates_without_a_target() -> None:
         resolved_target=(None,),
         syntax_kind=(0,),
         level=(1,),
+        line=(3,),
     )
     observation = decode_dependency_lane(payload).observations[0]
 
@@ -948,6 +1011,7 @@ def _dependency_payload(
     resolved_target: tuple[int | None, ...] = (0,),
     syntax_kind: tuple[int, ...] = (0,),
     level: tuple[int, ...] = (0,),
+    line: tuple[int, ...] = (1,),
 ) -> DependencyColumnarPayload:
     return DependencyColumnarPayload(
         identities=ThinIdentityTable(paths=("pkg/mod.py",)),
@@ -961,6 +1025,7 @@ def _dependency_payload(
         resolved_target=resolved_target,
         syntax_kind=syntax_kind,
         level=level,
+        line=line,
     )
 
 
@@ -978,6 +1043,7 @@ def test_dependency_columnar_form_rejects_bad_levels_and_unsorted_rows() -> None
             resolved_target=(0, 0),
             syntax_kind=(0, 0),
             level=(0, 0),
+            line=(1, 1),
         )
     with pytest.raises(ValueError, match="outside its table"):
         _dependency_payload(requested_names=((9,),))
@@ -1081,8 +1147,156 @@ def test_dependency_mechanism_is_order_independent_and_byte_stable() -> None:
     assert first != _lane_bytes(_bundle())["dependencies"]
 
 
-def _static_observation() -> ImportObservation:
+def _two_occurrence_bundle() -> ObservationBundle:
+    """The F6 distinguishing corpus: one import, two sites.
+
+    ``pkg.mod`` defers the same ``from pkg.dep import value`` inside two
+    different function bodies.  Every field the lane carried through
+    payload_schema "7" is equal between the two rows -- source, syntax,
+    level, requested module, requested names, resolution, target,
+    mechanism, binding, laziness -- so the occurrence site is the only
+    fact that tells them apart, and the producer is the only place it
+    exists.
+    """
+
+    dependency = ModuleDep(
+        source="pkg.mod",
+        target="pkg.dep",
+        import_type="from_import",
+        line=11,
+        resolution="analyzed",
+        requested_module="pkg.dep",
+        requested_names=("value",),
+        candidate_targets=("pkg.dep",),
+        binding="deferred_function",
+    )
+    return build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        module_deps=(dependency, replace(dependency, line=27)),
+    )
+
+
+def test_two_import_occurrences_stay_two_rows_through_the_lane() -> None:
+    """F6 red-first: two occurrences must survive as two distinguishable rows.
+
+    Through payload_schema "7" the projection dropped ``ModuleDep.line``,
+    so these two rows were the same VALUE.  A list keeps both copies, but
+    every keyed reader -- a set, a dict, a canonical family -- reads one
+    occurrence where the repository has two.  Measured on this repository
+    at 2fe5e38d: 9689 lane rows collapse to 9319 distinct values, 370 rows
+    in 186 groups, and all 186 groups are different sites.
+    """
+
+    bundle = _two_occurrence_bundle()
+    rows = bundle.structural.dependencies
+
+    assert len(rows) == 2
+    assert len({row.line for row in rows}) == 2
+    assert len(set(rows)) == 2
+    assert sorted(row.line for row in rows) == [11, 27]
+
+    payload = _dependency_lane_payload(bundle)
+    assert payload.line == (11, 27)
+    decoded = decode_dependency_lane(payload).observations
+    assert sorted(row.line for row in decoded) == [11, 27]
+
+
+def test_the_declared_dependency_schema_names_a_wire_that_carries_the_site() -> None:
+    """The rolled-back F5 bump, made executable: a lane bump must move bytes.
+
+    ``payload_schema`` is not a label a reader may mint over an unchanged
+    wire -- the F5 api-surface bump had to be reverted precisely because
+    the stored bytes were already right and the bump only turned
+    compatible baselines into ``unavailable``.  This pin ties the declared
+    "8" to the column that justifies it: move the schema without moving
+    the wire, or move the wire without declaring it, and one half of this
+    assertion breaks.
+    """
+
+    assert lane_payload_schema("dependencies") == "8"
+
+    bundle = _two_occurrence_bundle()
+    lane = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "dependencies"
+    )
+    assert lane.descriptor.payload_schema == "8"
+    raw = canonical_observation_lane_bytes(lane)
+    assert b'"line":[11,27]' in raw
+
+    moved = replace(
+        bundle,
+        structural=replace(
+            bundle.structural,
+            dependencies=(
+                bundle.structural.dependencies[0],
+                replace(bundle.structural.dependencies[1], line=41),
+            ),
+        ),
+    )
+    assert raw != _lane_bytes(moved)["dependencies"]
+
+
+def test_the_dependency_wire_refuses_two_rows_at_one_occurrence_key() -> None:
+    """The site completes the key, so a repeated key is a producer defect.
+
+    Same refusal the F1 risk wire makes: two rows that agree on the whole
+    occurrence key are not two facts, and silently keeping both would hand
+    a keyed reader a collision the wire already knew about.
+    """
+
+    _dependency_payload(line=(4,))
+
+    with pytest.raises(ValueError, match="import occurrence sites must be positive"):
+        _dependency_payload(line=(0,))
+    with pytest.raises(ValueError, match="share one occurrence key"):
+        _dependency_payload(
+            source=(0, 0),
+            requested_module=(0, 0),
+            requested_names=((), ()),
+            resolution=(0, 0),
+            resolved_target=(0, 0),
+            syntax_kind=(0, 0),
+            level=(0, 0),
+            line=(7, 7),
+        )
+    with pytest.raises(ValueError, match=r"columns disagree|must be sorted"):
+        _dependency_payload(
+            source=(0, 0),
+            requested_module=(0, 0),
+            requested_names=((), ()),
+            resolution=(0, 0),
+            resolved_target=(0, 0),
+            syntax_kind=(0, 0),
+            level=(0, 0),
+            line=(9, 3),
+        )
+
+
+def _static_observation() -> ImportOccurrenceObservation:
     return _bundle().structural.dependencies[0]
+
+
+def test_an_occurrence_row_refuses_a_site_it_cannot_have_been_written_at() -> None:
+    """The row type's own guard, with an input that actually reaches it.
+
+    Added because the guard was measured hollow: relaxing ``< 1`` to
+    ``< 0`` survived the whole suite, so nothing was proving that a
+    siteless row is refused where it is built rather than three layers
+    later on the wire.  ``True`` is checked beside ``0`` because a bool is
+    an int and would otherwise pass the comparison as the site 1.
+    """
+
+    base = _static_observation()
+
+    with pytest.raises(ValueError, match="import occurrence sites must be positive"):
+        replace(base, line=0)
+    with pytest.raises(ValueError, match="import occurrence sites must be positive"):
+        replace(base, line=-3)
+    with pytest.raises(ValueError, match="import occurrence sites must be positive"):
+        replace(base, line=cast(int, True))
 
 
 def test_unresolved_import_observations_refuse_a_target_or_candidates() -> None:

@@ -90,7 +90,20 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     # and novelty gating. The declared schema is where that disagreement is
     # recorded, so a stale artifact is regenerated rather than silently
     # compared against facts it cannot produce.
-    "dependencies": "7",
+    #
+    # "8" (F6, ruling 2026-08-28) is the opposite kind of move and the
+    # distinction is the whole reason the reader bump above is spelled out:
+    # this one DOES change the bytes. Rows gained ``line``, the occurrence
+    # site, as a KEY column, because the twelve fields "7" carried could not
+    # tell two occurrences of one import apart -- measured at 2fe5e38d, 9689
+    # rows collapse to 9319 distinct values, 370 rows in 186 groups, and all
+    # 186 groups are different sites. A "7" lane cannot answer an "8"
+    # reader's identity question, so a stored "7" reads
+    # payload_schema_outdated / unavailable until regenerated, never a silent
+    # comparison. The site discriminates the OCCURRENCE only: the dependency
+    # relation key stays (source, target, dependency_type) and the site never
+    # joins it.
+    "dependencies": "8",
     "module_identity": "4",
     # F1 lane-contract migration (ruling 2026-08-26, fork (b)): risk rows
     # carry the declaration site — ``start_line`` joins the wire as a KEY

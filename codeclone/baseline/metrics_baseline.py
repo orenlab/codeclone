@@ -44,7 +44,7 @@ from ..models import (
     DeadCodeObservationPayload,
     DependencyColumnarPayload,
     DependencyObservationPayload,
-    ImportObservation,
+    ImportOccurrenceObservation,
     IntegerColumnarPayload,
     IntegerObservationPayload,
     LaneTrust,
@@ -628,7 +628,7 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
     )
 
 
-def _import_dependency(item: ImportObservation) -> ModuleDep:
+def _import_dependency(item: ImportOccurrenceObservation) -> ModuleDep:
     if item.source.python_module is None or item.resolved_target is None:
         raise ValueError("dependency observation is not graph-resolvable")
     return ModuleDep(

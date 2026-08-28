@@ -44,7 +44,7 @@ from codeclone.models import (
     DigestObject,
     FileIdentity,
     HealthScore,
-    ImportObservation,
+    ImportOccurrenceObservation,
     LaneTrust,
     ModuleApiSurface,
     ModuleDocstringCoverage,
@@ -743,7 +743,7 @@ def test_metrics_baseline_fallback_projections_remain_typed(
     limited_diff = limited.diff(_project_metrics())
     assert limited_diff.new_cycles == (("pkg.a", "pkg.b"),)
 
-    unresolved = ImportObservation(
+    unresolved = ImportOccurrenceObservation(
         source=ResolvedSourceIdentity(
             file=FileIdentity(path="pkg/mod.py"),
             python_module=None,
@@ -755,11 +755,12 @@ def test_metrics_baseline_fallback_projections_remain_typed(
         resolution="unresolved_relative",
         candidate_targets=(),
         resolved_target=None,
+        line=4,
     )
     with pytest.raises(ValueError, match="not graph-resolvable"):
         metrics_mod._import_dependency(unresolved)
 
-    resolved = ImportObservation(
+    resolved = ImportOccurrenceObservation(
         source=registry.entries_by_module["pkg.mod"].identity,
         syntax_kind="import",
         level=0,
@@ -768,6 +769,7 @@ def test_metrics_baseline_fallback_projections_remain_typed(
         resolution="external",
         candidate_targets=(),
         resolved_target="pkg.other",
+        line=9,
     )
     dependency = metrics_mod._import_dependency(resolved)
     assert dependency.source == "pkg.mod"

@@ -25,6 +25,10 @@ from __future__ import annotations
 
 import dataclasses
 
+from codeclone.canonical.model import (
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
+)
 from codeclone.canonical.registry import (
     FACT_FAMILY_FIELDS,
     RISK_OBSERVATIONS_FAMILY,
@@ -264,3 +268,44 @@ def test_f1_dimension_vocabulary_mirrors_the_producer() -> None:
     )
     emitted = {row.dimension for row in bundle.structural.risk_observations}
     assert emitted == set(RISK_DIMENSIONS)
+
+
+def test_the_dependency_relation_key_never_absorbs_the_occurrence_site() -> None:
+    """F6 guard (ruling 2026-08-28): the site discriminates an OCCURRENCE.
+
+    F6 put ``line`` on the dependency observation lane, so the site is now
+    reachable everywhere an import fact is handled — and that availability
+    is precisely the temptation the ruling names: the site must NOT be
+    carried into ``(source, target, dependency_type)`` merely because it
+    can be.  The relation is one row per triple; keying it by the site
+    would turn one entity into as many rows as it has evidence sites,
+    which is the metrics dialect the ratified split ended.  Gate and SCC
+    read this graph, so the mutation would be a behaviour change, not a
+    cosmetic one.
+
+    Both directions red: smuggling the site into the relation breaks the
+    first half, dropping it from the occurrence breaks the second.
+    """
+
+    relation_fields = {
+        field.name for field in dataclasses.fields(DependencyRelationRow)
+    }
+    assert relation_fields == {"source", "target", "dependency_type"}
+    assert wire_columns("dependency_relations") == (
+        "dependency_type",
+        "source",
+        "target",
+    )
+
+    occurrence_fields = {
+        field.name for field in dataclasses.fields(DependencyOccurrenceRow)
+    }
+    assert occurrence_fields == {"relation", "line", "binding", "is_lazy"}
+    assert wire_columns("dependency_occurrences") == (
+        "binding",
+        "dependency_type",
+        "is_lazy",
+        "line",
+        "source",
+        "target",
+    )

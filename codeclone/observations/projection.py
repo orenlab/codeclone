@@ -25,7 +25,7 @@ from ..models import (
     DigestObject,
     FileIdentity,
     GroupItemLike,
-    ImportObservation,
+    ImportOccurrenceObservation,
     IntegerObservation,
     ModuleApiSurface,
     ModuleDep,
@@ -117,9 +117,9 @@ def _source_identity(
 def _dependency_observations(
     dependencies: Sequence[ModuleDep],
     registry: ModuleRegistryHandle,
-) -> tuple[ImportObservation, ...]:
+) -> tuple[ImportOccurrenceObservation, ...]:
     rows = tuple(
-        ImportObservation(
+        ImportOccurrenceObservation(
             source=_source_identity(dependency.source, registry),
             syntax_kind=dependency.import_type,
             level=dependency.level,
@@ -139,6 +139,10 @@ def _dependency_observations(
             # every dependency observation row (the G4 projection).
             binding=dependency.binding,
             is_lazy=dependency.is_lazy,
+            # F6: the producer's own occurrence discriminator. Dropping it
+            # here is what made two imports of one module in two function
+            # bodies the same lane row.
+            line=dependency.line,
         )
         for dependency in dependencies
     )
@@ -156,6 +160,7 @@ def _dependency_observations(
                 row.candidate_targets,
                 row.resolved_target or "",
                 row.inventory_expansion,
+                row.line,
             ),
         )
     )

@@ -26,7 +26,7 @@ from ..models import (
     DeadCodeObservation,
     DependencyColumnarPayload,
     DigestMeta,
-    ImportObservation,
+    ImportOccurrenceObservation,
     IntegerColumnarPayload,
     IntegerObservation,
     LanePayload,
@@ -357,7 +357,7 @@ def _encode_api_surface_lane(
 
 
 def _encode_dependency_lane(
-    observations: Sequence[ImportObservation],
+    observations: Sequence[ImportOccurrenceObservation],
 ) -> DependencyColumnarPayload:
     table, index = _identity_table([item.source for item in observations])
     modules = tuple(
@@ -384,6 +384,9 @@ def _encode_dependency_lane(
             item.resolution,
             _null_first(item.resolved_target),
             item.inventory_expansion,
+            # F6: the site sits where the payload's own key ends, so the
+            # payload's order stays a prefix of this one.
+            item.line,
             item.binding,
             item.is_lazy,
         ),
@@ -410,6 +413,7 @@ def _encode_dependency_lane(
         ),
         syntax_kind=tuple(syntax_index[item.syntax_kind] for item in rows),
         level=tuple(item.level for item in rows),
+        line=tuple(item.line for item in rows),
         inventory_expansion=tuple(
             position for position, item in enumerate(rows) if item.inventory_expansion
         ),

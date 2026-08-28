@@ -135,8 +135,17 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # descriptor digest moves and the other nine stay byte-identical to the
     # values pinned here. Pre-bump digest was
     # 2c533080e26a676bbf099998b23fb129b9a7c8731e9f31df6375eb5f14f2fd2c.
+    #
+    # SANCTIONED golden change, F6 (ruling 2026-08-28): payload_schema "7" ->
+    # "8" adds the occurrence site (``line``) to the dependency wire as a key
+    # column. Unlike the "6" -> "7" reader bump above, this one moves real
+    # bytes -- the confinement proof is the sibling assertion in this file
+    # plus _PRE_F6_LANE_DIGESTS in tests/test_observation_lanes.py, which
+    # pins the pre-F6 sha256 of all nine encoded lanes and lets exactly one
+    # of them move. Pre-F6 digest was
+    # 7bf4c16877b8a2c3e7a8bd098525350c72a9c17f3a06a675e7d83361959c61fa.
     "dependencies": (
-        "7bf4c16877b8a2c3e7a8bd098525350c72a9c17f3a06a675e7d83361959c61fa"
+        "aa860c681014101633220ddf0b2e2da25d861f805c2ec6fed402ab5cd0bb6029"
     ),
     "module_identity": (
         "6550f3624d9644ab0626b26928a6d1f5fbbaf7c672e04a7128dc6706798206c7"
@@ -212,7 +221,7 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         # "7" is the cycle-policy split's reader bump: the wire form did NOT
         # change, but cycle membership and cycle kind derived from these rows
         # did, and those now decide health, --fail-cycles, and novelty gating.
-        "dependencies": "7",
+        "dependencies": "8",
         "module_identity": "4",
         # F1 lane-contract migration: "5" adds the declaration-site KEY
         # column (start_line) to the risk wire; a stored "4" lane reads
