@@ -20,6 +20,24 @@ AuditPayloadMode = Literal["off", "compact", "full"]
 AnalysisSource = Literal["mcp", "cli"]
 AuditSurface = Literal["mcp", "cli", "hook", "ide", "ci", "unknown"]
 
+# Closed set of verdicts a raw audit path entry can receive. Refusing to
+# normalize is a recorded outcome, never an absence.
+_EventCorePathOutcome = Literal[
+    "normalized",
+    "unresolved",
+    "legacy_invalid",
+    "unsupported",
+]
+# One verdict about one raw entry: (outcome, reason, normalized projection).
+# The projection is None for every refusing outcome; the outcome is never
+# absent -- that is the whole point of the type.
+_EventCorePathVerdict = tuple[_EventCorePathOutcome, str, str | None]
+# Normalized projection of one or more path fields, whether the normalized
+# list was bounded, and the witness for every refused entry. Refusals arrive
+# deduplicated per field on the producer's full text; the merged order and the
+# bound belong to ``_record_unavailable_paths``.
+_ProjectedPaths = tuple[tuple[str, ...], bool, tuple[Mapping[str, object], ...]]
+
 AUDIT_EVENT_CORE_VERSION: Final = "2"
 _AUDIT_SURFACE_VALUES: tuple[AuditSurface, ...] = (
     "mcp",
@@ -109,6 +127,18 @@ _FULL_PAYLOAD_EVENT_TYPES: frozenset[str] = frozenset(
 )
 _EVENT_CORE_SCOPE_PATH_LIMIT = 50
 _EVENT_CORE_CITATION_LIMIT = 32
+
+# Forensic-retention policy for paths: a path the normalizer cannot express
+# repo-relative is not evidence that the path was never declared. Refused
+# entries keep their raw value under these keys instead of disappearing; the
+# count is exact even when the witness list is bounded.
+_PATH_UNAVAILABLE_KEY = "path_projection_unavailable"
+_PATH_UNAVAILABLE_COUNT_KEY = "path_projection_unavailable_count"
+_PATH_UNAVAILABLE_TRUNCATED_KEY = "path_projection_unavailable_truncated"
+# Raw witnesses are attacker-shaped free text (an agent declares them), so
+# they are bounded before they reach the bounded event-core column.
+_EVENT_CORE_RAW_WITNESS_LIMIT = 200
+
 _PROJECTION_SUPPLEMENT_FACT_KEYS = frozenset(
     {
         "scope_paths",
@@ -116,6 +146,9 @@ _PROJECTION_SUPPLEMENT_FACT_KEYS = frozenset(
         "changed_files",
         "untouched_in_declared",
         "citations",
+        _PATH_UNAVAILABLE_KEY,
+        _PATH_UNAVAILABLE_COUNT_KEY,
+        _PATH_UNAVAILABLE_TRUNCATED_KEY,
     }
 )
 
@@ -296,12 +329,13 @@ def _event_core_facts(
     if event_type in _INTENT_PAYLOAD_EVENTS:
         core = dict(_compact_intent_payload(payload))
         core.pop("intent_description", None)
-        scope_paths, truncated = _bounded_scope_paths(payload)
+        scope_paths, truncated, unavailable = _bounded_scope_paths(payload)
         if scope_paths:
             core["scope_paths"] = list(scope_paths)
         if truncated:
             core["scope_paths_truncated"] = True
-        return core, truncated
+        witness_truncated = _record_unavailable_paths(core, unavailable)
+        return core, truncated or witness_truncated
     if event_type == EVENT_INTENT_QUEUE_BLOCKED:
         return {
             "intent_id": str(payload.get("intent_id", "")),
@@ -380,36 +414,157 @@ def _compact_intent_payload(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _bounded_scope_paths(payload: Mapping[str, object]) -> tuple[tuple[str, ...], bool]:
+def _bounded_scope_paths(payload: Mapping[str, object]) -> _ProjectedPaths:
     scope = _mapping(payload.get("scope"))
-    raw_paths = [
-        *_sequence(scope.get("allowed_files")),
-        *_sequence(scope.get("allowed_related")),
-    ]
+    return _projected_paths(
+        (
+            ("scope.allowed_files", _sequence(scope.get("allowed_files"))),
+            ("scope.allowed_related", _sequence(scope.get("allowed_related"))),
+        )
+    )
+
+
+def _classify_event_core_path(value: object) -> _EventCorePathVerdict:
+    """Decide one of four outcomes for a raw audit path entry.
+
+    The accepted set is exactly the set this lane has always accepted; the
+    change is that a refusal is now named instead of returned as absence.
+    """
+    if not isinstance(value, str):
+        return ("unsupported", "non_string_value", None)
+    text = value.strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    if not text:
+        return ("legacy_invalid", "empty_value", None)
+    if text == ".":
+        return ("legacy_invalid", "dot_only_value", None)
+    if text == "..":
+        return ("unresolved", "parent_traversal", None)
+    if text.startswith("/"):
+        return ("unresolved", "absolute_path", None)
+    path = PurePosixPath(text)
+    if any(part in {"", ".", ".."} for part in path.parts):
+        return ("unresolved", "parent_traversal", None)
+    return ("normalized", "repo_relative", path.as_posix())
+
+
+def _raw_witness_text(value: object) -> str:
+    """The producer's own text for one entry: unbounded, unnormalized."""
+    return value if isinstance(value, str) else str(value)
+
+
+def _bounded_raw_witness(text: str) -> tuple[str, bool]:
+    """Bound the raw witness without normalizing it away.
+
+    The prefix is taken verbatim -- no strip, no separator rewrite -- because
+    the point of the witness is what the producer actually wrote.  Bounding is
+    presentation only; duplicate detection reads the full text, so two long
+    entries that share a prefix stay two refusals.
+    """
+    if len(text) <= _EVENT_CORE_RAW_WITNESS_LIMIT:
+        return (text, False)
+    return (text[:_EVENT_CORE_RAW_WITNESS_LIMIT], True)
+
+
+def _unavailable_path_entry(
+    text: str,
+    *,
+    field: str,
+    outcome: _EventCorePathOutcome,
+    reason: str,
+) -> Mapping[str, object]:
+    raw, raw_truncated = _bounded_raw_witness(text)
+    entry: dict[str, object] = {
+        "field": field,
+        "outcome": outcome,
+        "raw": raw,
+        "reason": reason,
+    }
+    if raw_truncated:
+        entry["raw_truncated"] = True
+    return entry
+
+
+def _projected_paths(
+    sources: Sequence[tuple[str, Sequence[object]]],
+) -> _ProjectedPaths:
+    """Project one or more raw path fields, keeping every refusal.
+
+    Sole owner of the accepted set for event-core paths: both the scope lane
+    and the scope-check lane read their normalized paths from here, so a
+    refusal cannot be classified two different ways in one audit row.
+
+    Refusals are deduplicated per field on the producer's full text, mirroring
+    the ``set`` the normalized side applies to full normalized paths.
+    """
     normalized: list[str] = []
-    for raw_path in raw_paths:
-        path = _normalized_event_core_path(raw_path)
-        if path is not None:
-            normalized.append(path)
+    unavailable: list[Mapping[str, object]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for field, raw_paths in sources:
+        for raw_path in raw_paths:
+            outcome, reason, path = _classify_event_core_path(raw_path)
+            if path is not None:
+                normalized.append(path)
+                continue
+            text = _raw_witness_text(raw_path)
+            key = (field, outcome, reason, text)
+            if key in seen:
+                continue
+            seen.add(key)
+            unavailable.append(
+                _unavailable_path_entry(
+                    text,
+                    field=field,
+                    outcome=outcome,
+                    reason=reason,
+                )
+            )
     unique = tuple(sorted(set(normalized)))
     return (
         unique[:_EVENT_CORE_SCOPE_PATH_LIMIT],
         len(unique) > _EVENT_CORE_SCOPE_PATH_LIMIT,
+        tuple(unavailable),
     )
 
 
-def _normalized_event_core_path(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = value.strip().replace("\\", "/")
-    while text.startswith("./"):
-        text = text[2:]
-    if not text or text in {".", ".."} or text.startswith("/"):
-        return None
-    path = PurePosixPath(text)
-    if any(part in {"", ".", ".."} for part in path.parts):
-        return None
-    return path.as_posix()
+def _ordered_unavailable_entries(
+    entries: Sequence[Mapping[str, object]],
+) -> tuple[Mapping[str, object], ...]:
+    """Deterministic order for the merged witness of one event."""
+    return tuple(
+        sorted(
+            entries,
+            key=lambda entry: (
+                str(entry["field"]),
+                str(entry["raw"]),
+                str(entry["outcome"]),
+                str(entry["reason"]),
+            ),
+        )
+    )
+
+
+def _record_unavailable_paths(
+    core: dict[str, object],
+    unavailable: Sequence[Mapping[str, object]],
+) -> bool:
+    """Attach the refusal witness to an event core; report bounding.
+
+    The count is the exact number of refused entries and is never bounded:
+    a bounded list may hide which entry was lost, but never that one was.
+    """
+    entries = _ordered_unavailable_entries(unavailable)
+    if not entries:
+        return False
+    core[_PATH_UNAVAILABLE_COUNT_KEY] = len(entries)
+    core[_PATH_UNAVAILABLE_KEY] = [
+        dict(entry) for entry in entries[:_EVENT_CORE_SCOPE_PATH_LIMIT]
+    ]
+    truncated = len(entries) > _EVENT_CORE_SCOPE_PATH_LIMIT
+    if truncated:
+        core[_PATH_UNAVAILABLE_TRUNCATED_KEY] = True
+    return truncated
 
 
 def event_summary(
@@ -507,19 +662,8 @@ def _compact_check_payload(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _bounded_path_list(
-    value: object,
-) -> tuple[tuple[str, ...], bool]:
-    normalized: list[str] = []
-    for raw_path in _sequence(value):
-        path = _normalized_event_core_path(raw_path)
-        if path is not None:
-            normalized.append(path)
-    unique = tuple(sorted(set(normalized)))
-    return (
-        unique[:_EVENT_CORE_SCOPE_PATH_LIMIT],
-        len(unique) > _EVENT_CORE_SCOPE_PATH_LIMIT,
-    )
+def _bounded_path_list(value: object, *, field: str) -> _ProjectedPaths:
+    return _projected_paths(((field, _sequence(value)),))
 
 
 def _check_event_core_facts(
@@ -527,13 +671,21 @@ def _check_event_core_facts(
 ) -> tuple[dict[str, object], bool]:
     core = _compact_check_payload(payload)
     truncated = False
-    changed, changed_truncated = _bounded_path_list(payload.get("actual_changed_files"))
-    declared, declared_truncated = _bounded_path_list(payload.get("declared_scope"))
-    unexpected, unexpected_truncated = _bounded_path_list(
-        payload.get("unexpected_files")
+    changed, changed_truncated, changed_lost = _bounded_path_list(
+        payload.get("actual_changed_files"),
+        field="actual_changed_files",
     )
-    forbidden, forbidden_truncated = _bounded_path_list(
-        payload.get("forbidden_touched")
+    declared, declared_truncated, declared_lost = _bounded_path_list(
+        payload.get("declared_scope"),
+        field="declared_scope",
+    )
+    unexpected, unexpected_truncated, unexpected_lost = _bounded_path_list(
+        payload.get("unexpected_files"),
+        field="unexpected_files",
+    )
+    forbidden, forbidden_truncated, forbidden_lost = _bounded_path_list(
+        payload.get("forbidden_touched"),
+        field="forbidden_touched",
     )
     if changed:
         core["changed_files"] = list(changed)
@@ -558,7 +710,14 @@ def _check_event_core_facts(
     )
     if truncated:
         core["paths_truncated"] = True
-    return core, truncated
+    # ``untouched_in_declared`` is derived from the normalized changed set, so
+    # a refused changed-file entry would otherwise make "declared but
+    # untouched" read as a fact. The witness names the field that lost it.
+    witness_truncated = _record_unavailable_paths(
+        core,
+        (*changed_lost, *declared_lost, *unexpected_lost, *forbidden_lost),
+    )
+    return core, truncated or witness_truncated
 
 
 def _compact_analysis_completed_payload(
