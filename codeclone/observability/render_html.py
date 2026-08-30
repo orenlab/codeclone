@@ -286,11 +286,25 @@ def _esc(value: object) -> str:
 
 
 def _epoch_ms(value: str) -> float | None:
-    """Parse an ISO-8601 UTC timestamp to epoch milliseconds, or None."""
+    """Parse an ISO-8601 UTC timestamp to epoch milliseconds, or None.
+
+    The observer stamps every operation and span with a trailing ``Z``, a
+    spelling ``fromisoformat`` only accepts from 3.11 on. Normalising that
+    designator to an explicit offset first keeps one stamp reading as one
+    instant on every supported interpreter -- without it 3.10 answered None
+    for every stamp and the span staircase collapsed into a flat, plausible
+    lie instead of failing.
+    """
     if not value:
         return None
+    # Only a *lone* trailing designator is the UTC marker. Stripping any
+    # trailing "Z" would widen the parser instead of porting it: 3.10 accepts
+    # "...00:00Z+00:00", so rewriting "...00:00ZZ" would turn a malformed
+    # stamp into a valid instant on 3.10 and keep it rejected on 3.11+.
+    lone_utc_designator = value.endswith("Z") and "Z" not in value[:-1]
+    text = f"{value[:-1]}+00:00" if lone_utc_designator else value
     try:
-        return datetime.fromisoformat(value).timestamp() * 1000.0
+        return datetime.fromisoformat(text).timestamp() * 1000.0
     except ValueError:
         return None
 
