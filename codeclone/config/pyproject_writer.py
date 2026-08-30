@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ..utils.atomic_write import write_text_atomically
 from .analytics_specs import ANALYTICS_NESTED_TABLE_KEY
@@ -32,6 +32,14 @@ if TYPE_CHECKING:
 else:
     TOMLDocument = object
     TomlTable = object
+
+
+ToolCodecloneTableState = Literal[
+    "missing_file",
+    "missing_section",
+    "existing_section",
+    "unreadable",
+]
 
 
 class PyprojectWriterError(ValueError):
@@ -213,6 +221,37 @@ def _validate_pyproject_text_before_write(*, root_path: Path, text: str) -> None
         ) from exc
 
 
+def probe_tool_codeclone_table(root_path: Path) -> ToolCodecloneTableState:
+    """Say, without writing anything, where ``[tool.codeclone]`` stands.
+
+    Callers that want to tell an operator what to paste into ``pyproject.toml``
+    need exactly this distinction, and getting it wrong corrupts the file: a
+    bare key line lands in whatever table came last, and a second table header
+    makes valid TOML invalid. The answer is read from the one owner that knows
+    how the table is created -- ``_ensure_tool_codeclone_table`` already
+    reports whether it had to make one -- so this is not a second reader of the
+    config with its own idea of the shape. The mutated document is discarded.
+
+    ``unreadable`` is the honest fourth answer. Through the CLI it is
+    unreachable, because startup rejects an unparseable ``pyproject.toml``
+    before any of this runs; it is reachable for any other caller, and this
+    function has no business raising on an error path.
+    """
+
+    config_path = root_path / "pyproject.toml"
+    if not config_path.is_file():
+        return "missing_file"
+    try:
+        document = read_pyproject_document(root_path)
+        _table, created = _ensure_tool_codeclone_table(document)
+    except (OSError, ValueError):
+        # ValueError covers all three refusals here: PyprojectWriterError and
+        # ConfigValidationError both derive from it, and tomlkit raises
+        # ParseError, which does too.
+        return "unreadable"
+    return "missing_section" if created else "existing_section"
+
+
 def _ensure_tool_codeclone_table(document: TOMLDocument) -> tuple[TomlTable, bool]:
     tomlkit = _load_tomlkit()
     created = False
@@ -255,8 +294,10 @@ def _load_tomlkit() -> Any:  # Any: lazy tomlkit import boundary
 __all__ = [
     "PyprojectWriteResult",
     "PyprojectWriterError",
+    "ToolCodecloneTableState",
     "apply_tool_codeclone_updates",
     "merge_tool_codeclone",
+    "probe_tool_codeclone_table",
     "read_pyproject_document",
     "serialize_pyproject_document",
     "validate_tool_codeclone_updates",

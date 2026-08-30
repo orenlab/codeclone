@@ -65,6 +65,10 @@ from typing import TYPE_CHECKING, Final
 from ..config.analytics_specs import ANALYTICS_NESTED_TABLE_KEY
 from ..config.memory_specs import MEMORY_NESTED_TABLE_KEY
 from ..config.pyproject_loader import load_pyproject_config
+from ..config.pyproject_writer import (
+    ToolCodecloneTableState,
+    probe_tool_codeclone_table,
+)
 from ..config.resolver import apply_pyproject_config_overrides
 from ..config.spec import CONFIG_KEY_SPECS
 
@@ -373,6 +377,21 @@ def apply_repository_config(
     )
 
 
+def tool_codeclone_table_state(root_path: Path) -> ToolCodecloneTableState:
+    """Report the shape of ``[tool.codeclone]`` to a surface, through the door.
+
+    A surface that has to tell an operator what to paste into
+    ``pyproject.toml`` needs to know whether the table is already there, and
+    the answer belongs to ``config.pyproject_writer`` -- the module that knows
+    how the table is created. R4 may not read R2, so the question comes through
+    here, exactly as configuration delivery does: the loader and the writer
+    stay canonical owners behind this door, and no surface grows its own idea
+    of the file's shape.
+    """
+
+    return probe_tool_codeclone_table(root_path)
+
+
 __all__ = [
     "AUTHORITY_KEY",
     "DELIVERIES",
@@ -381,6 +400,7 @@ __all__ = [
     "DeliveryRoute",
     "DeliverySurface",
     "SurfaceDelivery",
+    "ToolCodecloneTableState",
     "Withholding",
     "apply_repository_config",
     "configurable_keys",
@@ -388,6 +408,7 @@ __all__ = [
     "delivery_modules",
     "load_repository_config",
     "required_keys",
+    "tool_codeclone_table_state",
     "withheld_keys",
     "withholding_reason",
 ]

@@ -15,7 +15,7 @@ import textwrap
 import traceback
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from .. import __version__
 from ..contracts import ISSUES_URL
@@ -35,6 +35,7 @@ from .runtime import (
     ERR_BASELINE_CI_REQUIRES_TRUSTED,
     ERR_BASELINE_GATING_REQUIRES_TRUSTED,
     ERR_BASELINE_LOCK_RECOVERY_FAILED,
+    ERR_BASELINE_SCOPE_ID_REQUIRED,
     ERR_BASELINE_WRITE_FAILED,
     ERR_INVALID_BASELINE,
     ERR_INVALID_BASELINE_PATH,
@@ -45,6 +46,12 @@ from .runtime import (
     ERR_MEMORY_ROOT_NOT_FOUND,
     ERR_REPORT_WRITE_FAILED,
     ERR_UNREADABLE_SOURCE_IN_GATING,
+    HINT_SCOPE_ID_ADD_KEY,
+    HINT_SCOPE_ID_ADD_SECTION,
+    HINT_SCOPE_ID_CREATE_FILE,
+    HINT_SCOPE_ID_FOOTER,
+    HINT_SCOPE_ID_KEY_LINE,
+    HINT_SCOPE_ID_TABLE_HEADER,
     INFO_PROCESSING_CHANGED,
     NOTE_BASELINE_FOREIGN_INTERPRETER,
     NOTE_COHESION_LCOM4_2_1_MIGRATION,
@@ -86,6 +93,11 @@ from .styling import (
     strip_markup,
     styled,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from ..api.config_delivery import ToolCodecloneTableState
 
 
 def version_output(version: str) -> str:
@@ -827,6 +839,46 @@ def fmt_pipeline_done(elapsed: float) -> str:
 
 def fmt_contract_error(message: str) -> str:
     return f"{MARKER_CONTRACT_ERROR}\n{message}"
+
+
+_SCOPE_ID_HINT_INDENT = "    "
+
+
+def fmt_baseline_scope_id_required(
+    *,
+    table_state: ToolCodecloneTableState,
+    config_path: Path,
+    scope_id: UUID,
+) -> str:
+    """Refuse, then hand over the exact line and the exact place for it.
+
+    The refusal sentence is unchanged and stays first; everything after it is
+    the part an operator can act on without reading a guide. ``table_state``
+    picks one of three insertions, and each wrong pick damages a real file:
+    repeating ``[tool.codeclone]`` in a project that has it makes the TOML
+    invalid, and omitting the header in a project that does not have it drops
+    the key into whichever table happens to precede it. When the file cannot be
+    inspected there is no fourth guess to make -- the sentence goes out alone.
+    """
+
+    key_line = HINT_SCOPE_ID_KEY_LINE.format(scope_id=scope_id)
+    insertion: tuple[str, ...]
+    if table_state == "existing_section":
+        lead = HINT_SCOPE_ID_ADD_KEY.format(path=config_path)
+        insertion = (key_line,)
+    elif table_state == "missing_section":
+        lead = HINT_SCOPE_ID_ADD_SECTION.format(path=config_path)
+        insertion = (HINT_SCOPE_ID_TABLE_HEADER, key_line)
+    elif table_state == "missing_file":
+        lead = HINT_SCOPE_ID_CREATE_FILE.format(path=config_path)
+        insertion = (HINT_SCOPE_ID_TABLE_HEADER, key_line)
+    else:
+        return ERR_BASELINE_SCOPE_ID_REQUIRED
+
+    body = [ERR_BASELINE_SCOPE_ID_REQUIRED, "", lead, ""]
+    body.extend(f"{_SCOPE_ID_HINT_INDENT}{line}" for line in insertion)
+    body.extend(("", HINT_SCOPE_ID_FOOTER))
+    return "\n".join(body)
 
 
 def fmt_memory_db_not_found(*, error: object) -> str:

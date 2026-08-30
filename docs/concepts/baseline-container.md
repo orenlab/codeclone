@@ -60,13 +60,17 @@ UUID under `[tool.codeclone]`:
 
 ```toml
 [tool.codeclone]
-baseline_scope_id = "0189f1a2-3b4c-7d8e-9f01-234567890abc"
+baseline_scope_id = "<a UUID of your own>"
 ```
 
+The value must be unique to the project — it is what stops one project's
+baseline being compared against another's, so a shared literal defeats the key.
+Any canonical UUID is accepted; the version is not checked.
+
 Without it CodeClone exits 2 with `baseline_scope_id is required for baseline
-update and gating`. The scope id is what stops one project's baseline being
-compared against another's; publishing refuses a container whose scope id does
-not match the configured one.
+update and gating`, and prints a generated UUID with the exact line and file to
+put it in. `codeclone setup` writes the same key. Publishing refuses a container
+whose scope id does not match the configured one.
 
 ## Related pages
 

@@ -32,6 +32,7 @@ import argparse
 import io
 import re
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -67,6 +68,11 @@ def _build_catalog() -> dict[str, str]:
         ),
         "fmt_invalid_baseline_scope_id": ui.fmt_invalid_baseline_scope_id(
             path=_PINNED_PATH, error="not a UUID"
+        ),
+        "fmt_baseline_scope_id_required": ui.fmt_baseline_scope_id_required(
+            table_state="existing_section",
+            config_path=Path("/tmp/project/pyproject.toml"),
+            scope_id=UUID("0f5c6f3d-9d2e-4a2a-9a5f-6b0f9a1a2b3c"),
         ),
         "fmt_report_write_failed": ui.fmt_report_write_failed(
             label="HTML", path=_PINNED_PATH, error="disk full"
@@ -451,7 +457,16 @@ def test_error_constants_carry_next_step() -> None:
 _TAG_CANDIDATE_RE = re.compile(r"\[/?([a-zA-Z][a-zA-Z0-9_ .#-]*)\]")
 
 
-@pytest.mark.parametrize("name", sorted(_CATALOG))
+#: Formatters whose one consumer prints them with ``markup=False``. Their
+#: brackets are payload by construction -- ``[tool.codeclone]`` is a TOML table
+#: name the reader has to type -- so the rule inverts rather than relaxes: a
+#: design style tag in one of these would be shown verbatim instead of applied.
+#: That the consumer really disables markup is pinned behaviourally by
+#: ``test_missing_scope_id_error_keeps_config_table_name``, on both consoles.
+_PLAIN_TEXT_FORMATTERS = frozenset({"fmt_baseline_scope_id_required"})
+
+
+@pytest.mark.parametrize("name", sorted(set(_CATALOG) - _PLAIN_TEXT_FORMATTERS))
 def test_markup_tags_come_from_the_design_map(name: str) -> None:
     rendered = _CATALOG[name]
     for match in _TAG_CANDIDATE_RE.finditer(rendered):
@@ -462,6 +477,20 @@ def test_markup_tags_come_from_the_design_map(name: str) -> None:
         assert tag in styling.MARKUP_STYLES or _is_payload_bracket(tag), (
             f"{name}: markup tag [{tag}] is not in the design-code style map"
         )
+
+
+@pytest.mark.parametrize("name", sorted(_PLAIN_TEXT_FORMATTERS))
+def test_plain_text_formatters_carry_no_style_tags(name: str) -> None:
+    rendered = _CATALOG[name]
+    styled_tags = [
+        match.group(1)
+        for match in _TAG_CANDIDATE_RE.finditer(rendered)
+        if match.group(1) in styling.MARKUP_STYLES
+    ]
+    assert styled_tags == [], (
+        f"{name} is printed with markup disabled, so style tag(s) "
+        f"{styled_tags} would reach the reader as literal text"
+    )
 
 
 def _is_payload_bracket(tag: str) -> bool:

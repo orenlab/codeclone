@@ -17,7 +17,7 @@ Configuration is stored in `pyproject.toml`:
 ```toml
 [tool.codeclone]
 baseline = "codeclone.baseline.json"
-baseline_scope_id = "0189f1a2-3b4c-7d8e-9f01-234567890abc"  # required to update or gate on a baseline
+baseline_scope_id = "<a UUID of your own>"                   # required to update or gate on a baseline
 audit_enabled = true   # opt in; disabled by default
 fail_health = 60       # gate on health; disabled by default
 ```

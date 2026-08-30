@@ -51,9 +51,22 @@ def exit_contract_error(
     raise SystemExit(ExitCode.CONTRACT_ERROR) from cause
 
 
+def resolve_root_path(args: object) -> Path:
+    """Resolve the scan root, absolute, with no policy attached.
+
+    One spelling, one owner. ``resolve_existing_root_path`` layers the
+    existence check and the typed exit on top; error paths that only need to
+    name a file under the root -- "put this key in <root>/pyproject.toml" --
+    call this directly rather than growing a second, quietly divergent
+    normalization.
+    """
+
+    return Path(text_attr(args, "root", DEFAULT_ROOT)).resolve()
+
+
 def resolve_existing_root_path(*, args: object, printer: StatusConsole) -> Path:
     try:
-        root_path = Path(text_attr(args, "root", DEFAULT_ROOT)).resolve()
+        root_path = resolve_root_path(args)
     except OSError as exc:
         exit_contract_error(
             ui.ERR_INVALID_ROOT_PATH.format(error=exc),

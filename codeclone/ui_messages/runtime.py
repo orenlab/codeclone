@@ -69,9 +69,26 @@ ERR_BASELINE_WRITE_FAILED = (
     "[dim]Check that the path is writable, then re-run with "
     "--update-baseline.[/dim]"
 )
+# Printed with ``markup=False`` (see ``_print_scope_id_required``), so the
+# bracket must stay bare: a Rich escape would be shown, not consumed, and the
+# operator would read "\[tool.codeclone]".
 ERR_BASELINE_SCOPE_ID_REQUIRED = (
     "baseline_scope_id is required for baseline update and gating; set a "
-    "stable canonical UUID under \\[tool.codeclone]."
+    "stable canonical UUID under [tool.codeclone]."
+)
+# The refusal above says what is wrong. These say what to paste and where,
+# because "run codeclone setup" is not an answer for the projects that never
+# run it. Which one applies is decided by the shape of the file on disk --
+# offering a table header to a project that already has one hands it broken
+# TOML, and a wrong instruction is worse than none.
+HINT_SCOPE_ID_CREATE_FILE = "No pyproject.toml yet. Create {path} with:"
+HINT_SCOPE_ID_ADD_SECTION = "Add this section to {path}:"
+HINT_SCOPE_ID_ADD_KEY = "Add this line to [tool.codeclone] in {path}:"
+HINT_SCOPE_ID_TABLE_HEADER = "[tool.codeclone]"
+HINT_SCOPE_ID_KEY_LINE = 'baseline_scope_id = "{scope_id}"'
+HINT_SCOPE_ID_FOOTER = (
+    "That UUID was generated for this run. Commit it and never change it: it "
+    "is what keeps this project's baseline from being read as another's."
 )
 ERR_INVALID_BASELINE_SCOPE_ID = (
     "Invalid baseline_scope_id for {path}: {error}.\n"

@@ -17,6 +17,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, TextIO, cast
+from uuid import UUID
 
 import pytest
 
@@ -214,6 +215,7 @@ def _baseline_state_args(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "max_baseline_size_mb": 10,
         "update_baseline": False,
+        "root": ".",
         "baseline_scope_id": "018f4b8e-5a5f-7d35-9c21-4af5d18df420",
         "project_label": None,
         "fail_on_new": False,
@@ -347,6 +349,7 @@ def test_missing_scope_id_error_keeps_config_table_name(
             args=_baseline_state_args(
                 baseline_scope_id=None,
                 update_baseline=True,
+                root=str(tmp_path),
             ),
             baseline_path=tmp_path / "baseline.json",
             console=console,
@@ -356,6 +359,314 @@ def test_missing_scope_id_error_keeps_config_table_name(
     assert "CONTRACT ERROR:" in printed
     assert "[error]" not in printed
     assert "[tool.codeclone]" in printed
+    # The constant used to carry a Rich escape (``\[``) from the days when this
+    # message went through a markup-enabled print. Under ``markup=False`` the
+    # backslash is not consumed, it is shown -- and a substring check for
+    # "[tool.codeclone]" stays green while the user reads "\[tool.codeclone]".
+    assert "\\[" not in printed
+
+
+_SCOPE_ID_TABLE_HEADER = "[tool.codeclone]"
+
+
+def _scope_id_hint_block(printed: str) -> list[str]:
+    """Return the indented, copy-pasteable part of the refusal.
+
+    The prose paragraph names ``[tool.codeclone]`` as well, so a substring
+    search cannot tell "create this section" from "put the key in the section
+    you already have". Only the indented block is what a reader pastes, and
+    only it can break a TOML file by duplicating a table header.
+    """
+
+    return [line.strip() for line in printed.splitlines() if line.startswith("    ")]
+
+
+def _hinted_scope_ids(printed: str) -> list[str]:
+    return [
+        line.split('"')[1]
+        for line in _scope_id_hint_block(printed)
+        if line.startswith("baseline_scope_id = ")
+    ]
+
+
+def _refuse_missing_scope_id(root: Path) -> str:
+    """Drive the production refusal once and return everything it printed.
+
+    Enters through ``_required_scope_id`` -- the function both resolvers really
+    call -- rather than through the printing helper, so unwiring the call is
+    caught alongside gutting the body.
+    """
+
+    printer = _RecordingPrinter()
+    assert (
+        cli_baselines_mod._required_scope_id(
+            args=_baseline_state_args(
+                baseline_scope_id=None,
+                update_baseline=True,
+                root=str(root),
+            ),
+            baseline_path=root / "codeclone.baseline.json",
+            console=printer,
+        )
+        is None
+    )
+    return "\n".join(printer.lines)
+
+
+def test_scope_id_hint_adds_only_the_key_when_the_table_exists(
+    tmp_path: Path,
+) -> None:
+    """The common case, and the one where a wrong hint corrupts the file.
+
+    A configured project already has ``[tool.codeclone]``. Printing the header
+    a second time would give the reader a paste that makes the TOML invalid, so
+    this branch must offer the key line and nothing above it.
+    """
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "p"\n\n[tool.codeclone]\nfail_on_new = false\n',
+        "utf-8",
+    )
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    config_path = tmp_path / "pyproject.toml"
+    assert f"Add this line to [tool.codeclone] in {config_path}:" in printed
+    assert _scope_id_hint_block(printed) == [
+        f'baseline_scope_id = "{_hinted_scope_ids(printed)[0]}"'
+    ]
+    assert _SCOPE_ID_TABLE_HEADER not in _scope_id_hint_block(printed)
+
+
+def test_scope_id_hint_adds_the_whole_section_when_it_is_missing(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: a bare key line here lands in the wrong table.
+
+    ``pyproject.toml`` exists but has no ``[tool.codeclone]``. A key line on
+    its own would be pasted under whatever table happens to be last, so this
+    branch must carry the header with it.
+    """
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "p"\n', "utf-8")
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    config_path = tmp_path / "pyproject.toml"
+    assert f"Add this section to {config_path}:" in printed
+    assert _scope_id_hint_block(printed) == [
+        _SCOPE_ID_TABLE_HEADER,
+        f'baseline_scope_id = "{_hinted_scope_ids(printed)[0]}"',
+    ]
+
+
+def test_scope_id_hint_offers_to_create_a_missing_pyproject(tmp_path: Path) -> None:
+    """No file at all is a third input, and it needs different wording."""
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    config_path = tmp_path / "pyproject.toml"
+    assert f"No pyproject.toml yet. Create {config_path} with:" in printed
+    assert _scope_id_hint_block(printed) == [
+        _SCOPE_ID_TABLE_HEADER,
+        f'baseline_scope_id = "{_hinted_scope_ids(printed)[0]}"',
+    ]
+
+
+def test_scope_id_hint_stays_silent_when_the_config_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    """An input that reaches the fallback: a file that is not parseable TOML.
+
+    Where the section belongs cannot be proved, and the brief's own rule is
+    that a wrong instruction is worse than none, so the refusal keeps its
+    sentence and offers no paste.
+    """
+
+    (tmp_path / "pyproject.toml").write_text("[project\nname = 'p'\n", "utf-8")
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    assert "baseline_scope_id is required" in printed
+    assert _scope_id_hint_block(printed) == []
+
+
+def test_scope_id_hint_names_this_repository_by_absolute_path(
+    tmp_path: Path,
+) -> None:
+    """The path is the other half of "what and where".
+
+    A bare "pyproject.toml" is ambiguous in a monorepo and useless in CI logs,
+    and the baseline path is a different file entirely.
+    """
+
+    root = tmp_path / "nested" / "repo"
+    root.mkdir(parents=True)
+    (root / "pyproject.toml").write_text('[project]\nname = "p"\n', "utf-8")
+
+    printed = _refuse_missing_scope_id(root)
+
+    assert str(root / "pyproject.toml") in printed
+    assert str(root / "codeclone.baseline.json") not in printed
+
+
+def test_hinted_scope_id_is_a_canonical_random_uuid(tmp_path: Path) -> None:
+    """Re-derive the validator's rule instead of freezing a literal.
+
+    ``FoundationConfigInput._canonical_uuid`` accepts a value only when it
+    round-trips through ``UUID`` unchanged, so the suggestion has to satisfy
+    exactly that. Version 4 is the second half of the claim: a name-derived
+    (version 5) id would hand two same-named projects one scope id, which is
+    the confusion this key exists to prevent.
+    """
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    (token,) = _hinted_scope_ids(printed)
+    parsed = UUID(token)
+    assert str(parsed) == token
+    assert parsed.version == 4
+
+
+def test_hinted_scope_id_comes_from_uuid4_not_from_a_constant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin the edge ``uuid4 -> printed line``, not the value it produced.
+
+    A shape check alone survives a hardcoded literal that happens to be a
+    well-formed v4 UUID -- which is the exact defect being fixed, one id shared
+    by every installation. Supplying the generator's answer proves the printed
+    line is downstream of it.
+    """
+
+    supplied = UUID("11111111-2222-4333-8444-555555555555")
+    monkeypatch.setattr(cli_baselines_mod, "uuid4", lambda: supplied)
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    assert _hinted_scope_ids(printed) == [str(supplied)]
+
+
+def test_each_refusal_suggests_a_fresh_scope_id(tmp_path: Path) -> None:
+    """Two runs must not be handed the same id.
+
+    A shared suggestion would put two repositories under one scope, and the
+    baseline guard would stop being able to tell its own reference from a
+    stranger's -- the thing the key is for.
+    """
+
+    first = _hinted_scope_ids(_refuse_missing_scope_id(tmp_path))
+    second = _hinted_scope_ids(_refuse_missing_scope_id(tmp_path))
+
+    assert first != second
+
+
+def test_update_baseline_announces_the_missing_scope_id_once(
+    tmp_path: Path,
+) -> None:
+    """One failure, one announcement, one id to paste.
+
+    ``--update-baseline`` used to print this refusal twice -- once from the
+    resolver, once from the exit path. Tolerable while the text was a single
+    sentence; with a generated id attached it would show two different UUIDs
+    for one failure and nothing to say which one to keep.
+    """
+
+    (tmp_path / "pyproject.toml").write_text("[tool.codeclone]\n", "utf-8")
+    printer = _RecordingPrinter()
+
+    with pytest.raises(SystemExit):
+        cli_baselines_mod.resolve_clone_baseline_state(
+            args=_baseline_state_args(
+                baseline_scope_id=None,
+                update_baseline=True,
+                root=str(tmp_path),
+            ),
+            baseline_path=tmp_path / "codeclone.baseline.json",
+            baseline_exists=False,
+            observation_bundle=TEST_OBSERVATION_BUNDLE,
+            console=printer,
+            required_lanes=frozenset(),
+        )
+
+    printed = "\n".join(printer.lines)
+    assert printed.count("baseline_scope_id is required") == 1
+    assert len(_hinted_scope_ids(printed)) == 1
+
+
+def test_a_gating_run_announces_the_missing_scope_id_once(tmp_path: Path) -> None:
+    """The other duplicate: both resolvers refuse on the same predicate.
+
+    ``--fail-on-new`` runs the clone resolver and then the metrics resolver,
+    and each used to announce the missing key. The second one is redundant by
+    construction -- it cannot be reached without the first having run.
+    """
+
+    (tmp_path / "pyproject.toml").write_text("[tool.codeclone]\n", "utf-8")
+    printer = _RecordingPrinter()
+    args = _baseline_state_args(
+        baseline_scope_id=None,
+        fail_on_new=True,
+        root=str(tmp_path),
+    )
+
+    clone_state = cli_baselines_mod.resolve_clone_baseline_state(
+        args=args,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_exists=False,
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+        console=printer,
+        required_lanes=frozenset(),
+    )
+    cli_baselines_mod.resolve_metrics_baseline_state(
+        args=args,
+        metrics_baseline_path=tmp_path / "codeclone.baseline.json",
+        metrics_baseline_exists=False,
+        clone_baseline_state=clone_state,
+        console=printer,
+        required_lanes=frozenset(),
+    )
+
+    printed = "\n".join(printer.lines)
+    assert printed.count("baseline_scope_id is required") == 1
+    assert len(_hinted_scope_ids(printed)) == 1
+
+
+def _write_repo_without_a_scope_id(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "mod.py").write_text("def f(x):\n    return x + 1\n", "utf-8")
+    (root / "pyproject.toml").write_text('[project]\nname = "p"\n', "utf-8")
+    return root
+
+
+def _run_codeclone(root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "codeclone.main", str(root), *flags],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_cli_prints_a_pasteable_scope_id_line_end_to_end(tmp_path: Path) -> None:
+    """The whole wiring, in a real process, on a real repository.
+
+    A unit pin cannot see a removed call; this one reads the bytes the operator
+    reads, and it is what proves the hint survives the console layer that
+    strips markup.
+    """
+
+    root = _write_repo_without_a_scope_id(tmp_path)
+
+    result = _run_codeclone(root, "--update-baseline", "--no-color", "--quiet")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"{root / 'pyproject.toml'}" in result.stdout
+    (token,) = _hinted_scope_ids(result.stdout)
+    assert str(UUID(token)) == token
+    assert "\\[" not in result.stdout
 
 
 def test_baseline_update_forwards_configured_project_label(

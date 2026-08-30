@@ -58,7 +58,7 @@ refreshes both. There is no separate metrics-baseline flag.
 
 **Ignoring metrics baselines:** Complexity and typing metrics drift over time. Refresh the baseline on main with `--update-baseline`, then use `--fail-on-new-metrics` to catch regressions.
 
-**Omitting `baseline_scope_id`:** baseline update and baseline-relative gating both require a stable canonical UUID under `[tool.codeclone]`. Without it CodeClone exits 2 before any gate runs.
+**Omitting `baseline_scope_id`:** baseline update and baseline-relative gating both require a stable canonical UUID under `[tool.codeclone]`, unique to the project — it is what keeps one project's baseline from being read as another's. Without it CodeClone exits 2 before any gate runs, printing a generated UUID and the exact line and file to add it to; `codeclone setup` writes the same key. Never copy a scope id out of the documentation or another repository.
 
 **Misconfiguring gates:** Default thresholds are conservative. Tune `--fail-complexity`, `--fail-coupling`, and `--fail-health` to match your team standards, but document the choices so other developers understand the intent.
 

@@ -491,3 +491,60 @@ def test_fsync_parent_directory_ignores_unsupported_fsync_errno(
     monkeypatch.setattr("codeclone.utils.atomic_write.os.close", lambda _fd: None)
 
     atomic_write_mod._fsync_parent_directory(target)
+
+
+def test_probe_reports_a_missing_pyproject_file(tmp_path: Path) -> None:
+    """No file is its own answer: the caller has to offer creating one."""
+
+    assert pyproject_writer_mod.probe_tool_codeclone_table(tmp_path) == "missing_file"
+
+
+def test_probe_separates_a_missing_section_from_an_existing_one(
+    tmp_path: Path,
+) -> None:
+    """Both boundaries, because each wrong answer breaks a different file.
+
+    Answering ``existing_section`` for a file without the table sends a bare
+    key into the wrong table; answering ``missing_section`` for a file that has
+    it sends a duplicate header into a valid file.
+    """
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text('[project]\nname = "p"\n', "utf-8")
+    assert (
+        pyproject_writer_mod.probe_tool_codeclone_table(tmp_path) == "missing_section"
+    )
+
+    config.write_text(
+        '[project]\nname = "p"\n\n[tool.codeclone]\nfail_on_new = false\n',
+        "utf-8",
+    )
+    assert (
+        pyproject_writer_mod.probe_tool_codeclone_table(tmp_path) == "existing_section"
+    )
+
+
+def test_probe_reports_unreadable_config_instead_of_raising(tmp_path: Path) -> None:
+    """A parse failure reaches the fallback rather than the caller's stack.
+
+    The probe runs on an error path, so it must not turn a missing key into a
+    traceback. This input reaches the guard: tomlkit refuses the text.
+    """
+
+    (tmp_path / "pyproject.toml").write_text("[project\nname = 'p'\n", "utf-8")
+
+    assert pyproject_writer_mod.probe_tool_codeclone_table(tmp_path) == "unreadable"
+
+
+def test_probe_does_not_write_the_table_it_inspects(tmp_path: Path) -> None:
+    """It borrows the writer's owner; it must not borrow the writer's effect."""
+
+    config = tmp_path / "pyproject.toml"
+    original = '[project]\nname = "p"\n'
+    config.write_text(original, "utf-8")
+
+    assert (
+        pyproject_writer_mod.probe_tool_codeclone_table(tmp_path) == "missing_section"
+    )
+
+    assert config.read_text("utf-8") == original

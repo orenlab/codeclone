@@ -83,20 +83,32 @@ UUID:
 
 ```toml
 [tool.codeclone]
-baseline_scope_id = "0189f1a2-3b4c-7d8e-9f01-234567890abc"
+baseline_scope_id = "<a UUID of your own>"
 ```
 
-Without it:
+The value has to be yours: it is the discriminator that stops one project's
+baseline being compared against another's, so two projects must never share one.
+Do not copy the placeholder above.
+
+You do not have to invent it. Run CodeClone without the key and it hands you a
+generated one, together with the file it belongs in and whether the section
+already exists:
 
 ```text
 CONTRACT ERROR:
 baseline_scope_id is required for baseline update and gating; set a stable
 canonical UUID under [tool.codeclone].
+
+Add this line to [tool.codeclone] in /srv/acme/pyproject.toml:
+
+    baseline_scope_id = "0f5c6f3d-9d2e-4a2a-9a5f-6b0f9a1a2b3c"
+
+That UUID was generated for this run. Commit it and never change it: it is what
+keeps this project's baseline from being read as another's.
 ```
 
-Generate it once (`python -c "import uuid; print(uuid.uuid4())"`), commit it, and
-never change it — it is what stops one project's baseline being compared against
-another's.
+`codeclone setup` writes the same key for you. Either way, commit it and never
+change it. (`python -c "import uuid; print(uuid.uuid4())"` produces one too.)
 
 ## Removed flags and keys
 

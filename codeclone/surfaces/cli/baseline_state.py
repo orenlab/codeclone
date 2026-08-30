@@ -10,10 +10,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from ... import ui_messages as ui
 from ...api.comparison import foreign_interpreter_provenance
+from ...api.config_delivery import tool_codeclone_table_state
 from ...baseline import (
     BASELINE_UNTRUSTED_STATUSES,
     Baseline,
@@ -32,6 +33,7 @@ from ...baseline import (
 from ...contracts import ExitCode, HealthPopulation
 from ...contracts.errors import BaselineValidationError
 from . import state as cli_state
+from .startup import resolve_root_path
 from .types import CLIArgsLike, require_status_console
 
 if TYPE_CHECKING:
@@ -79,16 +81,34 @@ class _PrinterLike(Protocol):
     def print(self, *objects: object, **kwargs: object) -> None: ...
 
 
-def _print_scope_id_required(console: _PrinterLike) -> None:
+def _print_scope_id_required(console: _PrinterLike, *, root_path: Path) -> None:
     """Print the missing-scope-id contract error with its body left literal.
 
     The message names the ``[tool.codeclone]`` config table, which every
     console in this codebase treats as a markup tag and strips — deleting the
     only actionable detail. The marker keeps its styling; the body is printed
     with ``markup=False`` so the table name survives.
+
+    The body also carries a ready-to-paste key line and the absolute file it
+    belongs in. ``codeclone setup`` would write it, but not every project runs
+    setup, and a refusal that only names a requirement is not a procedure.
     """
     console.print(ui.MARKER_CONTRACT_ERROR)
-    console.print(ui.ERR_BASELINE_SCOPE_ID_REQUIRED, markup=False)
+    console.print(
+        ui.fmt_baseline_scope_id_required(
+            table_state=tool_codeclone_table_state(root_path),
+            config_path=root_path / "pyproject.toml",
+            # ``uuid4``, never a name-derived ``uuid5``: a deterministic id
+            # would reproduce the very failure this key prevents. Two checkouts
+            # that happen to share a project name would be handed one
+            # ``baseline_scope_id``, and the guard would again be unable to
+            # tell this project's baseline from a stranger's. The field is a
+            # discriminator, so it must be unique by construction and not by
+            # the user's choice of name.
+            scope_id=uuid4(),
+        ),
+        markup=False,
+    )
 
 
 def gate_blocking_lanes(
@@ -165,6 +185,7 @@ def _clone_opaque_lanes(
 
 
 class _BaselineArgs(Protocol):
+    root: str | Path
     max_baseline_size_mb: int
     update_baseline: bool
     baseline_scope_id: str | None
@@ -279,7 +300,11 @@ def resolve_clone_baseline_state(
 
     if args.update_baseline:
         if scope_id is None:
-            _print_scope_id_required(console)
+            # ``_required_scope_id`` has already announced this refusal, with
+            # the paste-ready hint attached. Repeating it handed the operator
+            # two copies of one failure -- and, when the value was present but
+            # malformed, the second copy claimed the key was missing, which is
+            # a different and wrong diagnosis.
             sys.exit(ExitCode.CONTRACT_ERROR)
         try:
             publish_baseline(
@@ -329,11 +354,19 @@ def _required_scope_id(
     args: _BaselineArgs,
     baseline_path: Path,
     console: _PrinterLike,
+    announce: bool = True,
 ) -> UUID | None:
+    """Read the configured scope id, announcing its absence at most once.
+
+    ``announce=False`` is for the second resolver in a run. Both resolvers need
+    the value and both would refuse on the same predicate, so the later one
+    would repeat a refusal the operator has already read, hint and all.
+    """
+
     raw = args.baseline_scope_id
     if raw is None:
-        if args.update_baseline or args.fail_on_new:
-            _print_scope_id_required(console)
+        if announce and (args.update_baseline or args.fail_on_new):
+            _print_scope_id_required(console, root_path=resolve_root_path(args))
         return None
     try:
         return UUID(str(raw))
@@ -356,10 +389,14 @@ def resolve_metrics_baseline_state(
     required_lanes: frozenset[str],
 ) -> MetricsBaselineState:
     state = _MetricsBaselineRuntime(baseline=MetricsBaseline(metrics_baseline_path))
+    # Silent by construction: the clone resolver runs first -- its result is a
+    # required argument here -- and it refuses on the same predicate, so this
+    # call reads the value without saying anything the operator has not read.
     scope_id = _required_scope_id(
         args=args,
         baseline_path=metrics_baseline_path,
         console=console,
+        announce=False,
     )
 
     if _metrics_mode_short_circuit(args=args, console=console):
