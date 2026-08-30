@@ -441,7 +441,13 @@ def test_f8_family_carries_the_emitted_population_and_not_the_suppressed(
     rows = model.facts.analysis.clone_groups
     assert {(row.clone_kind, row.group_key) for row in rows} == emitted
     assert len(rows) == 6
-    assert len(suppressed) == 3
+    # The policy-held lane is shaped by ``merge_segment_report_groups`` and is
+    # no longer re-judged by the ACTIVE lane's low-value filter, so the
+    # container now publishes every group the user rule withheld.  Under the
+    # double filter this corpus reported 3: the filter deleted half of the
+    # evidence the document had promised to publish, and dropped the count of
+    # what it deleted at the same time.
+    assert len(suppressed) == 6
 
 
 def test_f8_family_witnesses_every_emitted_container(
