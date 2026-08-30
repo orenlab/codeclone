@@ -150,6 +150,45 @@ def collect_project_export_root_qualnames(
     )
 
 
+def _wildcard_reexported_classes(
+    *,
+    module_deps: Sequence[ModuleDep],
+    package_modules: set[str],
+    dead_candidates: Sequence[DeadCandidate],
+    referenced_qualnames: frozenset[str],
+) -> set[str]:
+    """Classes a package re-exports through ``from <target> import *``.
+
+    A wildcard names no symbol, so the named export chain sees only
+    ``target:*`` and roots nothing - which is how a package spelled with
+    ``import *`` came to assert, with high confidence, that its own public
+    methods were dead. What such an edge binds is the target's public exports,
+    and the walk has already resolved which of those the project holds live,
+    so the edge is expanded against exactly that set rather than against every
+    symbol the target happens to define. Underscore names are excluded because
+    ``import *`` does not bind them.
+
+    A repository with no wildcard re-export has no such edge and gets the
+    empty set, so this rule cannot move a verdict outside its own class.
+    """
+
+    wildcard_targets = {
+        dependency.target
+        for dependency in module_deps
+        if dependency.source in package_modules
+        and dependency.target
+        and "*" in dependency.requested_names
+    }
+    return {
+        candidate.qualname
+        for candidate in dead_candidates
+        if candidate.kind == "class"
+        and not candidate.local_name.startswith("_")
+        and candidate.qualname.partition(":")[0] in wildcard_targets
+        and candidate.qualname in referenced_qualnames
+    }
+
+
 def collect_project_export_root_evidence(
     *,
     module_deps: Sequence[ModuleDep],
@@ -190,7 +229,12 @@ def collect_project_export_root_evidence(
         candidate.qualname
         for candidate in dead_candidates
         if candidate.kind == "class" and candidate.qualname in exported_names
-    }
+    } | _wildcard_reexported_classes(
+        module_deps=module_deps,
+        package_modules=package_modules,
+        dead_candidates=dead_candidates,
+        referenced_qualnames=referenced_qualnames,
+    )
     roots: set[str] = set()
     for candidate in dead_candidates:
         if candidate.kind != "method" or candidate.local_name.startswith("_"):

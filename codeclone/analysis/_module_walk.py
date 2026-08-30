@@ -287,6 +287,13 @@ class _ModuleWalkState:
     deps: list[ModuleDep] = field(default_factory=list)
     referenced_names: set[str] = field(default_factory=set)
     imported_symbol_bindings: dict[str, set[str]] = field(default_factory=dict)
+    # Resolved targets of ``from <target> import *``. A wildcard alias names no
+    # symbol, so it writes nothing into imported_symbol_bindings above and the
+    # binding is lost; the module it reads from is the one thing about the
+    # import that IS statically known, and this set keeps it. Gated exactly
+    # like imported_symbol_bindings, so a wildcard is admitted wherever the
+    # named import it stands for would be.
+    wildcard_import_targets: set[str] = field(default_factory=set)
     imported_module_aliases: dict[str, str] = field(default_factory=dict)
     external_symbol_aliases: set[str] = field(default_factory=set)
     external_module_aliases: set[str] = field(default_factory=set)
@@ -734,6 +741,11 @@ def _collect_import_from_node(
 
     for alias in node.names:
         if alias.name == "*":
+            # The one binding fact a wildcard carries: the module it reads
+            # from. Which names it binds is decided later, by the ``__all__``
+            # of the module doing the importing - the only static export
+            # evidence available without leaving this file.
+            state.wildcard_import_targets.add(primary_target)
             continue
         alias_name = alias.asname or alias.name
         state.imported_symbol_bindings.setdefault(alias_name, set()).add(
@@ -1537,6 +1549,17 @@ def _resolve_referenced_qualnames(
                         resolved.add(local_method_qualname)
 
     for exported_name in state.exported_names:
+        # The wildcard edge names the module, ``__all__`` names the symbol:
+        # together they are a statically resolvable export binding, which is
+        # what ``from x import *`` otherwise throws away. Resolution is a
+        # plain product because the walk cannot know which of several
+        # wildcards bound the name; a product with no matching declaration is
+        # inert, since no candidate anywhere carries that qualname. Kept
+        # unconditional rather than a fallback: a wildcard genuinely can
+        # shadow an earlier named import, and over-resolving costs a missed
+        # finding while under-resolving asserts that live API is dead.
+        for wildcard_target in state.wildcard_import_targets:
+            resolved.add(f"{wildcard_target}:{exported_name}")
         local_export_qualname = _local_export_qualname(
             module_name=module_name,
             exported_name=exported_name,
