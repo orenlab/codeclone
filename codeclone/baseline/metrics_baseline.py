@@ -21,6 +21,7 @@ from ..contracts import (
     COUPLING_RISK_MEDIUM_MAX,
 )
 from ..contracts.errors import BaselineValidationError
+from ..metrics.api_surface import is_product_api_module
 from ..metrics.dependencies import (
     build_import_graph,
     depth_profile,
@@ -663,6 +664,19 @@ def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot 
     place where lane rows meet run identities — and nowhere in the decode
     path.  The report vocabulary is deliberately untouched: this is a
     lane-contract migration, not a report-schema change.
+
+    The same place carries the track split's compatibility bridge.  A
+    baseline published before the split still holds a row per public symbol
+    of the repository's own test tree; a run no longer produces any of them,
+    so handing them to ``compare_api_surfaces`` unchanged would report every
+    one as removed from the public API surface on an untouched repository.
+    They are dropped on the way out instead, which lets an old baseline
+    degrade quietly on this lane until its owner regenerates it.  The
+    verdict comes from the same owner the run uses, minus the run's module
+    registry, which the container does not carry: registry-free the owner is
+    strictly the more cautious of the two, so the bridge can drop a stored
+    ``testing`` subpackage of a distributed package that a fresh run would
+    keep — never the other way round.
     """
 
     payload = _lane_payload(container, "api_surface")
@@ -671,7 +685,7 @@ def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot 
     rows: dict[tuple[str, str], list[PublicSymbol]] = {}
     for item in payload.symbols:
         module = item.owner.python_module
-        if module is None:
+        if module is None or not is_product_api_module(item.owner.file.path):
             continue
         key = (module.module, item.owner.file.path)
         rows.setdefault(key, []).append(

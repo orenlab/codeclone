@@ -32,6 +32,7 @@ from ..findings.clones.renamed_structure import build_renamed_structure_groups
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
+from ..metrics.api_surface import product_api_modules
 from ..metrics.coupling import resolve_project_class_coupling
 from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
 from ..metrics.dead_code import (
@@ -416,6 +417,19 @@ def analyze(
     # a class is a whole-project fact, so it is resolved once and every
     # consumer below reads the same coupling numbers.
     class_metrics = resolve_project_class_coupling(processing.class_metrics)
+    # The api-surface track is decided once, here, and both consumers below
+    # are handed the same product surface: the metric family that feeds
+    # ``api_breaking_changes`` and the gate, and the observation lane that
+    # becomes the baseline. Deciding it twice would put two meanings of "the
+    # product's public API" into one run; deciding it in a renderer would put
+    # them into one report. It cannot move down into the per-file collector
+    # either — that result is cached per file, and a warm cache written before
+    # this split would hand the test modules straight back.
+    api_modules = product_api_modules(
+        processing.api_modules,
+        scan_root=str(boot.root),
+        module_registry=discovery.module_registry,
+    )
     if not boot.args.skip_metrics:
         referenced_qualnames = frozenset(
             {
@@ -439,7 +453,7 @@ def analyze(
             security_surfaces=processing.security_surfaces,
             typing_modules=processing.typing_modules,
             docstring_modules=processing.docstring_modules,
-            api_modules=processing.api_modules,
+            api_modules=api_modules,
             semantic_authority=processing.semantic_authority,
             files_found=discovery.files_found,
             files_analyzed_or_cached=files_analyzed_or_cached,
@@ -525,7 +539,7 @@ def analyze(
                 function_clone_keys=tuple(func_groups),
                 block_clone_keys=tuple(block_groups),
                 module_deps=processing.module_deps,
-                api_modules=processing.api_modules,
+                api_modules=api_modules,
                 dead_candidates=dead_candidates,
                 abstained_qualnames=frozenset(
                     item.qualname for item in unresolved_override_items

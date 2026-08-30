@@ -18,6 +18,7 @@ from ..models import (
     ModuleApiSurface,
     PublicSymbol,
 )
+from ..paths import is_test_filepath
 from ._visibility import (
     ModuleVisibility,
     build_module_visibility,
@@ -25,15 +26,79 @@ from ._visibility import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..analysis.normalizer import NormalizationConfig
+    from ..models import ModuleRegistryHandle
     from ..qualnames import FunctionNode, QualnameCollector
 
 __all__ = [
     "collect_module_api_surface",
     "compare_api_surfaces",
+    "is_product_api_module",
+    "product_api_modules",
 ]
 
 _API_SIGNATURE_DOMAIN: Final = b"ccapi1:sig\x00"
+
+
+def is_product_api_module(
+    filepath: str,
+    *,
+    scan_root: str = "",
+    module_registry: ModuleRegistryHandle | None = None,
+) -> bool:
+    """Does this file's public surface belong to the product's contract?
+
+    The api-surface lane answers one question — "did the published contract
+    break" — and a repository's own test code is not part of that contract.
+    Before the split, deleting a test printed as ``removed | Removed from the
+    public API surface`` and renaming a test parameter as ``signature_break``,
+    which made ``fail_on_api_break`` unusable: it would fail a run for a
+    renamed test.
+
+    The track is not a second rule. It asks the project's existing source-kind
+    owner (``codeclone.paths.is_test_filepath``, itself built on
+    ``classify_source_kind``) — the same predicate that already decides the
+    test lane in ``analysis.units`` and ``metrics.dead_code``. Change the
+    owner's verdict and this track follows it; there is nothing here to keep
+    in step by hand.
+
+    ``module_registry`` is what lets the owner tell a repository's ``tests/``
+    tree from a ``testing`` subpackage that a distributed package actually
+    ships, so callers that hold a registry must pass it. ``scan_root`` is
+    equally load-bearing: a run carries absolute file paths, and the owner
+    classifies repository-relative ones.
+    """
+
+    return not is_test_filepath(
+        filepath,
+        scan_root=scan_root,
+        module_registry=module_registry,
+    )
+
+
+def product_api_modules(
+    modules: Sequence[ModuleApiSurface],
+    *,
+    scan_root: str = "",
+    module_registry: ModuleRegistryHandle | None = None,
+) -> tuple[ModuleApiSurface, ...]:
+    """Keep only the product track of a run's collected module surfaces.
+
+    Order is the caller's; this filters and never reorders, so the sort the
+    producer already applied survives.
+    """
+
+    return tuple(
+        module
+        for module in modules
+        if is_product_api_module(
+            module.filepath,
+            scan_root=scan_root,
+            module_registry=module_registry,
+        )
+    )
 
 
 @lru_cache(maxsize=1)

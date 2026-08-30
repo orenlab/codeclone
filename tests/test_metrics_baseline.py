@@ -1079,14 +1079,7 @@ def test_published_high_risk_entities_read_as_known_on_the_next_run(
     into matching everything.
     """
 
-    monkeypatch.setattr(container_mod, "current_python_tag", lambda: "cp314")
-    monkeypatch.setattr(container_mod, "_utc_now_z", lambda: "2026-07-20T00:00:00Z")
-    path = tmp_path / "baseline.json"
-    path.write_bytes(
-        canonical_container_bytes(build_container(_high_risk_bundle(), _SCOPE_ID))
-    )
-    baseline = MetricsBaseline(path)
-    baseline.load()
+    baseline = _published_baseline(tmp_path, monkeypatch, _high_risk_bundle())
 
     diff = baseline.diff(
         replace(
@@ -1155,6 +1148,26 @@ def test_baseline_reader_keeps_overload_declarations_distinct() -> None:
     assert len(value_rows) == 4
 
 
+def _published_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bundle: ObservationBundle,
+) -> MetricsBaseline:
+    """Publish one bundle as a container on disk and load it back.
+
+    Stated once: every suite below that needs a baseline it can read has the
+    same five steps, and three copies of them were a block clone.
+    """
+
+    monkeypatch.setattr(container_mod, "current_python_tag", lambda: "cp314")
+    monkeypatch.setattr(container_mod, "_utc_now_z", lambda: "2026-07-20T00:00:00Z")
+    path = tmp_path / "baseline.json"
+    path.write_bytes(canonical_container_bytes(build_container(bundle, _SCOPE_ID)))
+    baseline = MetricsBaseline(path)
+    baseline.load()
+    return baseline
+
+
 # ---------------------------------------------------------------------------
 # F5: the baseline reader's identity join (ruling 2026-08-26).
 # ---------------------------------------------------------------------------
@@ -1188,31 +1201,35 @@ _API_MODULES = (
 )
 
 
-def _api_bundle() -> ObservationBundle:
+def _api_bundle(
+    api_modules: tuple[ModuleApiSurface, ...] = _API_MODULES,
+    inventory_modules: tuple[str, ...] = (),
+) -> ObservationBundle:
     registry = module_registry_context(
         filepath="pkg/mod.py",
         module_name="pkg.mod",
+        inventory_modules=inventory_modules,
     )[1]
     return build_observation_bundle(
         scan_root=Path("."),
         module_registry=registry,
-        api_modules=_API_MODULES,
+        api_modules=api_modules,
     )
 
 
 def _stored_api_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    api_modules: tuple[ModuleApiSurface, ...] = _API_MODULES,
+    inventory_modules: tuple[str, ...] = (),
 ) -> ApiSurfaceSnapshot:
     """Publish the fixture bundle, read it back through the public loader."""
 
-    monkeypatch.setattr(container_mod, "current_python_tag", lambda: "cp314")
-    monkeypatch.setattr(container_mod, "_utc_now_z", lambda: "2026-07-20T00:00:00Z")
-    path = tmp_path / "baseline.json"
-    path.write_bytes(
-        canonical_container_bytes(build_container(_api_bundle(), _SCOPE_ID))
+    baseline = _published_baseline(
+        tmp_path,
+        monkeypatch,
+        _api_bundle(api_modules, inventory_modules),
     )
-    baseline = MetricsBaseline(path)
-    baseline.load()
     stored = baseline.api_surface_snapshot
     assert stored is not None
     return stored
@@ -1253,6 +1270,49 @@ def test_stored_api_surface_compares_clean_against_the_run_that_named_it(
     stored = _stored_api_snapshot(tmp_path, monkeypatch)
     # One assertion over BOTH outcome fields: written as two statements the
     # first failure would hide whether the second still had teeth.
+    assert compare_api_surfaces(
+        baseline=stored,
+        current=ApiSurfaceSnapshot(modules=_API_MODULES),
+        strict_types=True,
+    ) == ((), ())
+
+
+def test_stored_api_surface_drops_a_legacy_test_track_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A baseline published before the track split must degrade, not scream.
+
+    Every ``tests.*`` symbol an old container carries is a symbol the run can
+    no longer produce, so a reader that hands them to ``compare_api_surfaces``
+    reports each of them as removed from the public API surface on an
+    unchanged repository. The reader drops them instead, and the run's own
+    product symbol still survives the same decode — measured together so a
+    filter that swallowed everything could not pass.
+    """
+
+    legacy = ModuleApiSurface(
+        module="tests.test_thing",
+        filepath="tests/test_thing.py",
+        symbols=(
+            PublicSymbol(
+                qualname="tests.test_thing:test_thing",
+                kind="function",
+                start_line=1,
+                end_line=2,
+                params=(),
+                returns_hash="3" * 64,
+                exported_via="name",
+            ),
+        ),
+    )
+    stored = _stored_api_snapshot(
+        tmp_path,
+        monkeypatch,
+        api_modules=(*_API_MODULES, legacy),
+        inventory_modules=("tests.test_thing",),
+    )
+    assert [module.module for module in stored.modules] == ["pkg.mod"]
     assert compare_api_surfaces(
         baseline=stored,
         current=ApiSurfaceSnapshot(modules=_API_MODULES),

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 from typing import Literal, cast
 
 from codeclone.metrics import api_surface as api_surface_mod
@@ -14,6 +15,8 @@ from codeclone.metrics._visibility import ModuleVisibility
 from codeclone.metrics.api_surface import (
     collect_module_api_surface,
     compare_api_surfaces,
+    is_product_api_module,
+    product_api_modules,
 )
 from codeclone.models import (
     ApiParamSpec,
@@ -21,7 +24,9 @@ from codeclone.models import (
     ModuleApiSurface,
     PublicSymbol,
 )
+from codeclone.paths.module_identity.inventory import build_module_registry
 from tests._ast_metrics_helpers import tree_collector_and_imports
+from tests._pipeline_fixtures import PipelineRun, analysis_boot, run_pipeline_once
 
 from .ast_test_helpers import parse_class_first_member
 
@@ -467,3 +472,251 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
 
 def test_symbol_index_none_snapshot_returns_empty() -> None:
     assert api_surface_mod._symbol_index(None) == {}
+
+
+# ── track: the product's contract is not the repository's test code ────────
+
+
+#: One tree carrying every boundary the track has to decide, as data.
+#:
+#: Each entry is an input that reaches a different arm of the rule, so no arm
+#: of it is unreachable decoration:
+#:
+#: * ``pkg/mod.py`` — plain product code.
+#: * ``pkg/test_helpers.py`` — a ``test_``-named module *inside* a shipped
+#:   package. The source-kind owner calls the file test-kind by its name; the
+#:   track follows the owner rather than second-guessing it.
+#: * ``pkg/testing/tools.py`` — a ``testing`` subpackage the package really
+#:   ships. Only the module registry tells it from a repository test tree,
+#:   which is why the run's registry is handed to the owner.
+#: * ``conftest.py`` — pytest configuration outside any test directory: the
+#:   case that makes the directory rule alone insufficient.
+#: * ``tests/…`` — the repository's own test tree, including a fixture tree.
+#: * ``benchmarks/…`` and ``docs/conf.py`` — repository tooling. The owner
+#:   calls both production, so both stay; the track invents no second rule.
+_TRACK_TREE_FILES: tuple[tuple[str, str], ...] = (
+    ("pkg/__init__.py", ""),
+    (
+        "pkg/mod.py",
+        '__all__ = ["run"]\n\n\ndef run(value: int) -> int:\n    return value\n',
+    ),
+    ("pkg/test_helpers.py", "def helper(value: int) -> int:\n    return value\n"),
+    ("pkg/testing/__init__.py", ""),
+    ("pkg/testing/tools.py", "def make_client(value: int) -> int:\n    return value\n"),
+    ("conftest.py", "def root_fixture(request):\n    return request\n"),
+    ("tests/conftest.py", "def sample_fixture(request):\n    return request\n"),
+    ("tests/test_thing.py", "def test_thing(value: int) -> None:\n    assert value\n"),
+    (
+        "tests/fixtures/sample.py",
+        "def sample_case(value: int) -> int:\n    return value\n",
+    ),
+    ("benchmarks/bench_case.py", "def measure(value: int) -> int:\n    return value\n"),
+    ("docs/conf.py", "def setup(app):\n    return app\n"),
+)
+
+
+def _mixed_track_tree(root: Path) -> None:
+    """Materialize the boundary tree under ``root``."""
+
+    for relative_path, source in _TRACK_TREE_FILES:
+        target = root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, "utf-8")
+
+
+#: Every module the tree above publishes a public symbol from, as the run
+#: names them. Stated once so the product and test halves below cannot drift
+#: into two different populations.
+_TRACK_TREE_SURFACES = (
+    "benchmarks/bench_case.py",
+    "conftest.py",
+    "docs/conf.py",
+    "pkg/mod.py",
+    "pkg/test_helpers.py",
+    "pkg/testing/tools.py",
+    "tests/conftest.py",
+    "tests/fixtures/sample.py",
+    "tests/test_thing.py",
+)
+
+#: The product half: what a consumer asking "did the published contract
+#: break" is entitled to see. Written out rather than derived, so it cannot
+#: agree with a broken rule by construction.
+_PRODUCT_TRACK_SURFACES = (
+    "benchmarks/bench_case.py",
+    "docs/conf.py",
+    "pkg/mod.py",
+    "pkg/testing/tools.py",
+)
+
+#: The test half, and the reason the gate was unusable.
+_TEST_TRACK_SURFACES = (
+    "conftest.py",
+    "pkg/test_helpers.py",
+    "tests/conftest.py",
+    "tests/fixtures/sample.py",
+    "tests/test_thing.py",
+)
+
+
+def _api_surface_run(root: Path, cache_path: Path) -> PipelineRun:
+    _mixed_track_tree(root)
+    boot = analysis_boot(root, min_loc=1, min_stmt=1, skip_metrics=False)
+    boot.args.api_surface = True
+    _cache, run = run_pipeline_once(boot, cache_path, root=root, warm=False)
+    return run
+
+
+def _metric_surfaces(run: PipelineRun, root: Path) -> list[str]:
+    metrics = run.result.project_metrics
+    assert metrics is not None
+    # The run really produced this lane: an absent snapshot would make every
+    # assertion below vacuously true.
+    assert metrics.api_surface is not None
+    return sorted(
+        Path(module.filepath).relative_to(root).as_posix()
+        for module in metrics.api_surface.modules
+    )
+
+
+def test_mixed_track_tree_publishes_every_boundary_case(tmp_path: Path) -> None:
+    """The instrument is aimed at something.
+
+    Each pin below asserts that some files are absent from the lane. Absence
+    proves nothing about a file the collector never saw in the first place,
+    so the whole population is measured once, here, without the track rule in
+    the way: the collector reaches all nine.
+    """
+
+    _mixed_track_tree(tmp_path)
+    boot = analysis_boot(tmp_path, min_loc=1, min_stmt=1, skip_metrics=False)
+    boot.args.api_surface = True
+    _cache, run = run_pipeline_once(
+        boot,
+        tmp_path / "cache.json",
+        root=tmp_path,
+        warm=False,
+    )
+    assert sorted(
+        Path(module.filepath).relative_to(tmp_path).as_posix()
+        for module in run.processing.api_modules
+    ) == sorted(_TRACK_TREE_SURFACES)
+
+
+def test_product_api_surface_metric_keeps_the_product_track(tmp_path: Path) -> None:
+    """Direction one: a product symbol must not fall off the contract.
+
+    Its opposite — a test symbol staying on the contract — is asserted by a
+    separate test, so a filter that erred either way reddens a different pin
+    and the two errors can never mask each other.
+    """
+
+    run = _api_surface_run(tmp_path, tmp_path / "cache.json")
+    surfaces = _metric_surfaces(run, tmp_path)
+    assert [path for path in surfaces if path in _PRODUCT_TRACK_SURFACES] == sorted(
+        _PRODUCT_TRACK_SURFACES
+    )
+
+
+def test_product_api_surface_metric_excludes_the_repository_test_tree(
+    tmp_path: Path,
+) -> None:
+    """Direction two: the lane a gate reads must not carry test code.
+
+    ``fail_on_api_break`` reads ``api_breaking_changes``, which is computed
+    from this snapshot. While the snapshot carries ``tests.*``, deleting a
+    test prints as ``removed | Removed from the public API surface`` and
+    renaming a test parameter as ``signature_break``, so the gate is unusable
+    by construction: it would fail a run for a renamed test.
+    """
+
+    run = _api_surface_run(tmp_path, tmp_path / "cache.json")
+    surfaces = _metric_surfaces(run, tmp_path)
+    assert [path for path in surfaces if path in _TEST_TRACK_SURFACES] == []
+
+
+def test_product_api_surface_metric_publishes_exactly_the_product_track(
+    tmp_path: Path,
+) -> None:
+    """Both halves at once: nothing extra survives, nothing extra is invented."""
+
+    run = _api_surface_run(tmp_path, tmp_path / "cache.json")
+    assert _metric_surfaces(run, tmp_path) == sorted(_PRODUCT_TRACK_SURFACES)
+
+
+def test_product_api_surface_observation_lane_excludes_the_test_tree(
+    tmp_path: Path,
+) -> None:
+    """The baseline lane is probed alone: two consumers, two pins.
+
+    ``ProjectMetrics.api_surface`` and the observation lane are fed from the
+    same run but through different calls. A pin on one of them would pass on
+    a fix that reached only that one, so the lane that becomes the baseline
+    is measured on its own.
+    """
+
+    run = _api_surface_run(tmp_path, tmp_path / "cache.json")
+    lane = run.result.observation_bundle.structural.api_surface
+    assert "api_surface" in run.result.observation_bundle.contract.enabled_lanes
+    assert sorted({row.owner.file.path for row in lane}) == sorted(
+        _PRODUCT_TRACK_SURFACES
+    )
+
+
+def test_product_api_track_follows_the_source_kind_owner(tmp_path: Path) -> None:
+    """The track is the owner's verdict, not a copy of the owner's rule.
+
+    Two files decide this. ``pkg/testing/tools.py`` is only production
+    because the module registry proves ``pkg.testing`` is a shipped
+    subpackage — a path rule alone reads ``testing`` as a test directory and
+    drops it. ``pkg/test_helpers.py`` is only test-kind because the owner
+    widens ``classify_source_kind`` with the pytest filename convention — a
+    directory rule alone keeps it. Neither verdict can be reproduced without
+    asking the owner, so a track that stopped delegating fails here.
+    """
+
+    _mixed_track_tree(tmp_path)
+    shipped = tmp_path / "pkg" / "testing" / "tools.py"
+    named_like_a_test = tmp_path / "pkg" / "test_helpers.py"
+    registry = build_module_registry(root=tmp_path)
+    assert is_product_api_module(
+        str(shipped),
+        scan_root=str(tmp_path),
+        module_registry=registry,
+    )
+    assert not is_product_api_module(
+        str(named_like_a_test),
+        scan_root=str(tmp_path),
+        module_registry=registry,
+    )
+
+
+def test_product_api_track_reads_repository_relative_paths(tmp_path: Path) -> None:
+    """``scan_root`` is load-bearing, not decoration.
+
+    A run carries absolute file paths and the owner classifies
+    repository-relative ones. Drop the root and a repository that merely
+    lives under a directory called ``test`` — a checkout in ``/tmp/test/…``,
+    say — loses its whole public surface.
+    """
+
+    disguised_root = tmp_path / "testing" / "checkout"
+    (disguised_root / "pkg").mkdir(parents=True)
+    module = disguised_root / "pkg" / "mod.py"
+    module.write_text("def run(value: int) -> int:\n    return value\n", "utf-8")
+    assert is_product_api_module(str(module), scan_root=str(disguised_root))
+    assert not is_product_api_module(str(module))
+
+
+def test_product_api_modules_filters_without_reordering() -> None:
+    """The producer's order survives the filter."""
+
+    modules = tuple(
+        ModuleApiSurface(module=name, filepath=path, symbols=())
+        for name, path in (
+            ("b", "pkg/b.py"),
+            ("a", "tests/test_a.py"),
+            ("c", "pkg/c.py"),
+        )
+    )
+    assert [module.module for module in product_api_modules(modules)] == ["b", "c"]
