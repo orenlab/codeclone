@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.glossary import GLOSSARY_FAMILY_MODULE_MAP
 from ...messages.sections import DEPENDENCY_GRAPH_UNAVAILABLE, METRICS_SKIPPED
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty
 from ..widgets.components import Tone, insight_block
@@ -28,7 +29,7 @@ from ..widgets.dep_graph_layout import (
     block_node_style_for,
     render_block_diagram,
 )
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.tables import (
     graded_coverage,
     render_rows_table,
@@ -43,6 +44,11 @@ _as_int = _coerce.as_int
 _as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_MODULE_MAP)
+
 
 _CANDIDATE = "candidate"
 
@@ -168,7 +174,7 @@ def _mm_stat_cards(
             secondary=f"/ {node_total}",
             subtext=graph_subtext,
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Edges shown",
@@ -176,7 +182,7 @@ def _mm_stat_cards(
             secondary=f"/ {edge_total}",
             subtext=graph_subtext,
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Unwind candidates",
@@ -187,7 +193,7 @@ def _mm_stat_cards(
             ),
             value_tone="accent",
             css_class="meta-item meta-item--accent",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     return "".join(cards)
@@ -216,6 +222,7 @@ def _mm_zoom_toggle(
     package_count = len(_as_sequence(graph_packages.get("nodes")))
     module_count = len(_as_sequence(graph_modules.get("nodes")))
     return render_split_tabs(
+        family=GLOSSARY_FAMILY_MODULE_MAP,
         group_id="module-map-zoom",
         active_id=default_zoom,
         tabs=[
@@ -248,6 +255,7 @@ def _mm_unwind_table(unwind_candidates: Sequence[object], ctx: ReportContext) ->
         for row in unwind_candidates
     ]
     return render_rows_table(
+        family=GLOSSARY_FAMILY_MODULE_MAP,
         headers=("Module", "Fan-in", "Fan-out", "Score", "Status", "Signals"),
         rows=rows,
         empty_message="No unwind candidates detected.",
@@ -296,7 +304,7 @@ def _overloaded_cards(
             candidates,
             detail=_micro_badges(("total analyzed", total_modules)),
             value_tone="bad" if candidates > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Ranked only",
@@ -309,21 +317,21 @@ def _overloaded_cards(
                 if population_status == "limited"
                 else ("muted" if ranked_only else "good")
             ),
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Max score",
             f"{max_score:.2f}",
             detail=_micro_badges(("cutoff", f"{cutoff:.2f}")) if cutoff > 0.0 else "",
             value_tone="warn" if max_score > 0 else "muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Avg LOC",
             avg_loc,
             detail=_micro_badges(("modules", len(locs))),
             value_tone="muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     return f'<div class="stat-cards">{"".join(cards)}</div>'
@@ -358,6 +366,7 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
         f'<h3 class="subsection-title">{_OVERLOADED_HEADING}</h3>'
         + _overloaded_cards(summary, rows_data)
         + render_rows_table(
+            family=GLOSSARY_FAMILY_MODULE_MAP,
             headers=(
                 "Module",
                 "File",

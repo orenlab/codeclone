@@ -17,6 +17,7 @@ from codeclone.utils import coerce as _coerce
 
 from ...messages.clone_health import clone_health_summary_sentence
 from ...messages.explain import plural_word
+from ...messages.glossary import GLOSSARY_FAMILY_OVERVIEW
 from ...messages.overview import (
     ADOPTION_ADDED_SYMBOLS,
     ADOPTION_API_DIFF_UNAVAILABLE,
@@ -106,7 +107,7 @@ from ..widgets.components import (
     overview_source_breakdown_html,
     overview_summary_item_html,
 )
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 
 if TYPE_CHECKING:
     from .._context import ReportContext
@@ -115,6 +116,11 @@ _as_int = _coerce.as_int
 _as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_OVERVIEW)
+
 
 _DIRECTORY_BUCKET_LABELS = DIRECTORY_BUCKET_LABELS
 _DIRECTORY_BUCKET_ORDER = DIRECTORY_BUCKET_ORDER
@@ -183,7 +189,7 @@ def _health_gauge_html(
             label,
             tip=tip,
             css_class="meta-item overview-health-card",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         )
     _R = 42.0
     circumference = 2.0 * math.pi * _R

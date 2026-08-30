@@ -13,10 +13,11 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ...messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
+from ...messages.glossary import GLOSSARY_FAMILY_COUPLING
 from ...messages.sections import METRICS_SKIPPED
 from ..widgets.badges import _micro_badges, _render_chain_flow, _stat_card
 from ..widgets.components import Tone, insight_block
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.tables import (
     ORDER_WORST_FIRST,
     graded_coverage,
@@ -57,6 +58,11 @@ _as_sequence = _coerce.as_sequence
 #: leaned on the ordering alone would be silently wrong exactly on the
 #: repositories where it matters. The band therefore says both: how much of
 #: the table is drawn, and how much of the graded population reached it.
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_COUPLING)
+
+
 _QUALITY_TABLE_ROW_LIMIT = 50
 
 
@@ -138,14 +144,14 @@ def _complexity_cards(
             high_risk,
             detail=_micro_badges(("total", total)),
             value_tone="bad" if high_risk > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Max CC",
             max_cc,
             detail=_micro_badges(("target", "< 10")),
             value_tone="bad" if max_cc > 15 else "warn" if max_cc > 10 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Avg CC",
@@ -159,14 +165,14 @@ def _complexity_cards(
             # population. The figure is printed; grading it is not
             # presentation's to do, and a threshold that moves a user-facing
             # verdict is a calibration decision, not a rendering one.
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Deep nesting",
             deep,
             detail=_micro_badges(("threshold", "> 4")),
             value_tone="warn" if deep > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     return f'<div class="stat-cards">{"".join(cards)}</div>'
@@ -180,14 +186,14 @@ def _coupling_cards(summary: Mapping[str, object]) -> str:
             high_risk,
             detail=_micro_badges(("total", total)),
             value_tone="bad" if high_risk > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Max CBO",
             max_cbo,
             detail=_micro_badges(("target", "< 8")),
             value_tone="bad" if max_cbo > 12 else "warn" if max_cbo > 8 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Avg CBO",
@@ -196,7 +202,7 @@ def _coupling_cards(summary: Mapping[str, object]) -> str:
             # Neutral for the same reason as Avg CC above: no band for an
             # average is published, so this card states the measured figure
             # and leaves the verdict to the values the document does band.
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         # No fourth card. This band used to draw a "Medium risk" count read
         # from ``summary["medium_risk"]`` -- a key no metric family emits, in
@@ -241,14 +247,14 @@ def _cohesion_cards(summary: Mapping[str, object]) -> str:
             low_cohesion,
             detail=_micro_badges(("total", total)),
             value_tone="bad" if low_cohesion > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Max LCOM4",
             max_lcom4,
             detail=_micro_badges(("target", "= 1")),
             value_tone="bad" if max_lcom4 > 3 else "warn" if max_lcom4 > 1 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     return f'<div class="stat-cards">{"".join(cards)}</div>'
@@ -322,6 +328,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         for r in cx_shown
     ]
     cx_panel = _complexity_cards(complexity_summary, cx_rows_data) + render_rows_table(
+        family=GLOSSARY_FAMILY_COUPLING,
         headers=("Function", "File", "CC", "Nesting", "Risk"),
         rows=cx_rows,
         empty_message="Complexity metrics are not available.",
@@ -353,6 +360,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         for r in cp_shown
     ]
     cp_panel = _coupling_cards(coupling_summary) + render_rows_table(
+        family=GLOSSARY_FAMILY_COUPLING,
         headers=("Class", "File", "CBO", "Risk", "Coupled classes"),
         rows=cp_rows,
         empty_message="Coupling metrics are not available.",
@@ -386,6 +394,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         for r in ch_shown
     ]
     ch_panel = _cohesion_cards(cohesion_summary) + render_rows_table(
+        family=GLOSSARY_FAMILY_COUPLING,
         headers=("Class", "File", "LCOM4", "Risk", "Methods", "Fields"),
         rows=ch_rows,
         empty_message="Cohesion metrics are not available.",
@@ -437,4 +446,6 @@ def render_quality_panel(ctx: ReportContext) -> str:
         question="Are there quality hotspots in the codebase?",
         answer=answer,
         tone=tone,
-    ) + render_split_tabs(group_id="quality", tabs=sub_tabs)
+    ) + render_split_tabs(
+        group_id="quality", tabs=sub_tabs, family=GLOSSARY_FAMILY_COUPLING
+    )

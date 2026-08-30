@@ -14,16 +14,22 @@ from codeclone import __version__
 from codeclone.api.comparison import foreign_interpreter_provenance
 from codeclone.utils import coerce as _coerce
 
+from ...messages.glossary import GLOSSARY_FAMILY_META
 from .._context import _meta_pick
 from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html, _meta_display
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 
 if TYPE_CHECKING:
     from .._context import ReportContext
 
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_META)
 
 
 def _path_basename(value: object) -> str | None:
@@ -522,7 +528,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
             return ""
         row_html = "".join(
             f'<tr><td class="prov-td-label">{_escape_html(label)}'
-            f"{glossary_tip(label)}</td>"
+            f"{_TIP(label)}</td>"
             f'<td class="prov-td-value">{_val_html(label, value)}</td></tr>'
             for label, value in visible_rows
         )

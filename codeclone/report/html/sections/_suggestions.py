@@ -27,18 +27,24 @@ from codeclone.domain.quality import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_
 from codeclone.utils import coerce as _coerce
 
 from ..._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
+from ...messages.glossary import GLOSSARY_FAMILY_SUGGESTIONS
 from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html
 from ..primitives.filters import SPREAD_OPTIONS, _render_select
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty
 from ..widgets.cards import finding_card, meta_badge_html
 from ..widgets.components import insight_block
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 
 if TYPE_CHECKING:
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_SUGGESTIONS)
+
+
 _CLONE_KIND_CHIP_LABELS: dict[str, str] = {
     "function": "Function",
     "block": "Block",
@@ -265,27 +271,27 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
             len(rows),
             detail=_micro_badges(("actionable", len(rows) - info)),
             value_tone="warn" if len(rows) > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Critical",
             critical,
             detail=_micro_badges(("of total", len(rows))),
             value_tone="bad" if critical > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Warning",
             warning,
             value_tone="warn" if warning > 0 else "muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Easy wins",
             easy_wins,
             detail=_micro_badges(("effort", "easy")),
             value_tone="good" if easy_wins > 0 else "muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     sug_cards_html = f'<div class="stat-cards">{"".join(sug_cards)}</div>'

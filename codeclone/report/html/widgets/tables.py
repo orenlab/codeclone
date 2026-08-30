@@ -419,9 +419,14 @@ def render_rows_table(
     meta_columns: Collection[str] = (),
     count_identical_rows: bool = False,
     row_cut_note: str = "",
+    family: str,
     ctx: ReportContext | None = None,
 ) -> str:
     """Render a data table with badges, tooltips, and col sizing.
+
+    *family* names the report family owning these columns and is what the
+    header glossary is asked with: ``Kind`` is a symbol type in dead code, a
+    clone kind in clones, and a violation kind in semantic authority.
 
     *column_types* maps a header to a typed cell renderer: ``"score"`` (indigo
     progress bar + value), ``"status"`` (candidate-status pill), or ``"chips"``
@@ -479,7 +484,8 @@ def render_rows_table(
 
     # thead
     th_parts = [
-        f"<th>{_escape_html(header)}{glossary_tip(header)}</th>" for header in headers
+        f"<th>{_escape_html(header)}{glossary_tip(header, family=family)}</th>"
+        for header in headers
     ]
 
     # tbody

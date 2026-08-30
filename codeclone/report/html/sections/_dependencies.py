@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from codeclone.metrics.dependencies import select_dependency_graph_nodes
 from codeclone.utils import coerce as _coerce
 
+from ...messages.glossary import GLOSSARY_FAMILY_DEPENDENCIES
 from ...messages.sections import DEPENDENCY_GRAPH_UNAVAILABLE, METRICS_SKIPPED
 from ..primitives.escape import _escape_html
 from ..widgets.badges import (
@@ -32,7 +33,7 @@ from ..widgets.dep_graph_layout import (
     block_node_style_for,
     render_block_diagram,
 )
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.tables import render_rows_table
 
 if TYPE_CHECKING:
@@ -42,6 +43,11 @@ _as_int = _coerce.as_int
 _as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_DEPENDENCIES)
 
 
 def _select_dep_nodes(
@@ -156,14 +162,14 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             dep_module_count,
             detail=_micro_badges(("imports", dep_edge_count)),
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Edges",
             dep_edge_count,
             detail=_micro_badges(("avg/module", dep_avg)),
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Max depth",
@@ -176,7 +182,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             if cycle_count > 0
             else ("warn" if dependency_health < 100 else "good"),
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Cycles",
@@ -188,7 +194,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             ),
             value_tone="bad" if cycle_count > 0 else "good",
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
 
@@ -268,6 +274,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         + legend
         + '<h3 class="subsection-title">Longest chains</h3>'
         + render_rows_table(
+            family=GLOSSARY_FAMILY_DEPENDENCIES,
             headers=("Longest chain", "Length"),
             rows=dep_chain_rows,
             empty_message="No dependency chains detected.",
@@ -277,6 +284,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         )
         + '<h3 class="subsection-title">Detected cycles</h3>'
         + render_rows_table(
+            family=GLOSSARY_FAMILY_DEPENDENCIES,
             headers=("Cycle",),
             rows=dep_cycle_rows,
             empty_message="No dependency cycles detected.",

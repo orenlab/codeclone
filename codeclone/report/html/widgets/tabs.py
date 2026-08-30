@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ...messages.glossary import GLOSSARY
+from ...messages.glossary import glossary_term
 from ..primitives.escape import _escape_html
 
 
@@ -18,6 +18,7 @@ def render_split_tabs(
     *,
     group_id: str,
     tabs: Sequence[tuple[str, str, int, str]],
+    family: str,
     emit_clone_counters: bool = False,
     active_id: str | None = None,
 ) -> str:
@@ -25,6 +26,11 @@ def render_split_tabs(
 
     Each tab tuple: ``(tab_id, label, count, panel_html)``. ``active_id`` selects
     which tab starts active; when omitted the first tab is active.
+
+    *family* names the report family these tabs belong to, and is what the
+    glossary is asked with. It is not ``group_id``: that is a DOM handle the
+    scripts key on, and three panels already spell a tab ``Suppressed`` while
+    meaning three different populations.
     """
     if not tabs:
         return ""
@@ -47,8 +53,8 @@ def render_split_tabs(
             badge = f'<span class="tab-count">{count}</span>'
         # A product label on the tab, the domain term on hover: renaming a tab
         # for readers must not delete the vocabulary the docs use.
-        glossary_term = GLOSSARY.get(label.lower(), "")
-        title_attr = f' title="{_escape_html(glossary_term)}"' if glossary_term else ""
+        term = glossary_term(label, family=family)
+        title_attr = f' title="{_escape_html(term)}"' if term else ""
         nav.append(
             f'<button class="clone-nav-btn{active}" '
             f'data-clone-tab="{tab_id}" '

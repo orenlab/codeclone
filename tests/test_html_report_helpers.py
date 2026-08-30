@@ -74,6 +74,7 @@ from codeclone.report.html.widgets.dep_graph_layout import (
 from codeclone.report.html.widgets.icons import section_icon_html
 from codeclone.report.html.widgets.snippets import _FileCache
 from codeclone.report.html.widgets.tabs import render_split_tabs
+from codeclone.report.messages.glossary import GLOSSARY_FAMILY_DEAD_CODE
 from tests._assertions import assert_contains_none
 from tests._report_fixtures import build_test_report_document
 from tests.assertion_helpers import assert_all_contained
@@ -381,7 +382,12 @@ def test_cli_runtime_warning_formatter_covers_baseline_and_legacy_cache_paths() 
 
 
 def test_render_split_tabs_returns_empty_for_no_tabs() -> None:
-    assert render_split_tabs(group_id="dead-code", tabs=()) == ""
+    assert (
+        render_split_tabs(
+            group_id="dead-code", tabs=(), family=GLOSSARY_FAMILY_DEAD_CODE
+        )
+        == ""
+    )
 
 
 def _section_ctx(**overrides: object) -> SimpleNamespace:
@@ -1647,11 +1653,14 @@ def test_findings_tab_asks_about_this_repository_not_for_a_definition() -> None:
         f"the question still names the widget rather than the code: {question}"
     )
 
-    from codeclone.report.messages.glossary import GLOSSARY
-
-    assert "branch-body" in GLOSSARY.get("findings", ""), (
-        "the definition was dropped instead of re-homed"
+    from codeclone.report.messages.glossary import (
+        GLOSSARY_FAMILY_STRUCTURAL,
+        glossary_term,
     )
+
+    assert "branch-body" in glossary_term(
+        "findings", family=GLOSSARY_FAMILY_STRUCTURAL
+    ), "the definition was dropped instead of re-homed"
 
 
 def test_findings_tab_states_its_counts_between_answer_and_evidence() -> None:
@@ -1810,6 +1819,7 @@ def _demo_table(**overrides: Any) -> str:
         "headers": ("Name", "Confidence", "Effort", "Severity"),
         "rows": [("pkg.a:f", "high", "hard", "critical")],
         "empty_message": "nothing here",
+        "family": GLOSSARY_FAMILY_DEAD_CODE,
     }
     kwargs.update(overrides)
     return render_rows_table(**kwargs)
@@ -2539,6 +2549,7 @@ def test_no_report_table_can_outgrow_its_wrap() -> None:
             rows=[tuple(f"value {i}" for i in range(len(headers)))],
             empty_message="none",
             column_types=column_types or None,
+            family=GLOSSARY_FAMILY_DEAD_CODE,
         )
         problem = _table_width_problem(_parse_report_tables(html))
         if problem:
@@ -2561,6 +2572,7 @@ def test_an_unregistered_column_is_still_bounded() -> None:
         headers=("Totally Unregistered Column",),
         rows=[("x" * 400,)],
         empty_message="none",
+        family=GLOSSARY_FAMILY_DEAD_CODE,
     )
     _headers, widths, _rows = _parse_report_tables(html)[0]
     assert widths and all(widths), "an unregistered column still sizes itself"

@@ -16,10 +16,11 @@ from codeclone.utils.coerce import as_int as _as_int
 from codeclone.utils.coerce import as_mapping as _as_mapping
 from codeclone.utils.coerce import as_sequence as _as_sequence
 
+from ...messages.glossary import GLOSSARY_FAMILY_AUTHORITY
 from ..primitives.escape import _escape_html
 from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.highlight import highlight_block
 from ..widgets.tables import (
     render_rows_table,
@@ -33,6 +34,11 @@ if TYPE_CHECKING:
 
 
 #: Contract IR failure kinds, in the words a reader can act on.
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_AUTHORITY)
+
+
 _UNRESOLVED_REASON_LABELS = {
     "unresolved_call": "unresolved call",
     "unresolved_flow": "unresolved flow",
@@ -395,6 +401,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         candidate_total=candidate_total,
     )
     governed_panel = render_rows_table(
+        family=GLOSSARY_FAMILY_AUTHORITY,
         headers=("Contract", "Sink", "Status", "Resolution", "Why"),
         rows=governed_rows,
         empty_message="No governed semantic sinks.",
@@ -402,12 +409,14 @@ def render_authority_panel(ctx: ReportContext) -> str:
         ctx=ctx,
     )
     active_panel = render_rows_table(
+        family=GLOSSARY_FAMILY_AUTHORITY,
         headers=("Contract", "Kind", "Sink", "Canonical owner"),
         rows=violation_rows,
         empty_message="No semantic-authority violations.",
         ctx=ctx,
     )
     suppressed_panel = render_rows_table(
+        family=GLOSSARY_FAMILY_AUTHORITY,
         headers=("Contract", "Kind", "Sink", "Rule"),
         rows=suppressed_rows,
         empty_message="No suppressed semantic-authority findings.",
@@ -426,6 +435,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         _candidate_meta_html(shown, candidate_total)
         + _level_strip_html(candidates)
         + render_rows_table(
+            family=GLOSSARY_FAMILY_AUTHORITY,
             headers=("Owner", "Level", "Score", "Producers", "Propose"),
             rows=candidate_rows,
             empty_message="No semantic-authority discovery candidates.",
@@ -445,28 +455,28 @@ def render_authority_panel(ctx: ReportContext) -> str:
             active_total,
             detail=_micro_badges(("suppressed", suppressed_total)),
             value_tone="bad" if active_total else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Governed contracts",
             _as_int(summary.get("registry_contracts")),
             detail=_micro_badges(("owners", governed_total)),
             value_tone="muted" if not enabled else "",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Discovery",
             candidate_total,
             detail=_micro_badges(("sinks examined", sink_total or "n/a")),
             value_tone="muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Unresolved owners",
             unresolved_governed,
             secondary=f"of {governed_total}" if governed_total else "",
             value_tone="warn" if unresolved_governed else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     return (
@@ -477,6 +487,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         )
         + f'<div class="stat-cards">{"".join(cards)}</div>'
         + render_split_tabs(
+            family=GLOSSARY_FAMILY_AUTHORITY,
             group_id="semantic-authority",
             tabs=(
                 ("violations", "Violations", active_total, active_panel),

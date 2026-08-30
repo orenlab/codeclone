@@ -71,6 +71,7 @@ from codeclone.report.html.widgets.snippets import (
     _try_pygments,
 )
 from codeclone.report.messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
+from codeclone.report.messages.glossary import GLOSSARY_FAMILY_DEAD_CODE
 from codeclone.report.messages.overview import ADOPTION_API_DIFF_UNAVAILABLE
 from codeclone.report.messages.sections import (
     DEPENDENCY_GRAPH_UNAVAILABLE,
@@ -4819,6 +4820,7 @@ def test_render_rows_table_meter_column_self_scales() -> None:
     from codeclone.report.html.widgets.tables import render_rows_table
 
     html = render_rows_table(
+        family=GLOSSARY_FAMILY_DEAD_CODE,
         headers=("Name", "CC"),
         rows=[("alpha", "20"), ("beta", "10"), ("gamma", "5")],
         empty_message="none",
@@ -4839,6 +4841,7 @@ def test_render_rows_table_meter_handles_non_numeric() -> None:
     from codeclone.report.html.widgets.tables import render_rows_table
 
     html = render_rows_table(
+        family=GLOSSARY_FAMILY_DEAD_CODE,
         headers=("Name", "CC"),
         rows=[("alpha", "n/a")],
         empty_message="none",
@@ -4852,6 +4855,7 @@ def test_render_rows_table_source_kind_column_renders_badge() -> None:
     from codeclone.report.html.widgets.tables import render_rows_table
 
     html = render_rows_table(
+        family=GLOSSARY_FAMILY_DEAD_CODE,
         headers=("Name", "Source"),
         rows=[("x", "production"), ("y", "tests")],
         empty_message="none",
@@ -4866,6 +4870,7 @@ def test_render_rows_table_code_column_renders_code_chip() -> None:
     from codeclone.report.html.widgets.tables import render_rows_table
 
     html = render_rows_table(
+        family=GLOSSARY_FAMILY_DEAD_CODE,
         headers=("Name", "Rule"),
         rows=[("x", "golden_fixture@project_config"), ("y", "-")],
         empty_message="none",

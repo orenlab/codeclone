@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ...messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
+from ...messages.glossary import GLOSSARY_FAMILY_COVERAGE_JOIN
 from ..primitives.escape import _escape_html
 from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.tables import (
     ORDER_WORST_FIRST,
     graded_coverage,
@@ -39,6 +40,11 @@ _as_sequence = _coerce.as_sequence
 #: so the cut keeps the rows a reviewer opens first -- and the band still
 #: declares the count, because the cards above it count hotspots over the
 #: whole population and nothing bounds that population by fifty.
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_COVERAGE_JOIN)
+
+
 _REVIEW_ROW_LIMIT = 50
 
 
@@ -94,6 +100,7 @@ def render_coverage_join_panel(ctx: ReportContext) -> str:
         f'<div class="stat-cards">{"".join(cards)}</div>'
         + '<h3 class="subsection-title">Coverage review items</h3>'
         + render_rows_table(
+            family=GLOSSARY_FAMILY_COVERAGE_JOIN,
             headers=("Function", "Location", "CC", "Status", "Coverage", "Risk"),
             rows=review_rows,
             empty_message=_coverage_join_empty_message(),
@@ -120,7 +127,7 @@ def _status_card(coverage_summary: Mapping[str, object]) -> str:
         detail=_micro_badges(("source", _source_label(source))) if source else "",
         value_tone="good",
         css_class="meta-item",
-        glossary_tip_fn=glossary_tip,
+        glossary_tip_fn=_TIP,
     )
 
 
@@ -137,7 +144,7 @@ def _overall_coverage_card(coverage_summary: Mapping[str, object]) -> str:
         ),
         value_tone="warn" if review_items > 0 else "good",
         css_class="meta-item",
-        glossary_tip_fn=glossary_tip,
+        glossary_tip_fn=_TIP,
     )
 
 
@@ -150,7 +157,7 @@ def _coverage_hotspots_card(coverage_summary: Mapping[str, object]) -> str:
         detail=_micro_badges(("threshold", f"< {threshold}%")),
         value_tone="bad" if hotspots > 0 else "good",
         css_class="meta-item",
-        glossary_tip_fn=glossary_tip,
+        glossary_tip_fn=_TIP,
     )
 
 
@@ -167,7 +174,7 @@ def _scope_gaps_card(coverage_summary: Mapping[str, object]) -> str:
         ),
         value_tone="warn" if scope_gaps > 0 else "good",
         css_class="meta-item",
-        glossary_tip_fn=glossary_tip,
+        glossary_tip_fn=_TIP,
     )
 
 
@@ -177,7 +184,7 @@ def _measured_units_card(coverage_summary: Mapping[str, object]) -> str:
         _as_int(coverage_summary.get("measured_units")),
         detail=_micro_badges(("units", _as_int(coverage_summary.get("units")))),
         css_class="meta-item",
-        glossary_tip_fn=glossary_tip,
+        glossary_tip_fn=_TIP,
     )
 
 

@@ -36,6 +36,7 @@ from ...messages.clone_health import (
     clone_health_score,
 )
 from ...messages.explain import plural_word
+from ...messages.glossary import GLOSSARY_FAMILY_CLONES
 from ...suggestions import classify_clone_type
 
 # Imported, never re-derived: the active clone projection turns a document
@@ -47,7 +48,7 @@ from ..primitives.escape import _escape_html
 from ..primitives.filters import CLONE_TYPE_OPTIONS, SPREAD_OPTIONS, _render_select
 from ..widgets.badges import _micro_badges, _source_kind_badge_html, _stat_card
 from ..widgets.components import Tone, insight_block
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.icons import ICONS
 from ..widgets.snippets import _render_code_block
 from ..widgets.tables import render_rows_table, row_cut_note_html
@@ -61,6 +62,11 @@ if TYPE_CHECKING:
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_CLONES)
+
 
 _HEX_SET = frozenset("0123456789abcdefABCDEF")
 # The key is the vocabulary and comes from its owner; the wording is this
@@ -290,6 +296,7 @@ def _render_suppressed_clone_panel(
     # above the rows instead of repeating them down every one -- and the
     # renderer keeps them as columns if they ever tell two rows apart.
     return render_rows_table(
+        family=GLOSSARY_FAMILY_CLONES,
         headers=("Kind", "Group", "File", "Type", "Occurrences", "Rule", "Pattern"),
         rows=rows,
         empty_message="No suppressed clone groups.",
@@ -739,7 +746,7 @@ def _clone_health_card(ctx: ReportContext) -> str:
         points,
         secondary=f"of {max_points}",
         detail=_micro_badges(("clones score", f"{score}/100")),
-        glossary_tip_fn=glossary_tip,
+        glossary_tip_fn=_TIP,
     )
 
 
@@ -850,7 +857,10 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         )
 
     panel = global_novelty_html + render_split_tabs(
-        group_id="clones", tabs=sub_tabs, emit_clone_counters=True
+        family=GLOSSARY_FAMILY_CLONES,
+        group_id="clones",
+        tabs=sub_tabs,
+        emit_clone_counters=True,
     )
 
     # Insight block
@@ -892,14 +902,14 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
                 ("segments", len(ctx.segment_sorted)),
             ),
             value_tone="warn" if ctx.clone_groups_total > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Instances",
             ctx.clone_instances_total,
             detail=_micro_badges(("avg/group", avg_per_group)),
             value_tone="warn" if ctx.clone_instances_total > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     if novelty_enabled:
@@ -909,7 +919,7 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
                 total_new,
                 detail=_micro_badges(("known", total_known)),
                 value_tone="bad" if total_new > 0 else "good",
-                glossary_tip_fn=glossary_tip,
+                glossary_tip_fn=_TIP,
             ),
         )
     clone_cards.append(
@@ -917,7 +927,7 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
             "High spread",
             high_spread,
             value_tone="warn" if high_spread > 0 else "muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     )
     clone_health_card = _clone_health_card(ctx)
@@ -930,7 +940,7 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
                 suppressed_total,
                 subtext="accepted, not scored",
                 value_tone="muted",
-                glossary_tip_fn=glossary_tip,
+                glossary_tip_fn=_TIP,
             ),
         )
     clone_cards_html = f'<div class="stat-cards">{"".join(clone_cards)}</div>'

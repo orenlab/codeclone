@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.glossary import GLOSSARY_FAMILY_DEAD_CODE
 from ...messages.sections import METRICS_SKIPPED
 from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.tables import (
     ORDER_BY_LOCATION,
     ORDER_WORST_FIRST,
@@ -39,6 +40,11 @@ _as_sequence = _coerce.as_sequence
 #: also say how much of the high-confidence population is on screen, while the
 #: suppressed list is ordered by file path -- there the cut keeps whatever
 #: sorts first, which is a reason to state it louder, not quieter.
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_DEAD_CODE)
+
+
 _DEAD_CODE_ROW_LIMIT = 200
 
 
@@ -64,6 +70,7 @@ def _active_dead_code_table(ctx: ReportContext, items_data: Sequence[object]) ->
 
     shown = [_as_mapping(it) for it in items_data[:_DEAD_CODE_ROW_LIMIT]]
     return render_rows_table(
+        family=GLOSSARY_FAMILY_DEAD_CODE,
         headers=(
             "Name",
             "File",
@@ -122,6 +129,7 @@ def _suppressed_dead_code_table(
 
     shown = [_as_mapping(it) for it in suppressed_data[:_DEAD_CODE_ROW_LIMIT]]
     return render_rows_table(
+        family=GLOSSARY_FAMILY_DEAD_CODE,
         headers=(
             "Name",
             "File",
@@ -212,20 +220,20 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
             dead_total,
             detail=_micro_badges(("active", dead_total)),
             value_tone="warn" if dead_total > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "High confidence",
             dead_high_conf,
             detail=_micro_badges(("of total", dead_total)),
             value_tone="bad" if dead_high_conf > 0 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Suppressed",
             dead_suppressed_total,
             value_tone="muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         # Deliberately "muted", never "bad": an abstention is not a finding
         # the reader should act on, it is the analysis declining to claim one.
@@ -234,14 +242,14 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
             dead_unresolved_total,
             detail=_micro_badges(("abstained", dead_unresolved_total)),
             value_tone="muted",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Hit rate",
             f"{pct:.0f}%",
             detail=_micro_badges(("high vs total", "")),
             value_tone="bad" if pct > 50 else "warn" if pct > 20 else "good",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     cards_html = f'<div class="stat-cards">{"".join(dead_cards)}</div>'
@@ -254,6 +262,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         )
         + cards_html
         + render_split_tabs(
+            family=GLOSSARY_FAMILY_DEAD_CODE,
             group_id="dead-code",
             tabs=(
                 ("active", "Active", dead_total, active_panel),

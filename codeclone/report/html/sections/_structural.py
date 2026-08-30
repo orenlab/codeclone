@@ -28,6 +28,7 @@ from ...derived import (
 )
 from ...findings import _dedupe_items, _finding_scope_text, _spread
 from ...messages import explain as explain_msgs
+from ...messages.glossary import GLOSSARY_FAMILY_STRUCTURAL
 from ...suggestions import (
     structural_action_steps,
     structural_has_separate_suggestion,
@@ -36,7 +37,7 @@ from ..primitives.escape import _escape_html
 from ..widgets.badges import _source_kind_badge_html, _stat_card, _tab_empty
 from ..widgets.cards import finding_card, meta_badge_html
 from ..widgets.components import insight_block
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.snippets import _FileCache, _render_code_block
 from ..widgets.tabs import render_split_tabs
 
@@ -47,6 +48,11 @@ __all__ = [
     "build_structural_findings_html_panel",
     "render_structural_panel",
 ]
+
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_STRUCTURAL)
+
 
 _KIND_LABEL: dict[str, str] = dict(explain_msgs.STRUCTURAL_KIND_LABELS)
 
@@ -493,7 +499,7 @@ def build_structural_findings_html_panel(
     # counts existed only as a tab badge.
     stat_cards_html = "".join(
         (
-            _stat_card("Findings", len(groups), glossary_tip_fn=glossary_tip),
+            _stat_card("Findings", len(groups), glossary_tip_fn=_TIP),
             _stat_card("Functions", function_total, detail=""),
             _stat_card("Files", file_total, detail=""),
             _stat_card("Kinds", kind_total, value_tone="muted"),
@@ -541,7 +547,11 @@ def build_structural_findings_html_panel(
 
     return (
         intro
-        + render_split_tabs(group_id="findings", tabs=sub_tabs)
+        + render_split_tabs(
+            group_id="findings",
+            tabs=sub_tabs,
+            family=GLOSSARY_FAMILY_STRUCTURAL,
+        )
         + "".join(why_templates)
     )
 

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.glossary import GLOSSARY_FAMILY_SECURITY_SURFACES
 from ...messages.security import (
     SECURITY_EMPTY_DETAIL,
     SECURITY_EMPTY_TITLE,
@@ -45,7 +46,7 @@ from ..primitives.escape import _escape_html
 from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
 from ..widgets.components import overview_summary_item_html
-from ..widgets.glossary import glossary_tip
+from ..widgets.glossary import family_glossary_tip
 from ..widgets.tables import (
     ORDER_BY_LOCATION,
     render_rows_table,
@@ -67,6 +68,11 @@ _as_sequence = _coerce.as_sequence
 #: say so. The Surfaces card counts the whole population -- three hundred and
 #: ninety-four on this repository against fifty rows -- which is exactly the
 #: gap a reader could not see before.
+# The family this panel speaks for. Bound once so every card, table
+# and tab in this module asks the glossary as the same family.
+_TIP = family_glossary_tip(GLOSSARY_FAMILY_SECURITY_SURFACES)
+
+
 _SURFACE_ROW_LIMIT = 50
 
 
@@ -93,28 +99,28 @@ def render_security_surfaces_panel(ctx: ReportContext) -> str:
             detail=_micro_badges(("report", "only"), ("evidence", "exact")),
             value_tone="warn" if _as_int(summary.get("items")) > 0 else "muted",
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             SECURITY_STAT_CATEGORIES,
             _as_int(summary.get("category_count")),
             detail=_micro_badges(("modules", _as_int(summary.get("modules")))),
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             SECURITY_STAT_PRODUCTION,
             _as_int(summary.get("production")),
             detail=_micro_badges(("tests", _as_int(summary.get("tests")))),
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             SECURITY_STAT_EXACT_ITEMS,
             _as_int(summary.get("exact_items")),
             detail=_micro_badges(("fixtures", _as_int(summary.get("fixtures")))),
             css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
+            glossary_tip_fn=_TIP,
         ),
     ]
     surface_rows, surface_cut_note = _security_surface_rows(ctx, items)
@@ -123,6 +129,7 @@ def render_security_surfaces_panel(ctx: ReportContext) -> str:
         + _security_surfaces_context_html(ctx, items)
         + f'<h3 class="subsection-title">{SECURITY_TABLE_TITLE}</h3>'
         + render_rows_table(
+            family=GLOSSARY_FAMILY_SECURITY_SURFACES,
             headers=SECURITY_TABLE_HEADERS,
             rows=surface_rows,
             empty_message=SECURITY_TABLE_EMPTY,
