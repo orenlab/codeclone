@@ -256,7 +256,9 @@ def test_vector_store_open_or_create_contract(
         store._open_or_create_table(pyarrow)
 
 
-def test_optional_lancedb_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_optional_lancedb_import_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from codeclone.analytics.store import vectors_lancedb
 
     monkeypatch.setattr(
@@ -265,7 +267,7 @@ def test_optional_lancedb_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _name: (_ for _ in ()).throw(ImportError),
     )
     with pytest.raises(AnalyticsCapabilityError, match="lancedb"):
-        vectors_lancedb._load_lancedb()
+        vectors_lancedb._connect(tmp_path)
 
 
 def test_parse_json_object_contract() -> None:
