@@ -17,27 +17,17 @@ PATCH_VERIFY_TITLE = "Patch Verify"
 CLI_LAYOUT_MAX_WIDTH = 80
 CLI_AUDIT_MAX_WIDTH = 120
 
-SUMMARY_LABEL_FILES_FOUND = "Files found"
-SUMMARY_LABEL_FILES_ANALYZED = "  analyzed"
-SUMMARY_LABEL_CACHE_HITS = "  from cache"
-SUMMARY_LABEL_FILES_SKIPPED = "  skipped"
-SUMMARY_LABEL_LINES_ANALYZED = "Lines (this run)"
-SUMMARY_LABEL_FUNCTIONS_ANALYZED = "Functions (this run)"
-SUMMARY_LABEL_METHODS_ANALYZED = "Methods (this run)"
-SUMMARY_LABEL_CLASSES_ANALYZED = "Classes (this run)"
-SUMMARY_LABEL_FUNCTION = "Function clones"
-SUMMARY_LABEL_BLOCK = "Block clones"
-SUMMARY_LABEL_SEGMENT = "Segment clones"
-SUMMARY_LABEL_SUPPRESSED = "  suppressed"
-SUMMARY_LABEL_NEW_BASELINE = "New vs baseline"
-
 SUMMARY_COMPACT = (
     "Summary  found={found}  analyzed={analyzed}"
     "  cached={cache_hits}  skipped={skipped}"
 )
+# ``new`` receives a pre-rendered value, the way ``health`` does below: a
+# count when the clone lanes were compared against the baseline, and the
+# "not compared" word when they were not. "Not compared" is not "zero new",
+# so the slot carries the sentence rather than a number.
 SUMMARY_COMPACT_CLONES = (
     "Clones   func={function}  block={block}  seg={segment}"
-    "  suppressed={suppressed}  new={new}"
+    "  suppressed={suppressed}  low_value={low_value}  new={new}"
 )
 # ``cycles`` keeps the total; the parenthesised split says how many of them can
 # actually fail an import, which is the only part --fail-cycles reads.

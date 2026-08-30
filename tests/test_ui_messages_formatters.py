@@ -6,7 +6,12 @@
 
 from __future__ import annotations
 
-from codeclone.ui_messages import formatters
+import inspect
+import string
+
+import pytest
+
+from codeclone.ui_messages import formatters, labels, styling
 
 
 def test_fmt_summary_compact_coverage_join_ok_with_scope_gaps() -> None:
@@ -228,3 +233,121 @@ def test_fmt_metrics_coverage_join_ok_without_scope_gaps_or_source() -> None:
         source_label="",
     )
     assert "scope gaps" not in text
+
+
+# ---------------------------------------------------------------------------
+# One owner for the compact clone line
+#
+# Every other member of the SUMMARY_COMPACT* family is imported by its
+# formatter and rendered with ``.format``; the clone line alone was assembled
+# from a parallel parts list, and the two statements of the same line drifted
+# apart -- the template never learned ``low_value``. These pins hold the
+# template to the formatter's signature from both sides and prove the
+# rendered line is actually produced by the template (`G1`).
+# ---------------------------------------------------------------------------
+
+_COMPACT_CLONE_SENTINEL = (
+    "CLONESENTINEL {function}|{block}|{segment}|{suppressed}|{low_value}|{new}"
+)
+
+
+def _compact_clone_slots() -> set[str]:
+    """Field names the compact clone template declares."""
+
+    return {
+        field
+        for _, field, _, _ in string.Formatter().parse(labels.SUMMARY_COMPACT_CLONES)
+        if field
+    }
+
+
+def _compact_clone_rendered_fields() -> set[str]:
+    """Field names ``fmt_summary_compact_clones`` renders, from its signature."""
+
+    return {
+        name
+        for name, parameter in inspect.signature(
+            formatters.fmt_summary_compact_clones
+        ).parameters.items()
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    }
+
+
+def test_compact_clone_template_declares_every_rendered_field() -> None:
+    # Boundary "a field went missing": the formatter renders a count the
+    # template never learned. This is the drift that was measured -- the
+    # template knew five fields while the line printed six.
+    missing = _compact_clone_rendered_fields() - _compact_clone_slots()
+    assert missing == set(), (
+        "SUMMARY_COMPACT_CLONES is missing a slot for field(s) the compact "
+        f"clone line renders: {sorted(missing)}"
+    )
+
+
+def test_compact_clone_template_declares_no_unrendered_field() -> None:
+    # Boundary "a field is surplus": the template declares a slot no
+    # parameter feeds. Caught by a different test than the missing case so
+    # each direction fails on its own evidence.
+    surplus = _compact_clone_slots() - _compact_clone_rendered_fields()
+    assert surplus == set(), (
+        "SUMMARY_COMPACT_CLONES declares slot(s) the compact clone line does "
+        f"not render: {sorted(surplus)}"
+    )
+
+
+def test_compact_clone_line_is_rendered_from_its_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The ownership edge itself. Observable bytes cannot tell a template that
+    # owns the line from a parts list that happens to agree with it, so the
+    # probe replaces the template and demands the line follow: a formatter
+    # that rebuilds the string by hand ignores the substitution and fails
+    # here. Distinct slots also pin the field-to-slot wiring against a swap.
+    monkeypatch.setattr(formatters, "SUMMARY_COMPACT_CLONES", _COMPACT_CLONE_SENTINEL)
+    rendered = formatters.fmt_summary_compact_clones(
+        function=1,
+        block=2,
+        segment=3,
+        suppressed=4,
+        low_value=5,
+        new=6,
+    )
+    assert rendered == "CLONESENTINEL 1|2|3|4|5|6"
+
+
+def test_compact_clone_template_renders_the_uncompared_novelty_sentence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ``new`` reaches the template pre-rendered, the way ``health`` does for
+    # SUMMARY_COMPACT_METRICS: "not compared" is not "zero new", and the
+    # template must carry that sentence rather than a number.
+    monkeypatch.setattr(formatters, "SUMMARY_COMPACT_CLONES", _COMPACT_CLONE_SENTINEL)
+    rendered = formatters.fmt_summary_compact_clones(
+        function=1,
+        block=2,
+        segment=3,
+        suppressed=4,
+        low_value=5,
+        new=None,
+    )
+    assert rendered == (
+        f"CLONESENTINEL 1|2|3|4|5|{formatters.CLONE_NOVELTY_UNAVAILABLE_TEXT}"
+    )
+
+
+def test_rich_clone_line_pins_its_qualifier_group() -> None:
+    # The rich summary line is the only owner of the "suppressed" term now
+    # that SUMMARY_LABEL_SUPPRESSED is gone. Pinning the whole parenthesised
+    # group holds the terms, their order, and the separator, so dropping a
+    # qualifier or re-joining the group fails here rather than silently.
+    rendered = styling.strip_markup(
+        formatters.fmt_summary_clones(
+            func=1,
+            block=2,
+            segment=3,
+            suppressed=23,
+            low_value=13,
+            new=7,
+        )
+    )
+    assert "(23 suppressed, 13 low-value, 7 new)" in rendered

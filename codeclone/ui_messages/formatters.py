@@ -24,6 +24,7 @@ from .labels import (
     SUMMARY_COMPACT,
     SUMMARY_COMPACT_BLAST_RADIUS,
     SUMMARY_COMPACT_CHANGED_SCOPE,
+    SUMMARY_COMPACT_CLONES,
     SUMMARY_COMPACT_DEPENDENCIES,
     SUMMARY_COMPACT_METRICS,
     SUMMARY_COMPACT_PATCH_VERIFY,
@@ -337,17 +338,17 @@ def fmt_summary_compact_clones(
     low_value: int,
     new: int | None,
 ) -> str:
-    parts = [
-        f"Clones   func={function}",
-        f"block={block}",
-        f"seg={segment}",
-        f"suppressed={suppressed}",
-        f"low_value={low_value}",
-    ]
-    parts.append(
-        f"new={CLONE_NOVELTY_UNAVAILABLE_TEXT}" if new is None else f"new={new}"
+    # One owner for this line. Assembling it from a parallel parts list left
+    # the template stating a shape the line had already outgrown -- it never
+    # learned ``low_value`` -- so the template is read, not restated (`G1`).
+    return SUMMARY_COMPACT_CLONES.format(
+        function=function,
+        block=block,
+        segment=segment,
+        suppressed=suppressed,
+        low_value=low_value,
+        new=CLONE_NOVELTY_UNAVAILABLE_TEXT if new is None else new,
     )
-    return "  ".join(parts)
 
 
 def fmt_summary_compact_metrics(
