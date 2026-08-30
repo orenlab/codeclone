@@ -1,0 +1,18 @@
+"""Deferred-cycle member ``e``: closes the lap only inside a function.
+
+The import-time subgraph over ``{d, e}`` does not cycle, so the one cycle
+owner classifies the component ``deferred_cycle`` — the verdict opposite to
+``{f, g}`` below, on the same family.
+"""
+
+E_TAG = "e"
+
+
+def e_probe(value: int) -> int:
+    return value * 2
+
+
+def e_step(value: int) -> int:
+    from d import D_TAG
+
+    return value + len(D_TAG)

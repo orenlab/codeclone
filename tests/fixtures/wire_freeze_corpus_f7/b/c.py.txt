@@ -1,0 +1,9 @@
+"""Cycle member ``b.c``: the other half of the second component."""
+
+from a import A_TAG
+
+GAMMA_BASE = 5
+
+
+def bc_step(value: int) -> int:
+    return value + len(A_TAG)

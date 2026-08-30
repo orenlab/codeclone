@@ -1,0 +1,33 @@
+"""Suppressed function-tier carrier two."""
+
+
+def gold_beta_first(rows: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    index = 0
+    limit = len(rows)
+    while index < limit:
+        key = rows[index].strip()
+        index = index + 1
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    out.sort()
+    return out
+
+
+def gold_beta_second(rows: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    index = 0
+    limit = len(rows)
+    while index < limit:
+        key = rows[index].strip()
+        index = index + 1
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    out.sort()
+    return out

@@ -1,0 +1,7 @@
+"""Mixed-binding cycle member ``f``: the import-time half."""
+
+from g import G_BASE
+
+
+def f_step(value: int) -> int:
+    return value + G_BASE

@@ -54,6 +54,27 @@ _WIRE_FREEZE_CORPUS_S5 = Path(__file__).parent / "fixtures" / "wire_freeze_corpu
 # slice-5 note above states.
 _WIRE_FREEZE_CORPUS_F5 = Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f5"
 
+# The F7 distinguishing stage (its own tree, its own CLI run).  Measured
+# 2026-08-30: the self-repository carries 0 dependency_cycles and the base
+# corpus carries three whose member sets never collide, so the MODULE-domain
+# key's member boundary had never been exercised.  This stage carries two
+# DISJOINT components of the same kind whose sorted member names concatenate
+# to one identical dotted text, plus both classification verdicts and a set
+# that carries import-time and deferred edges at once.  Top-level module
+# names (no shared package head) are load-bearing: a ``pkg.`` prefix on every
+# member makes the flattened texts differ and the collision unreachable.
+_WIRE_FREEZE_CORPUS_F7 = Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f7"
+
+# The F8 distinguishing stage (its own tree, its own CLI run).  Measured
+# 2026-08-30: golden-fixture declaration is the only producer channel that
+# fills ``findings.groups.clones.suppressed``, and no wire-freeze stage
+# declared it — the self-repository carried 17 suppressed groups beside 0
+# emitted, every corpus carried emitted groups with the container absent, so
+# the two populations had never met in one document.  This stage carries
+# both, with disjoint keys, and is the first input to reach all three emitted
+# containers at once.
+_WIRE_FREEZE_CORPUS_F8 = Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f8"
+
 # The post-baseline stage: materialized only after the baseline is written,
 # so its clone pair is the corpus's one genuinely NEW novelty row.
 _WIRE_FREEZE_POST_BASELINE = "pkg/clones_three.py"
@@ -145,6 +166,34 @@ def corpus_s5_report(
     root = tmp_path_factory.mktemp("wire_freeze_corpus_s5")
     report_path = root / "corpus.report.json"
     _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_S5, root)
+    _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
+    return _corpus_document(report_path)
+
+
+@pytest.fixture(scope="session")
+def corpus_f7_report(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, object]:
+    """One single-stage F7 corpus run (no baseline: dependency cycles are an
+    analysis-tier fact of the current run)."""
+    root = tmp_path_factory.mktemp("wire_freeze_corpus_f7")
+    report_path = root / "corpus.report.json"
+    _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F7, root)
+    _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
+    return _corpus_document(report_path)
+
+
+@pytest.fixture(scope="session")
+def corpus_f8_report(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, object]:
+    """One single-stage F8 corpus run (no baseline: the emitted/suppressed
+    split is an analysis-tier fact of the current run).  The stage's own
+    ``pyproject.toml`` declares the golden-fixture tree; without it both
+    populations collapse into the emitted one and the run proves nothing."""
+    root = tmp_path_factory.mktemp("wire_freeze_corpus_f8")
+    report_path = root / "corpus.report.json"
+    _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F8, root)
     _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
     return _corpus_document(report_path)
 

@@ -329,3 +329,145 @@ def test_f5_overload_corpus_ingests_whole_and_satisfies_l8(
         assert store.project_run(receipt.run_id) == model_bytes
         assert decode_canonical_json(model_bytes) == model.normalize()
         assert store.read_run(receipt.run_id) == model.normalize()
+
+
+# ---------------------------------------------------------------------------
+# F7 / F8 distinguishing stages (ruling 2026-08-24 §10).  Both families are
+# named there as "keys not proven by data (0 rows)"; measured on this HEAD the
+# self-repository carries 0 dependency_cycles and 0 emitted clone_groups, and
+# the base wire-freeze corpus carries rows whose LOAD-BEARING key components
+# are still unexercised.  These stages exist to exercise them.
+# ---------------------------------------------------------------------------
+
+
+def test_f7_family_key_keeps_the_module_member_boundary(
+    corpus_f7_report: dict[str, object],
+) -> None:
+    """F7 on REAL producer output: the key is the MODULE SET, and the set's
+    member boundary is load-bearing.
+
+    The stage carries two disjoint strongly connected components of the SAME
+    kind whose sorted member names concatenate to one identical dotted text
+    (``{a, b.c}`` and ``{a.b, c}`` both flatten to ``a.b.c``).  A key that
+    flattened its members into one string — the ``string equality is not
+    entity equality`` failure the ratified MODULE domain forbids (ruling
+    2026-08-24 §2) — would fold the two rows into one.
+    """
+    model = canonical_model_from_legacy_document(corpus_f7_report)
+    rows = model.facts.analysis.dependency_cycles
+    assert len(rows) == 4
+    assert len({row.modules for row in rows}) == 4
+    flattened = {
+        (row.kind, ".".join(sorted(module.module for module in row.modules)))
+        for row in rows
+    }
+    assert len(flattened) == 3
+    collided = sorted(
+        tuple(sorted(module.module for module in row.modules))
+        for row in rows
+        if ".".join(sorted(module.module for module in row.modules)) == "a.b.c"
+    )
+    assert collided == [("a", "b.c"), ("a.b", "c")]
+    assert {
+        row.kind
+        for row in rows
+        if ".".join(sorted(module.module for module in row.modules)) == "a.b.c"
+    } == {"import_cycle"}
+
+
+def test_f7_family_classifies_one_row_per_set_across_bindings(
+    corpus_f7_report: dict[str, object],
+) -> None:
+    """The opposite boundary: the key must NOT split one entity.
+
+    ``{f, g}`` carries an import-time cycle AND a deferred back-edge over the
+    same pair; the family law is one row per module SET with the kind
+    classified exactly once, so a per-binding row would break the 1:1 between
+    rows and sets.  ``{d, e}`` pins the other classification verdict, so a
+    classifier stuck on either constant reddens here.
+    """
+    model = canonical_model_from_legacy_document(corpus_f7_report)
+    rows = model.facts.analysis.dependency_cycles
+    by_set = {row.modules: row.kind for row in rows}
+    assert len(by_set) == len(rows)
+    assert by_set[frozenset({ModuleId("f"), ModuleId("g")})] == "import_cycle"
+    assert by_set[frozenset({ModuleId("d"), ModuleId("e")})] == "deferred_cycle"
+
+
+def _emitted_clone_keys(document: dict[str, object]) -> set[tuple[str, str]]:
+    clones = document["findings"]["groups"]["clones"]  # type: ignore[index]
+    return {
+        (kind, str(group["facts"]["group_key"]))
+        for container, kind in (
+            ("functions", "function"),
+            ("blocks", "block"),
+            ("segments", "segment"),
+        )
+        for group in clones[container]
+    }
+
+
+def _suppressed_clone_keys(document: dict[str, object]) -> set[tuple[str, str]]:
+    clones = document["findings"]["groups"]["clones"]  # type: ignore[index]
+    suppressed = clones.get("suppressed") or {}
+    return {
+        (kind, str(group["facts"]["group_key"]))
+        for container, kind in (
+            ("functions", "function"),
+            ("blocks", "block"),
+            ("segments", "segment"),
+        )
+        for group in suppressed.get(container, ())
+    }
+
+
+def test_f8_family_carries_the_emitted_population_and_not_the_suppressed(
+    corpus_f8_report: dict[str, object],
+) -> None:
+    """F8's named residual, closed: suppressed is a DIFFERENT population.
+
+    Until this stage no available input carried both populations at once —
+    the self-repository measured 17 suppressed groups beside 0 emitted, and
+    every wire-freeze stage carried emitted groups with the ``suppressed``
+    container absent, so ``clones.suppressed`` never entered the oracle in
+    ANY configuration and the family's exclusion of it could not fire.
+    """
+    emitted = _emitted_clone_keys(corpus_f8_report)
+    suppressed = _suppressed_clone_keys(corpus_f8_report)
+    assert emitted, "the stage must carry a non-empty EMITTED clone population"
+    assert suppressed, "the stage must carry a non-empty SUPPRESSED clone population"
+    assert not (emitted & suppressed)
+    model = canonical_model_from_legacy_document(corpus_f8_report)
+    rows = model.facts.analysis.clone_groups
+    assert {(row.clone_kind, row.group_key) for row in rows} == emitted
+    assert len(rows) == 6
+    assert len(suppressed) == 3
+
+
+def test_f8_family_witnesses_every_emitted_container(
+    corpus_f8_report: dict[str, object],
+) -> None:
+    """Every entry of the emitted-container tuple is reached by a row, and the
+    block group's members keep their spans.
+
+    The segment container had never carried a row on any corpus, so dropping
+    it changed nothing observable; here it carries three.  The block group
+    repeats one SYMBOL at two spans, so a span-blind member identity collapses
+    its arity from three to two.
+    """
+    model = canonical_model_from_legacy_document(corpus_f8_report)
+    rows = model.facts.analysis.clone_groups
+    per_kind: dict[str, int] = {}
+    for row in rows:
+        per_kind[row.clone_kind] = per_kind.get(row.clone_kind, 0) + 1
+    assert per_kind == {"function": 1, "block": 2, "segment": 3}
+    host_one = SymbolId(FileId("pkg/emit_host_one.py"), "emit_host_one")
+    host_two = SymbolId(FileId("pkg/emit_host_two.py"), "emit_host_two")
+    (widest,) = [
+        row for row in rows if row.clone_kind == "block" and len(row.items) == 3
+    ]
+    assert {(item.symbol, item.start_line, item.end_line) for item in widest.items} == {
+        (host_one, 5, 40),
+        (host_one, 45, 59),
+        (host_two, 5, 40),
+    }

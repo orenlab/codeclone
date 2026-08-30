@@ -1,0 +1,79 @@
+"""Suppressed block-tier host one."""
+
+
+def gold_host_one(base: int) -> int:
+    seg_01 = (
+        base - 1
+    )
+    seg_02 = (
+        base - 2
+    )
+    seg_03 = (
+        base - 3
+    )
+    seg_04 = (
+        base - 4
+    )
+    seg_05 = (
+        base - 5
+    )
+    seg_06 = (
+        base - 6
+    )
+    seg_07 = (
+        base - 7
+    )
+    seg_08 = (
+        base - 8
+    )
+    seg_09 = (
+        base - 9
+    )
+    seg_10 = (
+        base - 10
+    )
+    seg_11 = (
+        base - 11
+    )
+    seg_12 = (
+        base - 12
+    )
+    base = seg_12
+    seg_01 = (
+        base - 1
+    )
+    seg_02 = (
+        base - 2
+    )
+    seg_03 = (
+        base - 3
+    )
+    seg_04 = (
+        base - 4
+    )
+    seg_05 = (
+        base - 5
+    )
+    seg_06 = (
+        base - 6
+    )
+    seg_07 = (
+        base - 7
+    )
+    seg_08 = (
+        base - 8
+    )
+    seg_09 = (
+        base - 9
+    )
+    seg_10 = (
+        base - 10
+    )
+    seg_11 = (
+        base - 11
+    )
+    seg_12 = (
+        base - 12
+    )
+    base = seg_12
+    return base

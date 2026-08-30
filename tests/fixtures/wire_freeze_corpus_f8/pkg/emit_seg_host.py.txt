@@ -1,0 +1,25 @@
+"""Emitted segment-tier host: one function repeating a control-flow run."""
+
+
+def emit_seg_host(base: int) -> int:
+    acc = base + 1
+    if acc > 0:
+        acc = acc - 1
+    values = [acc]
+    values.append(acc + 2)
+    total = sum(values)
+    while total > 100:
+        total = total - 10
+    label = str(total)
+    base = len(label)
+    acc = base + 1
+    if acc > 0:
+        acc = acc - 1
+    values = [acc]
+    values.append(acc + 2)
+    total = sum(values)
+    while total > 100:
+        total = total - 10
+    label = str(total)
+    base = len(label)
+    return base

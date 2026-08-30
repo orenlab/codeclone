@@ -1,0 +1,21 @@
+"""Mixed-binding cycle member ``g``: import-time half plus a deferred lap.
+
+The same module SET carries both an import-time cycle and a deferred
+back-edge, and the family law is one row per set with the kind classified
+exactly once — so a per-binding row would break the 1:1 between rows and
+sets that the ratified key asserts.
+"""
+
+from f import f_step
+
+G_BASE = 3
+
+
+def g_step(value: int) -> int:
+    return f_step(value) - 1
+
+
+def g_deferred(value: int) -> int:
+    from f import f_step as deferred_f
+
+    return deferred_f(value) + 1

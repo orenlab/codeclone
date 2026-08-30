@@ -1,0 +1,9 @@
+"""Cycle member ``c``: the other half of the first component."""
+
+from a.b import AB_TAG
+
+C_TAG = "c"
+
+
+def c_step(value: int) -> int:
+    return len(AB_TAG) + value

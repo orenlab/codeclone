@@ -1,0 +1,8 @@
+[tool.codeclone]
+# Required by the full-run ingest oracle (``source_facts.semantic``).
+semantic_authority = true
+# The switch that makes this stage necessary.  Golden-fixture suppression is
+# the ONLY producer channel that fills ``findings.groups.clones.suppressed``,
+# and no wire-freeze stage declared it — so the suppressed population was
+# absent everywhere and F8's exclusion of it could never fire.
+golden_fixture_paths = ["tests/fixtures/golden"]

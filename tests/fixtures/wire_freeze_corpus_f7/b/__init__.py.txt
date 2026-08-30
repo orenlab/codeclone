@@ -1,0 +1,7 @@
+"""Package head ``b``: a carrier only.
+
+It imports nothing, so it can never join a component — which is what makes
+``b.c`` reachable as a two-dot member name without dragging its parent in.
+"""
+
+B_TAG = "b"

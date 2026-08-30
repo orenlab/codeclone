@@ -1,0 +1,9 @@
+"""Deferred-cycle member ``d``: imports ``e`` at import time."""
+
+from e import e_probe
+
+D_TAG = "d"
+
+
+def d_step(value: int) -> int:
+    return e_probe(value) + 1

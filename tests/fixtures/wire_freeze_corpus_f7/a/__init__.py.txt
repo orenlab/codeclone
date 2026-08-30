@@ -1,0 +1,16 @@
+"""Cycle member ``a``: package head, one half of the second component.
+
+The stage's whole point is the pair of components below.  ``{a, b.c}`` and
+``{a.b, c}`` are DISJOINT strongly connected components of the same kind
+whose sorted member names concatenate to one identical dotted text,
+``a.b.c`` — so a key that flattened its members into a single string would
+report one cycle where the producer found two.
+"""
+
+from b.c import GAMMA_BASE
+
+A_TAG = "a"
+
+
+def a_step(value: int) -> int:
+    return value + GAMMA_BASE
