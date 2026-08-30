@@ -34,6 +34,7 @@ from codeclone.api.memory import blast_radius_cache_limit
 from codeclone.surfaces.mcp._blast_radius import BlastRadiusResult
 from codeclone.surfaces.mcp._session_blast_radius_mixin import (
     BLAST_RADIUS_CACHE_KEY_ROOT,
+    LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPRunRecord
@@ -42,6 +43,7 @@ _DOCS_CONFIG_REFERENCE = (
     Path(__file__).resolve().parents[1] / "docs" / "reference" / "configuration.md"
 )
 _CACHE_ENTRIES_KEY = "memory.max_blast_radius_cache_entries"
+_CEILING_NOTE_START = "**A session-wide ceiling of"
 
 
 def _declared_default(unconfigured_root: Path) -> int:
@@ -374,3 +376,159 @@ def test_only_this_key_lost_the_not_enforced_marking() -> None:
     for key in still_unenforced:
         _, sibling_purpose = _configuration_row(key)
         assert "Not enforced" in sibling_purpose, key
+
+
+def _fill_roots(
+    service: CodeCloneMCPService,
+    tmp_path: Path,
+    *,
+    roots: int,
+    offered: int,
+    bound: str | None = None,
+) -> None:
+    """Offer *offered* entries to each of *roots* distinct checkouts."""
+
+    for index in range(roots):
+        root = _checkout(tmp_path, f"root_{index}", bound=bound)
+        _fill(service, _record(root), count=offered, tag=f"r{index}")
+
+
+@pytest.mark.parametrize(("roots", "offered"), [(6, 20), (3, 40)])
+def test_total_session_residency_does_not_grow_with_the_number_of_roots(
+    service: CodeCloneMCPService,
+    tmp_path: Path,
+    roots: int,
+    offered: int,
+) -> None:
+    """The residency envelope of one session is not multiplied by its roots.
+
+    The per-root quota is the configured bound and stays that. On its own it
+    says nothing about the session: N unconfigured checkouts each admitted to
+    their own default would hold ``default * N`` answers, which is a different
+    residency envelope from the one a single session was ever measured to
+    hold. A legacy compatibility ceiling bounds the total until residency is
+    calibrated, so the sum is the ceiling and not a multiple of it.
+    """
+
+    ceiling = _declared_default(tmp_path / "unconfigured")
+    assert roots * offered > ceiling, "the premise of this measurement"
+
+    _fill_roots(service, tmp_path, roots=roots, offered=offered)
+
+    assert len(service._blast_radius_cache) == ceiling
+
+
+@pytest.mark.parametrize(("configured", "roots"), [(9, 8), (5, 20)])
+def test_the_session_ceiling_is_not_any_configured_partition_bound(
+    service: CodeCloneMCPService,
+    tmp_path: Path,
+    configured: int,
+    roots: int,
+) -> None:
+    """Two quantities, two bases: the ceiling is not read from any config.
+
+    Every checkout here carries the same atypical bound, and each keeps
+    exactly it while the session total stays under the ceiling -- a number
+    neither configured nor a multiple of what was configured. Nine roots of
+    nine and twenty roots of five have no literal in common, so a ceiling
+    taken from the configuration key rather than from its own basis cannot
+    satisfy both.
+    """
+
+    ceiling = _declared_default(tmp_path / "unconfigured")
+    assert configured * roots > ceiling, "the premise of this measurement"
+
+    _fill_roots(
+        service,
+        tmp_path,
+        roots=roots,
+        offered=configured + 2,
+        bound=str(configured),
+    )
+
+    assert len(service._blast_radius_cache) == ceiling
+
+
+def test_a_root_cannot_configure_its_way_past_the_session_ceiling(
+    service: CodeCloneMCPService,
+    tmp_path: Path,
+) -> None:
+    """The ceiling is above the key, not beside it.
+
+    A quota larger than the ceiling is not a promise the session can keep, and
+    the documentation says so rather than letting the number look effective.
+    """
+
+    ceiling = _declared_default(tmp_path / "unconfigured")
+    root = _checkout(tmp_path, "greedy", bound=str(ceiling * 2))
+
+    _fill(service, _record(root), count=ceiling * 2, tag="greedy")
+
+    assert _entries_under(service, root) == ceiling
+
+
+def test_the_session_ceiling_evicts_the_oldest_and_keeps_the_new_answer(
+    service: CodeCloneMCPService,
+    tmp_path: Path,
+) -> None:
+    """A ceiling that drops what it has just computed is not a cache.
+
+    Session insertion order is the session LRU order, so the entry the
+    ceiling gives up is the least recently used one across the whole session
+    -- which is what makes it a ceiling rather than a second quota. The
+    answer that crossed the line is the newest and must survive it.
+    """
+
+    ceiling = _declared_default(tmp_path / "unconfigured")
+    crowd = _checkout(tmp_path, "crowd")
+    _fill(service, _record(crowd), count=ceiling, tag="crowd")
+    assert _entries_under(service, crowd) == ceiling
+
+    newcomer = _record(_checkout(tmp_path, "newcomer"))
+    fresh = _dependents(service, newcomer)
+
+    assert len(service._blast_radius_cache) == ceiling
+    assert _entries_under(service, newcomer.root) == 1
+    assert _dependents(service, newcomer) is fresh
+
+
+def test_the_legacy_session_ceiling_is_the_declared_partition_default(
+    tmp_path: Path,
+) -> None:
+    """The derivation rule for the ceiling, not a second copy of its literal.
+
+    Every behavioural test above measures the ceiling through the door instead
+    of naming it, so all of them stay green for any value it takes. This is the
+    pin that dies when the number moves, and the rule it holds is that there is
+    exactly one number in this tree with any standing behind it: the residency
+    the cache was already enforcing before it was partitioned by root.
+
+    Raising the ceiling above that number invents session headroom nobody has
+    measured. Lowering it below shrinks the single-root session, which the
+    partition was never meant to change. Until a residency calibration gives
+    the session bound its own basis, the two are the same number -- and when
+    that calibration arrives, this test is what has to be rewritten to say so.
+    """
+
+    declared = _declared_default(tmp_path / "unconfigured")
+
+    assert declared == LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING
+
+
+def test_the_documented_session_ceiling_is_the_one_the_cache_enforces() -> None:
+    """The documentation states the ceiling, and states this number for it.
+
+    The key's row alone would now promise a per-root maximum the session does
+    not hand out once a second root appears. Every number the ceiling note
+    quotes is checked, not just the first: a note that keeps its headline
+    accurate while its consequences drift is the same broken promise.
+    """
+
+    text = _DOCS_CONFIG_REFERENCE.read_text(encoding="utf-8")
+    start = text.find(_CEILING_NOTE_START)
+    assert start != -1, f"no session ceiling note in {_DOCS_CONFIG_REFERENCE}"
+    note = text[start : text.index("Retention that", start)]
+
+    quoted = {int(value) for value in re.findall(r"`(\d+)`", note)}
+
+    assert quoted == {LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING}

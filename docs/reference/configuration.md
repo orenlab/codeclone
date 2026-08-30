@@ -252,7 +252,7 @@ analyzed root itself. MCP memory responses report the branch taken in
 | `memory.max_candidates` | int | `1000` | Maximum draft candidates |
 | `memory.max_evidence_per_record` | int | `20` | **Not enforced.** Accepted and validated; no code reads it (see note below) |
 | `memory.max_statement_chars` | int | `1000` | Hard limit on statement length |
-| `memory.max_blast_radius_cache_entries` | int | `64` | Maximum cached blast-radius answers retained **per repository root** by one MCP session (see note below) |
+| `memory.max_blast_radius_cache_entries` | int | `64` | Maximum cached blast-radius answers retained **per repository root** by one MCP session, under a session-wide ceiling that bounds the total (see note below) |
 | `memory.git_hotspot_period_days` | int | `90` | Git hotspot lookback window (days) |
 | `memory.git_hotspot_min_changes` | int | `5` | Minimum changes for hotspot status |
 | `memory.trajectories_enabled` | bool | `true` | Record workflow trajectories |
@@ -288,6 +288,29 @@ Roots are counted separately and evicted separately; a value of `0` or less
 means that root keeps no cached answers at all. A repository whose
 `[tool.codeclone.memory]` table cannot be read falls back to the default rather
 than making blast radius unavailable.
+
+**A session-wide ceiling of `64` cached blast-radius answers bounds the total,
+across every root, and it is not configurable.** One MCP session can serve
+several checkouts, and letting each of them hold its own configured partition
+would make the session's total memory grow with the number of roots. The
+ceiling is a temporary legacy compatibility bound — it holds a session at the
+residency the cache had before it was partitioned by root — and it is not a
+calibrated figure. Two consequences are worth knowing before you set the key:
+
+- Raising `memory.max_blast_radius_cache_entries` above `64` has no effect on
+  the total. That root's partition is allowed to grow to the configured value,
+  and the ceiling then evicts the session's least recently used answers back
+  down to `64`.
+- With more than one root in a session, no root reaches the full default. The
+  roots share the ceiling by least-recent use, so a busy checkout keeps more
+  entries than an idle one. Lowering the key for a root still lowers that
+  root's own partition; it does not reserve room for anybody else.
+
+A single-root session — the ordinary case — is unaffected: its partition bound
+and the ceiling are the same number, so it retains what it always retained.
+Splitting the two into separately configurable quantities, a per-root quota and
+a process-wide hard ceiling, waits on a residency calibration that would give
+the session bound a basis of its own.
 
 Retention that **is** enforced covers `draft`, `rejected` and `archived`
 records only, applied by `codeclone memory vacuum`.

@@ -93,6 +93,11 @@ def blast_radius_cache_limit(*, root_path: Path) -> int:
     session, whichever configuration was read last governs the other
     checkout's residency.
 
+    It is therefore the partition quota and only that. The total a session may
+    hold is a separate bound with a separate basis, held by the cache owner in
+    ``_session_blast_radius_mixin`` and read from no configuration at all, so
+    that this one key is never asked to mean both.
+
     A memory table that cannot be read at all yields the declared default.
     Blast radius carries ``start_controlled_change``,
     ``get_implementation_context`` and ``finish_controlled_change``; none of

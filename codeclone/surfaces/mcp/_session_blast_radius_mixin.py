@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import cast
+from typing import Final, cast
 
 from ...api.memory import blast_radius_cache_limit
 from . import _session_helpers as _helpers
@@ -54,6 +54,24 @@ BlastRadiusCache = dict[BlastRadiusCacheKey, BlastRadiusResult]
 #: run id, and it kept reading slot 0 after the meaning of slot 0 changed.
 BLAST_RADIUS_CACHE_KEY_ROOT = 0
 BLAST_RADIUS_CACHE_KEY_RUN_ID = 1
+
+#: Total blast-radius residency one session may hold, across every root.
+#:
+#: Deliberately **not** a configuration key. ``memory.max_blast_radius_cache_entries``
+#: bounds one root's partition and bounds nothing else; this bounds the sum and
+#: reads no configuration. Two names, two bases, neither borrowed from the other.
+#:
+#: The reason the sum needs its own bound: a historically session-wide 64 does
+#: not survive being reinterpreted as 64 per root. With N checkouts in one
+#: session that is a different residency envelope, and nobody has measured it.
+#: So this is a legacy compatibility ceiling, not a calibrated default -- it
+#: holds the session at the residency the pre-partition cache was already
+#: observed to hold, and it stays temporary until a residency calibration gives
+#: a session bound an empirical basis of its own. Only then is it worth naming
+#: two configurable quantities, a per-root quota and a process-wide hard
+#: ceiling; until then one configurable quantity plus this bound, and the
+#: single number with any standing is shared rather than invented twice.
+LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING: Final = 64
 
 
 def _finding_session(
@@ -147,8 +165,13 @@ class _MCPSessionBlastRadiusMixin:
 
         Insertion order is the LRU order, so filtering it by root yields this
         root's partition oldest-first. Entries belonging to other roots are
-        never candidates for eviction. A non-positive bound is a configured
-        refusal to retain: the partition is emptied and nothing is stored.
+        never candidates for eviction by *limit*. A non-positive bound is a
+        configured refusal to retain: the partition is emptied and nothing is
+        stored.
+
+        The configured quota is the only bound this root's configuration gets
+        to state. The session ceiling applies afterwards and independently, so
+        a quota above it buys residency the session will not hand out.
         """
 
         root = cache_key[BLAST_RADIUS_CACHE_KEY_ROOT]
@@ -159,8 +182,28 @@ class _MCPSessionBlastRadiusMixin:
         ]
         while partition and len(partition) >= limit:
             self._blast_radius_cache.pop(partition.pop(0), None)
-        if limit > 0:
-            self._blast_radius_cache[cache_key] = result
+        if limit <= 0:
+            return
+        self._blast_radius_cache[cache_key] = result
+        self._enforce_legacy_session_ceiling()
+
+    def _enforce_legacy_session_ceiling(self) -> None:
+        """Hold the whole session under the ceiling. Call under the lock.
+
+        The quota above never looks outside the root that asked, which is what
+        makes it a quota. This looks at nothing but the session, which is what
+        makes it a ceiling: a busy checkout gives ground to a busy neighbour
+        here, and never to a neighbour's configured bound.
+
+        Session insertion order is the session LRU order, so the entries given
+        up are the least recently used of the whole session, and the answer
+        that has just crossed the line is the newest one and survives.
+        """
+
+        session_order = list(self._blast_radius_cache)
+        excess = len(session_order) - LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING
+        for cache_key in session_order[: max(excess, 0)]:
+            self._blast_radius_cache.pop(cache_key, None)
 
     def _validated_blast_radius_depth(self, depth: str) -> BlastRadiusDepth:
         if depth not in VALID_BLAST_RADIUS_DEPTHS:
@@ -191,6 +234,7 @@ class _MCPSessionBlastRadiusMixin:
 __all__ = [
     "BLAST_RADIUS_CACHE_KEY_ROOT",
     "BLAST_RADIUS_CACHE_KEY_RUN_ID",
+    "LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING",
     "BlastRadiusCache",
     "BlastRadiusCacheKey",
     "_MCPSessionBlastRadiusMixin",
