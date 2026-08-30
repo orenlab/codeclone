@@ -27,7 +27,7 @@ It should not be treated as an absolute target, because the weighting reflects C
 | Cohesion | 15% | LCOM4 per class |
 | Coupling | 10% | CBO per class |
 | Coverage | 10% | Analyzed files over found files — analysis coverage, not test coverage |
-| Dead code | 10% | Symbols with no production references — functions, classes, methods, imports |
+| Dead code | 10% | Symbols with no production references — functions, classes, methods |
 | Dependencies | 10% | Dependency cycles and depth |
 
 The weights above are the contract, not a suggestion. How each dimension spends

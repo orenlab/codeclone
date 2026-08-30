@@ -58,6 +58,22 @@ ApiParameterKind = Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"
 ApiSymbolKind = Literal["function", "class", "method", "constant"]
 ApiVisibility = Literal["all", "name"]
 ImportSyntaxKind = Literal["import", "from_import"]
+# The dead-code candidate kinds, and the one spelling of them: the baseline
+# lane, the cache decode and every carrier below narrow onto this alias rather
+# than restating it, because the restatements are how a divergence hid.
+#
+# MEASURED 2026-08-30, and this is a fact, not an intention: "import" is
+# declared here and no producer can construct it. The module walk builds every
+# candidate through ``_build_dead_candidate``, whose own ``kind`` parameter is
+# Literal["class", "function", "method"]; the cache decode can only return what
+# the encoder wrote, and the encoder writes ``candidate.kind``. An AST sweep of
+# every historical revision of all four producing modules finds no revision
+# that ever emitted it. Narrowing the vocabulary is the honest repair and is
+# NOT done here: the canonical wire-freeze corpus carries an "import" row, so
+# it costs a re-freeze of a ratification-gated KAT
+# (``tests/test_canonical_roundtrip.py``, pinned length and sha256).
+# ``tests/test_pipeline_process.py`` pins the divergence in both directions so
+# it cannot change, or be repaired, silently.
 DeadCodeCandidateKind = Literal["function", "class", "method", "import"]
 # The dead-code lane's extensibility axis, orthogonal to DeadCodeCandidateKind:
 # "symbol" asks whether a definition is referenced, "unreachable_statement"
@@ -2230,7 +2246,7 @@ class DeadItem:
     filepath: str
     start_line: int
     end_line: int
-    kind: Literal["function", "class", "method", "import"]
+    kind: DeadCodeCandidateKind
     confidence: Literal["high", "medium"]
     reason: Literal["unreferenced", "test_only_reference"] = "unreferenced"
     test_reference_sources: tuple[str, ...] = ()
@@ -2257,7 +2273,7 @@ class DeadCandidate:
     filepath: str
     start_line: int
     end_line: int
-    kind: Literal["function", "class", "method", "import"]
+    kind: DeadCodeCandidateKind
     suppressed_rules: tuple[str, ...] = field(default_factory=tuple)
     # Set when a root rule proved this symbol live during the module walk.
     # The candidate is the carrier because it is the one per-symbol fact that
@@ -2279,7 +2295,7 @@ class UnresolvedOverrideItem:
     filepath: str
     start_line: int
     end_line: int
-    kind: Literal["function", "class", "method", "import"]
+    kind: DeadCodeCandidateKind
     class_qualname: str
     base_names: tuple[str, ...]
     reason: Literal["unresolved_external_base"] = "unresolved_external_base"

@@ -119,7 +119,12 @@ CLONE_KINDS: Final = ("function", "block", "segment")
 # against them by test.  The wire refuses unknowns (W08).  Meaning is owned
 # by LIVENESS_POLICY_VERSION for symbol rows and by
 # STATEMENT_REACHABILITY_POLICY_VERSION for unreachable-statement rows —
-# both enter the family's content-address namespace.
+# both enter the family's content-address namespace.  Mirroring the producer
+# type is necessary and is not sufficient: the candidate kinds carry an
+# "import" value that no producer can construct (measured 2026-08-30), and the
+# mirror pin stays green because both sides restate it.  The population itself
+# is pinned by ``tests/test_pipeline_process.py`` against a real cold and warm
+# run, so the declared excess cannot move in either direction unannounced.
 DEAD_CODE_CANDIDATE_KINDS: Final = ("function", "class", "method", "import")
 DEAD_CODE_OBSERVATION_KINDS: Final = ("symbol", "unreachable_statement")
 LIVE_ROOT_REASONS: Final = ("external_decorator", "export_root")

@@ -16,6 +16,7 @@ from ..models import (
     ClassMetricsDict,
     DeadCandidate,
     DeadCandidateDict,
+    DeadCodeCandidateKind,
     DependencyResolution,
     LiveRootReason,
     ModuleApiSurface,
@@ -49,7 +50,6 @@ _ApiParamKind = Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
 _PublicSymbolKind = Literal["function", "class", "method", "constant"]
 _ExportedViaKind = Literal["all", "name"]
 _RiskLevel = Literal["low", "medium", "high"]
-_DeadCandidateKind = Literal["function", "class", "method", "import"]
 
 
 def _api_param_kind(value: object) -> _ApiParamKind | None:
@@ -104,7 +104,18 @@ def _risk_level(value: object) -> _RiskLevel | None:
             return None
 
 
-def _dead_candidate_kind(value: object) -> _DeadCandidateKind | None:
+def _dead_candidate_kind(value: object) -> DeadCodeCandidateKind | None:
+    """Narrow one cached ``kind`` string back onto the declared vocabulary.
+
+    The return type is the model's alias rather than a local restatement of
+    the four values, so an arm the vocabulary does not carry is a type error
+    here instead of a silent second authority over a closed vocabulary.
+
+    The ``import`` arm accepts a value the encoder cannot write: it writes
+    ``candidate.kind``, and no producer can construct that kind (measured
+    2026-08-30, pinned by ``tests/test_pipeline_process.py``). It stays while
+    the vocabulary declares it, and it goes with it.
+    """
     match value:
         case "function":
             return "function"

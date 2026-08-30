@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import cast, get_args
 
 import pytest
 
@@ -80,6 +80,7 @@ from codeclone.models import (
     CoverageJoinResult,
     DeadCandidate,
     DeadCandidateDict,
+    DeadCodeCandidateKind,
     DeadItem,
     DigestObject,
     FunctionRelationshipFactsDict,
@@ -1545,7 +1546,7 @@ def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtere
         (_public_symbol_kind, ("function", "class", "method", "constant")),
         (_exported_via_kind, ("all", "name")),
         (_risk_level, ("low", "medium", "high")),
-        (_dead_candidate_kind, ("function", "class", "method", "import")),
+        (_dead_candidate_kind, get_args(DeadCodeCandidateKind)),
     ),
 )
 def test_discovery_cache_literal_helpers_accept_known_values_and_reject_unknowns(

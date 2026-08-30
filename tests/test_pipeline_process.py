@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import pytest
 
@@ -24,6 +24,7 @@ from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import INERT_PHASE_LEDGER, PhaseLedger
 from codeclone.cache.reuse import binding_context_digest, source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
+from codeclone.canonical.identity import DEAD_CODE_CANDIDATE_KINDS
 from codeclone.core._types import (
     DEFAULT_RUNTIME_PROCESSES,
     AnalysisResult,
@@ -41,11 +42,13 @@ from codeclone.core.parallelism import (
 )
 from codeclone.core.pipeline import analyze
 from codeclone.core.reporting import GatingResult, report
+from codeclone.domain.findings import SYMBOL_KIND_IMPORT
 from codeclone.metrics.coverage_join import CoverageJoinParseError
 from codeclone.models import (
     CacheDependentPayload,
     CacheEntryV3,
     CacheNeutralPayload,
+    DeadCodeCandidateKind,
     DepGraph,
     DigestObject,
     HealthScore,
@@ -477,6 +480,83 @@ def test_dead_code_lane_bytes_and_live_root_reasons_match_cold_and_warm(
     assert reasons[0] == (("pkg.mod:framework_handler", "external_decorator"),)
     assert reasons[0] == reasons[1]
     assert cold_bytes == warm_bytes
+
+
+def test_the_dead_code_kind_vocabulary_declares_one_kind_no_producer_emits(
+    tmp_path: Path,
+) -> None:
+    """The closed vocabulary is checked against its population, not a mirror.
+
+    ``DEAD_CODE_CANDIDATE_KINDS`` is pinned against ``DeadCodeCandidateKind``
+    and mirrored again by the baseline lane and the cache decode. Every one of
+    those guards compares a copy to a copy, so all of them stay green while
+    the vocabulary declares a value nothing can construct -- and it does:
+    ``import`` is declared and unreachable from any producer. This measures
+    the other side, the kinds a real run actually attaches to a symbol, cold
+    from the module walk and warm from the cache decode, over a fixture that
+    offers functions, classes, methods and imports.
+
+    The excess is recorded as a measured fact, not endorsed as a design. The
+    honest repair is to narrow the vocabulary, and it is not free: the
+    canonical wire-freeze corpus carries an ``import`` row, so narrowing
+    re-freezes a ratification-gated KAT (``tests/test_canonical_roundtrip.py``
+    pins that document's length and sha256). Until that is ratified this reds
+    on every way the divergence could move: the value becoming constructible,
+    the vocabulary dropping or growing a declared value, a real kind ceasing
+    to be produced, an undeclared kind appearing, or warm disagreeing with
+    cold. Repairing it therefore has to come back through here.
+    """
+    boot, cache_path = _metrics_package(
+        tmp_path,
+        modules={
+            "mod.py": (
+                "import json\n"
+                "import unused_external\n"
+                "from pathlib import Path\n"
+                "\n"
+                "\n"
+                "def plain_function(value):\n"
+                "    return json.dumps(value)\n"
+                "\n"
+                "\n"
+                "class PlainClass:\n"
+                "    def plain_method(self):\n"
+                "        return Path('.')\n"
+            )
+        },
+    )
+
+    cold_cache, _cold_discovery, cold_result = discover_and_process(
+        boot, cache_path, root=tmp_path, warm=False
+    )
+    cold_cache.save()
+    _warm_cache, warm_discovery, warm_result = discover_and_process(
+        boot, cache_path, root=tmp_path, warm=True
+    )
+
+    # Both halves must be load-bearing: a fixture carrying no import edge
+    # would make "no import kind" vacuous, and a warm pass that re-analysed
+    # would leave the cache decode unmeasured behind the module walk.
+    assert any(dep.source == "pkg.mod" for dep in cold_result.module_deps)
+    assert warm_discovery.cache_hits == 2
+
+    produced = {candidate.kind for candidate in cold_result.dead_candidates}
+    warm_kinds = {candidate.kind for candidate in warm_result.dead_candidates}
+
+    # Both authorities that declare this vocabulary, gathered on purpose: they
+    # are separate by design, and a value dropped from one of them would
+    # otherwise hide behind the other. They have to be one set before the
+    # excess below measures anything -- a mutation proved that reading only
+    # the wire tuple left a silent narrowing of the alias alive.
+    wire_vocabulary = set(DEAD_CODE_CANDIDATE_KINDS)
+    declared = set(get_args(DeadCodeCandidateKind))
+    assert wire_vocabulary == declared
+
+    # The excess is spelled once, by the contract constant that names it, so
+    # a rename follows instead of stranding a string literal here.
+    assert declared - produced == {SYMBOL_KIND_IMPORT}
+    assert produced <= declared
+    assert warm_kinds == produced
 
 
 def test_dependency_lane_bytes_match_cold_warm_partial_and_full_hits(

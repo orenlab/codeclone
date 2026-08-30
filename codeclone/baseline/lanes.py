@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Final, TypeGuard, TypeVar
+from typing import Final, TypeGuard, TypeVar, get_args
 
 from ..contracts import BASELINE_LANE_DESCRIPTOR_VERSION
 from ..models import (
@@ -282,11 +282,12 @@ def decode_api_surface_lane(
     )
 
 
-_DEAD_CODE_KINDS: Final[tuple[DeadCodeCandidateKind, ...]] = (
-    "class",
-    "function",
-    "import",
-    "method",
+# Read off the model's alias, never restated: ``_narrowed`` only asks for
+# membership, so declaration order is immaterial here, and one fewer hand-typed
+# copy is one fewer thing that can quietly disagree with the vocabulary it
+# claims to enforce (see ``DeadCodeCandidateKind`` for the measured case).
+_DEAD_CODE_KINDS: Final[tuple[DeadCodeCandidateKind, ...]] = get_args(
+    DeadCodeCandidateKind
 )
 _DEAD_CODE_OBSERVATION_KINDS: Final[tuple[DeadCodeObservationKind, ...]] = (
     "symbol",
