@@ -37,6 +37,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      # Ty runs on every matrix interpreter rather than once beside mypy, because
+      # its verdict depends on what each environment actually resolves. Measured
+      # 2026-08-30: `overrides` is installed only for Python < 3.12 (lancedb's own
+      # marker), so the vendor base class resolves on 3.10 and 3.11 and is Unknown
+      # from 3.12 up. A protocol mismatch planted in lancedb_backend.py -- a
+      # positional `schema`, which the real create_table binds to `data` -- was
+      # caught on 3.10 and 3.11 and passed silently on 3.12, 3.13 and 3.14. A
+      # single 3.14 run would be a gate blind to the defect class it exists for.
+      - name: Ty check production scope
+        run: uv run ty check codeclone .github/actions benchmarks
+
       - name: Run tests
         # Smoke CLI tests intentionally disable subprocess coverage collection
         # to avoid runner-specific flakiness while keeping parent-process coverage strict.
