@@ -182,7 +182,7 @@ def test_diff_context_reports_whether_clone_novelty_was_computed(
 
 
 def _clone_summary_lines(new: int | None) -> tuple[str, str]:
-    counts: dict[str, int] = {"segment": 0, "suppressed": 0, "fixture_excluded": 0}
+    counts: dict[str, int] = {"segment": 0, "suppressed": 0, "low_value": 0}
     return (
         ui.fmt_summary_clones(func=1, block=0, new=new, **counts),
         ui.fmt_summary_compact_clones(function=1, block=0, new=new, **counts),
@@ -1708,7 +1708,7 @@ def test_enforce_gating_uses_precomputed_changed_scope_threshold_result(
         block_groups={},
         block_groups_report={},
         segment_groups={},
-        suppressed_segment_groups=0,
+        low_value_segment_groups=0,
         block_group_facts={},
         func_clones_count=8,
         block_clones_count=0,
@@ -1764,7 +1764,7 @@ def test_enforce_gating_uses_precomputed_changed_scope_success(
         block_groups={},
         block_groups_report={},
         segment_groups={},
-        suppressed_segment_groups=0,
+        low_value_segment_groups=0,
         block_group_facts={},
         func_clones_count=8,
         block_clones_count=0,
@@ -1924,7 +1924,7 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
                 func_clones_count=0,
                 block_clones_count=0,
                 segment_clones_count=0,
-                suppressed_segment_groups=0,
+                low_value_segment_groups=0,
                 project_metrics=None,
                 # The report meta now declares metric families from the payload
                 # the analysis emitted, so the stub must carry that evidence.
@@ -2094,8 +2094,8 @@ def test_print_summary_invariant_warning(
         func_clones_count=0,
         block_clones_count=0,
         segment_clones_count=0,
-        suppressed_golden_fixture_groups=0,
-        suppressed_segment_groups=0,
+        suppressed_clone_groups=0,
+        low_value_segment_groups=0,
         new_clones_count=0,
     )
     out = capsys.readouterr().out
@@ -2169,10 +2169,10 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             block=2,
             segment=0,
             suppressed=3,
-            fixture_excluded=2,
+            low_value=2,
             new=4,
         )
-        == "Clones   func=1  block=2  seg=0  suppressed=3  fixtures=2  new=4"
+        == "Clones   func=1  block=2  seg=0  suppressed=3  low_value=2  new=4"
     )
     assert (
         ui.fmt_summary_compact_coverage_join(
@@ -2209,11 +2209,11 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         block=2,
         segment=3,
         suppressed=1,
-        fixture_excluded=2,
+        low_value=2,
         new=0,
     )
     assert "[bold yellow]3[/bold yellow] seg" in clones
-    assert "[yellow]2[/yellow] fixtures" in clones
+    assert "[yellow]2[/yellow] low-value" in clones
 
     assert "5 detected" in ui.fmt_metrics_cycles(5, import_cycles=2, deferred=3)
     dependencies = ui.fmt_metrics_dependencies(
@@ -3260,7 +3260,7 @@ def _stub_analysis_result(
         block_groups={},
         block_groups_report={},
         segment_groups={},
-        suppressed_segment_groups=0,
+        low_value_segment_groups=0,
         block_group_facts={},
         func_clones_count=0,
         block_clones_count=0,

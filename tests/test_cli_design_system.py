@@ -125,7 +125,7 @@ def _build_catalog() -> dict[str, str]:
             found=978, analyzed=978, cache_hits=0, skipped=0
         ),
         "fmt_summary_compact_clones": ui.fmt_summary_compact_clones(
-            function=1, block=2, segment=3, suppressed=4, fixture_excluded=5, new=6
+            function=1, block=2, segment=3, suppressed=4, low_value=5, new=6
         ),
         "fmt_summary_compact_metrics": ui.fmt_summary_compact_metrics(
             cc_avg=2.2,
@@ -192,7 +192,7 @@ def _build_catalog() -> dict[str, str]:
         )
         or "",
         "fmt_summary_clones": ui.fmt_summary_clones(
-            func=1200, block=2, segment=3, suppressed=23, fixture_excluded=13, new=1
+            func=1200, block=2, segment=3, suppressed=23, low_value=13, new=1
         ),
         "fmt_metrics_health": ui.fmt_metrics_health(92, "A"),
         "fmt_metrics_cc": ui.fmt_metrics_cc(2.2, 34, 6),

@@ -131,7 +131,7 @@ def _analysis() -> AnalysisResult:
         block_groups={},
         block_groups_report={},
         segment_groups={},
-        suppressed_segment_groups=0,
+        low_value_segment_groups=0,
         block_group_facts={},
         func_clones_count=0,
         block_clones_count=0,

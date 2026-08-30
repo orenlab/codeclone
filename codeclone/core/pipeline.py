@@ -75,7 +75,10 @@ from ..observations.lanes import (
 from ..observations.projection import build_observation_bundle
 from ..report.blocks import prepare_block_report_groups
 from ..report.explain import build_block_group_facts
-from ..report.segments import prepare_segment_report_groups
+from ..report.segments import (
+    merge_segment_report_groups,
+    prepare_segment_report_groups,
+)
 from ..report.suggestions import generate_suggestions
 from ._types import (
     AnalysisResult,
@@ -323,9 +326,11 @@ def analyze(
             ]
             for group_key in sorted(projection_groups)
         }
-        suppressed_segment_groups = int(cached_projection.get("suppressed", 0))
+        # The cache key is the projection's own wire name and stays frozen with
+        # the cache format; the value it carries is the low-value filter count.
+        low_value_segment_groups = int(cached_projection.get("suppressed", 0))
     else:
-        segment_groups, suppressed_segment_groups = prepare_segment_report_groups(
+        segment_groups, low_value_segment_groups = prepare_segment_report_groups(
             segment_groups_raw
         )
 
@@ -333,12 +338,13 @@ def analyze(
     suppressed_block_groups_report = prepare_block_report_groups(
         block_split.suppressed_groups
     )
-    if segment_split.suppressed_groups:
-        suppressed_segment_groups_report, _ = prepare_segment_report_groups(
-            segment_split.suppressed_groups
-        )
-    else:
-        suppressed_segment_groups_report = {}
+    # Groups the user's rule withheld are shaped for the report and nothing
+    # more. The low-value filter belongs to the active lane: judging a
+    # policy-held set by it deleted evidence the document promised to publish,
+    # and dropped the count of what it deleted at the same time.
+    suppressed_segment_groups_report = merge_segment_report_groups(
+        segment_split.suppressed_groups
+    )
     suppressed_clone_groups = (
         *build_suppressed_clone_groups(
             kind=CLONE_KIND_FUNCTION,
@@ -578,7 +584,7 @@ def analyze(
         block_groups_report=block_groups_report,
         segment_groups=segment_groups,
         suppressed_clone_groups=tuple(suppressed_clone_groups),
-        suppressed_segment_groups=suppressed_segment_groups,
+        low_value_segment_groups=low_value_segment_groups,
         block_group_facts=block_group_facts,
         func_clones_count=func_clones_count,
         block_clones_count=block_clones_count,

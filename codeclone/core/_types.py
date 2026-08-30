@@ -193,7 +193,11 @@ class AnalysisResult:
     block_groups: Mapping[str, list[GroupItem]]
     block_groups_report: Mapping[str, list[GroupItem]]
     segment_groups: Mapping[str, list[GroupItem]]
-    suppressed_segment_groups: int
+    #: Segment groups the report's low-value filter removed from the
+    #: active lane. A detector precision signal, not a suppression rule:
+    #: it carries no provenance and no configuration, and it is a
+    #: different population from ``suppressed_clone_groups``.
+    low_value_segment_groups: int
     block_group_facts: dict[str, dict[str, str]]
     func_clones_count: int
     block_clones_count: int

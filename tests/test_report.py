@@ -2956,8 +2956,8 @@ def test_segment_groups_merge_overlaps(tmp_path: Path) -> None:
             },
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     items = filtered["seg|mod:f"]
     assert len(items) == 2
     assert items[0]["start_line"] == 2
@@ -3001,9 +3001,9 @@ def test_segment_groups_suppress_boilerplate(tmp_path: Path) -> None:
             },
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
+    filtered, low_value = prepare_segment_report_groups(group)
     assert filtered == {}
-    assert suppressed == 1
+    assert low_value == 1
 
 
 def test_segment_groups_keep_call_statement(tmp_path: Path) -> None:
@@ -3039,8 +3039,8 @@ def test_segment_groups_keep_call_statement(tmp_path: Path) -> None:
             },
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert "seg|mod:f" in filtered
 
 
@@ -3076,9 +3076,9 @@ def test_segment_groups_suppress_rhs_call_assigns(tmp_path: Path) -> None:
             },
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
+    filtered, low_value = prepare_segment_report_groups(group)
     assert filtered == {}
-    assert suppressed == 1
+    assert low_value == 1
 
 
 def test_segment_groups_keep_control_flow(tmp_path: Path) -> None:
@@ -3115,8 +3115,8 @@ def test_segment_groups_keep_control_flow(tmp_path: Path) -> None:
             },
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert "seg|mod:f" in filtered
 
 
@@ -3152,8 +3152,8 @@ def test_segment_groups_keep_min_unique_types(tmp_path: Path) -> None:
             },
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert "seg|mod:f" in filtered
 
 
@@ -3249,8 +3249,8 @@ def test_segment_prepare_unknown_paths(tmp_path: Path) -> None:
             }
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert "seg|mod:f" in filtered
 
 
@@ -3268,8 +3268,8 @@ def test_segment_prepare_empty_merge() -> None:
             }
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert filtered == {}
 
 
@@ -3287,8 +3287,8 @@ def test_segment_prepare_missing_file(tmp_path: Path) -> None:
             }
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert "seg|mod:f" in filtered
 
 
@@ -3326,8 +3326,8 @@ def test_segment_prepare_unresolvable_cases(
             }
         ]
     }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
+    filtered, low_value = prepare_segment_report_groups(group)
+    assert low_value == 0
     assert "seg|mod:f" in filtered
 
 

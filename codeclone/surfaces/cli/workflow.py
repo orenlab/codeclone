@@ -303,7 +303,7 @@ def _cache_update_segment_projection(cache: Cache, analysis: AnalysisResult) -> 
         return
     new_projection = build_segment_report_projection(
         digest=analysis.segment_groups_raw_digest,
-        suppressed=analysis.suppressed_segment_groups,
+        suppressed=analysis.low_value_segment_groups,
         groups=analysis.segment_groups,
     )
     if new_projection != cache.segment_report_projection:
@@ -607,10 +607,10 @@ def _main_impl() -> None:
                 func_clones_count=analysis_result.func_clones_count,
                 block_clones_count=analysis_result.block_clones_count,
                 segment_clones_count=analysis_result.segment_clones_count,
-                suppressed_golden_fixture_groups=len(
+                suppressed_clone_groups=len(
                     getattr(analysis_result, "suppressed_clone_groups", ())
                 ),
-                suppressed_segment_groups=analysis_result.suppressed_segment_groups,
+                low_value_segment_groups=(analysis_result.low_value_segment_groups),
                 new_clones_count=(
                     diff_context.new_clones_count
                     if diff_context.clone_novelty_available

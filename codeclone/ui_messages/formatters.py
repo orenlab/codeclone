@@ -334,7 +334,7 @@ def fmt_summary_compact_clones(
     block: int,
     segment: int,
     suppressed: int,
-    fixture_excluded: int,
+    low_value: int,
     new: int | None,
 ) -> str:
     parts = [
@@ -342,9 +342,8 @@ def fmt_summary_compact_clones(
         f"block={block}",
         f"seg={segment}",
         f"suppressed={suppressed}",
+        f"low_value={low_value}",
     ]
-    if fixture_excluded > 0:
-        parts.append(f"fixtures={fixture_excluded}")
     parts.append(
         f"new={CLONE_NOVELTY_UNAVAILABLE_TEXT}" if new is None else f"new={new}"
     )
@@ -511,7 +510,7 @@ def fmt_summary_clones(
     block: int,
     segment: int,
     suppressed: int,
-    fixture_excluded: int,
+    low_value: int,
     new: int | None,
 ) -> str:
     clone_parts = [
@@ -523,9 +522,8 @@ def fmt_summary_clones(
     main = f" {GLYPH_SEP} ".join(clone_parts)
     quals = [
         f"{_v(suppressed, STYLE_COUNT_ATTENTION_SOFT)} suppressed",
+        f"{_v(low_value, STYLE_COUNT_ATTENTION_SOFT)} low-value",
     ]
-    if fixture_excluded > 0:
-        quals.append(f"{_v(fixture_excluded, STYLE_COUNT_ATTENTION_SOFT)} fixtures")
     quals.append(
         f"[{STYLE_META}]new {CLONE_NOVELTY_UNAVAILABLE_TEXT}[/{STYLE_META}]"
         if new is None

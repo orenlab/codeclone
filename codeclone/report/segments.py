@@ -178,20 +178,43 @@ def _analyze_segment_group(
     return analyses
 
 
-def prepare_segment_report_groups(segment_groups: GroupMapLike) -> tuple[GroupMap, int]:
-    """
-    Merge overlapping segment windows and suppress low-value boilerplate groups
-    for reporting. Detection hashes remain unchanged.
-    """
-    suppressed = 0
-    filtered: GroupMap = {}
-    file_cache: dict[str, dict[str, FunctionNode] | None] = {}
+def merge_segment_report_groups(segment_groups: GroupMapLike) -> GroupMap:
+    """Merge overlapping segment windows without judging what is left.
 
+    The shaping every segment lane needs, and nothing more. The low-value
+    filter deliberately does not live here: a lane whose groups a user rule
+    already withheld must not have them re-judged by the detector's own
+    precision filter, and the only way a caller cannot get that wrong is for
+    the two operations to be different functions.
+    """
+
+    merged_groups: GroupMap = {}
     for key, items in segment_groups.items():
         merged_items = merge_segment_items(items)
         if not merged_items:
             continue
+        merged_groups[key] = merged_items
+    return merged_groups
 
+
+def prepare_segment_report_groups(
+    segment_groups: GroupMapLike,
+) -> tuple[GroupMap, int]:
+    """Shape the ACTIVE segment lane and count what the filter removed.
+
+    Merges overlapping windows, then drops low-value boilerplate groups and
+    returns how many it dropped. Detection hashes remain unchanged.
+
+    The active lane only. A lane whose groups a user suppression rule already
+    withheld must call :func:`merge_segment_report_groups` instead: judging a
+    policy-held set by the detector's precision filter deletes evidence the
+    report document promised to publish.
+    """
+    low_value_groups = 0
+    filtered: GroupMap = {}
+    file_cache: dict[str, dict[str, FunctionNode] | None] = {}
+
+    for key, merged_items in merge_segment_report_groups(segment_groups).items():
         analyses = _analyze_segment_group(merged_items, file_cache=file_cache)
         if analyses is None:
             filtered[key] = merged_items
@@ -204,9 +227,9 @@ def prepare_segment_report_groups(segment_groups: GroupMapLike) -> tuple[GroupMa
             for analysis in analyses
         )
         if all_boilerplate or all_too_simple:
-            suppressed += 1
+            low_value_groups += 1
             continue
 
         filtered[key] = merged_items
 
-    return filtered, suppressed
+    return filtered, low_value_groups

@@ -259,8 +259,14 @@ def _print_summary(
     func_clones_count: int,
     block_clones_count: int,
     segment_clones_count: int,
-    suppressed_golden_fixture_groups: int,
-    suppressed_segment_groups: int,
+    #: The clone groups a user suppression rule withheld — the same
+    #: population the report document publishes as
+    #: ``findings.summary.clones.suppressed``.
+    suppressed_clone_groups: int,
+    #: The active-lane segment groups the report's low-value filter
+    #: removed. A different population; one word for both is what let
+    #: the terminal and the document disagree about the same run.
+    low_value_segment_groups: int,
     #: ``None`` when no clone lane was compared against the baseline. The
     #: summary then says so instead of printing a zero it did not measure.
     new_clones_count: int | None,
@@ -281,8 +287,8 @@ def _print_summary(
                 function=func_clones_count,
                 block=block_clones_count,
                 segment=segment_clones_count,
-                suppressed=suppressed_segment_groups,
-                fixture_excluded=suppressed_golden_fixture_groups,
+                suppressed=suppressed_clone_groups,
+                low_value=low_value_segment_groups,
                 new=new_clones_count,
             )
         )
@@ -312,8 +318,8 @@ def _print_summary(
                 func=func_clones_count,
                 block=block_clones_count,
                 segment=segment_clones_count,
-                suppressed=suppressed_segment_groups,
-                fixture_excluded=suppressed_golden_fixture_groups,
+                suppressed=suppressed_clone_groups,
+                low_value=low_value_segment_groups,
                 new=new_clones_count,
             )
         )

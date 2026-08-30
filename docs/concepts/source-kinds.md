@@ -71,7 +71,24 @@ keeps the whole group active.
 
 Suppression is visible, never silent. The run reports the suppressed count
 alongside the active one, and each suppressed group records the patterns that
-matched it, the rule `golden_fixture`, and the source `project_config`.
+matched it, the rule `golden_fixture`, and the source `project_config`. A group
+your rule withheld is shaped for the report and published as it stands; no
+later reporting filter re-judges it, in any clone lane.
+
+### Suppressed is not low-value
+
+Two different numbers ride the clone summary, and they count different things:
+
+| Number | Means | Where it comes from |
+| --- | --- | --- |
+| `suppressed` | clone groups a suppression rule withheld | your `golden_fixture_paths`; each group carries its rule, source, and matched patterns |
+| `low-value` | segment groups the report dropped as boilerplate | the segment detector's own reporting filter; no rule, no configuration, no provenance |
+
+The terminal summary line prints both, and `suppressed` there is the same
+number the report document publishes as `findings.summary.clones.suppressed`.
+`low-value` has no report-document counterpart: it describes the detector's
+precision on the active segment lane, not a decision you made. Detection hashes
+are unchanged either way.
 
 ## Related pages
 

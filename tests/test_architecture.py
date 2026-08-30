@@ -1131,3 +1131,56 @@ def test_no_door_wrapper_lives_only_on_its_tests() -> None:
         "these door halves wrap a canonical config owner and have no production "
         f"caller, so only tests take the door's path: {orphans}"
     )
+
+
+#: The producer of the report's low-value segment filter, and the attribute
+#: that names a set a user suppression rule already withheld. The pairing of
+#: the two is the defect: the filter is a property of the active reporting
+#: lane, and running it over a policy-held set deletes evidence the report
+#: document promised to publish, silently and with no count left behind.
+_LOW_VALUE_SEGMENT_FILTER = "prepare_segment_report_groups"
+_POLICY_HELD_GROUPS_ATTRIBUTE = "suppressed_groups"
+
+
+def _low_value_filter_calls_on_policy_held_groups(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text("utf-8"))
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or _expression_name(node.func).split(".")[-1] != _LOW_VALUE_SEGMENT_FILTER
+        ):
+            continue
+        arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+        offenders.extend(
+            f"{_expression_name(argument)} (line {node.lineno})"
+            for argument in arguments
+            if isinstance(argument, ast.Attribute)
+            and argument.attr == _POLICY_HELD_GROUPS_ATTRIBUTE
+        )
+    return offenders
+
+
+def test_low_value_segment_filter_never_judges_policy_held_groups() -> None:
+    """The detector's report filter is never handed a rule-suppressed lane.
+
+    Measured before this pin existed: the pipeline passed the golden-fixture
+    lane through the same filter as the active one and assigned the count of
+    what it removed to ``_``. Four groups this repository held by user policy
+    were deleted from the report, and ``suppressed_segments`` published 0 for a
+    run that had suppressed four. Shaping a held lane is
+    ``merge_segment_report_groups``, which has no filter to apply.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    offenders = {
+        module_name: calls
+        for module_name, path in _iter_codeclone_modules(root)
+        if (calls := _low_value_filter_calls_on_policy_held_groups(path))
+    }
+
+    assert offenders == {}, (
+        f"{_LOW_VALUE_SEGMENT_FILTER} was handed a policy-held group map; use "
+        f"merge_segment_report_groups for a lane a suppression rule withheld: "
+        f"{offenders}"
+    )

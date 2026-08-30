@@ -641,9 +641,7 @@ def test_pipeline_analyze_uses_cached_segment_projection(
     )
     assert digest == sha256(expected_payload).hexdigest()
 
-    def _must_not_run(
-        _segment_groups: object,
-    ) -> tuple[dict[str, list[dict[str, object]]], int]:
+    def _must_not_run(_segment_groups: object) -> object:
         raise AssertionError("prepare_segment_report_groups must not be called")
 
     monkeypatch.setattr(core_pipeline, "prepare_segment_report_groups", _must_not_run)
@@ -703,7 +701,7 @@ def test_pipeline_analyze_uses_cached_segment_projection(
     )
 
     result = analyze(boot=boot, discovery=discovery, processing=processing)
-    assert result.suppressed_segment_groups == 7
+    assert result.low_value_segment_groups == 7
     assert result.segment_groups == cached_projection["groups"]
     assert result.segment_groups_raw_digest == digest
 
@@ -1775,7 +1773,7 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
             block_groups={},
             block_groups_report={},
             segment_groups={},
-            suppressed_segment_groups=0,
+            low_value_segment_groups=0,
             block_group_facts={},
             func_clones_count=0,
             block_clones_count=0,

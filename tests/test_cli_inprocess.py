@@ -3727,6 +3727,223 @@ golden_fixture_paths = ["tests/fixtures/golden_*"]
     )
 
 
+#: One function whose body is a long chain of same-shaped assignments. Every
+#: six-statement window normalises to the same hash, so the detector reports a
+#: segment clone group, and the report's low-value filter classifies that group
+#: as "too simple" and drops it. Both properties are load-bearing: the tests
+#: below use this one shape to keep the two suppression populations apart.
+def _low_value_segment_source(func_name: str) -> str:
+    lines = [f"def {func_name}(seed: int) -> int:", "    step0 = seed"]
+    lines.extend(
+        f"    step{index} = step{index - 1} + {index}" for index in range(1, 26)
+    )
+    lines.append("    return step25")
+    return "\n".join(lines) + "\n"
+
+
+#: The mirror shape: repeated windows the low-value filter must NOT drop,
+#: because they carry control flow and more than one statement type. It is the
+#: witness that this corpus really produces segment clone groups, so a test
+#: asserting the low-value group is absent cannot pass vacuously.
+def _surviving_segment_source(func_name: str) -> str:
+    lines = [f"def {func_name}(seed: int) -> int:", "    acc = seed"]
+    for index in range(1, 13):
+        lines.append(f"    part{index} = acc + {index}")
+        lines.append(f"    if part{index} > 0:")
+        lines.append(f"        acc = part{index}")
+    lines.append("    return acc")
+    return "\n".join(lines) + "\n"
+
+
+_SECOND_DUPLICATE_SOURCE = (
+    "def duplicated_two(rows):\n"
+    "    total = 0\n"
+    "    for row in rows:\n"
+    "        total += row\n"
+    "    return total\n"
+)
+
+
+def _write_clone_lane_pyproject(root: Path, *, golden_fixtures: bool) -> None:
+    lines = [
+        "[tool.codeclone]",
+        'baseline_scope_id = "018f4b8e-5a5f-7d35-9c21-4af5d18df420"',
+        "min_loc = 1",
+        "min_stmt = 1",
+        "skip_metrics = true",
+    ]
+    if golden_fixtures:
+        lines.append('golden_fixture_paths = ["tests/fixtures/golden_*"]')
+    (root / "pyproject.toml").write_text("\n".join(lines) + "\n", "utf-8")
+
+
+def _clones_summary(payload: dict[str, object]) -> dict[str, int]:
+    findings = cast("dict[str, object]", payload["findings"])
+    summary = cast("dict[str, object]", findings["summary"])
+    return cast("dict[str, int]", summary["clones"])
+
+
+def _clone_group_buckets(payload: dict[str, object]) -> dict[str, object]:
+    findings = cast("dict[str, object]", payload["findings"])
+    groups = cast("dict[str, object]", findings["groups"])
+    return cast("dict[str, object]", groups["clones"])
+
+
+def _suppressed_clone_groups(
+    payload: dict[str, object], kind: str
+) -> list[dict[str, object]]:
+    buckets = _clone_group_buckets(payload)
+    suppressed = cast("dict[str, object]", buckets.get("suppressed", {}))
+    return cast("list[dict[str, object]]", suppressed.get(kind, []))
+
+
+def _segment_group_qualnames(payload: dict[str, object]) -> set[str]:
+    groups = cast("list[dict[str, object]]", _clone_group_buckets(payload)["segments"])
+    return {
+        str(item["qualname"])
+        for group in groups
+        for item in cast("list[dict[str, object]]", group["items"])
+    }
+
+
+def _run_clone_lane_analysis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    golden_fixtures: bool,
+    quiet: bool = False,
+) -> dict[str, object]:
+    _write_clone_lane_pyproject(tmp_path, golden_fixtures=golden_fixtures)
+    report_path = tmp_path / "report.json"
+    argv = [str(tmp_path), "--no-progress", "--json", str(report_path)]
+    if quiet:
+        argv.append("--quiet")
+    _run_parallel_main(monkeypatch, argv)
+    return cast("dict[str, object]", json.loads(report_path.read_text("utf-8")))
+
+
+def test_cli_golden_fixture_segment_groups_reach_the_suppressed_container(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A group held by the user's rule is never re-judged by the report filter.
+
+    The low-value filter is a property of the active reporting lane. Running it
+    a second time over a set the user's policy already withheld deletes evidence
+    the document promised to publish, and deletes it silently.
+    """
+
+    fixtures_dir = tmp_path / "tests" / "fixtures" / "golden_project"
+    fixtures_dir.mkdir(parents=True)
+    _write_python_module(
+        fixtures_dir, "held.py", _low_value_segment_source("accumulate_held")
+    )
+
+    payload = _run_clone_lane_analysis(tmp_path, monkeypatch, golden_fixtures=True)
+
+    suppressed_segments = _suppressed_clone_groups(payload, "segments")
+    assert len(suppressed_segments) == 1, (
+        "the segment group held by golden_fixture_paths never reached the report"
+    )
+    assert suppressed_segments[0]["suppression_rule"] == "golden_fixture"
+    assert _clones_summary(payload)["suppressed_segments"] == 1
+
+
+def test_cli_active_segment_groups_still_pass_the_low_value_report_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other boundary: the active lane keeps paying the low-value filter.
+
+    One module, two shapes. The filter must drop the flat assignment chain and
+    keep the branching one, so neither dropping nothing nor dropping everything
+    can satisfy this test.
+    """
+
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    _write_python_module(
+        package_dir,
+        "active.py",
+        _low_value_segment_source("accumulate_active")
+        + "\n"
+        + _surviving_segment_source("mixed_shapes"),
+    )
+
+    payload = _run_clone_lane_analysis(tmp_path, monkeypatch, golden_fixtures=False)
+
+    assert _segment_group_qualnames(payload) == {"pkg.active:mixed_shapes"}
+
+
+def _write_two_populations_sources(tmp_path: Path) -> None:
+    """Two policy-held function groups and exactly one low-value segment group.
+
+    The counts are deliberately unequal (2 against 1) so neither population can
+    stand in for the other and still satisfy the assertions below.
+    """
+
+    fixtures_dir = tmp_path / "tests" / "fixtures" / "golden_project"
+    fixtures_dir.mkdir(parents=True)
+    _write_duplicate_function_module(fixtures_dir, "a.py")
+    _write_duplicate_function_module(fixtures_dir, "b.py")
+    _write_python_module(fixtures_dir, "c.py", _SECOND_DUPLICATE_SOURCE)
+    _write_python_module(fixtures_dir, "d.py", _SECOND_DUPLICATE_SOURCE)
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    _write_python_module(
+        package_dir, "active.py", _low_value_segment_source("accumulate_active")
+    )
+
+
+def test_cli_summary_suppressed_count_matches_the_report_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The word ``suppressed`` names one population on both surfaces."""
+
+    _write_two_populations_sources(tmp_path)
+    payload = _run_clone_lane_analysis(tmp_path, monkeypatch, golden_fixtures=True)
+    out = capsys.readouterr().out
+
+    document_suppressed = _clones_summary(payload)["suppressed"]
+    assert document_suppressed == 2
+    assert _summary_metric(out, "suppressed") == document_suppressed
+
+
+def test_cli_summary_reports_the_low_value_filter_under_its_own_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The detector's report filter keeps its own count under its own label."""
+
+    _write_two_populations_sources(tmp_path)
+    payload = _run_clone_lane_analysis(tmp_path, monkeypatch, golden_fixtures=True)
+    out = capsys.readouterr().out
+
+    assert _clones_summary(payload)["suppressed"] == 2
+    assert _summary_metric(out, "low-value") == 1
+
+
+def test_cli_quiet_summary_reports_the_low_value_filter_under_its_own_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The compact mirror carries the same two names, not one word twice."""
+
+    _write_two_populations_sources(tmp_path)
+    payload = _run_clone_lane_analysis(
+        tmp_path, monkeypatch, golden_fixtures=True, quiet=True
+    )
+    out = capsys.readouterr().out
+
+    assert _clones_summary(payload)["suppressed"] == 2
+    assert _compact_summary_metric(out, "suppressed") == 2
+    assert _compact_summary_metric(out, "low_value") == 1
+
+
 def test_cli_public_api_breaking_count_stable_across_warm_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
