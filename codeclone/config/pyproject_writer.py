@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal
+
+import tomlkit
+from tomlkit.items import Table as TomlTable
+from tomlkit.toml_document import TOMLDocument
 
 from ..utils.atomic_write import write_text_atomically
 from .analytics_specs import ANALYTICS_NESTED_TABLE_KEY
@@ -27,11 +31,11 @@ from .spec import CONFIG_KEY_SPECS
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from tomlkit.items import Table as TomlTable
-    from tomlkit.toml_document import TOMLDocument
-else:
-    TOMLDocument = object
-    TomlTable = object
+# tomlkit is a mandatory dependency that ships ``py.typed``, so it is imported
+# statically and named directly.  A lazy loader would have to hand back either
+# ``Any`` or a bare module, and both erase the document identity: every
+# annotation below would then resolve to nothing and every binding here would
+# go unchecked -- the silence a ``cast`` buys, spelled differently.
 
 
 ToolCodecloneTableState = Literal[
@@ -62,10 +66,9 @@ def read_pyproject_document(root_path: Path) -> TOMLDocument:
     if not config_path.is_file():
         raise PyprojectWriterError(f"pyproject.toml not found under {root_path}")
 
-    tomlkit = _load_tomlkit()
     with open_repo_config(root_path) as handle:
         text = handle.read().decode("utf-8")
-    return cast(TOMLDocument, tomlkit.parse(text))
+    return tomlkit.parse(text)
 
 
 def validate_tool_codeclone_updates(
@@ -130,8 +133,7 @@ def apply_tool_codeclone_updates(
 def serialize_pyproject_document(document: TOMLDocument) -> str:
     """Serialize a tomlkit document with a trailing newline."""
 
-    tomlkit = _load_tomlkit()
-    text = str(tomlkit.dumps(document))
+    text = tomlkit.dumps(document)
     if not text.endswith("\n"):
         text += "\n"
     return text
@@ -211,7 +213,6 @@ def merge_tool_codeclone(
 def _validate_pyproject_text_before_write(*, root_path: Path, text: str) -> None:
     """Validate serialized pyproject text before it is installed."""
 
-    tomlkit = _load_tomlkit()
     try:
         payload = tomlkit.parse(text)
         load_pyproject_config(root_path, load_toml=lambda _path: payload)
@@ -253,7 +254,6 @@ def probe_tool_codeclone_table(root_path: Path) -> ToolCodecloneTableState:
 
 
 def _ensure_tool_codeclone_table(document: TOMLDocument) -> tuple[TomlTable, bool]:
-    tomlkit = _load_tomlkit()
     created = False
 
     tool_raw = document.get("tool")
@@ -261,7 +261,7 @@ def _ensure_tool_codeclone_table(document: TOMLDocument) -> tuple[TomlTable, boo
         tool = tomlkit.table()
         document["tool"] = tool
         created = True
-    elif not isinstance(tool_raw, tomlkit.items.Table):
+    elif not isinstance(tool_raw, TomlTable):
         raise PyprojectWriterError("Invalid pyproject.toml: 'tool' must be a table")
     else:
         tool = tool_raw
@@ -271,24 +271,14 @@ def _ensure_tool_codeclone_table(document: TOMLDocument) -> tuple[TomlTable, boo
         codeclone = tomlkit.table()
         tool["codeclone"] = codeclone
         created = True
-    elif not isinstance(codeclone_raw, tomlkit.items.Table):
+    elif not isinstance(codeclone_raw, TomlTable):
         raise PyprojectWriterError(
             "Invalid pyproject.toml: 'tool.codeclone' must be a table"
         )
     else:
         codeclone = codeclone_raw
 
-    return cast(TomlTable, codeclone), created
-
-
-def _load_tomlkit() -> Any:  # Any: lazy tomlkit import boundary
-    try:
-        import tomlkit as tomlkit_module
-    except ImportError as exc:
-        raise PyprojectWriterError(
-            "tomlkit is required for pyproject writes; install codeclone dependencies."
-        ) from exc
-    return tomlkit_module
+    return codeclone, created
 
 
 __all__ = [

@@ -681,6 +681,35 @@ def test_fastembed_chunk_text_without_tokenizer_returns_original() -> None:
     assert provider.chunk_text("short text") == ("short text",)
 
 
+def test_fastembed_without_an_inner_model_falls_back_everywhere() -> None:
+    """An embedding model carrying no inner model reaches the narrowing.
+
+    The inner model used to be taken on trust through a cast, so this shape
+    raised ``AttributeError`` deep inside a measurement instead of being
+    answered.  It now reaches the ``isinstance`` question and trips it, which
+    is the input that proves the question is asked at all.
+    """
+    from codeclone.memory.embedding.fastembed_provider import (
+        FastEmbedEmbeddingProvider,
+        known_model_max_tokens,
+    )
+
+    model_name = "BAAI/bge-small-en-v1.5"
+    provider = FastEmbedEmbeddingProvider(
+        model_name=model_name,
+        dimension=384,
+        cache_dir=Path("/tmp/fastembed-cache"),
+        allow_model_download=False,
+    )
+    provider._model = SimpleNamespace()
+
+    assert provider.chunk_text("short text") == ("short text",)
+    assert provider.max_sequence_tokens() == known_model_max_tokens(model_name)
+    (counts,) = provider.probe_passage_token_counts(["hello"])
+    assert counts.raw == counts.effective > 0
+    assert provider.estimate_token_counts(["hello"]) == (counts.raw,)
+
+
 def test_fastembed_estimate_token_counts_uses_tokenize_when_model_loaded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -699,7 +728,12 @@ def test_fastembed_estimate_token_counts_uses_tokenize_when_model_loaded(
 def test_fastembed_chunk_text_without_encode_ops_returns_original(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from codeclone.memory.embedding import fastembed_provider as provider_mod
+    """A tokenizer that cannot encode is answered, not asserted away.
+
+    The fallback used to be reached by replacing a module helper; the narrowing
+    now asks the object itself, so this tokenizer -- which carries a truncation
+    limit and nothing else -- reaches the same branch on its own.
+    """
     from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
 
     class _Tokenizer:
@@ -712,7 +746,6 @@ def test_fastembed_chunk_text_without_encode_ops_returns_original(
         allow_model_download=False,
     )
     provider._model = SimpleNamespace(model=SimpleNamespace(tokenizer=_Tokenizer()))
-    monkeypatch.setattr(provider_mod, "_tokenizer_encode_ops", lambda _tokenizer: None)
     assert provider.chunk_text("hello world") == ("hello world",)
 
 
@@ -850,17 +883,29 @@ def test_fastembed_verify_chunk_passage_input_raises_on_overflow(
     from codeclone.memory.embedding import fastembed_provider as provider_mod
     from codeclone.memory.exceptions import SemanticChunkingInvariantError
 
-    def _encode(_text: str, *, add_special_tokens: bool = True) -> object:
-        class _Encoding:
-            ids: ClassVar[list[int]] = list(range(600))
+    class _OverflowingTokenizer:
+        def encode(self, sequence: str, *, add_special_tokens: bool) -> object:
+            del sequence, add_special_tokens
 
-        return _Encoding()
+            class _Encoding:
+                ids: ClassVar[list[int]] = list(range(600))
+
+            return _Encoding()
+
+        def decode(self, ids: list[int]) -> str:
+            return "x" * len(ids)
+
+        def no_truncation(self) -> None:
+            return None
+
+        def enable_truncation(self, max_length: int) -> None:
+            del max_length
 
     with pytest.raises(
         SemanticChunkingInvariantError, match="exceeds model token window"
     ):
         provider_mod._verify_chunk_passage_input(
-            _encode,
+            _OverflowingTokenizer(),
             "too-long",
             model_max_tokens=128,
         )
@@ -924,25 +969,6 @@ def test_fastembed_estimate_token_counts_without_tokenize(
     provider._get_model()
     counts = provider.estimate_token_counts(["hello"])
     assert counts == (4,)
-
-
-def test_restore_tokenizer_truncation_requires_the_hook() -> None:
-    from codeclone.memory.embedding.fastembed_provider import (
-        _restore_tokenizer_truncation,
-    )
-
-    calls: list[dict[str, object]] = []
-
-    class _Tokenizer:
-        def enable_truncation(self, *, max_length: int) -> None:
-            calls.append({"max_length": max_length})
-
-    _restore_tokenizer_truncation(_Tokenizer(), max_length=128)
-    assert calls == [{"max_length": 128}]
-
-    # An object without the hook is left untouched instead of crashing.
-    _restore_tokenizer_truncation(object(), max_length=128)
-    assert len(calls) == 1
 
 
 def test_fastembed_max_sequence_tokens_prefers_tokenizer_truncation(

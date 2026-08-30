@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import importlib
 import numbers
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, runtime_checkable
 
 from ...budget.estimator import (
     TOKEN_ESTIMATOR_CHARS_APPROX,
@@ -64,75 +64,72 @@ def _encoding_token_ids(encoding: object) -> list[int]:
     return token_ids
 
 
-def _tokenizer_encode_ops(
-    tokenizer: object,
-) -> (
-    tuple[
-        Callable[..., object],
-        Callable[[list[int]], str],
-        Callable[[], None],
-        Callable[..., None],
-    ]
-    | None
-):
-    encode = getattr(tokenizer, "encode", None)
-    decode = getattr(tokenizer, "decode", None)
-    no_truncation = getattr(tokenizer, "no_truncation", None)
-    enable_truncation = getattr(tokenizer, "enable_truncation", None)
-    if not all(
-        callable(value) for value in (encode, decode, no_truncation, enable_truncation)
-    ):
-        return None
-    return (
-        cast("Callable[..., object]", encode),
-        cast("Callable[[list[int]], str]", decode),
-        cast("Callable[[], None]", no_truncation),
-        cast("Callable[..., None]", enable_truncation),
-    )
+# Every parameter below is named as the installed object names it, so a
+# vendor rename is a failure of the declaration rather than of the first
+# keyword call that reaches production.  fastembed and tokenizers both ship
+# ``py.typed``; what hides them from a checker is this module's own dynamic
+# import, which mypy resolves no further than ``ModuleType``.  The protocols
+# are therefore held against the installed objects by a runtime pin as well,
+# and every one of them is reached by an ``isinstance`` question rather than
+# by a ``cast`` that asserts the answer.
 
 
-def _restore_tokenizer_truncation(tokenizer: object, *, max_length: int) -> None:
-    enable_truncation = getattr(tokenizer, "enable_truncation", None)
-    if callable(enable_truncation):
-        enable_truncation(max_length=max_length)
+@runtime_checkable
+class _Tokenizer(Protocol):
+    """The tokenizer operations a single passage measurement needs."""
+
+    def encode(self, sequence: str, *, add_special_tokens: bool) -> object: ...
+
+    def decode(self, ids: list[int]) -> str: ...
+
+    def no_truncation(self) -> None: ...
+
+    def enable_truncation(self, max_length: int) -> None: ...
 
 
-def _special_token_count(encode: Callable[..., object]) -> int:
-    with_special = _encoding_length(encode("x", add_special_tokens=True))
-    without_special = _encoding_length(encode("x", add_special_tokens=False))
+@runtime_checkable
+class _BatchTokenizer(_Tokenizer, Protocol):
+    """A tokenizer that can also measure a whole batch in one call."""
+
+    def encode_batch(self, input: list[str]) -> list[object]: ...
+
+
+def _special_token_count(tokenizer: _Tokenizer) -> int:
+    with_special = _encoding_length(tokenizer.encode("x", add_special_tokens=True))
+    without_special = _encoding_length(tokenizer.encode("x", add_special_tokens=False))
     return max(0, with_special - without_special)
 
 
-def _passage_prefix_token_count(encode: Callable[..., object]) -> int:
-    return _encoding_length(encode(_PASSAGE_PREFIX, add_special_tokens=False))
+def _passage_prefix_token_count(tokenizer: _Tokenizer) -> int:
+    return _encoding_length(tokenizer.encode(_PASSAGE_PREFIX, add_special_tokens=False))
 
 
 def _passage_model_input_token_count(
-    encode: Callable[..., object],
+    tokenizer: _Tokenizer,
     chunk_text: str,
 ) -> int:
     return _encoding_length(
-        encode(f"{_PASSAGE_PREFIX}{chunk_text}", add_special_tokens=True)
+        tokenizer.encode(f"{_PASSAGE_PREFIX}{chunk_text}", add_special_tokens=True)
     )
 
 
 def _chunk_payload_token_budget(
-    encode: Callable[..., object],
+    tokenizer: _Tokenizer,
     *,
     model_max_tokens: int,
 ) -> int:
-    special_tokens = _special_token_count(encode)
-    prefix_tokens = _passage_prefix_token_count(encode)
+    special_tokens = _special_token_count(tokenizer)
+    prefix_tokens = _passage_prefix_token_count(tokenizer)
     return max(1, model_max_tokens - special_tokens - prefix_tokens)
 
 
 def _verify_chunk_passage_input(
-    encode: Callable[..., object],
+    tokenizer: _Tokenizer,
     chunk_text: str,
     *,
     model_max_tokens: int,
 ) -> None:
-    raw_tokens = _passage_model_input_token_count(encode, chunk_text)
+    raw_tokens = _passage_model_input_token_count(tokenizer, chunk_text)
     if raw_tokens > model_max_tokens:
         raise SemanticChunkingInvariantError(
             "passage chunk exceeds model token window: "
@@ -141,15 +138,86 @@ def _verify_chunk_passage_input(
 
 
 class _TextEmbeddingModel(Protocol):
-    model: object
+    """The embedding model this provider drives."""
 
-    def embed(self, texts: list[str]) -> Iterable[object]: ...
+    def embed(self, documents: list[str]) -> Iterable[object]: ...
 
 
-class _TokenizingTextModel(Protocol):
+class _TextEmbeddingFactory(Protocol):
+    """The constructor edge, where the download policy is handed to the vendor.
+
+    ``local_files_only`` is absent from ``TextEmbedding.__init__``'s explicit
+    signature and travels through its ``**kwargs``; naming it here is what
+    makes a checker confirm the vendor still accepts it.
+    """
+
+    def __call__(
+        self, *, model_name: str, cache_dir: str, local_files_only: bool
+    ) -> _TextEmbeddingModel: ...
+
+
+@runtime_checkable
+class _InnerModelHolder(Protocol):
+    """An embedding model that carries an inner model.
+
+    Read-only on purpose: this provider never writes ``model``, and a read-only
+    member is covariant, so the vendor may keep a narrower inner type than
+    ``object``.  fastembed creates it in ``__init__``, so no class-level
+    signature describes it and the ``isinstance`` question below is the check.
+    """
+
+    @property
+    def model(self) -> object: ...
+
+
+@runtime_checkable
+class _TokenizerHolder(Protocol):
+    """The inner model, as far as the tokenizer limit questions need it.
+
+    fastembed declares ``TextEmbedding.model`` as ``TextEmbeddingBase``, which
+    carries no tokenizer at all; the attribute is created when the ONNX
+    subclass the registry picks loads its model.  The narrowing is therefore a
+    real question, and asking it is what a cast used to skip.
+    """
+
     tokenizer: object | None
 
+
+@runtime_checkable
+class _TokenizingTextModel(Protocol):
+    """The inner model when it can tokenize a batch of documents.
+
+    Deliberately independent of ``_TokenizerHolder``: an inner model may be
+    able to tokenize without exposing a tokenizer, and the token-count path
+    uses it in exactly that state.
+    """
+
     def tokenize(self, documents: list[str]) -> list[object]: ...
+
+
+def _inner_model_of(model: object) -> object | None:
+    """The inner model an embedding model carries, if it carries one."""
+    return model.model if isinstance(model, _InnerModelHolder) else None
+
+
+def _tokenizer_of(inner: object) -> object | None:
+    """The tokenizer an inner model exposes, if it exposes one at all."""
+    return inner.tokenizer if isinstance(inner, _TokenizerHolder) else None
+
+
+def _drivable_tokenizer(tokenizer: object) -> _Tokenizer | None:
+    """The same tokenizer, once it is known to carry the encode operations."""
+    return tokenizer if isinstance(tokenizer, _Tokenizer) else None
+
+
+def _batch_tokenizer(tokenizer: object) -> _BatchTokenizer | None:
+    """The same tokenizer, once it is known to measure a whole batch at once."""
+    return tokenizer if isinstance(tokenizer, _BatchTokenizer) else None
+
+
+def _tokenizing_model(inner: object) -> _TokenizingTextModel | None:
+    """The inner model, once it is known to tokenize documents."""
+    return inner if isinstance(inner, _TokenizingTextModel) else None
 
 
 class FastEmbedEmbeddingProvider:
@@ -183,7 +251,16 @@ class FastEmbedEmbeddingProvider:
         self._text_embedding = self._resolve_text_embedding()
         self._model: _TextEmbeddingModel | None = None
 
-    def _resolve_text_embedding(self) -> Callable[..., object]:
+    def _resolve_text_embedding(self) -> _TextEmbeddingFactory:
+        """Bind the vendor constructor to the shape this provider calls.
+
+        The import stays dynamic because the extra is optional, and the
+        constructor is read as a plain attribute rather than through
+        ``getattr`` with a literal: an annotated attribute read is the edge a
+        checker can follow back to ``fastembed.TextEmbedding``, which is what
+        holds the declared keywords -- ``local_files_only`` included -- against
+        the installed signature.
+        """
         try:
             fastembed = importlib.import_module("fastembed")
         except ImportError as exc:
@@ -191,12 +268,13 @@ class FastEmbedEmbeddingProvider:
                 "fastembed embedding provider requires the optional "
                 "`codeclone[semantic-fastembed]` extra"
             ) from exc
-        text_embedding = getattr(fastembed, "TextEmbedding", None)
-        if text_embedding is None:
+        try:
+            text_embedding: _TextEmbeddingFactory = fastembed.TextEmbedding
+        except AttributeError as exc:
             raise MemorySemanticUnavailableError(
                 "fastembed package does not expose TextEmbedding"
-            )
-        return cast("Callable[..., object]", text_embedding)
+            ) from exc
+        return text_embedding
 
     def _get_model(self) -> _TextEmbeddingModel:
         if self._model is not None:
@@ -218,16 +296,22 @@ class FastEmbedEmbeddingProvider:
                     "fastembed embedding model is unavailable "
                     f"({self.model_name}; {mode}; cache={self.cache_dir}): {exc}"
                 ) from exc
-            self._model = cast(_TextEmbeddingModel, model)
+            self._model = model
         return self._model
 
-    def _inner_text_model(self) -> _TokenizingTextModel:
-        return cast(_TokenizingTextModel, self._get_model().model)
+    def _inner_text_model(self) -> object:
+        """The inner model, undescribed until a caller asks what it carries.
+
+        ``object`` is everything the vendor promises here; each caller narrows
+        to the surface it actually uses, so an inner model that can tokenize
+        without exposing a tokenizer is answered per question instead of being
+        declared to be both.
+        """
+        return _inner_model_of(self._get_model())
 
     def max_sequence_tokens(self) -> int | None:  # codeclone: ignore[dead-code]
         if self._model is not None:
-            inner = self._inner_text_model()
-            tokenizer = inner.tokenizer
+            tokenizer = _tokenizer_of(self._inner_text_model())
             if tokenizer is not None:
                 truncation = getattr(tokenizer, "truncation", None)
                 if truncation is not None:
@@ -246,9 +330,9 @@ class FastEmbedEmbeddingProvider:
     ) -> tuple[PassageTokenCounts, ...]:
         prefixed = [f"passage: {text}" for text in texts]
         inner = self._inner_text_model()
-        tokenizer = inner.tokenizer
-        tokenize = getattr(inner, "tokenize", None)
-        if tokenizer is None or tokenize is None:
+        tokenizer = _tokenizer_of(inner)
+        tokenizing = _tokenizing_model(inner)
+        if tokenizer is None or tokenizing is None:
             counts = estimate_texts_token_counts(
                 prefixed,
                 estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
@@ -259,15 +343,13 @@ class FastEmbedEmbeddingProvider:
         max_length = _tokenizer_max_length(tokenizer) or known_model_max_tokens(
             self.model_name
         )
-        encode_batch = getattr(tokenizer, "encode_batch", None)
-        encode_ops = _tokenizer_encode_ops(tokenizer)
-        if encode_ops is not None and callable(encode_batch):
-            _, _, no_truncation, enable_truncation = encode_ops
-            no_truncation()
-            raw_encodings = encode_batch(prefixed)
+        batch = _batch_tokenizer(tokenizer)
+        if batch is not None:
+            batch.no_truncation()
+            raw_encodings = batch.encode_batch(prefixed)
             raw_counts = tuple(_encoding_length(encoding) for encoding in raw_encodings)
-            enable_truncation(max_length=max_length)
-            effective_encodings = tokenize(prefixed)
+            batch.enable_truncation(max_length=max_length)
+            effective_encodings = tokenizing.tokenize(prefixed)
             effective_counts = tuple(
                 _encoding_length(encoding) for encoding in effective_encodings
             )
@@ -281,26 +363,23 @@ class FastEmbedEmbeddingProvider:
         )
 
     def chunk_text(self, text: str) -> tuple[str, ...]:
-        inner = self._inner_text_model()
-        tokenizer = inner.tokenizer
+        tokenizer = _drivable_tokenizer(_tokenizer_of(self._inner_text_model()))
         if tokenizer is None:
             return (text,)
         max_length = _tokenizer_max_length(tokenizer) or known_model_max_tokens(
             self.model_name
         )
-        encode_ops = _tokenizer_encode_ops(tokenizer)
-        if encode_ops is None:
-            return (text,)
-        encode, decode, no_truncation, _enable_truncation = encode_ops
-        no_truncation()
+        tokenizer.no_truncation()
         try:
-            if _passage_model_input_token_count(encode, text) <= max_length:
-                _verify_chunk_passage_input(encode, text, model_max_tokens=max_length)
+            if _passage_model_input_token_count(tokenizer, text) <= max_length:
+                _verify_chunk_passage_input(
+                    tokenizer, text, model_max_tokens=max_length
+                )
                 return (text,)
-            content_encoding = encode(text, add_special_tokens=False)
+            content_encoding = tokenizer.encode(text, add_special_tokens=False)
             content_ids = _encoding_token_ids(content_encoding)
             payload_budget = _chunk_payload_token_budget(
-                encode,
+                tokenizer,
                 model_max_tokens=max_length,
             )
             chunks: list[str] = []
@@ -308,8 +387,8 @@ class FastEmbedEmbeddingProvider:
             while start < len(content_ids):
                 end = min(start + payload_budget, len(content_ids))
                 while end > start:
-                    chunk = str(decode(content_ids[start:end]))
-                    if _passage_model_input_token_count(encode, chunk) <= max_length:
+                    chunk = tokenizer.decode(content_ids[start:end])
+                    if _passage_model_input_token_count(tokenizer, chunk) <= max_length:
                         break
                     end -= 1
                 if end <= start:
@@ -317,12 +396,14 @@ class FastEmbedEmbeddingProvider:
                         "unable to fit passage chunk within model token window "
                         f"at content offset {start}"
                     )
-                _verify_chunk_passage_input(encode, chunk, model_max_tokens=max_length)
+                _verify_chunk_passage_input(
+                    tokenizer, chunk, model_max_tokens=max_length
+                )
                 chunks.append(chunk)
                 start = end
             return tuple(chunks)
         finally:
-            _restore_tokenizer_truncation(tokenizer, max_length=max_length)
+            tokenizer.enable_truncation(max_length=max_length)
 
     def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
         prefixed = [f"passage: {text}" for text in texts]
@@ -331,14 +412,13 @@ class FastEmbedEmbeddingProvider:
                 prefixed,
                 estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
             )
-        inner = self._inner_text_model()
-        tokenize = getattr(inner, "tokenize", None)
-        if tokenize is None:
+        tokenizing = _tokenizing_model(self._inner_text_model())
+        if tokenizing is None:
             return estimate_texts_token_counts(
                 prefixed,
                 estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
             )
-        encodings = tokenize(prefixed)
+        encodings = tokenizing.tokenize(prefixed)
         return tuple(len(getattr(encoding, "ids", ())) for encoding in encodings)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
