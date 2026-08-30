@@ -37,7 +37,7 @@ from ...memory.jobs import (
     execute_projection_rebuild_status,
     execute_run_projection_jobs_once,
 )
-from ...memory.models import MemoryProject, MemoryQuery
+from ...memory.models import MemoryProject, MemoryQuery, MemoryRecord
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
@@ -116,6 +116,22 @@ _CLI_GOVERNANCE_BREAK_GLASS_MESSAGE = (
     "governance channel, or pass --i-know-what-im-doing for an explicit "
     "human break-glass action."
 )
+
+# Short memory ids: the query mode each lane answers on, and the words this
+# surface uses for the three outcomes the retrieval door can report.
+_RECORD_ID_GET_MODE = "get"
+_TRAJECTORY_ID_GET_MODE = "trajectory_get"
+_AMBIGUOUS_ID_STATUS = "ambiguous"
+_AMBIGUOUS_ID_HEADER = (
+    "Ambiguous id {requested}: {count} matches, so nothing was changed."
+)
+_AMBIGUOUS_ID_UNLISTED = "  ... and {count} more not listed"
+_AMBIGUOUS_ID_NEXT_STEP = (
+    "Re-run with a full id from the list: codeclone memory {command} <id>"
+)
+_RESOLVED_ID_NOTE = "Resolved {requested} -> {resolved}"
+
+_GovernanceTransition = Callable[[SqliteEngineeringMemoryStore, str], MemoryRecord]
 
 
 def _print_memory_contract_error(console: PrinterLike, exc: MemoryContractError) -> int:
@@ -825,95 +841,205 @@ def _run_review_candidates(
     return int(ExitCode.SUCCESS)
 
 
-def _run_approve(
-    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+def _memory_id_answer(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project: MemoryProject,
+    config: MemoryConfig,
+    root_path: Path,
+    mode: str,
+    value: str,
+) -> dict[str, object]:
+    """Ask retrieval what one typed id names, instead of resolving it here.
+
+    Retrieval is the caller of the lane's id resolver, so asking it is what
+    makes a short id an agent printed from MCP mean the same object on this
+    surface. The door's own answer is carried onward rather than re-modelled,
+    and a request it refuses to classify comes back empty so the typed string
+    keeps travelling untouched.
+    """
+
+    try:
+        return query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root_path,
+            backend=config.backend,
+            db_path=resolve_memory_db_path(root_path, config),
+            mode=mode,
+            record_id=value,
+        )
+    except MemoryContractError:
+        return {}
+
+
+def _memory_id_ambiguity(answer: dict[str, object]) -> dict[str, object]:
+    """The door's ambiguity payload, empty when it named a single object."""
+
+    if answer.get("status") != _AMBIGUOUS_ID_STATUS:
+        return {}
+    return nested_payload_dict(answer.get("payload"))
+
+
+def _resolved_memory_id(answer: dict[str, object], *, typed: str) -> str:
+    """The id a prefix resolved to, or the typed string left as it came.
+
+    Falling back rather than failing is what keeps a full id on the path it
+    has always taken and keeps "nothing matched" in the words it has always
+    had; only ambiguity is a new outcome, and its caller refuses instead.
+    """
+
+    payload = nested_payload_dict(answer.get("payload"))
+    resolved = nested_payload_dict(payload.get("resolution")).get("resolved")
+    if isinstance(resolved, str) and resolved:
+        return resolved
+    return typed
+
+
+def _render_ambiguous_memory_id(
+    *,
+    console: PrinterLike,
+    command: str,
+    typed: str,
+    ambiguity: dict[str, object],
 ) -> int:
+    """Refuse a prefix that names more than one object, and say which ones.
+
+    The count comes from the lane's exact total, not from the list length:
+    the door caps the candidates it returns, and a human deciding how much
+    longer to make the prefix has to be told how many objects it really hit.
+    """
+
+    count = as_int(ambiguity.get("candidate_count"))
+    candidates = mapping_items_from_list(ambiguity.get("candidates"))
+    console.print(_AMBIGUOUS_ID_HEADER.format(requested=typed, count=count))
+    for candidate in candidates:
+        console.print(
+            f"  {candidate.get('id')}  {candidate.get('status')}  "
+            f"{candidate.get('kind')}  {candidate.get('preview')}"
+        )
+    unlisted = count - len(candidates)
+    if unlisted > 0:
+        console.print(_AMBIGUOUS_ID_UNLISTED.format(count=unlisted))
+    console.print(_AMBIGUOUS_ID_NEXT_STEP.format(command=command))
+    return int(ExitCode.CONTRACT_ERROR)
+
+
+def _render_memory_id_resolution(
+    *, console: PrinterLike, typed: str, resolved: str
+) -> None:
+    """Name the object a prefix resolved to; the action it precedes is final."""
+
+    if resolved != typed:
+        console.print(_RESOLVED_ID_NOTE.format(requested=typed, resolved=resolved))
+
+
+def _run_governance_transition(
+    *,
+    console: PrinterLike,
+    root_path: Path,
+    args: argparse.Namespace,
+    command: str,
+    past_tense: str,
+    apply_transition: _GovernanceTransition,
+    detail_suffix: str = "",
+) -> int:
+    """One irreversible governance transition, id contract included.
+
+    approve/reject/archive differ only in the transition they apply and the
+    word they report, so the id contract is written once here. Three copies
+    could resolve a prefix on one command and refuse it on another, and the
+    refusal has to be reached before any store write in all three.
+    """
+
     if not _confirm_cli_governance_break_glass(console, args):
         return int(ExitCode.CONTRACT_ERROR)
     try:
-        store, _config, _project = _open_store(root_path)
+        store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
         console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
+    typed = str(args.record_id)
     try:
-        record = approve_record(
+        answer = _memory_id_answer(
             store,
-            record_id=str(args.record_id),
-            approved_by=str(args.by),
+            project=project,
+            config=config,
+            root_path=root_path,
+            mode=_RECORD_ID_GET_MODE,
+            value=typed,
         )
+        if ambiguity := _memory_id_ambiguity(answer):
+            return _render_ambiguous_memory_id(
+                console=console,
+                command=command,
+                typed=typed,
+                ambiguity=ambiguity,
+            )
+        resolved = _resolved_memory_id(answer, typed=typed)
+        record = apply_transition(store, resolved)
     except Exception as exc:
-        console.print(f"Approve failed: {exc}")
+        console.print(f"{command.capitalize()} failed: {exc}")
         return int(ExitCode.CONTRACT_ERROR)
     finally:
         store.close()
+    _render_memory_id_resolution(console=console, typed=typed, resolved=resolved)
     render_governance_result(
         console=console,
-        action="approved",
+        action=past_tense,
         record_id=record.id,
-        detail=f"Approved {record.id} -> active",
+        detail=f"{past_tense.capitalize()} {record.id}{detail_suffix}",
     )
     return int(ExitCode.SUCCESS)
+
+
+def _run_approve(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    return _run_governance_transition(
+        console=console,
+        root_path=root_path,
+        args=args,
+        command="approve",
+        past_tense="approved",
+        detail_suffix=" -> active",
+        apply_transition=lambda store, record_id: approve_record(
+            store, record_id=record_id, approved_by=str(args.by)
+        ),
+    )
 
 
 def _run_reject(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
-    if not _confirm_cli_governance_break_glass(console, args):
-        return int(ExitCode.CONTRACT_ERROR)
-    try:
-        store, _config, _project = _open_store(root_path)
-    except FileNotFoundError as exc:
-        console.print(ui.fmt_memory_db_not_found(error=exc))
-        return int(ExitCode.CONTRACT_ERROR)
-    try:
-        record = reject_record(
+    return _run_governance_transition(
+        console=console,
+        root_path=root_path,
+        args=args,
+        command="reject",
+        past_tense="rejected",
+        apply_transition=lambda store, record_id: reject_record(
             store,
-            record_id=str(args.record_id),
+            record_id=record_id,
             rejected_by=str(args.by),
             reason=args.reason,
-        )
-    except Exception as exc:
-        console.print(f"Reject failed: {exc}")
-        return int(ExitCode.CONTRACT_ERROR)
-    finally:
-        store.close()
-    render_governance_result(
-        console=console,
-        action="rejected",
-        record_id=record.id,
-        detail=f"Rejected {record.id}",
+        ),
     )
-    return int(ExitCode.SUCCESS)
 
 
 def _run_archive(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
-    if not _confirm_cli_governance_break_glass(console, args):
-        return int(ExitCode.CONTRACT_ERROR)
-    try:
-        store, _config, _project = _open_store(root_path)
-    except FileNotFoundError as exc:
-        console.print(ui.fmt_memory_db_not_found(error=exc))
-        return int(ExitCode.CONTRACT_ERROR)
-    try:
-        record = archive_record(
-            store,
-            record_id=str(args.record_id),
-            archived_by=str(args.by),
-        )
-    except Exception as exc:
-        console.print(f"Archive failed: {exc}")
-        return int(ExitCode.CONTRACT_ERROR)
-    finally:
-        store.close()
-    render_governance_result(
+    return _run_governance_transition(
         console=console,
-        action="archived",
-        record_id=record.id,
-        detail=f"Archived {record.id}",
+        root_path=root_path,
+        args=args,
+        command="archive",
+        past_tense="archived",
+        apply_transition=lambda store, record_id: archive_record(
+            store, record_id=record_id, archived_by=str(args.by)
+        ),
     )
-    return int(ExitCode.SUCCESS)
 
 
 def _run_trajectory(
@@ -1168,17 +1294,35 @@ def _run_trajectory_show(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
     try:
-        store, _config, _project = _open_store(root_path)
+        store, config, project = _open_store(root_path)
     except FileNotFoundError as exc:
         console.print(ui.fmt_memory_db_not_found(error=exc))
         return int(ExitCode.CONTRACT_ERROR)
+    typed = str(args.trajectory_id)
     try:
-        trajectory = store.find_trajectory(str(args.trajectory_id))
+        answer = _memory_id_answer(
+            store,
+            project=project,
+            config=config,
+            root_path=root_path,
+            mode=_TRAJECTORY_ID_GET_MODE,
+            value=typed,
+        )
+        if ambiguity := _memory_id_ambiguity(answer):
+            return _render_ambiguous_memory_id(
+                console=console,
+                command="trajectory show",
+                typed=typed,
+                ambiguity=ambiguity,
+            )
+        resolved = _resolved_memory_id(answer, typed=typed)
+        trajectory = store.find_trajectory(resolved)
     finally:
         store.close()
     if trajectory is None:
-        console.print(f"Trajectory not found: {args.trajectory_id}")
+        console.print(f"Trajectory not found: {typed}")
         return int(ExitCode.CONTRACT_ERROR)
+    _render_memory_id_resolution(console=console, typed=typed, resolved=resolved)
     render_trajectory_detail(console=console, trajectory=trajectory)
     return int(ExitCode.SUCCESS)
 
