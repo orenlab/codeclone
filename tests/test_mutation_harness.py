@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import mutation_harness
 from scripts.mutation_harness import PlanError, load_plan, main
 
 _HARNESS = Path(__file__).resolve().parents[1] / "scripts" / "mutation_harness.py"
@@ -645,6 +646,42 @@ def test_a_terminating_signal_restores_the_tree(sandbox: _Sandbox) -> None:
     payload = json.loads(stdout)
     assert isinstance(payload, dict)
     assert "interrupted" in _text(_only(payload), "reason")
+
+
+def test_an_interrupt_the_instant_the_mutation_lands_still_restores(
+    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restore is owed from the first readable byte, not from a later return.
+
+    The signal test above sends its ``SIGTERM`` from another process and so can
+    only sample this window by luck; under load it lands inside it and the
+    mutant stays in the tree.  Here the signal is raised at the first instant
+    the mutation is readable on disk, which is the earliest moment the harness
+    owes a restore, so the window is hit every run rather than one run in sixty.
+    """
+    target = sandbox.root / "subject.py"
+    fired: list[Path] = []
+    measure = mutation_harness._file_digest
+
+    def terminate_once_the_mutation_is_readable(path: Path) -> str:
+        readable = path.is_file() and "41 + 2" in path.read_text(encoding="utf-8")
+        if readable and not fired:
+            fired.append(path)
+            signal.raise_signal(signal.SIGTERM)
+        return measure(path)
+
+    monkeypatch.setattr(
+        mutation_harness, "_file_digest", terminate_once_the_mutation_is_readable
+    )
+    code, report = _drive(sandbox, _mutant())
+    mutant = _only(report)
+    # No reachable window would make every assertion below pass vacuously.
+    assert [path.resolve() for path in fired] == [target.resolve()]
+    assert _text(mutant, "reason") == f"interrupted_by_signal_{int(signal.SIGTERM)}"
+    assert target.read_text(encoding="utf-8") == _SUBJECT
+    assert sandbox.status() == ""
+    assert _flag(_entry(mutant, "checks"), "restore_verified")
+    assert code == 3
 
 
 # --------------------------------------------------------------------------

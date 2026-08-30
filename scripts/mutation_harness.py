@@ -32,7 +32,9 @@ construction rather than by discipline:
 7.  Stale ``__pycache__`` answers with yesterday's code.  Caches are purged and
     the child runs with bytecode writing disabled.
 8.  A timeout or a signal skips ``finally``.  Signals are converted into an
-    exception so the restore path is the only way out.
+    exception so the restore path is the only way out, and the bytes that undo
+    an edit are held before the edit is written, so no interrupt can land
+    between the mutation reaching the disk and somebody owing its removal.
 9.  "It is equivalent" buries a survivor.  Equivalence is a justified
     annotation on a survivor and never becomes a verdict of its own.
 
@@ -276,10 +278,26 @@ class SeedRun:
 
 
 @dataclass(frozen=True)
-class AppliedMutation:
-    """The bytes needed to put the worktree back exactly as it was."""
+class Target:
+    """The file a mutant may edit, and the bytes that put it back.
+
+    Read before anything is written.  The obligation to restore has to exist
+    before the mutation can be observed on disk: a termination signal delivered
+    in between would otherwise leave a mutant in the tree that nobody owes.
+    """
 
     path: Path
+    original: bytes
+
+    def restore(self) -> None:
+        """Write the original bytes back over whatever is there now."""
+        self.path.write_bytes(self.original)
+
+
+@dataclass(frozen=True)
+class AppliedMutation:
+    """The bytes one edit replaced, and the bytes it wrote in their place."""
+
     original: bytes
     mutated: bytes
 
@@ -564,7 +582,13 @@ def _substitute(text: str, mutant: Mutant) -> str:
     return text[:index] + mutant.replace + text[index + len(mutant.find) :]
 
 
-def _apply_mutation(root: Path, mutant: Mutant) -> AppliedMutation:
+def _locate_target(root: Path, mutant: Mutant) -> Target:
+    """Refuse an unusable target, and read the bytes that undo the edit.
+
+    Every refusal a mutant can earn without touching the disk happens here, so
+    that by the time anything is written the caller already holds the means to
+    take it back.
+    """
     path = (root / mutant.target).resolve()
     if root.resolve() not in path.parents:
         raise MutationError("target_outside_root")
@@ -572,16 +596,19 @@ def _apply_mutation(root: Path, mutant: Mutant) -> AppliedMutation:
         raise MutationError("target_not_a_file")
     if is_git_ignored(root, mutant.target):
         raise MutationError("target_is_git_ignored")
-    original = path.read_bytes()
+    return Target(path=path, original=path.read_bytes())
+
+
+def _apply_mutation(target: Target, mutant: Mutant) -> AppliedMutation:
     try:
-        text = original.decode("utf-8")
+        text = target.original.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise MutationError("target_not_utf8") from exc
     mutated = _substitute(text, mutant).encode("utf-8")
-    path.write_bytes(mutated)
-    if _file_digest(path) == _digest_bytes(original):
+    target.path.write_bytes(mutated)
+    if _file_digest(target.path) == _digest_bytes(target.original):
         raise MutationError("mutation_not_applied")
-    return AppliedMutation(path=path, original=original, mutated=mutated)
+    return AppliedMutation(original=target.original, mutated=mutated)
 
 
 # ---------------------------------------------------------------------------
@@ -677,17 +704,19 @@ def _baseline_refusal(run: SeedRun) -> tuple[Verdict, str] | None:
 def _mutate_and_run(
     root: Path, mutant: Mutant, baselines: tuple[SeedRun, ...]
 ) -> Attempt:
+    target: Target | None = None
     applied: AppliedMutation | None = None
     runs: tuple[SeedRun, ...] = ()
     failure: str | None = None
     try:
-        applied = _apply_mutation(root, mutant)
+        target = _locate_target(root, mutant)
+        applied = _apply_mutation(target, mutant)
         runs = tuple(_run_seed(root, mutant, seed) for seed in mutant.seeds)
     except (MutationError, Interrupted) as exc:
         failure = exc.reason
     finally:
-        if applied is not None:
-            applied.path.write_bytes(applied.original)
+        if target is not None:
+            target.restore()
     return Attempt(
         baselines=baselines,
         seeds=runs,
