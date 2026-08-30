@@ -7,27 +7,46 @@
 """F1 discriminator pins (ruling 2026-08-24 §1; fork resolved 2026-08-26).
 
 The measured defect: the bare ``(FILE, qualname, dimension)`` key of the
-``risk_observations`` family is blind to 4 real entity groups (3 sets of
-``@overload`` declarations and one property/setter pair, 9 lost rows of
-17 561 on the frozen corpus) — different declarations, one key.  The
-ratified resolution is a producer-native discriminator: the
-declaration-site ``start_line``, by the product's own precedent
-(``complexity.items`` keys ``(path, qualname, start_line)`` and is
-12 285/12 285 unique on the same corpus).
+``risk_observations`` family is blind to 4 real declaration groups —
+``@overload`` families of 4, 4 and 3 declarations plus one property/setter
+pair of 2, so 13 rows collapse onto 4 keys and 9 rows are lost (9 of
+20 001 @ 95e4210b 2026-08-30, a dated observation).  Different
+declarations, one key.  The ratified resolution is a producer-native
+discriminator: the declaration-site ``start_line``, by the product's own
+precedent (``complexity.items`` keys ``(path, qualname, start_line)`` and
+is unique on it: 12 285/12 285 at ratification, 14 040/14 040 @ 95e4210b).
 
 The named fork — declaration site as identity, unlike dependency
 occurrences where location is evidence — was RESOLVED by the maintainer's
 morning ruling (2026-08-26, variant (b)): the family is now a real wire
 family, and the producer carries the site end to end.
+
+``RISK_OBSERVATIONS_KEY`` has NO production consumer: the key the model
+enforces is built inside ``model._prove_unique_keys``.  So the pins below
+do not compare the declaration to a literal — that proves only that a
+literal was typed twice, and it was measured on 2026-08-30 to stay green
+while the executed key both lost ``start_line`` and gained a component.
+They drive ``CanonicalModel.normalize`` and bind the declaration to the
+key that actually runs, in both directions.
 """
 
 from __future__ import annotations
 
+import ast
 import dataclasses
+from collections.abc import Callable
 
+import pytest
+
+from codeclone.canonical.errors import CanonicalModelError
+from codeclone.canonical.identity import FileId, SymbolId
 from codeclone.canonical.model import (
+    AnalysisFacts,
+    CanonicalFacts,
+    CanonicalModel,
     DependencyOccurrenceRow,
     DependencyRelationRow,
+    RiskObservationRow,
 )
 from codeclone.canonical.registry import (
     FACT_FAMILY_FIELDS,
@@ -38,15 +57,122 @@ from codeclone.canonical.registry import (
 )
 from codeclone.models import RiskObservation, Unit
 
+# The one base row every F1 pin below mutates, and the sentinel value each
+# declarable component contributes to the executed key.  Distinct values on
+# purpose: a key that reorders its components reds against these.
+_F1_BASE_FILE = "pkg/declared.py"
+_F1_BASE_QUALNAME = "Declared.parse_args"
+_F1_BASE_DIMENSION = "cyclomatic_complexity"
+_F1_BASE_NUMERATOR = 7
+_F1_BASE_START_LINE = 11
 
-def test_f1_key_is_the_ratified_declaration_site_key() -> None:
-    """The exact ratified key — nothing dropped, nothing smuggled in.
+_F1_SENTINELS: dict[str, object] = {
+    "file": _F1_BASE_FILE.encode("utf-8"),
+    "qualname": _F1_BASE_QUALNAME.encode("utf-8"),
+    "dimension": _F1_BASE_DIMENSION,
+    "start_line": _F1_BASE_START_LINE,
+    "numerator": _F1_BASE_NUMERATOR,
+}
 
-    Dropping ``start_line`` reintroduces the measured 9-row collision;
-    adding any further component (``end_line``, ``raw_hash``) would exceed
-    the ratified complexity.items precedent. Both directions must red.
+
+def _f1_row(**overrides: object) -> RiskObservationRow:
+    values: dict[str, object] = {
+        "symbol": SymbolId(FileId(_F1_BASE_FILE), _F1_BASE_QUALNAME),
+        "dimension": _F1_BASE_DIMENSION,
+        "numerator": _F1_BASE_NUMERATOR,
+        "start_line": _F1_BASE_START_LINE,
+    }
+    values.update(overrides)
+    return RiskObservationRow(**values)  # type: ignore[arg-type]
+
+
+#: One mutator per component NAME the registry may declare for this family.
+#: Each yields a row differing from ``_f1_row()`` in exactly that component,
+#: so the pins can ask the MODEL what each name is worth.  A declared name
+#: with no mutator here is refused rather than silently skipped.
+_F1_COMPONENT_MUTATORS: dict[str, Callable[[], RiskObservationRow]] = {
+    "file": lambda: _f1_row(symbol=SymbolId(FileId("pkg/other.py"), _F1_BASE_QUALNAME)),
+    "qualname": lambda: _f1_row(
+        symbol=SymbolId(FileId(_F1_BASE_FILE), "Declared.other")
+    ),
+    "dimension": lambda: _f1_row(dimension="nesting_depth"),
+    "start_line": lambda: _f1_row(start_line=_F1_BASE_START_LINE + 11),
+    "numerator": lambda: _f1_row(numerator=_F1_BASE_NUMERATOR + 2),
+}
+
+
+def _f1_model(*rows: RiskObservationRow) -> CanonicalModel:
+    return CanonicalModel(
+        facts=CanonicalFacts(analysis=AnalysisFacts(risk_observations=frozenset(rows)))
+    )
+
+
+def _flatten(value: object) -> tuple[object, ...]:
+    if not isinstance(value, tuple):
+        return (value,)
+    return tuple(part for item in value for part in _flatten(item))
+
+
+def test_f1_declared_key_is_the_key_the_model_executes() -> None:
+    """The declaration names the executed key — components AND order.
+
+    The refusal carries the key the model actually built, so this reads
+    that value back out of the production path instead of restating the
+    literal.  Both directions red: drop a component from either side and
+    the arity stops matching; reorder either side and the sentinels stop
+    lining up.
     """
-    assert RISK_OBSERVATIONS_KEY == ("file", "qualname", "dimension", "start_line")
+    assert set(RISK_OBSERVATIONS_KEY) <= set(_F1_SENTINELS), (
+        "a declared key component has no sentinel, so this pin cannot say "
+        "what the executed key should contain"
+    )
+    with pytest.raises(CanonicalModelError) as refusal:
+        # Two rows that differ ONLY in the payload column: a collision iff
+        # the executed key is exactly the declared one.
+        _f1_model(_f1_row(), _F1_COMPONENT_MUTATORS["numerator"]()).normalize()
+
+    marker = "risk_observations.key="
+    message = str(refusal.value)
+    assert marker in message
+    executed = _flatten(ast.literal_eval(message.split(marker, 1)[1]))
+    assert executed == tuple(_F1_SENTINELS[name] for name in RISK_OBSERVATIONS_KEY)
+
+
+def test_f1_declared_key_components_are_executed_as_identity() -> None:
+    """Every DECLARED component is identity to the model: two rows differing
+    only in it are two facts.  Declaring a component the model treats as
+    payload reds here — the model refuses instead of keeping both."""
+    declared = tuple(RISK_OBSERVATIONS_KEY)
+    assert set(declared) <= set(_F1_COMPONENT_MUTATORS), (
+        "a declared component has no mutator, so it would go untested"
+    )
+    assert set(declared) < set(_F1_COMPONENT_MUTATORS), (
+        "the key must be a STRICT subset of the row's components: a family "
+        "declared all-key leaves the payload pin with nothing to execute"
+    )
+    for name in declared:
+        model = _f1_model(_f1_row(), _F1_COMPONENT_MUTATORS[name]())
+        kept = model.normalize().facts.analysis.risk_observations
+        assert len(kept) == 2, (
+            f"{name!r} is declared a key component, but the model merged two "
+            "rows that differ only in it"
+        )
+
+
+def test_f1_row_fields_outside_the_declared_key_are_executed_as_payload() -> None:
+    """The closed half: every component the declaration does NOT name is
+    payload, and two rows differing only in it share one key and are
+    refused.  Dropping a real key component from the declaration reds here
+    — the model keeps both rows and the expected refusal never arrives."""
+    payload = tuple(
+        name
+        for name in sorted(_F1_COMPONENT_MUTATORS)
+        if name not in RISK_OBSERVATIONS_KEY
+    )
+    for name in payload:
+        model = _f1_model(_f1_row(), _F1_COMPONENT_MUTATORS[name]())
+        with pytest.raises(CanonicalModelError, match=r"risk_observations\.key"):
+            model.normalize()
 
 
 def test_f1_family_is_a_wire_family_with_the_ratified_columns() -> None:

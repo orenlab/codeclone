@@ -24,6 +24,33 @@ The wire order of fact families is born mechanically from this registry —
 sorted family names, no manual tail (facts-order sanction, 2026-08-13):
 declared field order exists only where earlier bytes are required to
 interpret later bytes, and fact families have no such dependency.
+
+Corpus ratios in this module (``2 379/2 379 @ 95e4210b, 2026-08-30``) are
+DATED OBSERVATIONS of one corpus at one revision, never invariants.  They
+record what a key was measured to do on a population; they do not claim
+what it does now.  Every one of them moved between ratification and
+2026-08-30 (F1 17 561 → 20 001 rows, F2 2 091 → 2 379, F4 12 971 → 14 827,
+F10 387 → 406), because the population moves with the tree — so an
+undated ratio silently becomes a false statement about the current run,
+which is exactly what these stamps exist to prevent.  The invariant the
+ratios were introduced to support — *the key is total on its family* — is
+not documentation at all: ``model._unique_by_key`` proves it on every
+ingest of every corpus, and ``test_canonical_wire_freeze_corpus`` executes
+it against real producer output.  Re-derive a ratio by running the
+analyzer at the stamped revision; do not update the number in place
+without re-stamping it.
+
+Not every declared attribute is enforcement, and the opening claim holds
+only for the wire obligation.  ``field``, ``wire``, ``stored`` and
+``wire_shape`` are read by the accessors below, so an undeclared wire
+column genuinely cannot be written.  ``category``, ``owner``,
+``derivation`` and ``public_handle`` have NO production reader (measured
+2026-08-30 by AST over the tree: ``category`` and ``derivation`` have no
+reader at all; ``owner`` and ``public_handle`` only in
+``tests/test_canonical_identity``).  A wrong epistemic class or a wrong
+formula owner is therefore narration that nothing can catch.  Giving
+them a consumer is a production decision, not a comment fix — do not
+read the opening paragraph as if they were already enforced.
 """
 
 from __future__ import annotations
@@ -61,8 +88,9 @@ class FieldDeclaration:
 # names; the wire emits them in sorted(key) order — mechanically, from this
 # mapping, never from a hand-written list.
 FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
-    # F3 (wave 4): key (scope, feature) — measured live at HEAD,
-    # 2 614/2 614 unique; the scope is the ratified tagged ScopeRef over
+    # F3 (wave 4): key (scope, feature) — 2 614/2 614 unique at
+    # ratification, 2 671/2 671 @ 95e4210b 2026-08-30; the scope is the
+    # ratified tagged ScopeRef over
     # MODULE | FILE (ruling 2026-08-24 §2), never a polymorphic string.
     "adoption_counts": (
         FieldDeclaration(
@@ -97,8 +125,9 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             ANALYSIS_FACT,
             "adoption_coverage_producer",
             "key component: tagged ScopeRef MODULE | FILE (ruling §2) — "
-            "measured live at HEAD 914 module / 9 file scopes, zero "
-            "unresolvable; the variant IS identity",
+            "914 module / 9 file scopes at ratification, 933 / 9 @ "
+            "95e4210b 2026-08-30, zero unresolvable throughout; the "
+            "variant IS identity",
             stored=True,
             wire=True,
         ),
@@ -283,7 +312,9 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "symbol",
             ANALYSIS_FACT,
             "design_metrics_producer",
-            "SYMBOL key component (measured 2091/2091 with dimension)",
+            "SYMBOL key component (with dimension: 2 091/2 091 at "
+            "ratification, 2 379/2 379 @ 95e4210b 2026-08-30 — see the "
+            "corpus-ratio note at the head of this module)",
             stored=True,
             wire=True,
         ),
@@ -677,9 +708,11 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
     ),
     # F10 (wave 4, slice 5): key (FILE, start_line, evidence_symbol) —
     # the packet's exhaustive 1-3-field enumeration found exactly six
-    # unique 3-keys, evidence_symbol in all (387/387 live; 11/11 on the
-    # s5 corpus).  The legacy row's ``module`` field is deliberately NOT
-    # declared: it is the registry's FILE-MODULE projection, verified at
+    # unique 3-keys, evidence_symbol in all (387/387 at ratification,
+    # 406/406 @ 95e4210b 2026-08-30, 11/11 on the s5 corpus — dated
+    # observations, see the module head).  The legacy row's ``module``
+    # field is deliberately NOT declared: it is the registry's
+    # FILE-MODULE projection, verified at
     # ingest and re-derivable from file_modules (the F7 member_paths
     # precedent) — the projector cannot emit it.
     "security_surfaces": (
@@ -921,19 +954,34 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
 # and ratified by the 2026-08-26 morning ruling (fork (b)).
 #
 # The measured defect: the bare ``(FILE, qualname, dimension)`` key is blind
-# to 4 real entity groups (three ``@overload`` triples and one
-# property/setter pair — 9 of 17 561 corpus rows lost), and every one of
-# them is *different declarations sharing one name*, so deduplication is
-# indefensible: a producer-native discriminator is required.
+# to 4 real declaration groups — ``@overload`` families of 4, 4 and 3
+# declarations plus one property/setter pair of 2, so 13 rows collapse onto
+# 4 keys and 9 rows are lost (9 of 20 001 @ 95e4210b 2026-08-30; the note
+# this replaced said "three triples and one pair", which totals 7, not the
+# 9 it claimed).  Every group is *different declarations sharing one name*,
+# so deduplication is indefensible: a producer-native discriminator is
+# required.
 #
 # The ratified discriminator is the declaration-site ``start_line``, by the
 # product's own precedent: ``complexity.items`` already keys
-# ``(path, qualname, start_line)`` and is 12 285/12 285 unique on the frozen
-# corpus.  The producer now carries the fact end to end: the risk lane's
+# ``(path, qualname, start_line)`` and is unique on it (12 285/12 285 at
+# ratification, 14 040/14 040 @ 95e4210b 2026-08-30).  The producer now
+# carries the fact end to end: the risk lane's
 # ``RiskObservation`` row keeps ``start_line`` (payload schema "5"), the
 # baseline reader keys with it, and the family declaration above admits it
 # as a KEY component — the named exception to the dependency rule that
 # location is evidence (ruling §2), admitted by fork (b).
+#
+# THIS TUPLE IS A DECLARATION, NOT THE EXECUTED KEY.  No production caller
+# reads it: the key the model actually enforces is built inside
+# ``model._prove_unique_keys``.  A declaration with no structural path to
+# the decision it names is not enforcement, so the binding is carried by
+# ``tests/test_canonical_registry`` — it drives the real
+# ``CanonicalModel.normalize`` path and refuses to let this tuple and the
+# executed key drift apart, in either direction.  Keep that binding alive:
+# a pin that compares this literal to a literal proves only that the
+# literal was typed twice (measured 2026-08-30 — the pin it replaced stayed
+# green while the executed key both lost and gained a component).
 RISK_OBSERVATIONS_FAMILY: Final = "risk_observations"
 RISK_OBSERVATIONS_KEY: Final[tuple[str, ...]] = (
     "file",

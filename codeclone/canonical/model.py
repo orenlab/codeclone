@@ -15,6 +15,14 @@ the wire projection.
 the frozen corpus, 1 157 of 12 244 rows are not sorted-deduplicated, so the
 producer's order is a fact and canonizing it away would lose an entity.
 
+Corpus ratios in this module are DATED OBSERVATIONS, never invariants: a
+population moves with the tree, so a ratio describes one corpus at one
+revision.  A ratio carrying a revision stamp (``2 379/2 379 @ 95e4210b,
+2026-08-30``) was re-measured then; a ratio WITHOUT one is of unknown
+vintage and must be re-measured before it is relied on.  The invariant
+the ratios support — the key is total on its family — is enforced by
+``_unique_by_key`` on every ingest, not by these numbers.
+
 Wave family subset: ``file_modules · contracts · graph_nodes · sink_roles
 · candidates · semantic_edges · dependency_relations ·
 dependency_occurrences · violations · coupling_cohesion_observations ·
@@ -310,12 +318,31 @@ class CloneGroupRow:
 class DeadCodeObservationRow:
     """F4 dead-code observation fact (wave 4, slice K3).
 
-    Logical key — measured on the frozen corpus: ``(entity,
-    observation_kind)`` (12 970/12 971; the one lost row was byte-identical,
-    which set semantics absorbs losslessly).  The entity is the RATIFIED
-    tagged reference (ruling 2026-08-24 §2): the variant is part of the
-    identity, and an unclassifiable reference is refused at the oracle, not
-    guessed into a domain.  The counts are observed facts (zero measured);
+    Logical key: ``(entity, observation_kind)`` — and it is NOT total on
+    this lane.  Measured on the self-repo corpus (14 826/14 827 @ 95e4210b,
+    2026-08-30; a dated observation of one corpus at one revision, never an
+    invariant): the ingest ``frozenset`` collapses one repeat, so the model
+    carries one row fewer than the report the same run emitted.
+
+    That collapse is NOT "one fact stated twice".  The two colliding rows
+    are the getter and the setter of ``MCPSession._agent_label`` — two
+    declarations, at source lines 191 and 197 — and they arrive
+    byte-identical only because this lane's row shape carries no
+    declaration site.  The producer is not uniform about that: it emits ONE
+    row for an ``@overload`` family (the stubs are dropped upstream) and
+    TWO for a property/setter pair, while the F1 lane, which does carry
+    ``start_line``, emits both declarations.  So a real declaration is
+    lost, silently, before any model guard can see it.
+
+    What a byte-identical repeat SHOULD be — a refusal, a counted
+    multiplicity, or a collapse with a receipt — decides wire and identity
+    semantics and is an open ruling; this docstring states the measurement,
+    not a resolution.  Two DIFFERING rows under one key stay refused.
+
+    The entity is the RATIFIED tagged reference (ruling 2026-08-24 §2):
+    the variant is part of the identity, and an unclassifiable reference
+    is refused at the oracle, not guessed into a domain.  The counts are
+    observed facts (zero measured);
     ``abstained`` and ``live_root_reason`` are mutually exclusive by the
     producer's contract — an abstention outranks a root reason and the two
     never coexist on one row.
@@ -401,7 +428,8 @@ class CouplingCohesionRow:
     """F2 per-class design-metric observation (wave 4).
 
     Logical key — measured from the producer, never invented:
-    ``(SYMBOL, dimension)``, 2 091/2 091 unique on the frozen corpus
+    ``(SYMBOL, dimension)``, unique on the corpus (2 091/2 091 at
+    ratification, 2 379/2 379 @ 95e4210b 2026-08-30)
     (``observations/projection.py`` keys rows by source file, bare qualname
     and dimension; SYMBOL is the ratified FILE-headed spelling of the same
     entity).  ``numerator`` is payload and strictly positive: the producer
@@ -432,12 +460,16 @@ class RiskObservationRow:
 
     Logical key — the RATIFIED form: ``(SYMBOL, dimension, start_line)``,
     spelling the registry's ``(file, qualname, dimension, start_line)``.
-    The bare site-blind key is blind to 4 measured entity groups (three
-    ``@overload`` triples and one property/setter pair — 9 of 17 561 corpus
-    rows), and every one is *different declarations sharing one name*, so
+    The bare site-blind key is blind to 4 measured declaration groups:
+    ``@overload`` families of 4, 4 and 3 declarations plus one
+    property/setter pair of 2, so 13 rows collapse onto 4 keys and 9 rows
+    are lost (9 of 20 001 @ 95e4210b, 2026-08-30 — a dated observation, not
+    an invariant; the note this replaced said "three ``@overload`` triples
+    and one pair", whose own arithmetic gives 7, not the 9 it claimed).
+    Every group is *different declarations sharing one name*, so
     deduplication is indefensible.  ``start_line`` is the producer-native
-    discriminator (the ``complexity.items`` precedent, 12 285/12 285
-    unique) and here it IS identity — the named exception to the
+    discriminator (the ``complexity.items`` precedent, 14 040/14 040 unique
+    @ 95e4210b) and here it IS identity — the named exception to the
     dependency rule that location is evidence (ruling §2), admitted by the
     maintainer's fork (b).  ``numerator`` is payload and strictly positive:
     the producer drops zero rows, so absence already means zero.  No
@@ -524,8 +556,9 @@ class ApiSymbolRow:
 class AdoptionCountRow:
     """F3 per-scope adoption count (wave 4).
 
-    Logical key — the producer's own, measured live at HEAD:
-    ``(scope, feature)``, 2 614/2 614 unique.  The scope is the RATIFIED
+    Logical key — the producer's own: ``(scope, feature)``, unique on the
+    corpus (2 614/2 614 at ratification, 2 671/2 671 @ 95e4210b
+    2026-08-30).  The scope is the RATIFIED
     tagged ScopeRef (ruling 2026-08-24 §2): the producer resolves it as
     ``identity.python_module.module`` when the file has a module identity
     and the analyzed path otherwise (``analysis/units.py``), so the
@@ -570,8 +603,11 @@ class SecuritySurfaceRow:
     Logical key — measured, never invented: ``(FILE, start_line,
     evidence_symbol)``.  The packet's exhaustive 1-3-field enumeration
     found exactly SIX unique 3-keys with ``evidence_symbol`` in every one
-    (377/377 at recon; re-measured live at HEAD 387/387 and 11/11 on the
-    s5 corpus), and this is the ratified pick.  Two symbols may share one
+    (377/377 at recon, 387/387 at the ratification HEAD, 406/406 @
+    95e4210b, 2026-08-30 — dated observations of one corpus at three
+    revisions, not an invariant; the population moves with the tree, the
+    key's totality is what the model law proves on every run), and this is
+    the ratified pick.  Two symbols may share one
     line (the s5 ``eval(compile(...))`` datum) and one symbol may repeat
     across lines — both key components carry measured weight.
 
@@ -789,13 +825,37 @@ _RowT = TypeVar("_RowT")
 def _unique_by_key(
     rows: Iterable[_RowT], key_name: str, key_of: Callable[[_RowT], object]
 ) -> None:
+    """Refuse two DIFFERING facts under one logical key.
+
+    A repeat that is byte-identical to the row already seen is swallowed
+    here instead of refused, and that branch is UNREACHABLE on every
+    population this repository can build: all 14 call sites read a
+    ``frozenset``-typed family off the fact houses, and a set cannot hold
+    two equal rows — the repeat has already been absorbed upstream, so this
+    prover never meets one.  ``test_canonical_roundtrip`` pins both halves
+    of that claim (the branch's behaviour, and that every keyed family is a
+    frozenset), because an unexecuted unreachability claim rots.
+
+    The branch is kept, not deleted, and the reason is a boundary, not
+    taste: deleting it would make a byte-identical repeat a REFUSAL, and
+    what such a repeat IS — refusal, counted multiplicity, or a collapse
+    with a receipt — is the open wire/identity ruling that
+    ``DeadCodeObservationRow`` documents.  Read it as a hazard, not as
+    tolerance: the day a family becomes a SEQUENCE (a list or tuple, keyed
+    the same way), this branch silently accepts a duplicated row — measured
+    directly, not reasoned — and would mask exactly the loss class the F4
+    lane already exhibits at ingest.  Whoever makes a family a sequence
+    must decide this branch first.
+    """
     seen: dict[object, object] = {}
     for row in rows:
         key = key_of(row)
-        if key in seen and seen[key] != row:
-            raise CanonicalModelError(
-                f"two facts share one logical key {key_name}={key!r}"
-            )
+        if key in seen:
+            byte_identical_repeat = seen[key] == row
+            if not byte_identical_repeat:
+                raise CanonicalModelError(
+                    f"two facts share one logical key {key_name}={key!r}"
+                )
         seen[key] = row
 
 

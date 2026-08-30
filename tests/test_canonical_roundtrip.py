@@ -20,9 +20,12 @@ their class-B handles must differ.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import inspect
 import json
 import random
+from pathlib import Path
 
 import pytest
 
@@ -70,6 +73,8 @@ from codeclone.canonical import (
     encode_canonical_json,
     wire_fact_family_order,
 )
+from codeclone.canonical import model as canonical_model
+from codeclone.canonical.model import _unique_by_key
 
 
 def analysis_facts(**families: object) -> CanonicalFacts:
@@ -1901,3 +1906,83 @@ def test_tied_adoption_rows_are_ordered_by_scope_then_feature_on_the_wire() -> N
                 ["file", ordinal] for ordinal in (0, 1) for _ in range(3)
             ] + [["module", ordinal] for ordinal in range(6) for _ in range(3)]
         assert payload == baseline
+
+
+# ---------------------------------------------------------------------------
+# The uniqueness prover's byte-identical-repeat branch.
+#
+# ``_unique_by_key`` refuses two DIFFERING rows under one key but SWALLOWS a
+# repeat equal to the row already seen.  That branch is unreachable on every
+# population this repository can build, and the two pins below execute both
+# halves of that claim rather than leaving it as prose: an unexecuted
+# unreachability claim rots, and this one guards a real hazard — the day a
+# family becomes a sequence, the branch starts masking duplicate rows.
+# ---------------------------------------------------------------------------
+
+
+def _risk_probe_row(numerator: int) -> RiskObservationRow:
+    return RiskObservationRow(
+        SymbolId(FileId("pkg/probe.py"), "Probe.run"),
+        "cyclomatic_complexity",
+        numerator,
+        10,
+    )
+
+
+def _risk_probe_key(row: RiskObservationRow) -> tuple[object, ...]:
+    return (row.symbol, row.dimension, row.start_line)
+
+
+def test_uniqueness_prover_swallows_the_repeat_no_frozenset_can_carry() -> None:
+    """The branch's actual behaviour, executed on both inputs.
+
+    A sequence carrying the same row twice is accepted; a sequence carrying
+    two DIFFERING rows under one key is refused.  The first input is the one
+    a family cannot express — the frozenset has already absorbed the repeat —
+    which is precisely why the branch never runs in production.
+    """
+    row = _risk_probe_row(3)
+    twin = _risk_probe_row(3)
+    assert row == twin
+    assert len(frozenset({row, twin})) == 1
+
+    _unique_by_key([row, twin], "probe.key", _risk_probe_key)
+
+    with pytest.raises(CanonicalModelError, match=r"probe\.key"):
+        _unique_by_key([row, _risk_probe_row(4)], "probe.key", _risk_probe_key)
+
+
+def test_every_family_the_uniqueness_prover_reads_is_a_frozenset() -> None:
+    """The unreachability claim itself, executed.
+
+    Every ``_unique_by_key`` call site reads a family straight off the fact
+    house, and every one of those families is a ``frozenset`` — so no call
+    site can hand the prover a sequence, and the swallow branch cannot run.
+    Retype one family as a sequence and this reds: that change must decide
+    the branch before it lands, not inherit it.
+    """
+    source = Path(inspect.getsourcefile(canonical_model) or "").read_text("utf-8")
+    families: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_unique_by_key"
+        ):
+            continue
+        argument = node.args[0]
+        assert isinstance(argument, ast.Attribute), (
+            "a uniqueness-prover call site reads something other than a "
+            "declared fact family; this pin can no longer see what it keys"
+        )
+        assert isinstance(argument.value, ast.Name) and argument.value.id == "facts"
+        families.append(argument.attr)
+
+    assert families, "no uniqueness-prover call sites found: the pin is vacuous"
+    annotations = AnalysisFacts.__annotations__
+    for family in families:
+        assert annotations[family].startswith("frozenset["), (
+            f"{family!r} reaches the uniqueness prover but is not a frozenset: "
+            "the byte-identical-repeat branch is now reachable and silently "
+            "swallows a duplicated row"
+        )

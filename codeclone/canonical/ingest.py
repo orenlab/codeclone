@@ -600,9 +600,17 @@ def _observation_lane_families(
     One reader per lane, one decoder per row — split from the document
     walk so the walk stays a walk (the F3 landing pushed it over the
     complexity gate's high-risk floor, and the honest answer is structure,
-    not a wider allowlist).  The one measured byte-identical dead-code
-    duplicate (12 970/12 971) is the same FACT stated twice: set semantics
-    absorbs it losslessly, while two DIFFERING rows under one key stay
+    not a wider allowlist).
+
+    These ``frozenset`` constructions are also where row multiplicity dies.
+    The dead-code lane measures 14 826 model rows against 14 827 producer
+    rows (@ 95e4210b, 2026-08-30): the collapsed pair is a property and its
+    setter — two declarations this lane's row shape cannot tell apart — so
+    the collapse loses a real row rather than absorbing a fact stated
+    twice, and it happens before any model guard runs, so
+    ``_unique_by_key`` never meets the repeat.  See
+    ``DeadCodeObservationRow`` for the measurement and for the open
+    wire/identity ruling this awaits; two DIFFERING rows under one key stay
     refused by the model law.
     """
     fact_families = _mapping(
