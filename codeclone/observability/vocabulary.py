@@ -129,6 +129,8 @@ SPAN_NAMES: Final[frozenset[str]] = frozenset(
         "compatibility.check",
         "config.resolve",
         "controller.registry_bind",
+        "gc.collect",
+        "gc.run",
         "hygiene.collect_dirty_paths",
         "hygiene.collect_dirty_snapshot",
         "hygiene.dirty_entry_digests",
@@ -350,6 +352,45 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "events_by_kind.security_observation",
         "events_unresolved",
         "facts_bound",
+        # The unified GC orchestrator (codeclone.api.gc) is the ONE
+        # emitter of this family: jobs answer through the protocol and the
+        # orchestrator turns the answer into the observation, so three
+        # collecting surfaces cannot mint three dialects about one event.
+        # Every reason is written on every job span, zero included — an
+        # absent magnitude cannot be told apart from a span that never
+        # reached the site.
+        #
+        #  gc_jobs_*        one orchestration on the gc.run span: how many
+        #      jobs were dispatched, answered with a collection, or
+        #      answered with a typed refusal.  A refusal is a visible
+        #      event, never silence — silence is indistinguishable from
+        #      "nothing to collect".
+        #  gc_candidates    objects one job examined, on its gc.collect
+        #      span (the span's reason names the job).
+        #  gc_held_*        the DECISION lane: which root/predicate held
+        #      the uncollected candidates (head, retained history window,
+        #      live lease, explicit retention, in-flight staging, live
+        #      owner), so "why was this not collected" is answerable
+        #      without reading code.
+        #  gc_collected_*   the verdict lane: what left the surface's live
+        #      universe and under which closed reason (deadline expired,
+        #      owner dead, unreachable from every root, corrupt row).
+        #  gc_job_refused   0/1 on the job's own span.
+        "gc_candidates",
+        "gc_collected_corrupt",
+        "gc_collected_expired",
+        "gc_collected_orphaned",
+        "gc_collected_unreachable",
+        "gc_held_head",
+        "gc_held_history",
+        "gc_held_lease",
+        "gc_held_owner_alive",
+        "gc_held_retained",
+        "gc_held_staging",
+        "gc_job_refused",
+        "gc_jobs_collected",
+        "gc_jobs_dispatched",
+        "gc_jobs_refused",
         "manifest_collisions",
         "manifest_input_files",
         "manifest_mounts",

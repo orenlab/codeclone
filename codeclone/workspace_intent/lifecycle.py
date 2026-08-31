@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
+from ..models import deadline_passed
 from .contract import WorkspaceIntentRecord
 
 
@@ -92,8 +93,10 @@ def lease_expiry(record: WorkspaceIntentRecord) -> datetime | None:
 
 
 def is_lease_expired(record: WorkspaceIntentRecord) -> bool:
-    expiry = lease_expiry(record)
-    return expiry is None or expiry <= utc_now()
+    """Decided by the one hold-deadline law of the unified GC point: a
+    lease whose renewal timestamp cannot be read has a passed deadline —
+    collectable, never immortal."""
+    return deadline_passed(lease_expiry(record), utc_now())
 
 
 __all__ = [

@@ -326,14 +326,17 @@ def test_export_head_is_pinned_to_the_resolved_snapshot(
 ) -> None:
     """A publication landing mid-export advances the head and does not mix
     a single byte into the running export (§11.1)."""
-    with _store(tmp_path) as store:
+    with _store(tmp_path) as store, _store(tmp_path) as publisher:
         first_run = _publish(store, fixture_model())
         baseline = store.project_run(first_run)
         published: list[str] = []
 
         def _publish_mid_export(run_id: str) -> None:
+            # The concurrent publisher is a second handle — a real second
+            # process's commit.  (It cannot be the exporting handle: the
+            # export holds one read transaction end to end, §11.1.)
             published.append(run_id)
-            _publish(store, _grown_model(), expected_generation=1)
+            _publish(publisher, _grown_model(), expected_generation=1)
 
         monkeypatch.setattr(store, "_pin_export", _publish_mid_export)
         sink = io.BytesIO()

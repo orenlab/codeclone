@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
-from typing import Final, Literal, TypedDict
+from typing import Final, Literal, Protocol, TypedDict, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_validator
@@ -4189,3 +4190,196 @@ class StatementMarkdownReport:
     @property
     def warnings(self) -> tuple[str, ...]:
         return tuple(issue.message for issue in self.issues if issue.severity == "warn")
+
+
+# ---------------------------------------------------------------------------
+# The unified GC protocol (maintainer's form, 2026-08-31): one orchestrator,
+# surface-custom jobs, one contract between them.  The contract lives in the
+# model store; the orchestrator runtime is the ``codeclone.api.gc`` door.
+#
+# A job owns only what is surface-specific — its hold predicate (root
+# reachability for the canonical run-store, owner liveness and lease
+# arithmetic for workspace intents, a retention window for observability
+# operations) and the actual removal in its own storage, under its own
+# storage's atomicity.  Everything identical across surfaces — the closed
+# reason vocabularies, the honesty arithmetic of every report, refusal as a
+# typed visible outcome — is this contract.
+# ---------------------------------------------------------------------------
+
+#: Hold reasons: why a candidate survived a collection.
+GC_HOLD_HEAD: Final = "head"
+GC_HOLD_HISTORY: Final = "history"
+GC_HOLD_LEASE: Final = "lease"
+GC_HOLD_RETAINED: Final = "retained"
+GC_HOLD_STAGING: Final = "staging"
+GC_HOLD_OWNER_ALIVE: Final = "owner_alive"
+GC_HOLD_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        GC_HOLD_HEAD,
+        GC_HOLD_HISTORY,
+        GC_HOLD_LEASE,
+        GC_HOLD_RETAINED,
+        GC_HOLD_STAGING,
+        GC_HOLD_OWNER_ALIVE,
+    }
+)
+
+#: Collect reasons: why a candidate left its surface's live universe.
+#: ``orphaned`` and ``expired`` are the workspace-intent GC's existing
+#: words, adopted unchanged — the vocabulary unifies by taking the words
+#: the deciders already use, not by inventing a third dialect.
+GC_COLLECT_EXPIRED: Final = "expired"
+GC_COLLECT_ORPHANED: Final = "orphaned"
+GC_COLLECT_UNREACHABLE: Final = "unreachable"
+GC_COLLECT_CORRUPT: Final = "corrupt"
+GC_COLLECT_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        GC_COLLECT_EXPIRED,
+        GC_COLLECT_ORPHANED,
+        GC_COLLECT_UNREACHABLE,
+        GC_COLLECT_CORRUPT,
+    }
+)
+
+_GcDeadline = TypeVar("_GcDeadline", int, float, datetime)
+
+
+def deadline_passed(deadline: _GcDeadline | None, now: _GcDeadline) -> bool:
+    """The one hold-deadline law of every time-held object.
+
+    Held until the deadline, expired AT the deadline, and a missing or
+    unreadable deadline is a **passed** deadline: an object whose grant
+    cannot prove its own liveness is collectable, never immortal.  The
+    workspace-intent lease check and the run-store lease sweep both decide
+    through this function, so the law has exactly one spelling.
+    """
+    return deadline is None or deadline <= now
+
+
+class GcProtocolError(ValueError):
+    """A job report or a job roster violates the unified GC protocol."""
+
+
+def _gc_sorted_counts(
+    counts: Sequence[tuple[str, int]], *, lane: str, allowed: frozenset[str] | None
+) -> tuple[tuple[str, int], ...]:
+    for reason, count in counts:
+        if not reason or not isinstance(reason, str):
+            raise GcProtocolError(f"{lane} carries an unnamed reason")
+        if allowed is not None and reason not in allowed:
+            raise GcProtocolError(
+                f"{lane} reason {reason!r} is outside the closed GC vocabulary"
+            )
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise GcProtocolError(f"{lane} count for {reason!r} is not a count")
+    if len({reason for reason, _count in counts}) != len(counts):
+        raise GcProtocolError(f"{lane} names a reason twice")
+    return tuple(sorted(counts))
+
+
+@dataclass(frozen=True, slots=True)
+class GcJobReport:
+    """One job's typed answer: candidates, holds, collections, refusal.
+
+    The report is the protocol's honesty envelope, checked by construction:
+    every reason comes from the closed vocabulary, and the arithmetic
+    ``candidates == held + collected`` must balance — a candidate the job
+    cannot attribute is a candidate the report refuses to claim.  A
+    refusing job makes no claims at all: its own storage's atomicity rolled
+    the collection back, so any count beside a refusal would be fiction.
+    ``detail`` is the job's surface-custom lane (extra units such as
+    cascaded objects); the orchestrator never turns it into telemetry.
+    """
+
+    job: str
+    candidates: int
+    held: tuple[tuple[str, int], ...] = ()
+    collected: tuple[tuple[str, int], ...] = ()
+    detail: tuple[tuple[str, int], ...] = ()
+    refusal: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.job or not isinstance(self.job, str):
+            raise GcProtocolError("a GC job report must name its job")
+        if (
+            isinstance(self.candidates, bool)
+            or not isinstance(self.candidates, int)
+            or self.candidates < 0
+        ):
+            raise GcProtocolError("candidates is not a count")
+        held = _gc_sorted_counts(tuple(self.held), lane="held", allowed=GC_HOLD_REASONS)
+        collected = _gc_sorted_counts(
+            tuple(self.collected), lane="collected", allowed=GC_COLLECT_REASONS
+        )
+        detail = _gc_sorted_counts(tuple(self.detail), lane="detail", allowed=None)
+        object.__setattr__(self, "held", held)
+        object.__setattr__(self, "collected", collected)
+        object.__setattr__(self, "detail", detail)
+        if self.refusal is not None:
+            if not isinstance(self.refusal, str) or not self.refusal:
+                raise GcProtocolError("a refusal must say why")
+            if self.candidates or held or collected or detail:
+                raise GcProtocolError(
+                    "a refused job makes no claims: its storage rolled the "
+                    "collection back, so counts beside a refusal are fiction"
+                )
+            return
+        balance = sum(count for _reason, count in held) + sum(
+            count for _reason, count in collected
+        )
+        if balance != self.candidates:
+            raise GcProtocolError(
+                f"report does not balance: {self.candidates} candidates, "
+                f"{balance} attributed as held or collected"
+            )
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        job: str,
+        candidates: int,
+        held: Mapping[str, int] | None = None,
+        collected: Mapping[str, int] | None = None,
+        detail: Mapping[str, int] | None = None,
+    ) -> GcJobReport:
+        """A collected outcome from plain mappings, canonically ordered."""
+        return cls(
+            job=job,
+            candidates=candidates,
+            held=tuple(sorted((held or {}).items())),
+            collected=tuple(sorted((collected or {}).items())),
+            detail=tuple(sorted((detail or {}).items())),
+        )
+
+    @classmethod
+    def refused(cls, *, job: str, refusal: str) -> GcJobReport:
+        """A typed refusal: visible, claim-free, never an exception."""
+        return cls(job=job, candidates=0, refusal=refusal)
+
+    def held_count(self, reason: str) -> int:
+        return dict(self.held).get(reason, 0)
+
+    def collected_count(self, reason: str) -> int:
+        return dict(self.collected).get(reason, 0)
+
+
+class GcJob(Protocol):
+    """One surface's collector under the unified protocol."""
+
+    @property
+    def name(self) -> str: ...
+
+    def collect(self) -> GcJobReport: ...
+
+
+@dataclass(frozen=True, slots=True)
+class GcRunReceipt:
+    """One orchestration's receipt, reports in dispatch order.
+
+    The receipt is what separates a measured zero from silence: a job that
+    ran and collected nothing appears here with zeros; a job that never ran
+    does not appear at all.
+    """
+
+    reports: tuple[GcJobReport, ...]

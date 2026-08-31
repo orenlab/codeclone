@@ -70,6 +70,7 @@ import json
 import sqlite3
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
@@ -162,6 +163,16 @@ from codeclone.contracts import (
     SOURCE_KIND_POLICY_VERSION,
     STATEMENT_REACHABILITY_POLICY_VERSION,
     STORAGE_SCHEMA_REVISION,
+)
+from codeclone.models import (
+    GC_COLLECT_UNREACHABLE,
+    GC_HOLD_HEAD,
+    GC_HOLD_HISTORY,
+    GC_HOLD_LEASE,
+    GC_HOLD_RETAINED,
+    GC_HOLD_STAGING,
+    GcJobReport,
+    deadline_passed,
 )
 from codeclone.observability import SpanHandle, span
 from codeclone.utils.sqlite_store import open_sqlite_db
@@ -295,6 +306,22 @@ CREATE TABLE IF NOT EXISTS heads (
     generation INTEGER NOT NULL,
     run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
     PRIMARY KEY (namespace_pk, target)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS head_history (
+    namespace_pk INTEGER NOT NULL REFERENCES namespaces(namespace_pk),
+    target TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
+    PRIMARY KEY (namespace_pk, target, generation)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS run_leases (
+    lease_id TEXT PRIMARY KEY,
+    run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
+    kind TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS retained_runs (
+    run_pk INTEGER PRIMARY KEY REFERENCES runs(run_pk)
 ) WITHOUT ROWID;
 """
 
@@ -1458,6 +1485,22 @@ def _fence_guard(cursor: sqlite3.Cursor, fence: tuple[int, str, str]) -> None:
         )
 
 
+@contextmanager
+def _fenced_transaction(store: RunStore) -> Iterator[sqlite3.Cursor]:
+    """One fenced IMMEDIATE transaction over a store's connection — the one
+    spelling shared by every GC-side mutation (brief §4.2: fencing on every
+    mutation), a module-level step like :func:`_fence_guard` it wraps."""
+    cursor = store._connection.cursor()
+    cursor.execute("BEGIN IMMEDIATE")
+    try:
+        _fence_guard(cursor, store._fence)
+        yield cursor
+        cursor.execute("COMMIT")
+    except BaseException:
+        cursor.execute("ROLLBACK")
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Operational measurement.  Diagnostics only: the store's state produces
 # these numbers, and nothing reads them back — no canonical fact, no run
@@ -1857,6 +1900,159 @@ def _stream_export(
 
 
 # ---------------------------------------------------------------------------
+# Garbage collection (ruling 2026-08-24 §8) — the run-store job of the
+# unified GC point (contract: codeclone.models; runtime door:
+# codeclone.api.gc).  Pure sweep steps live here in the
+# module's function-per-step style; RunStore owns the one transaction.
+#
+# The roots, each with an owner who sets it and an owner who clears it:
+#
+# * heads — set by the publish CAS; cleared only by being superseded.
+#   Durable by design: the head is the truth pointer and must survive any
+#   process death.  The root is "every row of the heads table", never "the
+#   one latest run" — so when publication admissibility (ruling 2026-08-31
+#   I2-D) splits heads by profile identity, every profile's head roots its
+#   run with no change here; only the history window below must then gain
+#   the profile dimension in its key and grouping.
+# * retained history — appended by the publish CAS (same transaction);
+#   pruned by the sweep beyond the caller's ``retain_history`` window.
+# * leases (active/session/export) — granted by a consumer with a
+#   mandatory positive TTL; cleared by release or by the deadline law at
+#   sweep time.  A dead owner stops renewing, the deadline passes, the
+#   grant dissolves — an eternal lease has no representation.
+# * explicit retention — set and cleared by a deliberate operator call,
+#   never by liveness: its owner is a decision, not a process.
+# * staging — a publish's unpublished rows live only inside its own
+#   IMMEDIATE transaction, which SQLite serializes against the sweep's, so
+#   live staging is unreachable by construction; a COMMITTED unpublished
+#   run (a future multi-transaction staging path) is protected and
+#   reported, never guessed at.
+#
+# What a sweep never touches, and the mechanism that holds it: victims are
+# the complement of the root union, and even a wrong complement cannot
+# delete a rooted run — heads, head_history, run_leases and retained_runs
+# all carry ``REFERENCES runs(run_pk)`` under ``PRAGMA foreign_keys=ON``,
+# so deleting a still-rooted run is a constraint refusal that aborts the
+# whole transaction.  Objects are deleted only when no membership row
+# references them, and ``run_members.object_pk`` is itself a foreign key —
+# a shared immutable object with one surviving reader is undeletable twice
+# over.  ``store_meta``, ``witness`` and ``namespaces`` appear in no sweep
+# statement at all.
+# ---------------------------------------------------------------------------
+
+_GC_JOB_NAME: Final = "canonical_run_store"
+
+#: The closed lease vocabulary of §8: an in-flight operation, an MCP
+#: session pinned to a run, a multi-call export.  One mechanism, three
+#: grant kinds — the kind is provenance for debugging, never semantics.
+_LEASE_KINDS: Final[frozenset[str]] = frozenset({"active", "export", "session"})
+
+
+def _lease_now() -> int:
+    """The lease clock: whole unix seconds, read at grant and at sweep.
+
+    The deadline is enforced by the sweep's clock through the shared
+    deadline law, never by the grant owner's continued existence.
+    """
+    return int(time.time())
+
+
+def _sweep_expired_leases(cursor: sqlite3.Cursor, now: int) -> tuple[int, set[int]]:
+    """Dissolve expired leases; return (expired_count, live-leased run pks).
+
+    Every lease row passes through :func:`codeclone.models.deadline_passed`
+    — the one spelling of expiry — so the sweep and the workspace-intent
+    lifecycle cannot drift apart on the boundary.
+    """
+    rows = cursor.execute(
+        "SELECT lease_id, run_pk, expires_at FROM run_leases ORDER BY lease_id"
+    ).fetchall()
+    expired = [str(row[0]) for row in rows if deadline_passed(int(row[2]), now)]
+    live = {int(row[1]) for row in rows if not deadline_passed(int(row[2]), now)}
+    cursor.executemany(
+        "DELETE FROM run_leases WHERE lease_id = ?",
+        [(lease_id,) for lease_id in expired],
+    )
+    return len(expired), live
+
+
+def _prune_head_history(
+    cursor: sqlite3.Cursor, retain_history: int
+) -> tuple[int, set[int]]:
+    """Prune history beyond the per-target window; return (pruned, kept pks).
+
+    The newest ``retain_history`` generations of every (namespace, target)
+    stay and root their runs; everything older stops rooting and its rows
+    leave, so the history table cannot grow without bound between sweeps.
+    """
+    rows = cursor.execute(
+        "SELECT namespace_pk, target, generation, run_pk FROM head_history "
+        "ORDER BY namespace_pk, target, generation DESC"
+    ).fetchall()
+    pruned: list[tuple[int, str, int]] = []
+    kept: set[int] = set()
+    depth: dict[tuple[int, str], int] = {}
+    for namespace_pk, target, generation, run_pk in rows:
+        key = (int(namespace_pk), str(target))
+        rank = depth.get(key, 0)
+        depth[key] = rank + 1
+        if rank < retain_history:
+            kept.add(int(run_pk))
+        else:
+            pruned.append((int(namespace_pk), str(target), int(generation)))
+    cursor.executemany(
+        "DELETE FROM head_history "
+        "WHERE namespace_pk = ? AND target = ? AND generation = ?",
+        pruned,
+    )
+    return len(pruned), kept
+
+
+def _attribute_runs(
+    runs: Sequence[tuple[int, int]],
+    *,
+    head_run_pks: set[int],
+    history_run_pks: set[int],
+    retained_run_pks: set[int],
+    lease_run_pks: set[int],
+) -> tuple[dict[str, int], list[int]]:
+    """Attribute every run to exactly one hold reason, or to the victims.
+
+    Priority is fixed and documented (head, history, retained, lease,
+    staging — the more durable root wins the attribution) so the receipt's
+    arithmetic ``candidates == held + collected`` balances by construction
+    and the same store state always yields the same numbers.
+    """
+    held = {
+        GC_HOLD_HEAD: 0,
+        GC_HOLD_HISTORY: 0,
+        GC_HOLD_LEASE: 0,
+        GC_HOLD_RETAINED: 0,
+        GC_HOLD_STAGING: 0,
+    }
+    victims: list[int] = []
+    for run_pk, published in runs:
+        if run_pk in head_run_pks:
+            held[GC_HOLD_HEAD] += 1
+        elif run_pk in history_run_pks:
+            held[GC_HOLD_HISTORY] += 1
+        elif run_pk in retained_run_pks:
+            held[GC_HOLD_RETAINED] += 1
+        elif run_pk in lease_run_pks:
+            held[GC_HOLD_LEASE] += 1
+        elif published == 0:
+            held[GC_HOLD_STAGING] += 1
+        else:
+            victims.append(run_pk)
+    return held, victims
+
+
+def _run_pk_column(cursor: sqlite3.Cursor, sql: str) -> set[int]:
+    """One root table's run pks."""
+    return {int(row[0]) for row in cursor.execute(sql)}
+
+
+# ---------------------------------------------------------------------------
 # Public receipts
 # ---------------------------------------------------------------------------
 
@@ -2197,6 +2393,15 @@ class RunStore:
                 "WHERE namespace_pk = ? AND target = ?",
                 (new_generation, run_pk, namespace_pk, target),
             )
+        # The retained-history root (§8) is recorded at the only moment it
+        # can be: the CAS advance itself, in the same transaction.  A run
+        # that never advanced a head is never history — it survives a sweep
+        # only through a lease or explicit retention.
+        cursor.execute(
+            "INSERT INTO head_history (namespace_pk, target, generation, run_pk) "
+            "VALUES (?, ?, ?, ?)",
+            (namespace_pk, target, new_generation, run_pk),
+        )
         return True, new_generation, run_id
 
     # -- read path ---------------------------------------------------------
@@ -2260,6 +2465,184 @@ class RunStore:
         """
 
 
+def acquire_run_lease(
+    store: RunStore, run_id: str, *, kind: str, lease_id: str, ttl_seconds: int
+) -> int:
+    """Grant or renew one lease root on a published run; returns expiry.
+
+    The grant owner is the consumer (an in-flight operation, an MCP
+    session, a multi-call export); it clears the root by
+    :func:`release_run_lease` or by simply dying — the mandatory
+    positive TTL means an aborted owner's grant dissolves at its
+    deadline instead of pinning the run forever.  Renewal is
+    re-acquiring the same ``lease_id`` for the same run and kind; a
+    ``lease_id`` that names a different run or kind is refused, never
+    silently rebound.
+    """
+    if kind not in _LEASE_KINDS:
+        raise RunStoreError(
+            f"unknown lease kind {kind!r}; leases are {sorted(_LEASE_KINDS)!r}"
+        )
+    if not lease_id:
+        raise RunStoreError("lease_id must be non-empty")
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+        raise RunStoreError("ttl_seconds must be an integer")
+    if ttl_seconds <= 0:
+        raise RunStoreError(
+            "ttl_seconds must be positive: an eternal lease has no "
+            "representation in this store"
+        )
+    with _fenced_transaction(store) as cursor:
+        run_pk = _published_run_row(store._connection, run_id)[0]
+        expires_at = _lease_now() + ttl_seconds
+        existing = cursor.execute(
+            "SELECT run_pk, kind FROM run_leases WHERE lease_id = ?",
+            (lease_id,),
+        ).fetchone()
+        if existing is None:
+            cursor.execute(
+                "INSERT INTO run_leases (lease_id, run_pk, kind, expires_at) "
+                "VALUES (?, ?, ?, ?)",
+                (lease_id, run_pk, kind, expires_at),
+            )
+        elif (int(existing[0]), str(existing[1])) != (run_pk, kind):
+            raise RunStoreError(
+                f"lease {lease_id!r} already grants a different run or kind"
+            )
+        else:
+            cursor.execute(
+                "UPDATE run_leases SET expires_at = ? WHERE lease_id = ?",
+                (expires_at, lease_id),
+            )
+    return expires_at
+
+
+def release_run_lease(store: RunStore, lease_id: str) -> bool:
+    """Clear one lease root; False when no such grant exists (a second
+    release and a release after expiry sweep are both ordinary)."""
+    with _fenced_transaction(store) as cursor:
+        cursor.execute("DELETE FROM run_leases WHERE lease_id = ?", (lease_id,))
+        released = cursor.rowcount == 1
+    return released
+
+
+def retain_run(store: RunStore, run_id: str) -> bool:
+    """Set the explicit-retention root on a published run.
+
+    Deliberately durable: its owner is an operator's decision, not a
+    process, so it survives every crash and never expires — the one
+    root whose clearing is only ever :func:`release_retained_run`.
+    Returns False when the run is already retained.
+    """
+    with _fenced_transaction(store) as cursor:
+        run_pk = _published_run_row(store._connection, run_id)[0]
+        cursor.execute(
+            "INSERT OR IGNORE INTO retained_runs (run_pk) VALUES (?)",
+            (run_pk,),
+        )
+        retained = cursor.rowcount == 1
+    return retained
+
+
+def release_retained_run(store: RunStore, run_id: str) -> bool:
+    """Clear the explicit-retention root; False when it was not set."""
+    with _fenced_transaction(store) as cursor:
+        row = cursor.execute(
+            "SELECT run_pk FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise UnknownRunError(f"run {run_id!r} is not a run of this store")
+        cursor.execute("DELETE FROM retained_runs WHERE run_pk = ?", (int(row[0]),))
+        released = cursor.rowcount == 1
+    return released
+
+
+def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
+    """Sweep everything unreachable from the §8 roots, atomically.
+
+    A module-level operation over a store, like :func:`export_run` — the
+    store owns the connection, the fence, and the transaction, nothing
+    else.  Crash injection rides :func:`_fenced_transaction` itself: dying
+    after the last delete and before COMMIT must leave every run
+    readable byte-identically, one rollback, never a partial sweep.
+
+    One fenced IMMEDIATE transaction: expired leases dissolve,
+    history beyond the ``retain_history`` window stops rooting, every run
+    is attributed to exactly one hold reason or becomes a victim, victims
+    leave with their membership, and an object leaves only when no
+    surviving run references it — deleting a run never breaks a
+    neighbour through shared immutable objects, and the foreign keys
+    refuse even a defective sweep that tries.  The report's zeros are
+    measured zeros: a sweep that collected nothing still answers.
+    """
+    if (
+        isinstance(retain_history, bool)
+        or not isinstance(retain_history, int)
+        or retain_history < 0
+    ):
+        raise RunStoreError("retain_history must be a non-negative integer")
+    with _fenced_transaction(store) as cursor:
+        leases_expired, lease_run_pks = _sweep_expired_leases(cursor, _lease_now())
+        history_pruned, history_run_pks = _prune_head_history(cursor, retain_history)
+        runs = [
+            (int(row[0]), int(row[1]))
+            for row in cursor.execute(
+                "SELECT run_pk, published FROM runs ORDER BY run_pk"
+            )
+        ]
+        held, victims = _attribute_runs(
+            runs,
+            head_run_pks=_run_pk_column(cursor, "SELECT run_pk FROM heads"),
+            history_run_pks=history_run_pks,
+            retained_run_pks=_run_pk_column(cursor, "SELECT run_pk FROM retained_runs"),
+            lease_run_pks=lease_run_pks,
+        )
+        victim_rows = [(run_pk,) for run_pk in victims]
+        cursor.executemany("DELETE FROM run_members WHERE run_pk = ?", victim_rows)
+        cursor.executemany("DELETE FROM runs WHERE run_pk = ?", victim_rows)
+        cursor.execute(
+            "DELETE FROM objects WHERE object_pk NOT IN "
+            "(SELECT object_pk FROM run_members)"
+        )
+        objects_collected = cursor.rowcount
+    return GcJobReport.build(
+        job=_GC_JOB_NAME,
+        candidates=len(runs),
+        held=held,
+        collected={GC_COLLECT_UNREACHABLE: len(victims)},
+        detail={
+            "history_rows_pruned": history_pruned,
+            "leases_expired": leases_expired,
+            "objects_collected": objects_collected,
+        },
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RunStoreGcJob:
+    """The run-store's job under the unified GC protocol.
+
+    ``retain_history`` is the caller's operational policy, injected at
+    construction so the orchestrator stays surface-blind.  A fence refusal
+    — the store generation moved under this handle — is the one
+    anticipated concurrent outcome, answered as a typed refusal report;
+    every other failure is a defect and propagates raw.
+    """
+
+    store: RunStore
+    retain_history: int
+
+    @property
+    def name(self) -> str:
+        return _GC_JOB_NAME
+
+    def collect(self) -> GcJobReport:
+        try:
+            return collect_garbage(self.store, retain_history=self.retain_history)
+        except StoreFenceError as error:
+            return GcJobReport.refused(job=_GC_JOB_NAME, refusal=str(error))
+
+
 def export_run(store: RunStore, run_id: str, sink: ByteSink) -> ExportEnvelope:
     """Stream one published run's authoritative canonical bytes.
 
@@ -2268,20 +2651,37 @@ def export_run(store: RunStore, run_id: str, sink: ByteSink) -> ExportEnvelope:
     complete model.  The export surface is a module-level projection over
     a store, like every pure step in this module — :class:`RunStore` owns
     the connection, the lifecycle, and the snapshot seam, nothing else.
+
+    The whole export runs inside one explicit read transaction: WAL keeps
+    that snapshot stable from the first byte to the last (brief §11.1), so
+    a sweep or a publication committing in another process mid-export can
+    neither tear the stream nor mix generations into it.  Measured before
+    this transaction existed: a concurrent collector's commit between run
+    resolution and streaming turned the export into a membership-digest
+    refusal.
     """
-    run_pk, namespace, scope_digest, membership = _published_run_row(
-        store._connection, run_id
-    )
-    store._pin_export(run_id)
-    return _stream_export(
-        store._connection,
-        sink,
-        run_pk=run_pk,
-        namespace=namespace,
-        scope_digest=scope_digest,
-        membership=membership,
-        run_id=run_id,
-    )
+    connection = store._connection
+    cursor = connection.cursor()
+    cursor.execute("BEGIN")
+    try:
+        run_pk, namespace, scope_digest, membership = _published_run_row(
+            connection, run_id
+        )
+        store._pin_export(run_id)
+        envelope = _stream_export(
+            connection,
+            sink,
+            run_pk=run_pk,
+            namespace=namespace,
+            scope_digest=scope_digest,
+            membership=membership,
+            run_id=run_id,
+        )
+        cursor.execute("COMMIT")
+    except BaseException:
+        cursor.execute("ROLLBACK")
+        raise
+    return envelope
 
 
 def export_head(
@@ -2306,7 +2706,13 @@ __all__ = [
     "HeadState",
     "PublishReceipt",
     "RunStore",
+    "RunStoreGcJob",
+    "acquire_run_lease",
     "analysis_scope_digest",
+    "collect_garbage",
     "export_head",
     "export_run",
+    "release_retained_run",
+    "release_run_lease",
+    "retain_run",
 ]
