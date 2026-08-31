@@ -18,6 +18,7 @@ from ..paths import normalize_memory_scope_path
 from ..statement_markdown import (
     STATEMENT_FORMAT_PAYLOAD_KEY,
     resolve_statement_format,
+    truncate_statement_preview,
 )
 from .models import Trajectory
 from .patch_trail import patch_trail_from_mapping
@@ -496,10 +497,14 @@ def _is_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
 
 
 def _preview_text(value: str) -> str:
-    text = value.strip()
-    if len(text) <= MAX_STATEMENT_PREVIEW:
-        return text
-    return text[: MAX_STATEMENT_PREVIEW - 3] + "..."
+    """Export-lane preview; same severed-construct hazard as the compact lane.
+
+    _memory_precedent_row stamps statement_format from the full statement,
+    so this cut is handed to a renderer as markdown.
+    """
+    return truncate_statement_preview(
+        value.strip(), max_chars=MAX_STATEMENT_PREVIEW, ellipsis="..."
+    )
 
 
 def _redact_text(value: str) -> str:

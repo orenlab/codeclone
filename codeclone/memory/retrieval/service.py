@@ -44,6 +44,7 @@ from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..statement_markdown import (
     STATEMENT_FORMAT_PAYLOAD_KEY,
     resolve_statement_format,
+    truncate_statement_preview,
 )
 from ..status_report import build_memory_status_report
 from ..trajectory.analytics import (
@@ -137,10 +138,13 @@ def _statement_preview(
     *,
     max_chars: int = DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS,
 ) -> str:
-    if len(statement) <= max_chars:
-        return statement
-    trimmed = statement[: max_chars - 1].rstrip()
-    return f"{trimmed}…"
+    """Compact-lane preview at the retrieval default budget.
+
+    Shortening belongs to the format owner: this lane stamps
+    statement_format from the full record, so the cut must not sever a
+    construct the marker then tells the renderer to parse.
+    """
+    return truncate_statement_preview(statement, max_chars=max_chars)
 
 
 def query_records_for_repo_path(

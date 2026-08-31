@@ -42,6 +42,7 @@ from .statement_markdown import (
     STATEMENT_FORMAT_MD,
     STATEMENT_FORMAT_PAYLOAD_KEY,
     markdown_reject_error,
+    statement_structure_issue,
     validate_statement_markdown,
 )
 
@@ -425,13 +426,26 @@ def _statement_length_warnings(
     return ()
 
 
-def statement_markdown_warnings(statement: str) -> tuple[str, ...]:
-    """Advisory markdown-subset warnings for a candidate statement.
+def statement_markdown_warnings(
+    statement: str,
+    *,
+    target_limit: int = DEFAULT_MEMORY_TARGET_STATEMENT_CHARS,
+) -> tuple[str, ...]:
+    """Advisory statement-shape warnings for a candidate statement.
 
     Governance owns statement hygiene; surfaces call this instead of
-    reaching into the markdown validator directly.
+    reaching into the markdown validator directly. Two lanes ride it: the
+    markdown-subset discipline rules, and the structure hint that carries
+    the md-v1 shape to a writer who never called help. The hint is
+    conditional by construction, so the constant size of a record_candidate
+    response is unchanged.
     """
-    return validate_statement_markdown(statement.strip()).warnings
+    stripped = statement.strip()
+    warnings = list(validate_statement_markdown(stripped).warnings)
+    issue = statement_structure_issue(stripped, target_limit=target_limit)
+    if issue is not None:
+        warnings.append(issue.message)
+    return tuple(warnings)
 
 
 _BATCH_UNIT_SPLIT = re.compile(r"\n[ \t]*\n")

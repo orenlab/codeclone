@@ -37,6 +37,31 @@ STATEMENT_FORMAT_PLAIN: Final = "plain"
 STATEMENT_FORMAT_PAYLOAD_KEY: Final = "statement_format"
 
 _HELP_MENTION: Final = 'help(topic="engineering_memory")'
+_TITLE_PREFIX: Final = "## "
+
+STATEMENT_STRUCTURE_WARN_CODE: Final = "memory_statement_unstructured"
+
+# The shape itself, not a worked example: the writer pastes it back and fills
+# it in. It is deliberately shorter than the one-fact target, which is what
+# makes "one fact, not one line" a measurable claim instead of a slogan --
+# see statement_structure_issue.
+STATEMENT_SKELETON: Final = (
+    "## one-line title naming the fact\n"
+    "Body in one or two lines; `paths` and `symbols` in code spans.\n"
+    "| probe | result |\n"
+    "| --- | --- |\n"
+    "| `case` | `outcome` |\n"
+    "> ruling worth replaying verbatim\n"
+    "Why: what the next agent must do differently."
+)
+
+_STRUCTURE_HINT: Final = (
+    "{code}: {length} chars, no '{prefix}' title -- the approval window shows "
+    "one unscannable prose block. The target is one fact, not one line: this "
+    "shape is {shape} chars. next_step: re-record through "
+    "manage_engineering_memory(action=record_candidate) in this shape; the "
+    "untitled draft stays a draft.\n{skeleton}"
+)
 
 STATEMENT_MD_REJECT_CODES: Final[tuple[str, ...]] = (
     "memory_md_heading_structure",
@@ -229,6 +254,82 @@ def markdown_reject_error(report: StatementMarkdownReport) -> str:
     return " | ".join(issue.message for issue in report.rejects)
 
 
+def statement_structure_issue(
+    statement: str,
+    *,
+    target_limit: int,
+) -> StatementMarkdownIssue | None:
+    """Hand the writer the md-v1 shape at the write, not in a help topic.
+
+    Measured on the live store (agent-authored records only): markdown
+    adoption fell from 52.9% of new records (2026-08-04..08-19, n=380) to
+    4.9% (08-20..08-31, n=288) once the wave that built the format left
+    context. The template never moved -- it sat behind a help call the writer
+    had no reason to make, so 141 of the last 288 notes were untitled prose
+    past the one-fact target. Structure that costs an extra round trip is
+    structure nobody writes.
+
+    Fires only where structure pays: a note with no title that already spends
+    more than the one-fact target. A short single line stays legal and silent
+    -- there is nothing in it to lay out -- so the hint rides roughly half of
+    the writes rather than every response.
+    """
+    if statement.startswith(_TITLE_PREFIX) or len(statement) <= target_limit:
+        return None
+    return StatementMarkdownIssue(
+        code=STATEMENT_STRUCTURE_WARN_CODE,
+        severity="warn",
+        message=_STRUCTURE_HINT.format(
+            code=STATEMENT_STRUCTURE_WARN_CODE,
+            length=len(statement),
+            prefix=_TITLE_PREFIX,
+            shape=len(STATEMENT_SKELETON),
+            skeleton=STATEMENT_SKELETON,
+        ),
+    )
+
+
+def truncate_statement_preview(
+    statement: str,
+    *,
+    max_chars: int,
+    ellipsis: str = "…",
+) -> str:
+    """Shorten a statement body without severing a markdown construct.
+
+    Every preview site that shortens a statement also stamps
+    ``statement_format`` from the *full* record, so a careless cut tells the
+    renderer "this is markdown" and then hands it a broken one. Two rules,
+    both measured on live records:
+
+    * a multi-line body ends at a line boundary, and the ellipsis takes its
+      own line -- a character cut lands inside a table row and yields
+      ``| --- | -``, which no renderer parses as a table;
+    * a cut that leaves a backtick run unpaired unmasks whatever the code
+      span was shielding, so a masked ``[text](target)`` becomes an active
+      link on the render surface -- the exact construct ``memory_md_link``
+      refuses at the write seam. One restoration pass drops back to the
+      unpaired run, reusing the validator's own pairing.
+
+    Never returns more than ``max_chars``: the line rule and the restoration
+    pass only ever shorten the character cut.
+    """
+    if len(statement) <= max_chars:
+        return statement
+    trimmed = statement[: max_chars - len(ellipsis)].rstrip()
+    head, separator, _partial = trimmed.rpartition("\n")
+    if separator and head.strip():
+        trimmed = head
+    if validate_statement_markdown(trimmed).rejects:
+        # Any backtick surviving the mask is unpaired: either truncation cut
+        # its partner off, or the stored body already carried a lone tick.
+        unpaired = _mask_code_spans(trimmed).find("`")
+        if unpaired >= 0:
+            trimmed = trimmed[:unpaired].rstrip()
+    line_break = "\n" if "\n" in trimmed else ""
+    return f"{trimmed}{line_break}{ellipsis}"
+
+
 def resolve_statement_format(
     statement: str,
     payload: Mapping[str, object] | None = None,
@@ -258,7 +359,7 @@ def resolve_statement_format(
     ):
         return STATEMENT_FORMAT_MD
     if (
-        statement.startswith("## ")
+        statement.startswith(_TITLE_PREFIX)
         and not validate_statement_markdown(statement).rejects
     ):
         return STATEMENT_FORMAT_MD
@@ -271,9 +372,13 @@ __all__ = [
     "STATEMENT_FORMAT_PLAIN",
     "STATEMENT_MD_REJECT_CODES",
     "STATEMENT_MD_WARN_CODES",
+    "STATEMENT_SKELETON",
+    "STATEMENT_STRUCTURE_WARN_CODE",
     "StatementMarkdownIssue",
     "StatementMarkdownReport",
     "markdown_reject_error",
     "resolve_statement_format",
+    "statement_structure_issue",
+    "truncate_statement_preview",
     "validate_statement_markdown",
 ]

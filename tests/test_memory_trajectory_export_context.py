@@ -636,3 +636,33 @@ def test_trajectory_citations_skip_unparseable_step_facts(tmp_path: Path) -> Non
     )
     degraded = extract_trajectory_citations(corrupted)
     assert len(degraded) <= len(intact)
+
+
+def test_export_preview_keeps_markdown_constructs_whole() -> None:
+    """The export preview stamps statement_format=md-v1 on the body it cuts.
+
+    Same defect class as the retrieval compact preview: a character cut lands
+    inside a table row, so the renderer is handed a delimiter it cannot parse
+    while the payload still says the body is markdown.
+    """
+    from codeclone.memory.trajectory.export_context import (
+        MAX_STATEMENT_PREVIEW,
+        _preview_text,
+    )
+
+    statement = (
+        "## Preview budget cuts the delimiter row\n"
+        "`_preview_text()` cuts at a character budget while "
+        "`_memory_precedent_row()` stamps the md-v1 marker from the full "
+        "statement, so the renderer parses a severed construct.\n"
+        "| probe | result |\n"
+        "| --- | --- |\n"
+        "| `table row` | `severed` |\n"
+        "> Ruling: shorten at a line boundary, never mid-row."
+    )
+    assert len(statement) > MAX_STATEMENT_PREVIEW, "fixture no longer truncates"
+    preview = _preview_text(statement)
+    kept = preview.removesuffix("...").rstrip("\n").split("\n")
+    assert kept == statement.split("\n")[: len(kept)], (
+        f"export preview ends mid-line: {preview!r}"
+    )

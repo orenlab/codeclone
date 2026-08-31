@@ -291,3 +291,59 @@ def test_statement_format_rides_every_reader_surface(
                 f"{description}: plain statement must stay unmarked "
                 "(absent key = plain rendering)"
             )
+
+
+# --- Guard 3: the structure hint is reachable by real input -------------------
+#
+# A guard no input reaches is theatre. These drive the entry point an agent
+# actually calls -- manage_engineering_memory(action="record_candidate") -- not
+# the governance helper underneath it. This module's subject ring is r4, so the
+# expected strings are literals: the Phase 39S ratchet refuses a fresh r4->r2p
+# test edge, and tests/test_memory_statement_markdown.py pins these literals to
+# the constants that own them.
+
+_WIRE_HINT_CODE = "memory_statement_unstructured"
+_WIRE_SHAPE_TITLE_LINE = "## one-line title naming the fact"
+
+_WIRE_FLAT_LONG = (
+    "The compact preview path cuts a statement at a fixed character budget "
+    "and the trajectory export path cuts at its own budget, so a record that "
+    "carries a table loses its row separator while the payload still "
+    "advertises the md-v1 marker to every renderer downstream of the wire, "
+    "and the reader sees a half table it cannot parse."
+)
+
+
+def _record_over_the_wire(root: Path, statement: str) -> dict[str, object]:
+    service = CodeCloneMCPService(history_limit=2)
+    return service.manage_engineering_memory(
+        root=str(root.resolve()),
+        action="record_candidate",
+        record_type="risk_note",
+        statement=statement,
+        subject_path=_SUBJECT,
+    )
+
+
+def _wire_hints(payload: dict[str, object]) -> list[str]:
+    raw = cast("list[object]", payload.get("warnings", []))
+    return [str(item) for item in raw if _WIRE_HINT_CODE in str(item)]
+
+
+def test_structure_hint_reaches_the_writer_over_the_mcp_wire(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        payload = _record_over_the_wire(root, _WIRE_FLAT_LONG)
+        hits = _wire_hints(payload)
+        assert hits, f"no structure hint on the wire (keys: {sorted(payload)})"
+        assert _WIRE_SHAPE_TITLE_LINE in hits[0], "wire hint carries no shape"
+
+
+def test_titled_note_carries_no_hint_over_the_mcp_wire(tmp_path: Path) -> None:
+    """Sibling isolation: the same wire stays silent for a shaped note."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        payload = _record_over_the_wire(
+            root, f"## Preview cuts md-v1 bodies\n{_WIRE_FLAT_LONG}"
+        )
+        assert not _wire_hints(payload)

@@ -641,3 +641,189 @@ def test_validator_single_heading_level_is_h2() -> None:
     warned = validate_statement_markdown("### Title\nbody")
     assert not warned.rejects
     assert any("memory_md_heading_level" in item for item in warned.warnings)
+
+
+# --- Structure delivery: the md-v1 shape reaches the writer in band ----------
+#
+# Measured 2026-08-31 on the live store (agent-authored records only): markdown
+# adoption fell from 52.9% of new records (08-04..08-19, n=380) to 4.9%
+# (08-20..08-31, n=288) once the wave that built the format left context. The
+# template never moved -- it sat behind help(topic="engineering_memory"), a
+# call the writer had no reason to make. Structure that costs an extra round
+# trip is structure nobody writes.
+#
+# These tests read the size target through the governance seam that binds it,
+# never through codeclone.config: this module's subject ring is r2p, and the
+# Phase 39S ratchet refuses a fresh r2p->r2 test edge.
+
+_FLAT_LONG = (
+    "The compact preview path cuts a statement at a fixed character budget "
+    "and the trajectory export path cuts at its own budget, so a record that "
+    "carries a table loses its row separator while the payload still "
+    "advertises the md-v1 marker to every renderer downstream of the wire, "
+    "and the reader sees a half table it cannot parse."
+)
+_SHORT_FLAT = (
+    "Wildcard re-export recovery keeps the exported bindings a star import loses."
+)
+
+
+def test_flat_oversized_statement_gets_the_structure_hint() -> None:
+    """A note too long to read as one line is handed the shape, in band."""
+    from codeclone.memory.governance import statement_markdown_warnings
+    from codeclone.memory.statement_markdown import (
+        STATEMENT_SKELETON,
+        STATEMENT_STRUCTURE_WARN_CODE,
+    )
+
+    hits = [
+        item
+        for item in statement_markdown_warnings(_FLAT_LONG)
+        if STATEMENT_STRUCTURE_WARN_CODE in item
+    ]
+    assert hits, "flat oversized statement got no structure hint"
+    message = hits[0]
+    assert f"{len(_FLAT_LONG)} chars" in message, "hint did not measure this input"
+    assert STATEMENT_SKELETON in message, "hint carries no copyable shape"
+    assert "next_step" in message, "hint carries no executable next step"
+
+
+def test_titled_statement_is_not_told_to_add_a_title() -> None:
+    """Opposite boundary: a note that already carries the shape stays quiet."""
+    from codeclone.memory.governance import statement_markdown_warnings
+    from codeclone.memory.statement_markdown import STATEMENT_STRUCTURE_WARN_CODE
+
+    titled = f"## Compact preview cuts md-v1 bodies\n{_FLAT_LONG}"
+    assert not [
+        item
+        for item in statement_markdown_warnings(titled)
+        if STATEMENT_STRUCTURE_WARN_CODE in item
+    ]
+
+
+def test_short_one_line_fact_is_not_told_to_add_a_title() -> None:
+    """Opposite boundary: a single durable line stays legal and unwarned."""
+    from codeclone.memory.governance import statement_markdown_warnings
+    from codeclone.memory.statement_markdown import STATEMENT_STRUCTURE_WARN_CODE
+
+    assert not [
+        item
+        for item in statement_markdown_warnings(_SHORT_FLAT)
+        if STATEMENT_STRUCTURE_WARN_CODE in item
+    ]
+
+
+def test_advised_shape_obeys_the_rules_it_teaches() -> None:
+    """Derivation pin, not a magic number.
+
+    The hint is advice the writer pastes back through record_candidate, so
+    the shape must survive the same validator, and it must fit the target it
+    invokes -- that is what makes "one fact, not one line" measurable rather
+    than aspirational.
+
+    The size half is re-derived through the live seam: a flat note exactly as
+    long as the shape must draw no hint, which is true only while the shape
+    fits the bound target. Bloating the shape reds it; shrinking
+    DEFAULT_MEMORY_TARGET_STATEMENT_CHARS under the shape reds it too. A
+    relative pin ("shape <= target") would stay green for any value of
+    either.
+    """
+    from codeclone.memory.governance import statement_markdown_warnings
+    from codeclone.memory.statement_markdown import (
+        STATEMENT_SKELETON,
+        STATEMENT_STRUCTURE_WARN_CODE,
+        resolve_statement_format,
+        validate_statement_markdown,
+    )
+
+    report = validate_statement_markdown(STATEMENT_SKELETON)
+    assert not report.rejects, "advised shape would be refused at the seam"
+    assert not report.warnings, "advised shape trips its own discipline rules"
+    assert resolve_statement_format(STATEMENT_SKELETON) == "md-v1"
+
+    shape_sized_prose = "x" * len(STATEMENT_SKELETON)
+    assert not [
+        item
+        for item in statement_markdown_warnings(shape_sized_prose)
+        if STATEMENT_STRUCTURE_WARN_CODE in item
+    ], "the advised shape is longer than the target it tells writers to meet"
+    # Witness that the silence above is a measurement and not a dead probe:
+    # the longest statement record_candidate will accept at all must draw the
+    # hint. The pair brackets the boundary from both sides.
+    assert [
+        item
+        for item in statement_markdown_warnings("x" * 1000)
+        if STATEMENT_STRUCTURE_WARN_CODE in item
+    ], "the structure probe never fires, so the silence above proves nothing"
+
+
+def test_wire_literals_track_the_owned_constants() -> None:
+    """Drift lock for the r4 wire test, which may not import this ring.
+
+    tests/test_memory_statement_format_wire.py asserts on literals because
+    the Phase 39S ratchet forbids an r4->r2p test edge. This module is r2p
+    and can hold both, so the literals are pinned to their owners here.
+    """
+    from codeclone.memory.statement_markdown import (
+        STATEMENT_SKELETON,
+        STATEMENT_STRUCTURE_WARN_CODE,
+    )
+
+    from .test_memory_statement_format_wire import (
+        _WIRE_HINT_CODE,
+        _WIRE_SHAPE_TITLE_LINE,
+    )
+
+    assert _WIRE_HINT_CODE == STATEMENT_STRUCTURE_WARN_CODE
+    assert STATEMENT_SKELETON.startswith(f"{_WIRE_SHAPE_TITLE_LINE}\n")
+
+
+# --- Compact preview must not hand a renderer a severed construct ------------
+
+# A test-local budget: the properties below hold at any budget, so pinning the
+# shipped default here would only duplicate its declaration.
+_PROBE_BUDGET = 160
+
+
+def test_compact_preview_keeps_lines_whole() -> None:
+    """A cut inside a table row leaves a delimiter no renderer can parse."""
+    from codeclone.memory.retrieval.service import _statement_preview
+
+    preview = _statement_preview(TEMPLATE_STATEMENT)
+    assert preview != TEMPLATE_STATEMENT, "fixture no longer truncates"
+    kept = preview.removesuffix("…").rstrip("\n").split("\n")
+    assert kept == TEMPLATE_STATEMENT.split("\n")[: len(kept)], (
+        f"preview ends mid-line: {preview!r}"
+    )
+
+
+def test_compact_preview_never_unmasks_a_banned_construct() -> None:
+    """Truncation must not defeat the memory_md_link ban.
+
+    A link inside a code span is masked, so the statement is accepted. Cut
+    the span open and the same bytes become an active link -- while the
+    payload still stamps statement_format=md-v1 for the renderer.
+    """
+    from codeclone.memory.retrieval.service import _statement_preview
+    from codeclone.memory.statement_markdown import validate_statement_markdown
+
+    statement = (
+        "Evidence pointer kept literal so no renderer activates it, padded "
+        "here so the compact preview budget cuts inside the span and unmasks "
+        "it: `[ruling](https://example.invalid/ruling)` tail."
+    )
+    assert not validate_statement_markdown(statement).rejects
+    naive = statement[: _PROBE_BUDGET - 1]
+    assert [item.code for item in validate_statement_markdown(naive).rejects] == [
+        "memory_md_link"
+    ], "fixture no longer exercises the unmasking hazard"
+    preview = _statement_preview(statement, max_chars=_PROBE_BUDGET)
+    assert not validate_statement_markdown(preview).rejects
+
+
+def test_single_line_preview_still_spends_the_whole_budget() -> None:
+    """Opposite boundary: plain one-line prose keeps its character budget."""
+    from codeclone.memory.retrieval.service import _statement_preview
+
+    preview = _statement_preview("z" * 400, max_chars=_PROBE_BUDGET)
+    assert len(preview) == _PROBE_BUDGET
