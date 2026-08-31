@@ -153,6 +153,8 @@ def write_outputs(path: str, values: dict[str, str]) -> None:
             handle.write(f"{key}={value}\n")
 
 
+# The only caller is the inline `python` step of action.yml, which is YAML
+# rather than a module, so no analysed file can reference this symbol.
 # codeclone: ignore[dead-code]
 def resolve_install_target(
     *,

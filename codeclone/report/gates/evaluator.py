@@ -868,7 +868,6 @@ def evaluate_gate_state(
         return result
 
 
-# codeclone: ignore[dead-code]
 def metric_gate_reasons(
     *,
     report_document: Mapping[str, object],

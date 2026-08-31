@@ -177,8 +177,7 @@ class SpanHandle:
         self._db_fingerprints: dict[str, int] = {}
 
     # set_counter is wired by the 29.10 worker instrumentation; add_counter by
-    # the 29.DB query-trace hook (record_db_query). set_reason_kind stays
-    # forward-declared until a caller needs post-hoc reason classification.
+    # the 29.DB query-trace hook (record_db_query).
     def add_counter(self, key: str, value: int = 1) -> None:
         validate_counter_key(key)
         self._counters[key] = self._counters.get(key, 0) + value
@@ -200,7 +199,8 @@ class SpanHandle:
         ranked = sorted(self._db_fingerprints.items(), key=lambda kv: (-kv[1], kv[0]))
         return dict(ranked[:_DB_FINGERPRINT_TOP_N])
 
-    # codeclone: ignore[dead-code]
+    # Post-hoc reason classification, wired by the semantic rebuild
+    # workflow once the report says why the rebuild ran.
     def set_reason_kind(self, reason_kind: ReasonKind) -> None:
         self._reason_kind = reason_kind
 
