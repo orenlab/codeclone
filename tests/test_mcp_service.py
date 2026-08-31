@@ -2366,7 +2366,9 @@ def test_workspace_drift_detects_added_deleted_and_mtime_changes(
     assert "pkg/kept.py" in drift.drifted_files
     assert drift.added_files == ("pkg/added.py",)
     assert drift.topology_drift is True
-    assert drift.strength == "mtime_size_plus_git"
+    # Git is available here but silent about every compared path, so the run
+    # holds only the stat lanes. Topology is witnessed by the scan, not by git.
+    assert drift.strength == "mtime_size"
 
 
 def _single_file_drift_record(
@@ -2436,13 +2438,15 @@ def test_workspace_drift_misses_same_size_edit_git_cannot_witness(
     the length and lands inside one filesystem mtime tick moves neither. Git is
     the only content-sensitive lane, and it does not reach every scanned path:
     measured 2026-08-30, ``git status --porcelain=v1`` collapses an untracked
-    directory to one digest-less ``??`` entry and never lists an ignored file,
-    while ``strength`` still reports ``mtime_size_plus_git`` for the whole run.
+    directory to one digest-less ``??`` entry and never lists an ignored file.
     The frozen snapshot models exactly that -- git available, silent about this
-    path. Closing the gap needs a recorded content digest, the way
-    ``prove_cached_source_identity`` proves a cache hit; that is a contract
-    decision, not a local one, so the gap is pinned here instead of papered
-    over. Delete this test when the detector gains a content discriminator.
+    path. The blindness is still real, so the verdict below is still ``fresh``;
+    what changed on 2026-08-31 is that the run no longer advertises evidence it
+    does not hold. Closing the blindness itself needs a recorded content digest,
+    the way ``prove_cached_source_identity`` proves a cache hit; that is a
+    contract decision, not a local one, so the gap stays pinned here instead of
+    papered over. Delete this test when the detector gains a content
+    discriminator.
     """
     kept, recorded, record = _single_file_drift_record(
         tmp_path,
@@ -2461,7 +2465,299 @@ def test_workspace_drift_misses_same_size_edit_git_cannot_witness(
 
     assert drift.status == "fresh"
     assert drift.drifted_files == ()
-    assert drift.strength == "mtime_size_plus_git"
+    # The detector is still blind here; the label now says so.
+    assert drift.strength == "mtime_size"
+
+
+def _git_witness_repo(root: Path) -> None:
+    """A committed repo carrying no Python of its own and one ignored subtree.
+
+    The seed is deliberately Python-free so each test owns the whole scanned
+    universe: ``strength`` is a statement about every content-compared path,
+    so a stray seed module would silently join the set under test.
+    ``_git_commit_all`` is defined further down this module; it resolves when
+    the test runs, and duplicating it here would only add a clone.
+    """
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    root.joinpath(".gitignore").write_text("ignored_pkg/\n", encoding="utf-8")
+    root.joinpath("README.md").write_text("seed\n", encoding="utf-8")
+    _git_commit_all(root, "seed")
+
+
+def _drift_witness_case(
+    root: Path,
+    *,
+    run_id: str,
+    relative_path: str,
+    track: bool,
+) -> tuple[Path, MCPRunRecord]:
+    """Seed a real repo, plant one module in it, and record a run against it.
+
+    The three witness classes differ only in where the module sits and whether
+    git was ever told about it, so the arrangement is stated once and the
+    tests keep the part that is actually under test: what git then says.
+    """
+    module = root / relative_path
+    _git_witness_repo(root)
+    module.parent.mkdir(parents=True, exist_ok=True)
+    module.write_text("A = 1\n", encoding="utf-8")
+    if track:
+        _git_commit_all(root, "add module")
+    record = replace(
+        _dummy_run_record(root, run_id),
+        manifest=mcp_workspace_drift_mod.build_run_manifest(
+            root=root,
+            filepaths=[str(module)],
+        ),
+        dirty_snapshot=mcp_workspace_hygiene_mod.collect_dirty_snapshot(root),
+    )
+    assert set(record.manifest or {}) == {relative_path}
+    return module, record
+
+
+def _answered_git_snapshot(
+    record: MCPRunRecord,
+) -> mcp_workspace_hygiene_mod.DirtySnapshot:
+    """The run's own git observation, proven present and proven to have run.
+
+    Every case below needs git to be *available* -- a blind run would reach
+    ``mtime_size`` for the trivial reason and prove nothing about the witness.
+    """
+    snapshot = record.dirty_snapshot
+    assert snapshot is not None
+    assert snapshot.git_available is True
+    return snapshot
+
+
+def test_workspace_drift_strength_denies_git_witness_inside_untracked_directory(
+    tmp_path: Path,
+) -> None:
+    """``?? dir`` is not a witness for the files inside that directory.
+
+    Measured 2026-08-31 against a real repository: ``git status
+    --porcelain=v1`` collapses an untracked directory into one digest-less
+    entry keyed on the directory, so a content edit under it moves nothing
+    git recorded. Claiming ``mtime_size_plus_git`` for such a path states
+    evidence this run does not hold.
+    """
+    _module, record = _drift_witness_case(
+        tmp_path,
+        run_id="drift-untracked-dir",
+        relative_path="untracked_pkg/inside.py",
+        track=False,
+    )
+    entries = _answered_git_snapshot(record).entries
+    # Premise: git spoke about the directory, and never about the file.
+    assert [entry.path for entry in entries] == ["untracked_pkg"]
+    assert entries[0].digest is None
+
+    assert mcp_workspace_drift_mod.compute_drift(record).strength == "mtime_size"
+
+
+def test_workspace_drift_strength_denies_git_witness_for_ignored_file(
+    tmp_path: Path,
+) -> None:
+    """An ignored path is scanned by the run and never listed by git.
+
+    The scanner does not read ``.gitignore``, so an ignored module enters the
+    manifest and is content-compared while ``git status`` never mentions it.
+    The run holds ``(mtime_ns, size)`` for that path and nothing else.
+    """
+    _module, record = _drift_witness_case(
+        tmp_path,
+        run_id="drift-ignored",
+        relative_path="ignored_pkg/hidden.py",
+        track=False,
+    )
+    # Premise: git spoke, and said nothing at all.
+    assert _answered_git_snapshot(record).entries == ()
+
+    assert mcp_workspace_drift_mod.compute_drift(record).strength == "mtime_size"
+
+
+def test_workspace_drift_strength_claims_git_witness_for_listed_path(
+    tmp_path: Path,
+) -> None:
+    """The opposite error: refusing the claim where the witness is real.
+
+    A tracked path git lists individually carries a content digest, so the
+    before/after delta is content-sensitive for it. Understating that run as
+    ``mtime_size`` would be as wrong as the overstatement above.
+    """
+    module, record = _drift_witness_case(
+        tmp_path,
+        run_id="drift-witnessed",
+        relative_path="tracked_pkg/visible.py",
+        track=True,
+    )
+    assert _answered_git_snapshot(record).entries == ()
+    module.write_text("A = 2\n", encoding="utf-8")
+    # Premise: git now lists this exact path and digests its content.
+    listed = mcp_workspace_hygiene_mod.collect_dirty_snapshot(tmp_path).entry_map()
+    assert listed["tracked_pkg/visible.py"].digest is not None
+
+    strength = mcp_workspace_drift_mod.compute_drift(record).strength
+    assert strength == "mtime_size_plus_git"
+
+
+def _witnessed_dirty_snapshot(
+    *,
+    path: str,
+    digest: str | None,
+    git_available: bool = True,
+) -> mcp_workspace_hygiene_mod.DirtySnapshot:
+    return mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=git_available,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(
+            mcp_workspace_hygiene_mod.DirtySnapshotEntry(
+                path=path,
+                status_xy=" M",
+                digest=digest,
+                digest_status="ok" if digest is not None else "unavailable",
+            ),
+        ),
+    )
+
+
+def _blind_dirty_snapshot(
+    *,
+    git_available: bool = True,
+) -> mcp_workspace_hygiene_mod.DirtySnapshot:
+    return mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=git_available,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(),
+    )
+
+
+def test_workspace_drift_strength_cannot_claim_git_once_the_witness_is_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Causal pin: remove the git witness, keep the stat data, ``plus_git`` dies.
+
+    Every variant below leaves the recorded ``(mtime_ns, size)`` untouched and
+    subtracts only per-path git evidence -- git off on either observation, no
+    recorded snapshot, the entry erased, the entry collapsed onto the parent
+    directory, the entry kept but its digest withheld. None may reach
+    ``mtime_size_plus_git``. The control proves the input can.
+    """
+    pkg, manifest = _workspace_drift_pkg(tmp_path, (("kept.py", "A = 1\n"),))
+    witness = _witnessed_dirty_snapshot(path="pkg/kept.py", digest="d" * 64)
+
+    def _strength(
+        before: mcp_workspace_hygiene_mod.DirtySnapshot | None,
+        after: mcp_workspace_hygiene_mod.DirtySnapshot,
+    ) -> str:
+        monkeypatch.setattr(
+            mcp_workspace_drift_mod,
+            "collect_dirty_snapshot",
+            lambda _root: after,
+        )
+        record = replace(
+            _dummy_run_record(tmp_path, "drift-causal"),
+            manifest=manifest,
+            dirty_snapshot=before,
+        )
+        return mcp_workspace_drift_mod.compute_drift(record).strength
+
+    assert _strength(witness, witness) == "mtime_size_plus_git"
+    removals: dict[
+        str,
+        tuple[
+            mcp_workspace_hygiene_mod.DirtySnapshot | None,
+            mcp_workspace_hygiene_mod.DirtySnapshot,
+        ],
+    ] = {
+        "before_git_unavailable": (_blind_dirty_snapshot(git_available=False), witness),
+        "after_git_unavailable": (witness, _blind_dirty_snapshot(git_available=False)),
+        "no_recorded_snapshot": (None, witness),
+        "entry_erased": (_blind_dirty_snapshot(), _blind_dirty_snapshot()),
+        "entry_collapsed_onto_parent": (
+            _witnessed_dirty_snapshot(path="pkg", digest=None),
+            _witnessed_dirty_snapshot(path="pkg", digest=None),
+        ),
+        "digest_withheld": (
+            _witnessed_dirty_snapshot(path="pkg/kept.py", digest=None),
+            _witnessed_dirty_snapshot(path="pkg/kept.py", digest=None),
+        ),
+    }
+    for name, (before, after) in removals.items():
+        assert _strength(before, after) == "mtime_size", name
+    # The stat lane never moved: only the git witness was subtracted.
+    assert file_stat_signature(str(pkg / "kept.py")) == manifest["pkg/kept.py"]
+
+
+def test_workspace_drift_strength_downgrades_when_one_compared_path_is_blind(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One run-level label over a per-path property reports the weakest witness.
+
+    A single unwitnessed path can hide a same-stat edit, so a run is only as
+    strong as its blindest compared path. Witnessing both flips the same
+    manifest to the stronger claim, and narrowing the comparison narrows what
+    the label has to answer for.
+    """
+    _pkg, manifest = _workspace_drift_pkg(
+        tmp_path,
+        (("first.py", "A = 1\n"), ("second.py", "B = 2\n")),
+    )
+    first_only = _witnessed_dirty_snapshot(path="pkg/first.py", digest="a" * 64)
+    both = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(
+            *first_only.entries,
+            *_witnessed_dirty_snapshot(path="pkg/second.py", digest="b" * 64).entries,
+        ),
+    )
+
+    def _strength(
+        snapshot: mcp_workspace_hygiene_mod.DirtySnapshot,
+        *,
+        paths: Sequence[str] | None = None,
+    ) -> str:
+        monkeypatch.setattr(
+            mcp_workspace_drift_mod,
+            "collect_dirty_snapshot",
+            lambda _root: snapshot,
+        )
+        record = replace(
+            _dummy_run_record(tmp_path, "drift-weakest"),
+            manifest=manifest,
+            dirty_snapshot=snapshot,
+        )
+        return mcp_workspace_drift_mod.compute_drift(record, paths=paths).strength
+
+    assert _strength(first_only) == "mtime_size"
+    assert _strength(both) == "mtime_size_plus_git"
+    assert _strength(first_only, paths=["pkg/first.py"]) == "mtime_size_plus_git"
+
+
+def test_workspace_drift_strength_claims_nothing_when_nothing_was_compared(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty comparison holds no witness, so it claims none.
+
+    Vacuous containment -- "no compared path lacks the witness" -- would hand
+    the strongest label to the run that checked the least.
+    """
+    witness = _witnessed_dirty_snapshot(path="pkg/kept.py", digest="d" * 64)
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "collect_dirty_snapshot",
+        lambda _root: witness,
+    )
+    record = replace(
+        _dummy_run_record(tmp_path, "drift-empty"),
+        manifest={},
+        dirty_snapshot=witness,
+    )
+
+    assert mcp_workspace_drift_mod.compute_drift(record).strength == "mtime_size"
 
 
 def test_workspace_drift_path_selection_limits_comparison(tmp_path: Path) -> None:

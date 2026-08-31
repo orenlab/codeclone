@@ -26,6 +26,13 @@ WorkspaceDriftStrength = Literal["mtime_size", "mtime_size_plus_git"]
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceDrift:
+    """One drift verdict plus the evidence class that verdict actually rests on.
+
+    ``strength`` names the evidence held, never the mechanism consulted. Git
+    being reachable is not a witness for a path git never spoke about, so the
+    stronger label is earned per path and reported over the whole comparison.
+    """
+
     status: WorkspaceDriftStatus
     drifted_files: tuple[str, ...]
     added_files: tuple[str, ...]
@@ -65,7 +72,10 @@ def compute_drift(
             added_files=(),
             deleted_files=(),
             topology_drift=False,
-            strength=_drift_strength(record.dirty_snapshot, None),
+            strength=_drift_strength(
+                compared_paths=frozenset(),
+                witnessed_paths=_git_witnessed_paths(record.dirty_snapshot, None),
+            ),
         )
 
     selected_paths = _selected_paths(paths)
@@ -97,10 +107,13 @@ def compute_drift(
         else ()
     )
 
+    # The paths this run actually compares byte-for-byte. `strength` is a
+    # statement about exactly this set, so it is named once and reused.
+    compared_paths = frozenset(
+        path for path in manifest_paths if _path_selected(path, selected_paths)
+    )
     drifted: set[str] = set()
-    for path in sorted(manifest_paths):
-        if not _path_selected(path, selected_paths):
-            continue
+    for path in sorted(compared_paths):
         try:
             live_stat = file_stat_signature(str(record.root / path))
         except OSError:
@@ -138,7 +151,13 @@ def compute_drift(
         added_files=added_files,
         deleted_files=deleted_files,
         topology_drift=bool(added_files or deleted_files),
-        strength=_drift_strength(record.dirty_snapshot, current_dirty_snapshot),
+        strength=_drift_strength(
+            compared_paths=compared_paths,
+            witnessed_paths=_git_witnessed_paths(
+                record.dirty_snapshot,
+                current_dirty_snapshot,
+            ),
+        ),
     )
 
 
@@ -201,16 +220,54 @@ def _dirty_snapshot_delta(
     )
 
 
-def _drift_strength(
+def _git_witnessed_paths(
     before: DirtySnapshot | None,
     after: DirtySnapshot | None,
+) -> frozenset[str]:
+    """Paths git reported individually, under a digest that moves on content.
+
+    A path is witnessed only when an entry is keyed on that exact path and
+    carries a content digest, because that digest is the whole reason the
+    before/after delta can see an edit the stat lanes miss. Measured
+    2026-08-31 against a real repository, two shapes fail that test while git
+    is perfectly reachable: ``git status --porcelain=v1`` collapses an
+    untracked directory into a single digest-less entry keyed on the
+    directory, and it never lists an ignored file at all -- yet both are
+    scanned into the run manifest and compared.
+
+    Absence from a snapshot is deliberately not read as evidence. A clean
+    tracked file and an ignored file are the same absence here, and telling
+    them apart means asking git a question this run never asked. The honest
+    move is to narrow the claim to the witness in hand, not to widen the
+    mechanism until the old claim comes true.
+    """
+    if before is None or after is None:
+        return frozenset()
+    if not before.git_available or not after.git_available:
+        return frozenset()
+    return frozenset(
+        path
+        for snapshot in (before, after)
+        for path, entry in snapshot.entry_map().items()
+        if entry.digest is not None
+    )
+
+
+def _drift_strength(
+    *,
+    compared_paths: frozenset[str],
+    witnessed_paths: frozenset[str],
 ) -> WorkspaceDriftStrength:
-    if (
-        before is not None
-        and after is not None
-        and before.git_available
-        and after.git_available
-    ):
+    """Report the weakest evidence any compared path carries.
+
+    One label stands over a per-path property, so it may only claim the git
+    witness when every content-compared path holds it: a single blind path is
+    enough to hide a same-stat edit behind a ``fresh`` verdict. An empty
+    comparison is vacuously contained in any witness set and holds none of
+    it, so it claims none -- otherwise the run that checked the least would
+    report the strongest evidence.
+    """
+    if compared_paths and compared_paths <= witnessed_paths:
         return "mtime_size_plus_git"
     return "mtime_size"
 
