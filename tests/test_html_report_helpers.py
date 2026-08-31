@@ -7,6 +7,7 @@
 import ast
 import importlib
 import re
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -18,9 +19,13 @@ import codeclone.report.html.sections._meta as meta_section
 import codeclone.report.html.sections._suggestions as suggestions_section
 import codeclone.ui_messages as ui
 from codeclone.api.comparison import foreign_interpreter_provenance
+from codeclone.api.presentation_records import (
+    SuggestionLocationView,
+    SuggestionView,
+)
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import REPORT_SCHEMA_VERSION
-from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from codeclone.models import MetricsDiff
 from codeclone.report.html.sections._clones import (
     _derive_group_display_name,
     _render_group_explanation,
@@ -508,41 +513,44 @@ def _section_ctx(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**base)
 
 
-def _make_suggestion(**overrides: object) -> Suggestion:
-    payload: dict[str, object] = {
-        "severity": "warning",
-        "category": "complexity",
-        "title": "Reduce function complexity",
-        "location": "pkg/mod.py:10-20",
-        "steps": ("Extract a helper.",),
-        "effort": "moderate",
-        "priority": 0.9,
-        "finding_family": "metrics",
-        "finding_kind": "function_hotspot",
-        "subject_key": "pkg.mod:run",
-        "fact_kind": "Complexity hotspot",
-        "fact_summary": "cyclomatic_complexity=15, guard_count=2, hot path",
-        "fact_count": 2,
-        "spread_files": 2,
-        "spread_functions": 3,
-        "clone_type": "",
-        "confidence": "high",
-        "source_kind": "production",
-        "source_breakdown": (("production", 2), ("tests", 1)),
-        "representative_locations": (
-            ReportLocation(
-                filepath="/repo/pkg/mod.py",
-                relative_path="pkg/mod.py",
-                start_line=10,
-                end_line=20,
-                qualname="pkg.mod:run",
-                source_kind="production",
-            ),
+#: The record the suggestions panel is actually handed. It used to be a
+#: ``models.Suggestion`` -- the *domain* suggestion, which the panel never
+#: receives: production hands it the context's projection. Only the erased
+#: ``Any`` on the panel's parameters made the substitution invisible, and it
+#: cost every call site a ``cast`` to get a plain string past the domain
+#: record's ``Literal`` fields.
+_SUGGESTION_TEMPLATE = SuggestionView(
+    severity="warning",
+    category="complexity",
+    title="Reduce function complexity",
+    location="pkg/mod.py:10-20",
+    steps=("Extract a helper.",),
+    effort="moderate",
+    priority=0.9,
+    finding_family="metrics",
+    finding_kind="function_hotspot",
+    subject_key="pkg.mod:run",
+    fact_kind="Complexity hotspot",
+    fact_summary="cyclomatic_complexity=15, guard_count=2, hot path",
+    fact_count=2,
+    spread_files=2,
+    spread_functions=3,
+    clone_type="",
+    confidence="high",
+    source_kind="production",
+    source_breakdown=(("production", 2), ("tests", 1)),
+    representative_locations=(
+        SuggestionLocationView(
+            relative_path="pkg/mod.py",
+            start_line=10,
+            end_line=20,
+            qualname="pkg.mod:run",
+            source_kind="production",
+            filepath="/repo/pkg/mod.py",
         ),
-        "location_label": "pkg/mod.py:10-20",
-    }
-    payload.update(overrides)
-    return Suggestion(**cast(Any, payload))
+    ),
+    location_label="pkg/mod.py:10-20",
+)
 
 
 def test_html_badges_and_cards_cover_effort_and_tip_paths() -> None:
@@ -753,9 +761,10 @@ def test_suggestion_helpers_cover_empty_summary_breakdown_and_optional_sections(
 
     monkeypatch.setattr(suggestions_section, "source_kind_label", lambda _kind: "")
     card_html = _render_card(
-        _make_suggestion(
-            category=cast(Any, ""),
-            source_kind=cast(Any, ""),
+        replace(
+            _SUGGESTION_TEMPLATE,
+            category="",
+            source_kind="",
             source_breakdown=(),
             representative_locations=(),
             steps=(),
@@ -775,9 +784,10 @@ def test_suggestion_helpers_cover_empty_summary_breakdown_and_optional_sections(
 
 def test_suggestion_context_labels_prefer_specific_clone_kind() -> None:
     clone_labels = _suggestion_context_labels(
-        _make_suggestion(
-            category=cast(Any, "clone"),
-            source_kind=cast(Any, "fixtures"),
+        replace(
+            _SUGGESTION_TEMPLATE,
+            category="clone",
+            source_kind="fixtures",
             finding_kind="function",
             clone_type="Type-2",
         )
@@ -785,14 +795,15 @@ def test_suggestion_context_labels_prefer_specific_clone_kind() -> None:
     assert clone_labels == ("Fixtures", "Function", "Type-2")
 
     generic_labels = _suggestion_context_labels(
-        _make_suggestion(category=cast(Any, "dead_code"))
+        replace(_SUGGESTION_TEMPLATE, category="dead_code")
     )
     assert generic_labels == ("Production", "Dead Code")
 
     clone_labels_without_type = _suggestion_context_labels(
-        _make_suggestion(
-            category=cast(Any, "clone"),
-            source_kind=cast(Any, "tests"),
+        replace(
+            _SUGGESTION_TEMPLATE,
+            category="clone",
+            source_kind="tests",
             finding_kind="function",
             clone_type="",
         )
@@ -806,9 +817,10 @@ def test_section_icon_html_returns_empty_for_unknown_keys() -> None:
 
 def test_render_card_uses_professional_clone_context_chip_rhythm() -> None:
     card_html = _render_card(
-        _make_suggestion(
-            category=cast(Any, "clone"),
-            source_kind=cast(Any, "fixtures"),
+        replace(
+            _SUGGESTION_TEMPLATE,
+            category="clone",
+            source_kind="fixtures",
             finding_kind="block",
             clone_type="Type-4",
         ),
@@ -828,7 +840,8 @@ def test_suggestion_meta_labels_are_more_readable() -> None:
     assert _spread_label(spread_functions=1, spread_files=2) == "1 function · 2 files"
 
     card_html = _render_card(
-        _make_suggestion(effort="easy", priority=1.5), cast(Any, _section_ctx())
+        replace(_SUGGESTION_TEMPLATE, effort="easy", priority=1.5),
+        cast(Any, _section_ctx()),
     )
     assert (
         '<span class="finding-meta-badge finding-meta-badge--easy">Easy</span>'

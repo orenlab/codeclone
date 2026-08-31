@@ -11,10 +11,15 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from ...api.metric_families import presentation_metric_families
+from ...api.presentation_records import (
+    StructuralFindingGroup,
+    StructuralFindingOccurrence,
+    SuggestionLocationView,
+    SuggestionView,
+)
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
@@ -64,8 +69,8 @@ class ReportContext:
     overloaded_modules_map: Mapping[str, object]
     security_surfaces_map: Mapping[str, object]
     health_map: Mapping[str, object]
-    suggestions: tuple[SimpleNamespace, ...]
-    structural_findings: tuple[SimpleNamespace, ...]
+    suggestions: tuple[SuggestionView, ...]
+    structural_findings: tuple[StructuralFindingGroup, ...]
     overview_data: Mapping[str, object]
     report_document: Mapping[str, object]
     inventory_map: Mapping[str, object]
@@ -157,21 +162,52 @@ def _clone_projection(
     return tuple(rows), novelty, facts
 
 
-def _suggestion_projection(raw: object, *, scan_root: str) -> SimpleNamespace:
+def _source_breakdown_pairs(raw: object) -> tuple[tuple[object, ...], ...]:
+    """Keep the document's own pairs, dropping anything that is not one.
+
+    The panel indexes element ``0`` for a source-kind label and element ``1``
+    for a count and coerces each itself, so this carries the values as the
+    document holds them rather than deciding their types here.
+    """
+
+    pairs: list[tuple[object, ...]] = []
+    for pair in _as_sequence(raw):
+        if isinstance(pair, Sequence) and len(pair) == 2:
+            carried: tuple[object, ...] = tuple(pair)
+            pairs.append(carried)
+    return tuple(pairs)
+
+
+def _suggestion_location_projection(
+    raw: object,
+    *,
+    scan_root: str,
+) -> SuggestionLocationView:
+    # The document publishes exactly five keys here, from a single producer
+    # that spells them as a literal. Reading them by name -- rather than
+    # splatting the mapping into a namespace -- is what lets the record declare
+    # them, and it drops a key the record does not know instead of carrying an
+    # attribute no renderer can be checked against.
+    location = _as_mapping(raw)
+    relative_path = str(location.get("relative_path", ""))
+    return SuggestionLocationView(
+        relative_path=relative_path,
+        start_line=_as_int(location.get("start_line")),
+        end_line=_as_int(location.get("end_line")),
+        qualname=str(location.get("qualname", "")),
+        source_kind=str(location.get("source_kind", "")),
+        filepath=_absolute_presentation_path(relative_path, scan_root=scan_root),
+    )
+
+
+def _suggestion_projection(raw: object, *, scan_root: str) -> SuggestionView:
     row = _as_mapping(raw)
     action = _as_mapping(row.get("action"))
     locations = tuple(
-        SimpleNamespace(
-            **dict(location),
-            filepath=_absolute_presentation_path(
-                str(location.get("relative_path", "")),
-                scan_root=scan_root,
-            ),
-        )
+        _suggestion_location_projection(raw_location, scan_root=scan_root)
         for raw_location in _as_sequence(row.get("representative_locations"))
-        for location in (_as_mapping(raw_location),)
     )
-    return SimpleNamespace(
+    return SuggestionView(
         severity=str(row.get("severity", "info")),
         category=str(row.get("category", "")),
         title=str(row.get("title", "")),
@@ -190,17 +226,27 @@ def _suggestion_projection(raw: object, *, scan_root: str) -> SimpleNamespace:
         clone_type=str(row.get("clone_type", "")),
         confidence=str(row.get("confidence", "medium")),
         source_kind=str(row.get("source_kind", "other")),
-        source_breakdown=tuple(
-            tuple(pair)
-            for pair in _as_sequence(row.get("source_breakdown"))
-            if isinstance(pair, Sequence) and len(pair) == 2
-        ),
+        source_breakdown=_source_breakdown_pairs(row.get("source_breakdown")),
         representative_locations=locations,
         location_label=str(row.get("location_label", "")),
     )
 
 
-def _structural_projection(raw: object, *, scan_root: str) -> SimpleNamespace:
+def _structural_signature(raw: object) -> dict[str, str]:
+    """Carry the published signature envelope as the strings the record names.
+
+    ``findings.groups.structural.groups[].signature`` is the versioned
+    ``{version, stable, debug}`` envelope, so two of its three values are
+    mappings rather than strings. Every reader of this field already renders it
+    through ``str`` -- the chips escape it, the suggestion helpers strip it --
+    so spelling that once here is what the ``dict[str, str]`` on the record
+    means, rather than a claim the values do not keep.
+    """
+
+    return {str(key): str(value) for key, value in _as_mapping(raw).items()}
+
+
+def _structural_projection(raw: object, *, scan_root: str) -> StructuralFindingGroup:
     row = _as_mapping(raw)
     finding_kind = str(row.get("category", row.get("kind", "")))
     finding_id = str(row.get("id", ""))
@@ -210,8 +256,9 @@ def _structural_projection(raw: object, *, scan_root: str) -> SimpleNamespace:
         if finding_id.startswith(finding_prefix)
         else finding_id
     )
+    signature = _structural_signature(row.get("signature"))
     items = tuple(
-        SimpleNamespace(
+        StructuralFindingOccurrence(
             finding_kind=finding_kind,
             finding_key=finding_key,
             file_path=_absolute_presentation_path(
@@ -221,15 +268,15 @@ def _structural_projection(raw: object, *, scan_root: str) -> SimpleNamespace:
             qualname=str(item.get("qualname", "")),
             start=_as_int(item.get("start_line")),
             end=_as_int(item.get("end_line")),
-            signature=dict(_as_mapping(row.get("signature"))),
+            signature=dict(signature),
         )
         for raw_item in _as_sequence(row.get("items"))
         for item in (_as_mapping(raw_item),)
     )
-    return SimpleNamespace(
+    return StructuralFindingGroup(
         finding_kind=finding_kind,
         finding_key=finding_key,
-        signature=dict(_as_mapping(row.get("signature"))),
+        signature=signature,
         items=items,
     )
 
