@@ -157,7 +157,7 @@ When a constant is referenced, the source location is always `codeclone.contract
 ### Threshold Violations
 
 - **Misconfigured thresholds**: If a user config supplies a complexity threshold below `COMPLEXITY_RISK_LOW_MAX` (10), findings are misclassified. No automatic correction occurs; the finding is reported as configured.
-- **Health weight imbalance**: If `HEALTH_WEIGHTS` do not sum to 1.0, aggregate health scoring becomes biased. This is a contract violation and must be caught by startup validation.
+- **Health weight imbalance**: If `HEALTH_WEIGHTS` do not sum to 1.0, or any weight is negative, the aggregate stops being a weighted mean and leaves [0, 100] — where `_clamp_score` folds the overflow onto an ordinary-looking 100. This is a contract violation, and `codeclone.metrics.health._convex_weights` refuses it at the aggregate with `ContractInvariantError` rather than scoring through it.
 - **Penalty overflow**: If `HEALTH_DEPENDENCY_CYCLE_PENALTY` > 100, a single cycle can drive health below 0. No clamping is applied; result may be nonsensical.
 
 ### Path and Resource Exhaustion
@@ -171,7 +171,7 @@ When a constant is referenced, the source location is always `codeclone.contract
 
 1. All version constants must be strings or integers. No dynamic computation is allowed.
 2. Risk thresholds must be ordered: `COMPLEXITY_RISK_LOW_MAX < COMPLEXITY_RISK_MEDIUM_MAX` (10 < 20). Violations break finding classification.
-3. Health weights must sum to 1.0 ± 0.001 (floating-point tolerance).
+3. Health weights must be a convex combination: every weight ≥ 0 and the total 1.0 within `_weight_sum_slack(n) = (n + 1) × ulp(1.0) / 2` ≈ 8.9e-16 for the seven shipped dimensions. The slack is a float-representation bound re-derived from how decimal weights are stored, not a tolerance for mis-authored values: a ±0.001 window would accept a weight typed as 0.1009.
 4. Path constants must be relative (no absolute /home, /usr prefixes).
 5. Default parameters must be reasonable: processes > 0, size limits > 0, LOC/statement thresholds >= 1.
 
@@ -182,7 +182,7 @@ The test suite **must** verify:
 - Constants are importable and non-None.
 - Version strings are unique per artifact family.
 - Thresholds are ordered correctly.
-- Health weights sum to 1.0.
+- Health weights sum to 1.0 and none is negative — pinned on the sum itself, not on a re-run of the aggregate formula, which stays green for any vector.
 - Baseline and report versions are stable (immutable once released).
 
 Run verification:
@@ -209,4 +209,4 @@ uv run pytest -q
 | Test suite | `tests/test_defaults_contract.py` | Verification | Validates constant values and invariants. |
 | Schema versions | BASELINE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION, CACHE_VERSION | Current artifact specs | Tied to reader/writer code. |
 | Risk thresholds | COMPLEXITY_RISK_*, COUPLING_RISK_*, COHESION_RISK_* | Finding classification | Must be ordered; tested in test_defaults_contract.py. |
-| Health model | HEALTH_WEIGHTS, HEALTH_DEPENDENCY_* | Scoring algorithm | Weights must sum to 1.0. |
+| Health model | HEALTH_WEIGHTS, HEALTH_DEPENDENCY_* | Scoring algorithm | Weights must be convex: sum 1.0, none negative; enforced at the aggregate. |

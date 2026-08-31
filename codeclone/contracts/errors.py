@@ -21,6 +21,17 @@ class ValidationError(CodeCloneError):
     """Input validation failed."""
 
 
+class ContractInvariantError(CodeCloneError):
+    """A shipped contract constant violates the invariant it is published with.
+
+    Not user input and not a runtime accident: the value is a literal in
+    ``codeclone.contracts``, so this can only be reached through a build whose
+    constants were edited past their declared rule, or through a caller that
+    substituted one at runtime. Refusing is the point -- the alternative is a
+    number that looks ordinary and is not.
+    """
+
+
 class CacheError(CodeCloneError):
     """Cache operation failed."""
 
@@ -44,6 +55,7 @@ __all__ = [
     "BaselineValidationError",
     "CacheError",
     "CodeCloneError",
+    "ContractInvariantError",
     "FileProcessingError",
     "ParseError",
     "ValidationError",

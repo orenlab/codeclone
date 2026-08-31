@@ -88,14 +88,14 @@ Dependency penalties apply after dimensional scoring:
 | **Cyclic dependency undetected** | Cycle detector fails on complex graphs | Health penalty not applied; score inflated | Run `analyze_repository` with explicit dependency cycle check |
 | **Coverage baseline absent** | No coverage join provided in current run | Coverage dimension defaults to prior baseline | Pass external Cobertura XML or explicit coverage signal |
 | **Depth calculation divergence** | P95 percentile calculation disagrees across runs | Inconsistent penalties between commits | Verify that sorted depth samples include all module depths; re-run with identical sample set |
-| **Weight normalization error** | Weights don't sum to 1.0 (e.g., after config edit) | Score doesn't map to [0, 100] | Audit `HEALTH_WEIGHTS` mapping; run `uv run pytest -q` to catch normalization failures |
+| **Weight normalization error** | Weights don't sum to 1.0, or one is negative | `compute_health` raises `ContractInvariantError`; no score is published | Audit the `HEALTH_WEIGHTS` mapping. There is no normalization step to repair — the aggregate is a raw weighted sum and refuses a non-convex vector instead of rescaling it |
 
 ## Verification
 
 1. **Unit test coverage**: Dimension scorers and health constants are exercised in `tests/test_report.py` and `tests/test_defaults_contract.py` (there is no dedicated `tests/test_health.py`).
 2. **Contract schema**: Verify `REPORT_SCHEMA_VERSION` matches deployed report version (current: 3.1).
 3. **Threshold alignment**: Confirm that `DEFAULT_HEALTH_THRESHOLD` (60) is intentional; lower thresholds increase sensitive findings.
-4. **Weight audit**: Ensure `HEALTH_WEIGHTS` sum to 1.0 before deployment.
+4. **Weight audit**: `codeclone.metrics.health._convex_weights` proves the vector convex on every scored run, so a deployment carrying a bad vector fails loudly rather than quietly; the shipped values are additionally pinned in `tests/test_defaults_contract.py`.
 5. **Cyclic dependency test**: Run `codeclone .` on a known cyclic codebase and inspect the coupling findings in the report; verify the penalty is applied.
 
 Pre-commit gate:

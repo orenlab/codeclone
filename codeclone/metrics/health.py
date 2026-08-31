@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from math import ceil
+from math import ceil, fsum, ulp
 from typing import Literal
 
 from ..contracts import (
@@ -39,6 +39,7 @@ from ..contracts import (
     observed_population,
     population_carries_score,
 )
+from ..contracts.errors import ContractInvariantError
 from ..models import HealthScore
 
 
@@ -270,6 +271,59 @@ def _clone_piecewise_score(density: float) -> int:
     return 0
 
 
+def _weight_sum_slack(count: int) -> float:
+    """Return how far a correct weight vector's float total may sit from 1.0.
+
+    Not a tuning knob and not a comfort margin: a bound re-derived from how
+    the weights are stored. Each is written as a decimal and kept as the
+    nearest double, so it carries at most half an ulp of its own magnitude,
+    and ``fsum`` rounds the exact total once more, at most half an ulp of 1.0.
+    For ``count`` weights whose true sum is one that bounds the drift at
+    ``count + 1`` half-ulps -- around 1e-15, twelve orders below the smallest
+    slip a human can type into a weight. Widening it past that stops being a
+    representation bound and starts admitting vectors that are simply wrong.
+    """
+
+    return (count + 1) * ulp(1.0) / 2
+
+
+def _convex_weights() -> dict[str, float]:
+    """Return ``HEALTH_WEIGHTS`` once the aggregate is allowed to use it.
+
+    ``compute_health`` forms a raw weighted sum -- there is no division by the
+    weight total anywhere -- so "a health score is a number in [0, 100]" is a
+    property of the weight vector, not of the arithmetic. It holds while the
+    vector is a convex combination, and both halves carry load:
+
+    * a total above one inflates every score, and ``_clamp_score`` then folds
+      the overflow onto a perfectly ordinary-looking 100;
+    * a negative weight escapes the range even at a total of exactly one, and
+      it inverts that dimension -- more debt reads as more health.
+
+    Measured on this tree: at ``coupling = -0.10, dead_code = 0.30`` (total
+    1.0) a repository whose coupling dimension falls from 100 to 0 sees its
+    raw aggregate *rise* from 100.00 to 110.00.
+
+    The check reads the same binding the sum consumes and hands it back, so
+    the validated mapping and the weighted one cannot drift apart.
+    """
+
+    weights = HEALTH_WEIGHTS
+    negative = sorted(name for name, weight in weights.items() if weight < 0.0)
+    if negative:
+        raise ContractInvariantError(
+            "HEALTH_WEIGHTS must never be negative; "
+            f"got a negative weight for {', '.join(negative)}."
+        )
+    total = fsum(weights[name] for name in sorted(weights))
+    if abs(total - 1.0) > _weight_sum_slack(len(weights)):
+        raise ContractInvariantError(
+            f"HEALTH_WEIGHTS must sum to 1.0; got {total!r} "
+            f"across {len(weights)} dimensions."
+        )
+    return weights
+
+
 def _observed_population(inputs: HealthInputs) -> HealthPopulation:
     """Read this run's population state off its two counters.
 
@@ -343,9 +397,8 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
             population=population,
         )
 
-    total = sum(
-        dimensions[name] * HEALTH_WEIGHTS[name] for name in sorted(HEALTH_WEIGHTS)
-    )
+    weights = _convex_weights()
+    total = sum(dimensions[name] * weights[name] for name in sorted(weights))
     score = _clamp_score(total)
     return HealthScore(
         total=score,
