@@ -18,6 +18,7 @@ actually sees. Neither side can vouch for the other.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import re
 from pathlib import Path
@@ -30,7 +31,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 pytest.importorskip("mcp.server.fastmcp")
 
+from codeclone.surfaces.mcp import _session_finding_mixin as finding_mixin
+from codeclone.surfaces.mcp._session_shared import MCPRunRootAmbiguityError
 from codeclone.surfaces.mcp.server import build_mcp_server
+from codeclone.surfaces.mcp.service import CodeCloneMCPService
+from codeclone.surfaces.mcp.session import MCPGateRequest
+from tests.test_mcp_service import (
+    _paired_repo_roots,
+    _patch_contract_run_record,
+)
 
 # "pass root", "provide run_id", "set limit" — a bare instruction to hand the
 # tool a named value.
@@ -372,3 +381,266 @@ def test_predicate_accepts_a_valid_cross_tool_call_form() -> None:
         )
         == ()
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 1: a declared root must actually select the record it names.
+#
+# Declaring `root` in the schema is a promise. The promise is only worth
+# something if the value reaches the resolution that picks the run, and a
+# helper shared by sixteen tools cannot testify for any single one of them:
+# mutating the helper kills every test at once, so one tool quietly dropping
+# its own `root` stays green. This drives every tool the schema commits.
+# ---------------------------------------------------------------------------
+
+_COLLIDED_RUN_ID = "before1234567890"
+
+# Arguments a tool needs before it reaches run resolution. Kept explicit so a
+# newly added tool fails loudly here rather than dropping out of the sweep.
+_SELECTOR_ARGUMENTS: dict[str, dict[str, object]] = {
+    "check_patch_contract": {
+        "mode": "verify",
+        "before_run_id": _COLLIDED_RUN_ID,
+        "changed_files": ["pkg/a.py"],
+    },
+    "compare_runs": {"before_run_id": _COLLIDED_RUN_ID},
+    "get_blast_radius": {"files": ["pkg/a.py"]},
+    "get_finding": {"finding_id": "fn:g1"},
+    "get_remediation": {"finding_id": "fn:g1"},
+    "list_hotspots": {"kind": "highest_priority"},
+    "manage_change_intent": {"action": "check", "changed_files": ["pkg/a.py"]},
+    "mark_finding_reviewed": {"finding_id": "fn:g1"},
+    "validate_review_claims": {"text": "a claim about pkg/a.py"},
+}
+
+
+def _root_selector_population(
+    schemas: dict[str, frozenset[str]],
+    required: dict[str, frozenset[str]],
+) -> tuple[str, ...]:
+    """Tools that declare an *optional* root beside a run id.
+
+    A tool whose root is required cannot silently ignore it — there is no
+    rootless call for it to fall back to — so it leaves the population by a
+    property of its own schema rather than by being listed here.
+    """
+
+    return tuple(
+        sorted(
+            name
+            for name, properties in schemas.items()
+            if "root" in properties
+            and "root" not in required[name]
+            and any(item.endswith("run_id") for item in properties)
+        )
+    )
+
+
+def _distinguishable_collision(
+    tmp_path: Path,
+) -> tuple[CodeCloneMCPService, Path, Path]:
+    """One run id under two checkouts, whose records are told apart."""
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    # The two records must differ in more than one place, or a tool that picks
+    # the wrong checkout can still answer identically and look correct.
+    for root, health, complexity, path in (
+        (root_a, 81, 6, "pkg/a.py"),
+        (root_b, 42, 14, "pkg/zz.py"),
+    ):
+        service._runs.register(
+            _patch_contract_run_record(
+                root,
+                run_id=_COLLIDED_RUN_ID,
+                digest="shared-digest",
+                include_regression=True,
+                complexity=complexity,
+                health=health,
+                regression_path=path,
+                complexity_path=path,
+            )
+        )
+    return service, root_a, root_b
+
+
+def _call_selector_tool(
+    service: CodeCloneMCPService,
+    tool: str,
+    *,
+    root: Path | None,
+) -> object:
+    arguments: dict[str, Any] = dict(_SELECTOR_ARGUMENTS.get(tool, {}))
+    if root is not None:
+        arguments["root"] = str(root)
+    if tool != "compare_runs":
+        arguments["run_id"] = _COLLIDED_RUN_ID
+    if tool == "evaluate_gates":
+        return service.evaluate_gates(
+            MCPGateRequest(
+                run_id=_COLLIDED_RUN_ID,
+                root=None if root is None else str(root),
+            )
+        )
+    return getattr(service, tool)(**arguments)
+
+
+def _ambiguity_raised(
+    service: CodeCloneMCPService,
+    tool: str,
+    *,
+    root: Path | None,
+) -> bool:
+    """Did this call fail closed on the shared id?
+
+    Any other outcome — a payload, a typed not-found, a contract error — means
+    resolution did not stop on ambiguity, which is all this rule asks about.
+    """
+
+    try:
+        _call_selector_tool(service, tool, root=root)
+    except MCPRunRootAmbiguityError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def test_every_root_declaring_tool_honours_the_root_it_was_given(
+    tmp_path: Path,
+) -> None:
+    """The population rule: a named root must select the run it names.
+
+    Two halves per tool, and the first is the witness for the second. The
+    rootless call must fail closed, proving this tool really does resolve a
+    run by id and that the branch a dropped root would fall into is reachable.
+    Only then does the rooted call mean anything.
+    """
+
+    server = build_mcp_server(history_limit=4)
+    schemas, required = _tool_schemas(server)
+    population = _root_selector_population(schemas, required)
+    assert population, "no tool declares an optional root beside a run id"
+    unknown = sorted(set(_SELECTOR_ARGUMENTS) - set(population))
+    assert unknown == [], (
+        f"argument table names tools outside the population: {unknown}"
+    )
+
+    unreachable: list[str] = []
+    ignoring: list[str] = []
+    for index, tool in enumerate(population):
+        rootless_service, _a, _b = _distinguishable_collision(
+            tmp_path / f"rootless{index}"
+        )
+        if not _ambiguity_raised(rootless_service, tool, root=None):
+            unreachable.append(tool)
+            continue
+        rooted_service, root_a, _b2 = _distinguishable_collision(
+            tmp_path / f"rooted{index}"
+        )
+        if _ambiguity_raised(rooted_service, tool, root=root_a):
+            ignoring.append(tool)
+
+    assert unreachable == [], (
+        "these tools never reached the multi-root refusal, so this sweep cannot "
+        f"testify about their root at all: {unreachable}"
+    )
+    assert ignoring == [], (
+        f"these tools declare root and then resolve the run without it: {ignoring}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 2: an internal re-entry must stay bound to the record's own root.
+#
+# A tool that already resolved its record and then re-enters the resolver by
+# bare id walks back into the very refusal it just escaped. The binding that
+# prevents it is one keyword argument, invisible to every behavioural test
+# that does not run on a shared id.
+# ---------------------------------------------------------------------------
+
+_REENTRY_RESOLVER = "_service_get_finding"
+
+
+def _reentry_call_sites() -> tuple[tuple[str, int, str], ...]:
+    """Every internal re-entry into the finding resolver, read from source.
+
+    Read from the module's own AST rather than a list here, so a fourth site
+    added tomorrow joins the rule instead of slipping past it.
+    """
+
+    source = Path(finding_mixin.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    sites: list[tuple[str, int, str]] = []
+
+    def walk(node: ast.AST, enclosing: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                walk(child, child.name)
+                continue
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == _REENTRY_RESOLVER
+            ):
+                bound = next(
+                    (kw.value for kw in child.keywords if kw.arg == "root"),
+                    None,
+                )
+                if bound is None:
+                    state = "missing"
+                elif isinstance(bound, ast.Constant) and bound.value is None:
+                    state = "literal-none"
+                else:
+                    state = "bound"
+                sites.append((enclosing, child.lineno, state))
+            walk(child, enclosing)
+
+    walk(tree, "<module>")
+    return tuple(sites)
+
+
+def test_every_internal_finding_reentry_declares_a_root() -> None:
+    """The static half: no re-entry may resolve by bare id."""
+
+    sites = _reentry_call_sites()
+    assert len(sites) >= 3, f"the known re-entry sites went missing: {sites}"
+    unbound = [(name, line, state) for name, line, state in sites if state != "bound"]
+    assert unbound == [], (
+        f"{_REENTRY_RESOLVER} re-entered without the record's root: {unbound}"
+    )
+
+
+@pytest.mark.parametrize(
+    "tool",
+    sorted({name for name, _line, _state in _reentry_call_sites()}),
+)
+def test_internal_finding_reentry_survives_a_shared_run_id(
+    tool: str,
+    tmp_path: Path,
+) -> None:
+    """The causal half: each re-entering tool must still answer on a collision.
+
+    Parameterised over the enclosing methods the AST found, so each one fails
+    under its own test id and a fourth site arrives already covered.
+    """
+
+    service, root_a, _root_b = _distinguishable_collision(tmp_path)
+    if tool == "list_reviewed_findings":
+        service.mark_finding_reviewed(
+            finding_id="fn:g1",
+            run_id=_COLLIDED_RUN_ID,
+            root=str(root_a),
+        )
+    arguments: dict[str, Any] = {"run_id": _COLLIDED_RUN_ID, "root": str(root_a)}
+    if tool in {"get_remediation", "mark_finding_reviewed"}:
+        arguments["finding_id"] = "fn:g1"
+
+    try:
+        getattr(service, tool)(**arguments)
+    except MCPRunRootAmbiguityError as exc:  # pragma: no cover - the defect path
+        pytest.fail(
+            f"{tool} resolved its record and then re-entered "
+            f"{_REENTRY_RESOLVER} by bare id: {exc}"
+        )
