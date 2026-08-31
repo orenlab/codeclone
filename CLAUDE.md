@@ -124,7 +124,10 @@ After `start_controlled_change` returns `edit_allowed: true`:
 
 - Never use project root as memory scope.
 - Compress `record_candidate` statements to one durable fact: target ≤300 chars; `validate_claims` warns above 500; hard
-  limit 1000.
+  limit 1000. **The budget is one fact, not one line.** A titled, tabled note fits: the shape
+  `manage_engineering_memory` hands back on a flat over-target write is 232 chars. Measured
+  2026-08-31: notes carrying a `## ` title fell from 52.9% to 4.9% over one month, and every
+  untitled one was read back as prose — the write path was never the constraint.
 - List responses default to compact previews.
 - Treat `records[]`, `experiences[]`, and `trajectories[]` as separate evidence lanes:
     - `records` = asserted knowledge
