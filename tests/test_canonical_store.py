@@ -14,6 +14,7 @@ the same canonical bytes.
 
 from __future__ import annotations
 
+import ast
 import os
 import sqlite3
 import subprocess
@@ -34,6 +35,28 @@ from codeclone.canonical import (
     analysis_scope_digest,
     decode_canonical_json,
     encode_canonical_json,
+)
+from codeclone.canonical.identity import FileId, ModuleId
+from codeclone.canonical.model import (
+    AdoptionCountRow,
+    AnalysisPopulation,
+    ApiSymbolRow,
+    CandidateRow,
+    CloneGroupRow,
+    ContractRow,
+    CouplingCohesionRow,
+    DeadCodeObservationRow,
+    DependencyCycleRow,
+    DependencyOccurrenceRow,
+    DependencyRelationRow,
+    FileModuleRelation,
+    GraphNodeRow,
+    RiskObservationRow,
+    RunScalars,
+    SecuritySurfaceRow,
+    SemanticEdge,
+    SinkRoleRow,
+    ViolationRow,
 )
 from codeclone.canonical.store import _payload_bytes
 from tests.test_canonical_roundtrip import fixture_model
@@ -1056,3 +1079,138 @@ def test_two_analysis_population_records_in_one_run_are_refused(
         ),
     ):
         store.read_run(forged)
+
+
+# -- The typed family registry ----------------------------------------------
+
+# Independent literal fixture (the ``test_canonical_grammar`` precedent):
+# what each storage family's decoded row IS, spelled here by hand and never
+# read back from the production registry.  A production entry that starts
+# producing a different row type must red here; a family added to the
+# registry without landing here must red here too.
+_EXPECTED_ROW_TYPES: dict[str, type[object]] = {
+    "adoption_count": AdoptionCountRow,
+    "analysis_population": AnalysisPopulation,
+    "analyzed_file": FileId,
+    "api_symbol": ApiSymbolRow,
+    "candidate": CandidateRow,
+    "clone_group": CloneGroupRow,
+    "contract": ContractRow,
+    "coupled_set": frozenset,
+    "coupling_cohesion_observation": CouplingCohesionRow,
+    "dead_code_observation": DeadCodeObservationRow,
+    "dependency_cycle": DependencyCycleRow,
+    "dependency_occurrence": DependencyOccurrenceRow,
+    "dependency_relation": DependencyRelationRow,
+    "file": FileId,
+    "file_module": FileModuleRelation,
+    "graph_node": GraphNodeRow,
+    "module": ModuleId,
+    "risk_observation": RiskObservationRow,
+    "run_scalar": RunScalars,
+    "security_surface": SecuritySurfaceRow,
+    "semantic_edge": SemanticEdge,
+    "sink_role": SinkRoleRow,
+    "violation": ViolationRow,
+}
+
+_STORE_SOURCE = _REPO_ROOT / "codeclone" / "canonical" / "store.py"
+
+
+def _store_module_ast() -> ast.Module:
+    return ast.parse(_STORE_SOURCE.read_text(encoding="utf-8"), filename="store.py")
+
+
+def _named_function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} is gone from store.py")
+
+
+def test_store_recovers_no_row_type_by_cast() -> None:
+    """``cast`` is not a type: it is the project's declaration that our
+    own annotation is weaker than the truth.  The row reader states each
+    family's row type ONCE, in the registry entry, so nothing downstream
+    has a type left to recover."""
+    calls = sorted(
+        node.lineno
+        for node in ast.walk(_store_module_ast())
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "cast")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "cast")
+        )
+    )
+    assert calls == [], f"store.py recovers row types by cast at lines {calls}"
+
+
+def test_model_assembly_does_not_restate_the_family_table() -> None:
+    """One place for ``family -> row type``: the assembler reads typed
+    buckets and must not spell a storage family name at all.  A family
+    name here is the second statement whose drift nothing catches."""
+    assembler = _named_function(_store_module_ast(), "_collected_model")
+    spelled = sorted(
+        {
+            node.value
+            for node in ast.walk(assembler)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in _EXPECTED_ROW_TYPES
+        }
+    )
+    assert spelled == [], f"_collected_model restates families {spelled}"
+
+
+def test_every_family_decodes_to_its_declared_row_type() -> None:
+    """The registry's two halves are one declaration: real fixture
+    payloads go through the production reader, and what each family files
+    must be the row type this test spells by hand."""
+    from codeclone.canonical.store import _collect_row, _model_rows
+
+    collected: dict[str, list[object]] = {}
+    for family, row in _model_rows(fixture_model().normalize()):
+        _collect_row(family, row, f"{family} object", collected)
+    for family, expected in _EXPECTED_ROW_TYPES.items():
+        rows = collected.get(family, [])
+        assert rows, f"the distinguishing fixture produced no {family} row"
+        assert {type(row) for row in rows} == {expected}, (
+            f"family {family!r} decoded to the wrong row type"
+        )
+
+
+def test_family_dispatch_is_total_over_the_declared_families() -> None:
+    """The family set is stated ONCE in production: the reader dispatch
+    and the contract namespace map are both derived from the same
+    declarations, so a family cannot exist for one and be missing for the
+    other."""
+    from codeclone.canonical.store import (
+        _FAMILIES,
+        _FAMILY_NAMESPACE,
+        _FAMILY_READER,
+    )
+
+    assert {entry.family for entry in _FAMILIES} == set(_EXPECTED_ROW_TYPES)
+    assert set(_FAMILY_READER) == set(_EXPECTED_ROW_TYPES)
+    assert set(_FAMILY_NAMESPACE) == set(_EXPECTED_ROW_TYPES)
+
+
+def test_unknown_stored_family_is_a_typed_refusal() -> None:
+    """Totality is a refusal, never a silent skip — and the refusal has a
+    reachable input: a stored family the registry does not know."""
+    from codeclone.canonical.store import _collect_row
+
+    with pytest.raises(StoreIntegrityError, match="unknown stored family"):
+        _collect_row("not_a_family", {}, "probe", {})
+
+
+def test_a_row_filed_under_the_wrong_family_is_refused() -> None:
+    """What replaced the cast is a CHECK, not a second assertion: decoded
+    rows wait in an untyped per-family mapping, and a caller that files a
+    row under the wrong family gets a typed refusal instead of a silently
+    wrong model."""
+    from codeclone.canonical.store import _collected_model
+
+    node = next(iter(fixture_model().normalize().facts.analysis.graph_nodes))
+    with pytest.raises(StoreIntegrityError, match="carries a GraphNodeRow"):
+        _collected_model({"contract": [node]})

@@ -74,7 +74,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Final, cast
+from typing import Final, Generic, Protocol, TypeVar
 
 from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.codec import (
@@ -177,6 +177,8 @@ from codeclone.models import (
 from codeclone.observability import SpanHandle, span
 from codeclone.utils.sqlite_store import open_sqlite_db
 
+_RowT = TypeVar("_RowT")
+
 _DOMAIN_PREFIX: Final = f"cc-run-store:{STORAGE_SCHEMA_REVISION}\x00".encode()
 _DOMAIN_OBJECT: Final = _DOMAIN_PREFIX + b"object\x00"
 _DOMAIN_RUN: Final = _DOMAIN_PREFIX + b"run\x00"
@@ -198,70 +200,6 @@ _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
     ("storage_schema", STORAGE_SCHEMA_REVISION, "storage"),
 )
 
-# Family contract namespaces (F-3 §5.0.1): a fact's content address carries
-# the revision of the contract that gives it meaning, so a fact identity
-# never silently crosses a producer revision.
-_FAMILY_NAMESPACE: Final[dict[str, str]] = {
-    # F3: counting meaning — what counts as an annotated parameter or a
-    # documented public symbol — is owned by the adoption-coverage policy,
-    # so a policy bump never lets these facts silently share content
-    # addresses across generations.
-    "adoption_count": f"adoption_coverage:{ADOPTION_COVERAGE_POLICY_VERSION}",
-    "analyzed_file": f"module_identity:{MODULE_IDENTITY_VERSION}",
-    # F5: signature meaning is owned by the API signature contract — a
-    # signature-algorithm revision never lets these facts silently share
-    # content addresses across generations.
-    "api_symbol": f"api_surface_signature:{API_SURFACE_SIGNATURE_VERSION}",
-    "candidate": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
-    # F8: group_key meaning is owned by the clone fingerprint generation —
-    # a fingerprint-generation bump never lets these facts silently share
-    # content addresses across generations.
-    "clone_group": f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}",
-    "contract": f"contract_ir:{CONTRACT_IR_VERSION}",
-    "coupled_set": f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    # F2: the Wave D lane split put coupling/cohesion meaning on the design
-    # metrics revision (complexity moved to its own), so a design-metrics
-    # recount never lets these facts silently share content addresses.
-    "coupling_cohesion_observation": (
-        f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
-    ),
-    # F4: TWO policy owners give this family meaning — liveness for symbol
-    # rows, statement reachability for unreachable-statement rows — so both
-    # revisions enter the content-address namespace and neither can bump
-    # silently under the other.
-    "dead_code_observation": (
-        f"liveness:{LIVENESS_POLICY_VERSION}"
-        f":statement_reachability:{STATEMENT_REACHABILITY_POLICY_VERSION}"
-    ),
-    # F7: the cycle verdict is a canonical-model analysis fact over the
-    # relation graph; no separate cycle-algorithm revision exists, and the
-    # relation families it reads share this namespace.
-    "dependency_cycle": f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    "dependency_occurrence": f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    "dependency_relation": f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    "file": f"module_identity:{MODULE_IDENTITY_VERSION}",
-    "file_module": f"module_identity:{MODULE_IDENTITY_VERSION}",
-    "graph_node": f"contract_ir:{CONTRACT_IR_VERSION}",
-    "module": f"module_identity:{MODULE_IDENTITY_VERSION}",
-    # F1: the risk lane rides COMPLEXITY_ALGORITHM_REVISION (the Wave D
-    # two-metric split), so a complexity recount never lets these facts
-    # silently share content addresses across generations.
-    "risk_observation": f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
-    "analysis_population": f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    "run_scalar": f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    # F10: TWO policy owners give this family meaning -- the detector
-    # catalog (which symbols and capabilities exist) and the source-kind
-    # classification verdict -- so both revisions enter the
-    # content-address namespace and neither can bump silently under the
-    # other (the F4 two-owner precedent).
-    "security_surface": (
-        f"security_surface_catalog:{SECURITY_SURFACE_CATALOG_VERSION}"
-        f":source_kind:{SOURCE_KIND_POLICY_VERSION}"
-    ),
-    "semantic_edge": f"contract_ir:{CONTRACT_IR_VERSION}",
-    "sink_role": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
-    "violation": f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
-}
 
 _SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS store_meta (
@@ -979,7 +917,7 @@ def _decode_dead_code_observation_row(
 ) -> DeadCodeObservationRow:
     """Shape guards only: vocabularies, count floors, and the
     abstention/root exclusivity have exactly one owner — the model law
-    (``DeadCodeObservationRow``), wrapped by ``_decode_row``."""
+    (``DeadCodeObservationRow``), wrapped by ``_collect_row``."""
     reason = _require_field(row, "live_root_reason", where)
     if reason is not None and not isinstance(reason, str):
         raise StoreIntegrityError(
@@ -1023,7 +961,7 @@ def _decode_clone_item_value(value: object, where: str) -> CloneItemRow:
 def _decode_clone_group_row(row: Mapping[str, object], where: str) -> CloneGroupRow:
     """Shape guards only: the kind vocabulary, key floor, and two-item
     floor have exactly one owner — the model law (``CloneGroupRow``),
-    whose refusal ``_decode_row`` wraps into a typed integrity error."""
+    whose refusal ``_collect_row`` wraps into a typed integrity error."""
     items = _require_field(row, "items", where)
     if not isinstance(items, list):
         raise StoreIntegrityError(f"{where}: stored field 'items' is not an array")
@@ -1039,7 +977,7 @@ def _decode_dependency_cycle_row(
 ) -> DependencyCycleRow:
     """Shape guards only: the kind vocabulary and the two-module floor have
     exactly one owner — the model law (``DependencyCycleRow``), whose
-    refusal ``_decode_row`` wraps into a typed integrity error."""
+    refusal ``_collect_row`` wraps into a typed integrity error."""
     return DependencyCycleRow(
         kind=_require_str(row, "kind", where),
         modules=frozenset(
@@ -1053,7 +991,7 @@ def _decode_adoption_count_row(
 ) -> AdoptionCountRow:
     """Shape guards only: the feature vocabulary and both count floors
     have exactly one owner — the model law (``AdoptionCountRow``), whose
-    refusal ``_decode_row`` wraps into a typed integrity error."""
+    refusal ``_collect_row`` wraps into a typed integrity error."""
     return AdoptionCountRow(
         scope=_decode_endpoint(_require_field(row, "scope", where), where),
         feature=_require_str(row, "feature", where),
@@ -1067,7 +1005,7 @@ def _decode_coupling_cohesion_row(
 ) -> CouplingCohesionRow:
     """Shape guards only: the numerator floor and the dimension vocabulary
     have exactly one owner — the model law (``CouplingCohesionRow``), whose
-    refusal ``_decode_row`` wraps into a typed integrity error.  A second
+    refusal ``_collect_row`` wraps into a typed integrity error.  A second
     spelling of either domain here would be the G2 drift class."""
     return CouplingCohesionRow(
         symbol=_row_symbol(row, "symbol", where),
@@ -1081,7 +1019,7 @@ def _decode_risk_observation_row(
 ) -> RiskObservationRow:
     """Shape guards only: the numerator/site floors and the dimension
     vocabulary have exactly one owner — the model law
-    (``RiskObservationRow``), whose refusal ``_decode_row`` wraps into a
+    (``RiskObservationRow``), whose refusal ``_collect_row`` wraps into a
     typed integrity error.  A second spelling here would be the G2 drift
     class."""
     return RiskObservationRow(
@@ -1137,7 +1075,7 @@ def _decode_security_surface_row(
 ) -> SecuritySurfaceRow:
     """Shape guards only: the vocabularies, span floors, and the
     scope/local-name binding have exactly one owner -- the model law
-    (``SecuritySurfaceRow``), whose refusal ``_decode_row`` wraps into a
+    (``SecuritySurfaceRow``), whose refusal ``_collect_row`` wraps into a
     typed integrity error."""
     qualname = _require_field(row, "qualname", where)
     if qualname is not None and not isinstance(qualname, str):
@@ -1238,53 +1176,300 @@ def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow
     )
 
 
-# One decoder per storage family — the mechanical inverse of _model_rows.
-# Dispatch is total over _FAMILY_NAMESPACE; an unknown family is a typed
-# integrity refusal at the call site, never a silent skip.
-_ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] = {
-    "adoption_count": _decode_adoption_count_row,
-    "analysis_population": _decode_analysis_population_row,
-    "analyzed_file": _decode_file_row,
-    "api_symbol": _decode_api_symbol_row,
-    "candidate": _decode_candidate_row,
-    "clone_group": _decode_clone_group_row,
-    "contract": _decode_contract_row,
-    "coupled_set": _decode_coupled_row,
-    "coupling_cohesion_observation": _decode_coupling_cohesion_row,
-    "dead_code_observation": _decode_dead_code_observation_row,
-    "dependency_cycle": _decode_dependency_cycle_row,
-    "dependency_occurrence": _decode_dependency_occurrence_row,
-    "dependency_relation": _decode_dependency_relation_row,
-    "file": _decode_file_row,
-    "file_module": _decode_file_module_row,
-    "graph_node": _decode_graph_node_row,
-    "module": _decode_module_row,
-    "risk_observation": _decode_risk_observation_row,
-    "run_scalar": _decode_run_scalar_row,
-    "security_surface": _decode_security_surface_row,
-    "semantic_edge": _decode_semantic_edge_row,
-    "sink_role": _decode_sink_role_row,
-    "violation": _decode_violation_row,
+# ---------------------------------------------------------------------------
+# The family registry — the one place a storage family is declared
+# ---------------------------------------------------------------------------
+
+
+class _FamilyEntry(Protocol):
+    """The registry's erased face — what a caller still needs from an entry
+    once the row type has done its work at declaration time."""
+
+    @property
+    def family(self) -> str: ...
+
+    @property
+    def namespace(self) -> str: ...
+
+    def decode_into(
+        self, into: dict[str, list[object]], row: Mapping[str, object], where: str
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class _Family(Generic[_RowT]):
+    """One storage family: its name, the contract namespace of its content
+    address, the decoder that reads its stored row, and the type that
+    decoder produces — the mechanical inverse of one family of
+    :func:`_model_rows`.
+
+    ``decode`` and ``row_type`` bind the SAME ``_RowT``, so a family's row
+    type is ONE declaration rather than an agreement between two that
+    nothing checks: a decoder that stops producing its declared type is a
+    type error here (mypy ``Argument "decode" ... has incompatible type``;
+    ty ``invalid-argument-type``), and a family cannot be declared at all
+    without saying what it decodes to.
+
+    :meth:`rows` is why the model assembly needs no ``cast``.  Decoded rows
+    wait in an untyped per-family mapping — heterogeneous by construction,
+    since the family is a string read from the database — and the row type
+    is recovered by CHECKING it against the declaration, never by asserting
+    it.  A row filed under the wrong family is a typed refusal instead of a
+    silently wrong model.
+    """
+
+    family: str
+    namespace: str
+    decode: Callable[[Mapping[str, object], str], _RowT]
+    row_type: type[_RowT]
+
+    def decode_into(
+        self, into: dict[str, list[object]], row: Mapping[str, object], where: str
+    ) -> None:
+        into.setdefault(self.family, []).append(self.decode(row, where))
+
+    def rows(self, collected: Mapping[str, list[object]]) -> list[_RowT]:
+        decoded: list[_RowT] = []
+        for row in collected.get(self.family, []):
+            if not isinstance(row, self.row_type):
+                raise StoreIntegrityError(
+                    f"family {self.family!r} carries a {type(row).__name__}, "
+                    f"not a {self.row_type.__name__}"
+                )
+            decoded.append(row)
+        return decoded
+
+
+# Every storage family, declared once.  The namespace half is the family
+# contract namespace of F-3 §5.0.1: a fact's content address carries the
+# revision of the contract that gives it meaning, so a fact identity never
+# silently crosses a producer revision.
+
+# F3: counting meaning — what counts as an annotated parameter or a
+# documented public symbol — is owned by the adoption-coverage policy, so a
+# policy bump never lets these facts silently share content addresses
+# across generations.
+_FAMILY_ADOPTION_COUNT: Final = _Family(
+    family="adoption_count",
+    namespace=f"adoption_coverage:{ADOPTION_COVERAGE_POLICY_VERSION}",
+    decode=_decode_adoption_count_row,
+    row_type=AdoptionCountRow,
+)
+_FAMILY_ANALYSIS_POPULATION: Final = _Family(
+    family="analysis_population",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_analysis_population_row,
+    row_type=AnalysisPopulation,
+)
+_FAMILY_ANALYZED_FILE: Final = _Family(
+    family="analyzed_file",
+    namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
+    decode=_decode_file_row,
+    row_type=FileId,
+)
+# F5: signature meaning is owned by the API signature contract — a
+# signature-algorithm revision never lets these facts silently share
+# content addresses across generations.
+_FAMILY_API_SYMBOL: Final = _Family(
+    family="api_symbol",
+    namespace=f"api_surface_signature:{API_SURFACE_SIGNATURE_VERSION}",
+    decode=_decode_api_symbol_row,
+    row_type=ApiSymbolRow,
+)
+_FAMILY_CANDIDATE: Final = _Family(
+    family="candidate",
+    namespace=f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+    decode=_decode_candidate_row,
+    row_type=CandidateRow,
+)
+# F8: group_key meaning is owned by the clone fingerprint generation — a
+# fingerprint-generation bump never lets these facts silently share content
+# addresses across generations.
+_FAMILY_CLONE_GROUP: Final = _Family(
+    family="clone_group",
+    namespace=f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}",
+    decode=_decode_clone_group_row,
+    row_type=CloneGroupRow,
+)
+_FAMILY_CONTRACT: Final = _Family(
+    family="contract",
+    namespace=f"contract_ir:{CONTRACT_IR_VERSION}",
+    decode=_decode_contract_row,
+    row_type=ContractRow,
+)
+_FAMILY_COUPLED_SET: Final = _Family(
+    family="coupled_set",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_coupled_row,
+    row_type=frozenset,
+)
+# F2: the Wave D lane split put coupling/cohesion meaning on the design
+# metrics revision (complexity moved to its own), so a design-metrics
+# recount never lets these facts silently share content addresses.
+_FAMILY_COUPLING_COHESION: Final = _Family(
+    family="coupling_cohesion_observation",
+    namespace=f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}",
+    decode=_decode_coupling_cohesion_row,
+    row_type=CouplingCohesionRow,
+)
+# F4: TWO policy owners give this family meaning — liveness for symbol
+# rows, statement reachability for unreachable-statement rows — so both
+# revisions enter the content-address namespace and neither can bump
+# silently under the other.
+_FAMILY_DEAD_CODE_OBSERVATION: Final = _Family(
+    family="dead_code_observation",
+    namespace=(
+        f"liveness:{LIVENESS_POLICY_VERSION}"
+        f":statement_reachability:{STATEMENT_REACHABILITY_POLICY_VERSION}"
+    ),
+    decode=_decode_dead_code_observation_row,
+    row_type=DeadCodeObservationRow,
+)
+# F7: the cycle verdict is a canonical-model analysis fact over the
+# relation graph; no separate cycle-algorithm revision exists, and the
+# relation families it reads share this namespace.
+_FAMILY_DEPENDENCY_CYCLE: Final = _Family(
+    family="dependency_cycle",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_dependency_cycle_row,
+    row_type=DependencyCycleRow,
+)
+_FAMILY_DEPENDENCY_OCCURRENCE: Final = _Family(
+    family="dependency_occurrence",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_dependency_occurrence_row,
+    row_type=DependencyOccurrenceRow,
+)
+_FAMILY_DEPENDENCY_RELATION: Final = _Family(
+    family="dependency_relation",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_dependency_relation_row,
+    row_type=DependencyRelationRow,
+)
+_FAMILY_FILE: Final = _Family(
+    family="file",
+    namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
+    decode=_decode_file_row,
+    row_type=FileId,
+)
+_FAMILY_FILE_MODULE: Final = _Family(
+    family="file_module",
+    namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
+    decode=_decode_file_module_row,
+    row_type=FileModuleRelation,
+)
+_FAMILY_GRAPH_NODE: Final = _Family(
+    family="graph_node",
+    namespace=f"contract_ir:{CONTRACT_IR_VERSION}",
+    decode=_decode_graph_node_row,
+    row_type=GraphNodeRow,
+)
+_FAMILY_MODULE: Final = _Family(
+    family="module",
+    namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
+    decode=_decode_module_row,
+    row_type=ModuleId,
+)
+# F1: the risk lane rides COMPLEXITY_ALGORITHM_REVISION (the Wave D
+# two-metric split), so a complexity recount never lets these facts
+# silently share content addresses across generations.
+_FAMILY_RISK_OBSERVATION: Final = _Family(
+    family="risk_observation",
+    namespace=f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
+    decode=_decode_risk_observation_row,
+    row_type=RiskObservationRow,
+)
+_FAMILY_RUN_SCALAR: Final = _Family(
+    family="run_scalar",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_run_scalar_row,
+    row_type=RunScalars,
+)
+# F10: TWO policy owners give this family meaning -- the detector catalog
+# (which symbols and capabilities exist) and the source-kind classification
+# verdict -- so both revisions enter the content-address namespace and
+# neither can bump silently under the other (the F4 two-owner precedent).
+_FAMILY_SECURITY_SURFACE: Final = _Family(
+    family="security_surface",
+    namespace=(
+        f"security_surface_catalog:{SECURITY_SURFACE_CATALOG_VERSION}"
+        f":source_kind:{SOURCE_KIND_POLICY_VERSION}"
+    ),
+    decode=_decode_security_surface_row,
+    row_type=SecuritySurfaceRow,
+)
+_FAMILY_SEMANTIC_EDGE: Final = _Family(
+    family="semantic_edge",
+    namespace=f"contract_ir:{CONTRACT_IR_VERSION}",
+    decode=_decode_semantic_edge_row,
+    row_type=SemanticEdge,
+)
+_FAMILY_SINK_ROLE: Final = _Family(
+    family="sink_role",
+    namespace=f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+    decode=_decode_sink_role_row,
+    row_type=SinkRoleRow,
+)
+_FAMILY_VIOLATION: Final = _Family(
+    family="violation",
+    namespace=f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
+    decode=_decode_violation_row,
+    row_type=ViolationRow,
+)
+
+_FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
+    _FAMILY_ADOPTION_COUNT,
+    _FAMILY_ANALYSIS_POPULATION,
+    _FAMILY_ANALYZED_FILE,
+    _FAMILY_API_SYMBOL,
+    _FAMILY_CANDIDATE,
+    _FAMILY_CLONE_GROUP,
+    _FAMILY_CONTRACT,
+    _FAMILY_COUPLED_SET,
+    _FAMILY_COUPLING_COHESION,
+    _FAMILY_DEAD_CODE_OBSERVATION,
+    _FAMILY_DEPENDENCY_CYCLE,
+    _FAMILY_DEPENDENCY_OCCURRENCE,
+    _FAMILY_DEPENDENCY_RELATION,
+    _FAMILY_FILE,
+    _FAMILY_FILE_MODULE,
+    _FAMILY_GRAPH_NODE,
+    _FAMILY_MODULE,
+    _FAMILY_RISK_OBSERVATION,
+    _FAMILY_RUN_SCALAR,
+    _FAMILY_SECURITY_SURFACE,
+    _FAMILY_SEMANTIC_EDGE,
+    _FAMILY_SINK_ROLE,
+    _FAMILY_VIOLATION,
+)
+
+# Derived, never restated: the reader dispatch and the content address read
+# the SAME declarations, so a family cannot exist for one and be missing for
+# the other.  Dispatch is total over _FAMILY_NAMESPACE by construction; an
+# unknown family is a typed integrity refusal, never a silent skip.
+_FAMILY_READER: Final[dict[str, _FamilyEntry]] = {
+    entry.family: entry for entry in _FAMILIES
+}
+_FAMILY_NAMESPACE: Final[dict[str, str]] = {
+    entry.family: entry.namespace for entry in _FAMILIES
 }
 
 
-def _decode_row(family: str, row: Mapping[str, object], where: str) -> object:
-    decoder = _ROW_DECODERS.get(family)
-    if decoder is None:
+def _collect_row(
+    family: str, row: Mapping[str, object], where: str, into: dict[str, list[object]]
+) -> None:
+    entry = _FAMILY_READER.get(family)
+    if entry is None:
         raise StoreIntegrityError(f"{where}: unknown stored family {family!r}")
     try:
-        return decoder(row, where)
+        entry.decode_into(into, row, where)
     except CanonicalModelError as error:
         raise StoreIntegrityError(f"{where}: {error}") from error
 
 
 def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
     """Assemble decoded family rows into one canonical model."""
-
-    def family(name: str) -> list[object]:
-        return collected.get(name, [])
-
-    run_scalar_rows = cast("list[RunScalars]", family("run_scalar"))
+    run_scalar_rows = _FAMILY_RUN_SCALAR.rows(collected)
     if len(run_scalar_rows) > 1:
         # F9 law: ONE record per analysis snapshot — two stored records are
         # a writer defect, refused loudly, never last-reader-silenced.
@@ -1292,7 +1477,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
             "run carries more than one run_scalars record; the family is "
             "one record per analysis snapshot"
         )
-    population_rows = cast("list[AnalysisPopulation]", family("analysis_population"))
+    population_rows = _FAMILY_ANALYSIS_POPULATION.rows(collected)
     if len(population_rows) > 1:
         # RULING-2026-08-31 §3: a singleton authority — two stored records
         # are a writer defect, refused loudly, never last-reader-silenced.
@@ -1301,62 +1486,41 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
             "family is one record per analysis snapshot"
         )
     return CanonicalModel(
-        files=frozenset(cast("list[FileId]", family("file"))),
-        modules=frozenset(cast("list[ModuleId]", family("module"))),
-        analyzed_files=frozenset(cast("list[FileId]", family("analyzed_file"))),
-        file_modules=frozenset(cast("list[FileModuleRelation]", family("file_module"))),
+        files=frozenset(_FAMILY_FILE.rows(collected)),
+        modules=frozenset(_FAMILY_MODULE.rows(collected)),
+        analyzed_files=frozenset(_FAMILY_ANALYZED_FILE.rows(collected)),
+        file_modules=frozenset(_FAMILY_FILE_MODULE.rows(collected)),
         facts=CanonicalFacts(
             analysis=AnalysisFacts(
-                contracts=frozenset(cast("list[ContractRow]", family("contract"))),
-                graph_nodes=frozenset(cast("list[GraphNodeRow]", family("graph_node"))),
-                sink_roles=frozenset(cast("list[SinkRoleRow]", family("sink_role"))),
-                candidates=frozenset(cast("list[CandidateRow]", family("candidate"))),
-                semantic_edges=frozenset(
-                    cast("list[SemanticEdge]", family("semantic_edge"))
-                ),
+                contracts=frozenset(_FAMILY_CONTRACT.rows(collected)),
+                graph_nodes=frozenset(_FAMILY_GRAPH_NODE.rows(collected)),
+                sink_roles=frozenset(_FAMILY_SINK_ROLE.rows(collected)),
+                candidates=frozenset(_FAMILY_CANDIDATE.rows(collected)),
+                semantic_edges=frozenset(_FAMILY_SEMANTIC_EDGE.rows(collected)),
                 dependency_relations=frozenset(
-                    cast("list[DependencyRelationRow]", family("dependency_relation"))
+                    _FAMILY_DEPENDENCY_RELATION.rows(collected)
                 ),
                 dependency_occurrences=frozenset(
-                    cast(
-                        "list[DependencyOccurrenceRow]",
-                        family("dependency_occurrence"),
-                    )
+                    _FAMILY_DEPENDENCY_OCCURRENCE.rows(collected)
                 ),
-                dependency_cycles=frozenset(
-                    cast("list[DependencyCycleRow]", family("dependency_cycle"))
-                ),
-                clone_groups=frozenset(
-                    cast("list[CloneGroupRow]", family("clone_group"))
-                ),
+                dependency_cycles=frozenset(_FAMILY_DEPENDENCY_CYCLE.rows(collected)),
+                clone_groups=frozenset(_FAMILY_CLONE_GROUP.rows(collected)),
                 dead_code_observations=frozenset(
-                    cast(
-                        "list[DeadCodeObservationRow]",
-                        family("dead_code_observation"),
-                    )
+                    _FAMILY_DEAD_CODE_OBSERVATION.rows(collected)
                 ),
-                violations=frozenset(cast("list[ViolationRow]", family("violation"))),
+                violations=frozenset(_FAMILY_VIOLATION.rows(collected)),
                 coupling_cohesion_observations=frozenset(
-                    cast(
-                        "list[CouplingCohesionRow]",
-                        family("coupling_cohesion_observation"),
-                    )
+                    _FAMILY_COUPLING_COHESION.rows(collected)
                 ),
-                api_symbols=frozenset(cast("list[ApiSymbolRow]", family("api_symbol"))),
-                risk_observations=frozenset(
-                    cast("list[RiskObservationRow]", family("risk_observation"))
-                ),
-                adoption_counts=frozenset(
-                    cast("list[AdoptionCountRow]", family("adoption_count"))
-                ),
-                security_surfaces=frozenset(
-                    cast("list[SecuritySurfaceRow]", family("security_surface"))
-                ),
+                api_symbols=frozenset(_FAMILY_API_SYMBOL.rows(collected)),
+                risk_observations=frozenset(_FAMILY_RISK_OBSERVATION.rows(collected)),
+                adoption_counts=frozenset(_FAMILY_ADOPTION_COUNT.rows(collected)),
+                security_surfaces=frozenset(_FAMILY_SECURITY_SURFACE.rows(collected)),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
                 analysis_population=(population_rows[0] if population_rows else None),
             )
         ),
-        coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
+        coupled_sets=frozenset(_FAMILY_COUPLED_SET.rows(collected)),
     )
 
 
@@ -1581,9 +1745,14 @@ def _published_run_row(
 
 
 def _decode_member_object(
-    namespace: str, object_id_value: str, family: str, payload: bytes
-) -> object:
-    """Prove one stored member against its content address and decode it.
+    namespace: str,
+    object_id_value: str,
+    family: str,
+    payload: bytes,
+    into: dict[str, list[object]],
+) -> None:
+    """Prove one stored member against its content address and decode it
+    into the typed bucket its family declares.
 
     The one spelling of the member read: the full-model reconstruction and
     the bounded exporter both pass every stored byte through here, so a
@@ -1604,7 +1773,7 @@ def _decode_member_object(
         raise StoreIntegrityError(
             f"object {object_id_value[:12]}… payload is not a row"
         )
-    return _decode_row(family, row, f"{family} object")
+    _collect_row(family, row, f"{family} object", into)
 
 
 def _prove_run_digests(
@@ -1664,10 +1833,8 @@ def _reconstruct_run(
             raise StoreIntegrityError(
                 f"run {run_id!r} carries unknown family {family_name!r}"
             )
-        collected.setdefault(family_name, []).append(
-            _decode_member_object(
-                namespace, str(object_id_value), family_name, bytes(payload)
-            )
+        _decode_member_object(
+            namespace, str(object_id_value), family_name, bytes(payload), collected
         )
         object_ids.append(str(object_id_value))
     model = _collected_model(collected)
@@ -1758,16 +1925,16 @@ def _scan_run_family(
     namespace: str,
     family: str,
     object_ids: list[str],
-) -> list[object]:
-    """Decode one family of one run, row by row, proving every byte."""
-    rows: list[object] = []
+    into: dict[str, list[object]],
+) -> None:
+    """Decode one family of one run into its bucket, row by row, proving
+    every byte."""
     for object_id_value, payload in connection.execute(
         _MEMBER_FAMILY_SQL, (run_pk, family)
     ):
         stored_id = str(object_id_value)
-        rows.append(_decode_member_object(namespace, stored_id, family, bytes(payload)))
+        _decode_member_object(namespace, stored_id, family, bytes(payload), into)
         object_ids.append(stored_id)
-    return rows
 
 
 def _family_facts(
@@ -1777,8 +1944,9 @@ def _family_facts(
     export pass.  Only this family's rows are alive at a time."""
     family = _WIRE_FAMILY_STORAGE[wire_family]
     object_ids: list[str] = []
-    rows = _scan_run_family(connection, run_pk, namespace, family, object_ids)
-    return _collected_model({family: rows}).facts.analysis
+    rows: dict[str, list[object]] = {}
+    _scan_run_family(connection, run_pk, namespace, family, object_ids, rows)
+    return _collected_model(rows).facts.analysis
 
 
 def _export_plan(
@@ -1818,11 +1986,14 @@ def _export_plan(
     root_sets: set[frozenset[EffectRoot]] = set()
     producer_sets: set[frozenset[SymbolId]] = set()
     for family in sorted(_FAMILY_NAMESPACE):
-        rows = _scan_run_family(connection, run_pk, namespace, family, object_ids)
         if family in _IDENTITY_FAMILIES:
-            identity_rows[family] = rows
+            _scan_run_family(
+                connection, run_pk, namespace, family, object_ids, identity_rows
+            )
             continue
-        facts = _collected_model({family: rows}).facts.analysis
+        rows: dict[str, list[object]] = {}
+        _scan_run_family(connection, run_pk, namespace, family, object_ids, rows)
+        facts = _collected_model(rows).facts.analysis
         symbols |= referenced_symbols(facts)
         root_sets |= fact_root_sets(facts)
         producer_sets |= fact_producer_sets(facts)
