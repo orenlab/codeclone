@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+from collections.abc import Mapping
 from pathlib import Path
 from types import FunctionType, SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -35,6 +37,9 @@ from tests.test_lancedb_connection_protocol import (
     _declared_methods,
     _resolve_return_type,
 )
+
+if TYPE_CHECKING:
+    from tokenizers import Tokenizer
 
 fastembed = pytest.importorskip("fastembed")
 tokenizers = pytest.importorskip("tokenizers")
@@ -286,3 +291,183 @@ def test_the_download_switch_reaches_the_vendor_decision(tmp_path: Path) -> None
     assert seen == [True, False], (
         f"the download switch did not arrive at the vendor decision as declared: {seen}"
     )
+
+
+# ── the truncation window, read off the installed tokenizer ─────────────
+#
+# ``Tokenizer.truncation`` is the one vendor surface this provider reads as
+# data rather than calls as an operation, and the suite's doubles declared it
+# as an object carrying ``max_length``.  The installed object answers to a key
+# instead, so a double shaped like the declaration confirms a provider that
+# reads the declaration.  Everything below drives the installed tokenizer.
+
+_tokenizer_models = pytest.importorskip("tokenizers.models")
+_tokenizer_pre_tokenizers = pytest.importorskip("tokenizers.pre_tokenizers")
+
+#: Distinct from every entry in the provider's model table, so a window that
+#: came from the table can never be mistaken for one read off the tokenizer.
+_VENDOR_WINDOW = 77
+_VOCABULARY_SIZE = 200
+
+
+def _installed_tokenizer() -> Tokenizer:
+    """A real ``tokenizers.Tokenizer``, built without touching the network.
+
+    Word-level over a generated vocabulary: the model is irrelevant here, the
+    ``truncation`` surface is not, and that surface belongs to ``Tokenizer``
+    itself rather than to whichever model it wraps.
+    """
+    vocabulary = {f"w{index}": index for index in range(_VOCABULARY_SIZE)}
+    vocabulary["[UNK]"] = len(vocabulary)
+    tokenizer: Tokenizer = tokenizers.Tokenizer(
+        _tokenizer_models.WordLevel(vocabulary, unk_token="[UNK]")
+    )
+    tokenizer.pre_tokenizer = _tokenizer_pre_tokenizers.Whitespace()
+    return tokenizer
+
+
+class _InnerModelAroundTokenizer:
+    """The inner-model shape fastembed builds around a loaded tokenizer.
+
+    ``tokenize`` hands the documents back to the vendor, so the truncation the
+    provider enables is applied by the installed tokenizer instead of being
+    restated by a double that could agree with the provider by construction.
+    """
+
+    def __init__(self, tokenizer: Tokenizer) -> None:
+        self.tokenizer = tokenizer
+
+    def tokenize(self, documents: list[str]) -> list[object]:
+        encodings: list[object] = list(self.tokenizer.encode_batch(documents))
+        return encodings
+
+
+def _provider_over(inner_model: object) -> FastEmbedEmbeddingProvider:
+    """A provider whose model is already loaded, carrying ``inner_model``.
+
+    The model is pre-set rather than downloaded: the window question is asked
+    of the tokenizer, and reaching it must not cost a model fetch.
+    """
+    provider = FastEmbedEmbeddingProvider(
+        model_name=_MODEL_NAME,
+        dimension=_DIMENSION,
+        cache_dir=Path("unreachable-cache"),
+        allow_model_download=False,
+    )
+    provider._model = SimpleNamespace(model=inner_model)
+    return provider
+
+
+def _vendor_text() -> str:
+    """A passage long enough that the vendor window has to cut it."""
+    return " ".join(f"w{index}" for index in range(_VOCABULARY_SIZE))
+
+
+def test_the_installed_tokenizer_declares_its_window_under_a_key() -> None:
+    """The shape every pin below depends on, read off the installed object.
+
+    Stated once and separately so a vendor that changes the shape reports it
+    here, rather than as a puzzling fallback in each provider pin.
+    """
+    tokenizer = _installed_tokenizer()
+    assert tokenizer.truncation is None
+    tokenizer.enable_truncation(max_length=_VENDOR_WINDOW)
+    declared = tokenizer.truncation
+    assert isinstance(declared, Mapping)
+    assert declared["max_length"] == _VENDOR_WINDOW
+    assert getattr(declared, "max_length", None) is None, (
+        "the installed tokenizer grew an attribute; the reader may now be "
+        "asking the wrong question in the other direction"
+    )
+
+
+def test_max_sequence_tokens_reports_the_window_the_tokenizer_was_given() -> None:
+    """The window the vendor was configured with, not the model-name default.
+
+    The expectation is pushed into the tokenizer through the vendor's own
+    ``enable_truncation`` and read back through the surface production reads,
+    so no double supplies both sides.
+    """
+    tokenizer = _installed_tokenizer()
+    tokenizer.enable_truncation(max_length=_VENDOR_WINDOW)
+    provider = _provider_over(_InnerModelAroundTokenizer(tokenizer))
+
+    assert fastembed_provider.known_model_max_tokens(_MODEL_NAME) != _VENDOR_WINDOW
+    assert provider.max_sequence_tokens() == _VENDOR_WINDOW
+
+
+def test_the_model_name_default_serves_a_tokenizer_that_declares_no_window() -> None:
+    """The other boundary: no truncation configured, so the table answers.
+
+    Without this, a reader that returned the default unconditionally would
+    still pass the pin above's opposite.
+    """
+    tokenizer = _installed_tokenizer()
+    tokenizer.no_truncation()
+    provider = _provider_over(_InnerModelAroundTokenizer(tokenizer))
+
+    assert provider.max_sequence_tokens() == fastembed_provider.known_model_max_tokens(
+        _MODEL_NAME
+    )
+
+
+def test_the_probe_measures_against_the_window_the_tokenizer_declares() -> None:
+    """A truncated passage must be reported as truncated.
+
+    Under a window taken from the model table the passage fits, and the probe
+    reports raw == effective -- truncation that happened, measured as none.
+    """
+    tokenizer = _installed_tokenizer()
+    tokenizer.enable_truncation(max_length=_VENDOR_WINDOW)
+    provider = _provider_over(_InnerModelAroundTokenizer(tokenizer))
+
+    (counts,) = provider.probe_passage_token_counts([_vendor_text()])
+    assert counts.raw > _VENDOR_WINDOW
+    assert counts.effective == _VENDOR_WINDOW
+
+
+def test_chunking_splits_against_the_window_the_tokenizer_declares() -> None:
+    """A passage past the vendor window must be split, and every chunk fit."""
+    tokenizer = _installed_tokenizer()
+    tokenizer.enable_truncation(max_length=_VENDOR_WINDOW)
+    provider = _provider_over(_InnerModelAroundTokenizer(tokenizer))
+
+    chunks = provider.chunk_text(_vendor_text())
+    assert len(chunks) > 1
+    tokenizer.no_truncation()
+    for chunk in chunks:
+        encoded = tokenizer.encode(f"passage: {chunk}", add_special_tokens=True)
+        assert len(encoded.ids) <= _VENDOR_WINDOW
+
+
+def test_every_window_consumer_asks_the_one_reader() -> None:
+    """One owner computes the window; the three consumers call it.
+
+    Replacing the reader moves all three answers.  A consumer that re-derives
+    the window inline keeps its own answer and fails here, which is the edge
+    this states -- not the spelling of any single call site.
+    """
+    replacement_window = 41
+    tokenizer = _installed_tokenizer()
+    tokenizer.enable_truncation(max_length=_VENDOR_WINDOW)
+    provider = _provider_over(_InnerModelAroundTokenizer(tokenizer))
+    original = fastembed_provider._tokenizer_max_length
+
+    def _fixed_window(tokenizer: object) -> int:
+        del tokenizer
+        return replacement_window
+
+    fastembed_provider._tokenizer_max_length = _fixed_window
+    try:
+        assert provider.max_sequence_tokens() == replacement_window
+        (counts,) = provider.probe_passage_token_counts([_vendor_text()])
+        assert counts.effective == replacement_window
+        chunks = provider.chunk_text(_vendor_text())
+    finally:
+        fastembed_provider._tokenizer_max_length = original
+
+    tokenizer.no_truncation()
+    assert len(chunks) > 1
+    for chunk in chunks:
+        encoded = tokenizer.encode(f"passage: {chunk}", add_special_tokens=True)
+        assert len(encoded.ids) <= replacement_window

@@ -23,6 +23,23 @@ from codeclone.memory.embedding import (
 from codeclone.memory.exceptions import MemorySemanticUnavailableError
 
 
+def _declared_truncation(max_length: int) -> dict[str, object]:
+    """The truncation mapping ``tokenizers.Tokenizer`` hands a caller back.
+
+    The installed tokenizer keeps its window under a key, not on an attribute,
+    and these doubles used to declare the opposite -- so a provider that asked
+    for the attribute was confirmed by every double here while it read ``None``
+    off every real tokenizer.  ``tests/test_fastembed_provider_protocol.py``
+    holds this shape against the installed object.
+    """
+    return {
+        "max_length": max_length,
+        "stride": 0,
+        "strategy": "longest_first",
+        "direction": "right",
+    }
+
+
 class _FakeTextEmbedding:
     def __init__(
         self,
@@ -411,14 +428,14 @@ class _FakeEncoding:
 class _FakeTokenizer:
     def __init__(self) -> None:
         self._truncated = True
-        self.truncation = SimpleNamespace(max_length=512)
+        self.truncation = _declared_truncation(512)
 
     def no_truncation(self) -> None:
         self._truncated = False
 
     def enable_truncation(self, *, max_length: int) -> None:
         self._truncated = True
-        self.truncation = SimpleNamespace(max_length=max_length)
+        self.truncation = _declared_truncation(max_length)
 
     def encode(self, text: str, *, add_special_tokens: bool) -> _FakeEncoding:
         return self.encode_batch([text])[0]
@@ -466,14 +483,14 @@ def test_fastembed_chunk_text_splits_long_document(
 
         def __init__(self) -> None:
             self._truncated = True
-            self.truncation = SimpleNamespace(max_length=512)
+            self.truncation = _declared_truncation(512)
 
         def no_truncation(self) -> None:
             self._truncated = False
 
         def enable_truncation(self, *, max_length: int) -> None:
             self._truncated = True
-            self.truncation = SimpleNamespace(max_length=max_length)
+            self.truncation = _declared_truncation(max_length)
 
         def encode(self, text: str, *, add_special_tokens: bool) -> _WindowEncoding:
             content_tokens = len(text)
@@ -511,14 +528,14 @@ class _PassageBoundaryTokenizer:
 
     def __init__(self) -> None:
         self._truncated = True
-        self.truncation = SimpleNamespace(max_length=512)
+        self.truncation = _declared_truncation(512)
 
     def no_truncation(self) -> None:
         self._truncated = False
 
     def enable_truncation(self, *, max_length: int) -> None:
         self._truncated = True
-        self.truncation = SimpleNamespace(max_length=max_length)
+        self.truncation = _declared_truncation(max_length)
 
     def encode(self, text: str, *, add_special_tokens: bool) -> _FakeEncoding:
         content_tokens = len(text.encode("utf-8"))
@@ -627,7 +644,7 @@ def test_fastembed_max_sequence_tokens_uses_loaded_tokenizer(
 ) -> None:
 
     class _Tokenizer:
-        truncation = SimpleNamespace(max_length=256)
+        truncation = _declared_truncation(256)
 
     class _Inner:
         tokenizer = _Tokenizer()
@@ -645,7 +662,7 @@ def test_fastembed_probe_passage_token_counts_without_encode_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Tokenizer:
-        truncation = SimpleNamespace(max_length=512)
+        truncation = _declared_truncation(512)
 
         def encode(self, text: str, *, add_special_tokens: bool) -> _FakeEncoding:
             return _FakeEncoding(len(text))
@@ -737,7 +754,7 @@ def test_fastembed_chunk_text_without_encode_ops_returns_original(
     from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
 
     class _Tokenizer:
-        truncation = SimpleNamespace(max_length=512)
+        truncation = _declared_truncation(512)
 
     provider = FastEmbedEmbeddingProvider(
         model_name="BAAI/bge-small-en-v1.5",
@@ -836,13 +853,22 @@ def test_fastembed_embed_records_infer_counters_when_observability_enabled(
 def test_fastembed_tokenizer_helper_edge_paths() -> None:
     from codeclone.memory.embedding import fastembed_provider as provider_mod
 
-    class _Truncation:
-        max_length = 128
-
     class _TokenizerWithTruncation:
-        truncation = _Truncation()
+        truncation = _declared_truncation(128)
+
+    class _TokenizerWithAttributeTruncation:
+        """The shape these doubles used to declare, which no vendor ships.
+
+        Honouring it would mean the attribute question is back, so the reader
+        answers ``None`` here and lets the model-name default speak.
+        """
+
+        truncation = SimpleNamespace(max_length=128)
 
     assert provider_mod._tokenizer_max_length(_TokenizerWithTruncation()) == 128
+    assert (
+        provider_mod._tokenizer_max_length(_TokenizerWithAttributeTruncation()) is None
+    )
     assert provider_mod._tokenizer_max_length(object()) is None
 
     class _Encoding:
@@ -868,13 +894,18 @@ def test_fastembed_tokenizer_helper_edge_paths() -> None:
 def test_fastembed_tokenizer_max_length_rejects_non_positive() -> None:
     from codeclone.memory.embedding import fastembed_provider as provider_mod
 
-    class _Truncation:
-        max_length = 0
+    class _TokenizerWithZeroWindow:
+        truncation = _declared_truncation(0)
 
-    class _Tokenizer:
-        truncation = _Truncation()
+    class _TokenizerWithoutWindow:
+        truncation: ClassVar[dict[str, object]] = {"strategy": "longest_first"}
 
-    assert provider_mod._tokenizer_max_length(_Tokenizer()) is None
+    class _TokenizerWithBooleanWindow:
+        truncation: ClassVar[dict[str, object]] = {"max_length": True}
+
+    assert provider_mod._tokenizer_max_length(_TokenizerWithZeroWindow()) is None
+    assert provider_mod._tokenizer_max_length(_TokenizerWithoutWindow()) is None
+    assert provider_mod._tokenizer_max_length(_TokenizerWithBooleanWindow()) is None
 
 
 def test_fastembed_verify_chunk_passage_input_raises_on_overflow(
@@ -934,7 +965,7 @@ def test_fastembed_chunk_text_raises_when_chunk_cannot_fit(
             self.ids = ids
 
     class _Tokenizer:
-        truncation = type("T", (), {"max_length": 8})()
+        truncation = _declared_truncation(8)
 
         def encode(self, text: str, *, add_special_tokens: bool = False) -> _Encoding:
             return _Encoding([1] * 32)
@@ -994,10 +1025,10 @@ def test_fastembed_max_sequence_tokens_prefers_tokenizer_truncation(
     for tokenizer in (
         None,
         SimpleNamespace(truncation=None),
-        SimpleNamespace(truncation=SimpleNamespace(max_length=0)),
+        SimpleNamespace(truncation=_declared_truncation(0)),
     ):
         inner.tokenizer = tokenizer
         assert provider.max_sequence_tokens() == default_tokens
 
-    inner.tokenizer = SimpleNamespace(truncation=SimpleNamespace(max_length=256))
+    inner.tokenizer = SimpleNamespace(truncation=_declared_truncation(256))
     assert provider.max_sequence_tokens() == 256

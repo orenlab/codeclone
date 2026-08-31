@@ -36,13 +36,22 @@ def known_model_max_tokens(model_name: str) -> int:
 
 
 def _tokenizer_max_length(tokenizer: object) -> int | None:
+    """The truncation window the tokenizer declares, if it declares one.
+
+    ``tokenizers.Tokenizer.truncation`` answers with a mapping: ``None`` until
+    ``enable_truncation`` is called and a ``dict`` afterwards, so the window
+    lives under a key.  Measured across 0.13 through 0.23, no released version
+    answers with an object -- asking one for a ``max_length`` attribute
+    returned ``None`` in every configuration, and every caller then fell
+    through to the model-name default without any sign that it had.
+    """
     truncation = getattr(tokenizer, "truncation", None)
-    if truncation is None:
+    if not isinstance(truncation, Mapping):
         return None
-    max_length = getattr(truncation, "max_length", None)
-    if isinstance(max_length, int) and max_length > 0:
-        return max_length
-    return None
+    max_length = truncation.get("max_length")
+    if isinstance(max_length, bool) or not isinstance(max_length, int):
+        return None
+    return max_length if max_length > 0 else None
 
 
 def _encoding_length(encoding: object) -> int:
@@ -309,16 +318,25 @@ class FastEmbedEmbeddingProvider:
         """
         return _inner_model_of(self._get_model())
 
-    def max_sequence_tokens(self) -> int | None:  # codeclone: ignore[dead-code]
-        if self._model is not None:
-            tokenizer = _tokenizer_of(self._inner_text_model())
-            if tokenizer is not None:
-                truncation = getattr(tokenizer, "truncation", None)
-                if truncation is not None:
-                    max_length = getattr(truncation, "max_length", None)
-                    if isinstance(max_length, int) and max_length > 0:
-                        return max_length
-        return known_model_max_tokens(self.model_name)
+    def _token_window(self, tokenizer: object) -> int:
+        """The window every measurement in this provider is taken against.
+
+        One owner for the whole provider: the window the tokenizer declares
+        when it declares one, and the model-name default when it does not.
+        The callers below differ in how they reach the tokenizer, never in how
+        the window is decided.
+        """
+        return _tokenizer_max_length(tokenizer) or known_model_max_tokens(
+            self.model_name
+        )
+
+    def max_sequence_tokens(self) -> int | None:
+        # Asked before an embed as well, so an unloaded model answers from the
+        # model name rather than paying for a load to look at a tokenizer.
+        tokenizer = (
+            _tokenizer_of(self._inner_text_model()) if self._model is not None else None
+        )
+        return self._token_window(tokenizer)
 
     @property
     def estimator_label(self) -> str:
@@ -340,9 +358,7 @@ class FastEmbedEmbeddingProvider:
             return tuple(
                 PassageTokenCounts(raw=count, effective=count) for count in counts
             )
-        max_length = _tokenizer_max_length(tokenizer) or known_model_max_tokens(
-            self.model_name
-        )
+        max_length = self._token_window(tokenizer)
         batch = _batch_tokenizer(tokenizer)
         if batch is not None:
             batch.no_truncation()
@@ -366,9 +382,7 @@ class FastEmbedEmbeddingProvider:
         tokenizer = _drivable_tokenizer(_tokenizer_of(self._inner_text_model()))
         if tokenizer is None:
             return (text,)
-        max_length = _tokenizer_max_length(tokenizer) or known_model_max_tokens(
-            self.model_name
-        )
+        max_length = self._token_window(tokenizer)
         tokenizer.no_truncation()
         try:
             if _passage_model_input_token_count(tokenizer, text) <= max_length:
