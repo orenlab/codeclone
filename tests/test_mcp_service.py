@@ -2297,6 +2297,28 @@ def _workspace_drift_pkg(
     return pkg, manifest
 
 
+def _rewrite_with_stated_mtime(
+    path: Path,
+    content: str,
+    *,
+    mtime_ns: int,
+) -> FileStat:
+    """Rewrite one file and state its mtime instead of hoping the clock moved.
+
+    Timestamp granularity is an environment property, not a contract. ext4
+    stamps mtime from the kernel's coarse clock, so two writes inside one
+    1-4 ms tick share a timestamp and a same-length rewrite leaves
+    ``(mtime_ns, size)`` untouched; APFS gives each write its own stamp
+    (measured: zero collisions in 1000 back-to-back rewrites). A drift test
+    that lets the filesystem decide whether its own premise holds therefore
+    passes on one host and fails on the next. Callers state the mtime they
+    need and assert the premise before the conclusion.
+    """
+    path.write_text(content, encoding="utf-8")
+    os.utime(path, ns=(mtime_ns, mtime_ns))
+    return file_stat_signature(str(path))
+
+
 def test_workspace_drift_detects_added_deleted_and_mtime_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2323,7 +2345,18 @@ def test_workspace_drift_detects_added_deleted_and_mtime_changes(
         lambda _root: snapshot,
     )
     removed.unlink()
-    kept.write_text("A = 9\n", encoding="utf-8")
+    recorded = manifest["pkg/kept.py"]
+    live = _rewrite_with_stated_mtime(
+        kept,
+        "A = 9\n",
+        mtime_ns=recorded["mtime_ns"] + 1_000_000_000,
+    )
+    # The premise is a same-size edit whose mtime moved. Assert it: on a
+    # coarse-tick filesystem the rewrite lands in the recorded tick, the
+    # mtime lane goes green by accident, and the conclusion below would be
+    # carried by the size lane it was never meant to test.
+    assert live["size"] == recorded["size"]
+    assert live["mtime_ns"] != recorded["mtime_ns"]
     (pkg / "added.py").write_text("C = 3\n", encoding="utf-8")
 
     drift = mcp_workspace_drift_mod.compute_drift(record)
@@ -2333,6 +2366,101 @@ def test_workspace_drift_detects_added_deleted_and_mtime_changes(
     assert "pkg/kept.py" in drift.drifted_files
     assert drift.added_files == ("pkg/added.py",)
     assert drift.topology_drift is True
+    assert drift.strength == "mtime_size_plus_git"
+
+
+def _single_file_drift_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    run_id: str,
+) -> tuple[Path, FileStat, MCPRunRecord]:
+    """One-file drift fixture whose git lane is frozen at the recorded snapshot.
+
+    Freezing ``collect_dirty_snapshot`` leaves the stat lanes as the only thing
+    under test. Git is the one content-sensitive lane -- each dirty entry
+    carries a digest -- so an unfrozen sibling would answer the assertion on
+    its own and hide whichever stat lane actually broke.
+    """
+    pkg, manifest = _workspace_drift_pkg(tmp_path, (("kept.py", "A = 1\n"),))
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(),
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "collect_dirty_snapshot",
+        lambda _root: snapshot,
+    )
+    record = replace(
+        _dummy_run_record(tmp_path, run_id),
+        manifest=manifest,
+        dirty_snapshot=snapshot,
+    )
+    return pkg / "kept.py", manifest["pkg/kept.py"], record
+
+
+def test_workspace_drift_detects_size_change_under_one_mtime_tick(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin the size lane alone: the mtime is held at the recorded value."""
+    kept, recorded, record = _single_file_drift_record(
+        tmp_path,
+        monkeypatch,
+        run_id="drift-size",
+    )
+    live = _rewrite_with_stated_mtime(
+        kept,
+        "A = 1234\n",
+        mtime_ns=recorded["mtime_ns"],
+    )
+    assert live["mtime_ns"] == recorded["mtime_ns"]
+    assert live["size"] != recorded["size"]
+
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+
+    assert drift.drifted_files == ("pkg/kept.py",)
+    assert drift.status == "drifted"
+    assert drift.topology_drift is False
+
+
+def test_workspace_drift_misses_same_size_edit_git_cannot_witness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Characterize a known boundary: stat equality is not proof of same bytes.
+
+    ``compute_drift`` reads ``(mtime_ns, size)`` per file, so an edit that keeps
+    the length and lands inside one filesystem mtime tick moves neither. Git is
+    the only content-sensitive lane, and it does not reach every scanned path:
+    measured 2026-08-30, ``git status --porcelain=v1`` collapses an untracked
+    directory to one digest-less ``??`` entry and never lists an ignored file,
+    while ``strength`` still reports ``mtime_size_plus_git`` for the whole run.
+    The frozen snapshot models exactly that -- git available, silent about this
+    path. Closing the gap needs a recorded content digest, the way
+    ``prove_cached_source_identity`` proves a cache hit; that is a contract
+    decision, not a local one, so the gap is pinned here instead of papered
+    over. Delete this test when the detector gains a content discriminator.
+    """
+    kept, recorded, record = _single_file_drift_record(
+        tmp_path,
+        monkeypatch,
+        run_id="drift-blind",
+    )
+    live = _rewrite_with_stated_mtime(
+        kept,
+        "A = 2\n",
+        mtime_ns=recorded["mtime_ns"],
+    )
+    assert live == recorded
+    assert kept.read_text(encoding="utf-8") == "A = 2\n"
+
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+
+    assert drift.status == "fresh"
+    assert drift.drifted_files == ()
     assert drift.strength == "mtime_size_plus_git"
 
 
