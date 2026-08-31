@@ -67,6 +67,13 @@ ProducerActivation = Literal["always", "lane", "opt_in", "metrics"]
 #: ``activation``        ProducerActivation
 #: ``enabling_lane``     for activation == "lane": the observation lane whose
 #:                       enablement witnesses execution (else None)
+#: ``identity_keys``     container keys this producer GLUES entity identity
+#:                       into (dedup keys, group ids, fingerprints).  The law
+#:                       (controller mutation 2026-08-31, survived and closed):
+#:                       an identity-bearing key may never be declared
+#:                       non-semantic by the family-digest projection — a
+#:                       location glued into an identity key is identity, not
+#:                       provenance (the F1 precedent).
 ProducerSpec = Mapping[str, object]
 
 #: The closed producer-state vocabulary of the analysis population.
@@ -83,6 +90,7 @@ PRODUCER_STATE_DISABLED: Final = "disabled"
 REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
     {
         "family": "authority",
+        "identity_keys": ("id",),
         "identity_domain": "analysis",
         "revision_owners": (("authority_analysis", "AUTHORITY_ANALYSIS_REVISION"),),
         "activation": "lane",
@@ -90,12 +98,14 @@ REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
     },
     {
         "family": "clones",
+        "identity_keys": ("fingerprint", "group_key", "id"),
         "identity_domain": "analysis",
         "revision_owners": (("clone_fingerprint", "BASELINE_FINGERPRINT_VERSION"),),
         "activation": "always",
     },
     {
         "family": "dead_code",
+        "identity_keys": ("id",),
         "identity_domain": "analysis",
         "revision_owners": (
             ("liveness", "LIVENESS_POLICY_VERSION"),
@@ -106,6 +116,7 @@ REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
     },
     {
         "family": "design",
+        "identity_keys": (),
         "identity_domain": "analysis",
         "revision_owners": (
             ("complexity_metrics", "COMPLEXITY_ALGORITHM_REVISION"),
@@ -116,6 +127,7 @@ REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
     },
     {
         "family": "gates",
+        "identity_keys": (),
         "identity_domain": "evaluation",
         "revision_owners": (
             ("gate_algorithm", "GATE_ALGORITHM_REVISION"),
@@ -126,18 +138,21 @@ REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
     },
     {
         "family": "health",
+        "identity_keys": (),
         "identity_domain": "evaluation",
         "revision_owners": (("health_algorithm", "HEALTH_ALGORITHM_REVISION"),),
         "activation": "metrics",
     },
     {
         "family": "near_miss",
+        "identity_keys": ("pair_key",),
         "identity_domain": "analysis",
         "revision_owners": (("near_miss", "NEAR_MISS_ALGORITHM_REVISION"),),
         "activation": "opt_in",
     },
     {
         "family": "renamed_structure",
+        "identity_keys": ("fingerprint", "group_key"),
         "identity_domain": "analysis",
         "revision_owners": (
             ("renamed_structure", "RENAMED_STRUCTURE_ALGORITHM_REVISION"),
@@ -146,6 +161,7 @@ REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
     },
     {
         "family": "structural",
+        "identity_keys": ("id",),
         "identity_domain": "analysis",
         "revision_owners": (
             ("structural_findings_catalog", "STRUCTURAL_FINDINGS_CATALOG_VERSION"),
@@ -232,6 +248,20 @@ def spec_enabling_lane(spec: ProducerSpec) -> str | None:
     return lane if isinstance(lane, str) else None
 
 
+def spec_identity_keys(spec: ProducerSpec) -> tuple[str, ...]:
+    keys = spec["identity_keys"]
+    assert isinstance(keys, tuple)
+    return tuple(str(key) for key in keys)
+
+
+def all_identity_keys() -> frozenset[str]:
+    """Every key any registered producer glues entity identity into."""
+
+    return frozenset(
+        key for spec in REPORT_SEMANTIC_PRODUCERS for key in spec_identity_keys(spec)
+    )
+
+
 def spec_revision_owners(spec: ProducerSpec) -> tuple[tuple[str, str], ...]:
     owners = spec["revision_owners"]
     assert isinstance(owners, tuple)
@@ -309,6 +339,7 @@ __all__ = [
     "ProducerActivation",
     "ProducerSpec",
     "ReportIdentityRegistryError",
+    "all_identity_keys",
     "analysis_families",
     "evaluation_families",
     "producer_spec",
@@ -318,5 +349,6 @@ __all__ = [
     "spec_enabling_lane",
     "spec_family",
     "spec_identity_domain",
+    "spec_identity_keys",
     "spec_revision_owners",
 ]

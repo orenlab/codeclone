@@ -241,7 +241,10 @@ def _params_digest(params: Mapping[str, object]) -> str:
 #: Where a producer needs a position to DISAMBIGUATE two entities sharing a
 #: qualname it glues the line into its identity key (the F1 precedent;
 #: ``near_miss.pair_key`` does exactly that), and glued keys are hashed —
-#: bare span fields are not.
+#: bare span fields are not.  The registry declares those glued keys per
+#: family (``spec_identity_keys``), and the acceptance corpus pins that this
+#: set and that declaration never intersect: an identity-bearing key cannot
+#: be declared non-semantic.
 _NON_SEMANTIC_PROJECTION_KEYS = frozenset(
     {
         "display_facts",

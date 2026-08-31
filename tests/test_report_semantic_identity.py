@@ -565,3 +565,69 @@ def test_registry_names_evaluation_families_and_refuses_unknown() -> None:
     assert evaluation_families() == ("gates", "health")
     with pytest.raises(ReportIdentityRegistryError, match="no registered producer"):
         producer_spec("nonexistent_family")
+
+
+# ---------------------------------------------------------------------------
+# Identity keys versus the projection: both directions of the boundary.
+# m07 pins that provenance cannot enter the identity; these pin that
+# identity cannot fall out of it (controller mutation 2026-08-31: adding
+# "pair_key" to the exclusion list survived the corpus).
+# ---------------------------------------------------------------------------
+
+
+def test_identity_keys_are_never_declared_non_semantic() -> None:
+    """A key a producer glues entity identity into cannot be excluded from
+    the family-digest projection.  Derived from both authorities — no key
+    name is spelled here."""
+
+    from codeclone.contracts.report_identity import all_identity_keys
+    from codeclone.report.document.integrity import (
+        _NON_SEMANTIC_PROJECTION_KEYS,
+    )
+
+    conflicts = all_identity_keys() & _NON_SEMANTIC_PROJECTION_KEYS
+    assert conflicts == frozenset(), (
+        "identity-bearing keys declared non-semantic; a glued location is "
+        f"identity, not provenance: {sorted(conflicts)}"
+    )
+    assert all_identity_keys()  # the rule must quantify over something
+
+
+def test_line_glued_identity_key_moves_identity() -> None:
+    """The F1 collision the glued key exists to prevent: two pairs whose
+    members share qualnames and differ only in source position must not
+    share a run identity.  Member spans are stripped by the projection, so
+    ``pair_key`` is the only surviving distinguisher — exactly what the
+    surviving mutation removed."""
+
+    def _pair_at(beta_line: int) -> NearMissPair:
+        return NearMissPair(
+            pair_key=(
+                "pkg/module.py:pkg.module:alpha:1"
+                f"|pkg/module.py:pkg.module:beta:{beta_line}"
+            ),
+            members=(
+                NearMissMember(
+                    qualname="pkg.module:alpha",
+                    filepath="pkg/module.py",
+                    start_line=1,
+                    end_line=12,
+                    differing_start_line=6,
+                    differing_end_line=6,
+                ),
+                NearMissMember(
+                    qualname="pkg.module:beta",
+                    filepath="pkg/module.py",
+                    start_line=beta_line,
+                    end_line=beta_line + 11,
+                    differing_start_line=beta_line + 5,
+                    differing_end_line=beta_line + 5,
+                ),
+            ),
+            edit_statements=1,
+            edit_kind="replace",
+        )
+
+    first_site = _document(near_miss_pairs=[_pair_at(15)])
+    second_site = _document(near_miss_pairs=[_pair_at(40)])
+    assert report_run_identity(first_site) != report_run_identity(second_site)
