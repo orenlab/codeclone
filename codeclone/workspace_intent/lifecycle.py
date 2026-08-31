@@ -100,22 +100,43 @@ def liveness_probe_is_declared() -> bool:
 
 
 # A pid is a slot, not an identity: the kernel hands the same number to an
-# unrelated process once the old one is reaped. The two terms below are the
-# whole derivation of how far a *genuine* agent's measured start may drift
-# past the epoch it recorded for itself. Both are one second, and each is one
-# second for a stated reason -- do not fold them into a literal.
+# unrelated process once the old one is reaped. The tolerance below is one
+# proven bound plus one declared margin. Keep the two apart: only the first is
+# a measurement, and only the first may be re-derived from the machine.
 #
-#   1. ``agent_start_epoch`` is ``int(time.time())`` sampled *inside* the
-#      already-running agent, so it floors a real reading: the true start is
-#      at most one second later than the recorded integer.
-#   2. ``ps -o etime=`` reports whole seconds of elapsed time. Sampling the
-#      wall clock *before* the probe makes every later scheduling delay push
-#      the derived start earlier (safe), leaving truncation as the only
-#      overshoot, and that is under one second.
-_RECORDED_EPOCH_TRUNCATION_SECONDS = 1
-_ELAPSED_RESOLUTION_SECONDS = 1
+# Three floors sit between a genuine agent's real start ``S`` and the number
+# this module compares:
+#
+#     epoch = floor(E)        E sampled inside the running agent, S <= E <= B
+#     etime = floor(t - S)    whole seconds, read at some t >= B
+#     start = floor(B) - etime
+#
+# Bounding each floor by its own argument gives
+#
+#     start - epoch  <  B - (B - S - 1) - (S - 1)  =  2
+#
+# so a genuine agent's drift is at most ONE second. The individual truncations
+# do NOT compose additively -- they share a time base, and adding them
+# double-counts. Sampling ``B`` before the probe is what keeps it there: every
+# later scheduling delay inflates ``etime`` and drags ``start`` earlier, which
+# is the safe direction. ``test_measurement_drift_bound_is_re_derived_by_
+# simulation`` rebuilds this bound by exhaustive search rather than trusting
+# the algebra above.
+_MEASUREMENT_DRIFT_BOUND_SECONDS = 1
+
+# Not a measurement: a declared cushion, and the honest name for it. It buys
+# one second against a small forward wall-clock adjustment landing between the
+# agent's stamp and this probe, and costs nothing in detection power because a
+# pid takes minutes to be reissued. A large NTP *step* is not covered by any
+# constant of this size, and pretending otherwise would be the fabrication this
+# module exists to refuse.
+_CLOCK_ADJUSTMENT_MARGIN_SECONDS = 1
+
+# Strictly greater: a start exactly on the tolerance is still inside the
+# declared envelope, and this module converts ALIVE to DEAD only on positive
+# evidence. The boundary's strictness is pinned by its own two tests.
 START_EPOCH_SLACK_SECONDS = (
-    _RECORDED_EPOCH_TRUNCATION_SECONDS + _ELAPSED_RESOLUTION_SECONDS
+    _MEASUREMENT_DRIFT_BOUND_SECONDS + _CLOCK_ADJUSTMENT_MARGIN_SECONDS
 )
 
 _PROCESS_START_PROBE_TIMEOUT_SECONDS = 5.0

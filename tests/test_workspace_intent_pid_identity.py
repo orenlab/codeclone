@@ -154,21 +154,80 @@ def test_live_foreign_intent_still_blocks() -> None:
     assert ownership is IntentOwnership.FOREIGN_ACTIVE
 
 
-def test_start_epoch_slack_re_derives_from_its_two_measured_truncations() -> None:
-    """Pin the derivation, not the number.
+def _simulated_drift(
+    start_fraction: float, stamp_offset: float, age: float, probe_delay: float
+) -> int | None:
+    """One genuine agent, measured: ``start - epoch`` under the three floors.
 
-    The slack is a sum of two one-second truncations, each stated in the
-    source. Re-measure both and rebuild the constant, so changing the literal
-    without changing the basis fails here instead of drifting silently.
+    ``S`` is the real process start, ``E = S + stamp_offset`` the reading the
+    agent floors into its record, ``B = S + age`` the wall clock sampled before
+    the probe, and ``t = B + probe_delay`` when ``ps`` actually reads.
     """
 
-    # Term 1: an agent stamps ``int(time.time())``, flooring a live reading.
-    fractions = [time.time() - int(time.time()) for _ in range(500)]
-    assert all(0.0 <= value < 1.0 for value in fractions)
-    recorded_epoch_truncation = math.ceil(max(fractions))
+    real_start = 1000.0 + start_fraction
+    stamped_at = real_start + stamp_offset
+    sampled_before = real_start + age
+    if stamped_at > sampled_before:
+        return None
+    elapsed = math.floor(sampled_before + probe_delay - real_start)
+    derived_start = math.floor(sampled_before) - elapsed
+    return derived_start - math.floor(stamped_at)
 
-    # Term 2: the probe's own overshoot, measured against a child process
-    # whose start instant this test holds to the millisecond.
+
+def test_measurement_drift_bound_is_re_derived_by_simulation() -> None:
+    """Pin the derivation, not the number -- and not a wrong derivation.
+
+    An earlier version of this constant was built by adding the two one-second
+    truncations. That double-counts: they share a time base. Search the space
+    instead and take the worst case, so the bound is measured rather than
+    argued.
+    """
+
+    grid = [index / 32 for index in range(32)]
+    spans = [index / 16 for index in range(16 * 3)]
+    ages = [index / 16 for index in range(16 * 6)]
+
+    observed = {
+        drift
+        for start_fraction in grid
+        for stamp_offset in spans
+        for age in ages
+        for probe_delay in spans
+        if (drift := _simulated_drift(start_fraction, stamp_offset, age, probe_delay))
+        is not None
+    }
+
+    assert max(observed) == lifecycle._MEASUREMENT_DRIFT_BOUND_SECONDS
+    # The worst case is reached, so the bound is tight rather than merely safe.
+    assert lifecycle._MEASUREMENT_DRIFT_BOUND_SECONDS in observed
+
+
+def test_the_clock_margin_is_a_cushion_not_a_new_regime() -> None:
+    """Bound the one term that is policy rather than measurement.
+
+    ``_CLOCK_ADJUSTMENT_MARGIN_SECONDS`` cannot be re-derived from the machine
+    -- it is a declared cushion. What can be held is its rank: a cushion may
+    not outgrow the measured bound it cushions, or a fudge quietly becomes the
+    dominant term and the tolerance stops being derived at all. It also may not
+    vanish, or the declared protection is gone while its name remains.
+    """
+
+    margin = lifecycle._CLOCK_ADJUSTMENT_MARGIN_SECONDS
+    bound = lifecycle._MEASUREMENT_DRIFT_BOUND_SECONDS
+
+    assert margin > 0
+    assert margin <= bound
+    assert bound + margin == START_EPOCH_SLACK_SECONDS
+
+
+def test_probe_never_overshoots_a_known_child_start_by_a_whole_second() -> None:
+    """The live half of the model: real ``ps`` output, real child process.
+
+    The simulation above assumes ``etime`` truncates and that sampling the wall
+    clock first keeps the overshoot under a second. This measures that against
+    a child whose start instant the test holds to the millisecond.
+    """
+
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         spawned_at = time.time()
@@ -181,10 +240,49 @@ def test_start_epoch_slack_re_derives_from_its_two_measured_truncations() -> Non
     finally:
         child.kill()
         child.wait()
-    assert max(overshoots) < 1.0
-    elapsed_resolution = math.ceil(max(overshoots)) if max(overshoots) > 0 else 1
 
-    assert (recorded_epoch_truncation + elapsed_resolution) == START_EPOCH_SLACK_SECONDS
+    assert max(overshoots) < 1.0
+
+
+def test_an_agent_exactly_on_the_tolerance_reads_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The inclusive edge of the boundary.
+
+    A start sitting exactly on ``agent_start_epoch + SLACK`` is still inside
+    the declared envelope. Reading it DEAD would release a live agent's intent
+    and let a second agent edit the same tree -- the error this module is built
+    to refuse. The probe is stubbed because the subject here is the comparison,
+    not the reading; the reading has its own live tests above.
+    """
+
+    record = _living_record()
+    on_the_edge = record.agent_start_epoch + START_EPOCH_SLACK_SECONDS
+    monkeypatch.setattr(
+        lifecycle, "probe_process_start_epoch", lambda _pid: on_the_edge
+    )
+
+    assert agent_identity_liveness(record) is PidLiveness.ALIVE
+    assert lifecycle.is_orphaned(record) is False
+
+
+def test_an_agent_one_second_past_the_tolerance_reads_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exclusive neighbour, one second further out.
+
+    A recycled pid's process starts at an arbitrary second, so both this input
+    and the one above are reachable; only the comparison separates them.
+    """
+
+    record = _living_record()
+    past_the_edge = record.agent_start_epoch + START_EPOCH_SLACK_SECONDS + 1
+    monkeypatch.setattr(
+        lifecycle, "probe_process_start_epoch", lambda _pid: past_the_edge
+    )
+
+    assert agent_identity_liveness(record) is PidLiveness.DEAD
+    assert lifecycle.is_orphaned(record) is True
 
 
 def test_probe_reports_absence_for_a_reaped_pid() -> None:
