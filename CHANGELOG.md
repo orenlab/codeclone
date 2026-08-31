@@ -5,6 +5,38 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The public API surface stops carrying the repository's own test code.** The `api_surface`
+  lane, and the `api_breaking_changes` metric computed from it, collected a row for every public
+  symbol of the repository's own tests — so deleting a test printed as `removed | Removed from the
+  public API surface`, renaming a test parameter printed as `signature_break`, and
+  `--fail-on-api-break` was unusable by construction: it would fail a run for a renamed test. The
+  product track is now decided once, in the run, through the project's existing source-kind owner
+  (`codeclone.paths`), and both consumers are handed the same surface: the metric family behind
+  `api_breaking_changes` and the gate, and the observation lane that becomes the baseline. Deciding
+  it twice would put two meanings of "the product's public API" into one run, and deciding it in a
+  renderer would put them into one report. A baseline published before the split still holds a row
+  per test symbol; the container decode drops those rows on the way out, so an old baseline degrades
+  quietly on this lane instead of reporting every stored test symbol as removed from an untouched
+  repository. Regenerate the baseline to restore full comparison on this lane. No report-schema or
+  lane-contract vocabulary changed.
+- **The source-kind owner tells a repository's test tree from a module a package ships.**
+  `is_test_filepath` widened `classify_source_kind` with pytest's filename convention
+  unconditionally, so a `test_*.py` was test code wherever it sat — including inside a distributed
+  package, where a library that publishes test helpers for its own users (`annotated_types`'s
+  `test_cases` is one) lost them from the product API contract and had them exempted from dead-code
+  reporting, although those symbols *are* its contract. The convention now steps aside in exactly
+  one case: the module registry proves the file is an ordinary module of an importable package tree
+  with no test-named directory above it — the same registry fact the owner already used to tell a
+  shipped `testing` subpackage from a repository test tree, asked of a file instead of a directory.
+  Everything else keeps the verdict it had: a distribution's own shipped suite
+  (`pkg/tests/test_case.py`), `conftest.py` anywhere (pytest's configuration file is a test artifact
+  by role, not by name), namespace or plain directories the registry cannot vouch for, and every
+  caller with no registry to hand — absence of proof is not proof of the opposite. Measured over
+  7464 `.py` files of this project's own dependency closure, 860 are test-kind by the filename
+  convention alone: 848 shipped suites, 11 `conftest.py`, and 1 module a package publishes. The
+  verdict is the owner's, so all four of its consumers follow it together — API surface, dead code,
+  unit source kind, and the cached reference sets — and no CodeClone number moves for a repository
+  without such a module.
 - **The audit `analysis.completed` row carries the full novelty tristate.** The durable
   forensic row stored `findings_total` + `findings_new` and dropped `known`/`unavailable`,
   so a trail reading `total=26, new=0` later read as "no regressions" when all 26 findings

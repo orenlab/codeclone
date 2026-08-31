@@ -484,13 +484,20 @@ def test_symbol_index_none_snapshot_returns_empty() -> None:
 #:
 #: * ``pkg/mod.py`` — plain product code.
 #: * ``pkg/test_helpers.py`` — a ``test_``-named module *inside* a shipped
-#:   package. The source-kind owner calls the file test-kind by its name; the
-#:   track follows the owner rather than second-guessing it.
+#:   package, the shape ``annotated_types.test_cases`` publishes. The owner
+#:   reads the registry and keeps it on the contract; a bare reading of
+#:   pytest's filename convention would delete a published module from it.
 #: * ``pkg/testing/tools.py`` — a ``testing`` subpackage the package really
 #:   ships. Only the module registry tells it from a repository test tree,
 #:   which is why the run's registry is handed to the owner.
-#: * ``conftest.py`` — pytest configuration outside any test directory: the
-#:   case that makes the directory rule alone insufficient.
+#: * ``pkg/tests/test_shipped.py`` — a distribution's own suite, shipped in
+#:   the wheel. 848 of the 860 convention-only files in this project's whole
+#:   dependency closure have exactly this shape, and none of them is a
+#:   published contract.
+#: * ``conftest.py`` and ``pkg/conftest.py`` — pytest configuration, outside
+#:   and inside a shipped package. The first makes the directory rule alone
+#:   insufficient; the second is why the exemption is a fact about modules a
+#:   package publishes, not about names that merely look like tests.
 #: * ``tests/…`` — the repository's own test tree, including a fixture tree.
 #: * ``benchmarks/…`` and ``docs/conf.py`` — repository tooling. The owner
 #:   calls both production, so both stay; the track invents no second rule.
@@ -501,8 +508,14 @@ _TRACK_TREE_FILES: tuple[tuple[str, str], ...] = (
         '__all__ = ["run"]\n\n\ndef run(value: int) -> int:\n    return value\n',
     ),
     ("pkg/test_helpers.py", "def helper(value: int) -> int:\n    return value\n"),
+    ("pkg/conftest.py", "def package_fixture(request):\n    return request\n"),
     ("pkg/testing/__init__.py", ""),
     ("pkg/testing/tools.py", "def make_client(value: int) -> int:\n    return value\n"),
+    ("pkg/tests/__init__.py", ""),
+    (
+        "pkg/tests/test_shipped.py",
+        "def test_shipped(value: int) -> None:\n    assert value\n",
+    ),
     ("conftest.py", "def root_fixture(request):\n    return request\n"),
     ("tests/conftest.py", "def sample_fixture(request):\n    return request\n"),
     ("tests/test_thing.py", "def test_thing(value: int) -> None:\n    assert value\n"),
@@ -531,9 +544,11 @@ _TRACK_TREE_SURFACES = (
     "benchmarks/bench_case.py",
     "conftest.py",
     "docs/conf.py",
+    "pkg/conftest.py",
     "pkg/mod.py",
     "pkg/test_helpers.py",
     "pkg/testing/tools.py",
+    "pkg/tests/test_shipped.py",
     "tests/conftest.py",
     "tests/fixtures/sample.py",
     "tests/test_thing.py",
@@ -546,13 +561,15 @@ _PRODUCT_TRACK_SURFACES = (
     "benchmarks/bench_case.py",
     "docs/conf.py",
     "pkg/mod.py",
+    "pkg/test_helpers.py",
     "pkg/testing/tools.py",
 )
 
 #: The test half, and the reason the gate was unusable.
 _TEST_TRACK_SURFACES = (
     "conftest.py",
-    "pkg/test_helpers.py",
+    "pkg/conftest.py",
+    "pkg/tests/test_shipped.py",
     "tests/conftest.py",
     "tests/fixtures/sample.py",
     "tests/test_thing.py",
@@ -666,29 +683,45 @@ def test_product_api_surface_observation_lane_excludes_the_test_tree(
 def test_product_api_track_follows_the_source_kind_owner(tmp_path: Path) -> None:
     """The track is the owner's verdict, not a copy of the owner's rule.
 
-    Two files decide this. ``pkg/testing/tools.py`` is only production
-    because the module registry proves ``pkg.testing`` is a shipped
-    subpackage — a path rule alone reads ``testing`` as a test directory and
-    drops it. ``pkg/test_helpers.py`` is only test-kind because the owner
-    widens ``classify_source_kind`` with the pytest filename convention — a
-    directory rule alone keeps it. Neither verdict can be reproduced without
-    asking the owner, so a track that stopped delegating fails here.
+    Four files decide this, and not one of their verdicts can be reproduced
+    from the path alone:
+
+    * ``pkg/testing/tools.py`` is production only because the registry proves
+      ``pkg.testing`` is a shipped subpackage — a path rule reads ``testing``
+      as a test directory and drops it.
+    * ``pkg/test_helpers.py`` is production only because the registry proves
+      the file is an ordinary module of a shipped package — the pytest
+      filename convention alone drops it.
+    * ``pkg/tests/test_shipped.py`` is test-kind only because the owner's
+      directory vocabulary owns ``tests``; a rule that asked "is it inside any
+      package?" would publish a distribution's own suite as its contract.
+    * ``pkg/conftest.py`` is test-kind only because the owner keeps pytest's
+      configuration file categorical, registry or no registry.
+
+    A track that stopped delegating and re-derived any of this fails here.
     """
 
     _mixed_track_tree(tmp_path)
-    shipped = tmp_path / "pkg" / "testing" / "tools.py"
-    named_like_a_test = tmp_path / "pkg" / "test_helpers.py"
     registry = build_module_registry(root=tmp_path)
-    assert is_product_api_module(
-        str(shipped),
-        scan_root=str(tmp_path),
-        module_registry=registry,
-    )
-    assert not is_product_api_module(
-        str(named_like_a_test),
-        scan_root=str(tmp_path),
-        module_registry=registry,
-    )
+    verdicts = {
+        relative_path: is_product_api_module(
+            str(tmp_path / relative_path),
+            scan_root=str(tmp_path),
+            module_registry=registry,
+        )
+        for relative_path in (
+            "pkg/testing/tools.py",
+            "pkg/test_helpers.py",
+            "pkg/tests/test_shipped.py",
+            "pkg/conftest.py",
+        )
+    }
+    assert verdicts == {
+        "pkg/testing/tools.py": True,
+        "pkg/test_helpers.py": True,
+        "pkg/tests/test_shipped.py": False,
+        "pkg/conftest.py": False,
+    }
 
 
 def test_product_api_track_reads_repository_relative_paths(tmp_path: Path) -> None:

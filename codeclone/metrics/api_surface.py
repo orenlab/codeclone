@@ -65,8 +65,11 @@ def is_product_api_module(
     in step by hand.
 
     ``module_registry`` is what lets the owner tell a repository's ``tests/``
-    tree from a ``testing`` subpackage that a distributed package actually
-    ships, so callers that hold a registry must pass it. ``scan_root`` is
+    tree from what a distributed package actually ships - both a ``testing``
+    subpackage and a module published under a test-shaped name, such as
+    ``annotated_types.test_cases`` - so callers that hold a registry must
+    pass it. Registry-free the owner is strictly the more cautious of the
+    two, which is what the baseline decode bridge relies on. ``scan_root`` is
     equally load-bearing: a run carries absolute file paths, and the owner
     classifies repository-relative ones.
     """

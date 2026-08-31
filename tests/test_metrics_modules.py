@@ -953,6 +953,139 @@ def test_source_kind_vocabulary_preserves_filename_rules() -> None:
     assert is_test_filepath("src/example/test_helpers.py") is True
 
 
+#: The whole filename-convention frontier, as one tree the registry can read.
+#:
+#: pytest's discovery convention is a repository fact, not a packaging one, and
+#: reading it as "test-named anywhere is test code" costs a library that ships
+#: test helpers as part of its contract. Measured over the 7464 ``.py`` files
+#: of this project's own ``site-packages`` closure: 860 files are test-kind by
+#: the filename convention alone (the directory rule already calls them
+#: production). 848 of them sit inside a shipped ``tests``/``test`` subpackage
+#: and are a distribution's own suite; 11 are ``conftest.py``; exactly 1 is a
+#: plain test-named module of a shipped package -- ``annotated_types``'s
+#: published ``test_cases``. On this repository the same count is 0, which is
+#: why the boundary is drawn here over a tree rather than over ourselves.
+#:
+#: Each row reaches a different arm, so none of them is unreachable decoration:
+#:
+#: * ``pkg/test_cases.py`` -- the module a package publishes under a
+#:   test-shaped name. The registry proves ``pkg`` is a regular package and no
+#:   test-named directory sits above the file, so the convention steps aside.
+#: * ``pkg/conftest.py`` -- pytest's configuration file. It is a test artifact
+#:   by role rather than by name, and every one of the 11 found in shipped
+#:   packages (numpy, scipy, sklearn, pyarrow, fsspec, ...) configures that
+#:   distribution's own suite. The convention keeps it whatever the registry
+#:   says.
+#: * ``pkg/tests/test_suite.py`` and ``pkg/testing/test_tools.py`` -- shipped
+#:   subpackages whose names are in the source-kind vocabulary. Both stay test
+#:   code, and the second one only because the vocabulary owns ``testing`` too:
+#:   a rule that hardcoded ``tests`` would let it through.
+#: * ``nspkg/sub/test_ns.py`` -- no ``__init__.py`` anywhere above it, so the
+#:   registry cannot prove an importable package tree and the convention holds.
+#: * ``nspkg/tests/case.py`` -- the same broken package chain under a
+#:   test-named *directory*. It is the other caller of the shared chain
+#:   reader, and it is here because a mutation measured it unreached: with
+#:   the chain proof replaced by ``True`` the whole suite stayed green, so
+#:   the directory rule's "reachable by an ordinary import" clause had no
+#:   input that touched it.
+#: * ``scripts/test_probe.py`` -- repository tooling in a plain directory.
+#: * ``test_root.py`` -- a top-level module: there is no owning package at all.
+#: * ``tests/test_thing.py`` -- the repository's own test tree, already decided
+#:   by the directory rule before the convention is ever consulted.
+_FILENAME_CONVENTION_TREE: tuple[tuple[str, str], ...] = (
+    ("pkg/__init__.py", ""),
+    ("pkg/mod.py", "def run(value: int) -> int:\n    return value\n"),
+    ("pkg/test_cases.py", "def cases(value: int) -> int:\n    return value\n"),
+    ("pkg/conftest.py", "def fixture(request):\n    return request\n"),
+    ("pkg/testing/__init__.py", ""),
+    ("pkg/testing/test_tools.py", "def tool(value: int) -> int:\n    return value\n"),
+    ("pkg/tests/__init__.py", ""),
+    ("pkg/tests/test_suite.py", "def test_suite() -> None:\n    assert True\n"),
+    ("nspkg/sub/test_ns.py", "def probe(value: int) -> int:\n    return value\n"),
+    ("nspkg/tests/case.py", "def case(value: int) -> int:\n    return value\n"),
+    ("scripts/test_probe.py", "def probe(value: int) -> int:\n    return value\n"),
+    ("test_root.py", "def root(value: int) -> int:\n    return value\n"),
+    ("tests/test_thing.py", "def test_thing() -> None:\n    assert True\n"),
+)
+
+#: The verdict the owner must reach for every file of the tree above. Written
+#: out rather than derived, so it cannot agree with a broken rule by
+#: construction.
+_FILENAME_CONVENTION_VERDICTS: dict[str, bool] = {
+    "pkg/__init__.py": False,
+    "pkg/mod.py": False,
+    "pkg/test_cases.py": False,
+    "pkg/conftest.py": True,
+    "pkg/testing/__init__.py": False,
+    "pkg/testing/test_tools.py": True,
+    "pkg/tests/__init__.py": False,
+    "pkg/tests/test_suite.py": True,
+    "nspkg/sub/test_ns.py": True,
+    "nspkg/tests/case.py": True,
+    "scripts/test_probe.py": True,
+    "test_root.py": True,
+    "tests/test_thing.py": True,
+}
+
+
+def _filename_convention_tree(root: Path) -> None:
+    for relative_path, source in _FILENAME_CONVENTION_TREE:
+        target = root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, "utf-8")
+
+
+def test_pytest_filename_convention_stops_at_a_module_a_package_ships(
+    tmp_path: Path,
+) -> None:
+    """The owner separates a repository's test tree from a shipped module.
+
+    One predicate, one vocabulary, one registry: the convention is suspended
+    only where the module registry can prove the file is an ordinary module of
+    an importable package tree with no test-named directory above it. That is
+    the same evidence ``classify_source_kind`` already uses to tell a shipped
+    ``testing`` subpackage from a repository test tree, asked of a file
+    instead of a directory.
+    """
+
+    _filename_convention_tree(tmp_path)
+    registry = build_test_module_registry(root=tmp_path)
+    observed = {
+        relative_path: is_test_filepath(
+            str(tmp_path / relative_path),
+            scan_root=str(tmp_path),
+            module_registry=registry,
+        )
+        for relative_path, _source in _FILENAME_CONVENTION_TREE
+    }
+    assert observed == _FILENAME_CONVENTION_VERDICTS
+
+
+def test_pytest_filename_convention_holds_without_registry_evidence(
+    tmp_path: Path,
+) -> None:
+    """No registry, no exemption.
+
+    Every caller that cannot hand the owner a registry keeps the reading it
+    had before: the exemption is granted on proof, and its absence is not
+    proof of the opposite. This is what lets the baseline decode bridge run
+    the same owner registry-free and stay strictly the more cautious of the
+    two.
+    """
+
+    _filename_convention_tree(tmp_path)
+    shipped_module = str(tmp_path / "pkg" / "test_cases.py")
+    assert is_test_filepath(shipped_module, scan_root=str(tmp_path)) is True
+    assert (
+        is_test_filepath(
+            shipped_module,
+            scan_root=str(tmp_path),
+            module_registry=build_test_module_registry(root=tmp_path),
+        )
+        is False
+    )
+
+
 def test_dead_code_uses_module_identity_for_test_named_package_trees() -> None:
     fixture_root = Path(__file__).parent / "fixtures" / "source_kind"
     package_candidate = DeadCandidate(
