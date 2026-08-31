@@ -391,6 +391,10 @@ def _integrity_document(
             source_facts=resolved_source_facts,
             baseline=resolved_baseline,
             evaluation=resolved_evaluation,
+            meta={},
+            inventory={},
+            findings={},
+            metrics={},
         ),
     }
 

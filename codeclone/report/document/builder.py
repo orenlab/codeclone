@@ -345,6 +345,10 @@ def finalize_report_document(
             source_facts=source_facts,
             baseline=baseline,
             evaluation=evaluation,
+            meta=report_meta,
+            inventory=_as_mapping(body.get("inventory")),
+            findings=_as_mapping(body.get("findings")),
+            metrics=_as_mapping(body.get("metrics")),
         ),
     }
     return finalize_envelope_digest(document)

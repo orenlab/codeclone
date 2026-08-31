@@ -1,0 +1,1162 @@
+{
+ "baseline": {
+  "baseline_scope_id": null,
+  "disabled_capabilities": [
+   "semantic_authority"
+  ],
+  "root_digest_or_null": null,
+  "sorted_lane_trust": [
+   {
+    "name": "adoption_counts",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "api_surface",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "clones.blocks",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "clones.functions",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "coupling_cohesion_observations",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "dead_code",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "dependencies",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "module_identity",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "risk_observations",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   }
+  ],
+  "sorted_novelty_facts": [],
+  "state": "missing"
+ },
+ "contracts": {
+  "evaluation": {
+   "active_gate_lane_requirements": [],
+   "gate_algorithm_revision": "1",
+   "gate_lane_matrix_version": "2",
+   "gate_thresholds_digest": "0dea969259ae886b6247e500bd14e332294a7fb392a9256166820dc6ff7f4117",
+   "health_algorithm_revision": "1",
+   "health_input_lanes": [
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "health_input_manifest_version": "2"
+  },
+  "observation": {
+   "descriptors": [
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "adoption_counts",
+     "payload_schema": "2",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "api_surface",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "API_SURFACE_SIGNATURE_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.blocks",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.functions",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "coupling_cohesion_observations",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dead_code",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dependencies",
+     "payload_schema": "8",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "module_identity",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "risk_observations",
+     "payload_schema": "5",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "enabled_lanes": [
+    "adoption_counts",
+    "api_surface",
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "observation_digest_version": "1"
+  }
+ },
+ "derived": {
+  "hotlists": {
+   "highest_spread_ids": [],
+   "most_actionable_ids": [],
+   "production_hotspot_ids": [],
+   "test_fixture_hotspot_ids": []
+  },
+  "module_map": {
+   "default_zoom": "packages",
+   "graph_modules": {
+    "edges": [],
+    "nodes": [],
+    "package_depth": null,
+    "truncation": {
+     "edge_shown_count": 0,
+     "edge_universe_count": 0,
+     "node_shown_count": 0,
+     "node_universe_count": 0,
+     "seed_policy": "cycles_then_chains_then_degree",
+     "truncated": false
+    },
+    "zoom": "modules"
+   },
+   "graph_packages": {
+    "edges": [],
+    "nodes": [],
+    "package_depth": null,
+    "truncation": {
+     "edge_shown_count": 0,
+     "edge_universe_count": 0,
+     "node_shown_count": 0,
+     "node_universe_count": 0,
+     "seed_policy": "cycles_then_chains_then_degree",
+     "truncated": false
+    },
+    "zoom": "packages"
+   },
+   "schema_version": "1",
+   "scope": "report_only",
+   "summary": {
+    "available": false,
+    "edge_count": 0,
+    "module_count": 0,
+    "overloaded_candidate_count": 0,
+    "overloaded_population_status": "limited",
+    "package_count_depth2": 0,
+    "reason": "dependencies_skipped",
+    "unwind_candidate_count": 0
+   },
+   "unwind_candidates": []
+  },
+  "overview": {
+   "directory_hotspots": {
+    "all": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "authority": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "clones": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "cohesion": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "complexity": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "coupling": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "dead_code": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "dependency": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "structural": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    }
+   },
+   "families": {
+    "authority": 0,
+    "clones": 0,
+    "dead_code": 0,
+    "design": 0,
+    "structural": 0
+   },
+   "health_snapshot": {
+    "grade": null,
+    "population": "",
+    "score": null,
+    "strongest_dimension": null,
+    "weakest_dimension": null
+   },
+   "presentation_counts": {
+    "structural": 0,
+    "structural_kinds": 0,
+    "suggestions": 0,
+    "suggestions_by_family": {
+     "clones": 0,
+     "metrics": 0,
+     "structural": 0
+    }
+   },
+   "source_scope_breakdown": {},
+   "top_risks": []
+  },
+  "review_queue": {
+   "items": [],
+   "schema_version": "3",
+   "scope": "report_only",
+   "summary": {
+    "actionable": 0,
+    "by_family": {},
+    "by_novelty": {
+     "known": 0,
+     "new": 0
+    },
+    "by_severity": {
+     "critical": 0,
+     "info": 0,
+     "warning": 0
+    },
+    "reviewed": 0,
+    "top_priority": 0.0,
+    "total": 0
+   }
+  },
+  "suggestions": []
+ },
+ "evaluation": {
+  "contract": {
+   "active_gate_lane_requirements": [],
+   "gate_algorithm_revision": "1",
+   "gate_lane_matrix_version": "2",
+   "gate_thresholds_digest": "0dea969259ae886b6247e500bd14e332294a7fb392a9256166820dc6ff7f4117",
+   "health_algorithm_revision": "1",
+   "health_input_lanes": [
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "health_input_manifest_version": "2"
+  },
+  "outcome": {
+   "exit_code": 0,
+   "reasons": [],
+   "required_lanes": [],
+   "unavailable_lanes": []
+  },
+  "request": {
+   "coverage_min": 50,
+   "fail_cohesion": -1,
+   "fail_complexity": -1,
+   "fail_coupling": -1,
+   "fail_cycles": false,
+   "fail_dead_code": false,
+   "fail_health": -1,
+   "fail_on_api_break": false,
+   "fail_on_authority_violation": false,
+   "fail_on_docstring_regression": false,
+   "fail_on_new": false,
+   "fail_on_new_metrics": false,
+   "fail_on_truncated_run": false,
+   "fail_on_typing_regression": false,
+   "fail_on_unresolved_dead_code": false,
+   "fail_on_untested_hotspots": false,
+   "fail_threshold": -1,
+   "min_docstring_coverage": -1,
+   "min_typing_coverage": -1
+  }
+ },
+ "findings": {
+  "groups": {
+   "authority": {
+    "groups": []
+   },
+   "clones": {
+    "blocks": [],
+    "functions": [],
+    "segments": []
+   },
+   "dead_code": {
+    "groups": []
+   },
+   "design": {
+    "groups": []
+   },
+   "near_miss": {
+    "algorithm_revision": "3",
+    "state": "disabled",
+    "tier": "near_miss"
+   },
+   "renamed_structure": {
+    "algorithm_revision": "1",
+    "state": "disabled",
+    "tier": "renamed_structure"
+   },
+   "structural": {
+    "groups": []
+   }
+  },
+  "summary": {
+   "clones": {
+    "blocks": 0,
+    "functions": 0,
+    "instances": 0,
+    "known": 0,
+    "new": 0,
+    "segments": 0,
+    "unavailable": 0
+   },
+   "families": {
+    "authority": 0,
+    "clones": 0,
+    "dead_code": 0,
+    "design": 0,
+    "structural": 0
+   },
+   "impact_scope": {
+    "mixed": 0,
+    "non_runtime": 0,
+    "runtime": 0
+   },
+   "severity": {
+    "critical": 0,
+    "info": 0,
+    "warning": 0
+   },
+   "suppressed": {
+    "dead_code": 0
+   },
+   "total": 0
+  }
+ },
+ "integrity": {
+  "canonicalization": {
+   "envelope_null_sentinel": "integrity.digests.envelope.value",
+   "serializer": "orjson.OPT_SORT_KEYS",
+   "version": "3"
+  },
+  "digests": {
+   "analysis_facts": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "analysis_facts",
+    "value": "4a065c3b38e5a4c9f756ecafa2db0d0244a7cb91b99da3766d43ee763b10323e"
+   },
+   "comparison": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "comparison",
+    "value": "255a2d0da2d9f1702b83083509687acf50a4d1c8f91ae9f14fb85e7150578a2c"
+   },
+   "envelope": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "report_envelope",
+    "value": "d14b028a801ba92bb5f60b5a2498bc52fbfa08aa400f6b628a50cf54759867f6"
+   },
+   "evaluation": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "evaluation",
+    "value": "099b3b9d7c3e439a0b65fe05800a92f1e23bb7b9a31c1d55e32bcbf5efa2139a"
+   },
+   "observation": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "source_observations",
+    "value": "4211583d07c07f45064df4b0252bc36679c21ea46d31f5afb4c002fd8aa12636"
+   }
+  }
+ },
+ "inventory": {
+  "code": {
+   "classes": 0,
+   "functions": 0,
+   "methods": 0,
+   "parsed_lines": 0,
+   "scope": "current_run"
+  },
+  "file_registry": {
+   "encoding": "relative_path",
+   "items": []
+  },
+  "files": {
+   "analyzed": 0,
+   "cached": 0,
+   "skipped": 0,
+   "source_io_skipped": 0,
+   "total_found": 0,
+   "unsupported_construct_skipped": 0,
+   "unsupported_constructs": []
+  }
+ },
+ "meta": {
+  "analysis_mode": "full",
+  "analysis_thresholds": {
+   "design_findings": {
+    "cohesion": {
+     "metric": "lcom4",
+     "operator": ">=",
+     "value": 4
+    },
+    "complexity": {
+     "metric": "cyclomatic_complexity",
+     "operator": ">",
+     "value": 20
+    },
+    "coupling": {
+     "metric": "cbo",
+     "operator": ">",
+     "value": 10
+    }
+   }
+  },
+  "baseline": {
+   "fingerprint_version": null,
+   "generator_name": null,
+   "generator_version": null,
+   "loaded": false,
+   "path": null,
+   "path_scope": null,
+   "payload_sha256": null,
+   "payload_sha256_verified": false,
+   "python_tag": null,
+   "schema_version": null,
+   "status": null
+  },
+  "cache": {
+   "path": null,
+   "path_scope": null,
+   "schema_version": null,
+   "status": null,
+   "used": false
+  },
+  "codeclone_version": "",
+  "computed_metric_families": [
+   "api_surface",
+   "cohesion",
+   "complexity",
+   "coupling",
+   "coverage_adoption",
+   "dead_code",
+   "dependencies",
+   "health",
+   "overloaded_modules",
+   "security_surfaces"
+  ],
+  "metrics_baseline": {
+   "loaded": false,
+   "path": null,
+   "path_scope": null,
+   "payload_sha256": null,
+   "payload_sha256_verified": false,
+   "schema_version": null,
+   "status": null
+  },
+  "project_name": "",
+  "python_tag": "",
+  "python_version": "",
+  "report_mode": "full",
+  "runtime": {
+   "analysis_started_at_utc": null,
+   "baseline_path_absolute": null,
+   "cache_path_absolute": null,
+   "metrics_baseline_path_absolute": null,
+   "report_generated_at_utc": null,
+   "scan_root_absolute": null
+  },
+  "scan_root": "."
+ },
+ "metrics": {
+  "families": {
+   "api_surface": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "added": 0,
+     "baseline_diff_available": false,
+     "breaking": 0,
+     "enabled": false,
+     "modules": 0,
+     "public_symbols": 0,
+     "strict_types": false
+    }
+   },
+   "cohesion": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "average": 0.0,
+     "low_cohesion": 0,
+     "max": 0,
+     "total": 0
+    }
+   },
+   "complexity": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "average": 0.0,
+     "baseline_diff_available": false,
+     "high_risk": 0,
+     "max": 0,
+     "new_high_risk": 0,
+     "total": 0
+    }
+   },
+   "coupling": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "average": 0.0,
+     "baseline_diff_available": false,
+     "high_risk": 0,
+     "max": 0,
+     "new_high_risk": 0,
+     "total": 0
+    }
+   },
+   "coverage_adoption": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "baseline_diff_available": false,
+     "docstring_delta": 0,
+     "docstring_permille": 0,
+     "modules": 0,
+     "param_delta": 0,
+     "param_permille": 0,
+     "params_annotated": 0,
+     "params_total": 0,
+     "public_symbol_documented": 0,
+     "public_symbol_total": 0,
+     "return_delta": 0,
+     "return_permille": 0,
+     "returns_annotated": 0,
+     "returns_total": 0,
+     "typing_any_count": 0
+    }
+   },
+   "dead_code": {
+    "items": [],
+    "items_truncated": false,
+    "live_root_reasons": [],
+    "summary": {
+     "baseline_diff_available": false,
+     "high_confidence": 0,
+     "live_roots": 0,
+     "new_items": 0,
+     "suppressed": 0,
+     "total": 0,
+     "unreachable_statements": 0,
+     "unresolved_external_override": 0
+    },
+    "suppressed_items": [],
+    "unreachable_statements": [],
+    "unresolved_overrides": []
+   },
+   "dependencies": {
+    "cycle_details": [],
+    "cycles": [],
+    "dynamic_boundaries": [],
+    "items": [],
+    "items_truncated": false,
+    "longest_chains": [],
+    "summary": {
+     "avg_depth": 0.0,
+     "baseline_diff_available": false,
+     "cycles": 0,
+     "deferred_cycles": 0,
+     "edges": 0,
+     "import_cycles": 0,
+     "max_depth": 0,
+     "modules": 0,
+     "new_cycles": 0,
+     "new_deferred_cycles": 0,
+     "new_import_cycles": 0,
+     "p95_depth": 0
+    }
+   },
+   "health": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "baseline_diff_available": false,
+     "delta": 0,
+     "dimensions": null,
+     "grade": null,
+     "population": "",
+     "score": null
+    }
+   },
+   "overloaded_modules": {
+    "detection": {
+     "dependency_signals": [],
+     "minimum_population": 0,
+     "scope": "report_only",
+     "shape_signals": [],
+     "size_signals": [],
+     "strategy": "project_relative_composite",
+     "version": "1"
+    },
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "average_score": 0.0,
+     "candidate_score_cutoff": 0.0,
+     "candidates": 0,
+     "population_status": "limited",
+     "top_score": 0.0,
+     "total": 0
+    }
+   },
+   "security_surfaces": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "by_source_kind": {
+      "fixtures": 0,
+      "other": 0,
+      "production": 0,
+      "tests": 0
+     },
+     "categories": {},
+     "category_count": 0,
+     "exact_items": 0,
+     "fixtures": 0,
+     "items": 0,
+     "modules": 0,
+     "other": 0,
+     "production": 0,
+     "report_only": false,
+     "tests": 0
+    }
+   }
+  },
+  "summary": {
+   "api_surface": {
+    "added": 0,
+    "baseline_diff_available": false,
+    "breaking": 0,
+    "enabled": false,
+    "modules": 0,
+    "public_symbols": 0,
+    "strict_types": false
+   },
+   "cohesion": {
+    "average": 0.0,
+    "low_cohesion": 0,
+    "max": 0,
+    "total": 0
+   },
+   "complexity": {
+    "average": 0.0,
+    "baseline_diff_available": false,
+    "high_risk": 0,
+    "max": 0,
+    "new_high_risk": 0,
+    "total": 0
+   },
+   "coupling": {
+    "average": 0.0,
+    "baseline_diff_available": false,
+    "high_risk": 0,
+    "max": 0,
+    "new_high_risk": 0,
+    "total": 0
+   },
+   "coverage_adoption": {
+    "baseline_diff_available": false,
+    "docstring_delta": 0,
+    "docstring_permille": 0,
+    "modules": 0,
+    "param_delta": 0,
+    "param_permille": 0,
+    "params_annotated": 0,
+    "params_total": 0,
+    "public_symbol_documented": 0,
+    "public_symbol_total": 0,
+    "return_delta": 0,
+    "return_permille": 0,
+    "returns_annotated": 0,
+    "returns_total": 0,
+    "typing_any_count": 0
+   },
+   "dead_code": {
+    "baseline_diff_available": false,
+    "high_confidence": 0,
+    "live_roots": 0,
+    "new_items": 0,
+    "suppressed": 0,
+    "total": 0,
+    "unreachable_statements": 0,
+    "unresolved_external_override": 0
+   },
+   "dependencies": {
+    "avg_depth": 0.0,
+    "baseline_diff_available": false,
+    "cycles": 0,
+    "deferred_cycles": 0,
+    "edges": 0,
+    "import_cycles": 0,
+    "max_depth": 0,
+    "modules": 0,
+    "new_cycles": 0,
+    "new_deferred_cycles": 0,
+    "new_import_cycles": 0,
+    "p95_depth": 0
+   },
+   "health": {
+    "baseline_diff_available": false,
+    "delta": 0,
+    "dimensions": null,
+    "grade": null,
+    "population": "",
+    "score": null
+   },
+   "overloaded_modules": {
+    "average_score": 0.0,
+    "candidate_score_cutoff": 0.0,
+    "candidates": 0,
+    "population_status": "limited",
+    "top_score": 0.0,
+    "total": 0
+   },
+   "security_surfaces": {
+    "by_source_kind": {
+     "fixtures": 0,
+     "other": 0,
+     "production": 0,
+     "tests": 0
+    },
+    "categories": {},
+    "category_count": 0,
+    "exact_items": 0,
+    "fixtures": 0,
+    "items": 0,
+    "modules": 0,
+    "other": 0,
+    "production": 0,
+    "report_only": false,
+    "tests": 0
+   }
+  }
+ },
+ "report_schema_version": "3.2",
+ "source_facts": {
+  "analysis_contract": {
+   "design_findings": {
+    "cohesion": {
+     "metric": "lcom4",
+     "operator": ">=",
+     "value": 4
+    },
+    "complexity": {
+     "metric": "cyclomatic_complexity",
+     "operator": ">",
+     "value": 20
+    },
+    "coupling": {
+     "metric": "cbo",
+     "operator": ">",
+     "value": 10
+    }
+   }
+  },
+  "analysis_scope": [
+   {
+    "path": "pkg/module.py"
+   }
+  ],
+  "module_identity_manifest": {
+   "analysis_mount": {
+    "origin": "analysis_only",
+    "path": "."
+   },
+   "import_mounts": [
+    {
+     "module_prefix": "",
+     "origin": "root",
+     "path": "."
+    }
+   ],
+   "module_identity_version": "2",
+   "normalization": {
+    "case_sensitive": true,
+    "path_form": "posix_nfc"
+   },
+   "strategy": "root"
+  },
+  "module_registry": {
+   "digest": {
+    "algorithm": "sha256",
+    "domain": "codeclone.module-registry.v1",
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "entries_by_module": {
+    "rows": [
+     [
+      "pkg.module",
+      {
+       "analyzed": true,
+       "identity": {
+        "file": {
+         "path": "pkg/module.py"
+        },
+        "python_module": {
+         "is_package": false,
+         "module": "pkg.module",
+         "mount_path": ".",
+         "node_kind": "module_file",
+         "origin": "import_mount",
+         "package": "pkg"
+        }
+       },
+       "internality": "analyzed"
+      }
+     ]
+    ]
+   },
+   "entries_by_path": {
+    "rows": [
+     [
+      "pkg/module.py",
+      {
+       "analyzed": true,
+       "identity": {
+        "file": {
+         "path": "pkg/module.py"
+        },
+        "python_module": {
+         "is_package": false,
+         "module": "pkg.module",
+         "mount_path": ".",
+         "node_kind": "module_file",
+         "origin": "import_mount",
+         "package": "pkg"
+        }
+       },
+       "internality": "analyzed"
+      }
+     ]
+    ]
+   },
+   "manifest": {
+    "analysis_mount": {
+     "origin": "analysis_only",
+     "path": "."
+    },
+    "import_mounts": [
+     {
+      "module_prefix": "",
+      "origin": "root",
+      "path": "."
+     }
+    ],
+    "module_identity_version": "2",
+    "normalization": {
+     "case_sensitive": true,
+     "path_form": "posix_nfc"
+    },
+    "strategy": "root"
+   },
+   "manifest_digest": {
+    "algorithm": "sha256",
+    "domain": "ccmi2:manifest",
+    "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   },
+   "package_prefixes": []
+  },
+  "observation_contract": {
+   "descriptors": [
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "adoption_counts",
+     "payload_schema": "2",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "api_surface",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "API_SURFACE_SIGNATURE_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.blocks",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.functions",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "coupling_cohesion_observations",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dead_code",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dependencies",
+     "payload_schema": "8",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "module_identity",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "risk_observations",
+     "payload_schema": "5",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "enabled_lanes": [
+    "adoption_counts",
+    "api_surface",
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "observation_digest_version": "1"
+  },
+  "semantic": null,
+  "source_fact_families": {
+   "adoption_counts": [],
+   "api_surface": [],
+   "block_clone_keys": [],
+   "coupling_cohesion_entity_population": 0,
+   "coupling_cohesion_observations": [],
+   "dead_code": [],
+   "dependencies": [],
+   "function_clone_keys": [],
+   "risk_entity_population": 0,
+   "risk_observations": []
+  }
+ }
+}

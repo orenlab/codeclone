@@ -1297,6 +1297,7 @@ def test_report_json_integrity_tiers_change_only_for_declared_inputs() -> None:
         next_source_facts: Mapping[str, object] = source_facts,
         next_baseline: Mapping[str, object] = baseline,
         next_evaluation: Mapping[str, object] = evaluation,
+        next_findings: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         integrity = _build_integrity_payload(
             report_schema_version=REPORT_SCHEMA_VERSION,
@@ -1304,6 +1305,10 @@ def test_report_json_integrity_tiers_change_only_for_declared_inputs() -> None:
             source_facts=next_source_facts,
             baseline=next_baseline,
             evaluation=next_evaluation,
+            meta={},
+            inventory={},
+            findings=next_findings if next_findings is not None else {},
+            metrics={},
         )
         digests = integrity["digests"]
         assert isinstance(digests, dict)
@@ -1315,6 +1320,10 @@ def test_report_json_integrity_tiers_change_only_for_declared_inputs() -> None:
     evaluation_changed = _digests(
         next_evaluation={"outcome": {"exit_code": 3, "reasons": ["gate"]}}
     )
+    # Identity v2: uttered findings are a declared input of the analysis tier.
+    findings_changed = _digests(
+        next_findings={"groups": {"structural": {"groups": [{"category": "x"}]}}}
+    )
 
     assert original["observation"] == source_changed["observation"]
     assert original["analysis_facts"] != source_changed["analysis_facts"]
@@ -1322,6 +1331,8 @@ def test_report_json_integrity_tiers_change_only_for_declared_inputs() -> None:
     assert original["comparison"] != baseline_changed["comparison"]
     assert original["comparison"] == evaluation_changed["comparison"]
     assert original["evaluation"] != evaluation_changed["evaluation"]
+    assert original["observation"] == findings_changed["observation"]
+    assert original["analysis_facts"] != findings_changed["analysis_facts"]
 
 
 @pytest.mark.parametrize(

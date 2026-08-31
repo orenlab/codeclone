@@ -651,6 +651,18 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "REPORT_COMPARISON_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
     "REPORT_ENVELOPE_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
     "REPORT_EVALUATION_DIGEST_DOMAIN": (_LANE_NONE, "report integrity digest"),
+    "REPORT_ANALYSIS_IDENTITY_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
+    "REPORT_COMPARISON_IDENTITY_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
+    "REPORT_EVALUATION_IDENTITY_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
+    "REPORT_FAMILY_DIGEST_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
+    "REPORT_SEMANTIC_IDENTITY_VERSION": (
+        _LANE_NONE,
+        "identity generation of the report digest preimage; computed per run "
+        "over a document built after the cache is read, so no cache payload "
+        "stores it or anything derived from it",
+    ),
+    "HEALTH_ALGORITHM_REVISION": (_LANE_NONE, "health projection, post-cache"),
+    "GATE_ALGORITHM_REVISION": (_LANE_NONE, "gate projection, post-cache"),
     "REPORT_RUN_IDENTITY_TIER": (
         _LANE_NONE,
         "names which report integrity digest a run is called by; a wire key of "

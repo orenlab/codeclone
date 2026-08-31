@@ -3824,6 +3824,11 @@ class ReportIntegrityInput(BaseModel):
 
     canonicalization: dict[str, JsonValue]
     digests: dict[str, ReportDigestInput]
+    # Identity generation 2 (RULING-2026-08-31). Both optional with None
+    # defaults: a generation-1 document carries neither, and absence is the
+    # generation marker itself — never inferred, never defaulted to a value.
+    semantic_identity_version: str | None = None
+    semantic: dict[str, JsonValue] | None = None
 
 
 class ReportDocumentV3Input(BaseModel):

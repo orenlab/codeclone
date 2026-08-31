@@ -15,6 +15,9 @@ from codeclone.metrics.health import HealthInputs, compute_health, health_report
 from codeclone.models import (
     BaselineContainerV3,
     GroupMapLike,
+    NearMissMember,
+    NearMissPair,
+    RenamedStructureGroup,
     StructuralFindingGroup,
     Suggestion,
     SuppressedCloneGroup,
@@ -288,6 +291,8 @@ def build_test_report_document(
     observed_block_clone_keys: Sequence[str] = (),
     gate_exit_code: int = 0,
     gate_reasons: tuple[str, ...] = (),
+    near_miss_pairs: Sequence[NearMissPair] | None = None,
+    renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
 ) -> dict[str, object]:
     """Build the sole canonical report-v3 fixture shape used by report tests.
 
@@ -360,6 +365,8 @@ def build_test_report_document(
         metrics=metrics,
         suggestions=suggestions,
         structural_findings=structural_findings,
+        near_miss_pairs=near_miss_pairs,
+        renamed_structure_groups=renamed_structure_groups,
     )
 
 
@@ -386,6 +393,36 @@ def build_maximal_report_document() -> dict[str, object]:
         func_groups={},
         block_groups={},
         segment_groups={},
+        # Identity v2 reads the container's uttered budget
+        # (max_edit_statements), which only a complete container carries,
+        # so the maximal document utters the tier complete.
+        near_miss_pairs=(
+            NearMissPair(
+                pair_key=(
+                    "pkg/module.py:pkg.module:alpha:1|pkg/module.py:pkg.module:beta:15"
+                ),
+                members=(
+                    NearMissMember(
+                        qualname="pkg.module:alpha",
+                        filepath="pkg/module.py",
+                        start_line=1,
+                        end_line=12,
+                        differing_start_line=6,
+                        differing_end_line=6,
+                    ),
+                    NearMissMember(
+                        qualname="pkg.module:beta",
+                        filepath="pkg/module.py",
+                        start_line=15,
+                        end_line=26,
+                        differing_start_line=20,
+                        differing_end_line=20,
+                    ),
+                ),
+                edit_statements=1,
+                edit_kind="replace",
+            ),
+        ),
         meta={
             "analysis_profile": {
                 "min_loc": 6,

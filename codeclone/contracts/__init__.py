@@ -102,6 +102,24 @@ REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN: Final = "codeclone.report.analysis_facts.v1
 REPORT_COMPARISON_DIGEST_DOMAIN: Final = "codeclone.report.comparison.v1\0"
 REPORT_EVALUATION_DIGEST_DOMAIN: Final = "codeclone.report.evaluation.v1\0"
 REPORT_ENVELOPE_DIGEST_DOMAIN: Final = "codeclone.report.envelope.v1\0"
+# --- Report semantic identity v2 (RULING-2026-08-31, ratified) ---
+# The generation of the run-identity preimage, deliberately separate from
+# REPORT_SCHEMA_VERSION: the schema names the wire shape, this names what the
+# identity claims to cover. Generation "1" hashed source facts, the baseline
+# projection and the gate request; findings tiers, policy parameters and
+# evaluation outputs were outside the preimage, and five measured
+# (tree x config x engine) states shared one run_id. Generation "2" adds the
+# analysis population, the realized producer contracts and the canonical
+# family digests of every EXECUTED semantic family, per the ratified law:
+# two runs share a run_id iff they utter the same canonical set of semantic
+# statements under the same realized contract of their derivation.
+# Documents without this marker verify under generation-1 rules; the marker
+# is never inferred.
+REPORT_SEMANTIC_IDENTITY_VERSION: Final = "2"
+REPORT_ANALYSIS_IDENTITY_DOMAIN_V2: Final = "codeclone.report.analysis.v2\0"
+REPORT_COMPARISON_IDENTITY_DOMAIN_V2: Final = "codeclone.report.comparison.v2\0"
+REPORT_EVALUATION_IDENTITY_DOMAIN_V2: Final = "codeclone.report.evaluation.v2\0"
+REPORT_FAMILY_DIGEST_DOMAIN_V2: Final = "codeclone.report.family.v2\0"
 # Which of the five report digest tiers names a run, for every surface that has
 # to answer "which run is this". Exactly one tier can: ``evaluation`` seals the
 # facts, the baseline, the gate thresholds and the outcome, so two runs over one
@@ -127,6 +145,22 @@ GATE_LANE_MATRIX_VERSION: Final = "2"
 # so a health score computed under "1" and one computed under "2" are not
 # derived from the same input set even when they carry the same number.
 HEALTH_INPUT_MANIFEST_VERSION: Final = "2"
+# The health formula generation: which aggregate the dimension scores are
+# folded through. Until identity v2 this value existed only as an inline "1"
+# in the evaluation contract builder -- a witness no constant owned, so a
+# formula change had no lever to move. The calibrated inputs of the formula
+# (HEALTH_WEIGHTS, the reference permilles, the saturation multiples and the
+# dependency penalties) are NOT part of this revision: they are live
+# evaluation parameters, uttered and digested per document
+# (realized_contracts.evaluation.health.params), so a recalibration moves the
+# run identity without touching this constant. This constant moves only when
+# the folding itself changes meaning.
+HEALTH_ALGORITHM_REVISION: Final = "1"
+# The gate evaluation generation, on the same terms: the thresholds are the
+# live parameters (gate_thresholds_digest), the lane requirement matrix is
+# GATE_LANE_MATRIX_VERSION, and this constant names how request, matrix and
+# lane availability fold into an exit verdict.
+GATE_ALGORITHM_REVISION: Final = "1"
 OBSERVER_VOCABULARY_VERSION: Final = "3"
 # Version "2" adds two life proofs, and nothing else moves. (1) A PEP 484
 # explicit re-export - ``from x import y as y``, the ``as``-SAME-name
@@ -857,11 +891,13 @@ __all__ = [
     "FAMILY_CLONES",
     "FINDING_GROUPS_PATH",
     "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION",
+    "GATE_ALGORITHM_REVISION",
     "GATE_LANE_MATRIX_VERSION",
     "GROUP_KEY_AUTHORITY",
     "GROUP_KEY_DEAD_CODE",
     "GROUP_KEY_DESIGN",
     "GROUP_KEY_STRUCTURAL",
+    "HEALTH_ALGORITHM_REVISION",
     "HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE",
     "HEALTH_COMPLEXITY_ELEVATED_WEIGHT",
     "HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE",
@@ -901,11 +937,16 @@ __all__ = [
     "PORTABLE_PATH_PROFILE_VERSION",
     "RENAMED_STRUCTURE_ALGORITHM_REVISION",
     "REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN",
+    "REPORT_ANALYSIS_IDENTITY_DOMAIN_V2",
     "REPORT_COMPARISON_DIGEST_DOMAIN",
+    "REPORT_COMPARISON_IDENTITY_DOMAIN_V2",
     "REPORT_ENVELOPE_DIGEST_DOMAIN",
     "REPORT_EVALUATION_DIGEST_DOMAIN",
+    "REPORT_EVALUATION_IDENTITY_DOMAIN_V2",
+    "REPORT_FAMILY_DIGEST_DOMAIN_V2",
     "REPORT_RUN_IDENTITY_TIER",
     "REPORT_SCHEMA_VERSION",
+    "REPORT_SEMANTIC_IDENTITY_VERSION",
     "REPOSITORY_URL",
     "RUNTIME_REACHABILITY_CATALOG_VERSION",
     "SECURITY_SURFACE_CATALOG_VERSION",
