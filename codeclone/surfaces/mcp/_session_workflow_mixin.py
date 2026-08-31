@@ -369,6 +369,7 @@ class _MCPSessionWorkflowMixin:
         # 7. Budget
         budget_payload = patch_session._patch_contract_budget(
             run_id=record.run_id,
+            root=record.root,
             intent_id=intent_id,
             strictness=patch_session._validated_strictness(strictness),
         )

@@ -1524,7 +1524,14 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             return _json_text_payload(_helpers._schema_resource_payload())
         if uri == "codeclone://latest/triage":
             latest = self._runs.resolve_any_root()
-            return _json_text_payload(self.get_production_triage(run_id=latest.run_id))
+            # Bound to the record we just resolved: re-entering by bare id
+            # walks back into the multi-root refusal this call already passed.
+            return _json_text_payload(
+                self.get_production_triage(
+                    run_id=latest.run_id,
+                    root=str(latest.root),
+                )
+            )
         latest_prefix = "codeclone://latest/"
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
@@ -1572,7 +1579,11 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             return _json_text_payload(_helpers._schema_resource_payload())
         if suffix == "overview":
             return _json_text_payload(
-                self.list_hotspots(kind="highest_spread", run_id=record.run_id)
+                self.list_hotspots(
+                    kind="highest_spread",
+                    run_id=record.run_id,
+                    root=str(record.root),
+                )
             )
         finding_prefix = "findings/"
         if suffix.startswith(finding_prefix):
@@ -1580,6 +1591,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             return _json_text_payload(
                 self._service_get_finding(
                     run_id=record.run_id,
+                    root=str(record.root),
                     finding_id=finding_id,
                 )
             )

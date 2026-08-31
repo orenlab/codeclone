@@ -26,12 +26,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+import codeclone
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mcp.server.fastmcp import FastMCP
 
 pytest.importorskip("mcp.server.fastmcp")
 
-from codeclone.surfaces.mcp import _session_finding_mixin as finding_mixin
 from codeclone.surfaces.mcp._session_shared import MCPRunRootAmbiguityError
 from codeclone.surfaces.mcp.server import build_mcp_server
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -560,70 +561,179 @@ def test_every_root_declaring_tool_honours_the_root_it_was_given(
 # that does not run on a shared id.
 # ---------------------------------------------------------------------------
 
-_REENTRY_RESOLVER = "_service_get_finding"
+
+# The resolver names a re-entry must not walk back into by bare id.
+_RUN_RESOLVERS = frozenset(
+    {
+        "resolve_any_root",
+        "get_for_root",
+        "_resolve_run_for_optional_root",
+        "_run_bound_to_root",
+    }
+)
 
 
-def _reentry_call_sites() -> tuple[tuple[str, int, str], ...]:
-    """Every internal re-entry into the finding resolver, read from source.
-
-    Read from the module's own AST rather than a list here, so a fourth site
-    added tomorrow joins the rule instead of slipping past it.
-    """
-
-    source = Path(finding_mixin.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    sites: list[tuple[str, int, str]] = []
-
-    def walk(node: ast.AST, enclosing: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                walk(child, child.name)
-                continue
-            if (
-                isinstance(child, ast.Call)
-                and isinstance(child.func, ast.Attribute)
-                and child.func.attr == _REENTRY_RESOLVER
-            ):
-                bound = next(
-                    (kw.value for kw in child.keywords if kw.arg == "root"),
-                    None,
-                )
-                if bound is None:
-                    state = "missing"
-                elif isinstance(bound, ast.Constant) and bound.value is None:
-                    state = "literal-none"
-                else:
-                    state = "bound"
-                sites.append((enclosing, child.lineno, state))
-            walk(child, enclosing)
-
-    walk(tree, "<module>")
-    return tuple(sites)
+def _package_modules() -> tuple[Path, ...]:
+    package_root = Path(codeclone.__file__).resolve().parent
+    return tuple(sorted(package_root.rglob("*.py")))
 
 
-def test_every_internal_finding_reentry_declares_a_root() -> None:
-    """The static half: no re-entry may resolve by bare id."""
-
-    sites = _reentry_call_sites()
-    assert len(sites) >= 3, f"the known re-entry sites went missing: {sites}"
-    unbound = [(name, line, state) for name, line, state in sites if state != "bound"]
-    assert unbound == [], (
-        f"{_REENTRY_RESOLVER} re-entered without the record's root: {unbound}"
+def _parsed_package() -> tuple[tuple[Path, ast.Module], ...]:
+    return tuple(
+        (path, ast.parse(path.read_text(encoding="utf-8")))
+        for path in _package_modules()
     )
 
 
-@pytest.mark.parametrize(
-    "tool",
-    sorted({name for name, _line, _state in _reentry_call_sites()}),
-)
+def _resolving_callees(
+    parsed: tuple[tuple[Path, ast.Module], ...],
+) -> frozenset[str]:
+    """Names whose bodies can reach a run resolver, by transitive closure.
+
+    Resolved by name rather than by import graph: a re-entry is dangerous
+    because of what the callee eventually does, and this errs towards
+    including a name rather than letting a resolving one slip out.
+    """
+
+    calls: dict[str, set[str]] = {}
+    for _path, tree in parsed:
+
+        def walk(node: ast.AST, enclosing: str | None) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    calls.setdefault(child.name, set())
+                    walk(child, child.name)
+                    continue
+                if enclosing is not None and isinstance(child, ast.Call):
+                    callee = child.func
+                    if isinstance(callee, ast.Name):
+                        calls[enclosing].add(callee.id)
+                    elif isinstance(callee, ast.Attribute):
+                        calls[enclosing].add(callee.attr)
+                walk(child, enclosing)
+
+        walk(tree, None)
+
+    reaching = set(_RUN_RESOLVERS)
+    changed = True
+    while changed:
+        changed = False
+        for name, callees in calls.items():
+            if name not in reaching and callees & reaching:
+                reaching.add(name)
+                changed = True
+    return frozenset(reaching)
+
+
+def _reentry_call_sites() -> tuple[tuple[str, int, str, str, str], ...]:
+    """Every call that re-enters a resolver with an already-resolved run id.
+
+    Read from the whole package, never one module: the rule is about where a
+    resolved record is handed back to something that resolves again, and that
+    can be written in any file. A sweep bounded to one file holds only the
+    sites that file happens to contain.
+    """
+
+    parsed = _parsed_package()
+    resolving = _resolving_callees(parsed)
+    package_root = Path(codeclone.__file__).resolve().parent.parent
+    sites: list[tuple[str, int, str, str, str]] = []
+    for path, tree in parsed:
+        module = str(path.relative_to(package_root))
+
+        def walk(node: ast.AST, enclosing: str, module: str = module) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    walk(child, child.name)
+                    continue
+                if isinstance(child, ast.Call):
+                    keywords = {kw.arg: kw.value for kw in child.keywords if kw.arg}
+                    run_id = keywords.get("run_id")
+                    callee = child.func
+                    name = (
+                        callee.attr
+                        if isinstance(callee, ast.Attribute)
+                        else callee.id
+                        if isinstance(callee, ast.Name)
+                        else ""
+                    )
+                    if (
+                        isinstance(run_id, ast.Attribute)
+                        and run_id.attr == "run_id"
+                        and name in resolving
+                    ):
+                        root = keywords.get("root")
+                        if root is None:
+                            state = "missing"
+                        elif isinstance(root, ast.Constant) and root.value is None:
+                            state = "literal-none"
+                        else:
+                            state = "bound"
+                        sites.append((module, child.lineno, enclosing, name, state))
+                walk(child, enclosing)
+
+        walk(tree, "<module>")
+    return tuple(sites)
+
+
+def test_every_record_reentry_is_bound_to_its_root() -> None:
+    """A resolved record handed back to a resolver must carry its own root.
+
+    Three assertions, and the first two exist so the third cannot pass on an
+    empty sweep: the reachability closure must have found the real resolvers,
+    and the sites must span more than one module — the exact way this rule
+    was blind when it read a single file.
+    """
+
+    parsed = _parsed_package()
+    resolving = _resolving_callees(parsed)
+    assert {"_service_get_finding", "list_hotspots", "get_production_triage"} <= (
+        resolving
+    ), "the reachability closure lost the known resolving entry points"
+
+    sites = _reentry_call_sites()
+    modules = {module for module, _line, _encl, _callee, _state in sites}
+    assert len(modules) >= 2, (
+        f"the sweep collapsed to {sorted(modules)}; a package-wide rule that "
+        "only ever finds one module is not holding its population"
+    )
+
+    unbound = [site for site in sites if site[4] != "bound"]
+    assert unbound == [], (
+        f"re-entry by bare run id, without the record's root: {unbound}"
+    )
+
+
+def _service_reentry_tools() -> tuple[str, ...]:
+    """Re-entering methods that are themselves run-id-taking MCP tools.
+
+    A re-entering method that is not a tool, or a tool that takes no run id,
+    cannot be driven by a shared run id at all; it leaves this behavioural
+    half by its own schema and stays covered by the static rule above.
+    """
+
+    server = build_mcp_server(history_limit=4)
+    schemas, _required = _tool_schemas(server)
+    return tuple(
+        sorted(
+            {
+                enclosing
+                for _module, _line, enclosing, _callee, _state in _reentry_call_sites()
+                if enclosing in schemas and "run_id" in schemas[enclosing]
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize("tool", _service_reentry_tools())
 def test_internal_finding_reentry_survives_a_shared_run_id(
     tool: str,
     tmp_path: Path,
 ) -> None:
-    """The causal half: each re-entering tool must still answer on a collision.
+    """Each re-entering tool must still answer on a collision.
 
-    Parameterised over the enclosing methods the AST found, so each one fails
-    under its own test id and a fourth site arrives already covered.
+    Parameterised over the tools the package sweep found, so each fails under
+    its own id and a new one arrives already covered.
     """
 
     service, root_a, _root_b = _distinguishable_collision(tmp_path)
@@ -633,14 +743,26 @@ def test_internal_finding_reentry_survives_a_shared_run_id(
             run_id=_COLLIDED_RUN_ID,
             root=str(root_a),
         )
-    arguments: dict[str, Any] = {"run_id": _COLLIDED_RUN_ID, "root": str(root_a)}
-    if tool in {"get_remediation", "mark_finding_reviewed"}:
-        arguments["finding_id"] = "fn:g1"
-
     try:
-        getattr(service, tool)(**arguments)
+        _call_selector_tool(service, tool, root=root_a)
     except MCPRunRootAmbiguityError as exc:  # pragma: no cover - the defect path
-        pytest.fail(
-            f"{tool} resolved its record and then re-entered "
-            f"{_REENTRY_RESOLVER} by bare id: {exc}"
-        )
+        pytest.fail(f"{tool} re-entered a resolver by bare id: {exc}")
+
+
+@pytest.mark.parametrize("suffix", ["triage", "overview", "findings/fn:g1"])
+def test_latest_resource_rendering_stays_bound_to_its_record(
+    suffix: str,
+    tmp_path: Path,
+) -> None:
+    """The resource surface has no root to pass, so it must bind its own.
+
+    ``codeclone://latest/...`` resolves the newest record without an id and
+    then renders it. Rendering that re-entered by bare id walked straight into
+    the multi-root refusal on any two checkouts sharing a run.
+    """
+
+    service, _root_a, _root_b = _distinguishable_collision(tmp_path)
+    try:
+        service.read_resource(f"codeclone://latest/{suffix}")
+    except MCPRunRootAmbiguityError as exc:  # pragma: no cover - the defect path
+        pytest.fail(f"codeclone://latest/{suffix} re-entered by bare run id: {exc}")
