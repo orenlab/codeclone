@@ -125,6 +125,7 @@ SPAN_NAMES: Final[frozenset[str]] = frozenset(
         "cache.segment_projection",
         "cache.stat",
         "cache.validate_envelope",
+        "canonical.snapshot.publish",
         "canonical.store.publish",
         "compatibility.check",
         "config.resolve",
@@ -289,6 +290,27 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "cache_profile_hit",
         "cache_profile_miss",
         "cache_stat_fast_reject",
+        # The producer edge of the canonical backend (step 7): ONE span at
+        # the ONE publication point, deliberately NOT in the
+        # ``canonical_store_*`` family — that family has exactly one owner
+        # (the store), and a witness emitted from core under its name would
+        # make it a second instrumentation surface.  This is the rollout's
+        # own line, and it exists because the DEFAULT path here is the
+        # skip: a publication that skipped silently would look exactly like
+        # a backend nobody wired.
+        #
+        #  run_snapshot_publish_attempts       one call, always written.
+        #  *_disabled / *_refused / *_stored   EXCLUSIVE outcomes; exactly
+        #      one is written per call, so "nothing happened" is always
+        #      distinguishable from "the site was never reached".
+        #  *_inadmissible                      0/1, written on every stored
+        #      publish: whether this realized profile was refused the
+        #      canonical head (partial / clones-only / truncated).
+        "run_snapshot_publish_attempts",
+        "run_snapshot_publish_disabled",
+        "run_snapshot_publish_inadmissible",
+        "run_snapshot_publish_refused",
+        "run_snapshot_publish_stored",
         # The canonical backend run-store, instrumented before its rollout
         # flag and before any sweep exists: without this the backend's own
         # first operational line — first publish, republish, content

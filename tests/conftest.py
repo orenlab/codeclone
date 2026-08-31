@@ -324,3 +324,76 @@ def candidate_projection_documents(
     ]
     assert next(projected, None) is None, "the projection outran the report"
     return document, rebuilt, corpus.run_id
+
+
+# ---------------------------------------------------------------------------
+# The producer-wiring corpus runner (backend step 7).
+#
+# Lives here, beside the wire-freeze runner and for the same reason: the
+# subject of ``test_run_store_producer_wiring`` is ring r2 throughout, and
+# importing the r4 CLI surface from that module would make every r2 import
+# in it a new architecture-ratchet entry (the Phase 39S test-import law).
+# The invocation is in-process rather than in a subprocess so the coverage
+# instrument actually sees the production path it drives; the rollout
+# environment is applied through monkeypatch, undone on the way out.
+# ---------------------------------------------------------------------------
+
+RunStoreCorpusRunner = Callable[..., None]
+
+
+def _run_codeclone_cli(args: list[str], environment: dict[str, str]) -> None:
+    """One CLI invocation with an explicit rollout environment."""
+
+    import codeclone.surfaces.cli.workflow as cli
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(sys, "argv", ["codeclone", *args])
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        for key in (
+            "CODECLONE_RUN_STORE_ENABLED",
+            "CODECLONE_RUN_STORE_PATH",
+            "CODECLONE_RUN_STORE_FORCE",
+        ):
+            if key not in environment:
+                monkeypatch.delenv(key, raising=False)
+        try:
+            cli.main()
+        except SystemExit as exit_signal:
+            code = exit_signal.code
+            assert code in (None, 0, 1), f"CLI exited {code!r}: {args}"
+    finally:
+        monkeypatch.undo()
+
+
+@pytest.fixture
+def run_store_cli() -> RunStoreCorpusRunner:
+    """Run the real CLI waterfall over a corpus, with a rollout environment."""
+
+    def _run(
+        root: Path,
+        *args: str,
+        store: Path | None = None,
+        force_ci: bool = True,
+    ) -> None:
+        environment: dict[str, str] = {}
+        if force_ci:
+            # The rollout is CI-neutral by design and the suite may run
+            # under CI; the probe says so rather than depending on the host.
+            environment["CODECLONE_RUN_STORE_FORCE"] = "1"
+        if store is not None:
+            environment["CODECLONE_RUN_STORE_ENABLED"] = "1"
+            environment["CODECLONE_RUN_STORE_PATH"] = str(store)
+        _run_codeclone_cli(
+            [
+                str(root),
+                "--no-progress",
+                "--baseline",
+                str(root / "corpus.baseline.json"),
+                *args,
+            ],
+            environment,
+        )
+
+    return _run

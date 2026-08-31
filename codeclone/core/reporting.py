@@ -18,7 +18,12 @@ from ..contracts import (
     observed_population,
     population_universe_observed,
 )
-from ..models import BaselineContainerV3, MetricsDiff, TrustVector
+from ..models import (
+    BaselineContainerV3,
+    MetricsDiff,
+    RunSnapshotPublication,
+    TrustVector,
+)
 from ..observability import span
 from ..report.document._common import health_verdict_withheld
 from ..report.gates.evaluator import HEALTH_INPUT_LANES, GateResult, GateState
@@ -42,6 +47,7 @@ from ._types import (
     ProcessingResult,
     ReportArtifacts,
 )
+from .canonical_snapshot import publish_run_snapshot, resolve_run_store_config
 from .metrics_payload import _enrich_metrics_report_payload
 
 MetricGateConfig = _MetricGateConfig
@@ -398,6 +404,32 @@ def build_report_body_for_analysis(
         )
 
 
+def _publish_canonical_snapshot(
+    *,
+    boot: BootstrapResult,
+    discovery: DiscoveryResult,
+    processing: ProcessingResult,
+    analysis: AnalysisResult,
+    report_meta: Mapping[str, object],
+) -> RunSnapshotPublication:
+    """Resolve the rollout flag and publish, at the point that publishes.
+
+    The resolution site is the publication site on purpose: a flag read
+    anywhere else would let one surface answer "enabled" while another
+    answered "disabled" for the same run, which is the configuration
+    drift the delivery ratchet exists to catch.  Every path returns a
+    typed witness, including the default disabled path.
+    """
+
+    return publish_run_snapshot(
+        config=resolve_run_store_config(root=boot.root),
+        discovery=discovery,
+        processing=processing,
+        analysis=analysis,
+        report_meta=report_meta,
+    )
+
+
 def report(
     *,
     boot: BootstrapResult,
@@ -429,6 +461,22 @@ def report(
         "text": None,
     }
     report_document: dict[str, object] | None = None
+    # The ONE producer-edge publication point (backend step 7).  It lives
+    # here and not in the CLI stage runner because MCP deliberately
+    # bypasses ``run_analysis_stages``: a publish hung off the stage runner
+    # would give the three waterfalls two dialects of one fact, and this
+    # function is the single scope in which all four producer results and
+    # the run root are live at once.  It runs before the document work and
+    # is independent of it — a gate-only run publishes the same snapshot as
+    # a rendering run, because the snapshot is the ANALYSIS, not the
+    # report.
+    _publish_canonical_snapshot(
+        boot=boot,
+        discovery=discovery,
+        processing=processing,
+        analysis=analysis,
+        report_meta=report_meta,
+    )
     needs_report_document = report_document_required(
         boot,
         include_report_document=include_report_document,

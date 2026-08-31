@@ -1689,6 +1689,129 @@ class ObservabilityConfig:
             raise ValueError("observability retention and caps must be positive")
 
 
+# ---------------------------------------------------------------------------
+# Canonical run-store rollout (ruling 2026-08-24 §6: T2 is a TEMPORARY rollout
+# mechanism, never a second semantic generation).
+# ---------------------------------------------------------------------------
+
+#: Closed outcome vocabulary of one producer-native snapshot publication.
+#: Every one of the four is a DIFFERENT fact and none of them is silence:
+#: a run that publishes nothing must still say which of these it was, or
+#: "the backend did not run" becomes indistinguishable from "the backend
+#: ran and stored nothing" — the same absent-versus-empty hole the
+#: population law closes on the other side.
+#:
+#: * ``disabled``       the rollout flag is off; no store file was opened.
+#: * ``published``      the snapshot was stored and it advanced its head.
+#: * ``head_withheld``  the snapshot was stored, and its own profile head
+#:   was NOT the canonical complete head: a partial / clones-only /
+#:   truncated analysis is admissible as a snapshot and inadmissible as a
+#:   replacement for a complete measurement (ruling 2026-08-31, I2-D).
+#: * ``head_conflict``  the snapshot was stored and lost the head race to a
+#:   concurrent publisher (the store's own CAS outcome, never an error).
+#: * ``refused``        the run carries producer output this representation
+#:   cannot express, so NOTHING was stored.  An anticipated refusal is a
+#:   report; publishing the families it cannot express as zeros would be
+#:   the fake-zero the population law forbids, and failing the run would
+#:   make a rollout flag able to break an analysis.
+RUN_SNAPSHOT_PUBLICATION_DISABLED: Final = "disabled"
+RUN_SNAPSHOT_PUBLICATION_PUBLISHED: Final = "published"
+RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD: Final = "head_withheld"
+RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT: Final = "head_conflict"
+RUN_SNAPSHOT_PUBLICATION_REFUSED: Final = "refused"
+RUN_SNAPSHOT_PUBLICATION_OUTCOMES: Final[tuple[str, ...]] = (
+    RUN_SNAPSHOT_PUBLICATION_DISABLED,
+    RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT,
+    RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
+    RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
+    RUN_SNAPSHOT_PUBLICATION_REFUSED,
+)
+
+#: The outcomes under which nothing reached the store.  Spelled once so a
+#: reader never has to re-derive "was anything stored" from the outcome
+#: word — the classification reaches the decider (`G1`).
+RUN_SNAPSHOT_PUBLICATION_UNSTORED: Final[frozenset[str]] = frozenset(
+    {RUN_SNAPSHOT_PUBLICATION_DISABLED, RUN_SNAPSHOT_PUBLICATION_REFUSED}
+)
+
+#: The reserved head target of the complete canonical analysis profile.
+#: Every other realized profile publishes under its own
+#: ``profile:<digest>`` target, so no measurement can displace a head it
+#: did not produce: the ruling names an explicit ``head(profile_identity)``
+#: rather than one global head a poorer measurement can win by arriving
+#: later.
+CANONICAL_HEAD_TARGET: Final = "canonical"
+CANONICAL_PROFILE_HEAD_PREFIX: Final = "profile:"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunStoreConfig:
+    """Resolved rollout state of the canonical run-store backend.
+
+    Env-first and default OFF, deliberately NOT a published
+    ``[tool.codeclone]`` key: §6 of the backend ruling says the flag
+    DISAPPEARS once GC, the identity bridge and direct producer wiring
+    have landed, and a published configuration key cannot be withdrawn
+    without breaking the surface it was published on.
+    """
+
+    enabled: bool = False
+    #: Absolute path of the SQLite store, or ``None`` when disabled. The
+    #: path is resolved beside the flag, by the one resolver, so no caller
+    #: can enable the backend and then decide for itself where it writes.
+    path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.enabled and self.path is None:
+            raise ValueError("an enabled run store must carry its database path")
+        if not self.enabled and self.path is not None:
+            raise ValueError("a disabled run store must not carry a database path")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunSnapshotPublication:
+    """The typed witness of ONE publication decision at the producer edge.
+
+    Returned on every path, including the flag-off path: a skip that
+    returns ``None`` is a skip nobody can observe, and the wiring is
+    exactly the place where a silent skip would look identical to a
+    backend that never existed.
+    """
+
+    outcome: str
+    #: Whether this run's realized profile is the complete canonical one.
+    #: Recorded beside the outcome because ``head_withheld`` and
+    #: ``head_conflict`` are both "the head did not move for me" and only
+    #: this field says which of the two questions was answered.
+    admissible: bool
+    #: The head target this run published under — the reserved canonical
+    #: name, or the run's own profile head.
+    target: str = ""
+    run_id: str = ""
+    generation: int = 0
+    #: Why nothing was stored, on the ``refused`` outcome only.  A refusal
+    #: without its reason is a silence with a name on it.
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.outcome not in RUN_SNAPSHOT_PUBLICATION_OUTCOMES:
+            raise ValueError(
+                f"unknown run snapshot publication outcome: {self.outcome!r}"
+            )
+        if self.outcome in RUN_SNAPSHOT_PUBLICATION_UNSTORED:
+            if self.target or self.run_id or self.generation:
+                raise ValueError("an unstored publication carries no store receipt")
+        elif not self.target or not self.run_id:
+            raise ValueError("a stored publication must carry its target and run id")
+        if (self.outcome == RUN_SNAPSHOT_PUBLICATION_REFUSED) != bool(self.reason):
+            raise ValueError("a refusal carries its reason and nothing else does")
+        if self.admissible and self.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD:
+            raise ValueError(
+                "head_withheld is the inadmissible-profile outcome; an "
+                "admissible profile that lost the head raced for it"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class StageCounterSnapshot:
     """Deterministic, mergeable worker counters applied by a parent stage."""
