@@ -49,7 +49,7 @@ from codeclone.surfaces.mcp._workspace_intent_store import (
     get_workspace_intent_store,
     lazy_close_eligible_records,
 )
-from tests.test_workspace_intents import _record
+from tests.test_workspace_intents import LIVE_AGENT_START_EPOCH, _record
 
 
 @contextmanager
@@ -191,7 +191,9 @@ def test_sqlite_store_write_list_find_update_close(sqlite_root: Path) -> None:
     assert archived is not None
     assert archived.status == "clean"
 
-    closed_via_status = _record(intent_id="intent-close-002", start_epoch=101)
+    closed_via_status = _record(
+        intent_id="intent-close-002", start_epoch=LIVE_AGENT_START_EPOCH + 1
+    )
     assert store.write(closed_via_status)
     assert workspace_intents.update_workspace_intent_status(
         root=sqlite_root,
@@ -262,7 +264,7 @@ def test_sqlite_store_gc_closes_corrupted_and_stale(sqlite_root: Path) -> None:
             _record(
                 intent_id="intent-expired-002",
                 pid=record.agent_pid + 1,
-                start_epoch=101,
+                start_epoch=LIVE_AGENT_START_EPOCH + 1,
             ),
             expires_at_utc=workspace_intents.format_utc(
                 workspace_intents.utc_now() - timedelta(hours=1)

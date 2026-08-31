@@ -15,6 +15,9 @@ from ...workspace_intent.lifecycle import (
     utc_now,
 )
 from ...workspace_intent.lifecycle import (
+    agent_identity_liveness as _agent_identity_liveness,
+)
+from ...workspace_intent.lifecycle import (
     is_lease_expired as _is_lease_expired,
 )
 from ...workspace_intent.lifecycle import (
@@ -32,7 +35,13 @@ def stale_reason(record: WorkspaceIntentRecord) -> str | None:
     expires = _parse_utc(record.expires_at_utc)
     if expires is None or expires <= utc_now():
         return "expired"
-    if pid_mod.agent_pid_liveness(record.agent_pid) == PidLiveness.DEAD:
+    base = pid_mod.agent_pid_liveness(record.agent_pid)
+    identity = _agent_identity_liveness(
+        record,
+        base=base,
+        base_is_declared=pid_mod.agent_pid_liveness_is_declared(),
+    )
+    if identity == PidLiveness.DEAD:
         return "orphaned"
     if _is_lease_expired(record):
         return "lease_expired"

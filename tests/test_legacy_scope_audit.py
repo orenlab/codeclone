@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import os
+import time
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -72,7 +73,9 @@ def _record(
     return WorkspaceIntentRecord(
         intent_id="intent-legacy-scope-audit",
         agent_pid=os.getpid(),
-        agent_start_epoch=100,
+        # Sampled, not a literal: a 1970 epoch on this live pid describes an
+        # agent the kernel already reaped, and reads as recoverable.
+        agent_start_epoch=int(time.time()),
         agent_label="agent-legacy",
         run_id="abcdef1234567890",
         declared_at_utc=format_utc(declared_at),

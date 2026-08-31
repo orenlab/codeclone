@@ -103,6 +103,7 @@ def test_projection_job_pid_alive_and_reclaim_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from codeclone.memory.jobs import store as job_store
     from codeclone.memory.jobs.store import _pid_alive, _reclaim_stale_running_jobs
 
     assert _pid_alive(None) is False
@@ -131,6 +132,12 @@ def test_projection_job_pid_alive_and_reclaim_paths(
                 ),
             )
             conn.commit()
+            # The claimant's death is declared, not inherited from the pid
+            # space: nothing reserves 999999, so reading it off the kernel
+            # would make this reclaim assertion a property of the machine.
+            monkeypatch.setattr(
+                job_store, "_pid_alive", lambda token: token != "999999@dead"
+            )
             _reclaim_stale_running_jobs(
                 conn,
                 project_id=project.id,

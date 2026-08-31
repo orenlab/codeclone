@@ -1001,7 +1001,11 @@ def test_decide_flush_immediate_on_large_delta(tmp_path: Path) -> None:
         assert decision.immediate is True
 
 
-def test_try_claim_flush_slot_lifecycle(tmp_path: Path) -> None:
+def test_try_claim_flush_slot_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codeclone.memory.jobs import store as job_store
+
     with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
         conn = store.connection
         # No pending job yet.
@@ -1023,7 +1027,9 @@ def test_try_claim_flush_slot_lifecycle(tmp_path: Path) -> None:
         assert reserved is not None and reserved.flush_claimed_by == live
         # Live holder -> second claim is refused (strict single sleeper).
         assert try_claim_flush_slot(conn, project_id=project.id, claimant="2@h") is None
-        # Dead holder -> reclaimable.
+        # Dead holder -> reclaimable. The death is declared: nothing reserves
+        # pid 999999, so asking the kernel would make this a machine property.
+        monkeypatch.setattr(job_store, "_pid_alive", lambda token: token == live)
         set_flush_claimed_by(conn, job_id=job_id, claimant="999999@h")
         assert (
             try_claim_flush_slot(conn, project_id=project.id, claimant=live) == job_id

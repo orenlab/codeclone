@@ -34,6 +34,7 @@ def classify_intent_ownership(
     own_start_epoch: int,
     now: datetime,
     pid_liveness: Callable[[int], PidLiveness] | None = None,
+    record_liveness: Callable[[WorkspaceIntentRecord], PidLiveness] | None = None,
 ) -> IntentOwnership:
     """Classify one record without coupling the contract to an agent surface."""
 
@@ -46,7 +47,13 @@ def classify_intent_ownership(
     lease_valid = lease_expiry is not None and lease_expiry > now
     if is_own:
         return IntentOwnership.OWN_ACTIVE if lease_valid else IntentOwnership.OWN_STALE
-    liveness = (pid_liveness or lifecycle.pid_liveness)(record.agent_pid)
+    # A live pid is not a live agent. Recovery must be decided on the recorded
+    # agent's identity, or foreign work queues behind a recycled pid forever.
+    if record_liveness is not None:
+        liveness = record_liveness(record)
+    else:
+        base_liveness = (pid_liveness or lifecycle.pid_liveness)(record.agent_pid)
+        liveness = lifecycle.agent_identity_liveness(record, base=base_liveness)
     if liveness == PidLiveness.DEAD:
         return IntentOwnership.RECOVERABLE
     return (

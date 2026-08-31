@@ -35,4 +35,14 @@ def agent_pid_liveness(pid: int) -> PidLiveness:
     return _lifecycle_pid_liveness(pid)
 
 
-__all__ = ["agent_pid_liveness", "is_agent_pid_alive"]
+def agent_pid_liveness_is_declared() -> bool:
+    """True when this seam's boolean probe has been replaced by a caller."""
+
+    return is_agent_pid_alive is not _DEFAULT_IS_AGENT_PID_ALIVE
+
+
+__all__ = [
+    "agent_pid_liveness",
+    "agent_pid_liveness_is_declared",
+    "is_agent_pid_alive",
+]

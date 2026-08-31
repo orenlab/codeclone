@@ -18,7 +18,7 @@ from codeclone.workspace_intent.gate import (
     WorkspaceEditGateDecision,
     evaluate_workspace_edit_gate,
 )
-from tests.test_workspace_intents import _record
+from tests.test_workspace_intents import LIVE_AGENT_START_EPOCH, _record
 
 CODEX_AGENT_LABEL = "codex-mcp-client/0.137.0-alpha.4"
 CURSOR_AGENT_LABEL = "cursor-vscode/1.0.0"
@@ -39,13 +39,16 @@ def codex_foreign_record(
     *,
     intent_id: str = "intent-foreign-001",
     pid: int | None = None,
-    start_epoch: int = 100,
+    start_epoch: int = LIVE_AGENT_START_EPOCH,
     status: str = "active",
 ) -> WorkspaceIntentRecord:
+    # Foreignness here is the agent *label*, never an unreserved pid: nothing
+    # keeps ``getpid() + N`` free, and the cursor hooks run this record through
+    # a subprocess no monkeypatch can reach.
     return replace(
         _record(
             intent_id=intent_id,
-            pid=pid or (os.getpid() + 5000),
+            pid=pid or os.getpid(),
             start_epoch=start_epoch,
             status=status,
         ),
@@ -57,7 +60,7 @@ def cursor_vscode_record(
     *,
     intent_id: str = "intent-abcdef12-001",
     pid: int | None = None,
-    start_epoch: int = 100,
+    start_epoch: int = LIVE_AGENT_START_EPOCH,
     status: str = "active",
 ) -> WorkspaceIntentRecord:
     return replace(

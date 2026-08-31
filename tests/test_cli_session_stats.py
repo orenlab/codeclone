@@ -115,7 +115,9 @@ def _write_intent_file(
     intents_dir: Path,
     *,
     intent_id: str = "intent-aabb0011-001",
-    pid: int = 99999,
+    # Alive by construction. An unreserved "surely absent" default would hand
+    # any future caller a premise the machine can refute.
+    pid: int = os.getpid(),
     start_epoch: int | None = None,
     status: str = "active",
     label: str = "test-agent",
@@ -994,6 +996,13 @@ def test_session_stats_counts_expired_stale_and_recoverable(
     monkeypatch.setattr(
         insights_mod,
         "_is_pid_alive",
+        lambda pid: pid == os.getpid(),
+    )
+    # ``recoverable_count`` is decided by classify_intent_ownership, which reads
+    # the mcp seam -- not the insights one patched above. Without this the count
+    # is a function of whether pid 999999 happens to exist on this machine.
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive",
         lambda pid: pid == os.getpid(),
     )
 

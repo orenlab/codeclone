@@ -355,7 +355,9 @@ def test_hook_cleanup_resolves_owner_identity_from_environment(
     assert unclosed[0].intent_id == "intent-own-env-001"
 
 
-def test_hook_cleanup_record_filter_handles_recoverable_agents() -> None:
+def test_hook_cleanup_record_filter_handles_recoverable_agents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
     from dataclasses import replace
 
@@ -363,9 +365,16 @@ def test_hook_cleanup_record_filter_handles_recoverable_agents() -> None:
     from codeclone.workspace_intent.gate import _include_record_in_hook_cleanup
     from tests.test_workspace_intents import _record
 
+    # Death is declared here, not borrowed from the pid space. Nothing reserves
+    # ``getpid() + N``, so an unreserved "surely absent" pid makes the verdict a
+    # function of what else the machine happens to be running. This patches the
+    # seam the gate actually consults; the pid below is then inert.
+    monkeypatch.setattr(
+        "codeclone.workspace_intent.lifecycle.is_pid_alive", lambda _pid: False
+    )
     recoverable = replace(
         _record(intent_id="intent-rec-001", status="active"),
-        agent_pid=os.getpid() + 5000,
+        agent_pid=os.getpid(),
         agent_label="cursor-vscode/dead",
     )
     now = utc_now()

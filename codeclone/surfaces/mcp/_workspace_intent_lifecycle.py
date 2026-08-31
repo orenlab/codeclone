@@ -13,6 +13,7 @@ from ...workspace_intent.lifecycle import (
     TERMINAL_WORKSPACE_INTENT_STATUSES,
     PidLiveness,
     WorkspaceIntentStatus,
+    agent_identity_liveness,
     gc_status_for_reason,
     is_lease_expired,
     is_pid_alive,
@@ -27,13 +28,15 @@ from ...workspace_intent.lifecycle import (
 def is_orphaned(record: WorkspaceIntentRecord) -> bool:
     """Preserve the legacy monkeypatch seam around pid_liveness."""
 
-    return pid_liveness(record.agent_pid) == PidLiveness.DEAD
+    base = pid_liveness(record.agent_pid)
+    return agent_identity_liveness(record, base=base) == PidLiveness.DEAD
 
 
 __all__ = [
     "TERMINAL_WORKSPACE_INTENT_STATUSES",
     "PidLiveness",
     "WorkspaceIntentStatus",
+    "agent_identity_liveness",
     "gc_status_for_reason",
     "is_lease_expired",
     "is_orphaned",

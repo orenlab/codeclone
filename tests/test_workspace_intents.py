@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -23,11 +24,18 @@ _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 _PID_LIVENESS = "codeclone.surfaces.mcp._workspace_intent_pid.agent_pid_liveness"
 
 
+# The default pid below is this live process, so the default start epoch has to
+# be one this process could honestly have stamped. A literal like ``100`` claims
+# the running interpreter booted in 1970, which the machine flatly contradicts:
+# under identity-aware liveness such a record is a ghost, and correctly so.
+LIVE_AGENT_START_EPOCH = int(time.time())
+
+
 def _record(
     *,
     intent_id: str = "intent-abcdef12-001",
     pid: int | None = None,
-    start_epoch: int = 100,
+    start_epoch: int = LIVE_AGENT_START_EPOCH,
     status: str = "active",
     scope: dict[str, object] | None = None,
     expires_delta: timedelta = timedelta(hours=1),
@@ -225,9 +233,11 @@ def test_workspace_intent_stale_orphan_and_gc(
     orphaned = _record(
         intent_id="intent-orphaned-001",
         pid=999999,
-        start_epoch=101,
+        start_epoch=LIVE_AGENT_START_EPOCH + 1,
     )
-    active = _record(intent_id="intent-active-001", start_epoch=102)
+    active = _record(
+        intent_id="intent-active-001", start_epoch=LIVE_AGENT_START_EPOCH + 2
+    )
     for record in (expired, orphaned, active):
         assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
 
@@ -1343,8 +1353,10 @@ def test_registry_files_skips_unsafe_entries(tmp_path: Path) -> None:
 def test_write_workspace_intent_with_existing_snapshots_before_write(
     tmp_path: Path,
 ) -> None:
-    existing = _record(intent_id="intent-existing-001", start_epoch=100)
-    new = _record(intent_id="intent-new-001", start_epoch=101)
+    existing = _record(
+        intent_id="intent-existing-001", start_epoch=LIVE_AGENT_START_EPOCH
+    )
+    new = _record(intent_id="intent-new-001", start_epoch=LIVE_AGENT_START_EPOCH + 1)
     assert workspace_intents.write_workspace_intent(root=tmp_path, record=existing)
 
     seen, registered = workspace_intents.write_workspace_intent_with_existing(

@@ -21,6 +21,7 @@ would stay green if two consumers drifted together.
 from __future__ import annotations
 
 import os
+import time
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -147,6 +148,10 @@ def _foreign_record(
     what makes the record foreign and its owner demonstrably alive. A dead pid
     classifies as ``recoverable`` and is skipped, so the probe would pass over
     an empty scan and prove nothing about overlap.
+
+    The epoch is sampled rather than written as a literal: liveness compares it
+    against the live process's real start time, so a 1970 literal would describe
+    a recycled pid and be skipped for exactly the reason above.
     """
 
     declared_at = workspace_intents.utc_now()
@@ -158,7 +163,7 @@ def _foreign_record(
     return WorkspaceIntentRecord(
         intent_id="intent-foreign-scope-grammar",
         agent_pid=os.getpid(),
-        agent_start_epoch=100,
+        agent_start_epoch=int(time.time()),
         agent_label="agent-a",
         run_id="abcdef1234567890",
         declared_at_utc=workspace_intents.format_utc(declared_at),

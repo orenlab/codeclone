@@ -111,8 +111,21 @@ def _pid_liveness(pid: int) -> PidLiveness:
     return pid_mod.agent_pid_liveness(pid)
 
 
+def _record_liveness(record: WorkspaceIntentRecord) -> PidLiveness:
+    """Liveness of the recorded agent, not of the pid slot it once held."""
+
+    from ...workspace_intent.lifecycle import agent_identity_liveness
+    from . import _workspace_intent_pid as pid_mod
+
+    return agent_identity_liveness(
+        record,
+        base=_pid_liveness(record.agent_pid),
+        base_is_declared=pid_mod.agent_pid_liveness_is_declared(),
+    )
+
+
 def is_orphaned(record: WorkspaceIntentRecord) -> bool:
-    return _pid_liveness(record.agent_pid) == PidLiveness.DEAD
+    return _record_liveness(record) == PidLiveness.DEAD
 
 
 def is_stale(record: WorkspaceIntentRecord) -> bool:
@@ -186,6 +199,7 @@ def classify_intent_ownership(
         own_start_epoch=own_start_epoch,
         now=now,
         pid_liveness=_pid_liveness,
+        record_liveness=_record_liveness,
     )
 
 
@@ -407,9 +421,7 @@ def workspace_status_counts(*, root: Path) -> dict[str, int]:
     return {
         "stale_count": len(stale_records),
         "orphaned_count": sum(
-            1
-            for record in records
-            if _pid_liveness(record.agent_pid) == PidLiveness.DEAD
+            1 for record in records if _record_liveness(record) == PidLiveness.DEAD
         ),
         "total_agents": len({record.agent_pid for record in records}),
     }
@@ -769,6 +781,7 @@ __all__ = [
     "_parse_utc",
     "_pid_liveness",
     "_read_payload",
+    "_record_liveness",
     "_ttl_expired",
     "_unlink",
     "audit_scope_payload",
