@@ -631,3 +631,69 @@ def test_line_glued_identity_key_moves_identity() -> None:
     first_site = _document(near_miss_pairs=[_pair_at(15)])
     second_site = _document(near_miss_pairs=[_pair_at(40)])
     assert report_run_identity(first_site) != report_run_identity(second_site)
+
+
+# ---------------------------------------------------------------------------
+# Identity-key census: the declaration is provable against measured behavior
+# in BOTH directions (controller mutation c04, 2026-08-31: removing the
+# near_miss declaration survived — the intersection rule quantified over a
+# population nothing held).
+#
+# Each census row is a measurement: perturbing that key through the REAL
+# projection moves the family digest, so excluding the key reddens its row.
+# The census-equality pin binds the measured population to the registry
+# declaration, so removing a declaration (c04) or declaring a key nothing
+# measures reddens the equality.  No key name below restates the registry —
+# every row carries its own executable evidence.
+# ---------------------------------------------------------------------------
+
+_IDENTITY_KEY_CENSUS: tuple[tuple[str, str], ...] = (
+    ("authority", "id"),
+    ("clones", "fingerprint"),
+    ("clones", "group_key"),
+    ("clones", "id"),
+    ("dead_code", "id"),
+    ("near_miss", "pair_key"),
+    ("renamed_structure", "fingerprint"),
+    ("renamed_structure", "group_key"),
+    ("structural", "id"),
+)
+
+
+@pytest.mark.parametrize(("family", "key"), _IDENTITY_KEY_CENSUS)
+def test_identity_key_perturbation_moves_family_digest(family: str, key: str) -> None:
+    """Perturbing a declared identity key must move its family digest: the
+    projection may never erase it."""
+
+    from codeclone.report.document.integrity import _family_digest_value
+
+    base = {"anchor": "z", key: "entity-a"}
+    perturbed = {"anchor": "z", key: "entity-b"}
+    assert _family_digest_value(family, base) != _family_digest_value(
+        family, perturbed
+    ), f"projection erased identity key {key!r} of family {family!r}"
+
+
+def test_identity_key_census_matches_registry_declaration() -> None:
+    """Measured census == registry declaration, per family, both directions:
+    an undeclared measured key and an unmeasured declared key both refuse."""
+
+    from codeclone.contracts.report_identity import (
+        REPORT_SEMANTIC_PRODUCERS,
+        spec_family,
+        spec_identity_keys,
+    )
+
+    declared = {
+        spec_family(spec): frozenset(spec_identity_keys(spec))
+        for spec in REPORT_SEMANTIC_PRODUCERS
+        if spec_identity_keys(spec)
+    }
+    measured: dict[str, set[str]] = {}
+    for family, key in _IDENTITY_KEY_CENSUS:
+        measured.setdefault(family, set()).add(key)
+    assert {family: frozenset(keys) for family, keys in measured.items()} == declared, (
+        "identity-key declaration and measured census diverge; a declared "
+        "key needs its perturbation measurement, a measured key needs its "
+        "declaration"
+    )
