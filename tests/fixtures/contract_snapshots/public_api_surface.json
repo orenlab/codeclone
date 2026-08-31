@@ -41,7 +41,7 @@
     },
     {
       "name": "check_patch_contract",
-      "signature": "(self, *, mode: 'str', run_id: 'str | None' = None, before_run_id: 'str | None' = None, after_run_id: 'str | None' = None, intent_id: 'str | None' = None, strictness: 'str' = 'ci', diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, mode: 'str', run_id: 'str | None' = None, root: 'str | None' = None, before_run_id: 'str | None' = None, after_run_id: 'str | None' = None, intent_id: 'str | None' = None, strictness: 'str' = 'ci', diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "clear_session_runs",
@@ -49,11 +49,11 @@
     },
     {
       "name": "compare_runs",
-      "signature": "(self, *, before_run_id: 'str', after_run_id: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
+      "signature": "(self, *, before_run_id: 'str', after_run_id: 'str | None' = None, root: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
     },
     {
       "name": "create_review_receipt",
-      "signature": "(self, *, run_id: 'str | None' = None, intent_id: 'str | None' = None, format: 'str' = 'markdown', include_blast_radius: 'bool' = True, include_patch_contract: 'bool' = True) -> 'dict[str, object]'"
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, intent_id: 'str | None' = None, format: 'str' = 'markdown', include_blast_radius: 'bool' = True, include_patch_contract: 'bool' = True) -> 'dict[str, object]'"
     },
     {
       "name": "evaluate_gates",
@@ -69,7 +69,7 @@
     },
     {
       "name": "generate_pr_summary",
-      "signature": "(self, *, run_id: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
     },
     {
       "name": "get_blast_artifact",
@@ -77,7 +77,7 @@
     },
     {
       "name": "get_blast_radius",
-      "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, root: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "get_controller_audit_trail",
@@ -85,7 +85,7 @@
     },
     {
       "name": "get_finding",
-      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
+      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, root: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
     },
     {
       "name": "get_help",
@@ -109,7 +109,7 @@
     },
     {
       "name": "get_production_triage",
-      "signature": "(self, *, run_id: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
     },
     {
       "name": "get_relevant_memory",
@@ -117,11 +117,11 @@
     },
     {
       "name": "get_remediation",
-      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
+      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, root: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
     },
     {
       "name": "get_report_section",
-      "signature": "(self, *, run_id: 'str | None' = None, section: 'ReportSection' = 'all', family: 'MetricsDetailFamily | None' = None, path: 'str | None' = None, offset: 'int' = 0, limit: 'int' = 50) -> 'dict[str, object]'"
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, section: 'ReportSection' = 'all', family: 'MetricsDetailFamily | None' = None, path: 'str | None' = None, offset: 'int' = 0, limit: 'int' = 50) -> 'dict[str, object]'"
     },
     {
       "name": "get_review_receipt",
@@ -129,7 +129,7 @@
     },
     {
       "name": "get_run_summary",
-      "signature": "(self, run_id: 'str | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, run_id: 'str | None' = None, *, root: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "get_workspace_session_stats",
@@ -137,15 +137,15 @@
     },
     {
       "name": "list_findings",
-      "signature": "(self, *, run_id: 'str | None' = None, family: 'FindingFamilyFilter' = 'all', category: 'str | None' = None, severity: 'str | None' = None, source_kind: 'str | None' = None, novelty: 'FindingNoveltyFilter' = 'all', sort_by: 'FindingSort' = 'default', detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, offset: 'int' = 0, limit: 'int' = 50, max_results: 'int | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, family: 'FindingFamilyFilter' = 'all', category: 'str | None' = None, severity: 'str | None' = None, source_kind: 'str | None' = None, novelty: 'FindingNoveltyFilter' = 'all', sort_by: 'FindingSort' = 'default', detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, offset: 'int' = 0, limit: 'int' = 50, max_results: 'int | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "list_hotspots",
-      "signature": "(self, *, kind: 'HotlistKind', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, limit: 'int' = 10, max_results: 'int | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, kind: 'HotlistKind', run_id: 'str | None' = None, root: 'str | None' = None, detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, limit: 'int' = 10, max_results: 'int | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "list_reviewed_findings",
-      "signature": "(self, *, run_id: 'str | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "manage_change_intent",
@@ -157,7 +157,7 @@
     },
     {
       "name": "mark_finding_reviewed",
-      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, root: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "maybe_auto_enqueue_projection_rebuild",
@@ -185,7 +185,7 @@
     },
     {
       "name": "validate_review_claims",
-      "signature": "(self, *, text: 'str', run_id: 'str | None' = None, require_citations: 'bool' = True, patch_health_delta: 'int | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, text: 'str', run_id: 'str | None' = None, root: 'str | None' = None, require_citations: 'bool' = True, patch_health_delta: 'int | None' = None) -> 'dict[str, object]'"
     }
   ]
 }

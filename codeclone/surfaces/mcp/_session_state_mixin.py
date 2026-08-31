@@ -918,8 +918,13 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
 
-    def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
-        record = self._runs.resolve_any_root(run_id)
+    def get_run_summary(
+        self,
+        run_id: str | None = None,
+        *,
+        root: str | None = None,
+    ) -> dict[str, object]:
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         return self._summary_payload(record.summary, record=record)
 
     def compare_runs(
@@ -928,9 +933,15 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         before_run_id: str,
         after_run_id: str | None = None,
         focus: ComparisonFocus = "all",
+        root: str | None = None,
     ) -> dict[str, object]:
-        before = self._runs.resolve_any_root(before_run_id)
-        after = self._runs.resolve_any_root(after_run_id)
+        # One root for the pair: comparing runs from two checkouts is the
+        # cross-root case the comparability check already reports, not a
+        # selector the caller needs two of.
+        before = _helpers._resolve_run_for_optional_root(
+            self._runs, before_run_id, root
+        )
+        after = _helpers._resolve_run_for_optional_root(self._runs, after_run_id, root)
         return self._compare_run_records(before=before, after=after, focus=focus)
 
     def _compare_run_records(
@@ -1041,7 +1052,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _intent_sequence: int
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
-        record = self._runs.resolve_any_root(request.run_id)
+        record = _helpers._resolve_run_for_optional_root(
+            self._runs, request.run_id, request.root
+        )
         gate_result = self._evaluate_gate_snapshot(record=record, request=request)
         result = {
             "run_id": _helpers._short_run_id(record.run_id),
@@ -1117,6 +1130,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         self,
         *,
         run_id: str | None = None,
+        root: str | None = None,
         section: ReportSection = DEFAULT_REPORT_SECTION,
         family: MetricsDetailFamily | None = None,
         path: str | None = None,
@@ -1134,7 +1148,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             section,
             _VALID_REPORT_SECTIONS,
         )
-        record = self._runs.resolve_any_root(run_id)
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         report_document = record.report_document
         if validated_section == "changed":
             if record.changed_projection is None:
@@ -1205,10 +1219,11 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         self,
         *,
         run_id: str | None = None,
+        root: str | None = None,
         max_hotspots: int = 3,
         max_suggestions: int = 3,
     ) -> dict[str, object]:
-        record = self._runs.resolve_any_root(run_id)
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         summary = self._summary_payload(record.summary, record=record)
         findings = self._base_findings(record)
         findings_breakdown = _helpers._source_kind_breakdown(
@@ -1369,6 +1384,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         self,
         *,
         run_id: str | None = None,
+        root: str | None = None,
         changed_paths: tuple[str, ...] = (),
         git_diff_ref: str | None = None,
         format: PRSummaryFormat = "markdown",
@@ -1378,7 +1394,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             format,
             _VALID_PR_SUMMARY_FORMATS,
         )
-        record = self._runs.resolve_any_root(run_id)
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         paths_filter = self._resolve_query_changed_paths(
             record=record,
             changed_paths=changed_paths,

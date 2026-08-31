@@ -57,6 +57,7 @@ from ._session_shared import (
     AnalysisMode,
     CachePolicy,
     ChoiceT,
+    CodeCloneMCPRunStore,
     DetailLevel,
     FreshnessKind,
     Iterable,
@@ -320,6 +321,25 @@ def _resolve_root(root: str | None) -> Path:
     if not resolved.is_dir():
         raise MCPServiceContractError(err_msgs.ROOT_NOT_DIRECTORY.format(root=resolved))
     return resolved
+
+
+def _resolve_run_for_optional_root(
+    runs: CodeCloneMCPRunStore,
+    run_id: str | None,
+    root: str | None,
+) -> MCPRunRecord:
+    """Resolve a stored run, binding the lookup to *root* when one was named.
+
+    Run ids are content-addressed, so sibling checkouts at the same tree share
+    one and an unbound lookup fails closed. Naming a root is what turns that
+    refusal into an answer — so every surface whose refusal prescribes ``root``
+    resolves through here, and the prescription stays executable.
+    """
+
+    cleaned = "" if root is None else str(root).strip()
+    if not cleaned:
+        return runs.resolve_any_root(run_id)
+    return runs.get_for_root(run_id, root=_resolve_root(cleaned))
 
 
 def _resolve_optional_path(

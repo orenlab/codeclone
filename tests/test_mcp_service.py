@@ -18077,6 +18077,145 @@ def test_rootless_surfaces_keep_refusing_collided_run_ids(
         )
 
 
+def _distinguishable_collision(
+    tmp_path: Path,
+) -> tuple[CodeCloneMCPService, Path, Path]:
+    """One id under two roots, whose records are told apart by health score."""
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    for root, health in ((root_a, 81), (root_b, 42)):
+        service._runs.register(
+            _patch_contract_run_record(
+                root,
+                run_id="before1234567890",
+                digest="shared-digest",
+                include_regression=False,
+                complexity=6,
+                health=health,
+            )
+        )
+    return service, root_a, root_b
+
+
+def test_named_root_selects_which_checkouts_run_a_rootless_reader_answers(
+    tmp_path: Path,
+) -> None:
+    """root is an enforced selector, not an accepted-and-ignored argument.
+
+    The refusal these readers raise tells the caller to pass a root. That
+    instruction is only worth anything if the value reaches the resolution
+    that picks the record, so the two checkouts must answer differently.
+    """
+
+    service, root_a, root_b = _distinguishable_collision(tmp_path)
+
+    from_a = service.get_run_summary("before1234567890", root=str(root_a))
+    from_b = service.get_run_summary("before1234567890", root=str(root_b))
+
+    assert cast("dict[str, object]", from_a["health"])["score"] == 81
+    assert cast("dict[str, object]", from_b["health"])["score"] == 42
+
+    # The prescription the refusal makes is now executable end to end: the
+    # same call that was refused answers once the root is named.
+    triage_a = service.get_production_triage(
+        run_id="before1234567890",
+        root=str(root_a),
+    )
+    triage_b = service.get_production_triage(
+        run_id="before1234567890",
+        root=str(root_b),
+    )
+    assert cast("dict[str, object]", triage_a["health"])["score"] == 81
+    assert cast("dict[str, object]", triage_b["health"])["score"] == 42
+
+
+def test_rootless_readers_still_refuse_a_collided_id_when_no_root_is_named(
+    tmp_path: Path,
+) -> None:
+    """Adding the selector must not turn the fail-closed refusal into a guess."""
+
+    service, _root_a, _root_b = _distinguishable_collision(tmp_path)
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootAmbiguityError,
+        match="several repository roots",
+    ):
+        service.get_report_section(run_id="before1234567890", section="meta")
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootAmbiguityError,
+        match="several repository roots",
+    ):
+        service.list_findings(run_id="before1234567890")
+
+
+def test_check_patch_contract_binds_its_before_run_to_the_named_root(
+    tmp_path: Path,
+) -> None:
+    """The verify surface routes root through its own binding, not the readers'.
+
+    Every other rootless reader resolves through one shared helper; this one
+    threads the declared root into ``_run_bound_to_root`` instead, so its
+    parameter needs its own witness that the value reaches the decision.
+    """
+
+    root_a, _root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    for root in (root_a, _root_b):
+        service._runs.register(_same_commit_record(root, "before1234567890"))
+    stranger = tmp_path / "repo-c"
+    stranger.mkdir()
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootAmbiguityError,
+        match="several repository roots",
+    ):
+        service.check_patch_contract(
+            mode="verify",
+            before_run_id="before1234567890",
+            changed_files=["pkg/a.py"],
+        )
+
+    bound = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before1234567890",
+        root=str(root_a),
+        changed_files=["pkg/a.py"],
+    )
+    assert bound["reason"] == "no_after_run"
+
+    # A root that holds no such run must refuse by name, never borrow the
+    # sibling checkout that happens to answer to the same id.
+    stray = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before1234567890",
+        root=str(stranger),
+        changed_files=["pkg/a.py"],
+    )
+    assert stray["reason"] == "before_run_root_mismatch"
+
+
+def test_a_named_root_without_that_run_is_a_typed_mismatch_not_a_substitution(
+    tmp_path: Path,
+) -> None:
+    """Naming the wrong checkout must refuse, never borrow the sibling's run."""
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_same_commit_record(root_b, "before1234567890"))
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootMismatchError,
+        match="belongs to a different repository root",
+    ):
+        service.get_report_section(
+            run_id="before1234567890",
+            root=str(root_a),
+            section="meta",
+        )
+
+
 def test_intent_attachment_is_root_scoped_across_worktrees(
     tmp_path: Path,
 ) -> None:

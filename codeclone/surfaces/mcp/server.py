@@ -575,8 +575,11 @@ def build_mcp_server(
         annotations=read_only_tool,
         structured_output=True,
     )
-    def get_run_summary(run_id: RunIdParam = None) -> dict[str, object]:
-        return service.get_run_summary(run_id)
+    def get_run_summary(
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+    ) -> dict[str, object]:
+        return service.get_run_summary(run_id, root=root)
 
     @tool(
         title=mcp_tools.TITLE_GET_PRODUCTION_TRIAGE,
@@ -586,11 +589,13 @@ def build_mcp_server(
     )
     def get_production_triage(
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         max_hotspots: MaxHotspotsParam = 3,
         max_suggestions: MaxSuggestionsParam = 3,
     ) -> dict[str, object]:
         return service.get_production_triage(
             run_id=run_id,
+            root=root,
             max_hotspots=max_hotspots,
             max_suggestions=max_suggestions,
         )
@@ -604,12 +609,14 @@ def build_mcp_server(
     def get_blast_radius(
         files: FilesParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         depth: BlastDepthParam = "direct",
         include: IncludeParam = None,
     ) -> dict[str, object]:
         return service.get_blast_radius(
             files=files,
             run_id=run_id,
+            root=root,
             depth=depth,
             include=include,
         )
@@ -830,6 +837,7 @@ def build_mcp_server(
     def check_patch_contract(
         mode: PatchModeParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         before_run_id: BeforeRunIdParam = None,
         after_run_id: AfterRunIdParam = None,
         intent_id: OptionalIntentIdParam = None,
@@ -840,6 +848,7 @@ def build_mcp_server(
         return service.check_patch_contract(
             mode=mode,
             run_id=run_id,
+            root=root,
             before_run_id=before_run_id,
             after_run_id=after_run_id,
             intent_id=intent_id,
@@ -856,6 +865,7 @@ def build_mcp_server(
     )
     def create_review_receipt(
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         intent_id: OptionalIntentIdParam = None,
         format: ReceiptFormatParam = "markdown",
         include_blast_radius: IncludeBlastRadiusParam = True,
@@ -863,6 +873,7 @@ def build_mcp_server(
     ) -> dict[str, object]:
         return service.create_review_receipt(
             run_id=run_id,
+            root=root,
             intent_id=intent_id,
             format=format,
             include_blast_radius=include_blast_radius,
@@ -916,12 +927,14 @@ def build_mcp_server(
     def validate_review_claims(
         text: ReviewTextParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         require_citations: RequireCitationsParam = True,
         patch_health_delta: PatchHealthDeltaParam = None,
     ) -> dict[str, object]:
         return service.validate_review_claims(
             text=text,
             run_id=run_id,
+            root=root,
             require_citations=require_citations,
             patch_health_delta=patch_health_delta,
         )
@@ -949,6 +962,7 @@ def build_mcp_server(
     )
     def evaluate_gates(
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         fail_on_new: GateBoolParam = False,
         fail_threshold: GateIntParam = -1,
         fail_complexity: GateIntParam = -1,
@@ -969,6 +983,7 @@ def build_mcp_server(
         return service.evaluate_gates(
             MCPGateRequest(
                 run_id=run_id,
+                root=root,
                 fail_on_new=fail_on_new,
                 fail_threshold=fail_threshold,
                 fail_complexity=fail_complexity,
@@ -996,6 +1011,7 @@ def build_mcp_server(
     )
     def get_report_section(
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         section: ReportSectionParam = "meta",
         family: FamilyParam = None,
         path: PathFilterParam = None,
@@ -1004,6 +1020,7 @@ def build_mcp_server(
     ) -> dict[str, object]:
         return service.get_report_section(
             run_id=run_id,
+            root=root,
             section=section,
             family=family,
             path=path,
@@ -1044,6 +1061,7 @@ def build_mcp_server(
     )
     def list_findings(
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         family: FindingFamilyParam = "all",
         category: CategoryParam = None,
         severity: SeverityParam = None,
@@ -1060,6 +1078,7 @@ def build_mcp_server(
     ) -> dict[str, object]:
         return service.list_findings(
             run_id=run_id,
+            root=root,
             family=family,
             category=category,
             severity=severity,
@@ -1084,11 +1103,13 @@ def build_mcp_server(
     def get_finding(
         finding_id: FindingIdParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         detail_level: DetailLevelParam = "normal",
     ) -> dict[str, object]:
         return service.get_finding(
             finding_id=finding_id,
             run_id=run_id,
+            root=root,
             detail_level=detail_level,
         )
 
@@ -1101,11 +1122,13 @@ def build_mcp_server(
     def get_remediation(
         finding_id: FindingIdParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         detail_level: DetailLevelParam = "normal",
     ) -> dict[str, object]:
         return service.get_remediation(
             finding_id=finding_id,
             run_id=run_id,
+            root=root,
             detail_level=detail_level,
         )
 
@@ -1118,6 +1141,7 @@ def build_mcp_server(
     def list_hotspots(
         kind: HotspotKindParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         detail_level: DetailLevelParam = "summary",
         changed_paths: ChangedPathsParam = None,
         git_diff_ref: GitDiffRefParam = None,
@@ -1128,6 +1152,7 @@ def build_mcp_server(
         return service.list_hotspots(
             kind=kind,
             run_id=run_id,
+            root=root,
             detail_level=detail_level,
             changed_paths=tuple(changed_paths or ()),
             git_diff_ref=git_diff_ref,
@@ -1145,11 +1170,13 @@ def build_mcp_server(
     def compare_runs(
         before_run_id: RunIdRequiredParam,
         after_run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         focus: CompareFocusParam = "all",
     ) -> dict[str, object]:
         return service.compare_runs(
             before_run_id=before_run_id,
             after_run_id=after_run_id,
+            root=root,
             focus=focus,
         )
 
@@ -1301,12 +1328,14 @@ def build_mcp_server(
     )
     def generate_pr_summary(
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         changed_paths: ChangedPathsParam = None,
         git_diff_ref: GitDiffRefParam = None,
         format: PrFormatParam = "markdown",
     ) -> dict[str, object]:
         return service.generate_pr_summary(
             run_id=run_id,
+            root=root,
             changed_paths=tuple(changed_paths or ()),
             git_diff_ref=git_diff_ref,
             format=format,
@@ -1321,11 +1350,13 @@ def build_mcp_server(
     def mark_finding_reviewed(
         finding_id: FindingIdParam,
         run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
         note: ReviewNoteParam = None,
     ) -> dict[str, object]:
         return service.mark_finding_reviewed(
             finding_id=finding_id,
             run_id=run_id,
+            root=root,
             note=note,
         )
 
@@ -1335,8 +1366,11 @@ def build_mcp_server(
         annotations=read_only_tool,
         structured_output=True,
     )
-    def list_reviewed_findings(run_id: RunIdParam = None) -> dict[str, object]:
-        return service.list_reviewed_findings(run_id=run_id)
+    def list_reviewed_findings(
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+    ) -> dict[str, object]:
+        return service.list_reviewed_findings(run_id=run_id, root=root)
 
     @tool(
         title=mcp_tools.TITLE_START_CONTROLLED_CHANGE,

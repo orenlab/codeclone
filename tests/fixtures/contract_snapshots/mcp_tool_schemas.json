@@ -1094,6 +1094,19 @@
           "title": "Mode",
           "type": "string"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -1156,6 +1169,19 @@
           "description": "all, clones, structural, or metrics comparison focus.",
           "title": "Focus",
           "type": "string"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         }
       },
       "required": [
@@ -1199,6 +1225,19 @@
           "default": null,
           "description": "Active or queued intent id when required by action.",
           "title": "Intent Id"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "run_id": {
           "anyOf": [
@@ -1317,6 +1356,19 @@
           "description": "Gate threshold; -1 disables that gate.",
           "title": "Min Typing Coverage",
           "type": "integer"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "run_id": {
           "anyOf": [
@@ -1496,6 +1548,19 @@
           "description": "Safe git revision for changed files; not with changed_paths.",
           "title": "Git Diff Ref"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -1604,6 +1669,19 @@
           "description": "Optional blast-radius include filters. Valid: imports, clone_cohorts, coverage, risk_signals, do_not_touch, review_context, cycles. Use imports for dependents; dependents/risk alone are rejected.",
           "title": "Include"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -1639,6 +1717,19 @@
           "description": "Short MCP finding id or full canonical finding id; get_finding returns status=not_found for unknown ids.",
           "title": "Finding Id",
           "type": "string"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "run_id": {
           "anyOf": [
@@ -1988,6 +2079,19 @@
           "title": "Max Suggestions",
           "type": "integer"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -2107,6 +2211,19 @@
           "title": "Finding Id",
           "type": "string"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -2169,6 +2286,19 @@
           "default": null,
           "description": "Repo-relative module or file path filter.",
           "title": "Path"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "run_id": {
           "anyOf": [
@@ -2247,6 +2377,19 @@
   {
     "input_schema": {
       "properties": {
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -2335,7 +2478,7 @@
         },
         "family": {
           "default": "all",
-          "description": "all, clone, structural, dead_code, design, or authority — the baseline-tracked universe 'all' totals. The advisory tiers near_miss and renamed_structure are reachable only by naming them and are never part of 'all'.",
+          "description": "all, clone, structural, dead_code, design, or authority \u2014 the baseline-tracked universe 'all' totals. The advisory tiers near_miss and renamed_structure are reachable only by naming them and are never part of 'all'.",
           "title": "Family",
           "type": "string"
         },
@@ -2382,6 +2525,19 @@
           "description": "Pagination offset for inventory file_registry, findings groups, or metrics_detail items.",
           "title": "Offset",
           "type": "integer"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "run_id": {
           "anyOf": [
@@ -2502,6 +2658,19 @@
           "description": "Optional hard cap on returned items.",
           "title": "Max Results"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -2527,6 +2696,19 @@
   {
     "input_schema": {
       "properties": {
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -2992,6 +3174,19 @@
           "description": "Optional session-local review note.",
           "title": "Note"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
         "run_id": {
           "anyOf": [
             {
@@ -3333,6 +3528,19 @@
           "description": "Require finding ids or metric citations in text.",
           "title": "Require Citations",
           "type": "boolean"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "run_id": {
           "anyOf": [

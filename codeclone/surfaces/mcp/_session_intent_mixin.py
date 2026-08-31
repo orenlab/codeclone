@@ -139,14 +139,18 @@ class _MCPSessionIntentMixin:
         *,
         files: Sequence[str],
         run_id: str | None = None,
+        root: str | None = None,
         depth: str = "direct",
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        record = self._runs.resolve_any_root(run_id)
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         blast_radius_session = cast(_MCPSessionBlastRadiusMixin, super())
+        # Re-enter root-bound: the record already names its checkout, and a
+        # bare id would fall back to global resolution.
         payload = blast_radius_session.get_blast_radius(
             files=files,
             run_id=record.run_id,
+            root=str(record.root),
             depth=depth,
             include=include,
         )

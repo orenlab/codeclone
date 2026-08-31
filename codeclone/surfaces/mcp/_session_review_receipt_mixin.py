@@ -78,6 +78,7 @@ class _MCPSessionReviewReceiptMixin:
         self,
         *,
         run_id: str | None = None,
+        root: str | None = None,
         intent_id: str | None = None,
         format: str = "markdown",
         include_blast_radius: bool = True,
@@ -100,7 +101,7 @@ class _MCPSessionReviewReceiptMixin:
         record = (
             self._runs.get_for_root(run_id, root=known_intent.root)
             if known_intent is not None
-            else self._runs.resolve_any_root(run_id)
+            else _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         )
         intent = self._receipt_intent(record=record, intent_id=intent_id)
         changed_paths = self._receipt_changed_paths(record=record, intent=intent)

@@ -676,6 +676,11 @@ class MCPGateRequest:
     min_typing_coverage: int = -1
     min_docstring_coverage: int = -1
     coverage_min: int = DEFAULT_COVERAGE_MIN
+    # Appended, never inserted: the field order of a public frozen dataclass is
+    # a positional contract, and this selector arrived after the rest.
+    # Optional, and only a selector: gate evaluation reads the resolved run
+    # record, never this string.
+    root: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -90,10 +90,11 @@ class _MCPSessionBlastRadiusMixin:
         *,
         files: Sequence[str],
         run_id: str | None = None,
+        root: str | None = None,
         depth: str = "direct",
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        record = self._runs.resolve_any_root(run_id)
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         normalized_depth = self._validated_blast_radius_depth(depth)
         normalized_files = _finding_session(self)._normalize_changed_paths(
             root_path=record.root,

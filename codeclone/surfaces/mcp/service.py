@@ -206,8 +206,13 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
     def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
         return self._session_cls.analyze_changed_paths(self, request)
 
-    def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
-        return self._session_cls.get_run_summary(self, run_id)
+    def get_run_summary(
+        self,
+        run_id: str | None = None,
+        *,
+        root: str | None = None,
+    ) -> dict[str, object]:
+        return self._session_cls.get_run_summary(self, run_id, root=root)
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         return self._session_cls.evaluate_gates(self, request)
@@ -338,10 +343,12 @@ def _apply_public_method_signatures() -> None:
         "compare_runs": (
             _kwonly("before_run_id", "str"),
             _kwonly("after_run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("focus", "ComparisonFocus", "all"),
         ),
         "generate_pr_summary": (
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("changed_paths", "Sequence[str]", ()),
             _kwonly("git_diff_ref", "str | None", None),
             _kwonly("format", "PRSummaryFormat", "markdown"),
@@ -349,6 +356,7 @@ def _apply_public_method_signatures() -> None:
         "get_finding": (
             _kwonly("finding_id", "str"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("detail_level", "DetailLevel", "normal"),
         ),
         "get_help": (
@@ -357,12 +365,14 @@ def _apply_public_method_signatures() -> None:
         ),
         "get_production_triage": (
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("max_hotspots", "int", 3),
             _kwonly("max_suggestions", "int", 3),
         ),
         "get_blast_radius": (
             _kwonly("files", "Sequence[str]"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("depth", "str", "direct"),
             _kwonly("include", "Sequence[str] | None", None),
         ),
@@ -383,6 +393,7 @@ def _apply_public_method_signatures() -> None:
         "check_patch_contract": (
             _kwonly("mode", "str"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("before_run_id", "str | None", None),
             _kwonly("after_run_id", "str | None", None),
             _kwonly("intent_id", "str | None", None),
@@ -392,6 +403,7 @@ def _apply_public_method_signatures() -> None:
         ),
         "create_review_receipt": (
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("intent_id", "str | None", None),
             _kwonly("format", "str", "markdown"),
             _kwonly("include_blast_radius", "bool", True),
@@ -400,6 +412,7 @@ def _apply_public_method_signatures() -> None:
         "validate_review_claims": (
             _kwonly("text", "str"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("require_citations", "bool", True),
             _kwonly("patch_health_delta", "int | None", None),
         ),
@@ -419,10 +432,12 @@ def _apply_public_method_signatures() -> None:
         "get_remediation": (
             _kwonly("finding_id", "str"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("detail_level", "DetailLevel", "normal"),
         ),
         "get_report_section": (
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("section", "ReportSection", "all"),
             _kwonly("family", "MetricsDetailFamily | None", None),
             _kwonly("path", "str | None", None),
@@ -431,6 +446,7 @@ def _apply_public_method_signatures() -> None:
         ),
         "list_findings": (
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("family", "FindingFamilyFilter", "all"),
             _kwonly("category", "str | None", None),
             _kwonly("severity", "str | None", None),
@@ -448,6 +464,7 @@ def _apply_public_method_signatures() -> None:
         "list_hotspots": (
             _kwonly("kind", "HotlistKind"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("detail_level", "DetailLevel", "summary"),
             _kwonly("changed_paths", "Sequence[str]", ()),
             _kwonly("git_diff_ref", "str | None", None),
@@ -455,10 +472,14 @@ def _apply_public_method_signatures() -> None:
             _kwonly("limit", "int", 10),
             _kwonly("max_results", "int | None", None),
         ),
-        "list_reviewed_findings": (_kwonly("run_id", "str | None", None),),
+        "list_reviewed_findings": (
+            _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
+        ),
         "mark_finding_reviewed": (
             _kwonly("finding_id", "str"),
             _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
             _kwonly("note", "str | None", None),
         ),
         "start_controlled_change": (

@@ -104,6 +104,7 @@ class _MCPSessionPatchContractMixin:
         *,
         mode: str,
         run_id: str | None = None,
+        root: str | None = None,
         before_run_id: str | None = None,
         after_run_id: str | None = None,
         intent_id: str | None = None,
@@ -113,15 +114,22 @@ class _MCPSessionPatchContractMixin:
     ) -> dict[str, object]:
         validated_mode = self._validated_patch_contract_mode(mode)
         validated_strictness = self._validated_strictness(strictness)
+        # A declared intent already names the checkout; root only answers the
+        # intent-less call, which is the one the multi-root refusal addresses.
+        declared_root = (
+            None if root is None or not root.strip() else _helpers._resolve_root(root)
+        )
         if validated_mode == "budget":
             return self._patch_contract_budget(
                 run_id=run_id,
+                root=declared_root,
                 intent_id=intent_id,
                 strictness=validated_strictness,
             )
         return self._patch_contract_verify(
             before_run_id=before_run_id,
             after_run_id=after_run_id,
+            root=declared_root,
             intent_id=intent_id,
             strictness=validated_strictness,
             diff_ref=diff_ref,
@@ -134,11 +142,12 @@ class _MCPSessionPatchContractMixin:
         run_id: str | None,
         intent_id: str | None,
         strictness: StrictnessProfile,
+        root: Path | None = None,
     ) -> dict[str, object]:
         budget_intent = self._known_intent(intent_id)
         record = self._run_bound_to_root(
             run_id,
-            root=None if budget_intent is None else budget_intent.root,
+            root=root if budget_intent is None else budget_intent.root,
         )
         intent = self._optional_intent(record=record, intent_id=intent_id)
         intent_session = _intent_session(self)
@@ -200,6 +209,7 @@ class _MCPSessionPatchContractMixin:
         strictness: StrictnessProfile,
         diff_ref: str | None,
         changed_files: Sequence[str] | None,
+        root: Path | None = None,
     ) -> dict[str, object]:
         # ── 1. Resolve before-run (required for intent binding) ─────
         #   When intent_id is provided but before_run_id is not, auto-
@@ -218,7 +228,7 @@ class _MCPSessionPatchContractMixin:
         try:
             before = self._run_bound_to_root(
                 resolved_before_run_id,
-                root=None if binding_intent is None else binding_intent.root,
+                root=root if binding_intent is None else binding_intent.root,
             )
         except MCPRunRootMismatchError:
             return self._unverified_patch_contract(reason="before_run_root_mismatch")

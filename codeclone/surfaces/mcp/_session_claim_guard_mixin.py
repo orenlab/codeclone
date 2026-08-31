@@ -78,6 +78,7 @@ class _MCPSessionClaimGuardMixin:
         *,
         text: str,
         run_id: str | None = None,
+        root: str | None = None,
         require_citations: bool = True,
         patch_health_delta: int | None = None,
     ) -> dict[str, object]:
@@ -85,7 +86,7 @@ class _MCPSessionClaimGuardMixin:
             validate_text_input(text)
         except ValueError as exc:
             raise MCPServiceContractError(str(exc)) from exc
-        record = self._runs.resolve_any_root(run_id)
+        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         return self._validate_review_claims_for_record(
             record=record,
             text=text,
