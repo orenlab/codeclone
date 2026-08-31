@@ -49,28 +49,14 @@ owner, and it rebuilds the published row whole.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import cast
 
 from codeclone.canonical.errors import LegacyIngestError
 from codeclone.canonical.identity import (
-    AnalysisFile,
-    DeadCodeEntity,
-    DependencyEndpoint,
-    EffectLabelRoot,
     EffectRoot,
     FileId,
-    KnownModule,
     ModuleId,
-    ModuleSymbol,
-    OpaqueDottedHead,
-    OpaqueEntity,
-    OperationHead,
-    OperationRoot,
-    OperationTarget,
-    ProducerRoot,
     SymbolId,
-    UnresolvedRoot,
 )
 from codeclone.canonical.model import (
     AdoptionCountRow,
@@ -98,15 +84,17 @@ from codeclone.canonical.model import (
     SinkRoleRow,
     ViolationRow,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _RegistryIndex:
-    """The document's own module registry, indexed for head resolution."""
-
-    module_to_path: Mapping[str, str]
-    analyzed_paths: frozenset[str]
-    path_to_module: Mapping[str, str]
+from codeclone.canonical.semantic_grammar import (
+    IdentityIndex,
+    build_identity_index,
+    parse_dead_code_entity,
+    parse_endpoint,
+    parse_lane_symbol,
+    parse_root_set,
+    parse_symbol,
+    parse_symbol_set,
+    surface_head,
+)
 
 
 def _mapping(value: object, where: str) -> Mapping[str, object]:
@@ -134,7 +122,7 @@ def _string(container: Mapping[str, object], key: str, where: str) -> str:
     return value
 
 
-def _registry_index(document: Mapping[str, object]) -> _RegistryIndex:
+def _document_identity_index(document: Mapping[str, object]) -> IdentityIndex:
     source_facts = _mapping(
         _field(document, "source_facts", "document"), "source_facts"
     )
@@ -155,8 +143,7 @@ def _registry_index(document: Mapping[str, object]) -> _RegistryIndex:
         "module_registry.entries_by_path",
     )
     rows = _sequence(_field(by_path, "rows", "entries_by_path"), "entries_by_path.rows")
-    module_to_path: dict[str, str] = {}
-    path_to_module: dict[str, str] = {}
+    pairs: list[tuple[str, str]] = []
     for row in rows:
         pair = _sequence(row, "entries_by_path row")
         if len(pair) != 2:
@@ -171,90 +158,18 @@ def _registry_index(document: Mapping[str, object]) -> _RegistryIndex:
         module = _string(
             _mapping(python_module, "python_module"), "module", "python_module"
         )
-        if module in module_to_path and module_to_path[module] != path:
-            raise LegacyIngestError(
-                f"module {module!r} claims two files: "
-                f"{module_to_path[module]!r} and {path!r}"
-            )
-        if path in path_to_module and path_to_module[path] != module:
-            raise LegacyIngestError(
-                f"file {path!r} claims two modules: "
-                f"{path_to_module[path]!r} and {module!r}"
-            )
-        module_to_path[module] = path
-        path_to_module[path] = module
-    return _RegistryIndex(
-        module_to_path=module_to_path,
-        analyzed_paths=analyzed_paths,
-        path_to_module=path_to_module,
-    )
+        pairs.append((path, module))
+    # The conflict law over these pairs is the SHARED owner's, not this
+    # reader's: the producer path extracts the same pairs from a live
+    # registry handle and must be refused by the same rule.
+    return build_identity_index(pairs, analyzed_paths=analyzed_paths)
 
 
-def _symbol(key: str, index: _RegistryIndex, where: str) -> SymbolId:
-    head, separator, qualname = key.partition(":")
-    if not separator or not qualname:
-        raise LegacyIngestError(
-            f"{where}: {key!r} is not a ModuleKey-headed symbol key"
-        )
-    if head in index.module_to_path:
-        return SymbolId(FileId(index.module_to_path[head]), qualname)
-    if head in index.analyzed_paths:
-        return SymbolId(FileId(head), qualname)
-    raise LegacyIngestError(
-        f"{where}: symbol head {head!r} is neither a registry module nor an "
-        "analyzed path; refusing to guess an identity"
-    )
-
-
-def _operation_head(text: str, index: _RegistryIndex) -> OperationHead:
-    if text in index.module_to_path:
-        return KnownModule(ModuleId(text))
-    if text in index.analyzed_paths:
-        return AnalysisFile(FileId(text))
-    return OpaqueDottedHead(text)
-
-
-def _effect_root(root: str, index: _RegistryIndex, where: str) -> EffectRoot:
-    if root == "unresolved":
-        return UnresolvedRoot()
-    family, separator, rest = root.partition(":")
-    if not separator:
-        raise LegacyIngestError(f"{where}: root {root!r} has no family tag")
-    if family == "operation":
-        kind, kind_separator, target = rest.partition(":")
-        if not kind_separator or not target:
-            raise LegacyIngestError(f"{where}: operation root {root!r} has no target")
-        head_text, head_separator, local_name = target.partition(":")
-        if not head_separator:
-            # Measured: 21 of 1 080 corpus targets are one opaque dotted
-            # string; the whole target is the head, no local name asserted.
-            return OperationRoot(kind, OperationTarget(OpaqueDottedHead(target), ""))
-        if not local_name:
-            raise LegacyIngestError(
-                f"{where}: operation target {target!r} carries a ModuleKey "
-                "colon but no local name; collapsing it would merge two "
-                "distinct producer strings"
-            )
-        return OperationRoot(
-            kind, OperationTarget(_operation_head(head_text, index), local_name)
-        )
-    if family == "producer":
-        return ProducerRoot(_symbol(rest, index, where))
-    if family == "effect":
-        kind, kind_separator, label = rest.partition(":")
-        if not kind_separator or not label:
-            raise LegacyIngestError(f"{where}: effect root {root!r} has no label")
-        return EffectLabelRoot(kind, label)
-    raise LegacyIngestError(f"{where}: unknown root family in {root!r}")
-
-
-def _root_set(
-    values: object, index: _RegistryIndex, where: str
+def _document_root_set(
+    values: object, index: IdentityIndex, where: str
 ) -> frozenset[EffectRoot]:
-    return frozenset(
-        _effect_root(_root_string(item, where), index, where)
-        for item in _sequence(values, where)
-    )
+    """Document-shape reader; the root-family RULE is the owner's."""
+    return parse_root_set(index, _string_tuple(values, where), where)
 
 
 def _root_string(item: object, where: str) -> str:
@@ -263,13 +178,11 @@ def _root_string(item: object, where: str) -> str:
     return item
 
 
-def _symbol_set(
-    values: object, index: _RegistryIndex, where: str
+def _document_symbol_set(
+    values: object, index: IdentityIndex, where: str
 ) -> frozenset[SymbolId]:
-    return frozenset(
-        _symbol(_root_string(item, where), index, where)
-        for item in _sequence(values, where)
-    )
+    """Document-shape reader; the symbol RULE is the owner's."""
+    return parse_symbol_set(index, _string_tuple(values, where), where)
 
 
 def _string_tuple(values: object, where: str) -> tuple[str, ...]:
@@ -280,7 +193,7 @@ def canonical_model_from_legacy_document(
     document: Mapping[str, object],
 ) -> CanonicalModel:
     """Ingest one full legacy report document into the canonical model."""
-    index = _registry_index(document)
+    index = _document_identity_index(document)
     source_facts = _mapping(
         _field(document, "source_facts", "document"), "source_facts"
     )
@@ -292,15 +205,15 @@ def canonical_model_from_legacy_document(
 
     contracts = frozenset(
         ContractRow(
-            function=_symbol(
-                _string(_mapping(row, "contract_ir row"), "function", "contract_ir"),
+            function=parse_symbol(
                 index,
+                _string(_mapping(row, "contract_ir row"), "function", "contract_ir"),
                 "contract_ir.function",
             ),
             effect_signature=_string(
                 _mapping(row, "contract_ir row"), "effect_signature", "contract_ir"
             ),
-            root_set=_root_set(
+            root_set=_document_root_set(
                 _field(
                     _mapping(row, "contract_ir row"),
                     "provenance_roots",
@@ -325,15 +238,15 @@ def canonical_model_from_legacy_document(
     graph = _mapping(_field(semantic, "graph", "semantic"), "semantic.graph")
     graph_nodes = frozenset(
         GraphNodeRow(
-            function=_symbol(
-                _string(_mapping(row, "graph node"), "function", "graph.nodes"),
+            function=parse_symbol(
                 index,
+                _string(_mapping(row, "graph node"), "function", "graph.nodes"),
                 "graph.nodes.function",
             ),
             effect_signature=_string(
                 _mapping(row, "graph node"), "effect_signature", "graph.nodes"
             ),
-            root_set=_root_set(
+            root_set=_document_root_set(
                 _field(_mapping(row, "graph node"), "producer_root_ids", "graph.nodes"),
                 index,
                 "graph.nodes.producer_root_ids",
@@ -351,14 +264,14 @@ def canonical_model_from_legacy_document(
 
     semantic_edges = frozenset(
         SemanticEdge(
-            source=_symbol(
-                _string(_mapping(row, "graph edge"), "source", "graph.edges"),
+            source=parse_symbol(
                 index,
+                _string(_mapping(row, "graph edge"), "source", "graph.edges"),
                 "graph.edges.source",
             ),
-            target=_symbol(
-                _string(_mapping(row, "graph edge"), "target", "graph.edges"),
+            target=parse_symbol(
                 index,
+                _string(_mapping(row, "graph edge"), "target", "graph.edges"),
                 "graph.edges.target",
             ),
         )
@@ -367,9 +280,9 @@ def canonical_model_from_legacy_document(
 
     sink_roles = frozenset(
         SinkRoleRow(
-            symbol=_symbol(
-                _string(_mapping(row, "sink"), "sink_identity", "sinks"),
+            symbol=parse_symbol(
                 index,
+                _string(_mapping(row, "sink"), "sink_identity", "sinks"),
                 "sinks.sink_identity",
             ),
             authority_status=_string(
@@ -385,7 +298,7 @@ def canonical_model_from_legacy_document(
             shared_fact=_string(
                 _mapping(row, "candidate"), "shared_fact", "candidates"
             ),
-            producer_set=_symbol_set(
+            producer_set=_document_symbol_set(
                 _field(_mapping(row, "candidate"), "producers", "candidates"),
                 index,
                 "candidates.producers",
@@ -519,19 +432,8 @@ def canonical_model_from_legacy_document(
     ).normalize()
 
 
-def _surface_head(path: str, index: _RegistryIndex, where: str) -> str:
-    """The one legacy head of an analyzed FILE: its registry module when
-    one exists, the path itself otherwise (the ``_legacy_symbol_keys``
-    law).  A path outside the document's own analysis scope is refused."""
-    if path not in index.analyzed_paths:
-        raise LegacyIngestError(
-            f"{where}: {path!r} is not an analyzed path; refusing to guess an identity"
-        )
-    return index.path_to_module.get(path, path)
-
-
 def _security_surface(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> SecuritySurfaceRow:
     """One F10 fact from the producer's own security_surfaces item.
 
@@ -545,7 +447,7 @@ def _security_surface(
     """
     where = "security_surfaces item"
     path = _string(row, "relative_path", where)
-    head = _surface_head(path, index, f"{where}.relative_path")
+    head = surface_head(index, path, f"{where}.relative_path")
     declared_module = _string(row, "module", where)
     if declared_module != head:
         raise LegacyIngestError(
@@ -563,7 +465,7 @@ def _security_surface(
             )
         qualname = None
     else:
-        symbol = _symbol(qualname_text, index, f"{where}.qualname")
+        symbol = parse_symbol(index, qualname_text, f"{where}.qualname")
         if symbol.file.path != path:
             raise LegacyIngestError(
                 f"{where}: qualname {qualname_text!r} disagrees with the "
@@ -599,7 +501,7 @@ def _lane_rows(
 
 
 def _observation_lane_families(
-    source_facts: Mapping[str, object], index: _RegistryIndex
+    source_facts: Mapping[str, object], index: IdentityIndex
 ) -> tuple[
     frozenset[CouplingCohesionRow],
     frozenset[ApiSymbolRow],
@@ -658,21 +560,8 @@ def _observation_lane_families(
     )
 
 
-def _endpoint(text: str, index: _RegistryIndex, where: str) -> DependencyEndpoint:
-    """The ratified ``MODULE | FILE`` union, resolved by the registry —
-    never by the shape of the string (F-3 §2.1.8: the producer decides the
-    domain, not the spelling)."""
-    if text in index.module_to_path:
-        return ModuleId(text)
-    if text in index.analyzed_paths:
-        return FileId(text)
-    raise LegacyIngestError(
-        f"{where}: endpoint {text!r} is neither a registry module nor an analyzed path"
-    )
-
-
 def _dependency_occurrence(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> DependencyOccurrenceRow:
     line = _field(row, "line", "dependencies item")
     if isinstance(line, bool) or not isinstance(line, int):
@@ -681,11 +570,11 @@ def _dependency_occurrence(
     if not isinstance(is_lazy, bool):
         raise LegacyIngestError("dependencies item is_lazy is not a boolean")
     relation = DependencyRelationRow(
-        source=_endpoint(
-            _string(row, "source", "dependencies item"), index, "dependencies.source"
+        source=parse_endpoint(
+            index, _string(row, "source", "dependencies item"), "dependencies.source"
         ),
-        target=_endpoint(
-            _string(row, "target", "dependencies item"), index, "dependencies.target"
+        target=parse_endpoint(
+            index, _string(row, "target", "dependencies item"), "dependencies.target"
         ),
         dependency_type=_string(row, "import_type", "dependencies item"),
     )
@@ -698,7 +587,7 @@ def _dependency_occurrence(
 
 
 def _dependency_cycle(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> DependencyCycleRow:
     """One F7 fact from the producer's own ``cycle_details`` row.
 
@@ -737,33 +626,6 @@ def _dependency_cycle(
     )
 
 
-def _dead_code_entity(text: str, index: _RegistryIndex) -> DeadCodeEntity:
-    """The ratified tagged entity reference (ruling 2026-08-24 §2).
-
-    The producer glues ``head:local``; the head decides the variant through
-    the document's OWN registry: a registry module keeps its MODULE head
-    (the variant is identity — never normalized into the FILE spelling the
-    producer did not make), an analyzed path is the FILE-headed SYMBOL, and
-    everything else rides the opaque variant verbatim.  A string that does
-    not parse under the producer's grammar is refused, never guessed.
-    """
-    head, separator, local = text.partition(":")
-    if not separator or not local or not head:
-        raise LegacyIngestError(
-            f"dead_code entity {text!r} is not a head:local glued reference"
-        )
-    if ":" in local:
-        raise LegacyIngestError(
-            f"dead_code entity {text!r} carries a second ModuleKey colon; "
-            "refusing to classify it"
-        )
-    if head in index.module_to_path:
-        return ModuleSymbol(ModuleId(head), local)
-    if head in index.analyzed_paths:
-        return SymbolId(FileId(head), local)
-    return OpaqueEntity(head, local)
-
-
 def _dead_code_markers(value: object, where: str) -> tuple[tuple[str, str], ...]:
     pairs = []
     for item in _sequence(value, where):
@@ -775,7 +637,7 @@ def _dead_code_markers(value: object, where: str) -> tuple[tuple[str, str], ...]
 
 
 def _dead_code_observation(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> DeadCodeObservationRow:
     """One F4 fact from the producer's own dead_code lane row."""
     where = "dead_code observation"
@@ -787,7 +649,7 @@ def _dead_code_observation(
     if reason is not None and not isinstance(reason, str):
         raise LegacyIngestError(f"{where} live_root_reason is not a string")
     return DeadCodeObservationRow(
-        entity=_dead_code_entity(_string(row, "entity", where), index),
+        entity=parse_dead_code_entity(index, _string(row, "entity", where)),
         observation_kind=_string(row, "observation_kind", where),
         candidate_kind=_string(row, "candidate_kind", where),
         reference_count=_lane_int(row, "reference_count", where),
@@ -812,9 +674,9 @@ _CLONE_CONTAINERS: tuple[tuple[str, str], ...] = (
 
 
 def _clone_item(
-    row: Mapping[str, object], index: _RegistryIndex, where: str
+    row: Mapping[str, object], index: IdentityIndex, where: str
 ) -> CloneItemRow:
-    symbol = _symbol(_string(row, "qualname", where), index, where)
+    symbol = parse_symbol(index, _string(row, "qualname", where), where)
     declared_path = _string(row, "relative_path", where)
     if symbol.file.path != declared_path:
         raise LegacyIngestError(
@@ -829,7 +691,7 @@ def _clone_item(
 
 
 def _clone_group(
-    row: Mapping[str, object], index: _RegistryIndex, kind: str
+    row: Mapping[str, object], index: IdentityIndex, kind: str
 ) -> CloneGroupRow:
     where = f"{kind} clone group"
     declared_kind = _string(row, "clone_kind", where)
@@ -856,7 +718,7 @@ def _clone_group(
 
 
 def _clone_group_family(
-    document: Mapping[str, object], index: _RegistryIndex
+    document: Mapping[str, object], index: IdentityIndex
 ) -> frozenset[CloneGroupRow]:
     """The F8 family from the document's EMITTED clone containers only."""
     findings = _mapping(_field(document, "findings", "document"), "findings")
@@ -874,39 +736,30 @@ def _clone_group_family(
     )
 
 
-def _lane_symbol(
+def _document_lane_symbol(
     row: Mapping[str, object],
-    index: _RegistryIndex,
+    index: IdentityIndex,
     *,
     source_key: str,
     name_key: str,
     lane: str,
 ) -> SymbolId:
-    """The ONE spelling of the lane identity law (F2 and F5 share it).
+    """Read a lane row's source path and bare name, then apply the RULE.
 
-    A lane row carries a resolved source identity (``source`` / ``owner``)
-    plus a BARE qualname; the SYMBOL is the ratified FILE-headed spelling of
-    the same entity.  A path outside the document's own analysis scope, or a
-    name carrying a ModuleKey colon, is a typed refusal — never a guessed
-    identity.
+    Extraction is document shape and stays here; the identity law lives in
+    ``semantic_grammar.parse_lane_symbol`` so the producer path applies the
+    same one to the same fact spelled as typed objects.
     """
     holder = _mapping(_field(row, source_key, f"{lane} observation"), source_key)
     file_value = _mapping(
         _field(holder, "file", f"{lane} {source_key}"), f"{source_key}.file"
     )
-    path = _string(file_value, "path", f"{lane} {source_key}.file")
-    if path not in index.analyzed_paths:
-        raise LegacyIngestError(
-            f"{lane} observation {source_key} {path!r} is not an "
-            "analyzed path; refusing to guess an identity"
-        )
-    name = _string(row, name_key, f"{lane} observation")
-    if ":" in name:
-        raise LegacyIngestError(
-            f"{lane} observation {name_key} {name!r} is a glued "
-            "identity; the producer's lane law forbids it"
-        )
-    return SymbolId(FileId(path), name)
+    return parse_lane_symbol(
+        index,
+        _string(file_value, "path", f"{lane} {source_key}.file"),
+        _string(row, name_key, f"{lane} observation"),
+        lane,
+    )
 
 
 def _lane_int(row: Mapping[str, object], key: str, where: str) -> int:
@@ -922,11 +775,11 @@ def _lane_int(row: Mapping[str, object], key: str, where: str) -> int:
 
 
 def _coupling_cohesion_observation(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> CouplingCohesionRow:
     """One F2 observation from the producer's own lane row; the identity
     law lives in :func:`_lane_symbol`."""
-    symbol = _lane_symbol(
+    symbol = _document_lane_symbol(
         row, index, source_key="source", name_key="qualname", lane="coupling_cohesion"
     )
     return CouplingCohesionRow(
@@ -937,7 +790,7 @@ def _coupling_cohesion_observation(
 
 
 def _risk_observation(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> RiskObservationRow:
     """One F1 fact from the producer's own risk lane row.
 
@@ -946,7 +799,7 @@ def _risk_observation(
     entity and is refused, never defaulted (the site is a key component,
     ruling 2026-08-26 fork (b)).
     """
-    symbol = _lane_symbol(
+    symbol = _document_lane_symbol(
         row, index, source_key="source", name_key="qualname", lane="risk"
     )
     return RiskObservationRow(
@@ -958,7 +811,7 @@ def _risk_observation(
 
 
 def _adoption_count(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> AdoptionCountRow:
     """One F3 fact from the producer's own adoption lane row.
 
@@ -970,7 +823,9 @@ def _adoption_count(
     """
     where = "adoption observation"
     return AdoptionCountRow(
-        scope=_endpoint(_string(row, "scope", where), index, "adoption_counts.scope"),
+        scope=parse_endpoint(
+            index, _string(row, "scope", where), "adoption_counts.scope"
+        ),
         feature=_string(row, "feature", where),
         numerator=_lane_int(row, "numerator", where),
         denominator=_lane_int(row, "denominator", where),
@@ -1018,14 +873,14 @@ def _api_parameter(row: Mapping[str, object]) -> ApiParameterFact:
 
 
 def _api_symbol_observation(
-    row: Mapping[str, object], index: _RegistryIndex
+    row: Mapping[str, object], index: IdentityIndex
 ) -> ApiSymbolRow:
     """One F5 fact from the producer's own api_surface lane row.
 
     The identity law lives in :func:`_lane_symbol` (the C5 oracle
     discipline verbatim: no guessed identities).
     """
-    symbol = _lane_symbol(
+    symbol = _document_lane_symbol(
         row, index, source_key="owner", name_key="symbol", lane="api_surface"
     )
     parameters = tuple(
@@ -1140,30 +995,30 @@ def _run_scalars(document: Mapping[str, object]) -> RunScalars:
     )
 
 
-def _violation(row: Mapping[str, object], index: _RegistryIndex) -> ViolationRow:
+def _violation(row: Mapping[str, object], index: IdentityIndex) -> ViolationRow:
     suppressed = _field(row, "suppressed", "violation")
     if not isinstance(suppressed, bool):
         raise LegacyIngestError("violation suppressed is not a boolean")
     return ViolationRow(
         contract_id=_string(row, "contract_id", "violation"),
         kind=_string(row, "kind", "violation"),
-        sink_identity=_symbol(
-            _string(row, "sink_identity", "violation"), index, "violation.sink_identity"
+        sink_identity=parse_symbol(
+            index, _string(row, "sink_identity", "violation"), "violation.sink_identity"
         ),
-        canonical_owner=_symbol(
-            _string(row, "canonical_owner", "violation"),
+        canonical_owner=parse_symbol(
             index,
+            _string(row, "canonical_owner", "violation"),
             "violation.canonical_owner",
         ),
         authority_status=_string(row, "authority_status", "violation"),
         effect_signature=_string(row, "effect_signature", "violation"),
         resolution_state=_string(row, "resolution_state", "violation"),
-        root_set=_root_set(
+        root_set=_document_root_set(
             _field(row, "producer_root_ids", "violation"),
             index,
             "violation.producer_root_ids",
         ),
-        producer_set=_symbol_set(
+        producer_set=_document_symbol_set(
             _field(row, "producers", "violation"), index, "violation.producers"
         ),
         suppressed=suppressed,

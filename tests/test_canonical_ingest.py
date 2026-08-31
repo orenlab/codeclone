@@ -41,7 +41,9 @@ from codeclone.canonical import (
     OpaqueEntity,
     OperationRoot,
     OperationTarget,
+    ProducerRoot,
     RunScalars,
+    SemanticGrammarError,
     SymbolId,
     UnresolvedRoot,
     canonical_model_from_legacy_document,
@@ -638,6 +640,21 @@ def test_ingest_builds_the_measured_families() -> None:
     assert candidate.producer_set == frozenset({make, run})
 
 
+def test_ingest_reads_the_shared_root_family_rule_as_values() -> None:
+    """The root-family rule reaches THIS reading as a value, not a count.
+
+    After the 2026-08-31 transplant the rule lives in one shared owner, and
+    a shared rule that only one reading pins is a rule the other reading
+    cannot notice breaking — measured on this wave's battery, where the
+    projection-equivalence assertion stayed green under a mutated owner
+    because both readings moved together.
+    """
+    model = canonical_model_from_legacy_document(legacy_document())
+    roots = {root for row in model.facts.analysis.contracts for root in row.root_set}
+    assert ProducerRoot(SymbolId(FileId("scripts/tool.py"), "run")) in roots
+    assert UnresolvedRoot() in roots
+
+
 def test_ingest_builds_the_security_family_on_the_evidence_key() -> None:
     """F10: module-scope rows drop the head-only qualname (None spells
     the file itself), glued callable/class qualnames resolve through the
@@ -711,7 +728,7 @@ def test_ingest_refuses_a_surface_on_an_unanalyzed_path() -> None:
         item["module"] = "pkg/ghost.py"
         item["qualname"] = "pkg/ghost.py:make"
 
-    with pytest.raises(LegacyIngestError, match="not an analyzed path"):
+    with pytest.raises(SemanticGrammarError, match="not an analyzed path"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -881,7 +898,7 @@ def test_ingest_refuses_an_unglued_dead_entity() -> None:
     def swap(document: dict[str, Any]) -> None:
         _dead_lane_row(document)["entity"] = "just_a_name"
 
-    with pytest.raises(LegacyIngestError, match="head:local"):
+    with pytest.raises(SemanticGrammarError, match="head:local"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -889,7 +906,7 @@ def test_ingest_refuses_a_dead_entity_with_an_empty_local() -> None:
     def swap(document: dict[str, Any]) -> None:
         _dead_lane_row(document)["entity"] = "pkg.mod:"
 
-    with pytest.raises(LegacyIngestError, match="head:local"):
+    with pytest.raises(SemanticGrammarError, match="head:local"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -897,7 +914,7 @@ def test_ingest_refuses_a_dead_entity_with_a_second_colon() -> None:
     def swap(document: dict[str, Any]) -> None:
         _dead_lane_row(document)["entity"] = "pkg.mod:make:extra"
 
-    with pytest.raises(LegacyIngestError, match="second ModuleKey colon"):
+    with pytest.raises(SemanticGrammarError, match="second ModuleKey colon"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1020,7 +1037,7 @@ def test_ingest_refuses_an_unresolvable_symbol_head() -> None:
         node = document["source_facts"]["semantic"]["graph"]["nodes"][0]
         node["function"] = "ghost.mod:make"
 
-    with pytest.raises(LegacyIngestError, match="neither a registry module"):
+    with pytest.raises(SemanticGrammarError, match="neither a registry module"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1033,7 +1050,7 @@ def test_ingest_refuses_a_modulekey_target_without_local_name() -> None:
         contract = document["source_facts"]["semantic"]["contract_ir"]["contracts"][0]
         contract["provenance_roots"] = ["operation:canonical_operation:ext.lib:"]
 
-    with pytest.raises(LegacyIngestError, match="no local name"):
+    with pytest.raises(SemanticGrammarError, match="no local name"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1042,7 +1059,7 @@ def test_ingest_refuses_an_unresolvable_dependency_endpoint() -> None:
         item = document["metrics"]["families"]["dependencies"]["items"][0]
         item["target"] = "ghost.mod"
 
-    with pytest.raises(LegacyIngestError, match="endpoint"):
+    with pytest.raises(SemanticGrammarError, match="endpoint"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1051,7 +1068,7 @@ def test_ingest_refuses_an_unknown_root_family() -> None:
         contract = document["source_facts"]["semantic"]["contract_ir"]["contracts"][0]
         contract["provenance_roots"] = ["mystery:token"]
 
-    with pytest.raises(LegacyIngestError, match="unknown root family"):
+    with pytest.raises(SemanticGrammarError, match="unknown root family"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1089,7 +1106,7 @@ def test_ingest_refuses_a_module_claiming_two_files() -> None:
             ]
         )
 
-    with pytest.raises(LegacyIngestError, match="two files"):
+    with pytest.raises(SemanticGrammarError, match="two files"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1191,7 +1208,7 @@ def test_ingest_refuses_a_glued_observation_qualname() -> None:
     def swap(document: dict[str, Any]) -> None:
         _observation_row(document)["qualname"] = "pkg.mod:Writer"
 
-    with pytest.raises(LegacyIngestError, match="glued"):
+    with pytest.raises(SemanticGrammarError, match="glued"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1199,7 +1216,7 @@ def test_ingest_refuses_an_unanalyzed_observation_source() -> None:
     def swap(document: dict[str, Any]) -> None:
         _observation_row(document)["source"]["file"]["path"] = "vendored/x.py"
 
-    with pytest.raises(LegacyIngestError, match="not an analyzed path"):
+    with pytest.raises(SemanticGrammarError, match="not an analyzed path"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1239,7 +1256,7 @@ def test_ingest_refuses_a_glued_api_symbol() -> None:
     def swap(document: dict[str, Any]) -> None:
         _api_row(document)["symbol"] = "pkg.mod:make"
 
-    with pytest.raises(LegacyIngestError, match="glued"):
+    with pytest.raises(SemanticGrammarError, match="glued"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1247,7 +1264,7 @@ def test_ingest_refuses_an_unanalyzed_api_owner() -> None:
     def swap(document: dict[str, Any]) -> None:
         _api_row(document)["owner"]["file"]["path"] = "vendored/x.py"
 
-    with pytest.raises(LegacyIngestError, match="not an analyzed"):
+    with pytest.raises(SemanticGrammarError, match="not an analyzed"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1345,7 +1362,7 @@ def test_ingest_refuses_a_glued_risk_qualname() -> None:
     def swap(document: dict[str, Any]) -> None:
         _risk_row(document)["qualname"] = "pkg.mod:make"
 
-    with pytest.raises(LegacyIngestError, match="glued"):
+    with pytest.raises(SemanticGrammarError, match="glued"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 
@@ -1363,7 +1380,7 @@ def test_ingest_refuses_an_unresolvable_adoption_scope() -> None:
     def swap(document: dict[str, Any]) -> None:
         _adoption_row(document)["scope"] = "ext.lib"
 
-    with pytest.raises(LegacyIngestError, match="neither a registry module"):
+    with pytest.raises(SemanticGrammarError, match="neither a registry module"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 

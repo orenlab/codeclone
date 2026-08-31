@@ -41,39 +41,49 @@ import os
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
+from typing import NamedTuple
 
 # Reached through the OWNING submodules, never through the package door:
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
 # ingest oracle, and importing the oracle from a production path would
 # make the test oracle a production dependency (ruling 2026-08-24 §6).
-from ..canonical.identity import (
-    DeadCodeEntity,
-    DependencyEndpoint,
-    FileId,
-    ModuleId,
-    ModuleSymbol,
-    OpaqueEntity,
-    SymbolId,
-)
+from ..canonical.identity import FileId, ModuleId
 from ..canonical.model import (
     AdoptionCountRow,
     AnalysisFacts,
     AnalysisPopulation,
     ApiParameterFact,
     ApiSymbolRow,
+    CandidateRow,
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
     CloneItemRow,
+    ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
     FileModuleRelation,
+    GraphNodeRow,
     RiskObservationRow,
     RunScalars,
     SecuritySurfaceRow,
+    SemanticEdge,
+    SinkRoleRow,
+    ViolationRow,
+)
+from ..canonical.semantic_grammar import (
+    IdentityIndex,
+    build_identity_index,
+    parse_dead_code_entity,
+    parse_endpoint,
+    parse_lane_symbol,
+    parse_root_set,
+    parse_symbol,
+    parse_symbol_set,
+    surface_head,
 )
 from ..contracts import observed_population
 from ..metrics.registry import METRIC_FAMILIES
@@ -94,6 +104,7 @@ from ..models import (
     RiskObservation,
     RunSnapshotPublication,
     RunStoreConfig,
+    SemanticAuthorityResult,
 )
 from ..observability import span
 from ..paths.workspace import REL_RUN_STORE_DB_PATH
@@ -224,117 +235,25 @@ def resolve_run_store_config(
 # ---------------------------------------------------------------------------
 
 
-class _RegistryIndex:
-    """The run's own registry, indexed for head resolution — DATA only.
+def _identity_index(
+    registry: ModuleRegistryHandle, analyzed_paths: frozenset[str]
+) -> IdentityIndex:
+    """Project a live registry handle into the shared grammar's index.
 
-    The identity resolvers are module functions below rather than methods
-    here, and the split is not cosmetic: as a class holding all five
-    resolutions this reached CBO 9 and the coupling gate named it a new
-    high-risk class.  The honest answer to that gate is the one it asks
-    for — move responsibilities out to collaborators — and it happens to
-    be the shape the legacy oracle already uses from the document side, so
-    the two readings of one identity law now have the same silhouette.
+    Extraction only.  The conflict law over the pairs — a module claiming
+    two files, a file claiming two modules — is the grammar owner's, and it
+    is the SAME rule the legacy ingest oracle is refused by; that is the
+    whole point of the 2026-08-31 transplant.
     """
 
-    __slots__ = ("analyzed_paths", "module_to_path", "path_to_module")
-
-    def __init__(
-        self, registry: ModuleRegistryHandle, analyzed_paths: frozenset[str]
-    ) -> None:
-        module_to_path: dict[str, str] = {}
-        path_to_module: dict[str, str] = {}
-        for _key, entry in registry.entries_by_path.rows:
-            identity = entry.identity
-            if identity.python_module is None:
-                continue
-            path = identity.file.path
-            module = identity.python_module.module
-            if module_to_path.get(module, path) != path:
-                raise ProducerSnapshotUnavailable(f"module {module!r} claims two files")
-            if path_to_module.get(path, module) != module:
-                raise ProducerSnapshotUnavailable(f"file {path!r} claims two modules")
-            module_to_path[module] = path
-            path_to_module[path] = module
-        self.module_to_path = module_to_path
-        self.path_to_module = path_to_module
-        self.analyzed_paths = analyzed_paths
-
-
-# The identity law, spelled once per shape.  Every one of these resolves
-# through the registry the run published and refuses rather than guesses:
-# a string that does not land on a registry module or an analyzed path
-# names no entity, and minting one would be the identity drift the
-# canonical model exists to remove.
-
-
-def _symbol(index: _RegistryIndex, key: str, where: str) -> SymbolId:
-    head, separator, qualname = key.partition(":")
-    if not separator or not qualname:
-        raise ProducerSnapshotUnavailable(
-            f"{where}: {key!r} is not a ModuleKey-headed symbol key"
-        )
-    if head in index.module_to_path:
-        return SymbolId(FileId(index.module_to_path[head]), qualname)
-    if head in index.analyzed_paths:
-        return SymbolId(FileId(head), qualname)
-    raise ProducerSnapshotUnavailable(
-        f"{where}: symbol head {head!r} is neither a registry module nor "
-        "an analyzed path; refusing to guess an identity"
+    return build_identity_index(
+        (
+            (entry.identity.file.path, entry.identity.python_module.module)
+            for _key, entry in registry.entries_by_path.rows
+            if entry.identity.python_module is not None
+        ),
+        analyzed_paths=analyzed_paths,
     )
-
-
-def _endpoint(index: _RegistryIndex, text: str, where: str) -> DependencyEndpoint:
-    if text in index.module_to_path:
-        return ModuleId(text)
-    if text in index.analyzed_paths:
-        return FileId(text)
-    raise ProducerSnapshotUnavailable(
-        f"{where}: endpoint {text!r} is neither a registry module nor an analyzed path"
-    )
-
-
-def _lane_symbol(index: _RegistryIndex, path: str, name: str, lane: str) -> SymbolId:
-    """The ONE spelling of the observation-lane identity law: a resolved
-    source path plus a BARE name, never a glued identity."""
-
-    if path not in index.analyzed_paths:
-        raise ProducerSnapshotUnavailable(
-            f"{lane} observation source {path!r} is not an analyzed path"
-        )
-    if ":" in name:
-        raise ProducerSnapshotUnavailable(
-            f"{lane} observation name {name!r} is a glued identity"
-        )
-    return SymbolId(FileId(path), name)
-
-
-def _dead_code_entity(index: _RegistryIndex, text: str) -> DeadCodeEntity:
-    """The ratified tagged entity reference: the producer's head decides
-    the variant, and an unknown head rides the opaque variant verbatim
-    rather than being normalized into a spelling nobody made."""
-
-    head, separator, local = text.partition(":")
-    if not separator or not local or not head:
-        raise ProducerSnapshotUnavailable(
-            f"dead_code entity {text!r} is not a head:local reference"
-        )
-    if ":" in local:
-        raise ProducerSnapshotUnavailable(
-            f"dead_code entity {text!r} carries a second ModuleKey colon"
-        )
-    if head in index.module_to_path:
-        return ModuleSymbol(ModuleId(head), local)
-    if head in index.analyzed_paths:
-        return SymbolId(FileId(head), local)
-    return OpaqueEntity(head, local)
-
-
-def _surface_head(index: _RegistryIndex, path: str) -> str:
-    if path not in index.analyzed_paths:
-        raise ProducerSnapshotUnavailable(
-            f"security surface path {path!r} is not an analyzed path"
-        )
-    return index.path_to_module.get(path, path)
 
 
 # ---------------------------------------------------------------------------
@@ -508,11 +427,11 @@ def _run_scalars(
 
 
 def _coupling_cohesion_rows(
-    rows: Sequence[IntegerObservation], index: _RegistryIndex
+    rows: Sequence[IntegerObservation], index: IdentityIndex
 ) -> frozenset[CouplingCohesionRow]:
     return frozenset(
         CouplingCohesionRow(
-            symbol=_lane_symbol(
+            symbol=parse_lane_symbol(
                 index, row.source.file.path, row.qualname, "coupling_cohesion"
             ),
             dimension=row.dimension,
@@ -523,11 +442,11 @@ def _coupling_cohesion_rows(
 
 
 def _risk_rows(
-    rows: Sequence[RiskObservation], index: _RegistryIndex
+    rows: Sequence[RiskObservation], index: IdentityIndex
 ) -> frozenset[RiskObservationRow]:
     return frozenset(
         RiskObservationRow(
-            symbol=_lane_symbol(index, row.source.file.path, row.qualname, "risk"),
+            symbol=parse_lane_symbol(index, row.source.file.path, row.qualname, "risk"),
             dimension=row.dimension,
             numerator=row.numerator,
             start_line=row.start_line,
@@ -537,11 +456,11 @@ def _risk_rows(
 
 
 def _adoption_rows(
-    rows: Sequence[AdoptionCount], index: _RegistryIndex
+    rows: Sequence[AdoptionCount], index: IdentityIndex
 ) -> frozenset[AdoptionCountRow]:
     return frozenset(
         AdoptionCountRow(
-            scope=_endpoint(index, row.scope, "adoption_counts.scope"),
+            scope=parse_endpoint(index, row.scope, "adoption_counts.scope"),
             feature=row.feature,
             numerator=row.numerator,
             denominator=row.denominator,
@@ -551,11 +470,13 @@ def _adoption_rows(
 
 
 def _api_symbol_rows(
-    rows: Sequence[ApiSymbolObservation], index: _RegistryIndex
+    rows: Sequence[ApiSymbolObservation], index: IdentityIndex
 ) -> frozenset[ApiSymbolRow]:
     return frozenset(
         ApiSymbolRow(
-            symbol=_lane_symbol(index, row.owner.file.path, row.symbol, "api_surface"),
+            symbol=parse_lane_symbol(
+                index, row.owner.file.path, row.symbol, "api_surface"
+            ),
             symbol_kind=row.symbol_kind,
             visibility=row.visibility,
             parameters=tuple(
@@ -580,11 +501,11 @@ def _api_symbol_rows(
 
 
 def _dead_code_rows(
-    rows: Sequence[DeadCodeObservation], index: _RegistryIndex
+    rows: Sequence[DeadCodeObservation], index: IdentityIndex
 ) -> frozenset[DeadCodeObservationRow]:
     return frozenset(
         DeadCodeObservationRow(
-            entity=_dead_code_entity(index, row.entity),
+            entity=parse_dead_code_entity(index, row.entity),
             observation_kind=row.observation_kind,
             candidate_kind=row.candidate_kind,
             reference_count=row.reference_count,
@@ -599,7 +520,7 @@ def _dead_code_rows(
 
 
 def _dependency_rows(
-    payload: Mapping[str, object], index: _RegistryIndex
+    payload: Mapping[str, object], index: IdentityIndex
 ) -> tuple[frozenset[DependencyRelationRow], frozenset[DependencyOccurrenceRow]]:
     """The ratified split: every producer row is one OCCURRENCE, and the
     relation is that row's own triple — projected, never guessed.
@@ -614,10 +535,10 @@ def _dependency_rows(
     occurrences = frozenset(
         DependencyOccurrenceRow(
             relation=DependencyRelationRow(
-                source=_endpoint(
+                source=parse_endpoint(
                     index, _as_str(row.get("source")), "dependencies.source"
                 ),
-                target=_endpoint(
+                target=parse_endpoint(
                     index, _as_str(row.get("target")), "dependencies.target"
                 ),
                 dependency_type=_as_str(row.get("import_type")),
@@ -647,7 +568,7 @@ def _family_payload(payload: Mapping[str, object], family: str) -> Mapping[str, 
 
 
 def _dependency_cycle_rows(
-    payload: Mapping[str, object], index: _RegistryIndex
+    payload: Mapping[str, object], index: IdentityIndex
 ) -> frozenset[DependencyCycleRow]:
     """F7 from the producer's own ``cycle_details``.
 
@@ -670,7 +591,7 @@ def _dependency_cycle_rows(
             )
         resolved: list[ModuleId] = []
         for name in members:
-            endpoint = _endpoint(index, name, "dependency cycle member")
+            endpoint = parse_endpoint(index, name, "dependency cycle member")
             if not isinstance(endpoint, ModuleId):
                 raise ProducerSnapshotUnavailable(
                     f"dependency cycle member {name!r} is not a registry module"
@@ -681,7 +602,7 @@ def _dependency_cycle_rows(
 
 
 def _security_surface_rows(
-    payload: Mapping[str, object], index: _RegistryIndex
+    payload: Mapping[str, object], index: IdentityIndex
 ) -> frozenset[SecuritySurfaceRow]:
     """F10 from the producer's own security_surfaces rows.
 
@@ -698,7 +619,7 @@ def _security_surface_rows(
         )
     ):
         path = _as_str(row.get("filepath"))
-        head = _surface_head(index, path)
+        head = surface_head(index, path, "security surface")
         declared = _as_str(row.get("module"))
         if declared != head:
             raise ProducerSnapshotUnavailable(
@@ -716,7 +637,7 @@ def _security_surface_rows(
                 )
             qualname = None
         else:
-            symbol = _symbol(index, qualname_text, "security surface qualname")
+            symbol = parse_symbol(index, qualname_text, "security surface qualname")
             if symbol.file.path != path:
                 raise ProducerSnapshotUnavailable(
                     f"security surface qualname {qualname_text!r} disagrees "
@@ -777,7 +698,7 @@ _CLONE_LANES: tuple[tuple[str, str], ...] = (
 
 
 def _clone_group_rows(
-    analysis: AnalysisResult, index: _RegistryIndex
+    analysis: AnalysisResult, index: IdentityIndex
 ) -> frozenset[CloneGroupRow]:
     rows: list[CloneGroupRow] = []
     for kind, attribute in _CLONE_LANES:
@@ -787,7 +708,7 @@ def _clone_group_rows(
         for group_key in sorted(groups):
             items = [
                 CloneItemRow(
-                    symbol=_symbol(
+                    symbol=parse_symbol(
                         index, _as_str(item.get("qualname")), f"{kind} clone item"
                     ),
                     start_line=_as_int(item.get("start_line")),
@@ -807,6 +728,110 @@ def _clone_group_rows(
     return frozenset(rows)
 
 
+class _SemanticFamilies(NamedTuple):
+    """The six authority families, or six honest emptinesses."""
+
+    contracts: frozenset[ContractRow]
+    graph_nodes: frozenset[GraphNodeRow]
+    sink_roles: frozenset[SinkRoleRow]
+    candidates: frozenset[CandidateRow]
+    semantic_edges: frozenset[SemanticEdge]
+    violations: frozenset[ViolationRow]
+
+
+_EMPTY_SEMANTIC = _SemanticFamilies(
+    frozenset(), frozenset(), frozenset(), frozenset(), frozenset(), frozenset()
+)
+
+
+def _semantic_families(
+    semantic: SemanticAuthorityResult | None, index: IdentityIndex
+) -> _SemanticFamilies:
+    """The authority tier, straight off its producer.
+
+    ``None`` is the lane's own execution witness — the producer was never
+    invoked — and six empty families beside a population that says
+    ``semantic_authority: disabled`` is a measured statement, not a fake
+    zero.  When the lane DID run, every row resolves through the shared
+    grammar owner, so this path and the ingest oracle cannot end up
+    disagreeing about one identity.
+    """
+
+    if semantic is None:
+        return _EMPTY_SEMANTIC
+    return _SemanticFamilies(
+        contracts=frozenset(
+            ContractRow(
+                function=parse_symbol(index, row.function, "contract_ir.function"),
+                effect_signature=row.effect_signature,
+                root_set=parse_root_set(
+                    index, row.provenance_roots, "contract_ir.provenance_roots"
+                ),
+            )
+            for row in semantic.contract_ir.contracts
+        ),
+        graph_nodes=frozenset(
+            GraphNodeRow(
+                function=parse_symbol(index, node.function, "graph.nodes.function"),
+                effect_signature=node.effect_signature,
+                root_set=parse_root_set(
+                    index, node.producer_root_ids, "graph.nodes.producer_root_ids"
+                ),
+                output_facts=node.output_facts,
+                resolution_state=node.resolution_state,
+            )
+            for node in semantic.graph.nodes
+        ),
+        sink_roles=frozenset(
+            SinkRoleRow(
+                symbol=parse_symbol(index, sink.sink_identity, "sinks.sink_identity"),
+                authority_status=sink.authority_status,
+            )
+            for sink in semantic.sinks
+        ),
+        candidates=frozenset(
+            CandidateRow(
+                level=candidate.level,
+                shared_fact=candidate.shared_fact,
+                producer_set=parse_symbol_set(
+                    index, candidate.producers, "candidates.producers"
+                ),
+            )
+            for candidate in semantic.candidates
+        ),
+        semantic_edges=frozenset(
+            SemanticEdge(
+                source=parse_symbol(index, edge.source, "graph.edges.source"),
+                target=parse_symbol(index, edge.target, "graph.edges.target"),
+            )
+            for edge in semantic.graph.edges
+        ),
+        violations=frozenset(
+            ViolationRow(
+                contract_id=violation.contract_id,
+                kind=violation.kind,
+                sink_identity=parse_symbol(
+                    index, violation.sink_identity, "violation.sink_identity"
+                ),
+                canonical_owner=parse_symbol(
+                    index, violation.canonical_owner, "violation.canonical_owner"
+                ),
+                authority_status=violation.authority_status,
+                effect_signature=violation.effect_signature,
+                resolution_state=violation.resolution_state,
+                root_set=parse_root_set(
+                    index, violation.producer_root_ids, "violation.producer_root_ids"
+                ),
+                producer_set=parse_symbol_set(
+                    index, violation.producers, "violation.producers"
+                ),
+                suppressed=violation.suppressed,
+            )
+            for violation in semantic.violations
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # The snapshot, and the one publication decision
 # ---------------------------------------------------------------------------
@@ -821,28 +846,30 @@ def canonical_snapshot_from_producers(
 ) -> CanonicalModel:
     """Build one normalized model straight from the run's producers.
 
-    Refuses, typed, when the run carries semantic-authority output: those
-    six families reach the producer edge as the same glued identity
-    strings the document carries, and their canonical grammar (root
-    families, operation heads) lives only inside the legacy oracle.  A
-    second spelling of that grammar here would be two semantics for one
-    identity law, and omitting the families would publish measured zeros
-    for producers that ran.  Refusal is the honest third answer.
+    Total over the wave-4 family set, the six semantic-authority families
+    included: their producer rows carry the same glued identity strings the
+    report does, and since the 2026-08-31 transplant both readings resolve
+    them through the ONE grammar owner
+    (``codeclone.canonical.semantic_grammar``).  A semantic lane that never
+    ran leaves the six families legitimately empty and says so through the
+    population witness; an unresolvable spelling fails closed here and in
+    the ingest oracle identically.
     """
 
     bundle: ObservationBundle = analysis.observation_bundle
-    if bundle.semantic is not None:
-        raise ProducerSnapshotUnavailable(
-            "the semantic-authority lane ran; its canonical identity grammar "
-            "is not yet available outside the legacy ingest oracle, and this "
-            "builder refuses to publish its families as measured zeros"
-        )
     analyzed = frozenset(identity.path for identity in bundle.analysis_scope)
-    index = _RegistryIndex(bundle.registry, analyzed)
+    index = _identity_index(bundle.registry, analyzed)
+    semantic = _semantic_families(bundle.semantic, index)
     payload = analysis.metrics_payload or {}
     structural = bundle.structural
     relations, occurrences = _dependency_rows(payload, index)
     facts = AnalysisFacts(
+        contracts=semantic.contracts,
+        graph_nodes=semantic.graph_nodes,
+        sink_roles=semantic.sink_roles,
+        candidates=semantic.candidates,
+        semantic_edges=semantic.semantic_edges,
+        violations=semantic.violations,
         clone_groups=_clone_group_rows(analysis, index),
         dependency_relations=relations,
         dependency_occurrences=occurrences,

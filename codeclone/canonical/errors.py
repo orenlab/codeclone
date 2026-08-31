@@ -10,9 +10,10 @@ run-store.
 Distinct failure surfaces, never conflated:
 
 * :class:`CanonicalModelError` — producer-side: a value violates a model law
-  before it ever reaches the wire (path grammar, closed vocabularies,
-  duplicate logical keys).  :class:`LegacyIngestError` narrows it for the
-  full-run ingest of the legacy producer document.
+  before it ever reaches the wire (closed vocabularies, duplicate logical
+  keys).  :class:`SemanticGrammarError` narrows it for the shared identity
+  grammar, and :class:`LegacyIngestError` narrows THAT for the document
+  shape only the legacy ingest oracle can be handed.
 * :class:`WireDecodeError` — decoder-side: a typed refusal with a stable
   ``W``-code from the closed refusal table of the wire contract (F-3 §7.7).
   One error class carries one code; silent degradation is forbidden.
@@ -42,13 +43,29 @@ class WireDecodeError(ValueError):
         self.detail = detail
 
 
-class LegacyIngestError(CanonicalModelError):
+class SemanticGrammarError(CanonicalModelError):
+    """The canonical identity grammar refuses a producer spelling.
+
+    The ONE typed result of ``codeclone.canonical.semantic_grammar``, shared
+    by every consumer of the grammar (2026-08-31 authority transplant).  It
+    is deliberately not per-consumer: before the transplant the legacy
+    ingest oracle and a producer-native path would each have refused in
+    their own dialect, which is the second law the transplant removes.
+    Refusal is always fail-closed — a spelling that does not resolve names
+    no entity, and a guessed identity would silently become a wrong content
+    address in the run store.
+    """
+
+
+class LegacyIngestError(SemanticGrammarError):
     """The legacy producer document cannot be ingested honestly.
 
-    Raised by the full-run ingest when a legacy value does not resolve
-    against the document's own module registry or violates the producer's
-    measured grammar.  The ingest refuses instead of guessing: a guessed
-    identity would silently become a wrong content address in the run-store.
+    Narrows the grammar refusal to the document-SHAPE failures only the
+    ingest oracle can have (a missing key, a value that is not an object or
+    an array).  Identity-grammar refusals now come from the shared owner as
+    :class:`SemanticGrammarError` itself; this subclass keeps the two
+    distinguishable, and keeps every existing ``LegacyIngestError`` handler
+    catching what it always caught.
     """
 
 

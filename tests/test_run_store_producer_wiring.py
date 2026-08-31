@@ -33,16 +33,34 @@ from typing import cast
 
 import pytest
 
+from codeclone.canonical.errors import SemanticGrammarError
 from codeclone.canonical.identity import (
     PRODUCER_EXECUTION_STATES,
+    EffectRoot,
     FileId,
+    KnownModule,
     ModuleId,
     ModuleSymbol,
+    OpaqueDottedHead,
     OpaqueEntity,
+    OperationRoot,
+    ProducerRoot,
     SymbolId,
 )
 from codeclone.canonical.ingest import canonical_model_from_legacy_document
-from codeclone.canonical.model import AnalysisPopulation
+from codeclone.canonical.model import (
+    AnalysisFacts,
+    AnalysisPopulation,
+    CanonicalModel,
+)
+from codeclone.canonical.semantic_grammar import (
+    IdentityIndex,
+    parse_dead_code_entity,
+    parse_endpoint,
+    parse_lane_symbol,
+    parse_symbol,
+    surface_head,
+)
 from codeclone.canonical.store import HeadState, RunStore
 from codeclone.core._types import AnalysisResult
 from codeclone.core.canonical_snapshot import (
@@ -52,14 +70,9 @@ from codeclone.core.canonical_snapshot import (
     RUN_SNAPSHOT_NAMESPACE,
     ProducerSnapshotUnavailable,
     _clone_group_rows,
-    _dead_code_entity,
     _dependency_cycle_rows,
-    _endpoint,
-    _lane_symbol,
-    _RegistryIndex,
+    _identity_index,
     _security_surface_rows,
-    _surface_head,
-    _symbol,
     population_is_admissible,
     producer_state,
     profile_head_target,
@@ -457,6 +470,32 @@ def _run_and_read(
     return store, document
 
 
+def _semantic_run(
+    run_store_cli: RunStoreCorpusRunner, corpus: Path
+) -> tuple[Path, dict[str, object], CanonicalModel]:
+    """One enabled run with the authority lane ON, and what it published.
+
+    Both readings of this corpus — the equivalence comparison and the
+    totality pin — need the same three things, and spelling the setup twice
+    is how a corpus quietly forks between two tests that claim to describe
+    one run.
+    """
+
+    (corpus / "pyproject.toml").write_text(
+        "[tool.codeclone]\nsemantic_authority = true\n", "utf-8"
+    )
+    store, document = _run_and_read(run_store_cli, corpus)
+    # The instrument is proven on before anything is counted: this corpus
+    # has to have actually executed the lane.
+    source_facts = cast("dict[str, object]", document["source_facts"])
+    assert source_facts["semantic"] is not None
+    head = _head(store, CANONICAL_HEAD_TARGET)
+    assert head is not None
+    with RunStore(store) as run_store:
+        published = run_store.read_run(head.run_id)
+    return store, document, published
+
+
 def _head(store: Path, target: str) -> HeadState | None:
     with RunStore(store) as run_store:
         return run_store.head(namespace=RUN_SNAPSHOT_NAMESPACE, target=target)
@@ -557,33 +596,20 @@ def test_the_producer_native_model_equals_the_legacy_oracle(
 ) -> None:
     """Projection equivalence on ONE real corpus run, family by family.
 
-    The oracle refuses a document whose ``source_facts.semantic`` is null,
-    and the producer-native builder refuses a run whose semantic lane
-    executed, so the two paths meet only over a semantic-off run with the
-    empty semantic containers the document omits.  Supplying those empty
-    containers fabricates no row; every family below is compared on the
-    producer output of the same single run.
+    The corpus runs with the semantic-authority lane ON, and that is what
+    the grammar transplant bought.  Before it the two paths' domains were
+    DISJOINT — the oracle refuses a document whose ``source_facts.semantic``
+    is null, and the producer refused a run whose lane had executed — so
+    they could only ever be compared over an injected empty authority tier.
+    Now they meet on a run where all six authority families carry rows.
 
     ``analysis_population`` is deliberately excluded and asserted
     separately: the producer edge can and must pronounce states the
     rendered document cannot witness, so equality there would mean the
     producer had forgotten what it knows.
     """
-    store, document = _run_and_read(run_store_cli, corpus)
-    source_facts = cast("dict[str, object]", document["source_facts"])
-    assert source_facts["semantic"] is None
-    source_facts["semantic"] = {
-        "contract_ir": {"contracts": []},
-        "graph": {"nodes": [], "edges": []},
-        "sinks": [],
-        "candidates": [],
-        "violations": [],
-    }
+    _store, document, native = _semantic_run(run_store_cli, corpus)
     oracle = canonical_model_from_legacy_document(document)
-    head = _head(store, CANONICAL_HEAD_TARGET)
-    assert head is not None
-    with RunStore(store) as run_store:
-        native = run_store.read_run(head.run_id)
 
     assert native.files == oracle.files
     assert native.modules == oracle.modules
@@ -605,13 +631,17 @@ def test_the_producer_native_model_equals_the_legacy_oracle(
         "adoption_counts",
         "api_symbols",
         "clone_groups",
+        "contracts",
         "coupling_cohesion_observations",
         "dead_code_observations",
         "dependency_cycles",
         "dependency_occurrences",
         "dependency_relations",
+        "graph_nodes",
         "risk_observations",
         "security_surfaces",
+        "semantic_edges",
+        "sink_roles",
     ):
         rows = getattr(produced, family)
         assert rows, f"{family} carries no rows; the comparison would be hollow"
@@ -619,10 +649,19 @@ def test_the_producer_native_model_equals_the_legacy_oracle(
 
     population = produced.analysis_population
     assert population is not None
+    # Kept as data rather than four copy-pasted assertions: the producer
+    # edge must pronounce THREE different states on one run, and the point
+    # is the set of them, not any single one.
     states = dict(population.producer_states)
-    assert states["coverage_join"] == "not_executed"
-    assert states["near_miss"] == "disabled"
-    assert states["complexity"] == "complete"
+    assert {
+        family: states[family]
+        for family in ("complexity", "coverage_join", "near_miss", "semantic_authority")
+    } == {
+        "complexity": "complete",
+        "coverage_join": "not_executed",
+        "near_miss": "disabled",
+        "semantic_authority": "complete",
+    }
 
 
 # -- one call site, three waterfalls ----------------------------------------
@@ -718,13 +757,13 @@ def _package_registry(
 
 
 @pytest.fixture
-def index(tmp_path: Path) -> _RegistryIndex:
+def index(tmp_path: Path) -> IdentityIndex:
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg/__init__.py").write_text("", "utf-8")
     (tmp_path / "pkg/a.py").write_text('"""A."""\n', "utf-8")
     (tmp_path / "loose.py").write_text('"""Loose."""\n', "utf-8")
     registry = build_module_registry(root=tmp_path)
-    return _RegistryIndex(registry, frozenset({"pkg/a.py", "loose.py"}))
+    return _identity_index(registry, frozenset({"pkg/a.py", "loose.py"}))
 
 
 def test_a_registry_that_claims_two_files_for_one_module_is_refused(
@@ -743,8 +782,8 @@ def test_a_registry_that_claims_two_files_for_one_module_is_refused(
             rows=tuple(sorted((*rows, ("pkg/twin.py", twin))))
         ),
     )
-    with pytest.raises(ProducerSnapshotUnavailable, match="claims two files"):
-        _RegistryIndex(doubled, frozenset({"pkg/a.py", "pkg/twin.py"}))
+    with pytest.raises(SemanticGrammarError, match="claims two files"):
+        _identity_index(doubled, frozenset({"pkg/a.py", "pkg/twin.py"}))
 
     assert entry.identity.python_module is not None
     conflicting = replace(
@@ -754,8 +793,8 @@ def test_a_registry_that_claims_two_files_for_one_module_is_refused(
             python_module=replace(entry.identity.python_module, module="pkg.other"),
         ),
     )
-    with pytest.raises(ProducerSnapshotUnavailable, match="claims two modules"):
-        _RegistryIndex(
+    with pytest.raises(SemanticGrammarError, match="claims two modules"):
+        _identity_index(
             replace(
                 registry,
                 entries_by_path=ModuleInventoryIndex(
@@ -798,66 +837,70 @@ def test_a_registry_entry_without_a_module_identity_is_skipped_not_guessed(
             )
         ),
     )
-    index = _RegistryIndex(doctored, frozenset({"pkg/a.py"}))
+    index = _identity_index(doctored, frozenset({"pkg/a.py"}))
     assert "pkg.a" not in index.module_to_path
-    assert _symbol(index, "pkg/a.py:fn", "s") == SymbolId(FileId("pkg/a.py"), "fn")
+    assert parse_symbol(index, "pkg/a.py:fn", "s") == SymbolId(FileId("pkg/a.py"), "fn")
 
 
 def test_the_symbol_resolver_reaches_both_heads_and_both_refusals(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
-    assert _symbol(index, "pkg.a:fn", "s") == SymbolId(FileId("pkg/a.py"), "fn")
-    assert _symbol(index, "loose.py:fn", "s") == SymbolId(FileId("loose.py"), "fn")
-    with pytest.raises(ProducerSnapshotUnavailable, match="ModuleKey-headed"):
-        _symbol(index, "bare_name", "s")
-    with pytest.raises(ProducerSnapshotUnavailable, match="refusing to guess"):
-        _symbol(index, "nowhere:fn", "s")
+    assert parse_symbol(index, "pkg.a:fn", "s") == SymbolId(FileId("pkg/a.py"), "fn")
+    assert parse_symbol(index, "loose.py:fn", "s") == SymbolId(FileId("loose.py"), "fn")
+    with pytest.raises(SemanticGrammarError, match="ModuleKey-headed"):
+        parse_symbol(index, "bare_name", "s")
+    with pytest.raises(SemanticGrammarError, match="refusing to guess"):
+        parse_symbol(index, "nowhere:fn", "s")
 
 
 def test_the_endpoint_resolver_reaches_both_domains_and_its_refusal(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
-    assert _endpoint(index, "pkg.a", "e") == ModuleId("pkg.a")
-    assert _endpoint(index, "loose.py", "e") == FileId("loose.py")
-    with pytest.raises(ProducerSnapshotUnavailable, match="neither a registry module"):
-        _endpoint(index, "nowhere", "e")
+    assert parse_endpoint(index, "pkg.a", "e") == ModuleId("pkg.a")
+    assert parse_endpoint(index, "loose.py", "e") == FileId("loose.py")
+    with pytest.raises(SemanticGrammarError, match="neither a registry module"):
+        parse_endpoint(index, "nowhere", "e")
 
 
-def test_the_lane_identity_law_refuses_both_ways(index: _RegistryIndex) -> None:
-    assert _lane_symbol(index, "pkg/a.py", "fn", "risk") == SymbolId(
+def test_the_lane_identity_law_refuses_both_ways(index: IdentityIndex) -> None:
+    assert parse_lane_symbol(index, "pkg/a.py", "fn", "risk") == SymbolId(
         FileId("pkg/a.py"), "fn"
     )
-    with pytest.raises(ProducerSnapshotUnavailable, match="not an analyzed path"):
-        _lane_symbol(index, "pkg/missing.py", "fn", "risk")
-    with pytest.raises(ProducerSnapshotUnavailable, match="glued identity"):
-        _lane_symbol(index, "pkg/a.py", "mod:fn", "risk")
+    with pytest.raises(SemanticGrammarError, match="not an analyzed path"):
+        parse_lane_symbol(index, "pkg/missing.py", "fn", "risk")
+    with pytest.raises(SemanticGrammarError, match="glued identity"):
+        parse_lane_symbol(index, "pkg/a.py", "mod:fn", "risk")
 
 
 def test_the_dead_code_entity_reaches_all_three_variants_and_both_refusals(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
     """The tagged reference keeps the head the producer made: a registry
     module stays MODULE-headed, an analyzed path stays FILE-headed, and
     anything else rides the opaque variant verbatim."""
-    assert _dead_code_entity(index, "pkg.a:fn") == ModuleSymbol(ModuleId("pkg.a"), "fn")
-    assert _dead_code_entity(index, "loose.py:fn") == SymbolId(FileId("loose.py"), "fn")
-    assert _dead_code_entity(index, "nowhere:fn") == OpaqueEntity("nowhere", "fn")
-    with pytest.raises(ProducerSnapshotUnavailable, match="head:local"):
-        _dead_code_entity(index, "nocolon")
-    with pytest.raises(ProducerSnapshotUnavailable, match="second ModuleKey colon"):
-        _dead_code_entity(index, "pkg.a:mod:fn")
+    assert parse_dead_code_entity(index, "pkg.a:fn") == ModuleSymbol(
+        ModuleId("pkg.a"), "fn"
+    )
+    assert parse_dead_code_entity(index, "loose.py:fn") == SymbolId(
+        FileId("loose.py"), "fn"
+    )
+    assert parse_dead_code_entity(index, "nowhere:fn") == OpaqueEntity("nowhere", "fn")
+    with pytest.raises(SemanticGrammarError, match="head:local"):
+        parse_dead_code_entity(index, "nocolon")
+    with pytest.raises(SemanticGrammarError, match="second ModuleKey colon"):
+        parse_dead_code_entity(index, "pkg.a:mod:fn")
 
 
 def test_the_surface_head_reaches_its_two_answers_and_its_refusal(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
-    assert _surface_head(index, "pkg/a.py") == "pkg.a"
-    with pytest.raises(ProducerSnapshotUnavailable, match="not an analyzed path"):
-        _surface_head(index, "pkg/missing.py")
+    assert surface_head(index, "pkg/a.py", "s") == "pkg.a"
+    with pytest.raises(SemanticGrammarError, match="not an analyzed path"):
+        surface_head(index, "pkg/missing.py", "s")
 
 
 def test_a_cycle_row_is_refused_when_it_repeats_or_leaves_the_module_domain(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
     """A cycle set is a MODULE-domain fact; a member that is not a registry
     module would mint an identity, and a repeated member would be absorbed
@@ -907,7 +950,7 @@ def _surface(**overrides: object) -> dict[str, object]:
 
 
 def test_a_security_surface_at_war_with_the_registry_is_refused(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
     """Three registry-consistency laws, each a refusal and never a repair."""
     payload = {"security_surfaces": {"items": [_surface()]}}
@@ -943,7 +986,7 @@ def test_a_security_surface_at_war_with_the_registry_is_refused(
 
 
 def test_a_clone_group_with_two_items_under_one_identity_is_refused(
-    index: _RegistryIndex,
+    index: IdentityIndex,
 ) -> None:
     """A ``frozenset`` would absorb the arity defect silently, so the
     collapse is measured before the set is built."""
@@ -974,27 +1017,67 @@ def test_a_clone_group_with_two_items_under_one_identity_is_refused(
     assert next(iter(rows)).group_key == "g"
 
 
-def test_a_semantic_lane_run_is_refused_rather_than_published_as_zeros(
+def _authority_roots(facts: AnalysisFacts) -> frozenset[EffectRoot]:
+    """Every effect root the published authority tier actually carries.
+
+    Both houses are read, and each keeps its OWN ``effect_signature``:
+    ``ContractRow`` carries ``FunctionContractIR.effect_signature`` while
+    ``GraphNodeRow`` carries the authority graph's own.  They are two
+    different signatures — substituting one for the other diverges on a
+    real corpus — so nothing here folds them together.
+    """
+
+    contracts = frozenset(root for row in facts.contracts for root in row.root_set)
+    nodes = frozenset(root for node in facts.graph_nodes for root in node.root_set)
+    return contracts | nodes
+
+
+def test_a_semantic_lane_run_publishes_its_authority_families(
     corpus: Path,
     run_store_cli: RunStoreCorpusRunner,
 ) -> None:
-    """The refusal has an input that reaches it, and the run still succeeds.
+    """Totality after the 2026-08-31 grammar transplant.
 
-    The six semantic-authority families reach the producer edge as the same
-    glued identity strings the document carries, and their canonical
-    grammar lives only inside the legacy ingest oracle.  Publishing them as
-    empty would be the fake zero the population law forbids; failing the
-    analysis would let a rollout flag break a run.  The third answer is a
-    typed refusal that stores nothing.
+    Before it, a run whose semantic-authority lane executed was refused
+    outright: its six families reach the producer edge as the same glued
+    identity strings the report carries, and the grammar that resolves them
+    lived only inside the legacy ingest oracle.  With one normative owner
+    the producer path resolves them itself, so a supported form no longer
+    gets a typed refusal — it gets published, with rows.
     """
-    (corpus / "pyproject.toml").write_text(
-        "[tool.codeclone]\nsemantic_authority = true\n", "utf-8"
+    store, _document, model = _semantic_run(run_store_cli, corpus)
+    assert store.exists()
+    facts = model.facts.analysis
+    assert facts.contracts, "the authority tier published no contracts"
+    assert facts.graph_nodes
+    assert facts.sink_roles
+    population = facts.analysis_population
+    assert population is not None
+    assert dict(population.producer_states)["semantic_authority"] == "complete"
+
+
+def test_the_published_authority_tier_carries_every_root_family(
+    corpus: Path,
+    run_store_cli: RunStoreCorpusRunner,
+) -> None:
+    """A VALUE pin on this reading, not a cross-reading equality.
+
+    Measured while building this wave: the projection-equivalence assertion
+    is blind to a mutation inside the shared grammar owner BY CONSTRUCTION,
+    because both readings move together.  Only a test that reads what the
+    rule produced can turn red when the rule breaks, so each reading keeps
+    one.
+    """
+    _store, _document, model = _semantic_run(run_store_cli, corpus)
+    roots = _authority_roots(model.facts.analysis)
+    assert any(isinstance(root, ProducerRoot) for root in roots), (
+        "no producer-family root reached the model; the root-family rule "
+        "would be unpinned on this reading"
     )
-    store, document = _run_and_read(run_store_cli, corpus)
-    # The instrument is proven on before the absence is read.
-    source_facts = cast("dict[str, object]", document["source_facts"])
-    assert source_facts["semantic"] is not None
-    assert not store.exists()
+    operations = [root for root in roots if isinstance(root, OperationRoot)]
+    assert operations
+    assert any(isinstance(root.target.head, OpaqueDottedHead) for root in operations)
+    assert any(isinstance(root.target.head, KnownModule) for root in operations)
 
 
 def test_a_lost_head_race_is_a_conflict_and_never_a_completeness_claim(
