@@ -34,6 +34,7 @@ from codeclone.canonical import (
     AdoptionCountRow,
     AnalysisFacts,
     AnalysisFile,
+    AnalysisPopulation,
     ApiParameterFact,
     ApiSymbolRow,
     CandidateRow,
@@ -461,6 +462,15 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         source_io_skipped=4,
         unsupported_construct_skipped=5,
     )
+    analysis_population = AnalysisPopulation(
+        analysis_mode="full",
+        analysis_profile=(("min_loc", 6), ("min_stmt", 4)),
+        producer_states=(
+            ("complexity", "complete"),
+            ("near_miss", "not_executed"),
+            ("security_surfaces", "complete"),
+        ),
+    )
     coupled = [frozenset({"Token", "AccessToken"}), frozenset({"Token"})]
     if reverse_insertion:
         contracts = list(reversed(contracts))
@@ -501,6 +511,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             adoption_counts=frozenset(adoption_counts),
             security_surfaces=frozenset(security_surfaces),
             run_scalars=run_scalars,
+            analysis_population=analysis_population,
         ),
         coupled_sets=frozenset(coupled),
     )
@@ -546,14 +557,19 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     bytes, sha256 7e75e336…): the draft gained the tagged-ScopeRef
     adoption family.  The F10 ``security_surfaces`` family (slice 5) then
     replaced the F3 literal deliberately: the draft gained the
-    evidence-keyed surface family, so every document's bytes moved — the
-    one announced transition of this commit.
+    evidence-keyed surface family, so every document's bytes moved (6369
+    bytes, sha256 c30306a9…).  The ``analysis_population`` record
+    (RULING-2026-08-31 §3) then replaced the F10 literal deliberately:
+    the draft gained the execution-population singleton — the run-level
+    witness that "we analyzed this population" is its own semantic
+    statement, so every document's bytes moved — the one announced
+    transition of this commit.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 6369
+    assert len(payload) == 6574
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "c30306a9f9083b75e89c88a8ad7cb3de7757fb3418cedd7640894bee79c40fd3"
+        == "4674fa7d6b5400e453d02afd86047d9e0a2b9a8db943dd6f2822e32f5efd05f3"
     )
 
 
@@ -1986,3 +2002,74 @@ def test_every_family_the_uniqueness_prover_reads_is_a_frozenset() -> None:
             "the byte-identical-repeat branch is now reachable and silently "
             "swallows a duplicated row"
         )
+
+
+# ---------------------------------------------------------------------------
+# AnalysisPopulation record laws (RULING-2026-08-31 §3).
+# ---------------------------------------------------------------------------
+
+
+def _population(**overrides: object) -> AnalysisPopulation:
+    values: dict[str, object] = {
+        "analysis_mode": "full",
+        "analysis_profile": (("min_loc", 6), ("min_stmt", 4)),
+        "producer_states": (("complexity", "complete"), ("near_miss", "disabled")),
+    }
+    values.update(overrides)
+    return AnalysisPopulation(**values)  # type: ignore[arg-type]
+
+
+def test_population_accepts_every_ratified_execution_state() -> None:
+    record = _population(
+        producer_states=(
+            ("a", "complete"),
+            ("b", "disabled"),
+            ("c", "not_executed"),
+            ("d", "truncated"),
+            ("e", "unavailable"),
+        )
+    )
+    assert len(record.producer_states) == 5
+
+
+def test_population_refuses_an_empty_mode() -> None:
+    with pytest.raises(CanonicalModelError, match="analysis_mode"):
+        _population(analysis_mode="")
+
+
+def test_population_refuses_unsorted_profile_pairs() -> None:
+    with pytest.raises(CanonicalModelError, match="sorted and unique"):
+        _population(analysis_profile=(("min_stmt", 4), ("min_loc", 6)))
+
+
+def test_population_refuses_an_empty_profile_name() -> None:
+    with pytest.raises(CanonicalModelError, match="parameter name is empty"):
+        _population(analysis_profile=(("", 6),))
+
+
+def test_population_refuses_a_boolean_profile_value() -> None:
+    with pytest.raises(CanonicalModelError, match="non-negative int"):
+        _population(analysis_profile=(("min_loc", True),))
+
+
+def test_population_refuses_a_negative_profile_value() -> None:
+    with pytest.raises(CanonicalModelError, match="non-negative int"):
+        _population(analysis_profile=(("min_loc", -1),))
+
+
+def test_population_refuses_unsorted_producer_states() -> None:
+    with pytest.raises(CanonicalModelError, match="sorted and unique"):
+        _population(
+            producer_states=(("near_miss", "disabled"), ("complexity", "complete"))
+        )
+
+
+def test_population_refuses_an_empty_family_name() -> None:
+    with pytest.raises(CanonicalModelError, match="family name is empty"):
+        _population(producer_states=(("", "complete"),))
+
+
+def test_population_refuses_a_state_outside_the_ratified_vocabulary() -> None:
+    """The five-state law: an invented sixth state never enters the model."""
+    with pytest.raises(CanonicalModelError, match="ratified execution-state"):
+        _population(producer_states=(("complexity", "paused"),))

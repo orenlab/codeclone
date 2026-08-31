@@ -477,3 +477,29 @@ def test_f8_family_witnesses_every_emitted_container(
         (host_one, 45, 59),
         (host_two, 5, 40),
     }
+
+
+def test_analysis_population_witnesses_the_corpus_execution(
+    corpus_report: dict[str, object],
+) -> None:
+    """RULING-2026-08-31 §3 on real producer output: the corpus run
+    declares what it computed, so the canonical model must carry a
+    POPULATED execution witness — declared families ``complete``, and
+    every state inside the ratified five-state vocabulary.  This is the
+    instrument-on witness for the family: a fixture can fake a record,
+    only the corpus proves the producer path feeds one."""
+    model = canonical_model_from_legacy_document(corpus_report)
+    record = model.facts.analysis.analysis_population
+    assert record is not None, "corpus run declared families but no witness landed"
+    assert record.analysis_mode
+    assert record.analysis_profile, "corpus profile parameters must be witnessed"
+    states = dict(record.producer_states)
+    meta = corpus_report["meta"]
+    assert isinstance(meta, dict)
+    declared = meta["computed_metric_families"]
+    assert isinstance(declared, list) and declared
+    for family in declared:
+        assert states[str(family)] == "complete", family
+    from codeclone.canonical import PRODUCER_EXECUTION_STATES
+
+    assert set(states.values()) <= set(PRODUCER_EXECUTION_STATES)

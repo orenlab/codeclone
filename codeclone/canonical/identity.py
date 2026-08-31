@@ -113,6 +113,20 @@ DEPENDENCY_CYCLE_KINDS: Final = ("import_cycle", "deferred_cycle")
 # population (ruling 2026-08-24 §10 — the known dialect root) and never
 # enters it.
 CLONE_KINDS: Final = ("function", "block", "segment")
+# AnalysisPopulation (RULING-2026-08-31 §3): the five ratified producer
+# execution states, verbatim — ``family complete, count = 0`` is a
+# different semantic statement from ``not executed``, ``disabled``,
+# ``truncated`` and ``unavailable``, and the hard law rides the record
+# that carries these: a zero count is admissible ONLY as the result of an
+# executed measurement; absence of execution never projects to zero.
+# Alphabetical: no producer order exists for a state vocabulary.
+PRODUCER_EXECUTION_STATES: Final = (
+    "complete",
+    "disabled",
+    "not_executed",
+    "truncated",
+    "unavailable",
+)
 # F4 dead_code_observations (wave 4, slice K3): the producer's closed
 # vocabularies (``codeclone.models``: DeadCodeCandidateKind /
 # DeadCodeObservationKind / LiveRootReason), mirrored verbatim and pinned

@@ -66,6 +66,7 @@ from codeclone.canonical.identity import (
 from codeclone.canonical.model import (
     AdoptionCountRow,
     AnalysisFacts,
+    AnalysisPopulation,
     ApiParameterFact,
     ApiSymbolRow,
     CandidateRow,
@@ -471,6 +472,7 @@ def canonical_model_from_legacy_document(
     )
 
     run_scalars = _run_scalars(document)
+    analysis_population = _analysis_population(document)
 
     analyzed = frozenset(FileId(path) for path in index.analyzed_paths)
     file_modules = frozenset(
@@ -501,6 +503,7 @@ def canonical_model_from_legacy_document(
                 adoption_counts=adoption_counts,
                 security_surfaces=security_surfaces,
                 run_scalars=run_scalars,
+                analysis_population=analysis_population,
             )
         ),
         coupled_sets=coupled_sets,
@@ -1040,6 +1043,64 @@ def _inventory_scalar(container: Mapping[str, object], key: str, where: str) -> 
     if isinstance(value, bool) or not isinstance(value, int):
         raise LegacyIngestError(f"{where}.{key} is not an integer")
     return value
+
+
+def _analysis_population(
+    document: Mapping[str, object],
+) -> AnalysisPopulation | None:
+    """The execution-population witness the document itself pronounces.
+
+    Three meta key states, inherited verbatim from the R3 door
+    (``codeclone.api.metric_families``): ``computed_metric_families``
+    absent means a legacy document that never declared — the record is
+    honestly ABSENT, never fabricated; present (empty included) means
+    the run declared what it computed, and the record is built.  The
+    oracle emits only the two states the document can witness today —
+    ``complete`` for a declared family, ``not_executed`` for a container
+    family the declaration withholds; ``disabled`` / ``truncated`` /
+    ``unavailable`` join when producers publish their own states
+    (producer wiring), because a state the document cannot witness must
+    not be invented here.
+    """
+    meta_value = document.get("meta")
+    if not isinstance(meta_value, Mapping):
+        return None
+    meta = _mapping(meta_value, "meta")
+    if "computed_metric_families" not in meta:
+        return None
+    declared_value = _sequence(
+        _field(meta, "computed_metric_families", "meta"),
+        "meta.computed_metric_families",
+    )
+    declared = set()
+    for name in declared_value:
+        if not isinstance(name, str) or not name:
+            raise LegacyIngestError(
+                "meta.computed_metric_families carries a non-string name"
+            )
+        declared.add(name)
+    mode = _string(meta, "analysis_mode", "meta")
+    if not mode:
+        raise LegacyIngestError("meta.analysis_mode is empty")
+    profile_value = _mapping(
+        _field(meta, "analysis_profile", "meta"), "meta.analysis_profile"
+    )
+    profile = tuple(
+        (name, _inventory_scalar(profile_value, name, "meta.analysis_profile"))
+        for name in sorted(profile_value)
+    )
+    metrics = _mapping(_field(document, "metrics", "document"), "metrics")
+    families = _mapping(_field(metrics, "families", "metrics"), "metrics.families")
+    universe = sorted({str(name) for name in families} | declared)
+    states = tuple(
+        (family, "complete" if family in declared else "not_executed")
+        for family in universe
+    )
+    return AnalysisPopulation(
+        analysis_mode=mode,
+        analysis_profile=profile,
+        producer_states=states,
+    )
 
 
 def _run_scalars(document: Mapping[str, object]) -> RunScalars:

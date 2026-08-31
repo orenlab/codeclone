@@ -301,13 +301,16 @@ def test_registry_declares_the_two_class_b_handles_and_their_owners() -> None:
     }
 
 
-def test_registry_declares_the_one_record_family() -> None:
-    """F9 is the ONE record-shaped wire family: a record has no rows, so no
-    row key is invented; every table family stays columnar."""
+def test_registry_declares_the_record_families() -> None:
+    """The record-shaped wire families: one record per analysis snapshot,
+    no rows, no invented row keys — F9 ``run_scalars`` and the
+    RULING-2026-08-31 §3 ``analysis_population`` singleton; every table
+    family stays columnar."""
     from codeclone.canonical import RECORD_WIRE_FAMILIES, is_record_family
 
-    assert frozenset({"run_scalars"}) == RECORD_WIRE_FAMILIES
+    assert frozenset({"analysis_population", "run_scalars"}) == RECORD_WIRE_FAMILIES
     assert is_record_family("run_scalars")
+    assert is_record_family("analysis_population")
     assert not is_record_family("dependency_relations")
     assert not is_record_family("api_symbols")
 

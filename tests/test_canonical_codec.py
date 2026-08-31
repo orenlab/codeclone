@@ -732,6 +732,66 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"files_skipped":-1,"functions":41,',
     ),
     (
+        "W01",
+        "analysis_population record missing a member",
+        '"analysis_population":{"analysis_mode":"full",',
+        '"analysis_population":{',
+    ),
+    (
+        "W02",
+        "analysis_population keys out of canonical order",
+        '{"analysis_mode":"full","analysis_profile":[["min_loc",6],["min_stmt",4]],',
+        '{"analysis_profile":[["min_loc",6],["min_stmt",4]],"analysis_mode":"full",',
+    ),
+    (
+        "W18",
+        "analysis_population empty mode",
+        '"analysis_mode":"full"',
+        '"analysis_mode":""',
+    ),
+    (
+        "W01",
+        "analysis_population profile pair is not a pair",
+        '[["min_loc",6],',
+        '[["min_loc",6,6],',
+    ),
+    (
+        "W18",
+        "analysis_population profile value is not an int",
+        '[["min_loc",6],["min_stmt",4]]',
+        '[["min_loc","6"],["min_stmt",4]]',
+    ),
+    (
+        "W02",
+        "analysis_population profile pairs unsorted",
+        '[["min_loc",6],["min_stmt",4]]',
+        '[["min_stmt",4],["min_loc",6]]',
+    ),
+    (
+        "W18",
+        "analysis_population state pair member is not a string",
+        '["complexity","complete"]',
+        '["complexity",7]',
+    ),
+    (
+        "W18",
+        "analysis_population state pair is not an array",
+        '[["complexity","complete"],',
+        "[7,",
+    ),
+    (
+        "W08",
+        "analysis_population unknown execution state",
+        '"not_executed"',
+        '"paused"',
+    ),
+    (
+        "W02",
+        "analysis_population producer families unsorted",
+        '[["complexity","complete"],["near_miss","not_executed"]',
+        '[["near_miss","not_executed"],["complexity","complete"]',
+    ),
+    (
         "W21",
         "incompatible revision value",
         '"canonical_model":"1"',
@@ -1039,6 +1099,11 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
             "run_scalars member is not an object",
             lambda doc: doc["facts"].__setitem__("run_scalars", 7),
         ),
+        (
+            "W01",
+            "analysis_population member is not an object",
+            lambda doc: doc["facts"].__setitem__("analysis_population", 7),
+        ),
     ],
     ids=[
         "W01-effect-roots-not-object",
@@ -1051,6 +1116,7 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
         "W02-facts-columns-unsorted",
         "W01-facts-table-not-object",
         "W01-run-scalars-not-object",
+        "W01-analysis-population-not-object",
     ],
 )
 def test_structural_refusals_on_reserialized_documents(
@@ -1078,3 +1144,28 @@ def test_string_lexeme_refuses_a_lone_surrogate_directly() -> None:
 
 def test_writer_emits_the_canonical_float_lexeme() -> None:
     assert codec_module._write(1.5) == "1.5"
+
+
+def test_absent_analysis_population_is_the_empty_member_decoding_none() -> None:
+    """RULING-2026-08-31 §3 absence law on the wire: a run with no
+    execution witness emits the EMPTY record member and decodes back to
+    the typed absence — never a fabricated record, never a refusal.
+    Found by mutation: dropping the decoder's empty-member branch
+    survived the whole codec home, so this pin is the input that
+    reaches it."""
+    import dataclasses
+
+    model = fixture_model()
+    stripped = dataclasses.replace(
+        model,
+        facts=dataclasses.replace(
+            model.facts,
+            analysis=dataclasses.replace(
+                model.facts.analysis, analysis_population=None
+            ),
+        ),
+    )
+    payload = encode_canonical_json(stripped)
+    assert b'"analysis_population":{}' in payload
+    decoded = decode_canonical_json(payload)
+    assert decoded.facts.analysis.analysis_population is None

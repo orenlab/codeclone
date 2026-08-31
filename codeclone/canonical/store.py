@@ -123,6 +123,7 @@ from codeclone.canonical.identity import (
 from codeclone.canonical.model import (
     AdoptionCountRow,
     AnalysisFacts,
+    AnalysisPopulation,
     ApiParameterFact,
     ApiSymbolRow,
     CandidateRow,
@@ -235,6 +236,7 @@ _FAMILY_NAMESPACE: Final[dict[str, str]] = {
     # two-metric split), so a complexity recount never lets these facts
     # silently share content addresses across generations.
     "risk_observation": f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
+    "analysis_population": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     "run_scalar": f"canonical_model:{CANONICAL_MODEL_REVISION}",
     # F10: TWO policy owners give this family meaning -- the detector
     # catalog (which symbols and capabilities exist) and the source-kind
@@ -779,6 +781,21 @@ def _observation_model_rows(
     if facts.run_scalars is not None:
         # F9: exactly one record per snapshot — a run-level fact, no rows.
         yield ("run_scalar", dict(sorted(asdict(facts.run_scalars).items())))
+    if facts.analysis_population is not None:
+        # RULING-2026-08-31 §3: the execution-population singleton.
+        record = facts.analysis_population
+        yield (
+            "analysis_population",
+            {
+                "analysis_mode": record.analysis_mode,
+                "analysis_profile": [
+                    [name, value] for name, value in record.analysis_profile
+                ],
+                "producer_states": [
+                    [family, state] for family, state in record.producer_states
+                ],
+            },
+        )
 
 
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
@@ -1113,6 +1130,53 @@ def _decode_security_surface_row(
     )
 
 
+def _decode_stored_pairs(value: object, where: str) -> list[tuple[str, object]]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise StoreIntegrityError(f"{where}: stored pairs are not a list")
+    pairs: list[tuple[str, object]] = []
+    for item in value:
+        if (
+            not isinstance(item, Sequence)
+            or isinstance(item, (str, bytes))
+            or len(item) != 2
+            or not isinstance(item[0], str)
+        ):
+            raise StoreIntegrityError(
+                f"{where}: stored pair is not a [name, value] list"
+            )
+        pairs.append((item[0], item[1]))
+    return pairs
+
+
+def _decode_analysis_population_row(
+    row: Mapping[str, object], where: str
+) -> AnalysisPopulation:
+    mode = _require_str(row, "analysis_mode", where)
+    profile: list[tuple[str, int]] = []
+    for name, value in _decode_stored_pairs(
+        _require_field(row, "analysis_profile", where), f"{where}.analysis_profile"
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise StoreIntegrityError(
+                f"{where}.analysis_profile: stored value of {name!r} is not an int"
+            )
+        profile.append((name, value))
+    states: list[tuple[str, str]] = []
+    for family, state in _decode_stored_pairs(
+        _require_field(row, "producer_states", where), f"{where}.producer_states"
+    ):
+        if not isinstance(state, str):
+            raise StoreIntegrityError(
+                f"{where}.producer_states: stored state of {family!r} is not a string"
+            )
+        states.append((family, state))
+    return AnalysisPopulation(
+        analysis_mode=mode,
+        analysis_profile=tuple(profile),
+        producer_states=tuple(states),
+    )
+
+
 def _decode_run_scalar_row(row: Mapping[str, object], where: str) -> RunScalars:
     return RunScalars(
         classes=_require_line(row, "classes", where),
@@ -1152,6 +1216,7 @@ def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow
 # integrity refusal at the call site, never a silent skip.
 _ROW_DECODERS: Final[dict[str, Callable[[Mapping[str, object], str], object]]] = {
     "adoption_count": _decode_adoption_count_row,
+    "analysis_population": _decode_analysis_population_row,
     "analyzed_file": _decode_file_row,
     "api_symbol": _decode_api_symbol_row,
     "candidate": _decode_candidate_row,
@@ -1199,6 +1264,14 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
         raise StoreIntegrityError(
             "run carries more than one run_scalars record; the family is "
             "one record per analysis snapshot"
+        )
+    population_rows = cast("list[AnalysisPopulation]", family("analysis_population"))
+    if len(population_rows) > 1:
+        # RULING-2026-08-31 §3: a singleton authority — two stored records
+        # are a writer defect, refused loudly, never last-reader-silenced.
+        raise StoreIntegrityError(
+            "run carries more than one analysis_population record; the "
+            "family is one record per analysis snapshot"
         )
     return CanonicalModel(
         files=frozenset(cast("list[FileId]", family("file"))),
@@ -1253,6 +1326,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                     cast("list[SecuritySurfaceRow]", family("security_surface"))
                 ),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
+                analysis_population=(population_rows[0] if population_rows else None),
             )
         ),
         coupled_sets=frozenset(cast("list[frozenset[str]]", family("coupled_set"))),
@@ -1583,6 +1657,7 @@ _IDENTITY_FAMILIES: Final = frozenset(
 # wire names and exported eight empty tables).
 _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "adoption_counts": "adoption_count",
+    "analysis_population": "analysis_population",
     "api_symbols": "api_symbol",
     "candidates": "candidate",
     "clone_groups": "clone_group",

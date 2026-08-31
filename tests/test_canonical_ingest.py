@@ -1402,3 +1402,106 @@ def test_ingest_refuses_a_document_missing_the_adoption_lane() -> None:
 
     with pytest.raises(LegacyIngestError, match="missing 'adoption_counts'"):
         canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_execution_population_distinguishes_declared_from_undeclared() -> None:
+    """RULING-2026-08-31 §3: ``family complete, count = 0`` is not
+    ``family not executed``.
+
+    Two documents identical in every fact row — one declaring the
+    families it computed, one declaring it computed none — must ingest
+    to DIFFERENT canonical models: the model witnesses what the run
+    pronounced, never only what it counted.  Fifteen zero families
+    without an execution witness are not a canonical fact.
+    """
+    declared = legacy_document()
+    declared["meta"] = {
+        "analysis_mode": "full",
+        "analysis_profile": {"min_loc": 6, "min_stmt": 4},
+        "computed_metric_families": ["security_surfaces"],
+    }
+    silent = legacy_document()
+    silent["meta"] = {
+        "analysis_mode": "clones_only",
+        "analysis_profile": {"min_loc": 6, "min_stmt": 4},
+        "computed_metric_families": [],
+    }
+    model_declared = canonical_model_from_legacy_document(declared)
+    model_silent = canonical_model_from_legacy_document(silent)
+    assert model_declared != model_silent, (
+        "a run that computed security_surfaces and a run that computed "
+        "nothing ingested to the same canonical model: execution is "
+        "unwitnessed"
+    )
+
+
+def test_population_oracle_reads_the_three_meta_key_states() -> None:
+    """The R3 door law, inherited verbatim: key absent means a legacy
+    document that never declared (record honestly absent); key present
+    means the run declared, and the record is built."""
+    undeclared = legacy_document()
+    undeclared["meta"] = {"analysis_mode": "full"}
+    model = canonical_model_from_legacy_document(undeclared)
+    assert model.facts.analysis.analysis_population is None
+
+    declared = legacy_document()
+    declared["meta"] = {
+        "analysis_mode": "full",
+        "analysis_profile": {"min_stmt": 4, "min_loc": 6},
+        "computed_metric_families": ["security_surfaces", "phantom_extra"],
+    }
+    populated = canonical_model_from_legacy_document(declared)
+    record = populated.facts.analysis.analysis_population
+    assert record is not None
+    assert record.analysis_mode == "full"
+    # Profile pairs are canonically sorted regardless of document order.
+    assert record.analysis_profile == (("min_loc", 6), ("min_stmt", 4))
+    # The universe is the container's families UNION the declaration: a
+    # declared family the container never carried still gets its witness.
+    states = dict(record.producer_states)
+    assert states["security_surfaces"] == "complete"
+    assert states["phantom_extra"] == "complete"
+    assert states["dependencies"] == "not_executed"
+
+
+def test_population_oracle_refuses_a_non_string_declared_name() -> None:
+    poisoned = legacy_document()
+    poisoned["meta"] = {
+        "analysis_mode": "full",
+        "analysis_profile": {"min_loc": 6},
+        "computed_metric_families": [7],
+    }
+    with pytest.raises(LegacyIngestError, match="non-string name"):
+        canonical_model_from_legacy_document(poisoned)
+
+
+def test_population_oracle_refuses_an_empty_mode() -> None:
+    poisoned = legacy_document()
+    poisoned["meta"] = {
+        "analysis_mode": "",
+        "analysis_profile": {"min_loc": 6},
+        "computed_metric_families": [],
+    }
+    with pytest.raises(LegacyIngestError, match="analysis_mode is empty"):
+        canonical_model_from_legacy_document(poisoned)
+
+
+def test_population_oracle_refuses_a_missing_mode() -> None:
+    poisoned = legacy_document()
+    poisoned["meta"] = {
+        "analysis_profile": {"min_loc": 6},
+        "computed_metric_families": [],
+    }
+    with pytest.raises(LegacyIngestError, match="analysis_mode"):
+        canonical_model_from_legacy_document(poisoned)
+
+
+def test_population_oracle_refuses_a_non_int_profile_value() -> None:
+    poisoned = legacy_document()
+    poisoned["meta"] = {
+        "analysis_mode": "full",
+        "analysis_profile": {"min_loc": "six"},
+        "computed_metric_families": [],
+    }
+    with pytest.raises(LegacyIngestError, match="min_loc is not an integer"):
+        canonical_model_from_legacy_document(poisoned)

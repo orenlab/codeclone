@@ -88,6 +88,7 @@ from codeclone.canonical.identity import (
     IMPORT_TYPES,
     LIVE_ROOT_REASONS,
     OPERATION_KINDS,
+    PRODUCER_EXECUTION_STATES,
     RISK_DIMENSIONS,
     ROOT_FAMILY_EFFECT,
     ROOT_FAMILY_OPERATION,
@@ -122,6 +123,7 @@ from codeclone.canonical.identity import (
 from codeclone.canonical.model import (
     AdoptionCountRow,
     AnalysisFacts,
+    AnalysisPopulation,
     ApiParameterFact,
     ApiSymbolRow,
     CandidateRow,
@@ -881,6 +883,26 @@ def _graph_node_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obj
     ]
 
 
+def _analysis_population_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    del plan  # a record has no ordinals to resolve
+    if facts.analysis_population is None:
+        return []
+    record = facts.analysis_population
+    return [
+        {
+            "analysis_mode": record.analysis_mode,
+            "analysis_profile": [
+                [name, value] for name, value in record.analysis_profile
+            ],
+            "producer_states": [
+                [family, state] for family, state in record.producer_states
+            ],
+        }
+    ]
+
+
 def _run_scalars_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     del plan  # a record has no ordinals to resolve
     if facts.run_scalars is None:
@@ -922,6 +944,7 @@ _FAMILY_ROW_BUILDERS: dict[
     str, Callable[[AnalysisFacts, WirePlan], list[dict[str, object]]]
 ] = {
     "adoption_counts": _adoption_count_rows,
+    "analysis_population": _analysis_population_rows,
     "api_symbols": _api_symbol_rows,
     "candidates": _candidate_rows,
     "clone_groups": _clone_group_rows,
@@ -2455,6 +2478,80 @@ def _decode_security_surfaces(
     return frozenset(rows)
 
 
+def _decode_string_pairs(value: object, where: str) -> list[tuple[str, str]]:
+    """A wire list of two-string pairs, shape-checked pair by pair."""
+    pairs = _expect_list(value, where)
+    decoded: list[tuple[str, str]] = []
+    for index, pair in enumerate(pairs):
+        items = _expect_list(pair, f"{where}[{index}]")
+        if len(items) != 2:
+            raise _refuse("W01", f"{where}[{index}] is not a two-element pair")
+        decoded.append(
+            (
+                _expect_string(items[0], f"{where}[{index}][0]"),
+                _expect_string(items[1], f"{where}[{index}][1]"),
+            )
+        )
+    return decoded
+
+
+def _decode_analysis_population(
+    facts: Mapping[str, object],
+) -> AnalysisPopulation | None:
+    """The execution-population record member, or its typed absence."""
+    where = "facts.analysis_population"
+    value = facts["analysis_population"]
+    if not isinstance(value, dict):
+        raise _refuse("W01", f"{where} is not an object")
+    table = cast("dict[str, object]", value)
+    keys = list(table.keys())
+    if not keys:
+        return None
+    declared = list(wire_columns("analysis_population"))
+    if set(keys) != set(declared):
+        raise _refuse(
+            "W01",
+            f"{where} keys {keys!r} do not match the declared set {declared!r}",
+        )
+    if keys != declared:
+        raise _refuse("W02", f"{where} keys are not in canonical order")
+    mode = _expect_string(table["analysis_mode"], f"{where}.analysis_mode")
+    if not mode:
+        raise _refuse("W18", f"{where}.analysis_mode is empty")
+    profile_pairs = _expect_list(table["analysis_profile"], f"{where}.analysis_profile")
+    profile: list[tuple[str, int]] = []
+    for index, pair in enumerate(profile_pairs):
+        pair_where = f"{where}.analysis_profile[{index}]"
+        items = _expect_list(pair, pair_where)
+        if len(items) != 2:
+            raise _refuse("W01", f"{pair_where} is not a two-element pair")
+        profile.append(
+            (
+                _expect_string(items[0], f"{pair_where}[0]"),
+                _expect_wire_int(items[1], f"{pair_where}[1]"),
+            )
+        )
+    states = _decode_string_pairs(table["producer_states"], f"{where}.producer_states")
+    for family, state in states:
+        if state not in PRODUCER_EXECUTION_STATES:
+            raise _refuse(
+                "W08",
+                f"{where}.producer_states carries unknown execution state "
+                f"{state!r} for family {family!r}",
+            )
+    for name, pairs in (
+        ("analysis_profile", [name for name, _v in profile]),
+        ("producer_states", [family for family, _s in states]),
+    ):
+        if pairs != sorted(set(pairs)):
+            raise _refuse("W02", f"{where}.{name} pairs are not sorted and unique")
+    return AnalysisPopulation(
+        analysis_mode=mode,
+        analysis_profile=tuple(profile),
+        producer_states=tuple(states),
+    )
+
+
 def _decode_run_scalars(facts: Mapping[str, object]) -> RunScalars | None:
     """The F9 record member: one record object, or its typed absence."""
     value = facts["run_scalars"]
@@ -2708,6 +2805,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     adoption_counts = _decode_adoption_counts(facts_section, files, modules)
     security_surfaces = _decode_security_surfaces(facts_section, files)
     run_scalars = _decode_run_scalars(facts_section)
+    analysis_population = _decode_analysis_population(facts_section)
     violations, violation_handles = _decode_violations(
         facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
     )
@@ -2741,6 +2839,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 adoption_counts=adoption_counts,
                 security_surfaces=security_surfaces,
                 run_scalars=run_scalars,
+                analysis_population=analysis_population,
             )
         ),
         coupled_sets=frozenset(

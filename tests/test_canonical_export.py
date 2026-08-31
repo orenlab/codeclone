@@ -111,9 +111,14 @@ _TARGET = "worktree-a"
 # (slice 5) replaced the F3 literals deliberately: the fixture gained six
 # evidence-keyed security_surface objects under the composite
 # catalog-plus-source-kind namespace, which moves the membership and the
-# bytes — the one announced transition of this commit.
-_FIXTURE_RUN_ID = "4b82a70002840dd76ad9f8743ac9763fe8237390ca497619a071f01092b4c3eb"
-_FIXTURE_ARTIFACT = "297ee1ff4d0a3a61eaeef5c6cabe570a7469f212f77b608dbc09d104f1c38069"
+# bytes (run 4b82a700…, artifact 297ee1ff…).  The analysis_population
+# record (RULING-2026-08-31 §3) then replaced those values deliberately:
+# the fixture gained the execution-population singleton — a semantic
+# ADDITION to the stored membership, so the run identity legitimately
+# moves with it, and the projection bytes move the artifact digest — the
+# one announced transition of this commit.
+_FIXTURE_RUN_ID = "ab16ae7206d69d2bf24bd2cf559734c4c2201cce18af2aebe9acc515807a44e9"
+_FIXTURE_ARTIFACT = "5c4910e220629834b7904dd095b14f8106307ce01530b7e336b9be79ffbdff22"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

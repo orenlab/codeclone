@@ -81,6 +81,7 @@ from codeclone.canonical.identity import (
     DEPENDENCY_CYCLE_KINDS,
     IMPORT_TYPES,
     LIVE_ROOT_REASONS,
+    PRODUCER_EXECUTION_STATES,
     RISK_DIMENSIONS,
     SECURITY_CLASSIFICATION_MODES,
     SECURITY_EVIDENCE_KINDS,
@@ -719,6 +720,81 @@ class RunScalars:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisPopulation:
+    """The run-level execution-population authority (RULING-2026-08-31 §3).
+
+    "We analyzed this population" is a semantic statement of its own:
+    fifteen families at zero rows without this witness are not a
+    canonical fact.  ONE record per analysis snapshot — a singleton
+    authority, never a row family — carrying the realized profile and
+    the per-producer-family execution states.  The ratified five-state
+    law lives in the ``PRODUCER_EXECUTION_STATES`` vocabulary:
+    ``complete`` with a zero count, ``not_executed``, ``disabled``,
+    ``truncated`` and ``unavailable`` are five different statements, and
+    a zero count is admissible ONLY as the result of an executed
+    measurement — absence of execution never projects to zero.
+
+    What is deliberately NOT here, and why:
+
+    * ``analyzed_scope`` / ``analyzed_files`` / the source-universe
+      witness already ride the model (``CanonicalModel.analyzed_files``,
+      ``files``); respelling them in this record would be the same fact
+      in two places — the drift class §21 of the backend brief names as
+      the main implementation hazard.
+    * the file-population state (four states) is derivable from
+      ``run_scalars`` counters through its one contract owner
+      (``codeclone.contracts.observed_population``) — a
+      contract-derived value, never a stored analysis fact.
+    * the population receipts of the ratified composition
+      (``candidate_count`` / ``examined_count`` / ``returned_count`` and
+      the pipeline truncation state/reason) are NOT witnessed by any
+      legacy document this model can ingest today; landing their columns
+      now would force fabricated zeros — exactly what the hard law
+      forbids — so they join with the producer wiring that can witness
+      them, as a pre-freeze draft column addition.
+
+    ``producer_states`` keys are producer/metric family names as the run
+    pronounced them — an open vocabulary whose meaning the producer
+    registry (identity ruling I1) will own; the states themselves are
+    the closed ratified vocabulary.
+    """
+
+    analysis_mode: str
+    analysis_profile: tuple[tuple[str, int], ...]
+    producer_states: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        if not self.analysis_mode:
+            raise CanonicalModelError("analysis_mode must be a non-empty string")
+        profile_names = [name for name, _value in self.analysis_profile]
+        if profile_names != sorted(set(profile_names)):
+            raise CanonicalModelError(
+                "analysis_profile must be sorted and unique by parameter name"
+            )
+        for name, value in self.analysis_profile:
+            if not name:
+                raise CanonicalModelError("analysis_profile parameter name is empty")
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CanonicalModelError(
+                    f"analysis_profile parameter {name} must be a "
+                    f"non-negative int: {value!r}"
+                )
+        family_names = [family for family, _state in self.producer_states]
+        if family_names != sorted(set(family_names)):
+            raise CanonicalModelError(
+                "producer_states must be sorted and unique by family name"
+            )
+        for family, state in self.producer_states:
+            if not family:
+                raise CanonicalModelError("producer_states family name is empty")
+            if state not in PRODUCER_EXECUTION_STATES:
+                raise CanonicalModelError(
+                    f"producer state {state!r} of family {family} is outside "
+                    f"the ratified execution-state vocabulary"
+                )
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisFacts:
     """The analysis-tier record tables — the wire's ``facts`` section.
 
@@ -755,6 +831,10 @@ class AnalysisFacts:
     # F9: one record per analysis snapshot; None is the absent record —
     # never an all-zero fake (zero is measured in this family).
     run_scalars: RunScalars | None = None
+    # RULING-2026-08-31 §3: the execution-population singleton; None is
+    # the absent record — a legacy document that never declared what it
+    # computed stays honestly unwitnessed, never fabricated.
+    analysis_population: AnalysisPopulation | None = None
 
 
 @dataclass(frozen=True, slots=True)

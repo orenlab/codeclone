@@ -657,6 +657,41 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'"unsupported_construct_skipped":5}',
             "run scalar classes",
         ),
+        # Population shape guard: stored pairs must be a list
+        (
+            "analysis_population",
+            b'{"analysis_mode":"full","analysis_profile":"min_loc",'
+            b'"producer_states":[]}',
+            "stored pairs are not a list",
+        ),
+        # Population shape guard: a pair must be a [name, value] list
+        (
+            "analysis_population",
+            b'{"analysis_mode":"full","analysis_profile":[["min_loc",6,6]],'
+            b'"producer_states":[]}',
+            r"not a \[name, value\] list",
+        ),
+        # Population shape guard: profile value must be an int
+        (
+            "analysis_population",
+            b'{"analysis_mode":"full","analysis_profile":[["min_loc","6"]],'
+            b'"producer_states":[]}',
+            "is not an int",
+        ),
+        # Population shape guard: a state must be a string
+        (
+            "analysis_population",
+            b'{"analysis_mode":"full","analysis_profile":[],'
+            b'"producer_states":[["complexity",7]]}',
+            "is not a string",
+        ),
+        # Population model law through the store wrapper: unknown state
+        (
+            "analysis_population",
+            b'{"analysis_mode":"full","analysis_profile":[],'
+            b'"producer_states":[["complexity","paused"]]}',
+            "ratified execution-state",
+        ),
     ],
     ids=[
         "contract-not-a-pair",
@@ -688,6 +723,11 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "surface-module-scope-with-name-model-law",
         "run-scalar-non-int-shape-guard",
         "run-scalar-negative-model-law",
+        "population-pairs-not-list-shape-guard",
+        "population-pair-not-a-pair-shape-guard",
+        "population-profile-non-int-shape-guard",
+        "population-state-non-string-shape-guard",
+        "population-unknown-state-model-law",
     ],
 )
 def test_well_addressed_malformed_payload_is_refused(
@@ -943,3 +983,76 @@ def test_receipt_counts_every_family_of_the_fixture(tmp_path: Path) -> None:
         assert counts["file_module"] == len(model.file_modules)
         assert counts["coupled_set"] == len(model.coupled_sets)
         assert receipt.object_count == sum(counts.values())
+
+
+def test_two_analysis_population_records_in_one_run_are_refused(
+    tmp_path: Path,
+) -> None:
+    """RULING-2026-08-31 §3 at the storage face: the execution-population
+    record is a SINGLETON authority.  Same self-consistent forgery as the
+    F9 twin — membership and run identity refit through the store's own
+    formulas — so the one-record guard is the only wall left, and the
+    refusal message must name THIS family, never its sibling."""
+    from codeclone.canonical.store import (
+        _membership_digest,
+        _object_id,
+        _payload_bytes,
+        _run_id,
+    )
+
+    path = tmp_path / "runs.sqlite"
+    with RunStore(path) as store:
+        _publish(store, fixture_model())
+    second = _payload_bytes(
+        {
+            "analysis_mode": "clones_only",
+            "analysis_profile": [["min_loc", 6]],
+            "producer_states": [["complexity", "not_executed"]],
+        }
+    )
+    with sqlite3.connect(path) as connection:
+        run_pk, namespace_pk = connection.execute(
+            "SELECT run_pk, namespace_pk FROM runs"
+        ).fetchone()
+        cursor = connection.execute(
+            "INSERT INTO objects (namespace_pk, object_id, family, payload) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                namespace_pk,
+                _object_id(_NS, "analysis_population", second),
+                "analysis_population",
+                second,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
+            (run_pk, cursor.lastrowid),
+        )
+        object_ids = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT o.object_id FROM run_members m "
+                "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
+                (run_pk,),
+            )
+        ]
+        scope_digest = str(
+            connection.execute(
+                "SELECT analysis_scope_digest FROM runs WHERE run_pk = ?", (run_pk,)
+            ).fetchone()[0]
+        )
+        membership = _membership_digest(object_ids)
+        forged = _run_id(_NS, scope_digest, membership)
+        connection.execute(
+            "UPDATE runs SET membership_digest = ?, run_id = ? WHERE run_pk = ?",
+            (membership, forged, run_pk),
+        )
+        connection.commit()
+    with (
+        RunStore(path) as store,
+        pytest.raises(
+            StoreIntegrityError,
+            match="more than one analysis_population record",
+        ),
+    ):
+        store.read_run(forged)

@@ -58,6 +58,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from codeclone.canonical.grammar import require_analysis_wire_families
+
 ANALYSIS_FACT: Final = "analysis_fact"
 CONTRACT_DERIVED: Final = "contract_derived_semantic"
 REPRESENTATION: Final = "representation_projection"
@@ -128,6 +130,45 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "914 module / 9 file scopes at ratification, 933 / 9 @ "
             "95e4210b 2026-08-30, zero unresolvable throughout; the "
             "variant IS identity",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # AnalysisPopulation (RULING-2026-08-31 §3): the run-level execution
+    # population singleton — ONE record per analysis snapshot (record wire
+    # member, the F9 shape), never a row family.  The five-state law and
+    # the zero-only-as-measurement law ride the model's closed vocabulary
+    # (PRODUCER_EXECUTION_STATES); the ratified receipts columns join with
+    # the producer wiring that can witness them (their zero today would be
+    # fabricated — exactly what the hard law forbids).
+    "analysis_population": (
+        FieldDeclaration(
+            "analysis_mode",
+            ANALYSIS_FACT,
+            "analysis_execution_producer",
+            "realized analysis profile mode as the run pronounced it "
+            "(meta.analysis_mode); non-empty string payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "analysis_profile",
+            ANALYSIS_FACT,
+            "analysis_execution_producer",
+            "realized profile parameters: sorted unique (name, "
+            "non-negative int) pairs — observed request, not policy "
+            "authority (policy contracts are I2-C territory)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "producer_states",
+            ANALYSIS_FACT,
+            "analysis_execution_producer",
+            "sorted unique (family, state) pairs; state is the closed "
+            "five-state vocabulary (PRODUCER_EXECUTION_STATES), family "
+            "names are the run's own pronouncement — meaning owned by "
+            "the future producer registry (identity ruling I1)",
             stored=True,
             wire=True,
         ),
@@ -995,7 +1036,9 @@ RISK_OBSERVATIONS_KEY: Final[tuple[str, ...]] = (
 #: (F9: one record per analysis snapshot — there are no rows to key, and a
 #: fake entity key is never invented; ruling 2026-08-24 §1).  The absent
 #: record is the empty member.
-RECORD_WIRE_FAMILIES: Final[frozenset[str]] = frozenset({"run_scalars"})
+RECORD_WIRE_FAMILIES: Final[frozenset[str]] = frozenset(
+    {"analysis_population", "run_scalars"}
+)
 
 
 def is_record_family(family: str) -> bool:
@@ -1046,3 +1089,25 @@ def sparse_bool_wire_columns(family: str) -> tuple[str, ...]:
             if declaration.wire and declaration.wire_shape == "sparse_bool_positions"
         )
     )
+
+
+# The §4 grammar gate (ruling 2026-08-24, backend step 3): the analysis
+# facts section admits analysis-tier families only, each declared by its
+# semantic kind in ``codeclone.canonical.grammar``.  Executed at import,
+# so every path that reads this registry — codec encode and decode,
+# ingest, the store exporter, every test session — inherits the check: a
+# family added here without a grammar declaration, or with a comparison
+# or evaluation production, or with a field spelling foreign-tier
+# semantics, refuses loudly instead of shipping into the analysis wire.
+# Declaration-only columns (``stored=False, wire=False``) are not passed:
+# a value with no residence has no residence to misplace.
+require_analysis_wire_families(
+    {
+        family: tuple(
+            declaration.field
+            for declaration in declarations
+            if declaration.stored or declaration.wire
+        )
+        for family, declarations in FACT_FAMILY_FIELDS.items()
+    }
+)
