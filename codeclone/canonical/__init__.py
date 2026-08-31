@@ -20,9 +20,16 @@ from codeclone.canonical.authority_identity import (
     CANDIDATE_IDENTITY_CONTRACT,
     VIOLATION_IDENTITY_CONTRACT,
     candidate_handle,
+    candidate_level_score,
     candidate_total_order_key,
     legacy_symbol_key,
     violation_handle,
+)
+from codeclone.canonical.authority_projection import (
+    CANDIDATE_PRODUCER_STATUSES,
+    CANDIDATE_ROW_PROJECTION_CONTRACT,
+    candidate_projection_rows,
+    producer_source_kind,
 )
 from codeclone.canonical.codec import (
     canonical_float_lexeme,
@@ -175,6 +182,8 @@ __all__ = [
     "API_SYMBOL_KINDS",
     "API_VISIBILITIES",
     "CANDIDATE_IDENTITY_CONTRACT",
+    "CANDIDATE_PRODUCER_STATUSES",
+    "CANDIDATE_ROW_PROJECTION_CONTRACT",
     "CLONE_KINDS",
     "COMPARISON_FIELD_MARKERS",
     "COMPARISON_TIER",
@@ -267,6 +276,8 @@ __all__ = [
     "WitnessLayer",
     "analysis_scope_digest",
     "candidate_handle",
+    "candidate_level_score",
+    "candidate_projection_rows",
     "candidate_total_order_key",
     "canonical_artifact_digest",
     "canonical_float_lexeme",
@@ -284,6 +295,7 @@ __all__ = [
     "head_tag",
     "is_record_family",
     "legacy_symbol_key",
+    "producer_source_kind",
     "require_analysis_wire_families",
     "require_closed_vocabularies",
     "require_declaration",

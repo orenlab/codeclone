@@ -38,13 +38,26 @@ a grep and never from reading them by eye.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
 
+import orjson
 import pytest
 
-from codeclone.canonical import ADOPTION_FEATURES, RISK_DIMENSIONS
+from codeclone.canonical import (
+    ADOPTION_FEATURES,
+    RISK_DIMENSIONS,
+    candidate_projection_rows,
+    producer_source_kind,
+)
+from codeclone.canonical.errors import CanonicalModelError
+from codeclone.canonical.model import CandidateRow, SemanticEdge
+from codeclone.canonical.registry import FACT_FAMILY_FIELDS
+from codeclone.domain.source_scope import SOURCE_KIND_OTHER
+from codeclone.utils.coerce import as_sequence
 
 from ._projection_equivalence import (
     _ADOPTION_COLUMNS,
@@ -57,6 +70,7 @@ from ._projection_equivalence import (
     WITNESS_DECLARED,
     WITNESS_WITHHELD,
     ProjectionCorpus,
+    authority_candidate_rows,
     build_corpus,
     compare_projections,
     consumer_reads,
@@ -65,6 +79,7 @@ from ._projection_equivalence import (
     family_items,
     family_witness,
     lane_placeholder_fields,
+    lane_restored_fields,
     lane_witness,
     stale_represented_fields,
 )
@@ -76,6 +91,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 #: consumer confined to these lanes can move to the store today.
 _MIGRATABLE = (
     "analysis_population.states",
+    "authority.candidates",
     "dependencies.relations",
     "dependencies.occurrences",
 )
@@ -306,7 +322,11 @@ def test_an_undeclared_metric_family_is_unmeasured_not_equivalent(
         assert lane.model_count is None
         assert not lane.migratable
     assert report.lane("security_surfaces.items").witness == WITNESS_DECLARED
-    assert report.migratable_lanes == ()
+    # Exactly the withdrawal's reach: the two dependency lanes lose their
+    # witness and the population lane disagrees with the run's own
+    # declaration. A lane of another family keeps its verdict, which is what
+    # makes this a withdrawal rather than a blanket refusal.
+    assert report.migratable_lanes == ("authority.candidates",)
 
 
 def test_a_withheld_observation_lane_is_unmeasured_not_equivalent(
@@ -763,3 +783,238 @@ def test_the_budget_consumer_reads_families_no_path_scan_can_see(
     )
     assert "complexity" in reads.family_arguments
     assert "dead_code" in reads.family_arguments
+
+
+def test_the_candidates_lane_answers_every_public_row_column(
+    corpus: ProjectionCorpus,
+) -> None:
+    """Step 8's gate: the candidate row must be answerable from the store.
+
+    ``_authority_candidates`` hands the row to its client whole, so a column
+    the canonical side cannot produce is a column the consumer would lose on
+    migration. The lane is allowed to reach ``equivalent`` only when every
+    public column is either carried by the model or restored by the
+    projection this suite measures -- never by a hand-written exemption.
+    """
+
+    report = compare_projections(corpus.document, corpus.stored_model)
+    lane = report.lane("authority.candidates")
+    assert lane.unrepresented_fields == ()
+    assert lane.verdict == VERDICT_EQUIVALENT
+    assert lane.migratable
+
+
+# -- step 8: the candidate row, rebuilt --------------------------------------
+
+#: The published candidate columns the canonical model does NOT store, each
+#: closed by a different verdict (see ``canonical.authority_projection``).
+#: Parametrized one per column on purpose: a projection that loses one of
+#: them must red on its own name, never inside an aggregate.
+_RESTORED_CANDIDATE_COLUMNS = (
+    "algorithm_revision",
+    "independence",
+    "score",
+    "semantic_divergence",
+    "sink_statuses",
+    "source_kind",
+    "suppressed",
+)
+
+#: What the family actually stores. The ratified natural key and nothing
+#: else -- the guard against the opposite error, a derived column quietly
+#: becoming a stored one.
+_STORED_CANDIDATE_COLUMNS = ("level", "producer_set", "shared_fact")
+
+
+def _candidates_lane() -> Any:
+    return next(spec for spec in LANES if spec.name == "authority.candidates")
+
+
+def test_the_candidate_projection_reproduces_the_report_rows_byte_for_byte(
+    corpus: ProjectionCorpus,
+) -> None:
+    """Acceptance: the store's rows and the report's rows are the same bytes.
+
+    Serialized through the product's own encoder, without sorting keys, so
+    the comparison covers column order as well as values -- the report is
+    written that way and a consumer reading a differently ordered object is
+    reading a different document.
+    """
+
+    reported = [dict(row) for row in authority_candidate_rows(corpus.document)]
+    rebuilt = list(candidate_projection_rows(corpus.stored_model))
+    assert reported, "the corpus published no candidate rows to compare"
+    assert orjson.dumps(rebuilt) == orjson.dumps(reported)
+
+
+@pytest.mark.parametrize("column", _RESTORED_CANDIDATE_COLUMNS)
+def test_each_unstored_candidate_column_is_restored_by_the_projection(
+    column: str, corpus: ProjectionCorpus
+) -> None:
+    """One column, one verdict, one red.
+
+    ``lane_restored_fields`` earns the exemption per run against the
+    report's own rows, so a projection that stops reproducing this column
+    drops it here and the lane falls back to ``partial``.
+    """
+
+    restored = lane_restored_fields(
+        _candidates_lane(), corpus.document, corpus.stored_model
+    )
+    assert column in restored
+
+
+def test_the_candidate_family_stores_its_natural_key_and_nothing_else() -> None:
+    """The other boundary: a restored column must not become a stored one.
+
+    Every column above is closed by a verdict -- derived from ``level``,
+    classified from ``producers``, settled by the stored authority graph,
+    run provenance, or the union's placeholder. Storing one anyway would be
+    the same fact in two places, so the model shape and the registry
+    declaration are both pinned, and either drifting turns this red.
+    """
+
+    assert tuple(field.name for field in fields(CandidateRow)) == (
+        "level",
+        "shared_fact",
+        "producer_set",
+    )
+    stored = tuple(
+        sorted(
+            declaration.field
+            for declaration in FACT_FAMILY_FIELDS["candidates"]
+            if declaration.stored
+        )
+    )
+    assert stored == _STORED_CANDIDATE_COLUMNS
+
+
+def test_the_projection_refuses_a_group_the_stored_graph_cannot_settle(
+    corpus: ProjectionCorpus,
+) -> None:
+    """The guard has a reachable input, and it is loud rather than empty.
+
+    Three of the seven columns are settled by the stored authority graph. A
+    model carrying a candidate whose producer has no graph node cannot
+    settle them, and answering with a default would publish a wrong status
+    under a right-looking row.
+    """
+
+    model = corpus.stored_model
+    facts = model.facts.analysis
+    starved = replace(
+        model,
+        facts=replace(
+            model.facts,
+            analysis=replace(facts, graph_nodes=frozenset()),
+        ),
+    )
+    with pytest.raises(CanonicalModelError, match="graph node for every producer"):
+        candidate_projection_rows(starved)
+
+
+def test_a_producer_without_a_module_head_classifies_as_other() -> None:
+    """The classifier's floor, with the input that reaches it.
+
+    A producer key is ``{head}:{qualname}``; a head that is empty or blank
+    names no file, so the group has nothing to classify. The document layer
+    falls back the same way, and a fallback no input reaches would be
+    theatre rather than a floor.
+    """
+
+    assert producer_source_kind([":run"]) == SOURCE_KIND_OTHER
+    assert producer_source_kind(["   :run"]) == SOURCE_KIND_OTHER
+    assert producer_source_kind([]) == SOURCE_KIND_OTHER
+    assert producer_source_kind(["pkg.canon:run"]) != SOURCE_KIND_OTHER
+
+
+def _statuses(row: Mapping[str, object]) -> list[str]:
+    return [str(status) for status in as_sequence(row["sink_statuses"])]
+
+
+def _with_graph(
+    model: Any,
+    *,
+    nodes: frozenset[Any] | None = None,
+    edges: frozenset[Any] | None = None,
+) -> Any:
+    analysis = model.facts.analysis
+    return replace(
+        model,
+        facts=replace(
+            model.facts,
+            analysis=replace(
+                analysis,
+                graph_nodes=analysis.graph_nodes if nodes is None else nodes,
+                semantic_edges=analysis.semantic_edges if edges is None else edges,
+            ),
+        ),
+    )
+
+
+def test_a_resolved_producer_that_reaches_nobody_is_shadow(
+    corpus: ProjectionCorpus,
+) -> None:
+    """The fourth status, reached by the only input that produces it.
+
+    The probe corpus resolves nothing, so every independent producer is
+    ``unavailable`` there; the self-repo corpus carries 2 855 ``shadow``
+    entries. Declaring the branch correct on the strength of the big corpus
+    while no test can reach it is exactly the hollow guard this suite
+    exists to refuse, so the resolution state is moved here instead.
+    """
+
+    model = corpus.stored_model
+    resolved = _with_graph(
+        model,
+        nodes=frozenset(
+            replace(node, resolution_state="resolved")
+            for node in model.facts.analysis.graph_nodes
+        ),
+    )
+    before = {
+        str(row["candidate_id"]): _statuses(row)
+        for row in candidate_projection_rows(model)
+    }
+    after = {
+        str(row["candidate_id"]): _statuses(row)
+        for row in candidate_projection_rows(resolved)
+    }
+    assert set(before) == set(after)
+    assert "unavailable" in {status for row in before.values() for status in row}
+    assert "unavailable" not in {status for row in after.values() for status in row}
+    assert "shadow" in {status for row in after.values() for status in row}
+
+
+def test_the_reachability_walk_terminates_on_a_cyclic_authority_graph(
+    corpus: ProjectionCorpus,
+) -> None:
+    """The visited set has a reachable input: a cycle back to the source.
+
+    Without the revisit guard the walk would not terminate, so a graph that
+    closes on itself is the input that proves the guard runs -- and the
+    rows it yields must be the rows the acyclic graph yielded, because a
+    cycle among non-members settles nothing about this group.
+    """
+
+    model = corpus.stored_model
+    functions = sorted(
+        (node.function for node in model.facts.analysis.graph_nodes),
+        key=lambda symbol: (symbol.file.path, symbol.qualname),
+    )
+    members = {
+        producer
+        for row in model.facts.analysis.candidates
+        for producer in row.producer_set
+    }
+    outsiders = [symbol for symbol in functions if symbol not in members]
+    assert outsiders, "the corpus has no non-member function to route a cycle through"
+    source, outsider = functions[0], outsiders[0]
+    cyclic = _with_graph(
+        model,
+        edges=model.facts.analysis.semantic_edges
+        | {SemanticEdge(source, outsider), SemanticEdge(outsider, source)},
+    )
+    assert orjson.dumps(candidate_projection_rows(cyclic)) == orjson.dumps(
+        candidate_projection_rows(model)
+    )

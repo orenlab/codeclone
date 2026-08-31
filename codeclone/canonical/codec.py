@@ -511,7 +511,7 @@ def _root_set_ref(row_set: frozenset[EffectRoot], plan: WirePlan) -> int:
 
 def _candidate_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     handle_symbols = {p for row in facts.candidates for p in row.producer_set}
-    legacy_keys = _legacy_symbol_keys(handle_symbols, plan.file_modules)
+    legacy_keys = legacy_symbol_keys(handle_symbols, plan.file_modules)
     return [
         {
             "candidate_id": candidate_handle(
@@ -667,7 +667,7 @@ def _violation_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
     for violation in facts.violations:
         handle_symbols.add(violation.sink_identity)
         handle_symbols.update(violation.producer_set)
-    legacy_keys = _legacy_symbol_keys(handle_symbols, plan.file_modules)
+    legacy_keys = legacy_symbol_keys(handle_symbols, plan.file_modules)
     return [
         {
             "authority_status": row.authority_status,
@@ -976,7 +976,7 @@ def fact_family_rows(
     return _FAMILY_ROW_BUILDERS[family](facts, plan)
 
 
-def _legacy_symbol_keys(
+def legacy_symbol_keys(
     symbols: Iterable[SymbolId], file_modules: frozenset[FileModuleRelation]
 ) -> dict[SymbolId, str]:
     """Project symbols back to the producer's ModuleKey-headed keys.
@@ -2683,7 +2683,7 @@ def _verify_public_handles(
         handle_symbols.add(violation.sink_identity)
         handle_symbols.update(violation.producer_set)
     try:
-        legacy_keys = _legacy_symbol_keys(handle_symbols, file_modules)
+        legacy_keys = legacy_symbol_keys(handle_symbols, file_modules)
     except CanonicalModelError as error:
         raise _refuse("W25", f"public handles are unverifiable: {error}") from error
     for index, row in enumerate(candidates):

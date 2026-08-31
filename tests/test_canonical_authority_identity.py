@@ -210,11 +210,11 @@ def test_projection_refuses_an_ambiguous_file_module_relation() -> None:
     """A file with two modules has no deterministic legacy head; the handle
     projection fails closed instead of guessing an identity."""
     from codeclone.canonical import FileId, FileModuleRelation, ModuleId, SymbolId
-    from codeclone.canonical.codec import _legacy_symbol_keys
+    from codeclone.canonical.codec import legacy_symbol_keys
 
     fa = FileId("pkg/a.py")
     with pytest.raises(CanonicalModelError, match="unambiguous"):
-        _legacy_symbol_keys(
+        legacy_symbol_keys(
             {SymbolId(fa, "A.run")},
             frozenset(
                 {

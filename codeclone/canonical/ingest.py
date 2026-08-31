@@ -29,12 +29,21 @@ name (see ``OperationTarget``); a target with a colon but an empty local
 name is refused, because collapsing ``a.b:`` into ``a.b`` would merge two
 distinct producer strings into one identity.
 
-The wave-1 model subset decides what is carried: candidate scoring fields
-(``score``, ``independence``, ``semantic_divergence``, ``sink_statuses``)
-and contract ``document``/``wire`` payloads stay with the legacy document;
+The wave-1 model subset decides what is carried: contract
+``document``/``wire`` payloads stay with the legacy document, and
 ``candidate_id`` / ``violation_id`` are never ingested — they are class-B
 values recomputed only by their one formula owner, and the codec proves
 the round trip against the legacy values (W25).
+
+The candidate payload columns (``score``, ``independence``,
+``semantic_divergence``, ``sink_statuses``) are not ingested either, and
+step 8 settled why rather than deferring it again: ``score`` is a strict
+function of ``level``; the other three are conclusions the stored
+authority graph already settles (``semantic_edges``,
+``graph_nodes.effect_signature``, ``graph_nodes.resolution_state``) —
+measured on the self-repo corpus at 7 317/7 317 candidate rows, 0
+disagreements.  ``codeclone.canonical.authority_projection`` is their one
+owner, and it rebuilds the published row whole.
 """
 
 from __future__ import annotations

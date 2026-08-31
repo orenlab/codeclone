@@ -153,8 +153,16 @@ class SinkRoleRow:
 class CandidateRow:
     """Authority candidate; natural key ``(level, shared_fact, producer_set)``.
 
-    ``candidate_id`` and ``score`` are class-B contract-derived values with
-    one formula owner and are never stored (§5.1, §8.0).
+    The key IS the row: every other published column is closed by a verdict
+    rather than stored (step 8).  ``candidate_id`` and ``score`` are class-B
+    contract-derived values with one formula owner (§5.1, §8.0);
+    ``independence``, ``semantic_divergence`` and ``sink_statuses`` are
+    conclusions the stored authority graph settles, so carrying them would
+    be the same fact in two places; ``source_kind`` is a document-layer
+    ranking term, ``algorithm_revision`` is run provenance, and
+    ``suppressed`` is the union container's placeholder — the producer emits
+    no such key on a candidate.  The one owner that rebuilds them all is
+    ``codeclone.canonical.authority_projection``.
     """
 
     level: str

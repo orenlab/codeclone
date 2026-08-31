@@ -45,6 +45,24 @@ _AUTHORITY_DOMAIN: Final = b"ccsem1:authority\x00"
 _AUTHORITY_VIOLATION_DOMAIN: Final = b"ccsem1:authority-violation\x00"
 
 
+#: The closed level score table of ``candidate_identity_contract.v1``.
+#: The registry already declares ``score`` CONTRACT_DERIVED under this
+#: contract with ``stored=False`` — a strict function of ``level``, so the
+#: rank lives with the contract and never becomes a stored column.
+_CANDIDATE_LEVEL_SCORES: Final[dict[str, int]] = {
+    "exact_contract_ir": 5,
+    "same_effect_signature": 4,
+    "same_output_fact_and_input_family": 3,
+    "overlapping_transform_chain": 2,
+    "divergent_projection": 1,
+}
+
+
+def candidate_level_score(level: str) -> int:
+    """The contract's rank of one discovery-candidate level."""
+    return _CANDIDATE_LEVEL_SCORES[level]
+
+
 def legacy_symbol_key(head: str, qualname: str) -> str:
     """The producer's symbol key grammar: ``{head}:{qualname}``.
 

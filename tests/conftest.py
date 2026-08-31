@@ -280,3 +280,47 @@ def report_meta_factory() -> ReportMetaFactory:
         return meta
 
     return _make
+
+
+# ---------------------------------------------------------------------------
+# Backend P0 step 8: the candidate row, read twice.
+#
+# One probe run published through the canonical store, projected back out of
+# it, and spliced into a copy of its own report document.  The builder lives
+# here for the same reason the wire-freeze corpus does — the acceptance is
+# read by an r4 module (the MCP pager) while the projection it compares is an
+# r2 fact, and each module still binds exactly one ring.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def candidate_projection_documents(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, object], dict[str, object], str]:
+    """``(report document, same document rebuilt from the store, run id)``.
+
+    Only the candidate items differ in provenance: the rebuilt document
+    keeps every other authority item verbatim, so a pager reading both sees
+    the same union, the same filter and the same neighbours — and any
+    disagreement it reports is the projection's, not the fixture's.
+    """
+    from codeclone.canonical.authority_projection import candidate_projection_rows
+    from tests._projection_equivalence import build_corpus
+
+    base = tmp_path_factory.mktemp("candidate-projection")
+    tree = base / "tree"
+    tree.mkdir()
+    corpus = build_corpus(tree, store_path=base / "runs.sqlite3")
+
+    document = json.loads(json.dumps(corpus.document))
+    rebuilt = json.loads(json.dumps(corpus.document))
+    items = rebuilt["metrics"]["families"]["semantic_authority"]["items"]
+    projected = iter(
+        dict(row) for row in candidate_projection_rows(corpus.stored_model)
+    )
+    rebuilt["metrics"]["families"]["semantic_authority"]["items"] = [
+        next(projected) if item.get("item_kind") == "candidate" else item
+        for item in items
+    ]
+    assert next(projected, None) is None, "the projection outran the report"
+    return document, rebuilt, corpus.run_id

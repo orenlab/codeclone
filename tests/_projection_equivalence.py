@@ -75,6 +75,7 @@ from codeclone.canonical.authority_identity import (
     legacy_symbol_key,
     violation_handle,
 )
+from codeclone.canonical.authority_projection import candidate_projection_rows
 from codeclone.contracts.schemas import ReportMeta
 from codeclone.core._types import (
     AnalysisResult,
@@ -586,6 +587,14 @@ def _authority_items(
     )
 
 
+def authority_candidate_rows(
+    document: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    """The published candidate rows, in the order the document ranked them."""
+
+    return _authority_items(document, "candidate")
+
+
 # report readers -----------------------------------------------------------
 
 
@@ -1033,6 +1042,13 @@ class LaneSpec:
     joining a hand-written list that nobody updated. The two failure modes
     are both visible: an invented entry names a key no row carries, and a
     forgotten one turns a lane ``partial``.
+
+    ``projection`` is the OTHER way a key stops being a gap: a column the
+    model does not store but a named owner rebuilds from what it does store.
+    That exemption is never declared -- it is measured per run against the
+    report's own rows (:func:`lane_restored_fields`), so a projection that
+    stops reproducing a column loses the exemption instead of keeping a
+    stale entry in a hand-written list.
     """
 
     name: str
@@ -1041,6 +1057,7 @@ class LaneSpec:
     report_reader: Callable[[Mapping[str, object]], frozenset[Assertion]]
     model_reader: Callable[[CanonicalModel], frozenset[Assertion]]
     represented_fields: tuple[str, ...] = ()
+    projection: Callable[[CanonicalModel], Sequence[Mapping[str, object]]] | None = None
 
 
 def _metric_family(name: str) -> WitnessRef:
@@ -1077,6 +1094,11 @@ LANES: tuple[LaneSpec, ...] = (
             "producers",
             "shared_fact",
         ),
+        # The remaining published columns are rebuilt, not stored: three
+        # analysis conclusions the stored graph settles, plus a level score,
+        # a ranking classification, a run-provenance label and the union's
+        # boolean placeholder. The owner is measured here, never trusted.
+        projection=candidate_projection_rows,
     ),
     LaneSpec(
         name="authority.violations",
@@ -1286,8 +1308,38 @@ def lane_placeholder_fields(
     )
 
 
+def lane_restored_fields(
+    spec: LaneSpec, document: Mapping[str, object], model: CanonicalModel
+) -> tuple[str, ...]:
+    """Report keys this lane's projection rebuilds -- measured, not declared.
+
+    A key is restored only when the projection emits the same number of rows
+    in the same order and the same value for that key on EVERY row. Order is
+    part of the claim on purpose: a consumer pages these rows, so a
+    projection that agrees as a set and disagrees as a sequence hands page
+    two a different slice and must not be called equivalent.
+    """
+
+    if spec.projection is None:
+        return ()
+    reported = spec.report_rows(document)
+    projected = tuple(spec.projection(model))
+    if len(projected) != len(reported):
+        return ()
+    pairs = tuple(zip(reported, projected, strict=True))
+    return tuple(
+        sorted(
+            key
+            for key in lane_row_keys(spec, document)
+            if all(
+                key in row and row[key] == rebuilt.get(key) for row, rebuilt in pairs
+            )
+        )
+    )
+
+
 def lane_unrepresented_fields(
-    spec: LaneSpec, document: Mapping[str, object]
+    spec: LaneSpec, document: Mapping[str, object], model: CanonicalModel
 ) -> tuple[str, ...]:
     """Report keys of this lane that the canonical model cannot answer."""
 
@@ -1296,6 +1348,7 @@ def lane_unrepresented_fields(
             lane_row_keys(spec, document)
             - set(spec.represented_fields)
             - set(lane_placeholder_fields(spec, document))
+            - set(lane_restored_fields(spec, document, model))
         )
     )
 
@@ -1368,7 +1421,7 @@ def compare_lane(
     """Compare one lane, refusing to answer at all without a witness."""
 
     witness = witness_state(document, spec.witness)
-    unrepresented = lane_unrepresented_fields(spec, document)
+    unrepresented = lane_unrepresented_fields(spec, document, model)
     if witness != WITNESS_DECLARED:
         # Witness before count: an undeclared family's payload is a zero
         # nobody measured, and two unmeasured sides are not equivalent.
@@ -1496,6 +1549,7 @@ __all__ = [
     "LaneSpec",
     "ProjectionCorpus",
     "WitnessRef",
+    "authority_candidate_rows",
     "build_corpus",
     "build_probe_document",
     "compare_lane",
@@ -1506,6 +1560,7 @@ __all__ = [
     "family_items",
     "family_witness",
     "lane_placeholder_fields",
+    "lane_restored_fields",
     "lane_row_keys",
     "lane_unrepresented_fields",
     "lane_witness",
