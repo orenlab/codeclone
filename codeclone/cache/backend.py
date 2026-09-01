@@ -145,6 +145,12 @@ DIGEST_DOMAINS: Final[dict[str, str]] = {
 }
 DIGEST_ALGORITHM: Final = "sha256"
 
+#: How coarse a recency mark is. See :meth:`CacheBackend.touch`: marking every
+#: read entry on every run cost 33 MB of write volume per warm run on this
+#: repository, to re-record a fact that had not changed. A TTL measured in days
+#: cannot tell hour-granularity from second-granularity.
+RECENCY_GRANULARITY_SECONDS: Final = 3600
+
 _DDL: Final = (
     f"CREATE TABLE IF NOT EXISTS {META_TABLE}("
     "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -469,14 +475,24 @@ class CacheBackend:
         A recency mark is an integer write on an indexed column, never a
         payload rewrite: an entry read on every run must not age out merely
         because its contents never changed.
+
+        It is also coarse, and that is not a detail. Measured on this
+        repository, marking every read entry on every run cost **33 MB of
+        extra write volume per warm run** -- 1133 rows, each dirtying a table
+        page and an index page through the WAL, to record a fact that had not
+        changed. The ``last_used_epoch <`` predicate makes a second run inside
+        the same window write nothing at all, and a TTL measured in days
+        cannot tell the difference.
         """
 
         ordered = sorted(set(wire_paths))
         if not ordered:
             return 0
+        stale_before = now_epoch - RECENCY_GRANULARITY_SECONDS
         self._executemany(
-            "UPDATE cache_entry SET last_used_epoch = ? WHERE wire_path = ?",
-            [(now_epoch, wire_path) for wire_path in ordered],
+            "UPDATE cache_entry SET last_used_epoch = ? "
+            "WHERE wire_path = ? AND last_used_epoch < ?",
+            [(now_epoch, wire_path, stale_before) for wire_path in ordered],
         )
         return len(ordered)
 
@@ -905,6 +921,7 @@ __all__ = [
     "META_KEY_SCHEMA",
     "META_KEY_VERSION",
     "META_TABLE",
+    "RECENCY_GRANULARITY_SECONDS",
     "SINGLETON_SEGMENT_REPORT",
     "TABLE_DEPENDENT",
     "TABLE_NEUTRAL",

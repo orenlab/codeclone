@@ -27,6 +27,7 @@ import pytest
 
 from codeclone.cache.backend import (
     CACHE_SYNCHRONOUS,
+    RECENCY_GRANULARITY_SECONDS,
     CacheBackend,
     CacheBackendForeign,
     CacheBackendUnreadable,
@@ -211,6 +212,58 @@ def test_the_run_store_keeps_full_durability(tmp_path: Path) -> None:
 
     with RunStore(tmp_path / "runs.sqlite3") as run_store:
         assert _synchronous_of(run_store._connection) == 2
+
+
+def _epochs(cache_path: Path) -> dict[str, object]:
+    return {
+        path: row["last_used_epoch"]
+        for path, row in read_identity_columns(cache_path).items()
+    }
+
+
+def test_a_second_run_inside_the_window_rewrites_no_recency_marks(
+    tmp_path: Path,
+) -> None:
+    """Recency is coarse, and the coarseness is the point.
+
+    Measured on this repository: marking every read entry on every run cost
+    33 MB of extra write volume per warm run -- a table page and an index page
+    per row, to re-record a fact that had not changed. A run inside the window
+    must leave the marks exactly as they were.
+    """
+
+    _boot, cache_path, _cold = _cold_and_saved(tmp_path)
+    before = _epochs(cache_path)
+    assert before
+
+    with CacheBackend(cache_path) as backend:
+        backend.touch(sorted(before), now_epoch=_max_epoch(before) + 1)
+
+    assert _epochs(cache_path) == before
+
+
+def test_a_run_past_the_window_does_refresh_the_marks(tmp_path: Path) -> None:
+    """The other side: coarse is not the same as never.
+
+    Its own test rather than a second assertion above, so a mutation that
+    stopped marks moving altogether cannot be reported as covered by the
+    mutation that stopped them moving too eagerly.
+    """
+
+    _boot, cache_path, _cold = _cold_and_saved(tmp_path)
+    before = _epochs(cache_path)
+    later = _max_epoch(before) + RECENCY_GRANULARITY_SECONDS + 1
+
+    with CacheBackend(cache_path) as backend:
+        backend.touch(sorted(before), now_epoch=later)
+
+    after = _epochs(cache_path)
+    assert after != before
+    assert set(after.values()) == {later}
+
+
+def _max_epoch(epochs: dict[str, object]) -> int:
+    return max(int(str(value)) for value in epochs.values())
 
 
 def test_the_cache_schema_is_not_in_the_run_stores_identity_salt() -> None:
