@@ -145,6 +145,155 @@ def take_hidden() -> object:
 }
 
 
+#: The residual class of the SAME defect: the chain passes through a plain
+#: module. ``pkg`` re-exports ``pkg.api`` through ``import *`` + its own
+#: ``__all__``, and ``pkg.api`` re-exports ``pkg.impl`` the same way. Both hops
+#: carry the ``__all__`` this wave already treats as authoritative, so the class
+#: itself resolves live - only the export chain stopped at the first hop that
+#: was not a package ``__init__``, leaving the public method of a live
+#: re-exported class asserted dead with HIGH confidence.
+_CHAINED_STAR_TREE = {
+    "pkg/__init__.py": """
+from .api import *  # noqa: F403
+
+__all__ = ["StarBoundWidget", "star_bound_helper"]
+""",
+    "pkg/api.py": """
+from .impl import *  # noqa: F403
+
+__all__ = ["StarBoundWidget", "star_bound_helper"]
+""",
+    "pkg/impl.py": _IMPL_SOURCE,
+}
+
+#: The same chain with a NAMED middle hop - the spelling a package facade most
+#: often carries. The wildcard sits only at the package boundary, so the middle
+#: module is reached wholesale and then re-exports by name.
+_CHAINED_NAMED_MIDDLE_TREE = {
+    "pkg/__init__.py": """
+from .api import *  # noqa: F403
+
+__all__ = ["StarBoundWidget", "star_bound_helper"]
+""",
+    "pkg/api.py": """
+from .impl import StarBoundWidget, star_bound_helper
+
+__all__ = ["StarBoundWidget", "star_bound_helper"]
+""",
+    "pkg/impl.py": _IMPL_SOURCE,
+}
+
+#: The ceiling of the chain rule, and the input that proves its origin guard is
+#: reachable. ``pkg.api`` re-exports ``pkg.impl`` exactly as above, but NO
+#: package ``__init__`` re-exports ``pkg.api``, so nothing carries those names
+#: to a package boundary and the public method stays dead. A rule that followed
+#: wildcard edges from anywhere - rather than from a package outward - would
+#: move this verdict.
+_UNANCHORED_CHAIN_TREE = {
+    "pkg/__init__.py": "",
+    "pkg/api.py": """
+from .impl import *  # noqa: F403
+
+__all__ = ["StarBoundWidget", "star_bound_helper"]
+""",
+    "pkg/impl.py": _IMPL_SOURCE,
+}
+
+
+#: The second ceiling: only a WILDCARD edge extends the chain. ``pkg.api``
+#: reaches ``pkg.impl`` by NAME, so ``pkg.impl`` is not re-exported wholesale
+#: and what IT imports by name never reaches the package. ``DeepWidget`` is
+#: held live by that internal use, but ``pkg.DeepWidget`` does not exist at
+#: runtime, so its public method is genuinely unreachable. A chain that walked
+#: named edges as well would root it.
+_NAMED_EDGE_CEILING_TREE = {
+    "pkg/__init__.py": """
+from .api import *  # noqa: F403
+
+__all__ = ["StarBoundWidget"]
+""",
+    "pkg/api.py": """
+from .impl import StarBoundWidget
+
+__all__ = ["StarBoundWidget"]
+""",
+    "pkg/impl.py": """
+from .deep import DeepWidget
+
+
+class StarBoundWidget:
+    def render_panel(self) -> str:
+        return DeepWidget().identify()
+""",
+    "pkg/deep.py": """
+class DeepWidget:
+    def identify(self) -> str:
+        return "deep"
+
+    def render_deep(self) -> str:
+        return "never reached from the package"
+""",
+}
+
+
+#: The third ceiling, measured on ``qutip``: a module the chain REACHED carries
+#: only what put it on the chain. ``pkg.api`` is reached by a wildcard, which
+#: skips underscore names, so its private named import is not an export - while
+#: a package ``__init__`` doing the same import really does bind ``pkg._Hidden``
+#: and keeps its pre-existing treatment.
+_PRIVATE_IMPORT_ON_THE_CHAIN_TREE = {
+    "pkg/__init__.py": """
+from .api import *  # noqa: F403
+
+__all__ = ["StarBoundWidget"]
+""",
+    "pkg/api.py": """
+from ._private import _Hidden
+from .impl import StarBoundWidget
+
+__all__ = ["StarBoundWidget"]
+
+
+def build_hidden() -> _Hidden:
+    return _Hidden()
+""",
+    "pkg/impl.py": """
+class StarBoundWidget:
+    def render_panel(self) -> str:
+        return "panel"
+""",
+    "pkg/_private.py": """
+class _Hidden:
+    def secret_method(self) -> str:
+        return "secret"
+""",
+}
+
+
+#: Two re-exporters, one target: the chain must converge rather than walk the
+#: same module twice. A diamond is the ordinary shape of a package facade, and
+#: it is also the input that reaches the "already on the chain" arm of the walk.
+_DIAMOND_CHAIN_TREE = {
+    "pkg/__init__.py": """
+from .left import *  # noqa: F403
+from .right import *  # noqa: F403
+
+__all__ = ["StarBoundWidget", "star_bound_helper"]
+""",
+    "pkg/left.py": """
+from .impl import *  # noqa: F403
+
+__all__ = ["StarBoundWidget"]
+""",
+    "pkg/right.py": """
+from .impl import *  # noqa: F403
+
+__all__ = ["star_bound_helper"]
+""",
+    "pkg/impl.py": _IMPL_SOURCE,
+}
+
+
 def _write_tree(root: Path, tree: dict[str, str]) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     for name, source in tree.items():
@@ -286,3 +435,102 @@ def test_package_without_wildcard_keeps_its_dead_public_method(
 
     assert "pkg.impl:LocalOnlyWidget" not in dead
     assert "pkg.impl:LocalOnlyWidget.render_local" in dead
+
+
+def test_chained_reexport_through_a_plain_module_keeps_public_methods_live(
+    tmp_path: Path,
+) -> None:
+    """The residual of the measured class, stated as a rule.
+
+    The re-exporting hop being a package ``__init__`` rather than a plain
+    module is a spelling, not a fact about the API: both chains bind
+    ``pkg.StarBoundWidget`` at runtime. Deciding liveness by the spelling is
+    what produced a high-confidence assertion that live public API is dead.
+    """
+
+    for tree, name in (
+        (_CHAINED_STAR_TREE, "chainstar"),
+        (_CHAINED_NAMED_MIDDLE_TREE, "chainnamed"),
+    ):
+        dead = _dead_qualnames(tmp_path, tree, name)
+
+        assert "pkg.impl:StarBoundWidget" not in dead, name
+        assert "pkg.impl:StarBoundWidget.render_panel" not in dead, name
+
+
+def test_chained_reexport_still_reports_what_the_chain_omits(
+    tmp_path: Path,
+) -> None:
+    """The opposite ditch of the same edit.
+
+    Following the chain one hop further must not become "every symbol of every
+    module the chain touches is live": the names the chain never carries stay
+    dead, class, method and function alike.
+    """
+
+    for tree, name in (
+        (_CHAINED_STAR_TREE, "chainstar"),
+        (_CHAINED_NAMED_MIDDLE_TREE, "chainnamed"),
+    ):
+        dead = _dead_qualnames(tmp_path, tree, name)
+
+        assert "pkg.impl:UnexportedWidget" in dead, name
+        assert "pkg.impl:UnexportedWidget.render_hidden" in dead, name
+        assert "pkg.impl:unexported_helper" in dead, name
+
+
+def test_reexport_chain_is_anchored_at_the_package_boundary(
+    tmp_path: Path,
+) -> None:
+    """The origin guard, proven reachable by an input that trips it.
+
+    ``pkg.api`` re-exports the class exactly as the chained trees do, and its
+    own ``__all__`` still holds the class live - but no package ``__init__``
+    carries those names outward, so the public method is genuinely unreachable
+    and must stay dead.
+    """
+
+    dead = _dead_qualnames(tmp_path, _UNANCHORED_CHAIN_TREE, "unanchored")
+
+    assert "pkg.impl:StarBoundWidget" not in dead
+    assert "pkg.impl:StarBoundWidget.render_panel" in dead
+
+
+def test_reexport_chain_walks_wildcard_edges_only(tmp_path: Path) -> None:
+    """The chain carries a NAMESPACE, and only ``import *`` carries one.
+
+    A named import binds one name for the importing module's own use. Treating
+    it as a chain hop would root what a module merely consumes, which is the
+    "hundreds of new false positives" ditch this wave has to stay out of.
+    """
+
+    dead = _dead_qualnames(tmp_path, _NAMED_EDGE_CEILING_TREE, "namededge")
+
+    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
+    assert "pkg.deep:DeepWidget.render_deep" in dead
+
+
+def test_reached_module_does_not_reexport_its_private_imports(
+    tmp_path: Path,
+) -> None:
+    """The ``qutip`` measurement, stated as a rule.
+
+    ``_Hidden`` is live - ``pkg.api`` builds one - but ``pkg._Hidden`` does not
+    exist, because the wildcard that put ``pkg.api`` on the chain never binds an
+    underscore name. Rooting its methods would retire a true finding, which is
+    the same error as the defect, pointed the other way.
+    """
+
+    dead = _dead_qualnames(tmp_path, _PRIVATE_IMPORT_ON_THE_CHAIN_TREE, "privchain")
+
+    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
+    assert "pkg._private:_Hidden.secret_method" in dead
+
+
+def test_reexport_chain_converges_on_a_shared_target(tmp_path: Path) -> None:
+    """A diamond is one chain, not two, and it still reports what it omits."""
+
+    dead = _dead_qualnames(tmp_path, _DIAMOND_CHAIN_TREE, "diamond")
+
+    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
+    assert "pkg.impl:UnexportedWidget.render_hidden" in dead

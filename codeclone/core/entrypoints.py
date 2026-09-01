@@ -153,11 +153,15 @@ def collect_project_export_root_qualnames(
 def _wildcard_reexported_classes(
     *,
     module_deps: Sequence[ModuleDep],
-    package_modules: set[str],
+    reexporting_modules: frozenset[str],
     dead_candidates: Sequence[DeadCandidate],
     referenced_qualnames: frozenset[str],
 ) -> set[str]:
-    """Classes a package re-exports through ``from <target> import *``.
+    """Classes a re-exporter carries out through ``from <target> import *``.
+
+    The sources are the re-export frontier, not only the package ``__init__``
+    files on it: a wildcard edge re-exports whatever the next module holds, so
+    the chain does not end where the package directory does.
 
     A wildcard names no symbol, so the named export chain sees only
     ``target:*`` and roots nothing - which is how a package spelled with
@@ -175,7 +179,7 @@ def _wildcard_reexported_classes(
     wildcard_targets = {
         dependency.target
         for dependency in module_deps
-        if dependency.source in package_modules
+        if dependency.source in reexporting_modules
         and dependency.target
         and "*" in dependency.requested_names
     }
@@ -187,6 +191,44 @@ def _wildcard_reexported_classes(
         and candidate.qualname.partition(":")[0] in wildcard_targets
         and candidate.qualname in referenced_qualnames
     }
+
+
+def _reexporting_modules(
+    *,
+    module_deps: Sequence[ModuleDep],
+    package_modules: set[str],
+) -> frozenset[str]:
+    """The re-export frontier: from the package boundary outward along ``*``.
+
+    A package ``__init__`` re-exports what it imports - the declared Y2 rule.
+    ``from <target> import *`` carries the target's whole public namespace, so
+    a module the chain reached through such an edge re-exports on exactly the
+    same terms, and its own imports carry those names one hop further.
+
+    Stopping at the first non-package hop let the SPELLING of the intermediary
+    decide the verdict: a subpackage ``__init__`` kept the export alive, while
+    a plain module in the same position left the public method of the same live
+    re-exported class asserted dead with high confidence.
+
+    Only a wildcard edge extends the chain. A named import into a plain module
+    binds one name for that module's own use; it re-exports only once something
+    carries that module's namespace outward, which is the wildcard edge this
+    walk follows. A repository whose packages hold no wildcard re-export gets
+    ``package_modules`` back unchanged, so this owner cannot move a verdict
+    outside the construction it is about.
+    """
+    wildcard_edges: dict[str, set[str]] = {}
+    for dependency in module_deps:
+        if dependency.target and "*" in dependency.requested_names:
+            wildcard_edges.setdefault(dependency.source, set()).add(dependency.target)
+    reached = set(package_modules)
+    frontier = sorted(reached)
+    while frontier:
+        for target in sorted(wildcard_edges.get(frontier.pop(), ())):
+            if target not in reached:
+                reached.add(target)
+                frontier.append(target)
+    return frozenset(reached)
 
 
 def collect_project_export_root_evidence(
@@ -214,16 +256,29 @@ def collect_project_export_root_evidence(
             and identity.is_package
         )
     }
-    # The export chain is a set of NAMES, not a set of modules: a package
+    reexporting_modules = _reexporting_modules(
+        module_deps=module_deps,
+        package_modules=package_modules,
+    )
+    # The export chain is a set of NAMES, not a set of modules: a re-exporting
     # module re-exports the symbols it names in the import (which is also what
     # its ``__all__`` lists). Widening this to "every symbol living in a module
-    # some package imports" would root any class the project happens to
+    # some re-exporter imports" would root any class the project happens to
     # reference from anywhere - including one only a sibling module imports.
+    #
+    # A package ``__init__`` carries every name it imports, underscore included:
+    # ``pkg._Private`` genuinely exists after ``from ._x import _Private``. A
+    # module the chain merely REACHED carries only what put it on the chain -
+    # a wildcard edge, which skips underscore names - so its private imports
+    # are filtered out. Measured on ``qutip``: without this split the chain
+    # rooted the methods of ``_SolverOptions``, a private class no wildcard
+    # ever binds, and silently retired a true finding.
     exported_names = {
         f"{dependency.target}:{name}"
         for dependency in module_deps
-        if dependency.source in package_modules and dependency.target
+        if dependency.source in reexporting_modules and dependency.target
         for name in dependency.requested_names
+        if dependency.source in package_modules or not name.startswith("_")
     }
     exported_classes = {
         candidate.qualname
@@ -231,7 +286,7 @@ def collect_project_export_root_evidence(
         if candidate.kind == "class" and candidate.qualname in exported_names
     } | _wildcard_reexported_classes(
         module_deps=module_deps,
-        package_modules=package_modules,
+        reexporting_modules=reexporting_modules,
         dead_candidates=dead_candidates,
         referenced_qualnames=referenced_qualnames,
     )
