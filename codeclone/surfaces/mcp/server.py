@@ -30,6 +30,7 @@ from ...observability import (
     shutdown,
     span,
 )
+from ._protocol_diagnostics import diagnosing_server_class
 from .auth import (
     MCP_AUTH_TOKEN_ENV,
     MCPAuthConfigurationError,
@@ -280,11 +281,13 @@ def _load_mcp_runtime() -> tuple[
     ToolAnnotations,
 ]:
     try:
-        from mcp.server.fastmcp import FastMCP as imported_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
+
+        # The schema rejects a wrongly typed argument above every handler, so
+        # the only seam that can diagnose one is the tool-call boundary itself.
+        runtime_fastmcp: type[FastMCP] = diagnosing_server_class()
     except ImportError as exc:
         raise MCPDependencyError(mcp_instructions.MCP_INSTALL_HINT) from exc
-    runtime_fastmcp: type[FastMCP] = imported_fastmcp
     return (
         runtime_fastmcp,
         runtime_tool_annotations(
