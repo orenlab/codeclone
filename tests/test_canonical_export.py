@@ -118,21 +118,20 @@ _TARGET = "worktree-a"
 # ADDITION to the stored membership, so the run identity legitimately
 # moves with it, and the projection bytes move the artifact digest.
 #
-# TWO INDEPENDENT CAUSES then moved these literals inside one rebase, and
-# the merged values are neither side's.  Both are named here because a
-# single number with two grounds is a number the next reader cannot audit.
+# FOUR INDEPENDENT CAUSES have now moved these literals, and the value below
+# is none of their individual results.  Every one is named because a single
+# number with several grounds is a number the next reader cannot audit.
 #
 # (a) STORAGE_SCHEMA_REVISION "0" -> "1" (the persisted identity bridge)
-#     moves the RUN literal and leaves the ARTIFACT literal exactly where it
-#     was.  That asymmetry is the measurement, not an accident: the revision
-#     is spelled into ``_DOMAIN_PREFIX``, so it reaches the run identity
+#     moved the RUN literal and left the ARTIFACT literal exactly where it
+#     was.  That asymmetry was the measurement, not an accident: the revision
+#     WAS spelled into ``_DOMAIN_PREFIX``, so it reached the run identity
 #     through THREE separate preimages -- every object id, the scope receipt
 #     and the membership digest, and the run domain itself -- while the
 #     artifact digest is built over the projected wire bytes under its own
-#     ``cc-canonical-artifact:`` domain and never sees the storage layer.
-#     ``test_the_storage_revision_is_inside_every_store_content_address`` in
-#     tests/test_canonical_store.py holds that derivation as an executable
-#     rule rather than a comment.
+#     ``cc-canonical-artifact:`` domain and never sees the store's domain.
+#     (d) below is what ended that relation; the pins that hold its two
+#     halves are named there.
 #
 # (b) The violation ``locations`` column moves BOTH literals.  It is a
 #     semantic ADDITION to a stored row, not a re-projection: the ONE
@@ -141,23 +140,52 @@ _TARGET = "worktree-a"
 #     object's payload changed under the authority_analysis namespace --
 #     which moves the stored membership AND the exported bytes.
 #
-# (c) A third movement inside the same commit, and it is NOT part of the
-#     merge: the wire fixture's unresolved location was re-spelled to
-#     ``../outside/x.py`` so the mixed-variant pair sorts differently under
-#     the shipped key than under a tag-first one.  That changes the fixture,
-#     so it changes both literals again.
+# (c) A third movement inside the locations commit: the wire fixture's
+#     unresolved location was re-spelled to ``../outside/x.py`` so the
+#     mixed-variant pair sorts differently under the shipped key than under
+#     a tag-first one.  That changes the fixture, so it changes both
+#     literals again.
 #
-# Neither side's literal survives the merge, and the values below were
-# RE-DERIVED by running the generator on the merged tree, never chosen from
-# one side.  Measured separately so every addend stays auditable:
+# (d) RULING-2026-09-01 split the store container generation from the
+#     canonical object identity.  It moves the RUN literal and leaves the
+#     ARTIFACT literal untouched -- the same asymmetry (a) predicts, for the
+#     same reason, and the second measurement of it.  (d) has two candidate
+#     grounds and they were measured APART, not summed:
+#
+#     (d1) taking STORAGE_SCHEMA_REVISION out of the glue and putting
+#          CANONICAL_OBJECT_IDENTITY_VERSION in its place, spelling
+#          unchanged, reproduces the (a)+(b)+(c) literal byte for byte --
+#          the identity contract's first generation is "1" and the storage
+#          revision was "1", so this step moves NOTHING.  Adding the
+#          ``canonical_object_identity`` witness layer moves nothing here
+#          either: its role is not ``analysis``, so it never enters the
+#          layer list ``_run_id`` joins.  That intermediate measurement is
+#          the proof the basis is not double-counted.
+#     (d2) renaming the separator ``cc-run-store:`` -> ``cc-object-identity:``
+#          is the whole of (d).  The rename is not cosmetic: the old
+#          spelling's generation space is already burned by two storage
+#          revisions, so identity generation N and storage generation N
+#          would be the same bytes and no evidence carrying them could name
+#          the contract that produced it.
+#
+# Neither side's literal survives a merge of these causes, and the values
+# below were RE-DERIVED by running the locations wave's generator on the
+# merged tree, never chosen from one side.  Measured separately so every
+# addend stays auditable:
 #   base ffe371ec .............. run ab16ae72…  artifact 5c4910e2…
 #   (a) alone, c3c59f69 ........ run ae97942b…  artifact 5c4910e2… (unmoved)
 #   (b) alone, df6c3eed ........ run 6a49bb6b…  artifact a9bca26a…
 #   (a)+(b), merged ............ run 59bc02f6…  artifact a9bca26a… (unmoved
 #                                by (a), which never reaches the artifact
 #                                domain — the asymmetry (a) predicts)
-#   (a)+(b)+(c), this commit ... the literals below
-_FIXTURE_RUN_ID = "d9fc71f1147c9d6a16163495a80a56a3f3fe8bc7f44c99e3263cbe56e51c5f5a"
+#   (a)+(b)+(c), 7cd711d6 ...... run d9fc71f1…  artifact 86eea25d…
+#   +(d1) salt removal ......... run d9fc71f1…  artifact 86eea25d… (BOTH
+#                                unmoved: (d1) contributes zero bytes)
+#   +(d2) separator rename ..... run f4bd11bd… — the literals below; the
+#                                artifact stays at 86eea25d…, so (d) touched
+#                                the run identity and nothing in the
+#                                projection, and (d1)+(d2) is one basis
+_FIXTURE_RUN_ID = "f4bd11bde7c43551b1855b9f324f7dc8b077aaeec843d5cf0cb194a836dcd62f"
 _FIXTURE_ARTIFACT = "86eea25dc5e94d0788d7ea3abeb4df94f0757a10c6549f07a784b86e3fe4be3f"
 
 
@@ -309,7 +337,12 @@ def test_export_envelope_witness_is_read_from_the_store(tmp_path: Path) -> None:
             )
         ]
     assert [(w.layer, w.revision, w.role) for w in envelope.witness] == stored
-    assert {w.role for w in envelope.witness} == {"analysis", "projection", "storage"}
+    assert {w.role for w in envelope.witness} == {
+        "analysis",
+        "identity",
+        "projection",
+        "storage",
+    }
 
 
 # -- Envelope verification ---------------------------------------------------

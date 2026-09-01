@@ -122,16 +122,19 @@ def test_scope_receipt_known_answer() -> None:
             _DOMAIN_SCOPE + _payload_bytes(sorted(_SCOPE_PATHS))
         ).hexdigest()
     )
-    # The domain separator carries ``STORAGE_SCHEMA_REVISION``, so this
-    # literal moves exactly when that constant moves and never otherwise --
-    # which is what makes it a known ANSWER rather than a snapshot.  It was
-    # 23f3aa7e… under revision "0"; re-derived outside this process for
-    # revision "1" from the stated basis alone (sha256 of
-    # b"cc-run-store:1\x00scope\x00" || the compact JSON of the sorted
-    # paths), the same recipe reproduces 23f3aa7e… when "1" is put back to
-    # "0".  The RULE half above did not move at all.
+    # The domain separator carries ``CANONICAL_OBJECT_IDENTITY_VERSION`` and
+    # nothing else, so this literal moves exactly when the semantic preimage
+    # generation moves and never otherwise -- which is what makes it a known
+    # ANSWER rather than a snapshot.  It read 23f3aa7e… while the separator
+    # spelled STORAGE_SCHEMA_REVISION "0", 05d281af… while it spelled "1", and
+    # f8e91db1… since RULING-2026-09-01 took the storage revision out of the
+    # glue.  Re-derived outside this process from the stated basis alone
+    # (sha256 of b"cc-object-identity:1\x00scope\x00" || the compact JSON of
+    # the sorted paths).  The one thing that did NOT move across all three is
+    # the RULE half above: a container generation may not move a semantic
+    # address, and after the split it cannot.
     assert actual == (
-        "05d281af57f692c704951d7f9ae94d302af25d6f83e59e9f4f77b411bbf6302f"
+        "f8e91db19aebea20fbe36e2462e430d833428f3345e44980e4632bbe26a11192"
     )
 
 

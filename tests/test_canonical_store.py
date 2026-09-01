@@ -15,11 +15,12 @@ the same canonical bytes.
 from __future__ import annotations
 
 import ast
+import json
 import os
 import sqlite3
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -179,94 +180,276 @@ def test_law6_identity_and_bytes_are_hash_seed_independent() -> None:
     assert len(set(observed)) == 1, observed
 
 
-#: The run identity this fixture had while STORAGE_SCHEMA_REVISION was "0",
-#: kept as history rather than as a live expectation: the test below is the
-#: only thing that may still produce it, and only by putting the revision back.
-#:
-#: It moved once already, and NOT because the revision moved: the violation
-#: ``locations`` column changed every violation object's payload, so the
-#: fixture's revision-"0" identity became a different hash while the rule
-#: below stayed exactly the same.  Git merged this file without a conflict
-#: while the constant in it went stale — a semantic collision, not a textual
-#: one — so the value here is RE-DERIVED, never carried over.  Two
-#: independent derivations agree on it: the substitution the test below
-#: performs on the merged tree, and a real tree that still had
-#: STORAGE_SCHEMA_REVISION "0" with the column already present.
-_REVISION_0_RUN_ID = "e829cd438ffeca3ffa495777cb3c719ddbfdc4f7a95cfcf2902ab327dacc0303"
+# ---------------------------------------------------------------------------
+# The two independent contracts (RULING-2026-09-01).  Storage physics answers
+# "can this process open and migrate this SQLite container"; the canonical
+# object identity answers "by which semantic preimage is an object addressed".
+# They are pinned by two SEPARATE tests below, one per direction, because a
+# single test that asserted both would stay green if the two contracts were
+# re-merged under one constant.
+#
+# Both children bump a contracts constant AT THE SOURCE -- the module
+# attribute, before ``codeclone.canonical.store`` is first imported -- so the
+# substitution reaches every use site the production module has, including the
+# module-level separator glue that a ``monkeypatch.setattr`` on an already-
+# imported ``Final`` cannot touch.
+# ---------------------------------------------------------------------------
+
+#: The separator rule, spelled here independently of the production constant
+#: so a pin can check the live spelling before substituting anything.
+_STORE_DOMAINS: tuple[tuple[str, bytes], ...] = (
+    ("_DOMAIN_PREFIX", b""),
+    ("_DOMAIN_OBJECT", b"object\x00"),
+    ("_DOMAIN_RUN", b"run\x00"),
+    ("_DOMAIN_SCOPE", b"scope\x00"),
+    ("_DOMAIN_MEMBERSHIP", b"membership\x00"),
+    ("_DOMAIN_CONTRACT_EPOCH", b"contract-epoch\x00"),
+)
+
+#: The separator spelling of the generation that salted every content address
+#: with ``STORAGE_SCHEMA_REVISION``.  Kept as history: no live code may
+#: produce it, and the migration pin below is the only thing that still does.
+_PRIOR_GENERATION_PREFIX = b"cc-run-store:1\x00"
+
+_GENERATION_CHILD = """
+import json, pathlib, sqlite3, sys, tempfile
+
+import codeclone.contracts as contracts
+
+for name, value in json.loads(sys.argv[1]).items():
+    if not hasattr(contracts, name):
+        raise SystemExit("unknown contract constant: " + name)
+    setattr(contracts, name, value)
+
+assert "codeclone.canonical.store" not in sys.modules, "store imported too early"
+
+from codeclone.canonical import RunStore
+from tests.test_canonical_roundtrip import fixture_model
+
+with tempfile.TemporaryDirectory() as directory:
+    path = pathlib.Path(directory) / "runs.sqlite"
+    with RunStore(path) as store:
+        receipt = store.write_full_run(
+            fixture_model(), namespace="gen", target="head", expected_generation=0
+        )
+    with sqlite3.connect(path) as connection:
+        objects = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT object_id FROM objects ORDER BY object_id"
+            )
+        ]
+        membership = str(
+            connection.execute("SELECT membership_digest FROM runs").fetchone()[0]
+        )
+        meta = connection.execute(
+            "SELECT storage_schema_revision, contract_epoch FROM store_meta"
+        ).fetchone()
+
+print(json.dumps({
+    "run_id": receipt.run_id,
+    "scope": receipt.analysis_scope_digest,
+    "membership": membership,
+    "objects": objects,
+    "storage_revision": str(meta[0]),
+    "contract_epoch": str(meta[1]),
+}))
+"""
 
 
-def test_the_storage_revision_is_inside_every_store_content_address(
+@dataclass(frozen=True, slots=True)
+class _Generation:
+    """One published fixture, read back through the store's own tables."""
+
+    run_id: str
+    scope: str
+    membership: str
+    objects: tuple[str, ...]
+    storage_revision: str
+    contract_epoch: str
+
+
+def _generation(**overrides: str) -> _Generation:
+    """Publish the fixture in a fresh interpreter under bumped constants."""
+    completed = subprocess.run(
+        (sys.executable, "-c", _GENERATION_CHILD, json.dumps(overrides)),
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = json.loads(completed.stdout)
+    return _Generation(
+        run_id=str(payload["run_id"]),
+        scope=str(payload["scope"]),
+        membership=str(payload["membership"]),
+        objects=tuple(str(value) for value in payload["objects"]),
+        storage_revision=str(payload["storage_revision"]),
+        contract_epoch=str(payload["contract_epoch"]),
+    )
+
+
+def test_a_storage_schema_bump_moves_the_container_and_no_content_address() -> None:
+    """Container side: DDL generation moves, semantic addresses do not.
+
+    ``STORAGE_SCHEMA_REVISION`` answers one question -- may this process open
+    this SQLite file -- and a bridge table, an index or a layout change is a
+    legitimate reason to move it.  Measured 2026-09-01 on the first bump the
+    constant ever took ("0" -> "1", the persisted identity bridge): it was
+    spelled into ``_DOMAIN_PREFIX``, so a pure container change reset every
+    object id, the scope receipt, the membership digest and the run identity
+    -- the analysis semantics moved without a single fact changing.
+
+    The reachability half is load-bearing in its own right: the bump is
+    proven to have REACHED the container (the stored revision and the fenced
+    contract epoch both move), so the invariance below is the measured
+    silence of a guard that fired, not the silence of an input that never
+    arrived.
+    """
+    baseline = _generation()
+    bumped = _generation(STORAGE_SCHEMA_REVISION="99")
+
+    # Reachable input: the bump really is a container-generation change.
+    assert baseline.storage_revision == STORAGE_SCHEMA_REVISION
+    assert bumped.storage_revision == "99"
+    assert bumped.contract_epoch != baseline.contract_epoch
+
+    # ... and it reaches no semantic address.
+    assert baseline.objects
+    assert bumped.objects == baseline.objects
+    assert bumped.scope == baseline.scope
+    assert bumped.membership == baseline.membership
+    assert bumped.run_id == baseline.run_id
+
+
+def test_a_canonical_object_identity_bump_moves_every_content_address() -> None:
+    """Identity side: the semantic preimage generation owns the addresses.
+
+    ``CANONICAL_OBJECT_IDENTITY_VERSION`` answers the other question -- by
+    which preimage is an object addressed -- and it is what the logical key,
+    the family namespace, the witnesses and the canonical payload move with.
+    Every store content address must move with it, and the container
+    generation must not.
+
+    The live separators are re-derived from the rule BEFORE anything is
+    substituted.  A pin that hand-feeds its own separators measures its own
+    substitution: that is exactly how the previous wave's pin was found
+    hollow (mutant m11, 2026-09-01) -- dropping the constant out of
+    ``_DOMAIN_PREFIX`` altogether left it green.
+    """
+    import codeclone.canonical.store as store_module
+    from codeclone.contracts import CANONICAL_OBJECT_IDENTITY_VERSION
+
+    live = f"cc-object-identity:{CANONICAL_OBJECT_IDENTITY_VERSION}\x00".encode()
+    for name, suffix in _STORE_DOMAINS:
+        assert getattr(store_module, name) == live + suffix, name
+
+    baseline = _generation()
+    bumped = _generation(CANONICAL_OBJECT_IDENTITY_VERSION="99")
+
+    # Every single address moved -- not merely the set as a whole.
+    assert baseline.objects
+    assert frozenset(bumped.objects).isdisjoint(frozenset(baseline.objects))
+    assert bumped.scope != baseline.scope
+    assert bumped.membership != baseline.membership
+    assert bumped.run_id != baseline.run_id
+
+    # The container generation is not dragged along by a semantic bump.
+    assert bumped.storage_revision == baseline.storage_revision
+
+
+def test_the_contract_epoch_separator_is_owned_by_the_identity_prefix() -> None:
+    """Which contract owns the FENCE separator — measured, not assumed.
+
+    ``_DOMAIN_CONTRACT_EPOCH`` is the one domain here that addresses nothing:
+    no object, no run and no receipt is named by it.  It separates the store's
+    generation fence, whose preimage already joins EVERY witness layer.  Its
+    separator nevertheless descends from ``_DOMAIN_PREFIX``, so the identity
+    contract owns it today: an identity bump reaches the epoch twice (through
+    the separator AND through the layer list) while a storage bump reaches it
+    once, through the list alone.
+
+    This pin is the derivation, not a verdict.  Whether a container fence
+    should carry a semantic generation at all is the layer owner's decision
+    and is deliberately left open.  What may not happen again is that the
+    relation lives only in a comment: that is exactly how the storage revision
+    got inside every content address and stayed there for a whole generation.
+    """
+    import codeclone.canonical.store as store_module
+    from codeclone.contracts import CANONICAL_OBJECT_IDENTITY_VERSION
+
+    identity_rule = f"cc-object-identity:{CANONICAL_OBJECT_IDENTITY_VERSION}\x00"
+    storage_rule = f"cc-run-store:{STORAGE_SCHEMA_REVISION}\x00"
+    suffix = b"contract-epoch\x00"
+
+    # Owned by the identity prefix, and provably not by the storage rule --
+    # the second half is what reds if the split is reverted wholesale.
+    epoch = store_module._DOMAIN_CONTRACT_EPOCH
+    assert epoch == identity_rule.encode() + suffix
+    assert epoch != storage_rule.encode() + suffix
+    assert epoch == store_module._DOMAIN_PREFIX + suffix
+
+    # Reachable input for BOTH owners: neither bump is silent on the fence.
+    baseline = _generation()
+    assert _generation(CANONICAL_OBJECT_IDENTITY_VERSION="99").contract_epoch != (
+        baseline.contract_epoch
+    )
+    assert _generation(STORAGE_SCHEMA_REVISION="99").contract_epoch != (
+        baseline.contract_epoch
+    )
+
+
+def test_a_prior_generation_store_file_is_refused_not_reopened(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The measured relation between the storage layer and run identity.
+    """The migration rule: a file whose addresses carry the storage revision
+    inside them may not be reopened as if its addresses were compatible.
 
-    ``_WITNESS_LAYERS`` gives ``storage_schema`` the ``storage`` ROLE, which
-    keeps it out of the analysis-layer list that ``_run_id`` joins into its
-    preimage -- and that is the whole of what the role does.  The revision is
-    also spelled into ``_DOMAIN_PREFIX``, and every store content address is
-    built on a separator derived from it, so moving the revision moves every
-    object id, the scope receipt, the membership digest and the run identity
-    together.  Measured on 2026-09-01 by the first bump this constant ever
-    took ("0" -> "1"): the fixture run identity moved.
+    Admissible outcomes are a typed regeneration, a typed refusal, or the
+    next storage generation.  What is forbidden is a silent open.  The
+    refusal here is structural rather than advisory: the identity version is
+    a witness layer, so a file written before the split simply does not
+    declare it, and law 7 refuses the stored generation at open -- before a
+    single address is read back.
 
-    This pin is the DERIVATION, not a constant.  It puts the revision back
-    through the five separators and the witness layer and requires the
-    historical identity to come back byte for byte -- so it survives every
-    future bump, reds if the revision stops reaching the addresses, and reds
-    if the addressing rule itself is rewritten.  Without it the relation
-    lives only in a comment, and the comment already said the opposite.
-
-    It is deliberately NOT an assertion that the relation is right.  Whether
-    a storage-schema bump SHOULD reset the analysis identities is a design
-    question for the layer's owner; what may not happen is that the answer
-    stays unmeasured.
-
-    The first draft of this pin handed the revision-"0" separators in by
-    hand and MEASURED AS HOLLOW (mutant m11, 2026-09-01): taking the
-    revision back out of ``_DOMAIN_PREFIX`` altogether left it green,
-    because it never read the production spelling at all.  The prefixes are
-    therefore re-derived from the rule below and checked against the live
-    constants first; only then is the revision substituted.
+    The first half measures WHY that matters, and doubles as this pin's
+    mutation guard: the prior generation's addresses are disjoint from the
+    ones this process computes for the same model.  Put the storage revision
+    back into the separator and the two sets coincide, which reds here.
     """
-
     import codeclone.canonical.store as store_module
 
-    def prefix(revision: str) -> bytes:
-        """The separator rule, spelled independently of the constant."""
-        return f"cc-run-store:{revision}\x00".encode()
-
-    domains = (
-        ("_DOMAIN_PREFIX", b""),
-        ("_DOMAIN_OBJECT", b"object\x00"),
-        ("_DOMAIN_RUN", b"run\x00"),
-        ("_DOMAIN_SCOPE", b"scope\x00"),
-        ("_DOMAIN_MEMBERSHIP", b"membership\x00"),
-        ("_DOMAIN_CONTRACT_EPOCH", b"contract-epoch\x00"),
-    )
-    # The load-bearing half: every store separator really is built on the
-    # revision.  Drop it from the prefix and this reds before anything is
-    # published, which is precisely what the hand-fed version could not do.
-    live = prefix(STORAGE_SCHEMA_REVISION)
-    for name, suffix in domains:
-        assert getattr(store_module, name) == live + suffix, name
-    assert prefix("0") != live, "the substitution below must change something"
-
-    with _store(tmp_path, "current.sqlite") as store:
-        current = _publish(store, fixture_model()).run_id
-    assert current != _REVISION_0_RUN_ID
-
-    for name, suffix in domains:
-        monkeypatch.setattr(store_module, name, prefix("0") + suffix)
+    for name, suffix in _STORE_DOMAINS:
+        monkeypatch.setattr(store_module, name, _PRIOR_GENERATION_PREFIX + suffix)
     monkeypatch.setattr(
         store_module,
         "_WITNESS_LAYERS",
         tuple(
-            (layer, "0" if layer == "storage_schema" else revision, role)
-            for layer, revision, role in store_module._WITNESS_LAYERS
+            layer
+            for layer in store_module._WITNESS_LAYERS
+            if layer[0] != "canonical_object_identity"
         ),
     )
-    with _store(tmp_path, "revision0.sqlite") as store:
-        assert _publish(store, fixture_model()).run_id == _REVISION_0_RUN_ID
+    path = tmp_path / "prior.sqlite"
+    with _store(tmp_path, "prior.sqlite") as store:
+        _publish(store, fixture_model())
+    monkeypatch.undo()
+
+    with sqlite3.connect(path) as connection:
+        prior_addresses = frozenset(
+            str(row[0]) for row in connection.execute("SELECT object_id FROM objects")
+        )
+    with _store(tmp_path, "current.sqlite") as store:
+        _publish(store, fixture_model())
+    with sqlite3.connect(tmp_path / "current.sqlite") as connection:
+        current_addresses = frozenset(
+            str(row[0]) for row in connection.execute("SELECT object_id FROM objects")
+        )
+    assert prior_addresses and current_addresses
+    assert prior_addresses.isdisjoint(current_addresses)
+
+    with pytest.raises(StoreCompatibilityError, match="canonical_object_identity"):
+        RunStore(path)
 
 
 def test_storage_payload_bytes_ignore_mapping_key_order() -> None:

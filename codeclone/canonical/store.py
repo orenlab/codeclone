@@ -160,6 +160,7 @@ from codeclone.contracts import (
     AUTHORITY_ANALYSIS_REVISION,
     BASELINE_FINGERPRINT_VERSION,
     CANONICAL_MODEL_REVISION,
+    CANONICAL_OBJECT_IDENTITY_VERSION,
     CANONICAL_WIRE_REVISION,
     COMPLEXITY_ALGORITHM_REVISION,
     CONTRACT_IR_VERSION,
@@ -186,7 +187,15 @@ from codeclone.utils.sqlite_store import open_sqlite_db
 
 _RowT = TypeVar("_RowT")
 
-_DOMAIN_PREFIX: Final = f"cc-run-store:{STORAGE_SCHEMA_REVISION}\x00".encode()
+# Every store content address descends from this separator, and the ONLY
+# generation spelled into it is the semantic one: physics may not move
+# semantics (RULING-2026-09-01).  The spelling names the contract it
+# carries, because the old ``cc-run-store:`` generation space is already
+# burned by two storage revisions -- reusing it would make identity
+# generation N and storage generation N the same bytes.
+_DOMAIN_PREFIX: Final = (
+    f"cc-object-identity:{CANONICAL_OBJECT_IDENTITY_VERSION}\x00".encode()
+)
 _DOMAIN_OBJECT: Final = _DOMAIN_PREFIX + b"object\x00"
 _DOMAIN_RUN: Final = _DOMAIN_PREFIX + b"run\x00"
 _DOMAIN_SCOPE: Final = _DOMAIN_PREFIX + b"scope\x00"
@@ -198,22 +207,30 @@ _DOMAIN_CONTRACT_EPOCH: Final = _DOMAIN_PREFIX + b"contract-epoch\x00"
 # layer (wire revision) does not, and a projection revision therefore never
 # reaches back into semantic run identity (brief §5).
 #
-# ``storage`` is out of that LIST and, measured 2026-09-01 on the first bump
-# this constant ever took, is NOT out of the identity: STORAGE_SCHEMA_REVISION
-# is spelled into ``_DOMAIN_PREFIX`` below, so it sits inside every object id,
-# the scope receipt, the membership digest and the run domain — a bump resets
-# all four.  The role split is what keeps the layer out of the joined list;
-# it was never what kept it out of the addresses, and the earlier wording here
-# ("storage physics is not semantics") claimed a property nothing executed.
-# ``test_the_storage_revision_is_inside_every_store_content_address`` now
-# holds the measured relation as a derivation.  Whether a storage bump SHOULD
-# reset the analysis identities is the layer owner's decision and is open.
+# ``storage`` is out of that list AND out of the addresses: it answers only
+# "may this process open this container".  Through STORAGE_SCHEMA_REVISION "1"
+# that was false — the revision was spelled into ``_DOMAIN_PREFIX``, so a
+# bridge table reset every object id, the scope receipt, the membership digest
+# and the run domain (measured 2026-09-01 on the first bump the constant ever
+# took).  RULING-2026-09-01 split the two questions, and the role is no longer
+# asked to carry a property nothing executed:
+# ``test_a_storage_schema_bump_moves_the_container_and_no_content_address``
+# holds the container side and
+# ``test_a_canonical_object_identity_bump_moves_every_content_address`` holds
+# the semantic side, as two separate pins.
+#
+# ``identity`` is its own role for one reason: the identity generation already
+# reaches ``_run_id`` through ``_DOMAIN_RUN``, so joining it into the analysis
+# list as well would put one basis into the preimage twice.  It stays in the
+# witness table and in the fenced contract epoch, which is what refuses a file
+# written before the split.
 #
 # All layers participate in the witness comparison and in the fenced contract
 # epoch.
 _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
     ("authority_analysis", AUTHORITY_ANALYSIS_REVISION, "analysis"),
     ("canonical_model", CANONICAL_MODEL_REVISION, "analysis"),
+    ("canonical_object_identity", CANONICAL_OBJECT_IDENTITY_VERSION, "identity"),
     ("canonical_wire", CANONICAL_WIRE_REVISION, "projection"),
     ("contract_ir", CONTRACT_IR_VERSION, "analysis"),
     ("module_identity", MODULE_IDENTITY_VERSION, "analysis"),

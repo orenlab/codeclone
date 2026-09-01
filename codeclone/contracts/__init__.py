@@ -43,6 +43,33 @@ CONTRACT_IR_VERSION: Final = "1"
 # of REPORT_SCHEMA_VERSION and of any storage schema revision by design: a
 # projection revision never reaches back into semantic identity.
 CANONICAL_MODEL_REVISION: Final = "1"
+# Generation of the CANONICAL OBJECT IDENTITY: the semantic preimage by which a
+# stored object, a scope receipt, a membership digest and a run are addressed.
+# This constant and no other owns the run-store's domain separators. It moves
+# when the preimage moves -- the logical key, the family namespace, the set of
+# semantic witnesses, or the canonical payload encoding -- and every content
+# address in the store moves with it, by construction.
+#
+# It is deliberately NOT STORAGE_SCHEMA_REVISION. Until RULING-2026-09-01 the
+# storage revision was spelled into the separators, so a bridge table, an index
+# or a SQLite layout change reset every object id and every run identity
+# without a single analyzed fact changing; measured on the "0" -> "1" bump.
+# The two questions are now answered by two constants: "can this process open
+# this container" is storage physics, "by which preimage is this object
+# addressed" is semantics, and physics may not move semantics.
+#
+# The separator SPELLING moved with the split (``cc-run-store:`` ->
+# ``cc-object-identity:``) because the old spelling's generation space is
+# already burned by two storage revisions: under it, identity generation N and
+# storage generation N are the same bytes, and no evidence carrying them could
+# say which contract produced it. "1" is therefore the first generation of this
+# contract, not a continuation of the storage counter.
+#
+# The version is also a store witness layer with its own role, so it never
+# enters the analysis-layer list joined into run identity twice: it reaches
+# run_id through the domain separator only, and a store file written under a
+# different identity generation is refused at open rather than reinterpreted.
+CANONICAL_OBJECT_IDENTITY_VERSION: Final = "1"
 # Wire revision of canonical JSON vNext. "0" is the pre-freeze draft grammar
 # built by backend wave 1 (root members: format, revisions, values, domains,
 # sets, scope, facts, integrity). The bump to "1" is the wire-freeze event
@@ -64,12 +91,12 @@ CANONICAL_WIRE_REVISION: Final = "0"
 # than add semantic information, and REPORT_SCHEMA_VERSION stays where it is.
 # The revision is a witness layer, so an existing store file opened by this
 # process is refused (law 7) rather than migrated in place; the store holds no
-# user artifact. Measured on this bump, and NOT what the witness-layer role
-# split suggests: the revision is spelled into the store's domain separator,
-# so moving it also moves every object id, scope receipt, membership digest
-# and run identity in the store. Republishing an unchanged analysis under the
-# new schema therefore yields a DIFFERENT store run id -- readable only
-# alongside the old file, which this process already refuses to open.
+# user artifact. It reaches NO content address: the domain separators belong to
+# CANONICAL_OBJECT_IDENTITY_VERSION above, and republishing an unchanged
+# analysis under a new schema revision yields the SAME object ids, scope
+# receipt, membership digest and run id. That was not true through revision
+# "1", which was spelled into the separators and reset all four; files of that
+# generation do not declare the identity witness layer and are refused at open.
 STORAGE_SCHEMA_REVISION: Final = "1"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
@@ -853,6 +880,7 @@ __all__ = [
     "BASELINE_TRACKED_GROUP_KEYS",
     "CACHE_VERSION",
     "CANONICAL_MODEL_REVISION",
+    "CANONICAL_OBJECT_IDENTITY_VERSION",
     "CANONICAL_WIRE_REVISION",
     "CLONE_GROUP_BUCKET_KEYS",
     "CLONE_KIND_BLOCK",

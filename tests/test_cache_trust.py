@@ -538,9 +538,15 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "CONTRACT_IR_VERSION": (_LANE_NONE, "IR is built per run from cached summaries"),
     "STORAGE_SCHEMA_REVISION": (
         _LANE_NONE,
-        "canonical run-store SQLite schema (wave 2); a separate persistence "
-        "boundary by law — never a cache payload, and the cache is never "
-        "required to reconstruct a published run",
+        "canonical run-store SQLite container generation (wave 2); a separate "
+        "persistence boundary by law — never a cache payload, and the cache is "
+        "never required to reconstruct a published run",
+    ),
+    "CANONICAL_OBJECT_IDENTITY_VERSION": (
+        _LANE_NONE,
+        "semantic preimage generation of run-store content addresses; the "
+        "store owns its own persistence and no cache payload stores an "
+        "object id, a scope receipt or a run identity",
     ),
     "GATE_LANE_MATRIX_VERSION": (_LANE_NONE, "gate projection, post-cache"),
     "HEALTH_INPUT_MANIFEST_VERSION": (_LANE_NONE, "health projection, post-cache"),
