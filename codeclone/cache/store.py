@@ -849,8 +849,15 @@ class Cache:
             return released
 
     @staticmethod
-    def _decode_entry(value: object, filepath: str) -> CacheEntryV3 | None:
-        return _decode_wire_file_entry(value, filepath)
+    def _decode_entry(
+        value: object,
+        filepath: str,
+        *,
+        analysed_filepath: str,
+    ) -> CacheEntryV3 | None:
+        return _decode_wire_file_entry(
+            value, filepath, analysed_filepath=analysed_filepath
+        )
 
     @staticmethod
     def _encode_entry(entry: CacheEntryV3) -> dict[str, object]:
@@ -952,7 +959,12 @@ class Cache:
         except WireShapeRefused:
             self._identity.pop(runtime_path, None)
             return None
-        entry = self._decode_entry(wire, runtime_path)
+        # ``identity.wire_path`` IS the analysed spelling — it is what this
+        # load derived ``runtime_path`` FROM — and the decoder is handed both
+        # so it never has to pick one for a family whose domain it cannot see.
+        entry = self._decode_entry(
+            wire, runtime_path, analysed_filepath=identity.wire_path
+        )
         if entry is None:
             self._identity.pop(runtime_path, None)
             return None
@@ -988,10 +1000,17 @@ class Cache:
             units=units,
             materialized_clone_channels=materialized_clone_channels,
         )
-        runtime_path = runtime_filepath_from_wire(
-            wire_filepath_from_runtime(filepath, root=self.root),
-            root=self.root,
-        )
+        # The two spellings of one file, named apart because the entry's
+        # row families are NOT all in one domain.  Everything the module
+        # passes stamp carries the pass's own ``filepath`` — the RUNTIME
+        # path — while a security surface carries the ANALYSED path its
+        # semantic event was located at (``ResolvedSourceIdentity``), which
+        # is also what the wire keys the entry by.  A round trip that
+        # re-stamped one domain over the other silently handed the
+        # canonical builder a path the identity index had never seen, so
+        # neither spelling is derived twice or guessed.
+        analysed_path = wire_filepath_from_runtime(filepath, root=self.root)
+        runtime_path = runtime_filepath_from_wire(analysed_path, root=self.root)
 
         effective_relationship_facts = function_relationship_facts
         if effective_relationship_facts is None:
@@ -1043,7 +1062,7 @@ class Cache:
                 for fact in file_metrics.runtime_reachability
             ]
             security_surfaces = [
-                _security_surface_dict_from_model(surface, runtime_path)
+                _security_surface_dict_from_model(surface, analysed_path)
                 for surface in file_metrics.security_surfaces
             ]
             typing_coverage = _typing_coverage_dict_from_model(

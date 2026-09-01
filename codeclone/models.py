@@ -1714,13 +1714,21 @@ class ObservabilityConfig:
 #:   report; publishing the families it cannot express as zeros would be
 #:   the fake-zero the population law forbids, and failing the run would
 #:   make a rollout flag able to break an analysis.
+#: * ``failed``         something behind the producer edge came apart and
+#:   the edge contained it, so NOTHING was stored.  Deliberately not the
+#:   same word as ``refused``: a refusal is a statement ABOUT THE RUN, that
+#:   this representation cannot express it, while a failure is the rollout
+#:   itself coming apart and says nothing about the run.  Collapsing the
+#:   two would hide the only outcome that means "look at the backend".
 RUN_SNAPSHOT_PUBLICATION_DISABLED: Final = "disabled"
 RUN_SNAPSHOT_PUBLICATION_PUBLISHED: Final = "published"
 RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD: Final = "head_withheld"
 RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT: Final = "head_conflict"
 RUN_SNAPSHOT_PUBLICATION_REFUSED: Final = "refused"
+RUN_SNAPSHOT_PUBLICATION_FAILED: Final = "failed"
 RUN_SNAPSHOT_PUBLICATION_OUTCOMES: Final[tuple[str, ...]] = (
     RUN_SNAPSHOT_PUBLICATION_DISABLED,
+    RUN_SNAPSHOT_PUBLICATION_FAILED,
     RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT,
     RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
     RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
@@ -1731,7 +1739,19 @@ RUN_SNAPSHOT_PUBLICATION_OUTCOMES: Final[tuple[str, ...]] = (
 #: reader never has to re-derive "was anything stored" from the outcome
 #: word — the classification reaches the decider (`G1`).
 RUN_SNAPSHOT_PUBLICATION_UNSTORED: Final[frozenset[str]] = frozenset(
-    {RUN_SNAPSHOT_PUBLICATION_DISABLED, RUN_SNAPSHOT_PUBLICATION_REFUSED}
+    {
+        RUN_SNAPSHOT_PUBLICATION_DISABLED,
+        RUN_SNAPSHOT_PUBLICATION_FAILED,
+        RUN_SNAPSHOT_PUBLICATION_REFUSED,
+    }
+)
+
+#: The outcomes that carry a ``reason``.  A refusal names the family it
+#: could not express; a contained failure names the exception that ended
+#: the publication.  Every other outcome is fully described by its own
+#: word, and a reason on one of those would be a second story about it.
+RUN_SNAPSHOT_PUBLICATION_REASONED: Final[frozenset[str]] = frozenset(
+    {RUN_SNAPSHOT_PUBLICATION_FAILED, RUN_SNAPSHOT_PUBLICATION_REFUSED}
 )
 
 #: The three states of the identity bridge (RULING-2026-08-24 §7).  The two
@@ -1833,8 +1853,9 @@ class RunSnapshotPublication:
     #: holder of the report document can re-derive without the store: the
     #: bridge is a checkable relation, not an asserted one.
     analysis_scope_digest: str = ""
-    #: Why nothing was stored, on the ``refused`` outcome only.  A refusal
-    #: without its reason is a silence with a name on it.
+    #: Why nothing was stored, on the reasoned outcomes only.  A refusal or
+    #: a contained failure without its reason is a silence with a name on
+    #: it, which is the one thing worse than the crash it replaced.
     reason: str = ""
 
     def __post_init__(self) -> None:
@@ -1853,8 +1874,11 @@ class RunSnapshotPublication:
             # Without it the bridge could only assert the pair; with it the
             # pair is checkable from the two artifacts alone.
             raise ValueError("a stored publication must carry its scope receipt")
-        if (self.outcome == RUN_SNAPSHOT_PUBLICATION_REFUSED) != bool(self.reason):
-            raise ValueError("a refusal carries its reason and nothing else does")
+        if (self.outcome in RUN_SNAPSHOT_PUBLICATION_REASONED) != bool(self.reason):
+            raise ValueError(
+                "a refusal and a contained failure each carry their reason, "
+                "and no other outcome carries one"
+            )
         if self.admissible and self.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD:
             raise ValueError(
                 "head_withheld is the inadmissible-profile outcome; an "

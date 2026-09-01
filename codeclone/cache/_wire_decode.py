@@ -573,7 +573,25 @@ def _neutral_segment_from_wire(segment: SegmentDict) -> CacheNeutralSegment:
     )
 
 
-def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None:
+def _decode_wire_file_entry(
+    value: object,
+    filepath: str,
+    *,
+    analysed_filepath: str,
+) -> CacheEntryV3 | None:
+    """Rebuild one cached entry, in BOTH of the domains its rows live in.
+
+    ``filepath`` is the runtime path and it is what every family stamped by
+    a module pass wants back.  ``analysed_filepath`` is the analysed path —
+    the spelling the identity index, the module registry and the wire key
+    all use — and exactly one family needs it: a security surface is
+    located at its semantic event, not at the pass that ran.  The two are
+    separate parameters rather than one because the wire drops the row's
+    own ``filepath`` and this decoder therefore CHOOSES the domain; a
+    single path made that choice invisible, and the family that got it
+    wrong killed every second run under the run-store rollout.
+    """
+
     obj = _as_str_dict(value)
     if obj is None:
         return None
@@ -649,7 +667,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
     )
     security_surfaces = _decode_optional_wire_security_surfaces(
         obj=dependent_obj,
-        filepath=filepath,
+        filepath=analysed_filepath,
     )
     function_relationship_facts = _decode_optional_wire_function_relationship_facts(
         obj=dependent_obj,

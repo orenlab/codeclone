@@ -754,6 +754,7 @@ def test_cache_rejects_malformed_function_relationship_wire() -> None:
             ],
         },
         "pkg/module.py",
+        analysed_filepath="pkg/module.py",
     )
 
     assert entry is None
@@ -1035,6 +1036,15 @@ def test_cache_roundtrip_preserves_api_surface_parameter_order(
 
 
 def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
+    """A cached surface comes back in the ANALYSED domain it was produced in.
+
+    This assertion used to read ``str((tmp_path / "x.py").resolve())`` and
+    was, for one wave, the reason the defect looked deliberate.  The row's
+    ``module`` and ``qualname`` are registry identities, so a runtime
+    ``filepath`` beside them puts the row at war with itself, and the
+    canonical builder — which resolves a surface through the identity index
+    — died on every second run under the run-store rollout.
+    """
     entry = _roundtrip_cache_entry_with_metrics(
         tmp_path,
         file_metrics=FileMetrics(
@@ -1066,7 +1076,7 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
             "category": "process_boundary",
             "capability": "subprocess_run",
             "module": "pkg.runner",
-            "filepath": str((tmp_path / "x.py").resolve()),
+            "filepath": "x.py",
             "qualname": "pkg.runner:run_command",
             "start_line": 10,
             "end_line": 10,
@@ -2341,7 +2351,7 @@ def test_as_str_dict_rejects_non_string_keys() -> None:
     ],
 )
 def test_decode_wire_file_entry_invalid_variants(entry: object, filepath: str) -> None:
-    assert _decode_wire_file_entry(entry, filepath) is None
+    assert _decode_wire_file_entry(entry, filepath, analysed_filepath=filepath) is None
 
 
 def test_decode_wire_item_type_failures() -> None:
@@ -2389,15 +2399,24 @@ def test_decode_wire_file_entry_rejects_malformed_v3_lanes() -> None:
     wire = _encode_wire_file_entry(_empty_v3_entry())
     malformed_neutral = dict(wire)
     malformed_neutral["n"] = "not-a-lane"
-    assert _decode_wire_file_entry(malformed_neutral, "x.py") is None
+    assert (
+        _decode_wire_file_entry(malformed_neutral, "x.py", analysed_filepath="x.py")
+        is None
+    )
 
     malformed_dependent = dict(wire)
     malformed_dependent["d"] = {"cm": "not-a-list"}
-    assert _decode_wire_file_entry(malformed_dependent, "x.py") is None
+    assert (
+        _decode_wire_file_entry(malformed_dependent, "x.py", analysed_filepath="x.py")
+        is None
+    )
 
     missing_profile = dict(wire)
     del missing_profile["np"]
-    assert _decode_wire_file_entry(missing_profile, "x.py") is None
+    assert (
+        _decode_wire_file_entry(missing_profile, "x.py", analysed_filepath="x.py")
+        is None
+    )
 
 
 def test_cache_v3_wire_helpers_reject_malformed_rows_without_partial_decode() -> None:
@@ -3065,12 +3084,14 @@ def test_cache_v3_decoder_rejects_every_nested_lane_boundary() -> None:
     ):
         malformed = json.loads(json.dumps(wire))
         malformed[lane][key] = value
-        assert _decode_wire_file_entry(malformed, "x.py") is None
+        assert (
+            _decode_wire_file_entry(malformed, "x.py", analysed_filepath="x.py") is None
+        )
 
     coupled = json.loads(json.dumps(wire))
     coupled["d"]["cm"] = [["m:C", 1, 2, 0, 1, 1, 0, "low", "low"]]
     coupled["d"]["cc"] = [["m:C", ["m:D"]]]
-    decoded = _decode_wire_file_entry(coupled, "x.py")
+    decoded = _decode_wire_file_entry(coupled, "x.py", analysed_filepath="x.py")
     assert decoded is not None
     assert decoded.module_dependent.class_metrics[0]["coupled_classes"] == ["m:D"]
 
@@ -3270,7 +3291,7 @@ def test_cache_v3_empty_entry_encode_decode_is_deterministic() -> None:
     second = _encode_wire_file_entry(entry)
 
     assert first == second
-    assert _decode_wire_file_entry(first, "x.py") == entry
+    assert _decode_wire_file_entry(first, "x.py", analysed_filepath="x.py") == entry
 
 
 def test_cache_v3_wire_matches_golden_without_neutral_module_authority() -> None:
@@ -3417,6 +3438,7 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
     decoded_entry = _decode_wire_file_entry(
         _encode_wire_file_entry(complete_entry),
         "pkg/mod.py",
+        analysed_filepath="pkg/mod.py",
     )
     assert decoded_entry is not None
     decoded_dep_row = decoded_entry.module_dependent.module_deps[0]
@@ -3432,6 +3454,7 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
     decoded_legacy_entry = _decode_wire_file_entry(
         _encode_wire_file_entry(legacy_entry),
         "pkg/mod.py",
+        analysed_filepath="pkg/mod.py",
     )
     assert decoded_legacy_entry is not None
     assert decoded_legacy_entry.module_dependent.module_deps == (module_dep,)

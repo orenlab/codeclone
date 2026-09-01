@@ -99,6 +99,7 @@ from ..models import (
     RUN_SNAPSHOT_LINK_UNEVALUATED,
     RUN_SNAPSHOT_LINK_UNPUBLISHED,
     RUN_SNAPSHOT_PUBLICATION_DISABLED,
+    RUN_SNAPSHOT_PUBLICATION_FAILED,
     RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT,
     RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
     RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
@@ -118,7 +119,7 @@ from ..models import (
     RunStoreConfig,
     SemanticAuthorityResult,
 )
-from ..observability import span
+from ..observability import SpanHandle, span
 from ..paths.workspace import REL_RUN_STORE_DB_PATH
 from ..utils.ci import is_ci_environment
 from ..utils.coerce import as_int as _as_int
@@ -943,6 +944,26 @@ def publish_run_snapshot(
     would be indistinguishable from a backend that was never wired, which
     is the exact confusion this rollout exists to avoid, and the skip is
     the DEFAULT path (the flag ships off).
+
+    **The enabled half is a containment boundary, not a list.**  "A rollout
+    flag may not fail an analysis" was held for one wave by an
+    ``except ProducerSnapshotUnavailable`` — which is an enumeration of the
+    one failure somebody had already met.  Two more walked past it from two
+    unrelated directions: a ``SemanticGrammarError`` out of the identity
+    grammar on a warm cache, and a ``StoreCompatibilityError`` out of the
+    store meeting a file from an earlier ``STORAGE_SCHEMA_REVISION``.  Each
+    could have been added to the list; the third would not have been.
+    Anything ``_publish_enabled`` raises is therefore contained here and
+    becomes "flag off": the analysis is a measurement of the user's code
+    and the backend is an optional recording of it, so the recording may
+    never take the measurement down with it.  Where a failure should be
+    loud is INSIDE its own component — the store's law-7 refusal is right
+    to be an error; it is only wrong as the analysis's exit code.
+
+    ``BaseException`` is deliberately NOT contained.  ``KeyboardInterrupt``
+    and ``SystemExit`` are the process being taken down rather than the
+    producer edge coming apart, and a boundary that ate them would turn
+    Ctrl-C into a warm rollout witness.
     """
 
     with span(name="canonical.snapshot.publish") as publish_span:
@@ -953,59 +974,108 @@ def publish_run_snapshot(
                 outcome=RUN_SNAPSHOT_PUBLICATION_DISABLED, admissible=False
             )
         try:
-            model = canonical_snapshot_from_producers(
+            return _publish_enabled(
+                path=config.path,
                 discovery=discovery,
                 processing=processing,
                 analysis=analysis,
                 report_meta=report_meta,
+                namespace=namespace,
+                publish_span=publish_span,
             )
         except ProducerSnapshotUnavailable as refusal:
-            # Anticipated: a rollout flag may not fail an analysis, and it
-            # may not invent the families it cannot express either.
+            # Anticipated, and kept apart from the containment below: a
+            # refusal is a statement about the RUN — this representation
+            # cannot express it — and it may not invent the families it
+            # cannot express either.
             publish_span.set_counter("run_snapshot_publish_refused", 1)
             return RunSnapshotPublication(
                 outcome=RUN_SNAPSHOT_PUBLICATION_REFUSED,
                 admissible=False,
                 reason=str(refusal),
             )
-        population = model.facts.analysis.analysis_population
-        if population is None:  # pragma: no cover - the builder always writes it
-            raise ProducerSnapshotUnavailable("the snapshot carries no population")
-        admissible = population_is_admissible(population)
-        target = profile_head_target(population)
-        publish_span.set_counter(
-            "run_snapshot_publish_inadmissible", 0 if admissible else 1
-        )
-        config.path.parent.mkdir(parents=True, exist_ok=True)
-        # Imported at use, not at module scope: the store is opened only on
-        # the enabled path, so a disabled rollout never touches sqlite.
-        from ..canonical.store import RunStore
+        except Exception as failure:
+            # The boundary.  No type is named on purpose: naming types is
+            # how the last hole was left open, and the next producer, store
+            # or grammar error has to land here without anyone editing this
+            # clause.  Contained is not silent — the outcome carries the
+            # failure's own type and the edge counts the case — because
+            # swapping a crash for an unobservable missing backend would be
+            # the worse trade.
+            publish_span.set_counter("run_snapshot_publish_failed", 1)
+            return RunSnapshotPublication(
+                outcome=RUN_SNAPSHOT_PUBLICATION_FAILED,
+                admissible=False,
+                reason=f"{type(failure).__name__}: {failure}",
+            )
 
-        with RunStore(config.path) as store:
-            head = store.head(namespace=namespace, target=target)
-            receipt = store.write_full_run(
-                model,
-                namespace=namespace,
-                target=target,
-                expected_generation=0 if head is None else head.generation,
-            )
-        if receipt.head_advanced:
-            outcome = (
-                RUN_SNAPSHOT_PUBLICATION_PUBLISHED
-                if admissible
-                else RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD
-            )
-        else:
-            outcome = RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT
-        publish_span.set_counter("run_snapshot_publish_stored", 1)
-        return RunSnapshotPublication(
-            outcome=outcome,
-            admissible=admissible,
+
+def _publish_enabled(
+    *,
+    path: Path,
+    discovery: DiscoveryResult,
+    processing: ProcessingResult,
+    analysis: AnalysisResult,
+    report_meta: Mapping[str, object],
+    namespace: str,
+    publish_span: SpanHandle,
+) -> RunSnapshotPublication:
+    """Everything the enabled rollout does, inside the containment.
+
+    Split out so the boundary is a property of a WHOLE region rather than
+    of the statements somebody remembered to wrap: build, population read,
+    directory creation and the fenced store write are all behind it, and a
+    step added here inherits the containment without a second decision.
+    """
+
+    model = canonical_snapshot_from_producers(
+        discovery=discovery,
+        processing=processing,
+        analysis=analysis,
+        report_meta=report_meta,
+    )
+    population = model.facts.analysis.analysis_population
+    if population is None:  # pragma: no cover - the builder always writes it
+        raise ProducerSnapshotUnavailable("the snapshot carries no population")
+    admissible = population_is_admissible(population)
+    target = profile_head_target(population)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Imported at use, not at module scope: the store is opened only on
+    # the enabled path, so a disabled rollout never touches sqlite.
+    from ..canonical.store import RunStore
+
+    with RunStore(path) as store:
+        head = store.head(namespace=namespace, target=target)
+        receipt = store.write_full_run(
+            model,
+            namespace=namespace,
             target=target,
-            run_id=receipt.run_id,
-            generation=receipt.generation,
-            analysis_scope_digest=receipt.analysis_scope_digest,
+            expected_generation=0 if head is None else head.generation,
         )
+    if receipt.head_advanced:
+        outcome = (
+            RUN_SNAPSHOT_PUBLICATION_PUBLISHED
+            if admissible
+            else RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD
+        )
+    else:
+        outcome = RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT
+    # Both magnitudes are written here, after the write and not before it:
+    # ``inadmissible`` is documented as riding every STORED publish, and a
+    # publication contained on its way to the store would otherwise leave
+    # it behind as a magnitude nothing stored.
+    publish_span.set_counter(
+        "run_snapshot_publish_inadmissible", 0 if admissible else 1
+    )
+    publish_span.set_counter("run_snapshot_publish_stored", 1)
+    return RunSnapshotPublication(
+        outcome=outcome,
+        admissible=admissible,
+        target=target,
+        run_id=receipt.run_id,
+        generation=receipt.generation,
+        analysis_scope_digest=receipt.analysis_scope_digest,
+    )
 
 
 # ---------------------------------------------------------------------------

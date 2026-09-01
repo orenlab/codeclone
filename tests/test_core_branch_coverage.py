@@ -379,7 +379,7 @@ def test_cache_decode_wire_file_entry_with_invalid_structural() -> None:
         "cc": [],
         "sf": "invalid",
     }
-    assert _decode_wire_file_entry(wire_entry, "a.py") is None
+    assert _decode_wire_file_entry(wire_entry, "a.py", analysed_filepath="a.py") is None
 
 
 def test_cache_decode_wire_file_entry_with_invalid_referenced_qualnames() -> None:
@@ -397,7 +397,7 @@ def test_cache_decode_wire_file_entry_with_invalid_referenced_qualnames() -> Non
         "cn": [],
         "cc": [],
     }
-    assert _decode_wire_file_entry(wire_entry, "a.py") is None
+    assert _decode_wire_file_entry(wire_entry, "a.py", analysed_filepath="a.py") is None
 
 
 def test_cache_decode_wire_unit_extended_invalid_shape() -> None:

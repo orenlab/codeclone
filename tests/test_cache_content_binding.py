@@ -851,4 +851,9 @@ def test_signed_envelope_without_content_binding_cannot_authorize_hit(
     # entry still cannot authorise a hit, because nothing binds it to content.
     assert cache.load_status is CacheStatus.OK
     assert cache.get_file_entry("module.py") is None
-    assert _decode_wire_file_entry({"st": [1, 2]}, "module.py") is None
+    assert (
+        _decode_wire_file_entry(
+            {"st": [1, 2]}, "module.py", analysed_filepath="module.py"
+        )
+        is None
+    )

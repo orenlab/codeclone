@@ -481,13 +481,22 @@ def _dead_candidate_dict_from_model(
 
 def _security_surface_dict_from_model(
     surface: SecuritySurface,
-    filepath: str,
+    analysed_filepath: str,
 ) -> SecuritySurfaceDict:
+    """One cached surface row, in the ANALYSED domain its siblings are not.
+
+    The parameter is named for its domain because this family is the
+    exception: every other ``*_dict_from_model`` beside it is handed the
+    runtime path, and a row whose ``module`` and ``qualname`` are registry
+    identities but whose ``filepath`` is a runtime path is internally at
+    war with itself.
+    """
+
     return SecuritySurfaceDict(
         category=surface.category,
         capability=surface.capability,
         module=surface.module,
-        filepath=filepath,
+        filepath=analysed_filepath,
         qualname=surface.qualname,
         start_line=surface.start_line,
         end_line=surface.end_line,

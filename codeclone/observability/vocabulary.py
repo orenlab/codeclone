@@ -299,14 +299,24 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         # a backend nobody wired.
         #
         #  run_snapshot_publish_attempts       one call, always written.
-        #  *_disabled / *_refused / *_stored   EXCLUSIVE outcomes; exactly
-        #      one is written per call, so "nothing happened" is always
-        #      distinguishable from "the site was never reached".
+        #  *_disabled / *_failed / *_refused / *_stored   EXCLUSIVE
+        #      outcomes; exactly one is written per call, so "nothing
+        #      happened" is always distinguishable from "the site was never
+        #      reached".
+        #  *_failed                            the edge CONTAINED a failure
+        #      behind it so the analysis could finish.  Its own key and not
+        #      a second meaning of ``refused``: a refusal is a statement
+        #      about the run, a containment is the rollout coming apart,
+        #      and only the second one means "look at the backend".  This
+        #      is also what keeps the containment from being a silent loss
+        #      of the backend, which would be worse than the crash it
+        #      replaced.
         #  *_inadmissible                      0/1, written on every stored
         #      publish: whether this realized profile was refused the
         #      canonical head (partial / clones-only / truncated).
         "run_snapshot_publish_attempts",
         "run_snapshot_publish_disabled",
+        "run_snapshot_publish_failed",
         "run_snapshot_publish_inadmissible",
         "run_snapshot_publish_refused",
         "run_snapshot_publish_stored",
