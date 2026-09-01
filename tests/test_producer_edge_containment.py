@@ -53,6 +53,7 @@ from codeclone.cache.projection import runtime_filepath_from_wire
 from codeclone.cache.store import Cache
 from codeclone.canonical.model import CanonicalModel
 from codeclone.canonical.store import RunStore
+from codeclone.contracts import DEFAULT_CACHE_PATH
 from codeclone.core.canonical_snapshot import (
     RUN_SNAPSHOT_NAMESPACE,
     ProducerSnapshotUnavailable,
@@ -71,7 +72,6 @@ from codeclone.models import (
     SecuritySurface,
 )
 from codeclone.observability import bootstrap, operation, shutdown
-from codeclone.paths.workspace import REL_CACHE_PATH
 from tests._ast_metrics_helpers import module_registry_context
 from tests.conftest import RunStoreCorpusRunner
 from tests.test_run_store_producer_wiring import (  # noqa: F401
@@ -398,13 +398,14 @@ def test_a_store_path_that_cannot_be_created_does_not_fail_the_run(
     assert occupied.read_text("utf-8") == "not a directory\n"
     # The wide net stays -- a run store under any other name is still caught
     # -- but it excludes the disposable analysis cache, which became a SQLite
-    # store on 2026-09-01.  A cache write is not a publish, so counting it
+    # store on 2026-09-01, and whose value owner moved to ``contracts``.  A
+    # cache write is not a publish, so counting it
     # here would make this pin fail for the one reason it must not care
     # about.
     assert not [
         found
         for found in corpus.glob("**/*.sqlite3")
-        if found != corpus / REL_CACHE_PATH
+        if found != corpus / DEFAULT_CACHE_PATH
     ]
 
 
