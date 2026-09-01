@@ -10,7 +10,7 @@ source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 
 ## What it is
 
-CodeClone's **analysis** scans your Python repository for code structure patterns: duplicated logic (clones), complexity metrics, dependency cycles, and dead code. Each run produces structured reports you can review on the command line, in HTML, or via JSON, plus an incremental cache (`.codeclone/cache.json`) that speeds up re-runs. The *baseline* (`codeclone.baseline.json`) is a separate, explicitly created snapshot — see below — not the same thing as the cache.
+CodeClone's **analysis** scans your Python repository for code structure patterns: duplicated logic (clones), complexity metrics, dependency cycles, and dead code. Each run produces structured reports you can review on the command line, in HTML, or via JSON, plus an incremental cache (`.codeclone/db/cache.sqlite3`) that speeds up re-runs. The *baseline* (`codeclone.baseline.json`) is a separate, explicitly created snapshot — see below — not the same thing as the cache.
 
 ## When to use it
 

@@ -134,7 +134,7 @@ codeclone . --update-baseline
 
 **Recovery:** Cache is ephemeral and rebuilds on next full run. For immediate clarity:
 ```bash
-rm -f .codeclone/cache.json
+rm -f .codeclone/db/cache.sqlite3*
 codeclone .
 ```
 
@@ -156,13 +156,13 @@ codeclone .
 
 ### Cache corruption or corruption recovery
 
-**Condition:** Cache file `.codeclone/cache.json` is partially deleted or truncated.
+**Condition:** Cache store `.codeclone/db/cache.sqlite3` is partially deleted or truncated.
 
 **Effect:** Projection load fails; `get_run_summary` and `get_report_section` fail with file-not-found.
 
 **Recovery:** Delete cache and reanalyze:
 ```bash
-rm -f .codeclone/cache.json
+rm -f .codeclone/db/cache.sqlite3*
 codeclone .
 ```
 

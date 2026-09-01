@@ -41,7 +41,7 @@ Specialized subcommands manage setup, engineering memory, and analytics. Exit co
 | `--baseline [FILE]` | Baseline path. Default: `codeclone.baseline.json` |
 | `--max-baseline-size-mb MB` | Maximum baseline size. Default: 5 |
 | `--update-baseline` | Overwrite the baseline with current results |
-| `--cache-path [FILE]` | Cache file path. Default: `.codeclone/cache.json` |
+| `--cache-path [FILE]` | Cache file path. Default: `.codeclone/db/cache.sqlite3` |
 | `--cache-dir [FILE]` | Legacy alias for `--cache-path` |
 | `--max-cache-size-mb MB` | Maximum cache size. Default: 50 |
 

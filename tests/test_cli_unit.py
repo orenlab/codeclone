@@ -1397,7 +1397,7 @@ def test_cli_help_text_consistency(
         "If enabled without a value, uses 10.",
         "If enabled without a value, uses 4.",
         "If enabled without a value, uses 60.",
-        "<root>/.codeclone/cache.json",
+        "<root>/.codeclone/db/cache.sqlite3",
         "Legacy alias for --cache-path",
         "--max-baseline-size-mb MB",
         "--max-cache-size-mb MB",

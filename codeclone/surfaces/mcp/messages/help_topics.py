@@ -626,7 +626,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "resolution, and optional Bearer auth on streamable-http."
         ),
         key_points=(
-            "MCP never mutates source, baseline, cache.json, or canonical reports.",
+            (
+                "MCP never mutates source, baseline, the analysis cache, "
+                "or canonical reports."
+            ),
             (
                 "baseline_path, cache_path, coverage_xml resolve under the scan "
                 "root by default; pass allow_external_artifacts=true for "

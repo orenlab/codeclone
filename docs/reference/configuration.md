@@ -101,7 +101,7 @@ list.
 
 | Key | Type | Default | CLI flag | Purpose |
 |-----|------|---------|----------|---------|
-| `cache_path` | str | unset (`<root>/.codeclone/cache.json`) | `--cache-path` | Analysis cache file path |
+| `cache_path` | str | unset (`<root>/.codeclone/db/cache.sqlite3`) | `--cache-path` | Analysis cache file path |
 | `max_cache_size_mb` | int | `256` | `--max-cache-size-mb` | Maximum cache size (MB) |
 
 The cap is a memory and decompression-bomb guard on cache load. A repository whose

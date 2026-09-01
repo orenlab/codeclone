@@ -88,7 +88,7 @@ Analysis:
                         bijective, consistent renaming of locals and receiver attributes.
                         Advisory only; never enters clone gates or the baseline.
   --cache-path [FILE]   Path to the cache file.
-                        If FILE is omitted, uses <root>/.codeclone/cache.json.
+                        If FILE is omitted, uses <root>/.codeclone/db/cache.sqlite3.
   --cache-dir [FILE]    Legacy alias for --cache-path.
                         Prefer --cache-path in new configurations.
   --max-cache-size-mb MB

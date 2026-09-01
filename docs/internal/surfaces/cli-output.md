@@ -192,7 +192,7 @@ lane matches the current runtime contract.
 - Cache file is corrupted
 - Cache schema version does not match `CACHE_VERSION` ("4.0")
 
-**Remediation:** Delete `.codeclone/cache.json` and re-run.
+**Remediation:** Delete `.codeclone/db/cache.sqlite3*` and re-run.
 
 A cache above `DEFAULT_MAX_CACHE_SIZE_MB` (256 MB) is not a contract error: the
 file is ignored on load with a warning and the run falls back to cold analysis.

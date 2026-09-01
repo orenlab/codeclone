@@ -84,12 +84,8 @@ HELP_RENAMED_STRUCTURE = (
     "Advisory only; never enters clone gates or the baseline."
 )
 HELP_CACHE_PATH = (
-    # STALE, reported 2026-09-01: the default cache path is now
-    # <root>/.codeclone/db/cache.sqlite3. Correcting this string moves
-    # tests/test_cli_help_snapshot, and golden snapshots are not updated
-    # without the maintainer's approval, so the correction is queued rather
-    # than taken as a side effect of the cache migration.
-    "Path to the cache file.\nIf FILE is omitted, uses <root>/.codeclone/cache.json."
+    "Path to the cache file.\n"
+    "If FILE is omitted, uses <root>/.codeclone/db/cache.sqlite3."
 )
 HELP_CACHE_DIR_LEGACY = (
     "Legacy alias for --cache-path.\nPrefer --cache-path in new configurations."
@@ -281,7 +277,8 @@ HELP_TOUR_STEP_CLONES_BODY = (
 )
 HELP_TOUR_STEP_CACHE_TITLE = "Reusing structural facts"
 HELP_TOUR_STEP_CACHE_BODY = (
-    "The integrity-checked cache under `.codeclone/cache.json` speeds repeat runs.\n"
+    "The integrity-checked cache under `.codeclone/db/cache.sqlite3` speeds\n"
+    "repeat runs.\n"
     "Cache is optimization only, never analysis truth. Reports record whether\n"
     "cache was used; profile mismatch or invalid cache is ignored safely."
 )
