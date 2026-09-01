@@ -377,18 +377,24 @@ class CacheBackend:
         self,
         *,
         max_bytes: int,
-        protected: frozenset[str],
         generation: int,
     ) -> tuple[int, int]:
-        """Evict untouched rows until the content budget is met.
+        """Evict rows an older generation left behind, until the budget is met.
 
         Returns ``(evicted_rows, payload_bytes_after)``.
 
-        Rows written or refreshed by the *current* generation are protected and
-        are never evicted, because evicting them would hand back exactly the
-        defect this store exists to remove: a run that cannot warm the next one.
-        A budget too small to hold even the current run's own rows is reported
-        as over budget rather than enforced into uselessness.
+        The generation filter below is the whole protection: rows this run
+        wrote carry ``generation`` and are never candidates, so a budget can
+        never take back the entries that make the next run warm. A budget too
+        small to hold even the current run is reported as over budget rather
+        than enforced into uselessness.
+
+        There was a second, explicit ``protected`` set here. Mutation testing
+        (M2a, 2026-09-01) removed it and every test stayed green: it could
+        only ever have held paths at the current generation, which the SQL
+        already excludes, so no input could reach it. A guard nothing can trip
+        is a claim the code does not keep, so it is gone and the mutation now
+        aims at the filter that actually does the work.
         """
 
         remaining = self.payload_bytes()
@@ -407,7 +413,7 @@ class CacheBackend:
         for wire_path, length in candidates:
             if remaining <= max_bytes:
                 break
-            if not isinstance(wire_path, str) or wire_path in protected:
+            if not isinstance(wire_path, str):
                 continue
             doomed.append((wire_path,))
             remaining -= int(length)

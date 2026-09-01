@@ -158,7 +158,6 @@ class Cache:
         "_discard_store",
         "_generation",
         "_git_content_snapshot",
-        "_live_wire_paths",
         "_module_dependent_profile",
         "_module_names_by_runtime_path",
         "_module_neutral_profile",
@@ -246,7 +245,6 @@ class Cache:
         # Generation orders saves so the budget can tell rows this run touched
         # from rows left over by an older one; only the latter are evictable.
         self._generation: int = 0
-        self._live_wire_paths: set[str] = set()
         # A store whose load was refused must not survive piecewise. See
         # _write_backend_rows.
         self._discard_store: bool = False
@@ -395,7 +393,6 @@ class Cache:
             fingerprint_version=self.fingerprint_version,
         )
         self._canonical_runtime_paths = set()
-        self._live_wire_paths = set()
         self._discard_store = True
         self.segment_report_projection = None
 
@@ -656,7 +653,6 @@ class Cache:
             # The monolith replaced the whole document for the same reason;
             # a row store has to say so explicitly.
             removed_stale = backend.clear_entries()
-            self._live_wire_paths = set()
             dirty_runtime_paths: list[str] = list(self.data["files"])
             deleted_runtime_paths: list[str] = []
         elif moved is None or dropped is None:
@@ -680,18 +676,12 @@ class Cache:
             version=self._CACHE_VERSION,
             generation=generation,
         )
-        # Protection is exactly what this save wrote. Protecting everything the
-        # run merely loaded would make the budget unreachable -- a guard no
-        # input can trip -- while protecting nothing would let it evict the
-        # rows the next run needs.
-        self._live_wire_paths = set(wire_entries)
 
         doomed = [
             wire_filepath_from_runtime(runtime_path, root=self.root)
             for runtime_path in deleted_runtime_paths
         ]
         removed = backend.delete_entries(doomed) + removed_stale
-        self._live_wire_paths -= set(doomed)
 
         segment_projection = encode_segment_report_projection(
             self.segment_report_projection,
@@ -724,7 +714,6 @@ class Cache:
         with span(name="cache.backend.prune") as prune_span:
             evicted, remaining = backend.evict_to_budget(
                 max_bytes=self.max_size_bytes,
-                protected=frozenset(self._live_wire_paths),
                 generation=generation,
             )
             prune_span.set_counter("cache_backend_pruned", evicted)
