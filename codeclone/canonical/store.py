@@ -103,12 +103,15 @@ from codeclone.canonical.export import (
     artifact_domain,
 )
 from codeclone.canonical.identity import (
+    DOMAIN_TAG_FILE,
+    LOCATION_TAG_UNRESOLVED,
     AnalysisFile,
     DeadCodeEntity,
     DependencyEndpoint,
     EffectLabelRoot,
     EffectRoot,
     FileId,
+    FileLine,
     KnownModule,
     ModuleId,
     ModuleSymbol,
@@ -118,7 +121,9 @@ from codeclone.canonical.identity import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    SourceLocation,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
     canonical_key,
     dead_code_entity_key,
@@ -435,6 +440,45 @@ def _decode_dead_code_entity_value(value: object, where: str) -> DeadCodeEntity:
     raise StoreIntegrityError(f"{where}: unknown dead-code entity tag {tag!r}")
 
 
+def _source_location_value(location: SourceLocation) -> list[object]:
+    """One evidence site in the store's own tagged spelling.
+
+    The store keeps paths as PATHS rather than domain ordinals (the
+    ``_symbol_value`` law here), so a FILE-headed site spells its file path
+    and an unresolved site spells the string the producer asserted; the tag
+    keeps the two apart, because the second one is not a FILE identity and
+    must never be read back as one.
+    """
+    if isinstance(location, FileLine):
+        return [DOMAIN_TAG_FILE, location.file.path, location.line]
+    return [LOCATION_TAG_UNRESOLVED, location.path, location.line]
+
+
+def _decode_source_location(value: object, where: str) -> SourceLocation:
+    if not isinstance(value, list) or len(value) != 3:
+        raise StoreIntegrityError(
+            f"{where}: stored source location is not a [tag, path, line]"
+        )
+    tag, path, line = value
+    if not isinstance(tag, str) or not isinstance(path, str):
+        raise StoreIntegrityError(
+            f"{where}: stored source location is not a [tag, path, line]"
+        )
+    if isinstance(line, bool) or not isinstance(line, int):
+        raise StoreIntegrityError(f"{where}: stored source location line is not an int")
+    if tag == DOMAIN_TAG_FILE:
+        return FileLine(FileId(path), line)
+    if tag == LOCATION_TAG_UNRESOLVED:
+        return UnresolvedLocation(path, line)
+    raise StoreIntegrityError(f"{where}: unknown source location tag {tag!r}")
+
+
+def _decode_source_locations(value: object, where: str) -> tuple[SourceLocation, ...]:
+    if not isinstance(value, list):
+        raise StoreIntegrityError(f"{where}: stored source locations is not an array")
+    return tuple(_decode_source_location(item, where) for item in value)
+
+
 def _sorted_symbols(symbols: frozenset[SymbolId]) -> list[list[str]]:
     return [_symbol_value(s) for s in sorted(symbols, key=canonical_key)]
 
@@ -661,6 +705,9 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "effect_signature": violation.effect_signature,
                 "kind": violation.kind,
                 "producer_set": _sorted_symbols(violation.producer_set),
+                "locations": [
+                    _source_location_value(location) for location in violation.locations
+                ],
                 "resolution_state": violation.resolution_state,
                 "root_set": _sorted_roots(violation.root_set),
                 "sink_identity": _symbol_value(violation.sink_identity),
@@ -1193,6 +1240,9 @@ def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow
             _require_field(row, "producer_set", where), where
         ),
         suppressed=_require_bool(row, "suppressed", where),
+        locations=_decode_source_locations(
+            _require_field(row, "locations", where), f"{where}.locations"
+        ),
     )
 
 

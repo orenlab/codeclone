@@ -33,6 +33,7 @@ from codeclone.canonical import (
     DependencyCycleRow,
     EffectLabelRoot,
     FileId,
+    FileLine,
     KnownModule,
     LegacyIngestError,
     ModuleId,
@@ -45,6 +46,7 @@ from codeclone.canonical import (
     RunScalars,
     SemanticGrammarError,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
     canonical_model_from_legacy_document,
     decode_canonical_json,
@@ -224,7 +226,37 @@ def legacy_document() -> dict[str, Any]:
                         "resolution_state": "resolved",
                         "producers": [_RUN, _MAKE],
                         "suppressed": False,
-                        "locations": [],
+                        # Deliberately unsorted, and deliberately mixed: two
+                        # sites of ONE analyzed file, one of another, and one
+                        # path this run never analyzed. Ingest must not
+                        # inherit the document's order, must not fuse the
+                        # same-file pair, and must not drop the outsider.
+                        "locations": [
+                            {
+                                "relative_path": "scripts/tool.py",
+                                "start_line": 12,
+                                "end_line": 12,
+                                "qualname": _MAKE,
+                            },
+                            {
+                                "relative_path": "pkg/mod.py",
+                                "start_line": 40,
+                                "end_line": 40,
+                                "qualname": _MAKE,
+                            },
+                            {
+                                "relative_path": "pkg/mod.py",
+                                "start_line": 7,
+                                "end_line": 7,
+                                "qualname": _MAKE,
+                            },
+                            {
+                                "relative_path": "third_party/x.py",
+                                "start_line": 3,
+                                "end_line": 3,
+                                "qualname": _MAKE,
+                            },
+                        ],
                     }
                 ],
             },
@@ -1522,3 +1554,37 @@ def test_population_oracle_refuses_a_non_int_profile_value() -> None:
     }
     with pytest.raises(LegacyIngestError, match="min_loc is not an integer"):
         canonical_model_from_legacy_document(poisoned)
+
+
+def test_ingest_reads_the_violation_evidence_without_inheriting_its_order() -> None:
+    """The published location array, canonicalized rather than copied.
+
+    Three obligations, on one document row, through the real oracle: the
+    tuple comes back in the model's own order and not the array's; the two
+    sites of ``pkg/mod.py`` stay two evidence points; and the path this run
+    never analyzed comes back as an EXPLICIT unresolved witness rather than
+    quietly shortening the tuple.
+    """
+
+    model = canonical_model_from_legacy_document(legacy_document())
+    (violation,) = model.facts.analysis.violations
+    assert violation.locations == (
+        FileLine(FileId("pkg/mod.py"), 7),
+        FileLine(FileId("pkg/mod.py"), 40),
+        FileLine(FileId("scripts/tool.py"), 12),
+        UnresolvedLocation("third_party/x.py", 3),
+    )
+    # Non-vacuous: the document really did offer them in another order, so
+    # a pass-through would have been visible above.
+    offered = [
+        str(item["relative_path"])
+        for item in legacy_document()["source_facts"]["semantic"]["violations"][0][
+            "locations"
+        ]
+    ]
+    assert offered != [
+        "pkg/mod.py",
+        "pkg/mod.py",
+        "scripts/tool.py",
+        "third_party/x.py",
+    ]

@@ -64,6 +64,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields, replace
+from itertools import pairwise
 from typing import TypeVar
 
 from codeclone.canonical.api_identity import signature_variant
@@ -94,16 +95,19 @@ from codeclone.canonical.identity import (
     DependencyEndpoint,
     EffectRoot,
     FileId,
+    FileLine,
     KnownModule,
     ModuleId,
     ModuleSymbol,
     OperationRoot,
     ProducerRoot,
     ScopeRef,
+    SourceLocation,
     SymbolId,
     canonical_key,
     dead_code_entity_key,
     endpoint_key,
+    source_location_key,
 )
 
 
@@ -426,17 +430,51 @@ class ViolationRow:
     producer indexes the contract table with both); ``canonical_owner`` is a
     registry declaration and carries no role requirement.
 
-    Of the seven published columns this row does not carry, six are rebuilt
-    by ``codeclone.canonical.authority_projection``: ``producer_root_ids``
-    is ``root_set`` rendered, ``source_kind`` is a document-layer ranking
-    term over the stored producer set, ``algorithm_revision`` is run
-    provenance, and ``score``/``independence``/``semantic_divergence`` are
-    union placeholders the producer emits no key for.  The seventh,
-    ``locations``, is the one authority column measured NOT derivable: the
+    Of the six published columns this row does not carry, every one is
+    rebuilt by ``codeclone.canonical.authority_projection``:
+    ``producer_root_ids`` is ``root_set`` rendered, ``source_kind`` is a
+    document-layer ranking term over the stored producer set,
+    ``algorithm_revision`` is run provenance, and
+    ``score``/``independence``/``semantic_divergence`` are union
+    placeholders the producer emits no key for.
+
+    ``locations`` used to be a seventh, and it is STORED rather than
+    derived because it failed the §8.V.3 test where the other six pass: the
     producer distills it from ``FunctionContractSummary.events``, and that
-    event stream is no family of this subset — under §8.V.3 the basis lies
-    OUTSIDE, so closing it is a canonicalization decision (a new stored
-    column, and therefore a wire change), not a projection.
+    event stream is no family of this subset, so the basis lay OUTSIDE and
+    closing it was a canonicalization decision rather than a projection.
+
+    What is stored is the DISTILLED witness, not the event stream: the
+    producer's own selection (deduplicated, ordered, first three) as a tuple
+    of tagged :data:`~codeclone.canonical.identity.SourceLocation` values,
+    and three laws ride it.
+
+    * **Canonical order, not arrival order.** The tuple is strictly
+      increasing under
+      :func:`~codeclone.canonical.identity.source_location_key`, so the row
+      a set of sites produces does not depend on the order the events
+      happened to arrive in.
+    * **No accidental collapse.** *Strictly* increasing, so two sites that
+      differ at all — same path, different line included — stay two
+      evidence points.  A repeat is REFUSED rather than deduplicated:
+      silently absorbing one would lose an evidence point exactly where a
+      count is what a reader relies on.
+    * **No silent drop.** A site the FILE domain cannot admit rides the
+      ``UnresolvedLocation`` variant verbatim (the grammar owner is
+      ``canonical.semantic_grammar.parse_source_location``).  It is never
+      dropped, because a dropped site shortens the tuple and an emptied
+      tuple reads as "the producer had nothing to say".
+
+    The published location struct carries two more slots, and both are
+    derived rather than stored.  ``qualname`` is the violation's OWN
+    ``sink_identity`` — the producer keys its per-function location table by
+    the summary's function and stamps that same string on every row of it,
+    then attaches the sink's entry to the violation — so storing it would be
+    the same fact twice.  ``end_line`` equals ``start_line`` because
+    ``SemanticEvent.location`` is ``(path, line)``: one line, never a span.
+    Neither derivation can rot in silence — the projection equivalence
+    compares the whole published row byte for byte, so a producer that grew
+    a real span or a second qualname turns that comparison red.
     """
 
     contract_id: str
@@ -449,12 +487,21 @@ class ViolationRow:
     root_set: frozenset[EffectRoot]
     producer_set: frozenset[SymbolId]
     suppressed: bool
+    locations: tuple[SourceLocation, ...]
 
     def __post_init__(self) -> None:
         if not self.contract_id:
             raise CanonicalModelError("violation contract_id must be non-empty")
         if self.kind not in VIOLATION_KINDS:
             raise CanonicalModelError(f"unknown violation kind: {self.kind!r}")
+        keys: list[tuple[bytes, int, str]] = [
+            source_location_key(location) for location in self.locations
+        ]
+        if any(earlier >= later for earlier, later in pairwise(keys)):
+            raise CanonicalModelError(
+                "violation locations must be strictly increasing under the "
+                f"canonical location key: {self.locations!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1077,6 +1124,13 @@ class _DomainClosure:
             self.see_symbol(producer)
         for root in violation.root_set:
             self.see_root(root)
+        for location in violation.locations:
+            # The security-surface precedent: an evidence FILE joins the
+            # domain because the wire addresses it by ordinal.  The
+            # unresolved variant contributes nothing — having no domain to
+            # join is exactly what it asserts.
+            if isinstance(location, FileLine):
+                self.files.add(location.file)
 
 
 def _close_domains(model: CanonicalModel) -> _DomainClosure:

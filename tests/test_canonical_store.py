@@ -182,7 +182,17 @@ def test_law6_identity_and_bytes_are_hash_seed_independent() -> None:
 #: The run identity this fixture had while STORAGE_SCHEMA_REVISION was "0",
 #: kept as history rather than as a live expectation: the test below is the
 #: only thing that may still produce it, and only by putting the revision back.
-_REVISION_0_RUN_ID = "ab16ae7206d69d2bf24bd2cf559734c4c2201cce18af2aebe9acc515807a44e9"
+#:
+#: It moved once already, and NOT because the revision moved: the violation
+#: ``locations`` column changed every violation object's payload, so the
+#: fixture's revision-"0" identity became a different hash while the rule
+#: below stayed exactly the same.  Git merged this file without a conflict
+#: while the constant in it went stale — a semantic collision, not a textual
+#: one — so the value here is RE-DERIVED, never carried over.  Two
+#: independent derivations agree on it: the substitution the test below
+#: performs on the merged tree, and a real tree that still had
+#: STORAGE_SCHEMA_REVISION "0" with the column already present.
+_REVISION_0_RUN_ID = "e829cd438ffeca3ffa495777cb3c719ddbfdc4f7a95cfcf2902ab327dacc0303"
 
 
 def test_the_storage_revision_is_inside_every_store_content_address(

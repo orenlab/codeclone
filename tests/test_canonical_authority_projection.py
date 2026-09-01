@@ -42,10 +42,14 @@ from codeclone.canonical.authority_projection import (
 )
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
+    DOMAIN_TAG_FILE,
+    LOCATION_TAG_UNRESOLVED,
+    VIOLATION_KINDS,
     AnalysisFile,
     EffectLabelRoot,
     EffectRoot,
     FileId,
+    FileLine,
     KnownModule,
     ModuleId,
     OpaqueDottedHead,
@@ -53,7 +57,9 @@ from codeclone.canonical.identity import (
     OperationTarget,
     ProducerRoot,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
+    source_location_key,
 )
 from codeclone.canonical.model import (
     AnalysisFacts,
@@ -67,7 +73,9 @@ from codeclone.canonical.semantic_grammar import (
     build_identity_index,
     format_effect_root,
     format_root_set,
+    format_source_location,
     parse_effect_root,
+    parse_source_locations,
 )
 
 from ._projection_equivalence import ProjectionCorpus, build_corpus
@@ -111,43 +119,52 @@ def test_the_sink_projection_rebuilds_the_whole_published_row(
         )
 
 
-def test_the_violation_projection_rebuilds_every_column_with_a_stored_basis(
+def test_the_violation_projection_rebuilds_the_whole_published_row(
     corpus: ProjectionCorpus,
 ) -> None:
-    """Six of seven close; the seventh is named, not silently dropped."""
+    """All seven close now, ``locations`` included -- byte for byte.
+
+    The wave that measured this lane closed six columns and named the
+    seventh: ``locations`` had no stored basis, so the lane stood
+    ``partial`` on exactly one column over 26 violations carrying 58
+    location evidence points.  The column is stored now, so the comparison
+    below is the WHOLE published row and the exemption list is empty.
+    """
 
     reported = _reported(corpus, "violation")
     assert len(reported) > 1, "a one-row population settles no ordering"
     projected = list(violation_projection_rows(corpus.stored_model))
     assert len(projected) == len(reported)
     for report_row, rebuilt in zip(reported, projected, strict=True):
-        assert set(report_row) - set(rebuilt) == set(VIOLATION_UNPROJECTED_COLUMNS)
-        assert set(rebuilt) - set(report_row) == set()
-        trimmed = {
-            key: value
-            for key, value in report_row.items()
-            if key not in VIOLATION_UNPROJECTED_COLUMNS
-        }
-        assert orjson.dumps({key: rebuilt[key] for key in trimmed}) == orjson.dumps(
-            trimmed
+        assert set(rebuilt) == set(report_row)
+        assert orjson.dumps(rebuilt) == orjson.dumps(
+            {key: rebuilt[key] for key in report_row}
+        ), "the rebuilt row disagrees with the builder's key order"
+        assert orjson.dumps({key: rebuilt[key] for key in report_row}) == orjson.dumps(
+            report_row
         )
 
 
-def test_the_unprojected_column_is_the_one_with_no_stored_basis(
+def test_no_violation_column_is_left_unprojected(
     corpus: ProjectionCorpus,
 ) -> None:
-    """The exemption is a fact about the corpus, not a spelling.
+    """The exemption list is empty, and the corpus makes that non-vacuous.
 
-    ``locations`` is asserted on the reported rows -- so the projection is
-    omitting a column that carries a value, which is what makes the
-    omission a measured gap instead of a convenient empty.
+    ``locations`` is asserted on the reported rows -- so the equality above
+    is comparing a column that CARRIES a value on every row, which is what
+    keeps the closed gap a measurement instead of a convenient empty.
     """
 
-    assert VIOLATION_UNPROJECTED_COLUMNS == ("locations",)
+    assert VIOLATION_UNPROJECTED_COLUMNS == ()
     reported = _reported(corpus, "violation")
     assert reported, "an empty population makes the claim below vacuous"
     assert all(row["locations"] for row in reported), (
-        "no violation carries a location; the omission would be inert"
+        "no violation carries a location; the equality would be inert"
+    )
+    kinds = {str(row["kind"]) for row in reported}
+    assert kinds == set(VIOLATION_KINDS), (
+        f"the corpus reaches {len(kinds)} of {len(VIOLATION_KINDS)} violation "
+        "kinds; a kind nobody produces proves nothing about its locations"
     )
 
 
@@ -211,6 +228,7 @@ def _tying_violation_model() -> CanonicalModel:
             root_set=frozenset({UnresolvedRoot()}),
             producer_set=frozenset({producer}),
             suppressed=False,
+            locations=(FileLine(sink_file, 4),),
         )
 
     files = [sink_file, owner.file, *(producer.file for producer in producers)]
@@ -419,3 +437,263 @@ def test_the_corpus_roots_survive_the_round_trip(corpus: ProjectionCorpus) -> No
 
     assert len(_roots(projected)) > 1
     assert _roots(projected) == _roots(reported)
+
+
+# -- the evidence witness: three properties, three separable mutations ------
+#
+# ``locations`` is the one authority column that had to be CANONICALIZED
+# rather than projected, so its three obligations are pinned one test each,
+# and each test is written so that ONE mutation kills it and leaves the
+# other two green. That separation is the point: three tests that all die
+# to the same mutation measure one property three times, not three.
+
+#: The run scope the location grammar is read against. ``pkg/a.py`` and
+#: ``pkg/b.py`` are analyzed; ``vendor/x.py`` deliberately is not, so the
+#: unresolved variant has a reachable input rather than a hypothetical one.
+_LOCATION_INDEX = build_identity_index(
+    [("pkg/a.py", "pkg.a"), ("pkg/b.py", "pkg.b")],
+    analyzed_paths=frozenset({"pkg/a.py", "pkg/b.py"}),
+)
+
+
+def test_the_evidence_order_is_canonical_and_not_the_order_events_arrived() -> None:
+    """Property 1 -- the order is the model's, never the producer's.
+
+    Two sites in DIFFERENT files, offered in both orders: the tuple that
+    comes out is the same tuple. Different files on purpose, and no corpus
+    fixture on purpose: this pin must stay green under the mutations the
+    other two properties own, or the three would measure one property three
+    times instead of three properties once each.
+
+    Mutation: drop the ``sorted`` from ``parse_source_locations`` and the
+    two arrival orders stop agreeing here.
+    """
+
+    forward = parse_source_locations(
+        _LOCATION_INDEX, [("pkg/a.py", 4), ("pkg/b.py", 2)]
+    )
+    reversed_arrival = parse_source_locations(
+        _LOCATION_INDEX, [("pkg/b.py", 2), ("pkg/a.py", 4)]
+    )
+    assert forward == reversed_arrival
+    assert forward == (FileLine(FileId("pkg/a.py"), 4), FileLine(FileId("pkg/b.py"), 2))
+    keys = [source_location_key(item) for item in forward]
+    assert keys == sorted(keys)
+
+
+def test_two_sites_in_one_file_stay_two_evidence_points() -> None:
+    """Property 2 -- multiplicity survives; a repeat is refused, not eaten.
+
+    The input is already in canonical order, so property 1's mutation
+    (dropping the sort) leaves this test green and the two stay separable.
+    What this one is about is the LINE: two sites of one file are two
+    evidence points, and a key blind to the line would fuse them.
+
+    Mutation: drop ``location.line`` from ``source_location_key`` and the
+    two same-file sites collide -- the tuple below stops being strictly
+    increasing and ``ViolationRow`` refuses the row it should have carried.
+    """
+
+    sites = parse_source_locations(_LOCATION_INDEX, [("pkg/a.py", 4), ("pkg/a.py", 9)])
+    assert sites == (FileLine(FileId("pkg/a.py"), 4), FileLine(FileId("pkg/a.py"), 9))
+    row = _violation_with(sites)
+    assert row.locations == sites
+    assert [
+        (item["relative_path"], item["start_line"])
+        for item in cast(
+            "list[dict[str, object]]",
+            _projected_row(row)["locations"],
+        )
+    ] == [("pkg/a.py", 4), ("pkg/a.py", 9)]
+
+    # The other half of the property: a genuine repeat is a REFUSAL. A
+    # deduplicating model would return a shorter tuple and call it a fact.
+    doubled = (*sites, sites[-1])
+    with pytest.raises(CanonicalModelError, match="strictly increasing"):
+        _violation_with(doubled)
+
+
+def test_an_unplaceable_site_becomes_explicit_unresolved_and_is_never_dropped() -> None:
+    """Property 3 -- the site the FILE domain refuses still counts.
+
+    A dropped site leaves a SHORTER tuple, and on the last site an empty
+    one -- and an empty tuple reads as "the producer had nothing to say",
+    which is a different statement. So the length is asserted first and the
+    variant second, and the projection is asked to render the string back.
+
+    Mutation: make ``parse_source_locations`` skip a path outside
+    ``analyzed_paths`` and the length assertion below fails, while
+    properties 1 and 2 (whose paths are all analyzed) stay green.
+    """
+
+    sites = parse_source_locations(
+        _LOCATION_INDEX, [("pkg/a.py", 4), ("vendor/x.py", 7)]
+    )
+    assert len(sites) == 2, "an unplaceable site was dropped instead of tagged"
+    assert sites[1] == UnresolvedLocation("vendor/x.py", 7)
+    # The complement, so the classification is a decision and not a
+    # constant: the analyzed path in the same call took the other branch.
+    assert sites[0] == FileLine(FileId("pkg/a.py"), 4)
+
+    rendered = cast(
+        "list[dict[str, object]]", _projected_row(_violation_with(sites))["locations"]
+    )
+    assert [item["relative_path"] for item in rendered] == [
+        "pkg/a.py",
+        "vendor/x.py",
+    ], "the unresolved site's own string was not rendered back verbatim"
+
+    # A path the FILE law itself refuses reaches the same variant rather
+    # than a crash: ``..`` can never be a FILE identity.
+    outside = parse_source_locations(_LOCATION_INDEX, [("vendor/pkg/../x.py", 1)])
+    assert outside == (UnresolvedLocation("vendor/pkg/../x.py", 1),)
+
+
+def test_a_mixed_row_orders_by_the_path_and_not_by_the_variant_tag() -> None:
+    """Property 4 -- the tail-tag decision, held by measurement.
+
+    ``source_location_key`` puts the variant tag LAST, unlike
+    ``endpoint_key`` and ``dead_code_entity_key`` which lead with it. The
+    justification is that both location variants address ONE namespace --
+    the producer's own path string -- and the producer orders its evidence
+    by that string (``semantics/authority._summary_locations`` sorts by
+    ``(relative_path, start_line, qualname)``). A leading tag would split
+    that namespace into two blocks the producer never separated.
+
+    Reasoning is not measurement, and the corpus cannot supply the missing
+    half: 0 of its 58 sites are unresolved, so no corpus row mixes the
+    variants and both candidate keys agree on every row a real run produces.
+    This is the input that separates them -- and it is chosen so the two
+    orderings DISAGREE, which the second assertion proves rather than
+    assumes.
+
+    Mutation: lead ``source_location_key`` with the tag and this reds, while
+    the three single-variant property pins stay green.
+
+    Separability, measured rather than assumed. The sites are handed in
+    already in the shipped key's order, so property 1's mutation (dropping
+    the sort) is a no-op here and the two stay independent -- the first
+    shape of this pin was offered them REVERSED and the separability battery
+    caught it dying to p1 as well. It cannot be made independent of property
+    3: a mixed row needs an unresolved site to exist at all, so a mutation
+    that drops unplaceable sites necessarily reds this too. That dependency
+    is intrinsic to the claim, and it is stated rather than engineered away.
+    """
+
+    # ``aaa.py`` is outside the run's scope and ``zzz.py`` is inside it, so
+    # path order and tag order pull in opposite directions here.
+    sites = [("aaa.py", 1), ("zzz.py", 1)]
+    index = build_identity_index([], analyzed_paths=frozenset({"zzz.py"}))
+    ordered = parse_source_locations(index, sites)
+    assert {type(item) for item in ordered} == {FileLine, UnresolvedLocation}, (
+        "the input must mix the variants or it settles nothing"
+    )
+
+    # The producer's key, spelled here instead of imported: the path first,
+    # then the line. The qualname is constant across one violation's sites,
+    # so those two terms are the whole of the order it yields.
+    by_producer = [path for path, _line in sorted(sites, key=lambda site: site)]
+    assert [format_source_location(item) for item in ordered] == by_producer
+
+    # Both boundaries: a tag-first key is a DIFFERENT permutation on this
+    # input, so the equality above cannot be satisfied by both rules and the
+    # pin is not inert.
+    tag_first = sorted(
+        ordered,
+        key=lambda item: (
+            DOMAIN_TAG_FILE if isinstance(item, FileLine) else LOCATION_TAG_UNRESOLVED,
+            format_source_location(item),
+        ),
+    )
+    assert [format_source_location(item) for item in tag_first] != by_producer
+
+    # And the same disagreement reaches the model: under a tag-first key the
+    # canonical tuple would be non-increasing, which ``ViolationRow``
+    # refuses -- so the decision is load-bearing, not cosmetic.
+    assert _violation_with(ordered).locations == ordered
+    with pytest.raises(CanonicalModelError, match="strictly increasing"):
+        _violation_with(tuple(reversed(ordered)))
+
+
+def test_the_corpus_reaches_every_shape_the_three_pins_assert(
+    corpus: ProjectionCorpus,
+) -> None:
+    """The three pins above are hermetic; this is where they meet a run.
+
+    Hand-built inputs prove a rule; they do not prove the rule is about
+    anything. Each shape the pins assert is counted here on the population a
+    real pipeline produced, so a pin that had become inert would be visible
+    as a zero rather than as a still-green assertion.
+    """
+
+    violations = corpus.stored_model.facts.analysis.violations
+    assert violations, "an empty violation population makes every count vacuous"
+    for row in violations:
+        keys = [source_location_key(item) for item in row.locations]
+        assert keys == sorted(keys), "a stored row lost the canonical order"
+    assert all(row.locations for row in violations), (
+        "a corpus violation carries no site at all; the evidence column "
+        "would be measuring an empty everywhere"
+    )
+    multiplicity = [row for row in violations if len(row.locations) > 1]
+    assert multiplicity, "no corpus violation carries two sites (property 1)"
+    same_file = [
+        row
+        for row in multiplicity
+        if len({_location_path(item) for item in row.locations}) == 1
+    ]
+    assert same_file, (
+        "no corpus violation carries two sites of ONE file; a line-blind key "
+        "would survive this corpus and property 2 would be its only witness"
+    )
+    unresolved = [
+        item
+        for row in violations
+        for item in row.locations
+        if isinstance(item, UnresolvedLocation)
+    ]
+    assert unresolved == [], (
+        "the pipeline corpus produced an unplaceable site; the variant is "
+        "reachable there too and this expectation needs re-measuring"
+    )
+
+
+def _location_path(location: object) -> str:
+    return format_source_location(cast("FileLine | UnresolvedLocation", location))
+
+
+def _violation_with(sites: tuple[object, ...]) -> ViolationRow:
+    """One violation carrying exactly these sites, and nothing else new."""
+
+    sink = SymbolId(FileId("pkg/a.py"), "sink")
+    return ViolationRow(
+        contract_id="evidence/v1",
+        kind="owner_bypass",
+        sink_identity=sink,
+        canonical_owner=SymbolId(FileId("pkg/b.py"), "owner"),
+        authority_status="shadow",
+        effect_signature="s",
+        resolution_state="resolved",
+        root_set=frozenset({UnresolvedRoot()}),
+        producer_set=frozenset({sink}),
+        suppressed=False,
+        locations=cast("tuple[FileLine | UnresolvedLocation, ...]", sites),
+    )
+
+
+def _projected_row(row: ViolationRow) -> dict[str, object]:
+    """The published row of a one-violation model, through the projection."""
+
+    files = [FileId("pkg/a.py"), FileId("pkg/b.py")]
+    modules = {"pkg/a.py": ModuleId("pkg.a"), "pkg/b.py": ModuleId("pkg.b")}
+    model = CanonicalModel(
+        files=frozenset(files),
+        modules=frozenset(modules.values()),
+        analyzed_files=frozenset(files),
+        file_modules=frozenset(
+            FileModuleRelation(file=path, module=modules[path.path]) for path in files
+        ),
+        facts=CanonicalFacts(analysis=AnalysisFacts(violations=frozenset({row}))),
+    )
+    (projected,) = violation_projection_rows(model)
+    return projected

@@ -29,6 +29,7 @@ from codeclone.canonical import (
     EffectLabelRoot,
     EffectRoot,
     FileId,
+    FileLine,
     KnownModule,
     ModuleId,
     OpaqueDottedHead,
@@ -37,6 +38,7 @@ from codeclone.canonical import (
     ProducerRoot,
     RiskObservationRow,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
     ViolationRow,
     canonical_key,
@@ -225,6 +227,13 @@ def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
         lambda: RiskObservationRow(
             SymbolId(FileId("a.py"), "f"), "cyclomatic_complexity", 3, 0
         ),
+        # The evidence-line law, both variants and both ways it breaks: a
+        # negative line, and the bool that ``isinstance(True, int)`` would
+        # otherwise smuggle in as line 1.
+        lambda: FileLine(FileId("a.py"), -1),
+        lambda: FileLine(FileId("a.py"), True),
+        lambda: UnresolvedLocation("vendor/x.py", -1),
+        lambda: UnresolvedLocation("vendor/x.py", True),
         lambda: ViolationRow(
             contract_id="",
             kind="owner_bypass",
@@ -236,6 +245,7 @@ def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
             root_set=frozenset(),
             producer_set=frozenset(),
             suppressed=False,
+            locations=(),
         ),
         lambda: ViolationRow(
             contract_id="c",
@@ -248,6 +258,7 @@ def test_endpoint_key_is_total_and_tag_first_across_the_union() -> None:
             root_set=frozenset(),
             producer_set=frozenset(),
             suppressed=False,
+            locations=(),
         ),
     ],
 )

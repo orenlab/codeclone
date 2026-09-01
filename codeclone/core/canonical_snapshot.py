@@ -83,6 +83,7 @@ from ..canonical.semantic_grammar import (
     parse_endpoint,
     parse_lane_symbol,
     parse_root_set,
+    parse_source_locations,
     parse_symbol,
     parse_symbol_set,
     surface_head,
@@ -837,6 +838,19 @@ def _semantic_families(
                     index, violation.producers, "violation.producers"
                 ),
                 suppressed=violation.suppressed,
+                # The grammar owner decides placement AND order, so this
+                # path cannot pass the producer's own arrival order
+                # through. The two remaining published slots stay out on
+                # purpose: ``qualname`` is this violation's own
+                # ``sink_identity``, and ``end_line`` is ``start_line``
+                # because a semantic event carries one line, never a span.
+                locations=parse_source_locations(
+                    index,
+                    (
+                        (location.relative_path, location.start_line)
+                        for location in violation.locations
+                    ),
+                ),
             )
             for violation in semantic.violations
         ),

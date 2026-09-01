@@ -38,6 +38,12 @@ DOMAIN_TAG_MODULE: Final = "module"
 DOMAIN_TAG_SYMBOL: Final = "symbol"
 DOMAIN_TAG_EFFECT_ROOT: Final = "effect_root"
 HEAD_TAG_OPAQUE: Final = "opaque"
+#: Tag of the SOURCE_LOCATION variant whose path the FILE domain refuses.
+#: Deliberately not ``HEAD_TAG_OPAQUE``: an opaque HEAD is a producer string
+#: that never had a domain, while an unresolved LOCATION is a site the run
+#: could not place in its own analysis scope — different facts, different
+#: tags, so a wire reader never has to guess which one it is holding.
+LOCATION_TAG_UNRESOLVED: Final = "unresolved_location"
 
 ROOT_FAMILY_OPERATION: Final = "operation"
 ROOT_FAMILY_PRODUCER: Final = "producer"
@@ -229,6 +235,21 @@ def _require_file_path(path: str) -> str:
     return path
 
 
+def _require_evidence_line(line: int) -> None:
+    """Evidence-line law: a non-negative int, never a bool.
+
+    Non-negative rather than positive, and the bound is the producer's not
+    this module's: ``DependencyOccurrenceRow`` already admits line 0 for the
+    same reason — a document may publish a coerced zero, and refusing it
+    would make one malformed row unstorable instead of storable and
+    visibly zero.
+    """
+    if isinstance(line, bool) or line < 0:
+        raise CanonicalModelError(
+            f"source location line must be a non-negative int: {line!r}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class FileId:
     """FILE identity: normalized POSIX path from the analysis root."""
@@ -260,6 +281,57 @@ class SymbolId:
     def __post_init__(self) -> None:
         if not self.qualname:
             raise CanonicalModelError("SYMBOL qualname must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class FileLine:
+    """SOURCE_LOCATION variant: one line of a FILE the run analyzed.
+
+    A location is EVIDENCE, not identity (ruling 2026-08-24 §2, and the
+    ``DependencyOccurrenceRow`` precedent): it says where a fact was seen,
+    never which entity the fact is about.  ``line`` is the producer's own
+    single line — ``SemanticEvent.location`` is ``(path, line)``, one line
+    and not a span, so a stored ``end_line`` would be the same fact twice.
+    """
+
+    file: FileId
+    line: int
+
+    def __post_init__(self) -> None:
+        _require_evidence_line(self.line)
+
+
+@dataclass(frozen=True, slots=True)
+class UnresolvedLocation:
+    """SOURCE_LOCATION variant: a site the FILE domain cannot admit.
+
+    The producer named a path the run's own analysis scope does not carry
+    (an external absolute path the report layer reduced to a basename, a
+    spelling the FILE path law refuses, or the empty string a document may
+    still publish).  The string rides VERBATIM — never repaired into a FILE
+    identity nobody asserted, and never dropped.
+
+    Dropping is the failure this variant exists to prevent: a dropped site
+    leaves a SHORTER tuple, and on the last site an EMPTY one — and an empty
+    tuple reads as "the producer had nothing to say", which is a different
+    statement from "the producer said something this model could not
+    place".  The empty ``path`` is admitted for the same reason: it is what
+    the producer asserted, and refusing it here would turn the document of
+    a real run into a run that cannot be stored at all.
+    """
+
+    path: str
+    line: int
+
+    def __post_init__(self) -> None:
+        _require_evidence_line(self.line)
+
+
+#: The ratified tagged SOURCE_LOCATION union: a FILE-headed line, or the
+#: producer's own unplaceable site.  The VARIANT is part of the identity —
+#: an unresolved site never silently becomes the FILE-headed location of a
+#: path that merely looks like one.
+SourceLocation = FileLine | UnresolvedLocation
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,6 +535,35 @@ def dead_code_entity_key(entity: DeadCodeEntity) -> tuple[object, ...]:
     if isinstance(entity, OpaqueEntity):
         return (HEAD_TAG_OPAQUE, _utf8(entity.head), _utf8(entity.qualname))
     raise CanonicalModelError(f"value is not a dead-code entity: {entity!r}")
+
+
+def source_location_key(location: SourceLocation) -> tuple[bytes, int, str]:
+    """Total canonical key of one SOURCE_LOCATION across the tagged union.
+
+    The variant tag is the TAIL here, and that is a deliberate divergence
+    from :func:`endpoint_key` / :func:`dead_code_entity_key`, where it leads.
+    Those two unions address DIFFERENT namespaces (a dotted module name, a
+    repository path), so a leading tag is the natural discriminator and the
+    order it yields is the only order anyone has.  Both location variants
+    address ONE namespace — the producer's own path string — and the
+    producer publishes its evidence ordered by that string
+    (``semantics/authority._summary_locations`` sorts by
+    ``(relative_path, start_line, qualname)``).  A leading tag would split
+    that one namespace into two blocks the producer never separated, and
+    the projection could no longer reproduce the published order.  The tag
+    still rides, last, so the key stays injective across the union: two
+    variants that agree on path and line are still two different values.
+
+    The return type is the exact triple rather than the ``tuple[object,
+    ...]`` the sibling key functions use, and that is load-bearing: this key
+    is ORDERED (``<``), not merely compared for equality, so a checker has to
+    be able to see that every slot is comparable to its counterpart.
+    """
+    if isinstance(location, FileLine):
+        return (_utf8(location.file.path), location.line, DOMAIN_TAG_FILE)
+    if isinstance(location, UnresolvedLocation):
+        return (_utf8(location.path), location.line, LOCATION_TAG_UNRESOLVED)
+    raise CanonicalModelError(f"value is not a source location: {location!r}")
 
 
 def canonical_key(value: object) -> tuple[object, ...]:

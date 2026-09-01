@@ -56,6 +56,7 @@ from codeclone.canonical.identity import (
     EffectRoot,
     FileId,
     ModuleId,
+    SourceLocation,
     SymbolId,
 )
 from codeclone.canonical.model import (
@@ -91,6 +92,7 @@ from codeclone.canonical.semantic_grammar import (
     parse_endpoint,
     parse_lane_symbol,
     parse_root_set,
+    parse_source_locations,
     parse_symbol,
     parse_symbol_set,
     surface_head,
@@ -995,6 +997,37 @@ def _run_scalars(document: Mapping[str, object]) -> RunScalars:
     )
 
 
+def _document_locations(
+    value: object, index: IdentityIndex, where: str
+) -> tuple[SourceLocation, ...]:
+    """The published location structs as the canonical evidence tuple.
+
+    Document SHAPE is read here (``_document_*``, the oracle's own naming
+    law); the identity RULE is the grammar owner's. Two of the four
+    published slots are deliberately not read: ``qualname`` is the
+    violation's own ``sink_identity`` restated by the producer, and
+    ``end_line`` equals ``start_line`` because a semantic event carries one
+    line and never a span — reading either would store a fact this row
+    already carries.
+
+    Ordering and the placement rule both belong to the grammar owner:
+    :func:`parse_source_locations` decides the canonical order once for both
+    publication paths, so a document's own array order can never reach the
+    stored row.
+    """
+
+    return parse_source_locations(
+        index,
+        (
+            (
+                _string(_mapping(item, where), "relative_path", where),
+                _lane_int(_mapping(item, where), "start_line", where),
+            )
+            for item in _sequence(value, where)
+        ),
+    )
+
+
 def _violation(row: Mapping[str, object], index: IdentityIndex) -> ViolationRow:
     suppressed = _field(row, "suppressed", "violation")
     if not isinstance(suppressed, bool):
@@ -1022,6 +1055,9 @@ def _violation(row: Mapping[str, object], index: IdentityIndex) -> ViolationRow:
             _field(row, "producers", "violation"), index, "violation.producers"
         ),
         suppressed=suppressed,
+        locations=_document_locations(
+            _field(row, "locations", "violation"), index, "violation.locations"
+        ),
     )
 
 

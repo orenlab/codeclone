@@ -92,19 +92,20 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATABLE = (
     "analysis_population.states",
     "authority.candidates",
+    "authority.violations",
     "authority.sinks",
     "dependencies.relations",
     "dependencies.occurrences",
 )
 
-#: The one authority column no projection can rebuild, and the lane it
-#: keeps ``partial``. ``locations`` is the violation's source evidence,
-#: distilled by the producer from ``FunctionContractSummary.events``; the
-#: event stream is not a family of the wave-1..4 subset, so under S8.V.3
-#: the basis lies OUTSIDE the subset and the value must be canonicalized
-#: rather than derived. Named here so the remaining gap is a measured
-#: number, not an omission.
-_VIOLATION_GAP = ("locations",)
+#: The authority columns no projection can rebuild -- EMPTY since
+#: ``locations`` was canonicalized. It was the lane's one measured gap:
+#: the violation's source evidence, distilled by the producer from
+#: ``FunctionContractSummary.events``, whose basis lay OUTSIDE the wave-1..4
+#: subset, so under S8.V.3 it had to be stored rather than derived. It is a
+#: stored tagged ``SourceLocation`` witness now, so the tuple is empty and
+#: the equality below turns red the moment a NEW gap appears.
+_VIOLATION_GAP: tuple[str, ...] = ()
 
 #: Measured, not assumed: the report's dead-code family is a classification
 #: over the observation population, and the model carries the population.
@@ -180,23 +181,24 @@ def test_the_migration_frontier_is_exactly_the_equivalent_lanes(
             assert lane.unrepresented_fields == ()
 
 
-def test_the_violation_lane_keeps_exactly_one_measured_gap(
+def test_the_violation_lane_has_no_measured_gap_left(
     corpus: ProjectionCorpus,
 ) -> None:
-    """What the violation projection cannot rebuild, stated as a number.
+    """What the violation projection cannot rebuild, stated as a number: 0.
 
-    Six of the seven unrepresented violation columns are rebuilt from
-    stored facts; ``locations`` is not, because its basis -- the producer's
-    per-function event stream -- is not a family this subset carries. The
-    lane therefore stays ``partial`` on purpose, and the assertion is an
-    equality rather than a membership so that a NEW gap appearing here
-    fails instead of hiding behind the one we already know about.
+    The wave that measured this lane closed six of the seven unrepresented
+    columns and named the seventh. ``locations`` is stored now -- a tuple of
+    tagged ``SourceLocation`` witnesses -- so the lane rebuilds every
+    published column and becomes ``equivalent``. The assertion is an
+    equality rather than a membership so that a NEW gap appearing here fails
+    instead of hiding behind an empty tuple.
     """
 
     report = compare_projections(corpus.document, corpus.stored_model)
     lane = report.lane("authority.violations")
-    assert lane.verdict == VERDICT_PARTIAL
     assert lane.unrepresented_fields == _VIOLATION_GAP
+    assert lane.verdict == VERDICT_EQUIVALENT
+    assert lane.migratable
 
 
 def test_a_partial_lane_is_never_migratable(corpus: ProjectionCorpus) -> None:
@@ -355,7 +357,11 @@ def test_an_undeclared_metric_family_is_unmeasured_not_equivalent(
     # witness and the population lane disagrees with the run's own
     # declaration. The lanes of another family keep their verdict, which is
     # what makes this a withdrawal rather than a blanket refusal.
-    assert report.migratable_lanes == ("authority.candidates", "authority.sinks")
+    assert report.migratable_lanes == (
+        "authority.candidates",
+        "authority.violations",
+        "authority.sinks",
+    )
 
 
 def test_a_withheld_observation_lane_is_unmeasured_not_equivalent(

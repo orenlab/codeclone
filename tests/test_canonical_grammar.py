@@ -424,10 +424,16 @@ def test_registry_source_executes_the_wire_gate_at_import() -> None:
 
 
 def test_the_real_wire_population_passes_the_gate() -> None:
-    """Witness that the instrument is on: 19 families, 93 fact fields."""
+    """Witness that the instrument is on: 19 families, 94 fact fields.
+
+    93 until the authority ``violations`` family gained ``locations``, the
+    one published authority column measured NOT derivable from the stored
+    subset and therefore canonicalized rather than projected. One family
+    gained one wire column; no family was added or removed.
+    """
     families = _wire_field_names()
     assert len(families) == 19
-    assert sum(len(fields) for fields in families.values()) == 93
+    assert sum(len(fields) for fields in families.values()) == 94
     require_analysis_wire_families(families)
 
 

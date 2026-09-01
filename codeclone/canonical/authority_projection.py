@@ -61,13 +61,17 @@ SINK columns all close: three are the function contract's, read off the
 stored graph node the producer built from the same entry (14 837/14 837
 self-repo rows and 292/292 corpus rows byte-identical, 0 disagreements);
 the rest are a ranking term, a provenance label and four union
-placeholders.  Of the seven VIOLATION columns, six close (143/143 corpus
-rows byte-identical over 22 columns) and ``locations`` does NOT — see
-:data:`VIOLATION_UNPROJECTED_COLUMNS`.  That single column is why
-``authority.violations`` stays ``partial`` while ``authority.sinks``
-becomes ``equivalent``: closing it means canonicalizing a value whose
-basis is outside the subset, which is a wire decision and not a
-projection.
+placeholders.  The seven VIOLATION columns close too, but not all the
+same way: six were derivable and one, ``locations``, was measured NOT
+derivable — so it was CANONICALIZED rather than projected, and the row
+stores it now (:data:`VIOLATION_UNPROJECTED_COLUMNS` records what that
+changed here).  This module renders the stored witness back into the
+published struct: the path from the site's own variant, ``start_line``
+from its line, ``end_line`` from the same line (a semantic event carries
+one line, never a span) and ``qualname`` from the violation's own
+``sink_identity``, the string the producer stamps on every row of its
+per-function location table.  With that, ``authority.violations`` joins
+``authority.sinks`` at ``equivalent``.
 """
 
 from __future__ import annotations
@@ -83,14 +87,17 @@ from codeclone.canonical.authority_identity import (
 )
 from codeclone.canonical.codec import legacy_symbol_keys
 from codeclone.canonical.errors import CanonicalModelError
-from codeclone.canonical.identity import ProducerRoot, SymbolId
+from codeclone.canonical.identity import ProducerRoot, SourceLocation, SymbolId
 from codeclone.canonical.model import (
     CandidateRow,
     CanonicalModel,
     SinkRoleRow,
     ViolationRow,
 )
-from codeclone.canonical.semantic_grammar import format_root_set
+from codeclone.canonical.semantic_grammar import (
+    format_root_set,
+    format_source_location,
+)
 from codeclone.contracts import AUTHORITY_ANALYSIS_REVISION
 from codeclone.domain.source_scope import SOURCE_KIND_ORDER, SOURCE_KIND_OTHER
 from codeclone.paths import classify_source_kind
@@ -100,16 +107,20 @@ CANDIDATE_ROW_PROJECTION_CONTRACT: Final = "candidate_row_projection.v1"
 SINK_ROW_PROJECTION_CONTRACT: Final = "sink_row_projection.v1"
 VIOLATION_ROW_PROJECTION_CONTRACT: Final = "violation_row_projection.v1"
 
-#: The published violation columns this projection does NOT emit, and the
-#: only reason it may omit one: the value's derivation basis lies outside
-#: the stored subset, so S8.V.3 makes it a CANONICALIZATION decision rather
-#: than a projection gap.  ``locations`` is the producer's distillation of
+#: The published violation columns this projection does NOT emit -- EMPTY.
+#: ``locations`` was the one entry, and the reason it stood here is the
+#: reason it is gone: under S8.V.3 a value whose derivation basis lies
+#: outside the stored subset is a CANONICALIZATION decision, not a
+#: projection gap.  The producer distils it from
 #: ``FunctionContractSummary.events`` -- the first three source sites of the
-#: sink's own events -- and that event stream is not a family of the
-#: wave-1..4 model.  Emitting ``[]`` here would be worse than omitting it:
-#: on a corpus whose violations happen to carry no location the empty list
-#: would read as a rebuilt column and mint an exemption nobody measured.
-VIOLATION_UNPROJECTED_COLUMNS: Final = ("locations",)
+#: sink's own events -- and that event stream is no family of the wave-1..4
+#: model, so the column is STORED now (``ViolationRow.locations``, a tuple
+#: of tagged ``SourceLocation`` witnesses) and this projection renders it
+#: from the model like every other column.  The tuple stays declared and
+#: empty rather than deleted: it is what the equivalence lane reads to say
+#: the gap is zero, and a future column with no stored basis lands here
+#: instead of being silently absent.
+VIOLATION_UNPROJECTED_COLUMNS: Final[tuple[str, ...]] = ()
 
 #: The closed status vocabulary a candidate group assigns its producers.
 #: ``authoritative`` is a sink-level verdict and is unreachable per producer
@@ -418,18 +429,44 @@ def sink_projection_rows(model: CanonicalModel) -> tuple[dict[str, object], ...]
     )
 
 
+def _violation_location(
+    location: SourceLocation, *, qualname: str
+) -> dict[str, object]:
+    """One stored evidence site as the published location struct.
+
+    Two of the four slots are derived rather than read, and each has its
+    owner cited rather than assumed.  ``end_line`` repeats ``start_line``
+    because the producer builds both from ``event.location[1]`` and
+    ``SemanticEvent.location`` is ``(path, int)`` -- one line, no span.
+    ``qualname`` is the violation's own sink: the producer keys its
+    location table by ``summary.function``, stamps that same string on every
+    row of the entry, then hands the SINK's entry to the violation.
+    Neither derivation is left to rot -- the projection equivalence compares
+    this struct against the report's own byte for byte, so a producer that
+    grew a real span, or a second qualname, turns that comparison red
+    instead of drifting quietly.
+    """
+
+    return {
+        "relative_path": format_source_location(location),
+        "start_line": location.line,
+        "end_line": location.line,
+        "qualname": qualname,
+    }
+
+
 def _violation_row(
     row: ViolationRow,
     *,
     legacy: Mapping[SymbolId, str],
 ) -> dict[str, object]:
-    """One published violation row, minus the column with no stored basis.
+    """One published violation row -- every column, none exempt.
 
-    ``locations`` is absent by measurement, not by oversight -- see
-    :data:`VIOLATION_UNPROJECTED_COLUMNS`.  Of the six columns that ARE
-    rebuilt, ``producer_root_ids`` is stored outright (``root_set``),
-    ``source_kind`` is the document layer's ranking term over the stored
-    producer set, ``algorithm_revision`` is run provenance, and ``score``,
+    ``producer_root_ids`` is stored outright (``root_set``); ``locations``
+    is stored outright too -- the canonicalized evidence witness, rendered
+    by :func:`_violation_location`.  ``source_kind`` is the document
+    layer's ranking term over the stored producer set,
+    ``algorithm_revision`` is run provenance, and ``score``,
     ``independence`` and ``semantic_divergence`` are union placeholders the
     producer emits no key for on a violation item.
     """
@@ -462,6 +499,10 @@ def _violation_row(
         "independence": False,
         "semantic_divergence": False,
         "suppressed": row.suppressed,
+        "locations": [
+            _violation_location(location, qualname=sink_identity)
+            for location in row.locations
+        ],
         "sink_statuses": [],
         "algorithm_revision": AUTHORITY_ANALYSIS_REVISION,
     }
@@ -491,7 +532,7 @@ def _violation_document_order(row: Mapping[str, object]) -> tuple[object, ...]:
 
 
 def violation_projection_rows(model: CanonicalModel) -> tuple[dict[str, object], ...]:
-    """Rebuild the published violation rows, minus ``locations``."""
+    """Rebuild the published violation rows from canonical facts alone."""
 
     facts = model.facts.analysis
     graph = _AuthorityGraphView(model)

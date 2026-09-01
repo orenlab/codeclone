@@ -239,7 +239,69 @@ def step_b(value: int) -> int:
     return step_a(value) - 1
 """
 
+#: The governed emitters: one canonical owner and the four deviations the
+#: enforcement pass classifies.  Every function here is RESOLVED on purpose
+#: -- an ``unavailable`` sink is skipped before any violation is emitted, so
+#: an unresolved corpus can only ever reach the two kinds the tree already
+#: had.  The shapes are the producer's own resolution rules read back:
+#: a call whose value is CONSUMED makes the flow unresolved, so
+#: ``rebuilt_emit`` calls the owner as a statement (the graph edge, and the
+#: ``mixed`` status, without the abstention); ``stamped_emit`` writes a
+#: field, which is a side effect the effect signature sees, so it diverges
+#: from the owner while keeping the owner's output fact.
+_GOV = """
+
+def canonical_emit(value: int) -> int:
+    total = value
+    total += 1
+    total += 2
+    return total
+
+
+def adapter_emit(value: int) -> int:
+    total = value
+    canonical_emit(total)
+    total += 1
+    total += 2
+    return total
+
+
+def rebuilt_emit(value: int) -> int:
+    total = value
+    canonical_emit(total)
+    total += 9
+    return total
+
+
+def bypass_emit_a(value: int) -> int:
+    total = value
+    total += 3
+    total += 4
+    return total
+
+
+def bypass_emit_b(value: int) -> int:
+    total = value
+    total += 3
+    total += 4
+    return total
+
+
+def stamped_emit(value: int, sink: object) -> int:
+    total = value
+    sink.slot = total
+    return total
+"""
+
 _AUTHORITY_REGISTRY: tuple[dict[str, object], ...] = (
+    # Sorted by contract_id: the registry parser refuses any other order.
+    {
+        "contract_id": "projection-equivalence.emit/v1",
+        "canonical_owner": "pkg.gov:canonical_emit",
+        "allowed_adapters": ["pkg.gov:adapter_emit"],
+        "forbidden_raw_inputs": ["param:0"],
+        "required_provenance": ["producer:pkg.gov:canonical_emit"],
+    },
     {
         "contract_id": "projection-equivalence.normalize/v1",
         "canonical_owner": "pkg.canon:Normalizer.canonical_normalize",
@@ -261,6 +323,7 @@ def write_probe_tree(root: Path) -> None:
     (package / "helper.py").write_text(_HELPER, "utf-8")
     (package / "cycle_a.py").write_text(_CYCLE_A, "utf-8")
     (package / "cycle_b.py").write_text(_CYCLE_B, "utf-8")
+    (package / "gov.py").write_text(_GOV, "utf-8")
 
 
 def _boot(root: Path) -> BootstrapResult:

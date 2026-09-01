@@ -332,11 +332,12 @@ def candidate_projection_documents(
 # Same builder as the candidate fixture above and for the same reason: the
 # acceptance is read through a consumer surface (r4) while the projection it
 # compares is an r2 fact, so the splice lives here rather than in either
-# test module.  The violation projection deliberately omits ``locations``,
-# so the rebuilt document keeps the reported value for that ONE key -- the
-# fixture is for paging and byte comparison of what the projection claims,
-# and smuggling an invented location into it would make the omission
-# invisible exactly where it matters.
+# test module.  ``locations`` used to be the ONE key the violation
+# projection did not claim, and the rebuilt document kept the reported value
+# for it; the column is stored now, so the projection claims every key and
+# the fall-back path below has no exempt key left to take.  The assertion
+# that no key falls back is kept rather than deleted: it is what turns a
+# projection quietly dropping a column back into a failure.
 # ---------------------------------------------------------------------------
 
 
@@ -383,9 +384,9 @@ def authority_projection_documents(
             return item
         row = next(rows)
         assert set(row) - set(item) == set(), "the projection invented a column"
-        assert set(item) - set(row) == set(VIOLATION_UNPROJECTED_COLUMNS) or set(
-            item
-        ) == set(row), "the projection dropped a column nobody exempted"
+        assert set(item) - set(row) <= set(VIOLATION_UNPROJECTED_COLUMNS), (
+            "the projection dropped a column nobody exempted"
+        )
         return {key: row.get(key, value) for key, value in item.items()}
 
     rebuilt["metrics"]["families"]["semantic_authority"]["items"] = [

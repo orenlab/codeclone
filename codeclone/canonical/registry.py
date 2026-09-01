@@ -932,6 +932,18 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
         FieldDeclaration(
+            "locations",
+            ANALYSIS_FACT,
+            "semantic_authority_producer",
+            "distilled source evidence; NOT derivable (S8.V.3) — the "
+            "producer's basis is FunctionContractSummary.events, which is "
+            "no family of this subset, so the value is stored rather than "
+            "projected; payload tuple, never key (a violation is the same "
+            "violation wherever it was witnessed)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
             "producer_set",
             ANALYSIS_FACT,
             "semantic_authority_producer",

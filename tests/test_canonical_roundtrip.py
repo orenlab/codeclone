@@ -52,6 +52,7 @@ from codeclone.canonical import (
     EffectLabelRoot,
     EffectRoot,
     FileId,
+    FileLine,
     FileModuleRelation,
     GraphNodeRow,
     KnownModule,
@@ -68,6 +69,7 @@ from codeclone.canonical import (
     SemanticEdge,
     SinkRoleRow,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
     ViolationRow,
     decode_canonical_json,
@@ -271,6 +273,9 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             root_set=roots_a,  # shared with contracts and graph nodes
             producer_set=frozenset({sa, sb}),
             suppressed=False,
+            # Two sites in ONE file, two lines apart: the multiplicity a
+            # path-keyed collapse would eat, carried through the wire.
+            locations=(FileLine(fa, 11), FileLine(fa, 17)),
         ),
         ViolationRow(
             contract_id="governance.report_write",
@@ -283,6 +288,17 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             root_set=frozenset(),  # measured empty, not absent
             producer_set=frozenset({sa, sb}),
             suppressed=True,
+            # BOTH variants of the location slot on one row, and in the
+            # DISCRIMINATING order: the unresolved path sorts BEFORE the
+            # FILE-headed one, so this pair separates the two candidate
+            # orderings instead of agreeing under both. Tag-first would put
+            # the FILE site first and make this tuple non-increasing, which
+            # ``ViolationRow`` refuses -- so the wire fixture holds the
+            # ordering decision, not only the encoder branch.
+            locations=(
+                UnresolvedLocation("../outside/x.py", 3),
+                FileLine(fa, 5),
+            ),
         ),
     ]
     coupling_cohesion = [
@@ -562,14 +578,35 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     (RULING-2026-08-31 §3) then replaced the F10 literal deliberately:
     the draft gained the execution-population singleton — the run-level
     witness that "we analyzed this population" is its own semantic
-    statement, so every document's bytes moved — the one announced
-    transition of this commit.
+    statement, so every document's bytes moved.
+
+    The violation ``locations`` column then replaced the population literal
+    (6574 bytes, sha256 4674fa7d…) deliberately — the announced transition
+    of this commit.  ``locations`` was the ONE authority column measured not
+    derivable from the stored subset, so it was canonicalized rather than
+    projected and the ``violations`` family gained a wire column.  What
+    entered these bytes is exactly four ``[tag, ref, line]`` evidence cells
+    over the fixture's two violation rows — three FILE-headed
+    (``["file", 0, 11]``, ``["file", 0, 17]`` on the first row and
+    ``["file", 0, 5]`` on the second) and one unresolved — plus the column
+    name itself in every row of the family (6680 bytes, sha256 ae4938b1…).
+
+    That literal was then replaced ONCE MORE, deliberately and for a
+    different reason: the unresolved cell's path became ``../outside/x.py``,
+    which sorts BEFORE the FILE-headed site beside it.  The first spelling
+    (``vendor/pkg/../x.py``) put the two variants in an order BOTH candidate
+    keys agree on, so it exercised the encoder's second branch without
+    holding the ordering decision.  This one discriminates: under the
+    shipped key the unresolved cell leads, under a tag-first key the FILE
+    cell would, and that tuple would then be non-increasing and refused by
+    ``ViolationRow``.  The fixture therefore pins the mixed-variant ORDER,
+    not only the mixed-variant encoding.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 6574
+    assert len(payload) == 6677
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "4674fa7d6b5400e453d02afd86047d9e0a2b9a8db943dd6f2822e32f5efd05f3"
+        == "dc86a3f5dbba0ef9e3dcb587f0562fad5767a88edff18d66ac562c4d9ea4f808"
     )
 
 
@@ -875,6 +912,7 @@ def _violation(kind: str, *, status: str = "shadow") -> ViolationRow:
         root_set=frozenset(),
         producer_set=frozenset({sa}),
         suppressed=False,
+        locations=(FileLine(fa, 9),),
     )
 
 
@@ -1583,6 +1621,7 @@ def test_model_refuses_a_violation_sink_without_the_function_role() -> None:
                         root_set=row.root_set,
                         producer_set=frozenset({sa}),
                         suppressed=False,
+                        locations=row.locations,
                     )
                 }
             ),

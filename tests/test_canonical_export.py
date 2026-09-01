@@ -43,6 +43,7 @@ from codeclone.canonical import (
     ExportEnvelope,
     ExportIntegrityError,
     FileId,
+    FileLine,
     GraphNodeRow,
     ModuleId,
     ProducerRoot,
@@ -115,23 +116,49 @@ _TARGET = "worktree-a"
 # record (RULING-2026-08-31 §3) then replaced those values deliberately:
 # the fixture gained the execution-population singleton — a semantic
 # ADDITION to the stored membership, so the run identity legitimately
-# moves with it, and the projection bytes move the artifact digest — the
-# one announced transition of this commit.
-# STORAGE_SCHEMA_REVISION "0" -> "1" (the persisted identity bridge) then
-# replaced the RUN literal and left the artifact literal exactly where it
-# was.  That asymmetry is the measurement, not an accident: the revision is
-# spelled into ``_DOMAIN_PREFIX``, so it reaches the run identity through
-# THREE separate preimages -- every object id, the scope receipt and the
-# membership digest, and the run domain itself -- while the artifact digest
-# is built over the projected wire bytes under its own
-# ``cc-canonical-artifact:`` domain and never sees the storage layer at all.
-# Re-derived, not re-snapshotted: putting the revision back to "0" in the
-# five derived separators and in the witness layer reproduces
-# ab16ae7206d6… from this same fixture, byte for byte, and
-# ``test_the_storage_revision_is_inside_every_store_content_address`` in
-# tests/test_canonical_store.py holds that derivation as an executable rule.
-_FIXTURE_RUN_ID = "ae97942ba3953cdc4cf355ff809c182fc51c2dddf0444dfd50e72c27d9c10ee0"
-_FIXTURE_ARTIFACT = "5c4910e220629834b7904dd095b14f8106307ce01530b7e336b9be79ffbdff22"
+# moves with it, and the projection bytes move the artifact digest.
+#
+# TWO INDEPENDENT CAUSES then moved these literals inside one rebase, and
+# the merged values are neither side's.  Both are named here because a
+# single number with two grounds is a number the next reader cannot audit.
+#
+# (a) STORAGE_SCHEMA_REVISION "0" -> "1" (the persisted identity bridge)
+#     moves the RUN literal and leaves the ARTIFACT literal exactly where it
+#     was.  That asymmetry is the measurement, not an accident: the revision
+#     is spelled into ``_DOMAIN_PREFIX``, so it reaches the run identity
+#     through THREE separate preimages -- every object id, the scope receipt
+#     and the membership digest, and the run domain itself -- while the
+#     artifact digest is built over the projected wire bytes under its own
+#     ``cc-canonical-artifact:`` domain and never sees the storage layer.
+#     ``test_the_storage_revision_is_inside_every_store_content_address`` in
+#     tests/test_canonical_store.py holds that derivation as an executable
+#     rule rather than a comment.
+#
+# (b) The violation ``locations`` column moves BOTH literals.  It is a
+#     semantic ADDITION to a stored row, not a re-projection: the ONE
+#     authority column measured not derivable from the subset became a
+#     stored tuple of tagged SourceLocation witnesses, so every violation
+#     object's payload changed under the authority_analysis namespace --
+#     which moves the stored membership AND the exported bytes.
+#
+# (c) A third movement inside the same commit, and it is NOT part of the
+#     merge: the wire fixture's unresolved location was re-spelled to
+#     ``../outside/x.py`` so the mixed-variant pair sorts differently under
+#     the shipped key than under a tag-first one.  That changes the fixture,
+#     so it changes both literals again.
+#
+# Neither side's literal survives the merge, and the values below were
+# RE-DERIVED by running the generator on the merged tree, never chosen from
+# one side.  Measured separately so every addend stays auditable:
+#   base ffe371ec .............. run ab16ae72…  artifact 5c4910e2…
+#   (a) alone, c3c59f69 ........ run ae97942b…  artifact 5c4910e2… (unmoved)
+#   (b) alone, df6c3eed ........ run 6a49bb6b…  artifact a9bca26a…
+#   (a)+(b), merged ............ run 59bc02f6…  artifact a9bca26a… (unmoved
+#                                by (a), which never reaches the artifact
+#                                domain — the asymmetry (a) predicts)
+#   (a)+(b)+(c), this commit ... the literals below
+_FIXTURE_RUN_ID = "d9fc71f1147c9d6a16163495a80a56a3f3fe8bc7f44c99e3263cbe56e51c5f5a"
+_FIXTURE_ARTIFACT = "86eea25dc5e94d0788d7ea3abeb4df94f0757a10c6549f07a784b86e3fe4be3f"
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:
@@ -654,6 +681,7 @@ def _bulk_model(rows: int = 1500) -> CanonicalModel:
                     root_set=pool[i % 24],
                     producer_set=frozenset({symbols[i]}),
                     suppressed=False,
+                    locations=(FileLine(symbols[i].file, i + 1),),
                 )
                 for i in range(rows)
             ),

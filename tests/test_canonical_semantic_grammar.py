@@ -89,6 +89,11 @@ _MOVED_RULES = frozenset(
         "parse_operation_head",
         "parse_effect_root",
         "parse_root_set",
+        # Not a transplanted rule but a rule under the same law: the
+        # location grammar has two consumers from birth, so a second
+        # definition is the same defect the transplant existed to remove.
+        "parse_source_location",
+        "parse_source_locations",
         "surface_head",
         "build_identity_index",
         # The pre-transplant private spellings: a resurrected copy would
@@ -98,6 +103,8 @@ _MOVED_RULES = frozenset(
         "_lane_symbol",
         "_dead_code_entity",
         "_operation_head",
+        "_source_location",
+        "_source_locations",
         "_effect_root",
         "_root_set",
         "_symbol_set",

@@ -50,6 +50,7 @@ from codeclone.canonical.identity import (
     EffectLabelRoot,
     EffectRoot,
     FileId,
+    FileLine,
     KnownModule,
     ModuleId,
     ModuleSymbol,
@@ -59,8 +60,11 @@ from codeclone.canonical.identity import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    SourceLocation,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
+    source_location_key,
 )
 
 #: The nullary sentinel spelling of an unresolved effect root.
@@ -211,6 +215,70 @@ def parse_dead_code_entity(index: IdentityIndex, text: str) -> DeadCodeEntity:
     if head in index.analyzed_paths:
         return SymbolId(FileId(head), local)
     return OpaqueEntity(head, local)
+
+
+def parse_source_location(index: IdentityIndex, path: str, line: int) -> SourceLocation:
+    """One published evidence site as the tagged SOURCE_LOCATION union.
+
+    The path decides the variant through the run's OWN analysis scope —
+    :func:`parse_dead_code_entity`'s law, applied to a site instead of an
+    entity: an analyzed path is the FILE-headed location, and anything else
+    rides the unresolved variant VERBATIM rather than being repaired into a
+    FILE identity the producer never asserted.
+
+    There is no refusal branch and no drop branch, and both absences are
+    deliberate.  A refusal would make one unplaceable site cost the whole
+    run its snapshot, while the report publishes that site happily — the
+    store would then disagree with the report by REFUSING, which is a
+    different gap, not a closed one.  A drop is worse: it shortens the
+    evidence tuple, and an emptied tuple reads as "the producer had nothing
+    to say".  The variant is how the model says "something was said here,
+    and this run could not place it".
+    """
+
+    if path in index.analyzed_paths:
+        return FileLine(FileId(path), line)
+    return UnresolvedLocation(path, line)
+
+
+def parse_source_locations(
+    index: IdentityIndex, sites: Iterable[tuple[str, int]]
+) -> tuple[SourceLocation, ...]:
+    """One violation's evidence tuple, in canonical order.
+
+    Both publication paths — the legacy document oracle and the
+    producer-native snapshot — hand their own ``(path, line)`` pairs here,
+    so the ORDER is decided once.  Sorting is this function's job and not
+    the caller's on purpose: canonical order is a model law, and a caller
+    that passed the producer's own order through would make the stored row
+    depend on the order the events happened to arrive in.
+
+    Deliberately NOT deduplicated.  Two coinciding sites are a producer
+    fact, and ``ViolationRow`` refuses the repeat rather than absorbing it —
+    a silent collapse would delete an evidence point exactly where a count
+    is what a reader relies on.
+    """
+
+    return tuple(
+        sorted(
+            (parse_source_location(index, path, line) for path, line in sites),
+            key=source_location_key,
+        )
+    )
+
+
+def format_source_location(location: SourceLocation) -> str:
+    """The producer's own spelling of one evidence site's path.
+
+    The inverse of :func:`parse_source_location` on the path slot, and the
+    ONE renderer of it: a FILE-headed site spells the repository-relative
+    path the FILE identity IS, and an unresolved site spells back exactly
+    the string it was handed.
+    """
+
+    if isinstance(location, FileLine):
+        return location.file.path
+    return location.path
 
 
 def surface_head(index: IdentityIndex, path: str, where: str) -> str:
@@ -378,12 +446,15 @@ __all__ = [
     "format_effect_root",
     "format_operation_head",
     "format_root_set",
+    "format_source_location",
     "parse_dead_code_entity",
     "parse_effect_root",
     "parse_endpoint",
     "parse_lane_symbol",
     "parse_operation_head",
     "parse_root_set",
+    "parse_source_location",
+    "parse_source_locations",
     "parse_symbol",
     "parse_symbol_set",
     "surface_head",

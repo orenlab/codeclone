@@ -87,6 +87,7 @@ from codeclone.canonical.identity import (
     HEAD_TAG_OPAQUE,
     IMPORT_TYPES,
     LIVE_ROOT_REASONS,
+    LOCATION_TAG_UNRESOLVED,
     OPERATION_KINDS,
     PRODUCER_EXECUTION_STATES,
     RISK_DIMENSIONS,
@@ -105,6 +106,7 @@ from codeclone.canonical.identity import (
     EffectLabelRoot,
     EffectRoot,
     FileId,
+    FileLine,
     KnownModule,
     ModuleId,
     ModuleSymbol,
@@ -114,11 +116,14 @@ from codeclone.canonical.identity import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    SourceLocation,
     SymbolId,
+    UnresolvedLocation,
     UnresolvedRoot,
     canonical_key,
     dead_code_entity_key,
     root_family,
+    source_location_key,
 )
 from codeclone.canonical.model import (
     AdoptionCountRow,
@@ -662,6 +667,22 @@ def _dependency_cycle_rows(
     return [{"kind": kind, "modules": list(ordinals)} for ordinals, kind in keyed]
 
 
+def _source_location_value(
+    location: SourceLocation, file_ordinal: Mapping[FileId, int]
+) -> list[object]:
+    """One evidence site as a ``[tag, ref, line]`` cell.
+
+    The polymorphic slot the ratified dependency endpoints already use,
+    widened by one cell for the line: the tag decides how ``ref`` is read,
+    so a FILE-headed site rides an ordinal into the FILE domain and an
+    unresolved site rides its own string — which is the whole point of the
+    variant, since that string has no domain to be an ordinal into.
+    """
+    if isinstance(location, FileLine):
+        return [DOMAIN_TAG_FILE, file_ordinal[location.file], location.line]
+    return [LOCATION_TAG_UNRESOLVED, location.path, location.line]
+
+
 def _violation_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
     handle_symbols: set[SymbolId] = set()
     for violation in facts.violations:
@@ -675,6 +696,14 @@ def _violation_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
             "contract_id": row.contract_id,
             "effect_signature": row.effect_signature,
             "kind": row.kind,
+            # The stored tuple IS the canonical order (the model refuses any
+            # other), so the cells are emitted as they stand: sorting here
+            # would be a second ordering owner, and a second owner is how
+            # two spellings of one law start to disagree.
+            "locations": [
+                _source_location_value(location, plan.file_ordinal)
+                for location in row.locations
+            ],
             "producer_set": plan.producer_set_ordinal[
                 _producer_set_key(row.producer_set, plan)
             ],
@@ -2577,9 +2606,47 @@ def _decode_run_scalars(facts: Mapping[str, object]) -> RunScalars | None:
     return RunScalars(**values)
 
 
+def _decode_source_location(
+    value: object, files: Sequence[FileId], where: str
+) -> SourceLocation:
+    """One ``[tag, ref, line]`` evidence cell, read back into its variant."""
+    cell = _expect_list(value, where)
+    if len(cell) != 3:
+        raise _refuse("W18", f"{where} is not a [tag, ref, line] cell")
+    tag = _expect_string(cell[0], f"{where}.tag")
+    line = _expect_wire_int(cell[2], f"{where}.line")
+    if tag == DOMAIN_TAG_FILE:
+        return FileLine(files[_expect_ordinal(cell[1], len(files), where)], line)
+    if tag == LOCATION_TAG_UNRESOLVED:
+        return UnresolvedLocation(_expect_string(cell[1], f"{where}.path"), line)
+    raise _refuse("W09", f"reference tag {tag!r} is not admitted for a source location")
+
+
+def _decode_source_locations(
+    value: object, files: Sequence[FileId], where: str
+) -> tuple[SourceLocation, ...]:
+    """The evidence tuple, proved to carry the model's own ordering law.
+
+    ``_expect_strictly_increasing`` over ``source_location_key`` is the same
+    law ``ViolationRow`` enforces, read through the same owner — so the wire
+    refuses a reordered or collapsed tuple as a typed W02 instead of letting
+    a model error escape the decoder, and neither side can drift from the
+    other without moving that one function.
+    """
+    locations = tuple(
+        _decode_source_location(cell, files, f"{where}[{position}]")
+        for position, cell in enumerate(_expect_list(value, where))
+    )
+    _expect_strictly_increasing(
+        [source_location_key(location) for location in locations], where
+    )
+    return locations
+
+
 def _decode_violations(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
+    files: Sequence[FileId],
     roots: Sequence[EffectRoot],
     root_tables: Sequence[tuple[int, ...]],
     producer_tables: Sequence[tuple[int, ...]],
@@ -2648,6 +2715,11 @@ def _decode_violations(
                     symbols[o] for o in producer_tables[producer_set_ordinal]
                 ),
                 suppressed=index in suppressed_positions,
+                locations=_decode_source_locations(
+                    columns["locations"][index],
+                    files,
+                    f"facts.violations.locations[{index}]",
+                ),
             )
         )
         handles.append(
@@ -2807,7 +2879,13 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     run_scalars = _decode_run_scalars(facts_section)
     analysis_population = _decode_analysis_population(facts_section)
     violations, violation_handles = _decode_violations(
-        facts_section, symbols, roots, root_tables, producer_tables, function_ordinals
+        facts_section,
+        symbols,
+        files,
+        roots,
+        root_tables,
+        producer_tables,
+        function_ordinals,
     )
     _check_function_role(producer_tables, function_ordinals)
     _verify_public_handles(
