@@ -292,3 +292,31 @@ def test_a_run_id_parameter_that_admits_numbers_is_never_prescribed_a_fix() -> N
         )
         == frozenset()
     )
+
+
+def test_the_caller_receives_the_refusal_through_the_protocol_handler() -> None:
+    """What the client is handed, not what the server method returns.
+
+    Every other pin here drives ``FastMCP.call_tool``. The MCP client never
+    calls that: it sends a CallToolRequest, and the registered handler turns
+    the raised refusal into the error text of a CallToolResult. The two are
+    the same path only because FastMCP binds the one to the other at setup,
+    which is a fact about a dependency, not a fact this repository controls.
+    """
+
+    import mcp.types as types
+
+    server = build_mcp_server(history_limit=4)
+    handler = server._mcp_server.request_handlers[types.CallToolRequest]
+    request = types.CallToolRequest(
+        method="tools/call",
+        params=types.CallToolRequestParams(
+            name="get_run_summary", arguments={"run_id": 12345678}
+        ),
+    )
+    served = cast("Any", asyncio.run(cast("Any", handler(request))))
+    delivered = cast("Any", served.root)
+    assert delivered.isError is True
+    text = "\n".join(block.text for block in delivered.content)
+    assert text.startswith("run id is a string; quote it."), text
+    assert _corrections(text) == {"run_id": _ALL_DIGIT_ID}, text
