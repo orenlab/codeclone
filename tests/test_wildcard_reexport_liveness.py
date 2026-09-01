@@ -38,6 +38,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 # The CLI is SPAWNED, never imported: these pins live at the report layer and
 # importing the CLI surface would make the module a ring-4 test reaching into
 # ring-2 internals. Same pattern as the dependency-cycle policy suite.
@@ -45,6 +47,14 @@ _CLI_ENTRY = "from codeclone.surfaces.cli.workflow import main; main()"
 
 #: Baseline update and gating both require a stable canonical scope id.
 _SCOPE_ID = "0192f3aa-6c51-7b28-9d44-1ea5c07b6f39"
+
+#: Every tree here is three or four tiny files and returns in about a second,
+#: so this is a DEADLINE, not a performance budget: it exists to turn a
+#: non-terminating walk into a bounded red. A run that has to be killed cannot
+#: be told apart from one still working, which is the one failure mode a
+#: dead-code analyzer must never have - the user gets no wrong finding, they
+#: get nothing, and no reason why.
+_RUN_DEADLINE_SECONDS = 120.0
 
 _IMPL_SOURCE = """
 class StarBoundWidget:
@@ -294,6 +304,40 @@ __all__ = ["star_bound_helper"]
 }
 
 
+#: Mutual ``import *`` - legal Python, and present in real packages. Every other
+#: tree here is a one-way chain or a diamond, and BOTH still terminate without a
+#: visited set: a DAG frontier drains on its own. Only a cycle turns the visited
+#: set from an optimisation into the thing that ends the walk, so this is the
+#: only input in the suite that holds it.
+_CYCLIC_CHAIN_TREE = {
+    "pkg/__init__.py": """
+from .a import *  # noqa: F403
+
+__all__ = ["CycleWidget"]
+""",
+    "pkg/a.py": """
+from .b import *  # noqa: F403
+
+__all__ = ["CycleWidget"]
+""",
+    "pkg/b.py": """
+from .a import *  # noqa: F403
+
+__all__ = ["CycleWidget"]
+
+
+class CycleWidget:
+    def render_cycle(self) -> str:
+        return "cycle"
+
+
+class OrphanWidget:
+    def never_called(self) -> int:
+        return 1
+""",
+}
+
+
 def _write_tree(root: Path, tree: dict[str, str]) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     for name, source in tree.items():
@@ -307,6 +351,33 @@ def _write_tree(root: Path, tree: dict[str, str]) -> Path:
     return root
 
 
+def _run_bounded(
+    argv: list[str],
+    *,
+    name: str,
+) -> subprocess.CompletedProcess[str]:
+    """Spawn one analysis under a deadline, and fail loudly if it is hit.
+
+    ``subprocess.run`` without a timeout turns a non-terminating walk into a
+    hung suite, which reads exactly like a slow one. The deadline converts that
+    into an ordinary red naming the duty that broke.
+    """
+    try:
+        return subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_RUN_DEADLINE_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"analysis of tree {name!r} did not terminate within "
+            f"{_RUN_DEADLINE_SECONDS:.0f}s: the re-export walk must converge on "
+            f"every input, including a cyclic one"
+        )
+
+
 def _dead_qualnames(tmp_path: Path, tree: dict[str, str], name: str) -> frozenset[str]:
     """Dead-code qualnames of one generated tree, behind the witness chain.
 
@@ -318,7 +389,7 @@ def _dead_qualnames(tmp_path: Path, tree: dict[str, str], name: str) -> frozense
 
     project_root = _write_tree(tmp_path / name, tree)
     report_path = tmp_path / f"{name}-report.json"
-    completed = subprocess.run(
+    completed = _run_bounded(
         [
             sys.executable,
             "-c",
@@ -334,9 +405,7 @@ def _dead_qualnames(tmp_path: Path, tree: dict[str, str], name: str) -> frozense
             "--no-skip-dead-code",
             "--no-progress",
         ],
-        capture_output=True,
-        text=True,
-        check=False,
+        name=name,
     )
     assert report_path.exists(), completed.stdout + completed.stderr
     payload = json.loads(report_path.read_text("utf-8"))
@@ -534,3 +603,23 @@ def test_reexport_chain_converges_on_a_shared_target(tmp_path: Path) -> None:
 
     assert "pkg.impl:StarBoundWidget.render_panel" not in dead
     assert "pkg.impl:UnexportedWidget.render_hidden" in dead
+
+
+def test_reexport_chain_terminates_on_a_mutual_wildcard_cycle(
+    tmp_path: Path,
+) -> None:
+    """A cycle must converge, and still answer correctly on both sides.
+
+    ``pkg.a`` and ``pkg.b`` re-export each other, so the walk revisits a module
+    it has already placed on the frontier. Without the visited set this input
+    does not finish - and a walk that does not finish is worse than a wrong
+    verdict, because it is indistinguishable from one still running. The
+    deadline in ``_run_bounded`` is what makes that failure legible.
+    """
+
+    dead = _dead_qualnames(tmp_path, _CYCLIC_CHAIN_TREE, "cyclic")
+
+    assert "pkg.b:CycleWidget" not in dead
+    assert "pkg.b:CycleWidget.render_cycle" not in dead
+    assert "pkg.b:OrphanWidget" in dead
+    assert "pkg.b:OrphanWidget.never_called" in dead
