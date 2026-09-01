@@ -50,7 +50,12 @@ from tests.test_mcp_service import _dummy_run_record
 
 # The correction is a JSON object member, so the test can parse it instead of
 # trusting its prose: '"run_id": "12345678"'.
-_CORRECTION = re.compile(r'"([a-z_]*run_id)"\s*:\s*"(\d+)"')
+#
+# The value is matched as anything the refusal chose to put there, never as
+# digits. A pattern that only admitted digits would silently fail to see a
+# correction offering '-12345678' and would report no prescription at all —
+# measured: it let a mutant that dropped the digit guard survive.
+_CORRECTION = re.compile(r'"([a-z_]*run_id)"\s*:\s*"([^"]*)"')
 # pydantic's own report, i.e. the refusal with no executable part.
 _SCHEMA_FAULT = "Input should be a valid string"
 

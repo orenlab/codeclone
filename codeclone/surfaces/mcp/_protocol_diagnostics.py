@@ -83,10 +83,13 @@ def quoted_digits(value: object) -> str | None:
     A boolean, a fraction or a negative cannot have come from one, so they keep
     the schema refusal rather than receive a prescription naming a value the
     caller never sent.
+
+    One test decides that, deliberately: rendering first and admitting only
+    digits rejects ``True`` and ``-1`` by the same rule that rejects anything
+    else that does not read back as an id. An extra ``bool`` guard in front
+    was measured redundant — mutation could not tell the two apart.
     """
 
-    if isinstance(value, bool):
-        return None
     if isinstance(value, int):
         digits = str(value)
     elif isinstance(value, float) and value.is_integer():
