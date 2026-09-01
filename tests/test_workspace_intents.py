@@ -932,7 +932,12 @@ def test_workspace_intent_ttl_extension_keeps_the_original_declaration_moment(
         ttl_seconds=workspace_intents.MIN_TTL_SECONDS,
     )
 
-    updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
+    # Read raw, the way the collector reads: the filtered listing drops stale
+    # rows, so a hold that came back wrong would take this test down with it
+    # and hide which of the two errors actually happened.
+    updated = workspace_intents.list_workspace_intent_records_for_recovery(
+        root=tmp_path
+    )[0]
     assert updated.declared_at_utc == record.declared_at_utc
 
 
