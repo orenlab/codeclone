@@ -47,7 +47,11 @@ from ._types import (
     ProcessingResult,
     ReportArtifacts,
 )
-from .canonical_snapshot import publish_run_snapshot, resolve_run_store_config
+from .canonical_snapshot import (
+    bridge_run_snapshot,
+    publish_run_snapshot,
+    resolve_run_store_config,
+)
 from .metrics_payload import _enrich_metrics_report_payload
 
 MetricGateConfig = _MetricGateConfig
@@ -470,7 +474,7 @@ def report(
     # is independent of it — a gate-only run publishes the same snapshot as
     # a rendering run, because the snapshot is the ANALYSIS, not the
     # report.
-    _publish_canonical_snapshot(
+    publication = _publish_canonical_snapshot(
         boot=boot,
         discovery=discovery,
         processing=processing,
@@ -589,6 +593,12 @@ def report(
             renderer=lambda: render_text_report_document(report_document),
         )
 
+    # The bridge is stated AFTER the document is sealed, because the report
+    # half of the relation does not exist until then, and it is stated on
+    # every path: a gate-only run reaches here with ``report_document`` None
+    # and gets the ``unevaluated`` state rather than no link at all.  The
+    # publication witness itself is not enough -- it names the store record
+    # and knows nothing of the document that evaluated it.
     return ReportArtifacts(
         html=contents["html"],
         json=contents["json"],
@@ -596,6 +606,10 @@ def report(
         sarif=contents["sarif"],
         text=contents["text"],
         report_document=report_document,
+        run_snapshot_link=bridge_run_snapshot(
+            publication=publication,
+            report_document=report_document,
+        ),
     )
 
 

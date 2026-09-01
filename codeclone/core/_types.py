@@ -40,6 +40,7 @@ from ..models import (
     ProjectMetrics,
     RehydratedCacheNeutral,
     RenamedStructureGroup,
+    RunSnapshotLink,
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentGroupItem,
@@ -237,6 +238,12 @@ class ReportArtifacts:
     md: bytes | None = None
     sarif: bytes | None = None
     report_document: dict[str, object] | None = None
+    #: The identity bridge for this run (RULING-2026-08-24 §7): the typed
+    #: relation between the analysis snapshot the store holds and the
+    #: evaluated identity this document carries.  Always present -- a run
+    #: that stored nothing says so through the link's state, because an
+    #: absent link and "there is no backend" would be the same silence.
+    run_snapshot_link: RunSnapshotLink | None = None
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:

@@ -37,6 +37,7 @@ refused rather than approximated.
 
 from __future__ import annotations
 
+import hmac
 import os
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
@@ -90,6 +91,9 @@ from ..metrics.registry import METRIC_FAMILIES
 from ..models import (
     CANONICAL_HEAD_TARGET,
     CANONICAL_PROFILE_HEAD_PREFIX,
+    RUN_SNAPSHOT_LINK_LINKED,
+    RUN_SNAPSHOT_LINK_UNEVALUATED,
+    RUN_SNAPSHOT_LINK_UNPUBLISHED,
     RUN_SNAPSHOT_PUBLICATION_DISABLED,
     RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT,
     RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
@@ -102,6 +106,7 @@ from ..models import (
     ModuleRegistryHandle,
     ObservationBundle,
     RiskObservation,
+    RunSnapshotLink,
     RunSnapshotPublication,
     RunStoreConfig,
     SemanticAuthorityResult,
@@ -979,7 +984,122 @@ def publish_run_snapshot(
             target=target,
             run_id=receipt.run_id,
             generation=receipt.generation,
+            analysis_scope_digest=receipt.analysis_scope_digest,
         )
+
+
+# ---------------------------------------------------------------------------
+# The identity bridge (RULING-2026-08-24 §7)
+# ---------------------------------------------------------------------------
+
+
+class RunSnapshotBridgeError(RuntimeError):
+    """The two identity domains could not be related, and saying so is the
+    only honest outcome.
+
+    Refusing closed is the point, and it is the same law the report's own
+    run-identity reader is held to: a bridge that answered a wrong pair, or
+    quietly downgraded a lost pair to "there was no document", would put a
+    falsehood somewhere no endpoint can check it.  A wrong-but-real store
+    run verifies perfectly against its own scope and membership -- the
+    falsehood lives in the relation, and this is the only place that looks
+    at the relation.
+    """
+
+
+def report_scope_receipt(report_document: Mapping[str, object]) -> str:
+    """Re-derive the store's scope receipt from the report document alone.
+
+    This is what makes the bridge checkable rather than asserted: a third
+    party holding a report and a store can recompute the join without
+    trusting either producer.
+
+    The field is ``source_facts.analysis_scope`` and NOT
+    ``inventory.file_registry``, which is a different universe on both of
+    its axes -- measured on the probe corpus, 2026-09-01: the registry is
+    the FOUND file list anchored on ``scan_root`` (7 rows, ``canon.py``),
+    while the store digests the ANALYZED scope anchored on the analysis
+    root (6 rows, ``pkg/canon.py``).  They coincide only when every found
+    file was analyzed and the scan root is the analysis root, which is why
+    a single-package corpus agrees and a corpus with one skipped file does
+    not.  ``analysis_scope`` matched the store's set exactly, row for row.
+
+    The store import is deferred for the reason the publish path defers it:
+    a disabled rollout must never pull sqlite in, and this function is
+    called on runs that stored nothing.
+    """
+
+    from ..canonical.store import analysis_scope_digest
+
+    source_facts = _as_mapping(_as_mapping(report_document).get("source_facts"))
+    paths = [
+        path
+        for entry in _as_sequence(source_facts.get("analysis_scope"))
+        if (path := _as_str(_as_mapping(entry).get("path")))
+    ]
+    return analysis_scope_digest(frozenset(FileId(path) for path in paths))
+
+
+def _report_run_identity_or_refuse(report_document: Mapping[str, object]) -> str:
+    from ..utils.run_identity import ReportRunIdentityError, report_run_identity
+
+    try:
+        return report_run_identity(report_document)
+    except ReportRunIdentityError as refusal:
+        raise RunSnapshotBridgeError(
+            f"the report document carries no run identity to bridge: {refusal}"
+        ) from refusal
+
+
+def bridge_run_snapshot(
+    *,
+    publication: RunSnapshotPublication,
+    report_document: Mapping[str, object] | None,
+) -> RunSnapshotLink:
+    """Relate one publication to the document that evaluated it, or say why not.
+
+    Both zeros are states, not failures: they were measured on live runs and
+    a bridge that hid them would be lying about a cardinality the two
+    domains genuinely have.  The one thing that IS a failure is a pair whose
+    two halves do not describe the same analyzed scope, because that is the
+    error no consumer downstream can detect.
+    """
+
+    stored = bool(publication.run_id)
+    if not stored:
+        if report_document is None:
+            # Nothing stored and nothing evaluated: there is no relation to
+            # state, and the outcome still says which road got here.
+            return RunSnapshotLink(
+                state=RUN_SNAPSHOT_LINK_UNEVALUATED, outcome=publication.outcome
+            )
+        return RunSnapshotLink(
+            state=RUN_SNAPSHOT_LINK_UNPUBLISHED,
+            outcome=publication.outcome,
+            report_run_identity=_report_run_identity_or_refuse(report_document),
+        )
+    if report_document is None:
+        return RunSnapshotLink(
+            state=RUN_SNAPSHOT_LINK_UNEVALUATED,
+            outcome=publication.outcome,
+            store_run_id=publication.run_id,
+            analysis_scope_digest=publication.analysis_scope_digest,
+        )
+    recomputed = report_scope_receipt(report_document)
+    if not hmac.compare_digest(recomputed, publication.analysis_scope_digest):
+        raise RunSnapshotBridgeError(
+            "refusing to bridge a pair whose scope receipt disagrees: the "
+            f"store run {publication.run_id[:12]} was published over scope "
+            f"{publication.analysis_scope_digest[:12]}, the report document "
+            f"re-derives {recomputed[:12]}"
+        )
+    return RunSnapshotLink(
+        state=RUN_SNAPSHOT_LINK_LINKED,
+        outcome=publication.outcome,
+        store_run_id=publication.run_id,
+        analysis_scope_digest=publication.analysis_scope_digest,
+        report_run_identity=_report_run_identity_or_refuse(report_document),
+    )
 
 
 __all__ = [
@@ -989,11 +1109,14 @@ __all__ = [
     "ENV_RUN_STORE_PATH",
     "RUN_SNAPSHOT_NAMESPACE",
     "ProducerSnapshotUnavailable",
+    "RunSnapshotBridgeError",
+    "bridge_run_snapshot",
     "canonical_snapshot_from_producers",
     "population_is_admissible",
     "producer_execution_population",
     "producer_state",
     "profile_head_target",
     "publish_run_snapshot",
+    "report_scope_receipt",
     "resolve_run_store_config",
 ]

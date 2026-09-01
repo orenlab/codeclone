@@ -1734,6 +1734,21 @@ RUN_SNAPSHOT_PUBLICATION_UNSTORED: Final[frozenset[str]] = frozenset(
     {RUN_SNAPSHOT_PUBLICATION_DISABLED, RUN_SNAPSHOT_PUBLICATION_REFUSED}
 )
 
+#: The three states of the identity bridge (RULING-2026-08-24 §7).  The two
+#: identity domains address different things, so their relation is NOT
+#: total, and the two zeros are measured facts rather than error paths:
+#: a gate-only run stores a snapshot no document evaluates, and a run with
+#: the rollout off evaluates a document no snapshot backs.  Naming both
+#: keeps "there is no backend" apart from "the bridge lost the pair".
+RUN_SNAPSHOT_LINK_LINKED: Final = "linked"
+RUN_SNAPSHOT_LINK_UNPUBLISHED: Final = "unpublished"
+RUN_SNAPSHOT_LINK_UNEVALUATED: Final = "unevaluated"
+RUN_SNAPSHOT_LINK_STATES: Final[tuple[str, ...]] = (
+    RUN_SNAPSHOT_LINK_LINKED,
+    RUN_SNAPSHOT_LINK_UNEVALUATED,
+    RUN_SNAPSHOT_LINK_UNPUBLISHED,
+)
+
 #: The reserved head target of the complete canonical analysis profile.
 #: Every other realized profile publishes under its own
 #: ``profile:<digest>`` target, so no measurement can displace a head it
@@ -1789,6 +1804,12 @@ class RunSnapshotPublication:
     target: str = ""
     run_id: str = ""
     generation: int = 0
+    #: The store's OWN scope receipt for this run -- the digest of the
+    #: analyzed-file identity set, carried out of ``PublishReceipt``.  It is
+    #: here because it is the only part of the store's ``run_id`` preimage a
+    #: holder of the report document can re-derive without the store: the
+    #: bridge is a checkable relation, not an asserted one.
+    analysis_scope_digest: str = ""
     #: Why nothing was stored, on the ``refused`` outcome only.  A refusal
     #: without its reason is a silence with a name on it.
     reason: str = ""
@@ -1801,8 +1822,14 @@ class RunSnapshotPublication:
         if self.outcome in RUN_SNAPSHOT_PUBLICATION_UNSTORED:
             if self.target or self.run_id or self.generation:
                 raise ValueError("an unstored publication carries no store receipt")
+            if self.analysis_scope_digest:
+                raise ValueError("an unstored publication carries no scope receipt")
         elif not self.target or not self.run_id:
             raise ValueError("a stored publication must carry its target and run id")
+        elif not self.analysis_scope_digest:
+            # Without it the bridge could only assert the pair; with it the
+            # pair is checkable from the two artifacts alone.
+            raise ValueError("a stored publication must carry its scope receipt")
         if (self.outcome == RUN_SNAPSHOT_PUBLICATION_REFUSED) != bool(self.reason):
             raise ValueError("a refusal carries its reason and nothing else does")
         if self.admissible and self.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD:
@@ -1810,6 +1837,56 @@ class RunSnapshotPublication:
                 "head_withheld is the inadmissible-profile outcome; an "
                 "admissible profile that lost the head raced for it"
             )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunSnapshotLink:
+    """The typed relation between the two run-identity domains.
+
+    RULING-2026-08-24 §7 forbids a shared name or a foreign key between
+    ``RunStore._run_id`` (an analysis state: namespace, analysis witness
+    layers, scope, membership) and the report's ``run_id`` (an evaluation
+    identity: those facts plus the baseline, the gate request, the realized
+    policy and the outcome).  They are kept apart here on purpose -- two
+    differently named fields, neither derived from the other -- and what
+    joins them is EVIDENCE, not a name: ``analysis_scope_digest`` is the
+    store's own scope receipt, and a holder of the report document can
+    re-derive it from the document's file registry alone.
+
+    The relation is partial in both directions, as measured:
+    one store record answered two report identities on one corpus (same
+    analysis, two gate thresholds), a gate-only run leaves a snapshot with
+    no document, and the default flag-off run leaves a document with no
+    snapshot.  ``state`` says which of those happened; it never says
+    "unknown".
+    """
+
+    state: str
+    #: The publication outcome that produced this state, kept beside it
+    #: because ``unpublished`` is reached by two different roads (the flag
+    #: was off; the snapshot was refused) and only this field says which.
+    outcome: str
+    #: Store domain -- an analysis state id.  Empty iff nothing was stored.
+    store_run_id: str = ""
+    #: The shared evidence: the store's scope receipt for that record.
+    analysis_scope_digest: str = ""
+    #: Report domain -- the evaluated run identity.  Empty iff no document
+    #: was produced.
+    report_run_identity: str = ""
+
+    def __post_init__(self) -> None:
+        if self.state not in RUN_SNAPSHOT_LINK_STATES:
+            raise ValueError(f"unknown run snapshot link state: {self.state!r}")
+        stored = bool(self.store_run_id)
+        evaluated = bool(self.report_run_identity)
+        if self.state == RUN_SNAPSHOT_LINK_LINKED and not (stored and evaluated):
+            raise ValueError("a linked bridge carries both addresses")
+        if self.state == RUN_SNAPSHOT_LINK_UNPUBLISHED and stored:
+            raise ValueError("an unpublished bridge carries no store address")
+        if self.state == RUN_SNAPSHOT_LINK_UNEVALUATED and evaluated:
+            raise ValueError("an unevaluated bridge carries no report address")
+        if stored != bool(self.analysis_scope_digest):
+            raise ValueError("a store address and its scope receipt travel together")
 
 
 @dataclass(frozen=True, slots=True)

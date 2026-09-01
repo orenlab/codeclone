@@ -408,6 +408,7 @@ def test_the_stored_outcomes_cannot_disagree_with_the_admissibility_verdict() ->
         target="profile:abc",
         run_id="r",
         generation=1,
+        analysis_scope_digest="s",
     )
     assert withheld.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD
     published = RunSnapshotPublication(
@@ -416,6 +417,7 @@ def test_the_stored_outcomes_cannot_disagree_with_the_admissibility_verdict() ->
         target=CANONICAL_HEAD_TARGET,
         run_id="r",
         generation=1,
+        analysis_scope_digest="s",
     )
     assert published.admissible
     with pytest.raises(ValueError, match="inadmissible-profile outcome"):
@@ -425,6 +427,7 @@ def test_the_stored_outcomes_cannot_disagree_with_the_admissibility_verdict() ->
             target=CANONICAL_HEAD_TARGET,
             run_id="r",
             generation=1,
+            analysis_scope_digest="s",
         )
     with pytest.raises(ValueError, match="carries no store receipt"):
         RunSnapshotPublication(
