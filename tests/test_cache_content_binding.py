@@ -23,6 +23,7 @@ from codeclone.cache.reuse import (
     source_content_digest,
 )
 from codeclone.cache.store import Cache
+from codeclone.cache.versioning import CacheStatus
 from codeclone.models import (
     CacheDependentPayload,
     CacheEntryV3,
@@ -50,7 +51,7 @@ from codeclone.paths.git_snapshot import (
     dirty_entry_digest,
 )
 from codeclone.paths.module_identity.inventory import build_module_registry
-from tests._cache_store_fixtures import write_cache_row
+from tests._cache_store_fixtures import set_identity_column
 
 
 def _blob(object_id: str = "1" * 40) -> GitBlobIdentity:
@@ -825,16 +826,29 @@ def test_signed_envelope_without_content_binding_cannot_authorize_hit(
     tmp_path: Path,
 ) -> None:
     cache_path = tmp_path / "cache.sqlite3"
-    # An empty save creates the store with a valid meta envelope, so the row
-    # written next is the only thing under test.
-    Cache(cache_path, root=tmp_path).save()
-    # A correctly checksummed row with no content binding: the integrity gate
-    # passes and the missing-content-binding gate is what this still exercises.
-    write_cache_row(cache_path, "module.py", {"st": [1, 2]})
+    source = tmp_path / "module.py"
+    source.write_text("def f():\n    return 1\n", "utf-8")
+    seed = Cache(cache_path, root=tmp_path)
+    seed.bind_module_registry(build_module_registry(root=tmp_path))
+    seed.put_file_entry(
+        str(source),
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=source_content_digest(b"def f():\n    return 1\n"),
+    )
+    seed.save()
+    # Strip the content binding and re-mint the row's checksum, so the load
+    # reaches the binding gate instead of stopping at the integrity gate in
+    # front of it.
+    set_identity_column(cache_path, "module.py", "binding_version", "")
 
     cache = Cache(cache_path, root=tmp_path)
     cache.load()
 
-    assert cache.load_warning == "Cache format invalid; ignoring cache."
+    # The store is intact and the row verifies, so the load succeeds -- and the
+    # entry still cannot authorise a hit, because nothing binds it to content.
+    assert cache.load_status is CacheStatus.OK
     assert cache.get_file_entry("module.py") is None
     assert _decode_wire_file_entry({"st": [1, 2]}, "module.py") is None

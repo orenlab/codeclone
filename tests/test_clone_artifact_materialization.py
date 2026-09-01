@@ -383,6 +383,25 @@ def _rewrite_neutral_wires(
         write_cache_row(cache_path, wire_path, typed)
 
 
+def _assert_no_entry_authorises_a_hit(cache_path: Path, root: Path) -> None:
+    """No stored entry may be served after its witness was falsified.
+
+    The refusal moved with the schema, and moved for the better. The document
+    store could only answer by condemning the whole cache; identity and lanes
+    apart, the store stays readable and the entries whose witness no longer
+    decodes simply do not come back. What must not change is that none of them
+    authorises a hit.
+    """
+
+    cache = Cache(cache_path, root=root)
+    cache.load()
+    assert cache.load_status == CacheStatus.OK
+    stored = read_cache_rows(cache_path)
+    assert stored, "the probe needs entries to falsify"
+    for wire_path in stored:
+        assert cache.get_file_entry(str(root / wire_path)) is None
+
+
 def _loaded_cache_status(cache_path: Path, root: Path) -> CacheStatus:
     cache = Cache(cache_path, root=root)
     cache.load()
@@ -404,7 +423,7 @@ def test_witness_under_claim_is_rejected_at_decode(tmp_path: Path) -> None:
         neutral["mt"] = []
 
     _rewrite_neutral_wires(cache_path, deny_witness)
-    assert _loaded_cache_status(cache_path, tmp_path) == CacheStatus.INVALID_TYPE
+    _assert_no_entry_authorises_a_hit(cache_path, tmp_path)
 
 
 def test_witness_over_claim_is_rejected_at_decode(tmp_path: Path) -> None:
@@ -422,7 +441,7 @@ def test_witness_over_claim_is_rejected_at_decode(tmp_path: Path) -> None:
         neutral["mt"] = ["near_miss", "renamed_structure"]
 
     _rewrite_neutral_wires(cache_path, claim_channels)
-    assert _loaded_cache_status(cache_path, tmp_path) == CacheStatus.INVALID_TYPE
+    _assert_no_entry_authorises_a_hit(cache_path, tmp_path)
 
 
 def test_witness_outside_closed_vocabulary_is_rejected_at_decode(
@@ -436,7 +455,7 @@ def test_witness_outside_closed_vocabulary_is_rejected_at_decode(
         neutral["mt"] = ["exact"]
 
     _rewrite_neutral_wires(cache_path, unknown_channel)
-    assert _loaded_cache_status(cache_path, tmp_path) == CacheStatus.INVALID_TYPE
+    _assert_no_entry_authorises_a_hit(cache_path, tmp_path)
 
 
 def test_reuse_gate_requires_exact_channel_match(tmp_path: Path) -> None:

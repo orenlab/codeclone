@@ -130,6 +130,20 @@ def new_tracked_files() -> TrackedFiles:
     return TrackedFiles()
 
 
+def mark_deleted(data: CacheData, key: str) -> None:
+    """Record a removal for a key that was never materialised in memory.
+
+    Pruning works off the identity register, so it can name a row the
+    in-memory map has never seen. Without this the save would keep a row for
+    a file the repository no longer has.
+    """
+
+    files = data["files"]
+    if isinstance(files, TrackedFiles):
+        files.dirty.discard(key)
+        files.deleted.add(key)
+
+
 def tracked_files(data: CacheData) -> TrackedFiles | None:
     """The tracking map behind ``data['files']``, when it still is one."""
 
@@ -157,6 +171,7 @@ __all__ = [
     "TrackedFiles",
     "_empty_cache_data",
     "_resolve_root",
+    "mark_deleted",
     "new_tracked_files",
     "tracked_files",
 ]

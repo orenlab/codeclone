@@ -4464,7 +4464,31 @@ class StatementMarkdownReport:
 # typed visible outcome — is this contract.
 # ---------------------------------------------------------------------------
 
+
 #: Hold reasons: why a candidate survived a collection.
+@dataclass(frozen=True, slots=True)
+class EntryIdentity:
+    """Everything a validity decision reads, and nothing else.
+
+    0.48% of the store, measured.  Held for every row after a load; the lanes
+    are not.
+    """
+
+    wire_path: str
+    binding_version: str
+    stat_mtime_ns: int
+    stat_size: int
+    source_digest: bytes
+    git_blob_format: str | None
+    git_blob_id: bytes | None
+    neutral_profile: bytes
+    dependent_profile: bytes
+    binding_context: bytes
+    clone_channels: tuple[str, ...]
+    neutral_bytes: int
+    dependent_bytes: int
+
+
 GC_HOLD_HEAD: Final = "head"
 GC_HOLD_HISTORY: Final = "history"
 GC_HOLD_LEASE: Final = "lease"

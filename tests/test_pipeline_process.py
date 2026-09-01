@@ -588,7 +588,11 @@ def test_dependency_lane_bytes_match_cold_warm_partial_and_full_hits(
         algorithm="sha256",
         value="f" * 64,
     )
-    for filepath, entry in tuple(warm_cache.data["files"].items()):
+    # A load leaves the lanes on disk, so the entries have to be asked for
+    # before they can be made stale; the in-memory map starts empty by design.
+    for filepath in cold_discovery.all_file_paths:
+        entry = warm_cache.get_file_entry(filepath)
+        assert entry is not None
         warm_cache.data["files"][filepath] = replace(
             entry,
             module_dependent_profile=stale_dependent_profile,

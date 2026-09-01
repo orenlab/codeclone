@@ -572,7 +572,6 @@ PARKED_COUNTER_KEYS: Final[Mapping[str, str]] = {
     "audit_digest_links": PARK_SUBSYSTEM_ABSENT,
     "baseline_publish_recovered": PARK_SUBSYSTEM_ABSENT,
     "cache_backend_contention": PARK_DEFERRED_PHASE_39K,
-    "cache_backend_orphans": PARK_DEFERRED_PHASE_39K,
     "cache_backend_recovery_corrupt": PARK_DEFERRED_PHASE_39K,
     "cache_backend_recovery_current": PARK_DEFERRED_PHASE_39K,
     "cache_backend_recovery_previous": PARK_DEFERRED_PHASE_39K,

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Protocol
@@ -46,21 +47,29 @@ from ..models import (
     StructuralFindingGroup,
     Unit,
 )
-from ..observability import span
+from ..observability import SpanHandle, span
 from ..paths.workspace import workspace_dir_for_cache_path
 from ._wire_decode import _decode_wire_file_entry
 from ._wire_encode import _encode_wire_file_entry
 from .backend import (
+    CACHE_BACKEND_SCHEMA_VERSION,
     META_KEY_CHECKSUM,
     META_KEY_FINGERPRINT,
     META_KEY_GENERATION,
     META_KEY_PYTHON_TAG,
+    META_KEY_SCHEMA,
     META_KEY_VERSION,
     SINGLETON_SEGMENT_REPORT,
+    TABLE_DEPENDENT,
+    TABLE_NEUTRAL,
     CacheBackend,
     CacheBackendForeign,
     CacheBackendUnreadable,
     CacheBackendUnusable,
+    EntryIdentity,
+    WireShapeRefused,
+    join_wire_entry,
+    split_wire_entry,
     verify_envelope,
 )
 from .entries import (
@@ -77,6 +86,7 @@ from .entries import (
     _structural_group_dict_from_model,
     _typing_coverage_dict_from_model,
 )
+from .gc import collect_cache_garbage
 from .projection import (
     SegmentReportProjection,
     decode_segment_report_projection,
@@ -103,6 +113,9 @@ from .versioning import (
     new_tracked_files,
     tracked_files,
 )
+from .versioning import (
+    mark_deleted as _mark_deleted,
+)
 
 
 class _CacheStatusLike(Protocol):
@@ -114,6 +127,30 @@ class _CacheStatusLike(Protocol):
 
     @property
     def cache_schema_version(self) -> str | None: ...
+
+
+def _now_epoch() -> int:
+    """Wall-clock seconds, for recency marks only.
+
+    Never for ordering anything a result depends on: the cache's own ordering
+    is the generation counter, which does not move backwards when a clock does.
+    """
+
+    return int(time.time())
+
+
+def _record_db_cost(handle: SpanHandle, backend: CacheBackend) -> None:
+    """Publish this handle's SQLite work into the observer's db_cost section.
+
+    A span joins ``db_cost`` by carrying ``db_queries``; the other two give the
+    section its N+1 shape (many statements, few rows). Without these the cache
+    is the one store in the process whose work cannot be looked at, which is
+    exactly the black box the observer exists to prevent.
+    """
+
+    handle.set_counter("db_queries", backend.queries)
+    handle.set_counter("db_writes", backend.writes)
+    handle.set_counter("db_rows", backend.rows)
 
 
 def _as_generation(raw: str | None) -> int:
@@ -158,10 +195,13 @@ class Cache:
         "_discard_store",
         "_generation",
         "_git_content_snapshot",
+        "_identity",
         "_module_dependent_profile",
         "_module_names_by_runtime_path",
         "_module_neutral_profile",
+        "_used_wire_paths",
         "_write_enabled",
+        "_written_bytes",
         "cache_schema_version",
         "data",
         "fingerprint_version",
@@ -245,6 +285,13 @@ class Cache:
         # Generation orders saves so the budget can tell rows this run touched
         # from rows left over by an older one; only the latter are evictable.
         self._generation: int = 0
+        # Identity for every stored row: 0.48% of the store, measured. The
+        # lanes behind these rows stay on disk until somebody asks for one.
+        self._identity: dict[str, tuple[int, EntryIdentity]] = {}
+        # Paths this run actually read, so the TTL sweep can tell a live entry
+        # from one nothing has wanted for weeks.
+        self._used_wire_paths: set[str] = set()
+        self._written_bytes: int = 0
         # A store whose load was refused must not survive piecewise. See
         # _write_backend_rows.
         self._discard_store: bool = False
@@ -393,6 +440,8 @@ class Cache:
             fingerprint_version=self.fingerprint_version,
         )
         self._canonical_runtime_paths = set()
+        self._identity = {}
+        self._used_wire_paths = set()
         self._discard_store = True
         self.segment_report_projection = None
 
@@ -472,15 +521,23 @@ class Cache:
                     load_span.set_counter(
                         "cache_backend_entries", backend.entry_count()
                     )
+                    # Bytes this load actually read, not bytes the store holds:
+                    # the lanes were left on disk, and a counter that claimed
+                    # them would report work nobody did.
                     load_span.set_counter(
-                        "cache_backend_read_bytes", backend.payload_bytes()
+                        "cache_backend_read_bytes",
+                        sum(
+                            len(identity.wire_path)
+                            for _fid, identity in self._identity.values()
+                        ),
                     )
+                    _record_db_cost(load_span, backend)
                 finally:
                     backend.close()
             if parsed is None:
                 return
             self.data = parsed
-            self._canonical_runtime_paths = set(parsed["files"].keys())
+            self._canonical_runtime_paths = set(self._identity)
             self._discard_store = False
             self.load_status = CacheStatus.OK
             self._set_load_warning(None)
@@ -511,6 +568,20 @@ class Cache:
                 return self._reject_invalid_cache_format()
             if version != self._CACHE_VERSION:
                 return self._reject_version_mismatch(version)
+
+            # A store written by an older physical schema is a generation
+            # mismatch, not damage. Letting it fall through would meet a
+            # missing table and be reported as corruption, which invites a
+            # user to go looking for a fault that is not there.
+            schema = meta.get(META_KEY_SCHEMA)
+            if schema != CACHE_BACKEND_SCHEMA_VERSION:
+                return self._reject_cache_load(
+                    "Cache schema mismatch "
+                    f"(found {schema or 'none'}, expected "
+                    f"{CACHE_BACKEND_SCHEMA_VERSION}); ignoring cache.",
+                    status=CacheStatus.VERSION_MISMATCH,
+                    schema_version=version,
+                )
 
             checksum = meta.get(META_KEY_CHECKSUM)
             py_tag = meta.get(META_KEY_PYTHON_TAG)
@@ -554,17 +625,22 @@ class Cache:
             self._generation = _as_generation(meta.get(META_KEY_GENERATION))
 
         parsed_files = new_tracked_files()
+        # A load reads identity and stops. Decoding every lane here is what
+        # the previous shape did, and it is why a run paid 52 MB to answer
+        # questions worth 247 KB. ``decoded_entries`` stays at zero on purpose:
+        # nothing has been decoded yet, and a counter that said otherwise would
+        # be reporting work that has not happened.
+        identities: dict[str, tuple[int, EntryIdentity]] = {}
         with span(name="cache.decode_entries") as decode_span:
-            decoded = 0
-            for wire_path, file_entry_obj in backend.iter_entries(version):
-                runtime_path = runtime_filepath_from_wire(wire_path, root=self.root)
-                parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
-                if parsed_entry is None:
-                    return self._reject_invalid_cache_format(schema_version=version)
-                dict.__setitem__(parsed_files, runtime_path, parsed_entry)
-                decoded += 1
-            decode_span.set_counter("cache_entries", decoded)
-            decode_span.set_counter("decoded_entries", decoded)
+            for file_id, identity in backend.iter_identities(version):
+                runtime_path = runtime_filepath_from_wire(
+                    identity.wire_path, root=self.root
+                )
+                identities[runtime_path] = (file_id, identity)
+            decode_span.set_counter("cache_entries", len(identities))
+            decode_span.set_counter("decoded_entries", 0)
+        self._identity = identities
+        self._used_wire_paths = set()
         with span(name="cache.segment_projection"):
             self.segment_report_projection = decode_segment_report_projection(
                 backend.read_singleton(SINGLETON_SEGMENT_REPORT, version),
@@ -599,9 +675,8 @@ class Cache:
                 )
                 write_span.set_counter("cache_backend_changed_entries", written)
                 write_span.set_counter("cache_backend_removed_entries", removed)
-                write_span.set_counter(
-                    "cache_backend_write_bytes", backend.payload_bytes()
-                )
+                write_span.set_counter("cache_backend_write_bytes", self._written_bytes)
+                _record_db_cost(write_span, backend)
                 with span(name="cache.backend.activate_generation") as activate_span:
                     backend.write_meta(
                         version=self._CACHE_VERSION,
@@ -612,7 +687,7 @@ class Cache:
                     activate_span.set_counter(
                         "cache_backend_entries", backend.entry_count()
                     )
-                self._enforce_budget(backend, generation=generation)
+            self._enforce_budget(generation=generation)
             self._generation = generation
             self._dirty = False
             if tracked is not None:
@@ -664,24 +739,36 @@ class Cache:
             dirty_runtime_paths = sorted(moved & set(self.data["files"]))
             deleted_runtime_paths = sorted(dropped)
 
-        wire_entries: dict[str, object] = {}
+        rows: list[tuple[EntryIdentity, bytes, bytes]] = []
         for runtime_path in dirty_runtime_paths:
             entry = self.get_file_entry(runtime_path)
             if entry is None:
                 continue
             wire_path = wire_filepath_from_runtime(runtime_path, root=self.root)
-            wire_entries[wire_path] = self._encode_entry(entry)
+            identity, neutral, dependent = split_wire_entry(
+                wire_path, self._encode_entry(entry)
+            )
+            rows.append((identity, neutral, dependent))
         written = backend.upsert_entries(
-            wire_entries,
+            rows,
             version=self._CACHE_VERSION,
             generation=generation,
+            now_epoch=_now_epoch(),
         )
+        self._written_bytes = sum(len(n) + len(d) for _i, n, d in rows)
 
         doomed = [
             wire_filepath_from_runtime(runtime_path, root=self.root)
             for runtime_path in deleted_runtime_paths
         ]
         removed = backend.delete_entries(doomed) + removed_stale
+        # Entries this run read but did not change keep their payload and get
+        # a fresh recency mark, so a hot file that never changes cannot age
+        # out of the TTL sweep behind a cold one that was rewritten once.
+        backend.touch(
+            sorted(self._used_wire_paths - {i.wire_path for i, _n, _d in rows}),
+            now_epoch=_now_epoch(),
+        )
 
         segment_projection = encode_segment_report_projection(
             self.segment_report_projection,
@@ -697,29 +784,40 @@ class Cache:
             )
         return written, removed
 
-    def _enforce_budget(self, backend: CacheBackend, *, generation: int) -> None:
-        """Hold the cache to ``max_size_bytes`` on the side that can afford it.
+    def _enforce_budget(self, *, generation: int) -> None:
+        """Hold the cache to ``max_size_bytes`` through the one collector.
 
-        This is the half of the pinned asymmetry that used to be missing:
-        ``save()`` ignored the budget entirely while ``load()`` answered an
-        oversized store by discarding all of it.  Enforcement now happens here,
-        and it evicts only rows no longer touched by the current run -- the
-        run's own rows are what the *next* run needs to stay warm, so evicting
-        them would recreate the defect under a new name.  A budget too small to
-        hold even the current run is reported, not obeyed into uselessness.
+        This used to be its own eviction loop here, which made the cache the
+        only store in the process with a private cleanup nobody else could
+        see. The bound is now a policy handed to the cache's GC job, so one
+        collector answers for eviction, TTL and orphans alike, under the same
+        report shape and the same telemetry as every other job.
+
+        A budget too small to hold even the current run is reported, not
+        obeyed into uselessness: the job never takes rows this generation
+        wrote, so there is nothing it could evict to satisfy it.
         """
 
         if self.max_size_bytes <= 0:
             return
-        with span(name="cache.backend.prune") as prune_span:
-            evicted, remaining = backend.evict_to_budget(
-                max_bytes=self.max_size_bytes,
-                generation=generation,
-            )
-            prune_span.set_counter("cache_backend_pruned", evicted)
-        if evicted:
+        report = collect_cache_garbage(
+            path=self.path,
+            version=self._CACHE_VERSION,
+            generation=generation,
+            now_epoch=_now_epoch(),
+            max_bytes=self.max_size_bytes,
+        )
+        if report.refusal is not None:
+            raise CacheError(f"Failed to save cache: {report.refusal}")
+        collected = sum(count for _reason, count in report.collected)
+        if collected:
             self._canonical_runtime_paths.clear()
             self._canonical_runtime_paths.update(self.data["files"])
+            for runtime_path in tuple(self._identity):
+                if runtime_path not in self.data["files"]:
+                    self._identity.pop(runtime_path, None)
+        with CacheBackend(self.path) as backend:
+            remaining = backend.payload_bytes()
         if remaining > self.max_size_bytes:
             self._set_load_warning(
                 f"Cache content is {remaining} bytes, over the configured "
@@ -736,7 +834,9 @@ class Cache:
             # rows stay on disk and a later save must not read this as a
             # deletion of every one of them.
             self.data["files"] = new_tracked_files()
-            self._canonical_runtime_paths.clear()
+            # Identity stays. Releasing frees the lanes, which is where the
+            # memory is; forgetting which rows exist would turn the next
+            # lookup into a miss and the next save into a deletion.
             release_span.set_counter("released_entries", released)
             return released
 
@@ -763,17 +863,76 @@ class Cache:
         return canonical_entry
 
     def get_file_entry(self, filepath: str) -> CacheEntryV3 | None:
+        """Return one entry, fetching its lanes only if they are still on disk.
+
+        A load leaves the heavy lanes where they are, so this is where they
+        arrive -- once per file, on demand. An entry already in memory is
+        handed back untouched, which keeps a lookup from looking like a change.
+        """
+
         runtime_lookup_key = filepath
         entry_obj = self.data["files"].get(runtime_lookup_key)
         if entry_obj is None:
             wire_key = wire_filepath_from_runtime(filepath, root=self.root)
             runtime_lookup_key = runtime_filepath_from_wire(wire_key, root=self.root)
             entry_obj = self.data["files"].get(runtime_lookup_key)
+        if entry_obj is not None:
+            self._mark_used(runtime_lookup_key)
+            return entry_obj
+        return self._materialize(runtime_lookup_key)
 
-        if entry_obj is None:
+    def _mark_used(self, runtime_path: str) -> None:
+        known = self._identity.get(runtime_path)
+        if known is not None:
+            self._used_wire_paths.add(known[1].wire_path)
+
+    def _materialize(self, runtime_path: str) -> CacheEntryV3 | None:
+        """Pull one entry's lanes off disk and decode it.
+
+        A lane that fails to decode makes this one entry a miss, never the
+        store: the identity row that named it is dropped so the run re-analyses
+        that file and the next save replaces it.
+        """
+
+        known = self._identity.get(runtime_path)
+        if known is None:
             return None
-
-        return entry_obj
+        file_id, identity = known
+        try:
+            with (
+                span(name="cache.backend.load_generation") as lane_span,
+                CacheBackend(self.path, read_only=True) as backend,
+            ):
+                neutral = backend.read_lane(TABLE_NEUTRAL, file_id)
+                dependent = backend.read_lane(TABLE_DEPENDENT, file_id)
+                lane_span.set_counter(
+                    "cache_backend_read_bytes",
+                    identity.neutral_bytes + identity.dependent_bytes,
+                )
+                _record_db_cost(lane_span, backend)
+        except CacheBackendUnusable:
+            self._identity.pop(runtime_path, None)
+            return None
+        except OSError:
+            self._identity.pop(runtime_path, None)
+            return None
+        if neutral is None or dependent is None:
+            self._identity.pop(runtime_path, None)
+            return None
+        try:
+            wire = join_wire_entry(identity, neutral, dependent)
+        except WireShapeRefused:
+            self._identity.pop(runtime_path, None)
+            return None
+        entry = self._decode_entry(wire, runtime_path)
+        if entry is None:
+            self._identity.pop(runtime_path, None)
+            return None
+        # A materialised entry is what the store already holds, so it enters
+        # the map without being marked changed.
+        dict.__setitem__(self.data["files"], runtime_path, entry)
+        self._used_wire_paths.add(identity.wire_path)
+        return entry
 
     def put_file_entry(
         self,
@@ -1011,16 +1170,22 @@ class Cache:
             )
             for filepath in existing_filepaths
         }
+        # Every row the store holds, not merely the ones already in memory:
+        # after a load the lanes are still on disk, so asking the in-memory map
+        # alone would leave an entry for a deleted file behind and call it
+        # pruned. Identity is the register of what exists.
         stale_runtime_paths = sorted(
-            runtime_path
-            for runtime_path in self.data["files"]
-            if runtime_path not in keep_runtime_paths
+            {*self.data["files"], *self._identity} - keep_runtime_paths
         )
         if not stale_runtime_paths:
             return 0
         for runtime_path in stale_runtime_paths:
-            # del, not pop: TrackedFiles tracks removal through __delitem__.
-            del self.data["files"][runtime_path]
+            if runtime_path in self.data["files"]:
+                # del, not pop: TrackedFiles tracks removal through __delitem__.
+                del self.data["files"][runtime_path]
+            else:
+                _mark_deleted(self.data, runtime_path)
+            self._identity.pop(runtime_path, None)
             self._canonical_runtime_paths.discard(runtime_path)
         self._dirty = True
         return len(stale_runtime_paths)

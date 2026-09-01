@@ -104,6 +104,7 @@ from codeclone.models import (
     Unit,
 )
 from codeclone.observability import bootstrap, operation, shutdown
+from codeclone.observability.query import query_platform_observability
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
@@ -118,6 +119,7 @@ from tests._cache_store_fixtures import (
     META_KEY_FINGERPRINT,
     META_KEY_PYTHON_TAG,
     META_KEY_VERSION,
+    TABLE_NEUTRAL,
     envelope_checksum,
 )
 from tests._cache_store_fixtures import (
@@ -125,6 +127,9 @@ from tests._cache_store_fixtures import (
 )
 from tests._cache_store_fixtures import (
     open_store as _open_store,
+)
+from tests._cache_store_fixtures import (
+    overwrite_lane as _overwrite_lane,
 )
 from tests._cache_store_fixtures import (
     read_cache_meta as _read_cache_meta,
@@ -137,9 +142,6 @@ from tests._cache_store_fixtures import (
 )
 from tests._cache_store_fixtures import (
     write_cache_meta as _write_cache_meta,
-)
-from tests._cache_store_fixtures import (
-    write_cache_row as _write_cache_row,
 )
 
 _SOURCE_CONTENT_DIGEST = DigestObject(
@@ -437,6 +439,54 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
 
 
+def test_cache_sqlite_work_reaches_the_observers_db_cost_section(
+    tmp_path: Path,
+) -> None:
+    """The cache's own database work is visible where database work is read.
+
+    A span joins ``db_cost`` by carrying ``db_queries``; the other two counters
+    give the section its N+1 shape. Before this the cache was the one store in
+    the process whose work could not be looked at -- and the store that
+    accelerates every run is the last place that should be a black box.
+
+    Asserted through the observer's own query, not by reading the span table,
+    so a counter that never reached the section would fail here.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    cache = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(cache, "x.py")
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_db_cost", surface="test"):
+            cache.put_file_entry(
+                "x.py",
+                {"mtime_ns": 1, "size": 10},
+                [],
+                [],
+                [],
+                source_content_digest=_SOURCE_CONTENT_DIGEST,
+            )
+            cache.save()
+            reloaded = Cache(cache_path, root=tmp_path)
+            reloaded.load()
+            assert reloaded.get_file_entry("x.py") is not None
+    finally:
+        shutdown()
+
+    section = query_platform_observability(root=tmp_path, section="db_cost")
+    rows = cast("list[dict[str, object]]", section["rows"])
+    cache_rows = {
+        str(row["span"]): row for row in rows if str(row["span"]).startswith("cache.")
+    }
+    assert cache_rows, section
+    for row in cache_rows.values():
+        assert cast(int, row["queries"]) > 0
+    assert "cache.backend.write_generation" in cache_rows
+    assert "cache.backend.load_generation" in cache_rows
+
+
 def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path, root=tmp_path)
@@ -484,9 +534,12 @@ def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
     assert load_counters["cache_file_bytes"] > 0
     assert load_counters["cache_backend_entries"] == 1
     assert load_counters["cache_backend_read_bytes"] > 0
+    # A load reads identity and decodes nothing: the lanes stay on disk until
+    # somebody asks. A non-zero decoded_entries here would mean the schema had
+    # quietly gone back to reading everything.
     assert counters_by_name["cache.decode_entries"] == {
         "cache_entries": 1,
-        "decoded_entries": 1,
+        "decoded_entries": 0,
     }
 
 
@@ -499,9 +552,15 @@ def test_cache_release_loaded_entries_clears_clean_loaded_entries(
     loaded = Cache(cache_path, root=tmp_path)
     loaded.load()
     assert loaded.get_file_entry("x.py") is not None
+    assert len(loaded.data["files"]) == 1
 
+    # Release frees the materialised lanes -- which is where the memory is --
+    # and leaves the row in the store. Under the old shape a release also lost
+    # the entry, because the only copy was the one in memory; now asking again
+    # simply fetches it back.
     assert loaded.release_loaded_entries() == 1
-    assert loaded.get_file_entry("x.py") is None
+    assert loaded.data["files"] == {}
+    assert loaded.get_file_entry("x.py") is not None
     assert loaded.load_status == CacheStatus.OK
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
 
@@ -898,8 +957,10 @@ def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
     removed = loaded.prune_file_entries((str(live),))
 
     assert removed == 1
-    assert str(live) in loaded.data["files"]
-    assert str(stale) not in loaded.data["files"]
+    # A load leaves the lanes on disk, so the in-memory map is not the register
+    # of what exists; the lookup is.
+    assert loaded.get_file_entry(str(live)) is not None
+    assert loaded.get_file_entry(str(stale)) is None
 
     loaded.save()
 
@@ -1543,14 +1604,19 @@ def test_cache_row_checksum_covers_content_not_stored_bytes(tmp_path: Path) -> N
 
     wire_path, entry = _sole_cache_row(cache_path)
     assert isinstance(entry, dict)
-    # Rewrite the row with reversed key order and indentation, keeping the
-    # checksum that was computed over the canonical form.
-    reordered = dict(reversed(list(entry.items())))
-    with _open_store(cache_path) as conn:
-        conn.execute(
-            "UPDATE cache_files SET payload = ? WHERE wire_path = ?",
-            (json.dumps(reordered, indent=2).encode("utf-8"), wire_path),
-        )
+    neutral = entry["n"]
+    assert isinstance(neutral, dict)
+    # Rewrite the lane with reversed key order and indentation. The identity
+    # checksum is untouched and still holds, because it covers the identity;
+    # the lane is decoded, not compared byte for byte.
+    reordered = dict(reversed(list(neutral.items())))
+    reordered.pop("mt", None)
+    _overwrite_lane(
+        cache_path,
+        wire_path,
+        TABLE_NEUTRAL,
+        json.dumps(reordered, indent=2).encode("utf-8"),
+    )
 
     _assert_loads_cleanly(cache_path, "x.py")
 
@@ -1662,7 +1728,7 @@ def test_cache_refuses_a_legacy_json_monolith_at_the_cache_path(
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.8"
+    assert Cache._CACHE_VERSION == "4.0"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1677,7 +1743,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     )
     old_cache.save()
 
-    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "3.8"
+    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "4.0"
     _write_cache_meta(cache_path, **{META_KEY_VERSION: "2.10"})
 
     regenerated = Cache(cache_path, root=tmp_path)
@@ -1872,11 +1938,11 @@ def test_cache_load_row_payload_that_is_not_an_object(tmp_path: Path) -> None:
 
     cache_path = tmp_path / "cache.sqlite3"
     _save_single_cache_entry(cache_path)
-    _write_cache_row(cache_path, "x.py", [])
-    cache = Cache(cache_path)
+    _overwrite_lane(cache_path, "x.py", TABLE_NEUTRAL, b"[]")
+    cache = Cache(cache_path, root=cache_path.parent)
     cache.load()
-    assert cache.load_warning is not None
-    assert "format" in cache.load_warning
+    assert cache.load_status is CacheStatus.OK
+    assert cache.get_file_entry("x.py") is None
 
 
 def test_cache_save_error(tmp_path: Path) -> None:
@@ -2086,16 +2152,22 @@ def test_cache_dependent_lane_rejects_api_surface_mismatch(
     assert loaded.load_status == CacheStatus.OK
 
 
-def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
+def test_cache_load_undecodable_lane_costs_one_entry(tmp_path: Path) -> None:
+    """A lane the decoder refuses is one miss, not a condemned store.
+
+    Under the monolith a single unreadable entry invalidated the whole
+    document. With identity and lanes apart, the identity row still verifies,
+    so the load succeeds and only the entry whose lane is broken goes missing.
+    """
+
     cache_path = tmp_path / "cache.sqlite3"
     _save_single_cache_entry(cache_path)
-    # A correctly checksummed row whose entry the wire decoder refuses: the
-    # integrity gate passes and the decode gate is what this still exercises.
-    _write_cache_row(cache_path, "x.py", {"st": "bad"})
-    cache = Cache(cache_path)
+    _overwrite_lane(cache_path, "x.py", TABLE_NEUTRAL, {"st": "bad"})
+
+    cache = Cache(cache_path, root=cache_path.parent)
     cache.load()
-    assert cache.load_warning is not None
-    assert "format invalid" in cache.load_warning
+    assert cache.load_status is CacheStatus.OK
+    assert cache.get_file_entry("x.py") is None
 
 
 def test_cache_save_skips_none_entry_from_lookup(
@@ -3648,7 +3720,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     assert "SECURITY_SURFACE_CATALOG_VERSION" in source
     assert "RUNTIME_REACHABILITY_CATALOG_VERSION" in source
     assert "STRUCTURAL_FINDINGS_CATALOG_VERSION" in source
-    assert CACHE_VERSION == "3.8"
+    assert CACHE_VERSION == "4.0"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

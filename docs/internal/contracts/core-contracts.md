@@ -21,7 +21,7 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 |----------|-------|-------|-----------|
 | `BASELINE_SCHEMA_VERSION` | `"3.0"` | baseline.json structure | Defines JSON schema for baseline artifacts. Bump only when baseline dict structure changes. |
 | `BASELINE_FINGERPRINT_VERSION` | `"3"` | fingerprint algorithm | Never change without explicit `BASELINE_FINGERPRINT_VERSION` review. Alters cloning semantics. |
-| `CACHE_VERSION` | `"3.8"` | analysis cache format | Invalidates `.codeclone/db/cache.sqlite3` on mismatch. Bump on cache layout or serialization change. |
+| `CACHE_VERSION` | `"4.0"` | analysis cache store | Invalidates `.codeclone/db/cache.sqlite3` on mismatch. Bump on cache schema or serialization change. See the note below. |
 | `REPORT_SCHEMA_VERSION` | `"3.2"` | report artifact JSON | Governs report.json, report.sarif structure. Bump on schema shape change. |
 | `METRICS_BASELINE_SCHEMA_VERSION` | `"1.3"` | metrics baseline JSON | Structure of the metrics baseline artifact used for regression gating. |
 | `PATCH_TRAIL_SCHEMA_VERSION` | `"1"` | audit trail encoding | Controls patch_trail.json serialization in intent workspaces. |
@@ -153,6 +153,7 @@ When a constant is referenced, the source location is always `codeclone.contract
 - **Baseline artifact read fails**: Reader code compares the stored schema version against `BASELINE_SCHEMA_VERSION` with an exact match. Any other stored value — older or newer — makes the baseline untrusted (`MISMATCH_SCHEMA_VERSION`) and requires regeneration; the only cross-version path is the one-shot 2.1→3.0 migration in `codeclone/baseline/transition.py`.
 - **Report artifact incompatibility**: CodeClone tools consuming reports check `REPORT_SCHEMA_VERSION`. A version mismatch blocks report loading.
 - **Cache invalidation**: Analysis cache becomes invalid if `CACHE_VERSION` increments. Cached analysis is discarded on first run.
+- **Cache generations are not run identities**: the JSON monolith and the backend-resident cache store are different generations and neither reads the other; there is no fallback, and the cache is disposable, so the regeneration cost is the whole cost. A cache generation never participates in run-store semantic identity, and cache tables never enter publication correctness.
 
 ### Threshold Violations
 

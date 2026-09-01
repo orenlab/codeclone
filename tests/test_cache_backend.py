@@ -36,8 +36,9 @@ from codeclone.cache.versioning import CacheStatus
 from codeclone.core._types import BootstrapResult
 from tests._cache_store_fixtures import (
     META_KEY_VERSION,
-    open_store,
+    break_identity_checksum,
     read_cache_rows,
+    read_identity_columns,
     write_cache_meta,
 )
 from tests._pipeline_fixtures import (
@@ -169,11 +170,7 @@ def test_a_corrupt_row_costs_one_entry_and_not_the_store(tmp_path: Path) -> None
     _boot, cache_path, _cold = _cold_and_saved(tmp_path)
     assert len(read_cache_rows(cache_path)) == len(_MODULES)
 
-    with open_store(cache_path) as conn:
-        conn.execute(
-            "UPDATE cache_files SET checksum = 'wrong' WHERE wire_path = ?",
-            ("alpha.py",),
-        )
+    break_identity_checksum(cache_path, "alpha.py")
 
     warm = Cache(cache_path, root=tmp_path)
     warm.load()
@@ -214,6 +211,35 @@ def test_the_run_store_keeps_full_durability(tmp_path: Path) -> None:
 
     with RunStore(tmp_path / "runs.sqlite3") as run_store:
         assert _synchronous_of(run_store._connection) == 2
+
+
+def test_the_cache_schema_is_not_in_the_run_stores_identity_salt() -> None:
+    """Adding a cache index must not change what a run means.
+
+    The run store salts its content addresses with ``STORAGE_SCHEMA_REVISION``.
+    If the cache's own storage revision were ever folded into that salt, adding
+    an index here would change analysis identities without changing a single
+    fact -- a defect a parallel wave is removing at the source by splitting
+    ``CANONICAL_OBJECT_IDENTITY_VERSION`` out of it.
+
+    This pins the property from the cache's side, which holds independently of
+    that wave: no module of the cache package reaches the salt, or the run
+    store that owns it. Checked over the package's own module list rather than
+    a text search of the tree, so a new cache module cannot slip past it.
+    """
+
+    import codeclone.cache
+
+    package = Path(codeclone.cache.__file__).parent
+    forbidden = ("STORAGE_SCHEMA_REVISION", "canonical.store", "_DOMAIN_OBJECT")
+    offenders = {
+        module.name: sorted(
+            name for name in forbidden if name in module.read_text("utf-8")
+        )
+        for module in sorted(package.glob("*.py"))
+    }
+    assert {name: hits for name, hits in offenders.items() if hits} == {}
+    assert offenders, "the probe needs modules to inspect"
 
 
 def test_a_foreign_database_is_refused_before_it_is_written_to(
@@ -272,22 +298,17 @@ def test_a_save_writes_only_the_rows_that_moved(tmp_path: Path) -> None:
 
     # A save with nothing changed writes no entry rows at all.
     warm._dirty = True
-    with CacheBackend(cache_path) as backend:
-        generations_before = sorted(
-            row[0]
-            for row in backend._connection.execute(
-                "SELECT generation FROM cache_files"
-            ).fetchall()
-        )
+
+    def generations() -> dict[str, object]:
+        return {
+            path: row["generation"]
+            for path, row in read_identity_columns(cache_path).items()
+        }
+
+    before = generations()
     warm.save()
-    with CacheBackend(cache_path) as backend:
-        generations_after = sorted(
-            row[0]
-            for row in backend._connection.execute(
-                "SELECT generation FROM cache_files"
-            ).fetchall()
-        )
-    assert generations_after == generations_before
+    after = generations()
+    assert after == before
 
 
 def test_a_refused_generation_is_replaced_not_partially_inherited(

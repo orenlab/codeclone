@@ -427,7 +427,7 @@ TIER_STATE_COMPLETE: Final = "complete"
 # either direction, and the neutral reuse gate demands witness == the running
 # configuration's channels. 3.7 caches are rejected at the version gate and
 # re-analysed — there is no byte-stable path for the mandatory key.
-CACHE_VERSION: Final = "3.8"
+CACHE_VERSION: Final = "4.0"
 # 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
 # changed. "complete" became "complete_nonempty" and "complete_empty" joined
 # it, because one word was carrying two facts — a population that exists and
