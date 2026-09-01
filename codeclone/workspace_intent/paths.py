@@ -41,15 +41,34 @@ def intent_path(
 
 
 def registry_files(root: Path) -> tuple[Path, ...]:
+    """Every safe intent file in the registry, one entry per resolved target.
+
+    Identity here is the resolved target, never the spelling that reached it.
+    This is the single door every registry consumer reads through, so it is
+    also the only place two names for one record can be collapsed. Keyed by
+    spelling instead, one held scope is announced twice in
+    ``concurrent_intents``, and the removal path -- which unlinks the one path
+    it recorded per intent id -- leaves the other name behind. Where several
+    spellings share a target the one that *is* its target wins, so removing an
+    intent removes the record rather than a link to it.
+    """
+
     directory = registry_dir(root)
+    chosen: dict[Path, Path] = {}
     try:
-        return tuple(
-            path
-            for path in sorted(directory.glob("*.json"))
-            if is_safe_intent_path(path, directory)
-        )
+        for path in sorted(directory.glob("*.json")):
+            if not is_safe_intent_path(path, directory):
+                continue
+            # Safe to resolve unguarded: the predicate above resolved this same
+            # path a moment ago. A second try/except here would be a branch no
+            # input can reach, which is worse than the OSError it imagines.
+            target = path.resolve(strict=False)
+            current = chosen.get(target)
+            if current is None or (current != target and path == target):
+                chosen[target] = path
     except OSError:
         return ()
+    return tuple(sorted(chosen.values()))
 
 
 def read_payload(
@@ -80,13 +99,27 @@ def is_safe_intent_id(value: object) -> bool:
 
 
 def is_safe_intent_path(expected: Path, registry: Path) -> bool:
+    """Whether ``expected`` may be read or removed as a registry intent file.
+
+    The property is resolved containment -- ``resolve(candidate)`` lands inside
+    ``resolve(registry)`` -- and deliberately not ``candidate ==
+    resolve(candidate)``. Demanding an already-resolved spelling refuses a link
+    whose target is a legitimate record inside the registry, and buys nothing
+    for it: the substitution equality was reaching for is caught one line down,
+    on the resolved target, which is the one thing no spelling can disguise.
+
+    The cost of over-refusing is not symmetric across the two consumers, which
+    is why it is a security bug rather than an inconvenience. The edit gate
+    fails closed and merely stops its own agent. Conflict detection fails OPEN:
+    an invisible record is no record, so ``start_controlled_change`` hands out
+    an active intent on scope another live agent is holding.
+    """
+
     try:
         if not expected.is_absolute():
             return False
         resolved = expected.resolve(strict=False)
         resolved_registry = registry.resolve(strict=False)
-        if resolved != expected:
-            return False
         if not resolved.is_relative_to(resolved_registry):
             return False
         name = expected.name

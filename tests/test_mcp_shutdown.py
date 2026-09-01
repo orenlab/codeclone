@@ -95,7 +95,24 @@ class _ClosingWriter:
 # ---------------------------------------------------------------------------
 
 
-def test_safe_path_accepts_valid_intent_path(tmp_path: Path) -> None:
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink is not supported on this platform")
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not available in this environment")
+
+
+# The safety property is resolved containment -- ``resolve(candidate)`` lands
+# inside ``resolve(registry)`` -- and not ``candidate == resolve(candidate)``.
+# The four tests below are the discriminating cases of exactly that property:
+# they differ only in where the candidate resolves to, so a predicate that
+# refuses every link fails the first, and a predicate that inspects the
+# unresolved spelling fails the last two.
+
+
+def test_safe_path_accepts_ordinary_path_inside_root(tmp_path: Path) -> None:
     registry = registry_dir(tmp_path)
     registry.mkdir(parents=True, exist_ok=True)
     expected = intent_path(
@@ -105,6 +122,33 @@ def test_safe_path_accepts_valid_intent_path(tmp_path: Path) -> None:
         intent_id="intent-aaa-001",
     )
     assert _is_safe_intent_path(expected, registry) is True
+
+
+def _registry_holding_link_to(tmp_path: Path, target_parent: str) -> tuple[Path, Path]:
+    """A registry plus one link in it named like an intent record.
+
+    ``target_parent`` says where the link lands -- inside the registry, or out
+    in the repository root -- because that is the single fact the containment
+    property turns on. Everything else about the two cases is identical, and
+    saying it twice would pin the shape of the setup rather than the property.
+    """
+
+    registry = registry_dir(tmp_path)
+    registry.mkdir(parents=True, exist_ok=True)
+    parent = registry if target_parent == "registry" else tmp_path
+    target = parent / "real-target.json"
+    target.write_text("{}", encoding="utf-8")
+    link = registry / "123-456-intent-aaa-001.json"
+    _symlink_or_skip(link, target)
+    return registry, link
+
+
+def test_safe_path_accepts_symlink_whose_target_is_inside_root(
+    tmp_path: Path,
+) -> None:
+    registry, link = _registry_holding_link_to(tmp_path, "registry")
+
+    assert _is_safe_intent_path(link, registry) is True
 
 
 def test_safe_path_rejects_relative(tmp_path: Path) -> None:
@@ -118,23 +162,25 @@ def test_safe_path_rejects_relative(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "target_relative_to",
-    ["outside", "inside"],
-    ids=["symlink-outside-registry", "symlink-inside-registry"],
-)
-def test_safe_path_rejects_symlink(
+def test_safe_path_refuses_symlink_whose_target_escapes_root(
     tmp_path: Path,
-    target_relative_to: str,
+) -> None:
+    registry, link = _registry_holding_link_to(tmp_path, "root")
+
+    assert _is_safe_intent_path(link, registry) is False
+
+
+def test_safe_path_refuses_dotdot_escape_after_normalization(
+    tmp_path: Path,
 ) -> None:
     registry = registry_dir(tmp_path)
     registry.mkdir(parents=True, exist_ok=True)
-    parent = tmp_path if target_relative_to == "outside" else registry
-    target = parent / "real-target.json"
-    target.write_text("{}")
-    symlink = registry / "123-456-intent-aaa-001.json"
-    symlink.symlink_to(target)
-    assert _is_safe_intent_path(symlink, registry) is False
+    escape = registry / ".." / ".." / "123-456-intent-aaa-001.json"
+
+    # Every non-containment check passes on this spelling: it is absolute, it
+    # ends in .json and it carries two dashes. Containment is the only thing
+    # standing between it and acceptance.
+    assert _is_safe_intent_path(escape, registry) is False
 
 
 def test_safe_path_rejects_directory(tmp_path: Path) -> None:

@@ -1435,6 +1435,100 @@ def test_registry_files_skips_unsafe_entries(tmp_path: Path) -> None:
     )
 
 
+def _symlink_or_skip(link: Path, target: Path, *, directory: bool = False) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink is not supported on this platform")
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not available in this environment")
+
+
+def test_symlinked_state_directory_keeps_foreign_intent_visible(
+    tmp_path: Path,
+) -> None:
+    """A symlinked ``.codeclone`` must not silently empty ``concurrent_intents``.
+
+    The writer accepts this layout -- ``_validate_atomic_target`` inspects the
+    immediate parent, and ``.codeclone/intents`` is a real directory inside the
+    symlinked ``.codeclone``. So the record is on disk and a live foreign agent
+    holds the scope. If the reader then refuses every entry because the path is
+    not already fully resolved, the two consumers of the registry split in
+    opposite directions: the edit gate fails closed and merely inconveniences
+    its own agent, while conflict detection fails OPEN and hands out an active
+    intent on scope somebody else is holding.
+    """
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    state = tmp_path / "agent-state"
+    state.mkdir()
+    _symlink_or_skip(root / ".codeclone", state, directory=True)
+
+    foreign = _record(intent_id="intent-foreign-visible-001")
+    assert workspace_intents.write_workspace_intent(root=root, record=foreign)
+    assert (
+        state / "intents" / f"{foreign.agent_pid}-{foreign.agent_start_epoch}"
+        f"-{foreign.intent_id}.json"
+    ).is_file()
+
+    listed = workspace_intents.list_workspace_intents(root=root)
+    assert [record.intent_id for record in listed] == [foreign.intent_id]
+
+    conflicts = workspace_intents.detect_conflicts(
+        new_scope=foreign.scope,
+        existing=listed,
+        own_pid=foreign.agent_pid + 1,
+        own_start_epoch=foreign.agent_start_epoch,
+    )
+    assert [conflict["intent_id"] for conflict in conflicts] == [foreign.intent_id]
+
+
+def test_aliased_registry_spellings_are_one_intent(tmp_path: Path) -> None:
+    """Conflict identity is the resolved target, not the spelling that reached it.
+
+    Admitting a link into the registry is only half the property. Two names for
+    one record must still be one record: keyed by spelling, a single held scope
+    is announced twice in ``concurrent_intents``, and the removal path -- which
+    unlinks the one path it recorded for an intent id -- leaves the other name
+    behind. The alias below is the same file under a second name, so every
+    consumer downstream of the registry listing must see one intent.
+    """
+
+    record = _record(intent_id="intent-alias-001")
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    from codeclone.surfaces.mcp._workspace_intent_paths import (
+        registry_dir,
+        registry_files,
+    )
+
+    real = workspace_intents.intent_path(
+        root=tmp_path,
+        pid=record.agent_pid,
+        start_epoch=record.agent_start_epoch,
+        intent_id=record.intent_id,
+    )
+    # One alias on each side of the real name in sort order: a pid never
+    # renders with a leading zero, and a letter always sorts after a digit, so
+    # the real record is reached both as the incumbent and as the challenger.
+    directory = registry_dir(tmp_path)
+    _symlink_or_skip(directory / "0-0-intent-alias-001.json", real)
+    _symlink_or_skip(directory / "zz-0-intent-alias-001.json", real)
+
+    assert registry_files(tmp_path) == (real,)
+
+    listed = workspace_intents.list_workspace_intents(root=tmp_path)
+    assert [item.intent_id for item in listed] == [record.intent_id]
+
+    conflicts = workspace_intents.detect_conflicts(
+        new_scope=record.scope,
+        existing=listed,
+        own_pid=record.agent_pid + 1,
+        own_start_epoch=record.agent_start_epoch,
+    )
+    assert [conflict["intent_id"] for conflict in conflicts] == [record.intent_id]
+
+
 def test_write_workspace_intent_with_existing_snapshots_before_write(
     tmp_path: Path,
 ) -> None:
