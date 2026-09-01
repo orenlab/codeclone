@@ -55,7 +55,12 @@ Indexes, each with a measured reason:
                     upsert names -- without the UNIQUE constraint the
                     write path has no ``ON CONFLICT`` to resolve, so this
                     one is structural, not an optimisation.
-``ix_entry_gen``    eviction ordering, oldest generation first.
+``ix_entry_gen``    eviction ordering, oldest generation first. Composite
+                    ``(generation, wire_path)`` because the sweep orders by
+                    both: measured, a bare ``(generation)`` index served the
+                    search and then made SQLite build a temp b-tree for the
+                    rest of the ORDER BY -- half an index for the query it
+                    exists for.
 ``ix_entry_used``   the TTL sweep -- covering, so it never reads a table row.
 
 All three together cost +3.7% on the insert path and 94 KB.  Each is proved
@@ -185,7 +190,7 @@ _DDL: Final = (
 
 _INDEXES: Final = (
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_entry_path ON cache_entry(wire_path)",
-    "CREATE INDEX IF NOT EXISTS ix_entry_gen ON cache_entry(generation)",
+    "CREATE INDEX IF NOT EXISTS ix_entry_gen ON cache_entry(generation, wire_path)",
     "CREATE INDEX IF NOT EXISTS ix_entry_used ON cache_entry(last_used_epoch)",
 )
 
