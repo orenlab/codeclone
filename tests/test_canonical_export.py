@@ -117,7 +117,20 @@ _TARGET = "worktree-a"
 # ADDITION to the stored membership, so the run identity legitimately
 # moves with it, and the projection bytes move the artifact digest — the
 # one announced transition of this commit.
-_FIXTURE_RUN_ID = "ab16ae7206d69d2bf24bd2cf559734c4c2201cce18af2aebe9acc515807a44e9"
+# STORAGE_SCHEMA_REVISION "0" -> "1" (the persisted identity bridge) then
+# replaced the RUN literal and left the artifact literal exactly where it
+# was.  That asymmetry is the measurement, not an accident: the revision is
+# spelled into ``_DOMAIN_PREFIX``, so it reaches the run identity through
+# THREE separate preimages -- every object id, the scope receipt and the
+# membership digest, and the run domain itself -- while the artifact digest
+# is built over the projected wire bytes under its own
+# ``cc-canonical-artifact:`` domain and never sees the storage layer at all.
+# Re-derived, not re-snapshotted: putting the revision back to "0" in the
+# five derived separators and in the witness layer reproduces
+# ab16ae7206d6… from this same fixture, byte for byte, and
+# ``test_the_storage_revision_is_inside_every_store_content_address`` in
+# tests/test_canonical_store.py holds that derivation as an executable rule.
+_FIXTURE_RUN_ID = "ae97942ba3953cdc4cf355ff809c182fc51c2dddf0444dfd50e72c27d9c10ee0"
 _FIXTURE_ARTIFACT = "5c4910e220629834b7904dd095b14f8106307ce01530b7e336b9be79ffbdff22"
 
 

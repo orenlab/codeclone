@@ -48,6 +48,7 @@ from typing import NamedTuple
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
 # ingest oracle, and importing the oracle from a production path would
 # make the test oracle a production dependency (ruling 2026-08-24 §6).
+from ..canonical.errors import RunReportLinkError
 from ..canonical.identity import FileId, ModuleId
 from ..canonical.model import (
     AdoptionCountRow,
@@ -91,6 +92,8 @@ from ..metrics.registry import METRIC_FAMILIES
 from ..models import (
     CANONICAL_HEAD_TARGET,
     CANONICAL_PROFILE_HEAD_PREFIX,
+    RUN_SNAPSHOT_LANE_RECOMPUTED,
+    RUN_SNAPSHOT_LANE_STORED,
     RUN_SNAPSHOT_LINK_LINKED,
     RUN_SNAPSHOT_LINK_UNEVALUATED,
     RUN_SNAPSHOT_LINK_UNPUBLISHED,
@@ -99,6 +102,8 @@ from ..models import (
     RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
     RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
     RUN_SNAPSHOT_PUBLICATION_REFUSED,
+    RUN_SNAPSHOT_RESOLUTION_RESOLVED,
+    RUN_SNAPSHOT_RESOLUTION_UNLINKED,
     AdoptionCount,
     ApiSymbolObservation,
     DeadCodeObservation,
@@ -108,6 +113,7 @@ from ..models import (
     RiskObservation,
     RunSnapshotLink,
     RunSnapshotPublication,
+    RunSnapshotResolution,
     RunStoreConfig,
     SemanticAuthorityResult,
 )
@@ -993,9 +999,16 @@ def publish_run_snapshot(
 # ---------------------------------------------------------------------------
 
 
-class RunSnapshotBridgeError(RuntimeError):
+class RunSnapshotBridgeError(RunReportLinkError):
     """The two identity domains could not be related, and saying so is the
     only honest outcome.
+
+    Narrows the store's own link refusal rather than starting a second
+    dialect of it: the relation can fail on either side of the ring
+    boundary -- the store refuses an edge whose halves disagree, this owner
+    refuses a document that carries no identity -- and one
+    ``except RunReportLinkError`` has to catch both, or a caller would have
+    to know which half broke in order to survive it.
 
     Refusing closed is the point, and it is the same law the report's own
     run-identity reader is held to: a bridge that answered a wrong pair, or
@@ -1102,6 +1115,115 @@ def bridge_run_snapshot(
     )
 
 
+# ---------------------------------------------------------------------------
+# Persistence of the bridge: a derived index, and only ever an index.
+# ---------------------------------------------------------------------------
+
+
+def persist_run_snapshot_link(*, store_path: Path, link: RunSnapshotLink) -> bool:
+    """Record a stated relation in the store's index; say whether one was.
+
+    ``False`` is a measured state, not a failure, and it is the answer on
+    the two zeros the bridge already names: a gate-only run has no report
+    identity to record, and a run that stored nothing has no row to address.
+    Only the ``linked`` state carries both halves, and only both halves make
+    an edge.
+    """
+
+    if link.state != RUN_SNAPSHOT_LINK_LINKED:
+        return False
+    # Deferred exactly like the publish path's: this module is imported on
+    # every run, and the store is reached only by runs that have one.
+    from ..canonical.store import RunStore, link_run_report
+
+    with RunStore(store_path) as store:
+        link_run_report(
+            store,
+            run_id=link.store_run_id,
+            report_run_identity=link.report_run_identity,
+            expected_scope_digest=link.analysis_scope_digest,
+        )
+    return True
+
+
+def resolve_run_snapshot_link(
+    *, config: RunStoreConfig, report_document: Mapping[str, object]
+) -> RunSnapshotResolution:
+    """Ask a store which analysis backs one report document.
+
+    Two roads, one answer.  The STORED lane reads the edge and then makes
+    it prove itself: the run row's scope receipt must equal what this
+    document re-derives, because an edge that addressed the wrong row would
+    otherwise hand back a valid model of a different tree with every
+    endpoint check agreeing.  The RECOMPUTED lane runs when no edge is
+    there -- the index was emptied, or the pair was recorded by a build that
+    predates it -- and recovers the relation from the two artifacts alone.
+
+    The recomputed lane refuses rather than chooses when the scope receipt
+    names several published runs, which is the ordinary shape of a store
+    that has seen one tree edited: same paths, different facts, different
+    runs.  Choosing there would be the silent lookup "by something similar",
+    and both candidates would verify perfectly against their own membership.
+    """
+
+    if config.path is None:
+        raise RunSnapshotBridgeError(
+            "the run store is not enabled for this root, so nothing can be "
+            "asked which analysis backs this document"
+        )
+    if not config.path.exists():
+        raise RunSnapshotBridgeError(
+            f"there is no run store at {config.path}; an absent store is not "
+            "the statement that no analysis backs this document"
+        )
+    identity = _report_run_identity_or_refuse(report_document)
+    scope = report_scope_receipt(report_document)
+
+    from ..canonical.store import RunStore, linked_run, runs_over_scope
+
+    with RunStore(config.path) as store:
+        edge = linked_run(store, report_run_identity=identity)
+        candidates = (
+            () if edge is not None else runs_over_scope(store, scope_digest=scope)
+        )
+    if edge is not None:
+        if not hmac.compare_digest(edge.analysis_scope_digest, scope):
+            raise RunSnapshotBridgeError(
+                f"the stored edge for report {identity[:12]} addresses run "
+                f"{edge.run_id[:12]} over scope "
+                f"{edge.analysis_scope_digest[:12]}, and this document "
+                f"re-derives scope {scope[:12]}: refusing the pair rather "
+                "than looking for a run that fits better"
+            )
+        return RunSnapshotResolution(
+            state=RUN_SNAPSHOT_RESOLUTION_RESOLVED,
+            lane=RUN_SNAPSHOT_LANE_STORED,
+            store_run_id=edge.run_id,
+            report_run_identity=identity,
+            analysis_scope_digest=scope,
+        )
+    if len(candidates) > 1:
+        raise RunSnapshotBridgeError(
+            f"scope {scope[:12]} is ambiguous across {len(candidates)} "
+            "published runs and no edge names one of them; the scope receipt "
+            "is a compatibility witness, never the key of the relation"
+        )
+    if not candidates:
+        return RunSnapshotResolution(
+            state=RUN_SNAPSHOT_RESOLUTION_UNLINKED,
+            lane=RUN_SNAPSHOT_LANE_RECOMPUTED,
+            report_run_identity=identity,
+            analysis_scope_digest=scope,
+        )
+    return RunSnapshotResolution(
+        state=RUN_SNAPSHOT_RESOLUTION_RESOLVED,
+        lane=RUN_SNAPSHOT_LANE_RECOMPUTED,
+        store_run_id=candidates[0],
+        report_run_identity=identity,
+        analysis_scope_digest=scope,
+    )
+
+
 __all__ = [
     "CLONES_ONLY_MODE",
     "ENV_RUN_STORE_ENABLED",
@@ -1112,11 +1234,13 @@ __all__ = [
     "RunSnapshotBridgeError",
     "bridge_run_snapshot",
     "canonical_snapshot_from_producers",
+    "persist_run_snapshot_link",
     "population_is_admissible",
     "producer_execution_population",
     "producer_state",
     "profile_head_target",
     "publish_run_snapshot",
     "report_scope_receipt",
+    "resolve_run_snapshot_link",
     "resolve_run_store_config",
 ]

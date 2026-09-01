@@ -122,8 +122,16 @@ def test_scope_receipt_known_answer() -> None:
             _DOMAIN_SCOPE + _payload_bytes(sorted(_SCOPE_PATHS))
         ).hexdigest()
     )
+    # The domain separator carries ``STORAGE_SCHEMA_REVISION``, so this
+    # literal moves exactly when that constant moves and never otherwise --
+    # which is what makes it a known ANSWER rather than a snapshot.  It was
+    # 23f3aa7e… under revision "0"; re-derived outside this process for
+    # revision "1" from the stated basis alone (sha256 of
+    # b"cc-run-store:1\x00scope\x00" || the compact JSON of the sorted
+    # paths), the same recipe reproduces 23f3aa7e… when "1" is put back to
+    # "0".  The RULE half above did not move at all.
     assert actual == (
-        "23f3aa7e8b07e789f08105019ad023b52331c522895bdb921c78c0cdea409593"
+        "05d281af57f692c704951d7f9ae94d302af25d6f83e59e9f4f77b411bbf6302f"
     )
 
 

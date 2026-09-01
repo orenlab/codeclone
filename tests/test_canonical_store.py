@@ -59,6 +59,7 @@ from codeclone.canonical.model import (
     ViolationRow,
 )
 from codeclone.canonical.store import _payload_bytes
+from codeclone.contracts import STORAGE_SCHEMA_REVISION
 from tests.test_canonical_roundtrip import fixture_model
 
 _NS = "lineage-alpha"
@@ -176,6 +177,86 @@ def test_law6_identity_and_bytes_are_hash_seed_independent() -> None:
         observed.append(completed.stdout.strip())
     assert len(observed) == 3
     assert len(set(observed)) == 1, observed
+
+
+#: The run identity this fixture had while STORAGE_SCHEMA_REVISION was "0",
+#: kept as history rather than as a live expectation: the test below is the
+#: only thing that may still produce it, and only by putting the revision back.
+_REVISION_0_RUN_ID = "ab16ae7206d69d2bf24bd2cf559734c4c2201cce18af2aebe9acc515807a44e9"
+
+
+def test_the_storage_revision_is_inside_every_store_content_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The measured relation between the storage layer and run identity.
+
+    ``_WITNESS_LAYERS`` gives ``storage_schema`` the ``storage`` ROLE, which
+    keeps it out of the analysis-layer list that ``_run_id`` joins into its
+    preimage -- and that is the whole of what the role does.  The revision is
+    also spelled into ``_DOMAIN_PREFIX``, and every store content address is
+    built on a separator derived from it, so moving the revision moves every
+    object id, the scope receipt, the membership digest and the run identity
+    together.  Measured on 2026-09-01 by the first bump this constant ever
+    took ("0" -> "1"): the fixture run identity moved.
+
+    This pin is the DERIVATION, not a constant.  It puts the revision back
+    through the five separators and the witness layer and requires the
+    historical identity to come back byte for byte -- so it survives every
+    future bump, reds if the revision stops reaching the addresses, and reds
+    if the addressing rule itself is rewritten.  Without it the relation
+    lives only in a comment, and the comment already said the opposite.
+
+    It is deliberately NOT an assertion that the relation is right.  Whether
+    a storage-schema bump SHOULD reset the analysis identities is a design
+    question for the layer's owner; what may not happen is that the answer
+    stays unmeasured.
+
+    The first draft of this pin handed the revision-"0" separators in by
+    hand and MEASURED AS HOLLOW (mutant m11, 2026-09-01): taking the
+    revision back out of ``_DOMAIN_PREFIX`` altogether left it green,
+    because it never read the production spelling at all.  The prefixes are
+    therefore re-derived from the rule below and checked against the live
+    constants first; only then is the revision substituted.
+    """
+
+    import codeclone.canonical.store as store_module
+
+    def prefix(revision: str) -> bytes:
+        """The separator rule, spelled independently of the constant."""
+        return f"cc-run-store:{revision}\x00".encode()
+
+    domains = (
+        ("_DOMAIN_PREFIX", b""),
+        ("_DOMAIN_OBJECT", b"object\x00"),
+        ("_DOMAIN_RUN", b"run\x00"),
+        ("_DOMAIN_SCOPE", b"scope\x00"),
+        ("_DOMAIN_MEMBERSHIP", b"membership\x00"),
+        ("_DOMAIN_CONTRACT_EPOCH", b"contract-epoch\x00"),
+    )
+    # The load-bearing half: every store separator really is built on the
+    # revision.  Drop it from the prefix and this reds before anything is
+    # published, which is precisely what the hand-fed version could not do.
+    live = prefix(STORAGE_SCHEMA_REVISION)
+    for name, suffix in domains:
+        assert getattr(store_module, name) == live + suffix, name
+    assert prefix("0") != live, "the substitution below must change something"
+
+    with _store(tmp_path, "current.sqlite") as store:
+        current = _publish(store, fixture_model()).run_id
+    assert current != _REVISION_0_RUN_ID
+
+    for name, suffix in domains:
+        monkeypatch.setattr(store_module, name, prefix("0") + suffix)
+    monkeypatch.setattr(
+        store_module,
+        "_WITNESS_LAYERS",
+        tuple(
+            (layer, "0" if layer == "storage_schema" else revision, role)
+            for layer, revision, role in store_module._WITNESS_LAYERS
+        ),
+    )
+    with _store(tmp_path, "revision0.sqlite") as store:
+        assert _publish(store, fixture_model()).run_id == _REVISION_0_RUN_ID
 
 
 def test_storage_payload_bytes_ignore_mapping_key_order() -> None:

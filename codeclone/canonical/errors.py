@@ -99,6 +99,21 @@ class UnknownRunError(RunStoreError):
     """The requested ``run_id`` is not a published run of this store."""
 
 
+class RunReportLinkError(RunStoreError):
+    """The identity bridge cannot be stated, or cannot be trusted.
+
+    The persisted edge relates one immutable analysis row to one evaluated
+    report identity, and the scope receipt proves the two are compatible.
+    Every way that relation can go wrong refuses here rather than degrading:
+    a pair whose halves describe different analyzed scopes, an edge to a row
+    the store does not hold, and an index that offers two analyses for one
+    evaluation.  Refusing is the point, because a wrong edge is invisible at
+    both endpoints -- the store run verifies against its own membership and
+    the document against its own integrity block, so only the relation is
+    false and only this owner looks at the relation.
+    """
+
+
 class ExportIntegrityError(RunStoreError):
     """Exported artifact bytes disagree with their export envelope.
 

@@ -22,6 +22,7 @@ from ..models import (
     BaselineContainerV3,
     MetricsDiff,
     RunSnapshotPublication,
+    RunStoreConfig,
     TrustVector,
 )
 from ..observability import span
@@ -49,6 +50,7 @@ from ._types import (
 )
 from .canonical_snapshot import (
     bridge_run_snapshot,
+    persist_run_snapshot_link,
     publish_run_snapshot,
     resolve_run_store_config,
 )
@@ -415,7 +417,7 @@ def _publish_canonical_snapshot(
     processing: ProcessingResult,
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
-) -> RunSnapshotPublication:
+) -> tuple[RunStoreConfig, RunSnapshotPublication]:
     """Resolve the rollout flag and publish, at the point that publishes.
 
     The resolution site is the publication site on purpose: a flag read
@@ -423,10 +425,16 @@ def _publish_canonical_snapshot(
     answered "disabled" for the same run, which is the configuration
     drift the delivery ratchet exists to catch.  Every path returns a
     typed witness, including the default disabled path.
+
+    The resolved config travels back out with the witness for exactly that
+    reason: the bridge is written into the same store this call published
+    into, and a second resolution later in ``report`` would be a second
+    reading of one flag inside one run.
     """
 
-    return publish_run_snapshot(
-        config=resolve_run_store_config(root=boot.root),
+    config = resolve_run_store_config(root=boot.root)
+    return config, publish_run_snapshot(
+        config=config,
         discovery=discovery,
         processing=processing,
         analysis=analysis,
@@ -474,7 +482,7 @@ def report(
     # is independent of it — a gate-only run publishes the same snapshot as
     # a rendering run, because the snapshot is the ANALYSIS, not the
     # report.
-    publication = _publish_canonical_snapshot(
+    run_store_config, publication = _publish_canonical_snapshot(
         boot=boot,
         discovery=discovery,
         processing=processing,
@@ -599,6 +607,18 @@ def report(
     # and gets the ``unevaluated`` state rather than no link at all.  The
     # publication witness itself is not enough -- it names the store record
     # and knows nothing of the document that evaluated it.
+    run_snapshot_link = bridge_run_snapshot(
+        publication=publication,
+        report_document=report_document,
+    )
+    # Persisted here and not inside the bridge: stating the relation is a
+    # pure reading of two artifacts, and writing it is a store mutation.
+    # A run with the rollout off has no store to write into, which is the
+    # false branch of this condition on every default run.
+    if run_store_config.path is not None:
+        persist_run_snapshot_link(
+            store_path=run_store_config.path, link=run_snapshot_link
+        )
     return ReportArtifacts(
         html=contents["html"],
         json=contents["json"],
@@ -606,10 +626,7 @@ def report(
         sarif=contents["sarif"],
         text=contents["text"],
         report_document=report_document,
-        run_snapshot_link=bridge_run_snapshot(
-            publication=publication,
-            report_document=report_document,
-        ),
+        run_snapshot_link=run_snapshot_link,
     )
 
 

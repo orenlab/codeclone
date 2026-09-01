@@ -1749,6 +1749,29 @@ RUN_SNAPSHOT_LINK_STATES: Final[tuple[str, ...]] = (
     RUN_SNAPSHOT_LINK_UNPUBLISHED,
 )
 
+#: Outcome of asking a store which analysis backs one report document.
+#: ``unlinked`` is a measured state -- no published run of this store answers
+#: this document -- and is not the same as any refusal: a refusal means the
+#: question could not be answered honestly, and it is raised, never returned.
+RUN_SNAPSHOT_RESOLUTION_RESOLVED: Final = "resolved"
+RUN_SNAPSHOT_RESOLUTION_UNLINKED: Final = "unlinked"
+RUN_SNAPSHOT_RESOLUTION_STATES: Final[tuple[str, ...]] = (
+    RUN_SNAPSHOT_RESOLUTION_RESOLVED,
+    RUN_SNAPSHOT_RESOLUTION_UNLINKED,
+)
+
+#: Which road produced the resolution.  The lane is REPORTED rather than
+#: inferred because it is the only thing that separates "the index answered"
+#: from "the index was gone and the relation was recomputed", and without
+#: that separation the index's central promise -- that deleting it changes
+#: nothing but the cost -- would not be measurable.
+RUN_SNAPSHOT_LANE_STORED: Final = "stored"
+RUN_SNAPSHOT_LANE_RECOMPUTED: Final = "recomputed"
+RUN_SNAPSHOT_LANES: Final[tuple[str, ...]] = (
+    RUN_SNAPSHOT_LANE_RECOMPUTED,
+    RUN_SNAPSHOT_LANE_STORED,
+)
+
 #: The reserved head target of the complete canonical analysis profile.
 #: Every other realized profile publishes under its own
 #: ``profile:<digest>`` target, so no measurement can displace a head it
@@ -1887,6 +1910,36 @@ class RunSnapshotLink:
             raise ValueError("an unevaluated bridge carries no report address")
         if stored != bool(self.analysis_scope_digest):
             raise ValueError("a store address and its scope receipt travel together")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunSnapshotResolution:
+    """The answer to "which stored analysis backs this report document?".
+
+    The persisted edge is an index, so the same question has two roads and
+    ``lane`` says which one was taken.  Both must name one run: an index
+    whose deletion changed the ANSWER rather than the cost would be an
+    authority wearing an index's name.
+    """
+
+    state: str
+    lane: str
+    #: Store domain -- empty iff ``state`` is ``unlinked``.
+    store_run_id: str = ""
+    #: Report domain -- always present; the document was read to get here.
+    report_run_identity: str
+    #: The joining evidence, re-derived from the document on every answer.
+    analysis_scope_digest: str
+
+    def __post_init__(self) -> None:
+        if self.state not in RUN_SNAPSHOT_RESOLUTION_STATES:
+            raise ValueError(f"unknown run snapshot resolution state: {self.state!r}")
+        if self.lane not in RUN_SNAPSHOT_LANES:
+            raise ValueError(f"unknown run snapshot resolution lane: {self.lane!r}")
+        if not self.report_run_identity or not self.analysis_scope_digest:
+            raise ValueError("a resolution carries the report address it answered")
+        if bool(self.store_run_id) != (self.state == RUN_SNAPSHOT_RESOLUTION_RESOLVED):
+            raise ValueError("a resolved answer names a run and nothing else does")
 
 
 @dataclass(frozen=True, slots=True)

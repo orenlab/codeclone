@@ -54,9 +54,23 @@ CANONICAL_WIRE_REVISION: Final = "0"
 # Deliberately separate from CANONICAL_WIRE_REVISION and REPORT_SCHEMA_VERSION
 # (F-3 §10, brief §14): the SQLite physics may change without claiming the
 # semantics moved, and a projection revision never reaches back into stored
-# run identity. "0" is the pre-freeze draft schema; the SQLite file is an
-# internal store, never a user-facing artifact contract.
-STORAGE_SCHEMA_REVISION: Final = "0"
+# run identity. The SQLite file is an internal store, never a user-facing
+# artifact contract. "0" was the pre-freeze draft schema; "1" adds the
+# ``run_report_links`` table -- the persisted identity bridge, a REBUILDABLE
+# DERIVED INDEX over two artifacts that already exist, never a third
+# authority. It is this constant and no other that moves for it: the relation
+# is provably recomputable from the report document and the store row, so a
+# new key in the public report would duplicate a computable witness rather
+# than add semantic information, and REPORT_SCHEMA_VERSION stays where it is.
+# The revision is a witness layer, so an existing store file opened by this
+# process is refused (law 7) rather than migrated in place; the store holds no
+# user artifact. Measured on this bump, and NOT what the witness-layer role
+# split suggests: the revision is spelled into the store's domain separator,
+# so moving it also moves every object id, scope receipt, membership digest
+# and run identity in the store. Republishing an unchanged analysis under the
+# new schema therefore yields a DIFFERENT store run id -- readable only
+# alongside the old file, which this process already refuses to open.
+STORAGE_SCHEMA_REVISION: Final = "1"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"

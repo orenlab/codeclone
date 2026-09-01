@@ -66,6 +66,7 @@ identity (analysis layers only) — brief §5.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import sqlite3
 import time
@@ -88,6 +89,7 @@ from codeclone.canonical.codec import (
 )
 from codeclone.canonical.errors import (
     CanonicalModelError,
+    RunReportLinkError,
     RunStoreError,
     StoreCompatibilityError,
     StoreFenceError,
@@ -187,10 +189,23 @@ _DOMAIN_MEMBERSHIP: Final = _DOMAIN_PREFIX + b"membership\x00"
 _DOMAIN_CONTRACT_EPOCH: Final = _DOMAIN_PREFIX + b"contract-epoch\x00"
 
 # Layered compatibility witness (brief §4.1).  ``analysis`` layers enter the
-# run identity; the ``projection`` layer (wire revision) and the ``storage``
-# layer do not — a projection revision never reaches back into semantic run
-# identity (brief §5), and storage physics is not semantics.  All layers
-# participate in the witness comparison and in the fenced contract epoch.
+# run identity through the layer list ``_run_id`` joins; the ``projection``
+# layer (wire revision) does not, and a projection revision therefore never
+# reaches back into semantic run identity (brief §5).
+#
+# ``storage`` is out of that LIST and, measured 2026-09-01 on the first bump
+# this constant ever took, is NOT out of the identity: STORAGE_SCHEMA_REVISION
+# is spelled into ``_DOMAIN_PREFIX`` below, so it sits inside every object id,
+# the scope receipt, the membership digest and the run domain — a bump resets
+# all four.  The role split is what keeps the layer out of the joined list;
+# it was never what kept it out of the addresses, and the earlier wording here
+# ("storage physics is not semantics") claimed a property nothing executed.
+# ``test_the_storage_revision_is_inside_every_store_content_address`` now
+# holds the measured relation as a derivation.  Whether a storage bump SHOULD
+# reset the analysis identities is the layer owner's decision and is open.
+#
+# All layers participate in the witness comparison and in the fenced contract
+# epoch.
 _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
     ("authority_analysis", AUTHORITY_ANALYSIS_REVISION, "analysis"),
     ("canonical_model", CANONICAL_MODEL_REVISION, "analysis"),
@@ -260,6 +275,11 @@ CREATE TABLE IF NOT EXISTS run_leases (
 );
 CREATE TABLE IF NOT EXISTS retained_runs (
     run_pk INTEGER PRIMARY KEY REFERENCES runs(run_pk)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS run_report_links (
+    report_run_identity TEXT NOT NULL,
+    run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
+    PRIMARY KEY (report_run_identity, run_pk)
 ) WITHOUT ROWID;
 """
 
@@ -1730,9 +1750,16 @@ def _verify_staged_membership(
 
 
 def _published_run_row(
-    connection: sqlite3.Connection, run_id: str
+    source: sqlite3.Connection | sqlite3.Cursor, run_id: str
 ) -> tuple[int, str, str, str]:
-    row = connection.execute(
+    """The one spelling of the published-run lookup.
+
+    ``source`` is a connection on the read paths and the OPEN cursor of a
+    fenced transaction on the write path: the edge writer must read the row
+    it is about to address inside the same transaction that writes the
+    edge, or the row could be collected between the two statements.
+    """
+    row = source.execute(
         "SELECT r.run_pk, n.namespace, r.analysis_scope_digest, "
         "r.membership_digest FROM runs r "
         "JOIN namespaces n ON n.namespace_pk = r.namespace_pk "
@@ -2260,6 +2287,24 @@ class PublishReceipt:
     family_counts: dict[str, int]
 
 
+@dataclass(frozen=True, slots=True)
+class RunReportEdge:
+    """One edge of the persisted identity bridge.
+
+    Two addresses from two domains, kept apart exactly as the ruling keeps
+    their names apart, plus the evidence that joins them: the run row's own
+    scope receipt, which a holder of the report document re-derives without
+    the store.  The edge asserts nothing a third party cannot check.
+    """
+
+    #: Store domain — the analysis state this edge addresses.
+    run_id: str
+    #: Report domain — the evaluated identity that answered it.
+    report_run_identity: str
+    #: The joining evidence, read off the run row.
+    analysis_scope_digest: str
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     """Idempotent DDL of the store, run by the shared connection owner.
 
@@ -2728,6 +2773,118 @@ def release_retained_run(store: RunStore, run_id: str) -> bool:
     return released
 
 
+# ---------------------------------------------------------------------------
+# The persisted identity bridge — a rebuildable derived index (ruling §7).
+#
+# The store's ``run_id`` is an ANALYSIS state; the report's is an EVALUATION
+# identity, and the ruling keeps the two names apart.  What is persisted here
+# is neither of them renamed: it is the EDGE, addressing one immutable run row
+# and one report identity, with the run's own scope receipt proving the pair
+# compatible.  The scope receipt is emphatically NOT the key — one scope
+# legitimately carries many snapshots, because editing a file leaves the path
+# set untouched — so an index keyed by it would answer "a run over these
+# paths" where the caller asked for "the run behind THIS document".
+#
+# Derived means removable: dropping every row costs a recomputation from the
+# two artifacts and nothing else, so the edge never becomes a third authority
+# and never roots a run against the collector.
+# ---------------------------------------------------------------------------
+
+
+def link_run_report(
+    store: RunStore,
+    *,
+    run_id: str,
+    report_run_identity: str,
+    expected_scope_digest: str,
+) -> RunReportEdge:
+    """State one edge, or refuse the pair.
+
+    Idempotent by construction: re-analyzing an unchanged tree republishes
+    the same run under the same report identity, and an edge that grew a
+    second row for that would make "how many evaluations answered this
+    analysis" a count of runs instead of a count of evaluations.
+
+    The row is read inside the writing transaction on purpose — a lookup
+    outside it could name a run the collector removes before the insert,
+    and the foreign key would then refuse a write whose input was true when
+    it was read.
+    """
+    if not report_run_identity:
+        raise RunReportLinkError("an edge must name the report identity it answers")
+    with _fenced_transaction(store) as cursor:
+        run_pk, _namespace, scope_digest, _membership = _published_run_row(
+            cursor, run_id
+        )
+        if not hmac.compare_digest(scope_digest, expected_scope_digest):
+            raise RunReportLinkError(
+                f"refusing to link run {run_id[:12]} over scope "
+                f"{scope_digest[:12]} to a report that re-derives "
+                f"{expected_scope_digest[:12]}: the two halves do not "
+                "describe one analyzed scope"
+            )
+        cursor.execute(
+            "INSERT OR IGNORE INTO run_report_links "
+            "(report_run_identity, run_pk) VALUES (?, ?)",
+            (report_run_identity, run_pk),
+        )
+    return RunReportEdge(
+        run_id=run_id,
+        report_run_identity=report_run_identity,
+        analysis_scope_digest=scope_digest,
+    )
+
+
+def linked_run(store: RunStore, *, report_run_identity: str) -> RunReportEdge | None:
+    """The edge stored for one report identity, or ``None``.
+
+    The scope receipt comes back off the RUN ROW, never off the edge: the
+    row is immutable and content-addressed, so a copy on the edge would be a
+    second truth about a fact that cannot move.
+
+    Two edges for one identity is a corruption, not a choice — one
+    evaluation cannot descend from two analyses — and taking the first would
+    be the silent wrong-row answer this whole owner exists to prevent.
+    """
+    rows = store._connection.execute(
+        "SELECT r.run_id, r.analysis_scope_digest FROM run_report_links l "
+        "JOIN runs r ON r.run_pk = l.run_pk "
+        "WHERE l.report_run_identity = ? AND r.published = 1 "
+        "ORDER BY r.run_id",
+        (report_run_identity,),
+    ).fetchall()
+    if not rows:
+        return None
+    if len(rows) > 1:
+        raise RunReportLinkError(
+            f"report identity {report_run_identity[:12]} is linked to "
+            f"{len(rows)} analysis runs; one evaluation descends from one "
+            "analysis, so the index is corrupt and answers nothing"
+        )
+    return RunReportEdge(
+        run_id=str(rows[0][0]),
+        report_run_identity=report_run_identity,
+        analysis_scope_digest=str(rows[0][1]),
+    )
+
+
+def runs_over_scope(store: RunStore, *, scope_digest: str) -> tuple[str, ...]:
+    """Every published run whose scope receipt is ``scope_digest``.
+
+    The recomputation lane's candidate set, and deliberately a SET: this is
+    the function that makes the non-uniqueness of the scope receipt visible
+    to its caller instead of hiding it behind a ``LIMIT 1``.
+    """
+    return tuple(
+        str(row[0])
+        for row in store._connection.execute(
+            "SELECT run_id FROM runs "
+            "WHERE analysis_scope_digest = ? AND published = 1 ORDER BY run_id",
+            (scope_digest,),
+        )
+    )
+
+
 def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
     """Sweep everything unreachable from the §8 roots, atomically.
 
@@ -2769,6 +2926,12 @@ def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
             lease_run_pks=lease_run_pks,
         )
         victim_rows = [(run_pk,) for run_pk in victims]
+        # The bridge index is swept WITH its runs and never among the roots:
+        # a derived index that held a run alive would have quietly become an
+        # authority, and one left behind would point into a deleted row —
+        # which the foreign key would refuse anyway, turning every sweep of a
+        # linked run into a failed collection.
+        cursor.executemany("DELETE FROM run_report_links WHERE run_pk = ?", victim_rows)
         cursor.executemany("DELETE FROM run_members WHERE run_pk = ?", victim_rows)
         cursor.executemany("DELETE FROM runs WHERE run_pk = ?", victim_rows)
         cursor.execute(
@@ -2876,6 +3039,7 @@ def export_head(
 __all__ = [
     "HeadState",
     "PublishReceipt",
+    "RunReportEdge",
     "RunStore",
     "RunStoreGcJob",
     "acquire_run_lease",
@@ -2883,7 +3047,10 @@ __all__ = [
     "collect_garbage",
     "export_head",
     "export_run",
+    "link_run_report",
+    "linked_run",
     "release_retained_run",
     "release_run_lease",
     "retain_run",
+    "runs_over_scope",
 ]
