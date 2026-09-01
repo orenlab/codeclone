@@ -9,6 +9,7 @@ import os
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal, cast
 
 import pytest
 
@@ -509,3 +510,182 @@ def test_read_only_registry_loader_dispatches_by_backend(tmp_path: Path) -> None
     )
     with pytest.raises(ValueError, match="Unsupported intent registry backend"):
         load_registry_records_read_only(tmp_path, unknown_config)
+
+
+# ── The queue has an order, and the order is a contract ──
+#
+# ``record_sort_key`` is ``(declared_at_utc, agent_pid, intent_id)``. That
+# tuple is not presentation: the gate names the HEAD of the sorted queue, and
+# that intent_id is who the user is told to coordinate with. One owner applies
+# the rule -- the registry reader -- and every consumer inherits it.
+#
+# In each fixture below the later key components run OPPOSITE to the earlier
+# ones, so a key that lost its first component could not pass by accident.
+# The expected head is re-derived from the RULE, never named by literal.
+
+
+def _queued_split_only_by_declaration() -> tuple[
+    workspace_intents.WorkspaceIntentRecord,
+    workspace_intents.WorkspaceIntentRecord,
+]:
+    """Two waiting agents distinguishable only by when they declared.
+
+    The earlier declaration carries the HIGHER pid and the LATER intent_id.
+    """
+
+    now = workspace_intents.utc_now()
+    early = replace(
+        _record(intent_id="intent-ffffffff-002", pid=os.getpid() + 2000),
+        status="queued",
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=2)),
+    )
+    later = replace(
+        _record(intent_id="intent-aaaaaaaa-001", pid=os.getpid() + 1000),
+        status="queued",
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=1)),
+    )
+    return early, later
+
+
+def _queued_split_only_by_pid() -> tuple[
+    workspace_intents.WorkspaceIntentRecord,
+    workspace_intents.WorkspaceIntentRecord,
+]:
+    """Two waiting agents that declared in the same moment.
+
+    The lower pid carries the LATER intent_id.
+    """
+
+    declared = workspace_intents.format_utc(
+        workspace_intents.utc_now() - timedelta(hours=2)
+    )
+    lower = replace(
+        _record(intent_id="intent-ffffffff-002", pid=os.getpid() + 1000),
+        status="queued",
+        declared_at_utc=declared,
+    )
+    higher = replace(
+        _record(intent_id="intent-aaaaaaaa-001", pid=os.getpid() + 2000),
+        status="queued",
+        declared_at_utc=declared,
+    )
+    return lower, higher
+
+
+def test_gate_names_the_earliest_declared_of_two_queued_intents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Head, first key component: the queue is FIFO by declaration."""
+
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    early, later = _queued_split_only_by_declaration()
+    for record in (later, early):  # written out of order on purpose
+        _write_record(tmp_path, record)
+
+    decision = evaluate_workspace_edit_gate(tmp_path)
+
+    expected = min((early, later), key=lambda record: record.declared_at_utc)
+    assert decision.reason == "queued_intent_not_editable"
+    assert decision.intent_id == expected.intent_id
+
+
+def test_gate_names_the_lowest_pid_among_intents_declared_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Head, second key component: a tie on declaration falls to the pid."""
+
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    lower, higher = _queued_split_only_by_pid()
+    for record in (higher, lower):
+        _write_record(tmp_path, record)
+
+    decision = evaluate_workspace_edit_gate(tmp_path)
+
+    expected = min((lower, higher), key=lambda record: record.agent_pid)
+    assert decision.reason == "queued_intent_not_editable"
+    assert decision.intent_id == expected.intent_id
+
+
+def _read_only_records(
+    root: Path,
+    *,
+    backend: Literal["file", "sqlite"],
+) -> tuple[workspace_intents.WorkspaceIntentRecord, ...]:
+    import codeclone.workspace_intent.gate as workspace_gate_mod
+    from codeclone.config.intent_registry import IntentRegistryConfig
+
+    storage = (
+        root / DEFAULT_INTENT_REGISTRY_DB_PATH
+        if backend == "sqlite"
+        else root / ".codeclone" / "intents"
+    )
+    # Reached through the gate module on purpose: importing the reader here
+    # would add a fresh r4 -> r2p test edge for the 39S ratchet to refuse,
+    # and this test's subject is the order, not the import graph.
+    records = workspace_gate_mod.intent_reader.load_registry_records_read_only(  # type: ignore[attr-defined]
+        root,
+        IntentRegistryConfig(backend=backend, storage_path=storage),
+    )
+    return cast("tuple[workspace_intents.WorkspaceIntentRecord, ...]", records)
+
+
+def test_registry_reader_hands_out_the_queue_in_declaration_order(
+    tmp_path: Path,
+) -> None:
+    """The single owner of the order, first key component.
+
+    Every consumer inherits this sequence rather than re-establishing it, so
+    this is where the law is applied and where reversing it must be felt.
+    """
+
+    early, later = _queued_split_only_by_declaration()
+    for record in (later, early):
+        _write_record(tmp_path, record)
+
+    records = _read_only_records(tmp_path, backend="file")
+
+    expected = min((early, later), key=lambda record: record.declared_at_utc)
+    assert records[0].intent_id == expected.intent_id
+
+
+def test_registry_reader_breaks_a_declaration_tie_by_pid(
+    tmp_path: Path,
+) -> None:
+    """The single owner of the order, second key component."""
+
+    lower, higher = _queued_split_only_by_pid()
+    for record in (higher, lower):
+        _write_record(tmp_path, record)
+
+    records = _read_only_records(tmp_path, backend="file")
+
+    expected = min((lower, higher), key=lambda record: record.agent_pid)
+    assert records[0].intent_id == expected.intent_id
+
+
+def test_sqlite_registry_reader_hands_out_the_same_queue_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The order is a property of the registry, not of one backend.
+
+    The sqlite reader no longer asks SQL for the sequence; the owner sorts
+    what the query returns, so both backends answer with one law.
+    """
+
+    monkeypatch.setenv("CODECLONE_INTENT_REGISTRY_BACKEND", "sqlite")
+    monkeypatch.setenv(
+        "CODECLONE_INTENT_REGISTRY_PATH",
+        DEFAULT_INTENT_REGISTRY_DB_PATH,
+    )
+    clear_workspace_intent_store_cache()
+    early, later = _queued_split_only_by_declaration()
+    for record in (later, early):
+        _write_record(tmp_path, record)
+
+    records = _read_only_records(tmp_path, backend="sqlite")
+
+    expected = min((early, later), key=lambda record: record.declared_at_utc)
+    assert records[0].intent_id == expected.intent_id

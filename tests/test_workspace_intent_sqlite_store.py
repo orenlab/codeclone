@@ -609,3 +609,36 @@ def test_sqlite_store_write_returns_false_on_closed_connection(
     record = _record(intent_id="intent-write-fail-001")
     store._conn.close()
     assert store.write(record) is False
+
+
+def test_sqlite_store_find_raw_resolves_a_duplicated_id_to_the_queue_tail(
+    sqlite_root: Path,
+) -> None:
+    """The two order consumers point OPPOSITE ways, and must stay that way.
+
+    The edit gate names the HEAD of the queue -- the earliest declaration --
+    because that is whose turn it is. ``find_raw`` resolves an intent id held
+    by more than one agent to the TAIL, the most recent writer of that id.
+    Collapsing the ordering onto one owner must not quietly swap them, so the
+    tail has its own pin, re-derived from the rule rather than named.
+    """
+
+    shared_id = "intent-abcdef12-001"
+    now = workspace_intents.utc_now()
+    older = replace(
+        _record(intent_id=shared_id, pid=100_002),
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=2)),
+    )
+    newer = replace(
+        _record(intent_id=shared_id, pid=100_000),
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=1)),
+    )
+    store = get_workspace_intent_store(sqlite_root)
+    for record in (newer, older):  # written out of order on purpose
+        assert store.write(record)
+
+    found = store.find_raw(shared_id)
+
+    expected = max((older, newer), key=lambda record: record.declared_at_utc)
+    assert found is not None
+    assert found.agent_pid == expected.agent_pid

@@ -40,7 +40,6 @@ from codeclone.workspace_intent.ownership import (
     IntentOwnership,
     classify_intent_ownership,
 )
-from codeclone.workspace_intent.paths import record_sort_key
 from codeclone.workspace_intent.schema import (
     IntentRegistrySchemaError,
     open_intent_registry_db_readonly,
@@ -271,7 +270,12 @@ def _decision_from_records(
     current_time = utc_now()
     queued: WorkspaceIntentRecord | None = None
     ignored_count = 0
-    for record in sorted(records, key=record_sort_key):
+    # ``records`` arrive in queue order and are consumed in it. The order is
+    # ``record_sort_key`` and it is applied by its one owner, the registry
+    # reader in ``workspace_intent.reader``; re-sorting here would make this a
+    # second owner of the same law, and a reader that got the order wrong
+    # would be silently corrected instead of caught.
+    for record in records:
         if not is_terminal_workspace_intent_status(record.status):
             ownership = classify_intent_ownership(
                 record,

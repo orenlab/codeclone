@@ -27,7 +27,15 @@ def load_registry_records_read_only(
     root: Path,
     config: IntentRegistryConfig,
 ) -> tuple[WorkspaceIntentRecord, ...]:
-    """Load records without creating, migrating, or mutating registry state."""
+    """Load records without creating, migrating, or mutating registry state.
+
+    This module is the single owner of queue order. Records come back sorted
+    by ``record_sort_key`` -- ``(declared_at_utc, agent_pid, intent_id)`` --
+    and every consumer inherits that sequence instead of re-deriving it. The
+    order is load-bearing, not cosmetic: the edit gate names the head of this
+    queue as the intent that blocks, so whoever reverses it changes which
+    agent the user is told to coordinate with.
+    """
 
     if config.backend == "file":
         return load_file_records(root)
@@ -57,11 +65,15 @@ def load_sqlite_records(
         return ()
     conn = open_readonly(db_path)
     try:
+        # No ORDER BY: the sort below owns the sequence. Asking SQL for it as
+        # well applied the same law a second time, and measurably worse --
+        # ordering by the declared index turns a plain table scan into an
+        # index scan that must still fetch ``payload_json`` per row, for a
+        # query with no LIMIT that materialises everything anyway.
         rows = conn.execute(
             """
             SELECT payload_json
             FROM workspace_intents
-            ORDER BY declared_at_utc, agent_pid, intent_id
             """
         ).fetchall()
     finally:
