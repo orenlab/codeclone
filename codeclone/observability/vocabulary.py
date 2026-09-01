@@ -542,8 +542,8 @@ PARK_SUBSYSTEM_ABSENT: Final = "subsystem_absent"
 PARK_REASONS: Final[Mapping[str, str]] = {
     PARK_DEFERRED_PHASE_39K: (
         "reserved for the Phase 39K cache backend; that backend now exists and "
-        "the names it emits have left this list, but these five name a "
-        "generation-recovery and contention design it does not implement, so "
+        "the names it emits have left this list, but the ones still here name "
+        "a generation-recovery and contention design it does not implement, so "
         "no code path produces them"
     ),
     PARK_OUT_OF_PACKAGE_HARNESS: (

@@ -154,6 +154,13 @@ DIGEST_ALGORITHM: Final = "sha256"
 #: read entry on every run cost 33 MB of write volume per warm run on this
 #: repository, to re-record a fact that had not changed. A TTL measured in days
 #: cannot tell hour-granularity from second-granularity.
+#:
+#: The value is bounded from BOTH sides, and each side is pinned by its own
+#: test, because a window that is merely "positive and under a day" still
+#: admits one second -- which reproduces the write amplification in full.
+#: Upper: inside a day, so the TTL it serves cannot tell the difference.
+#: Lower: at least as coarse as the interval between two runs in one working
+#: session, so a re-run writes nothing at all.
 RECENCY_GRANULARITY_SECONDS: Final = 3600
 
 _DDL: Final = (

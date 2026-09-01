@@ -324,6 +324,42 @@ def _max_epoch(epochs: dict[str, object]) -> int:
     return max(int(str(value)) for value in epochs.values())
 
 
+#: How far apart two analyses of the same repository plausibly fall inside one
+#: working session. It is a statement about how the tool is USED, and it is
+#: deliberately NOT written in terms of the window it bounds: a bound spelled
+#: with the constant it bounds is the relative-invariant hole all over again.
+WARM_RERUN_INTERVAL_SECONDS = 5 * 60
+
+
+def test_a_rerun_inside_one_working_session_writes_no_marks(tmp_path: Path) -> None:
+    """The lower boundary, held by behaviour instead of by ``> 0``.
+
+    ``test_the_recency_window_is_derived_from_the_ttl_it_serves`` states the
+    rule but pins only half of it: the window must be inside a day, and above
+    nothing. Measured on this file: setting the window to one second left that
+    assertion green, and left ``test_a_run_past_the_window_does_refresh_the_
+    marks`` green too, because that test builds its deadline FROM the constant.
+    One second is not a harmless value -- it is exactly the per-run write
+    amplification the window exists to remove, since consecutive runs of an
+    analyzer are minutes apart and never seconds.
+
+    So the missing half is asserted where it is observable rather than as a
+    second inequality: a re-run five minutes later must leave every mark
+    exactly where it was. This reds for any window below that interval,
+    including the surviving one-second mutant, and it also reds if ``touch``
+    ever drops the ``last_used_epoch <`` predicate that does the work.
+    """
+
+    _boot, cache_path, _cold = _cold_and_saved(tmp_path)
+    before = _epochs(cache_path)
+    rerun = _max_epoch(before) + WARM_RERUN_INTERVAL_SECONDS
+
+    with CacheBackend(cache_path) as backend:
+        backend.touch(sorted(before), now_epoch=rerun)
+
+    assert _epochs(cache_path) == before
+
+
 def test_the_cache_schema_is_not_in_the_run_stores_identity_salt() -> None:
     """Adding a cache index must not change what a run means.
 

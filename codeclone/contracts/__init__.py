@@ -427,6 +427,23 @@ TIER_STATE_COMPLETE: Final = "complete"
 # either direction, and the neutral reuse gate demands witness == the running
 # configuration's channels. 3.7 caches are rejected at the version gate and
 # re-analysed — there is no byte-stable path for the mandatory key.
+#
+# 3.8 -> 4.0 is the only bump in this constant's history that changes the
+# CONTAINER rather than the row: the analysis cache stops being a JSON monolith
+# at ``.codeclone/cache.json`` and becomes a row-addressed SQLite store at
+# ``.codeclone/db/cache.sqlite3``. The major digit moves because no 3.x reader
+# and no 3.x file survive the move in any direction — there is nothing to
+# migrate and nothing to reinterpret, only a different artifact at a different
+# path. A 3.x cache is therefore never rejected at the version gate, because it
+# is never opened: ``Cache._legacy_monolith_warning`` merely REPORTS the
+# stranded JSON document and leaves it on disk, following the ``.cache_secret``
+# precedent -- a file this tool no longer owns is not this tool's to delete.
+# The bump records the generation break for anything that reads this constant
+# to reason about compatibility.
+#
+# It is disposable acceleration state and never truth, so this constant reaches
+# no report, no baseline and no content address: nothing downstream of a run
+# changes value because the cache changed shape.
 CACHE_VERSION: Final = "4.0"
 # 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
 # changed. "complete" became "complete_nonempty" and "complete_empty" joined
