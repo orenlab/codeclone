@@ -183,32 +183,37 @@ def test_a_corrupt_row_costs_one_entry_and_not_the_store(tmp_path: Path) -> None
     assert warm.get_file_entry("gamma.py") is not None
 
 
-def test_the_cache_does_not_borrow_the_run_stores_durability(tmp_path: Path) -> None:
-    """The two stores share infrastructure, not durability semantics.
+def _synchronous_of(connection: object) -> int:
+    """SQLite's own encoding: 1 == NORMAL, 2 == FULL."""
 
-    The run store commits at ``synchronous=FULL`` because losing a published
-    run loses authority. The cache does not, because losing it costs only a
-    cold file. This pins the asymmetry in both directions: if a later
-    unification set the cache to FULL it would pay for nothing, and if it set
-    the run store to NORMAL it would weaken a durability guarantee that is not
-    the cache's to spend.
+    (mode,) = connection.execute("PRAGMA synchronous").fetchone()  # type: ignore[attr-defined]
+    return int(mode)
+
+
+def test_the_cache_commits_at_normal_not_full(tmp_path: Path) -> None:
+    """Half of the durability asymmetry: the cache does not overpay.
+
+    Losing a cache costs a cold file, so an fsync per commit buys nothing. Kept
+    separate from its sibling below because the two errors are opposites and a
+    single test would let one mutation stand in for both.
+    """
+
+    assert CACHE_SYNCHRONOUS == "NORMAL"
+    with CacheBackend(tmp_path / "cache.sqlite3") as backend:
+        assert _synchronous_of(backend._connection) == 1
+
+
+def test_the_run_store_keeps_full_durability(tmp_path: Path) -> None:
+    """The other half: the run store's guarantee is not the cache's to spend.
+
+    Losing a published run loses authority, so it commits at FULL. If a later
+    unification of the two stores reached for one setting, this is what refuses.
     """
 
     from codeclone.canonical.store import RunStore
 
-    assert CACHE_SYNCHRONOUS == "NORMAL"
-
-    cache_path = tmp_path / "cache.sqlite3"
-    with CacheBackend(cache_path) as backend:
-        (cache_mode,) = backend._connection.execute("PRAGMA synchronous").fetchone()
-
-    run_store_path = tmp_path / "runs.sqlite3"
-    with RunStore(run_store_path) as run_store:
-        (run_mode,) = run_store._connection.execute("PRAGMA synchronous").fetchone()
-
-    # 1 == NORMAL, 2 == FULL in SQLite's own encoding.
-    assert cache_mode == 1
-    assert run_mode == 2
+    with RunStore(tmp_path / "runs.sqlite3") as run_store:
+        assert _synchronous_of(run_store._connection) == 2
 
 
 def test_a_foreign_database_is_refused_before_it_is_written_to(
