@@ -184,7 +184,7 @@ MUST be disclosed in the pull request.
 | Artifact                                       | Role                                              |
 |------------------------------------------------|---------------------------------------------------|
 | `codeclone.baseline.json`                      | trusted comparison snapshot for baseline-aware CI |
-| `.codeclone/cache.json`                        | integrity-checked optimization — never truth      |
+| `.codeclone/db/cache.sqlite3`                  | integrity-checked optimization — never truth      |
 | `.codeclone/report.{html,json,md,sarif,txt}`   | deterministic projections of the canonical report |
 | `.codeclone/intents/` or a configured registry | workspace coordination state                      |
 | `.codeclone/db/audit.sqlite3`                  | optional passive controller evidence              |

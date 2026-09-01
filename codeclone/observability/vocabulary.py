@@ -120,7 +120,6 @@ SPAN_NAMES: Final[frozenset[str]] = frozenset(
         "cache.content_identity",
         "cache.decode_entries",
         "cache.profile_reuse",
-        "cache.read_json",
         "cache.release_entries",
         "cache.segment_projection",
         "cache.stat",
@@ -542,8 +541,10 @@ PARK_SUBSYSTEM_ABSENT: Final = "subsystem_absent"
 
 PARK_REASONS: Final[Mapping[str, str]] = {
     PARK_DEFERRED_PHASE_39K: (
-        "owned by the Phase 39K cache backend, which the maintainer deferred; "
-        "no backend exists to instrument"
+        "reserved for the Phase 39K cache backend; that backend now exists and "
+        "the names it emits have left this list, but these five name a "
+        "generation-recovery and contention design it does not implement, so "
+        "no code path produces them"
     ),
     PARK_OUT_OF_PACKAGE_HARNESS: (
         "emitted by a release harness that lives outside the shipped package"
@@ -558,10 +559,6 @@ PARK_REASONS: Final[Mapping[str, str]] = {
 
 PARKED_SPAN_NAMES: Final[Mapping[str, str]] = {
     "audit.digest_link": PARK_SUBSYSTEM_ABSENT,
-    "cache.backend.activate_generation": PARK_DEFERRED_PHASE_39K,
-    "cache.backend.load_generation": PARK_DEFERRED_PHASE_39K,
-    "cache.backend.prune": PARK_DEFERRED_PHASE_39K,
-    "cache.backend.write_generation": PARK_DEFERRED_PHASE_39K,
     # codeclone.contracts is ring r0; codeclone.observability is r1.
     "compatibility.check": PARK_RING_BOUNDARY,
     "controller.registry_bind": PARK_SUPERSEDED,  # analysis.registry_bind
@@ -574,17 +571,11 @@ PARKED_SPAN_NAMES: Final[Mapping[str, str]] = {
 PARKED_COUNTER_KEYS: Final[Mapping[str, str]] = {
     "audit_digest_links": PARK_SUBSYSTEM_ABSENT,
     "baseline_publish_recovered": PARK_SUBSYSTEM_ABSENT,
-    "cache_backend_changed_entries": PARK_DEFERRED_PHASE_39K,
     "cache_backend_contention": PARK_DEFERRED_PHASE_39K,
-    "cache_backend_entries": PARK_DEFERRED_PHASE_39K,
     "cache_backend_orphans": PARK_DEFERRED_PHASE_39K,
-    "cache_backend_pruned": PARK_DEFERRED_PHASE_39K,
-    "cache_backend_read_bytes": PARK_DEFERRED_PHASE_39K,
     "cache_backend_recovery_corrupt": PARK_DEFERRED_PHASE_39K,
     "cache_backend_recovery_current": PARK_DEFERRED_PHASE_39K,
     "cache_backend_recovery_previous": PARK_DEFERRED_PHASE_39K,
-    "cache_backend_removed_entries": PARK_DEFERRED_PHASE_39K,
-    "cache_backend_write_bytes": PARK_DEFERRED_PHASE_39K,
     "compatibility_status_compatible": PARK_RING_BOUNDARY,
     "compatibility_status_incompatible": PARK_RING_BOUNDARY,
     "compatibility_status_migration_required": PARK_RING_BOUNDARY,

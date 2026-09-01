@@ -84,6 +84,11 @@ HELP_RENAMED_STRUCTURE = (
     "Advisory only; never enters clone gates or the baseline."
 )
 HELP_CACHE_PATH = (
+    # STALE, reported 2026-09-01: the default cache path is now
+    # <root>/.codeclone/db/cache.sqlite3. Correcting this string moves
+    # tests/test_cli_help_snapshot, and golden snapshots are not updated
+    # without the maintainer's approval, so the correction is queued rather
+    # than taken as a side effect of the cache migration.
     "Path to the cache file.\nIf FILE is omitted, uses <root>/.codeclone/cache.json."
 )
 HELP_CACHE_DIR_LEGACY = (

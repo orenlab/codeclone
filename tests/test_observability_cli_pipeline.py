@@ -462,7 +462,12 @@ def test_cli_report_bytes_equal_with_observability_off_and_on(tmp_path: Path) ->
         enabled_cwd=repo,
         disabled_artifacts=report_artifacts,
         enabled_artifacts=report_artifacts,
-        reset_paths=(repo / ".codeclone" / "cache.json",),
+        # Both runs must be cold, or the second reads a warm cache and the
+        # report meta differs for a reason that has nothing to do with the
+        # observer. Spelled out rather than imported from paths.workspace:
+        # that would be a new r4 -> r2 edge, and the Phase 39S ratchet is
+        # shrink-only.
+        reset_paths=(repo / ".codeclone" / "db" / "cache.sqlite3",),
     )
 
     assert observability_store_path(repo).is_file()

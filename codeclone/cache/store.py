@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Collection, Sequence
-from json import JSONDecodeError
 from pathlib import Path
 from typing import Protocol
 
@@ -48,8 +47,22 @@ from ..models import (
     Unit,
 )
 from ..observability import span
+from ..paths.workspace import workspace_dir_for_cache_path
 from ._wire_decode import _decode_wire_file_entry
 from ._wire_encode import _encode_wire_file_entry
+from .backend import (
+    META_KEY_CHECKSUM,
+    META_KEY_FINGERPRINT,
+    META_KEY_GENERATION,
+    META_KEY_PYTHON_TAG,
+    META_KEY_VERSION,
+    SINGLETON_SEGMENT_REPORT,
+    CacheBackend,
+    CacheBackendForeign,
+    CacheBackendUnreadable,
+    CacheBackendUnusable,
+    verify_envelope,
+)
 from .entries import (
     _api_surface_dict_from_model,
     _class_metrics_dict_from_model,
@@ -63,18 +76,6 @@ from .entries import (
     _security_surface_dict_from_model,
     _structural_group_dict_from_model,
     _typing_coverage_dict_from_model,
-)
-from .integrity import (
-    as_str_dict as _as_str_dict,
-)
-from .integrity import (
-    as_str_or_none as _as_str,
-)
-from .integrity import (
-    cache_envelope_checksum,
-    read_json_document,
-    verify_cache_envelope_checksum,
-    write_json_document_atomically,
 )
 from .projection import (
     SegmentReportProjection,
@@ -92,12 +93,15 @@ from .reuse import (
     git_blob_identity_for_parsed_source,
 )
 from .versioning import (
+    LEGACY_CACHE_MONOLITH_FILENAME,
     LEGACY_CACHE_SECRET_FILENAME,
     MAX_CACHE_SIZE_BYTES,
     CacheData,
     CacheStatus,
     _empty_cache_data,
     _resolve_root,
+    new_tracked_files,
+    tracked_files,
 )
 
 
@@ -110,6 +114,15 @@ class _CacheStatusLike(Protocol):
 
     @property
     def cache_schema_version(self) -> str | None: ...
+
+
+def _as_generation(raw: str | None) -> int:
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
 
 
 def resolve_cache_status(cache: _CacheStatusLike) -> tuple[CacheStatus, str | None]:
@@ -142,7 +155,10 @@ class Cache:
         "_canonical_runtime_paths",
         "_collect_api_surface",
         "_dirty",
+        "_discard_store",
+        "_generation",
         "_git_content_snapshot",
+        "_live_wire_paths",
         "_module_dependent_profile",
         "_module_names_by_runtime_path",
         "_module_neutral_profile",
@@ -227,9 +243,27 @@ class Cache:
         )
         self.segment_report_projection: SegmentReportProjection | None = None
         self._dirty: bool = write_enabled
+        # Generation orders saves so the budget can tell rows this run touched
+        # from rows left over by an older one; only the latter are evictable.
+        self._generation: int = 0
+        self._live_wire_paths: set[str] = set()
+        # A store whose load was refused must not survive piecewise. See
+        # _write_backend_rows.
+        self._discard_store: bool = False
 
     def _detect_legacy_secret_warning(self) -> str | None:
-        secret_path = self.path.parent / LEGACY_CACHE_SECRET_FILENAME
+        warnings = [
+            warning
+            for warning in (
+                self._legacy_secret_warning_line(),
+                self._legacy_monolith_warning(),
+            )
+            if warning is not None
+        ]
+        return "\n".join(warnings) if warnings else None
+
+    def _legacy_secret_warning_line(self) -> str | None:
+        secret_path = self._workspace_dir() / LEGACY_CACHE_SECRET_FILENAME
         try:
             if secret_path.exists():
                 return (
@@ -238,6 +272,45 @@ class Cache:
                 )
         except OSError as exc:
             return f"Legacy cache secret check failed: {exc}"
+        return None
+
+    def _workspace_dir(self) -> Path:
+        """Where this cache's non-cache siblings live.
+
+        Both the obsolete secret file and the superseded JSON monolith sit in
+        the workspace directory, which stopped being ``self.path.parent`` when
+        the store moved into ``db/``.
+        """
+
+        return workspace_dir_for_cache_path(self.path)
+
+    def _legacy_monolith_warning(self) -> str | None:
+        """Name the JSON monolith the SQLite store replaced, once, if present.
+
+        The old cache was a single 50 MB document; the new one lives in
+        ``db/``.  Nothing reads the old file any more, so upgrading silently
+        strands it.  Reporting it follows the ``.cache_secret`` precedent
+        rather than deleting it: the file is the user's, and a cache this tool
+        no longer owns is not this tool's to remove.
+        """
+
+        workspace = self._workspace_dir()
+        if workspace == self.path.parent:
+            # A caller-chosen cache path, not the managed layout: there is no
+            # monolith of ours to have superseded.
+            return None
+        return self._legacy_file_warning(
+            workspace / LEGACY_CACHE_MONOLITH_FILENAME,
+            label="Superseded JSON cache",
+        )
+
+    @staticmethod
+    def _legacy_file_warning(path: Path, *, label: str) -> str | None:
+        try:
+            if path.exists():
+                return f"{label} detected at {path}; delete this obsolete file."
+        except OSError as exc:
+            return f"{label} check failed: {exc}"
         return None
 
     def bind_git_content_snapshot(self, snapshot: GitContentSnapshot) -> None:
@@ -322,6 +395,8 @@ class Cache:
             fingerprint_version=self.fingerprint_version,
         )
         self._canonical_runtime_paths = set()
+        self._live_wire_paths = set()
+        self._discard_store = True
         self.segment_report_projection = None
 
     def _reject_cache_load(
@@ -382,71 +457,80 @@ class Cache:
             self.segment_report_projection = None
             return
 
+        # No whole-store size gate lives here any more, and reinstating one
+        # would restore the pinned defect.  The old cap existed solely because
+        # the loader had to hold the entire document in memory before it could
+        # read one entry; rows are read by key, so what a load holds is bounded
+        # by the row, not by the store.  ``max_size_bytes`` is now enforced
+        # where it can be honoured without costing the next run its warm path:
+        # on the write side, in ``save()``.  See
+        # ``test_cache_saved_over_cap_must_still_warm_next_run``.
         try:
-            if size is None:
-                with span(name="cache.stat") as stat_span:
-                    size = self.path.stat().st_size
-                    stat_span.set_counter("cache_file_bytes", size)
-            if size > self.max_size_bytes:
-                self._ignore_cache(
-                    "Cache file too large "
-                    f"({size} bytes, max {self.max_size_bytes}); ignoring cache.",
-                    status=CacheStatus.TOO_LARGE,
-                )
-                return
-
-            with span(name="cache.read_json") as read_span:
-                read_span.set_counter("cache_file_bytes", size)
-                raw_obj = read_json_document(self.path, max_bytes=self.max_size_bytes)
-            parsed = self._load_and_validate(raw_obj)
+            with span(name="cache.backend.load_generation") as load_span:
+                if size is not None:
+                    load_span.set_counter("cache_file_bytes", size)
+                backend = CacheBackend(self.path, read_only=True)
+                try:
+                    parsed = self._load_from_backend(backend)
+                    load_span.set_counter(
+                        "cache_backend_entries", backend.entry_count()
+                    )
+                    load_span.set_counter(
+                        "cache_backend_read_bytes", backend.payload_bytes()
+                    )
+                finally:
+                    backend.close()
             if parsed is None:
                 return
             self.data = parsed
             self._canonical_runtime_paths = set(parsed["files"].keys())
+            self._discard_store = False
             self.load_status = CacheStatus.OK
             self._set_load_warning(None)
             self._dirty = False
+        except CacheBackendForeign:
+            self._reject_invalid_cache_format()
+        except CacheBackendUnreadable as exc:
+            self._ignore_cache(
+                f"Cache unreadable; ignoring cache: {exc}",
+                status=CacheStatus.UNREADABLE,
+            )
+        except CacheBackendUnusable as exc:
+            self._ignore_cache(
+                f"Cache corrupted; ignoring cache: {exc}",
+                status=CacheStatus.CORRUPT,
+            )
         except OSError as exc:
             self._ignore_cache(
                 f"Cache unreadable; ignoring cache: {exc}",
                 status=CacheStatus.UNREADABLE,
             )
-        except JSONDecodeError:
-            self._ignore_cache(
-                "Cache corrupted; ignoring cache.",
-                status=CacheStatus.INVALID_JSON,
-            )
 
-    def _load_and_validate(self, raw_obj: object) -> CacheData | None:
+    def _load_from_backend(self, backend: CacheBackend) -> CacheData | None:
         with span(name="cache.validate_envelope"):
-            raw = _as_str_dict(raw_obj)
-            if raw is None:
-                return self._reject_invalid_cache_format()
-
-            legacy_version = _as_str(raw.get("version"))
-            if legacy_version is not None:
-                return self._reject_version_mismatch(legacy_version)
-
-            version = _as_str(raw.get("v"))
+            meta = backend.read_meta()
+            version = meta.get(META_KEY_VERSION)
             if version is None:
                 return self._reject_invalid_cache_format()
-
             if version != self._CACHE_VERSION:
                 return self._reject_version_mismatch(version)
 
-            checksum = _as_str(raw.get("checksum"))
-            payload = _as_str_dict(raw.get("payload"))
-            if checksum is None or payload is None:
+            checksum = meta.get(META_KEY_CHECKSUM)
+            py_tag = meta.get(META_KEY_PYTHON_TAG)
+            fp_version = meta.get(META_KEY_FINGERPRINT)
+            if checksum is None or py_tag is None or fp_version is None:
                 return self._reject_invalid_cache_format(schema_version=version)
 
-            # Verify over {version, payload}: the on-disk ``v`` is inside the
-            # checksummed scope, so a generation retagged by migration is refused
-            # here even though it passed the ``v == _CACHE_VERSION`` gate above.
-            # This is NOT redundant with that gate - see cache_envelope_checksum
-            # for the cross-defect witness (its {11,17} decode-tolerance half was
-            # closed independently by Wave D's {18}-strict decode). The checksum
-            # is an integrity check, NOT authentication (see its threat model).
-            if not verify_cache_envelope_checksum(version, payload, checksum):
+            # The version mark sits inside the checksummed scope for the same
+            # reason it did in the JSON envelope: a generation retagged in
+            # place by a migration or an edit passes the equality gate above
+            # and must still be refused here.
+            if not verify_envelope(
+                version=version,
+                python_tag=py_tag,
+                fingerprint_version=fp_version,
+                checksum=checksum,
+            ):
                 return self._reject_cache_load(
                     "Cache checksum mismatch; ignoring cache.",
                     status=CacheStatus.INTEGRITY_FAILED,
@@ -454,10 +538,6 @@ class Cache:
                 )
 
             runtime_tag = current_python_tag()
-            py_tag = _as_str(payload.get("py"))
-            if py_tag is None:
-                return self._reject_invalid_cache_format(schema_version=version)
-
             if py_tag != runtime_tag:
                 return self._reject_cache_load(
                     "Cache python tag mismatch "
@@ -465,10 +545,6 @@ class Cache:
                     status=CacheStatus.PYTHON_TAG_MISMATCH,
                     schema_version=version,
                 )
-
-            fp_version = _as_str(payload.get("fp"))
-            if fp_version is None:
-                return self._reject_invalid_cache_format(schema_version=version)
 
             if fp_version != self.fingerprint_version:
                 return self._reject_cache_load(
@@ -478,30 +554,23 @@ class Cache:
                     status=CacheStatus.FINGERPRINT_MISMATCH,
                     schema_version=version,
                 )
+            self._generation = _as_generation(meta.get(META_KEY_GENERATION))
 
-            files_dict = _as_str_dict(payload.get("files"))
-            if files_dict is None:
-                return self._reject_invalid_cache_format(schema_version=version)
-            segment_projection_obj = payload.get("sr")
-            payload.pop("files", None)
-            payload.clear()
-            raw.clear()
-
-        parsed_files: dict[str, CacheEntryV3] = {}
+        parsed_files = new_tracked_files()
         with span(name="cache.decode_entries") as decode_span:
-            decode_span.set_counter("cache_entries", len(files_dict))
-            while files_dict:
-                wire_path = next(iter(files_dict))
-                file_entry_obj = files_dict.pop(wire_path)
+            decoded = 0
+            for wire_path, file_entry_obj in backend.iter_entries(version):
                 runtime_path = runtime_filepath_from_wire(wire_path, root=self.root)
                 parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
                 if parsed_entry is None:
                     return self._reject_invalid_cache_format(schema_version=version)
-                parsed_files[runtime_path] = parsed_entry
-            decode_span.set_counter("decoded_entries", len(parsed_files))
+                dict.__setitem__(parsed_files, runtime_path, parsed_entry)
+                decoded += 1
+            decode_span.set_counter("cache_entries", decoded)
+            decode_span.set_counter("decoded_entries", decoded)
         with span(name="cache.segment_projection"):
             self.segment_report_projection = decode_segment_report_projection(
-                segment_projection_obj,
+                backend.read_singleton(SINGLETON_SEGMENT_REPORT, version),
                 root=self.root,
             )
 
@@ -518,49 +587,166 @@ class Cache:
             return
         if not self._dirty:
             return
+        tracked = tracked_files(self.data)
+        generation = self._generation + 1
         try:
-            wire_files: dict[str, object] = {}
-            wire_map = {
-                runtime_path: wire_filepath_from_runtime(runtime_path, root=self.root)
-                for runtime_path in self.data["files"]
-            }
-            for runtime_path in sorted(self.data["files"], key=wire_map.__getitem__):
-                entry = self.get_file_entry(runtime_path)
-                if entry is None:
-                    continue
-                wire_files[wire_map[runtime_path]] = self._encode_entry(entry)
-
-            payload: dict[str, object] = {
-                "py": current_python_tag(),
-                "fp": self.fingerprint_version,
-                "files": wire_files,
-            }
-            segment_projection = encode_segment_report_projection(
-                self.segment_report_projection,
-                root=self.root,
-            )
-            if segment_projection is not None:
-                payload["sr"] = segment_projection
-            envelope = {
-                "v": self._CACHE_VERSION,
-                "payload": payload,
-                "checksum": cache_envelope_checksum(self._CACHE_VERSION, payload),
-            }
-            write_json_document_atomically(self.path, envelope)
+            with (
+                span(name="cache.backend.write_generation") as write_span,
+                CacheBackend(self.path) as backend,
+            ):
+                written, removed = self._write_backend_rows(
+                    backend,
+                    moved=None if tracked is None else set(tracked.dirty),
+                    dropped=None if tracked is None else set(tracked.deleted),
+                    generation=generation,
+                )
+                write_span.set_counter("cache_backend_changed_entries", written)
+                write_span.set_counter("cache_backend_removed_entries", removed)
+                write_span.set_counter(
+                    "cache_backend_write_bytes", backend.payload_bytes()
+                )
+                with span(name="cache.backend.activate_generation") as activate_span:
+                    backend.write_meta(
+                        version=self._CACHE_VERSION,
+                        python_tag=current_python_tag(),
+                        fingerprint_version=self.fingerprint_version,
+                        generation=generation,
+                    )
+                    activate_span.set_counter(
+                        "cache_backend_entries", backend.entry_count()
+                    )
+                self._enforce_budget(backend, generation=generation)
+            self._generation = generation
             self._dirty = False
+            if tracked is not None:
+                tracked.mark_persisted()
 
             self.data["version"] = self._CACHE_VERSION
             self.data["python_tag"] = current_python_tag()
             self.data["fingerprint_version"] = self.fingerprint_version
+        except CacheBackendUnusable as exc:
+            raise CacheError(f"Failed to save cache: {exc}") from exc
         except OSError as exc:
             raise CacheError(f"Failed to save cache: {exc}") from exc
+
+    def _write_backend_rows(
+        self,
+        backend: CacheBackend,
+        *,
+        moved: set[str] | None,
+        dropped: set[str] | None,
+        generation: int,
+    ) -> tuple[int, int]:
+        """Persist only what this run moved.
+
+        The monolith re-serialised every entry on every save, so a one-file
+        edit rewrote the whole repository's cache.  ``moved`` and ``dropped``
+        name the keys that actually changed.  They arrive as plain sets on
+        purpose: which keys moved is all this needs to know, and taking the
+        tracking map itself would tie the row writer to how the caller happens
+        to notice changes.  ``None`` means the caller could not tell, so
+        everything is written -- the old cost, never a wrong answer.
+        """
+
+        if self._discard_store:
+            # The rows on disk belong to a generation this run refused --
+            # a foreign version mark, a failed checksum, a different
+            # interpreter. Writing only what changed would leave them in
+            # place, and the next load would serve entries this one rejected.
+            # The monolith replaced the whole document for the same reason;
+            # a row store has to say so explicitly.
+            removed_stale = backend.clear_entries()
+            self._live_wire_paths = set()
+            dirty_runtime_paths: list[str] = list(self.data["files"])
+            deleted_runtime_paths: list[str] = []
+        elif moved is None or dropped is None:
+            removed_stale = 0
+            dirty_runtime_paths = list(self.data["files"])
+            deleted_runtime_paths = []
+        else:
+            removed_stale = 0
+            dirty_runtime_paths = sorted(moved & set(self.data["files"]))
+            deleted_runtime_paths = sorted(dropped)
+
+        wire_entries: dict[str, object] = {}
+        for runtime_path in dirty_runtime_paths:
+            entry = self.get_file_entry(runtime_path)
+            if entry is None:
+                continue
+            wire_path = wire_filepath_from_runtime(runtime_path, root=self.root)
+            wire_entries[wire_path] = self._encode_entry(entry)
+        written = backend.upsert_entries(
+            wire_entries,
+            version=self._CACHE_VERSION,
+            generation=generation,
+        )
+        # Protection is exactly what this save wrote. Protecting everything the
+        # run merely loaded would make the budget unreachable -- a guard no
+        # input can trip -- while protecting nothing would let it evict the
+        # rows the next run needs.
+        self._live_wire_paths = set(wire_entries)
+
+        doomed = [
+            wire_filepath_from_runtime(runtime_path, root=self.root)
+            for runtime_path in deleted_runtime_paths
+        ]
+        removed = backend.delete_entries(doomed) + removed_stale
+        self._live_wire_paths -= set(doomed)
+
+        segment_projection = encode_segment_report_projection(
+            self.segment_report_projection,
+            root=self.root,
+        )
+        if segment_projection is None:
+            backend.delete_singleton(SINGLETON_SEGMENT_REPORT)
+        else:
+            backend.write_singleton(
+                SINGLETON_SEGMENT_REPORT,
+                segment_projection,
+                version=self._CACHE_VERSION,
+            )
+        return written, removed
+
+    def _enforce_budget(self, backend: CacheBackend, *, generation: int) -> None:
+        """Hold the cache to ``max_size_bytes`` on the side that can afford it.
+
+        This is the half of the pinned asymmetry that used to be missing:
+        ``save()`` ignored the budget entirely while ``load()`` answered an
+        oversized store by discarding all of it.  Enforcement now happens here,
+        and it evicts only rows no longer touched by the current run -- the
+        run's own rows are what the *next* run needs to stay warm, so evicting
+        them would recreate the defect under a new name.  A budget too small to
+        hold even the current run is reported, not obeyed into uselessness.
+        """
+
+        if self.max_size_bytes <= 0:
+            return
+        with span(name="cache.backend.prune") as prune_span:
+            evicted, remaining = backend.evict_to_budget(
+                max_bytes=self.max_size_bytes,
+                protected=frozenset(self._live_wire_paths),
+                generation=generation,
+            )
+            prune_span.set_counter("cache_backend_pruned", evicted)
+        if evicted:
+            self._canonical_runtime_paths.clear()
+            self._canonical_runtime_paths.update(self.data["files"])
+        if remaining > self.max_size_bytes:
+            self._set_load_warning(
+                f"Cache content is {remaining} bytes, over the configured "
+                f"{self.max_size_bytes}-byte budget, and nothing evictable "
+                "remains; the cache stays usable and the next run stays warm."
+            )
 
     def release_loaded_entries(self, *, allow_dirty: bool = False) -> int:
         if self._dirty and not allow_dirty:
             return 0
         with span(name="cache.release_entries") as release_span:
             released = len(self.data["files"])
-            self.data["files"] = {}
+            # Releasing drops entries from memory, never from the store: the
+            # rows stay on disk and a later save must not read this as a
+            # deletion of every one of them.
+            self.data["files"] = new_tracked_files()
             self._canonical_runtime_paths.clear()
             release_span.set_counter("released_entries", released)
             return released
@@ -844,7 +1030,8 @@ class Cache:
         if not stale_runtime_paths:
             return 0
         for runtime_path in stale_runtime_paths:
-            self.data["files"].pop(runtime_path, None)
+            # del, not pop: TrackedFiles tracks removal through __delitem__.
+            del self.data["files"][runtime_path]
             self._canonical_runtime_paths.discard(runtime_path)
         self._dirty = True
         return len(stale_runtime_paths)

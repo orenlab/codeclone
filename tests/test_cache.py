@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -20,7 +18,6 @@ import codeclone.cache._validators as cache_validators
 import codeclone.cache._wire_decode as cache_wire_decode
 import codeclone.cache._wire_helpers as cache_wire_helpers
 import codeclone.cache.entries as cache_entries
-import codeclone.cache.store as cache_store
 import codeclone.core.discovery as core_discovery
 from codeclone.cache._validators import (
     _is_class_metrics_dict,
@@ -64,7 +61,6 @@ from codeclone.cache.entries import (
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
 from codeclone.cache.integrity import (
-    cache_envelope_checksum,
     cache_payload_checksum,
     canonical_json,
 )
@@ -116,6 +112,34 @@ from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
 from tests._ast_metrics_helpers import (
     build_test_module_registry,
     module_registry_context,
+)
+from tests._cache_store_fixtures import (
+    META_KEY_CHECKSUM,
+    META_KEY_FINGERPRINT,
+    META_KEY_PYTHON_TAG,
+    META_KEY_VERSION,
+    envelope_checksum,
+)
+from tests._cache_store_fixtures import (
+    drop_cache_meta as _drop_cache_meta,
+)
+from tests._cache_store_fixtures import (
+    open_store as _open_store,
+)
+from tests._cache_store_fixtures import (
+    read_cache_meta as _read_cache_meta,
+)
+from tests._cache_store_fixtures import (
+    read_cache_rows as _read_cache_rows,
+)
+from tests._cache_store_fixtures import (
+    sole_cache_row as _sole_cache_row,
+)
+from tests._cache_store_fixtures import (
+    write_cache_meta as _write_cache_meta,
+)
+from tests._cache_store_fixtures import (
+    write_cache_row as _write_cache_row,
 )
 
 _SOURCE_CONTENT_DIGEST = DigestObject(
@@ -278,6 +302,39 @@ def _analysis_payload(cache: Cache, *, files: object) -> dict[str, object]:
     }
 
 
+def _assert_loads_cleanly(cache_path: Path, filepath: str) -> Cache:
+    """Load the store and assert it warmed without complaint."""
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    assert loaded.load_warning is None
+    assert loaded.get_file_entry(filepath) is not None
+    return loaded
+
+
+def _remint_envelope(cache_path: Path, **overrides: str) -> None:
+    """Apply meta overrides and re-mint the envelope digest over the result.
+
+    Tests that target a gate *behind* the integrity gate have to arrive there
+    with a digest that still verifies, or they prove only that the integrity
+    gate works -- which a different test already proves.
+    """
+
+    meta = dict(_read_cache_meta(cache_path))
+    meta.update(overrides)
+    _write_cache_meta(
+        cache_path,
+        **overrides,
+        **{
+            META_KEY_CHECKSUM: envelope_checksum(
+                version=meta[META_KEY_VERSION],
+                python_tag=meta[META_KEY_PYTHON_TAG],
+                fingerprint_version=meta[META_KEY_FINGERPRINT],
+            )
+        },
+    )
+
+
 def _save_single_cache_entry(cache_path: Path, *, filepath: str = "x.py") -> None:
     cache = Cache(cache_path, root=cache_path.parent)
     _bind_module_paths(cache, filepath)
@@ -411,13 +468,22 @@ def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
         conn.close()
 
     counters_by_name = {name: json.loads(counters or "{}") for name, counters in rows}
-    assert "cache.stat" in counters_by_name
-    assert "cache.read_json" in counters_by_name
-    assert "cache.validate_envelope" in counters_by_name
-    assert "cache.decode_entries" in counters_by_name
-    assert "cache.segment_projection" in counters_by_name
+    # cache.read_json is gone with the document it read; the backend load span
+    # that replaced it was already declared in the vocabulary and parked as
+    # "no backend exists to instrument". It exists now, so it is wired.
+    assert "cache.read_json" not in counters_by_name
+    assert set(counters_by_name) >= {
+        "cache.backend.load_generation",
+        "cache.decode_entries",
+        "cache.segment_projection",
+        "cache.stat",
+        "cache.validate_envelope",
+    }
     assert counters_by_name["cache.stat"]["cache_file_bytes"] > 0
-    assert counters_by_name["cache.read_json"]["cache_file_bytes"] > 0
+    load_counters = counters_by_name["cache.backend.load_generation"]
+    assert load_counters["cache_file_bytes"] > 0
+    assert load_counters["cache_backend_entries"] == 1
+    assert load_counters["cache_backend_read_bytes"] > 0
     assert counters_by_name["cache.decode_entries"] == {
         "cache_entries": 1,
         "decoded_entries": 1,
@@ -1457,24 +1523,36 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     )
     cache.save()
 
-    raw = json.loads(cache_path.read_text("utf-8"))
-    payload = cast(dict[str, object], raw["payload"])
-    files = cast(dict[str, object], payload["files"])
+    files = _read_cache_rows(cache_path)
     assert "pkg/module.py" in files
     assert str(target) not in files
 
 
-def test_cache_checksum_validation_ignores_json_whitespace(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+def test_cache_row_checksum_covers_content_not_stored_bytes(tmp_path: Path) -> None:
+    """Integrity is a claim about the entry, not about how it was serialised.
+
+    The JSON store proved this against document whitespace; a row store proves
+    the same property against key order and spacing inside the row payload. A
+    checksum that bound the literal bytes would make every re-encoding a false
+    integrity failure, which is how a disposable cache turns into a permanent
+    cold path.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
     _save_single_cache_entry(cache_path)
 
-    raw = json.loads(cache_path.read_text("utf-8"))
-    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+    wire_path, entry = _sole_cache_row(cache_path)
+    assert isinstance(entry, dict)
+    # Rewrite the row with reversed key order and indentation, keeping the
+    # checksum that was computed over the canonical form.
+    reordered = dict(reversed(list(entry.items())))
+    with _open_store(cache_path) as conn:
+        conn.execute(
+            "UPDATE cache_files SET payload = ? WHERE wire_path = ?",
+            (json.dumps(reordered, indent=2).encode("utf-8"), wire_path),
+        )
 
-    loaded = Cache(cache_path)
-    loaded.load()
-    assert loaded.load_warning is None
-    assert loaded.get_file_entry("x.py") is not None
+    _assert_loads_cleanly(cache_path, "x.py")
 
 
 def test_cache_checksum_matches_legacy_string_digest_for_unicode_payload() -> None:
@@ -1499,37 +1577,48 @@ def test_cache_load_binds_version_into_unicode_payload_signature(
     # Candidate 1: the signed scope is {v, payload}. The pre-fix payload-only
     # string digest is therefore no longer accepted, and the envelope digest is.
     # Unicode canonicalization still round-trips cleanly through the signer.
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
     _save_single_cache_entry(cache_path, filepath="unicodé.py")
+    meta = _read_cache_meta(cache_path)
 
-    raw = cast(dict[str, object], json.loads(cache_path.read_text("utf-8")))
-    payload = cast(dict[str, object], raw["payload"])
-
-    # The old payload-only string digest is now refused as an integrity failure.
-    raw["checksum"] = hashlib.sha256(
-        canonical_json(payload).encode("utf-8")
-    ).hexdigest()
-    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+    # A digest that leaves the version mark outside its scope is refused, so a
+    # store retagged to the running generation cannot pass as one written under
+    # it. Unicode canonicalisation round-trips through the digest either way.
+    _write_cache_meta(
+        cache_path,
+        **{
+            META_KEY_CHECKSUM: hashlib.sha256(
+                canonical_json(
+                    {
+                        "py": meta[META_KEY_PYTHON_TAG],
+                        "fp": meta[META_KEY_FINGERPRINT],
+                    }
+                ).encode("utf-8")
+            ).hexdigest()
+        },
+    )
     rejected = Cache(cache_path)
     rejected.load()
     assert rejected.load_status is CacheStatus.INTEGRITY_FAILED
 
-    # The envelope digest over {v, payload} is accepted, unicode payload intact.
-    raw["checksum"] = cache_envelope_checksum(cast(str, raw["v"]), payload)
-    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
-    accepted = Cache(cache_path)
-    accepted.load()
-    assert accepted.load_warning is None
-    assert accepted.get_file_entry("unicodé.py") is not None
+    _write_cache_meta(
+        cache_path,
+        **{
+            META_KEY_CHECKSUM: envelope_checksum(
+                version=meta[META_KEY_VERSION],
+                python_tag=meta[META_KEY_PYTHON_TAG],
+                fingerprint_version=meta[META_KEY_FINGERPRINT],
+            )
+        },
+    )
+    _assert_loads_cleanly(cache_path, "unicodé.py")
 
 
 def test_cache_checksum_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
-    data = json.loads(cache_path.read_text("utf-8"))
-    data["checksum"] = "bad"
-    cache_path.write_text(json.dumps(data), "utf-8")
+    _write_cache_meta(cache_path, **{META_KEY_CHECKSUM: "bad"})
 
     loaded = Cache(cache_path)
     loaded.load()
@@ -1541,7 +1630,17 @@ def test_cache_checksum_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
 
 
-def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
+def test_cache_refuses_a_legacy_json_monolith_at_the_cache_path(
+    tmp_path: Path,
+) -> None:
+    """The document format the SQLite store replaced is refused, not read.
+
+    A repository upgraded in place still has its old ``cache.json``, and a user
+    may still point ``--cache-path`` at one. Reading it is impossible and
+    guessing at it would be worse; the load has to end in a typed refusal with
+    an empty cache, never in a partially understood store.
+    """
+
     cache_path = tmp_path / "cache.json"
     data = {"version": "0.0", "files": {}}
     signature = cache_payload_checksum(data)
@@ -1553,11 +1652,11 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     loaded = Cache(cache_path)
     loaded.load()
     assert loaded.load_warning is not None
-    assert "version" in loaded.load_warning
+    assert "corrupted" in loaded.load_warning
     assert loaded.data["version"] == Cache._CACHE_VERSION
     assert loaded.data["files"] == {}
-    assert loaded.load_status == CacheStatus.VERSION_MISMATCH
-    assert loaded.cache_schema_version == "0.0"
+    assert loaded.load_status == CacheStatus.CORRUPT
+    assert loaded.cache_schema_version is None
 
 
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
@@ -1578,10 +1677,8 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     )
     old_cache.save()
 
-    old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.8"
-    old_document["v"] = "2.10"
-    cache_path.write_text(json.dumps(old_document), "utf-8")
+    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "3.8"
+    _write_cache_meta(cache_path, **{META_KEY_VERSION: "2.10"})
 
     regenerated = Cache(cache_path, root=tmp_path)
     regenerated.load()
@@ -1612,13 +1709,9 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
 
 @pytest.mark.parametrize("version", ["0.0", "2.2", "2.7"])
 def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    payload = _analysis_payload(cache, files={})
-    signature = cache_payload_checksum(payload)
-    cache_path.write_text(
-        json.dumps({"v": version, "payload": payload, "checksum": signature}), "utf-8"
-    )
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _write_cache_meta(cache_path, **{META_KEY_VERSION: version})
 
     loaded = Cache(cache_path)
     loaded.load()
@@ -1629,18 +1722,57 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> N
     assert loaded.cache_schema_version == version
 
 
-def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache_path.write_text(json.dumps({"version": Cache._CACHE_VERSION, "files": {}}))
-    monkeypatch.setattr(cache_store, "MAX_CACHE_SIZE_BYTES", 1)
-    cache = Cache(cache_path)
+def test_cache_over_its_budget_still_loads_and_warms(tmp_path: Path) -> None:
+    """The inverse of the deleted ``test_cache_too_large_warns``.
+
+    That test pinned the defect: a store past ``max_size_bytes`` was discarded
+    whole on load, so the next run went cold. Both directions are now pinned by
+    two different tests -- this one says an over-budget store still serves its
+    entries, and ``test_cache_budget_evicts_rows_an_older_generation_left``
+    says the budget is not thereby inert.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+
+    cache = Cache(cache_path, root=cache_path.parent, max_size_bytes=1)
     cache.load()
-    assert cache.load_warning is not None
-    assert "too large" in cache.load_warning
-    assert cache.data["version"] == Cache._CACHE_VERSION
-    assert cache.data["files"] == {}
-    assert cache.load_status == CacheStatus.TOO_LARGE
-    assert cache.cache_schema_version is None
+    assert cache.load_status is CacheStatus.OK
+    assert cache.load_warning is None
+    assert cache.get_file_entry("x.py") is not None
+    assert cache.cache_schema_version == Cache._CACHE_VERSION
+    assert not hasattr(CacheStatus, "TOO_LARGE")
+
+
+def test_cache_budget_evicts_rows_an_older_generation_left(tmp_path: Path) -> None:
+    """The budget is reachable: some input trips it and something is evicted.
+
+    A guard no input can reach is theater, and after removing the load-side cap
+    the write-side budget is the only thing ``max_size_bytes`` still does. This
+    proves it fires -- and that it fires on a row from an *older* generation,
+    which is the only kind it is allowed to take.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path, filepath="stale.py")
+    assert set(_read_cache_rows(cache_path)) == {"stale.py"}
+
+    second = Cache(cache_path, root=cache_path.parent, max_size_bytes=1)
+    second.load()
+    _bind_module_paths(second, "fresh.py")
+    second.put_file_entry(
+        "fresh.py",
+        {"mtime_ns": 2, "size": 20},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
+    second.save()
+
+    # The previous generation's row is gone; the row this run needs survives,
+    # because evicting it would put the next run back on the cold path.
+    assert set(_read_cache_rows(cache_path)) == {"fresh.py"}
 
 
 def test_cache_load_missing_file(tmp_path: Path) -> None:
@@ -1660,14 +1792,14 @@ def test_file_stat_signature(tmp_path: Path) -> None:
     assert isinstance(stat["mtime_ns"], int)
 
 
-def test_cache_load_corrupted_json(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+def test_cache_load_corrupted_store(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.sqlite3"
     cache_path.write_text("{invalid json", "utf-8")
     cache = Cache(cache_path)
     cache.load()
     assert cache.load_warning is not None
     assert "corrupted" in cache.load_warning
-    assert cache.load_status == CacheStatus.INVALID_JSON
+    assert cache.load_status == CacheStatus.CORRUPT
     assert cache.cache_schema_version is None
 
 
@@ -1688,37 +1820,35 @@ def test_cache_load_exists_oserror_graceful_ignore(
     _assert_unreadable_cache_contract(cache)
 
 
-def test_cache_load_unreadable_stat_graceful_ignore(
+def test_cache_load_unreadable_existence_probe_graceful_ignore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache_path.write_text('{"version":"1.0","files":{}}', "utf-8")
-    original_stat = Path.stat
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    original_exists = Path.exists
 
-    def _raise_stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+    def _raise_exists(self: Path, *args: object, **kwargs: object) -> bool:
         if self == cache_path:
             raise OSError("no stat")
-        return original_stat(self)
+        return original_exists(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "stat", _raise_stat)
+    monkeypatch.setattr(Path, "exists", _raise_exists)
     cache = Cache(cache_path)
     cache.load()
     _assert_unreadable_cache_contract(cache)
 
 
-def test_cache_load_unreadable_read_graceful_ignore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache_path.write_text('{"version":"1.0","files":{}}', "utf-8")
-    original_open = Path.open
+def test_cache_load_unopenable_store_graceful_ignore(tmp_path: Path) -> None:
+    """A store that cannot be opened is *unreadable*, not corrupt.
 
-    def _raise_open(self: Path, *args: Any, **kwargs: Any) -> object:
-        if self == cache_path:
-            raise OSError("no read")
-        return original_open(self, *args, **kwargs)
+    Induced by a real condition rather than a patched seam: a directory at the
+    cache path exists, stats fine, and refuses to open as a database. The two
+    verdicts ask different things of the reader -- fix your permissions versus
+    your cache is damaged -- so collapsing them would misdirect.
+    """
 
-    monkeypatch.setattr(Path, "open", _raise_open)
+    cache_path = tmp_path / "cache.sqlite3"
+    cache_path.mkdir()
     cache = Cache(cache_path)
     cache.load()
     _assert_unreadable_cache_contract(cache)
@@ -1732,32 +1862,34 @@ def _assert_unreadable_cache_contract(cache: Cache) -> None:
     assert cache.cache_schema_version is None
 
 
-def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+def test_cache_load_row_payload_that_is_not_an_object(tmp_path: Path) -> None:
+    """A row that decodes to the wrong JSON kind is a format refusal.
+
+    The document store guarded this as ``files`` arriving as a list; a row
+    store guards the same class one level down, at a row whose payload is not
+    an entry object at all.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _write_cache_row(cache_path, "x.py", [])
     cache = Cache(cache_path)
-    payload = _analysis_payload(cache, files=[])
-    # Re-mint over the {v, payload} pre-image so the envelope sig passes and the
-    # invalid-files gate is what this test still exercises (candidate 1).
-    signature = cache_envelope_checksum(cache._CACHE_VERSION, payload)
-    cache_path.write_text(
-        json.dumps(
-            {"v": cache._CACHE_VERSION, "payload": payload, "checksum": signature}
-        ),
-        "utf-8",
-    )
     cache.load()
     assert cache.load_warning is not None
     assert "format" in cache.load_warning
 
 
-def test_cache_save_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cache_path = tmp_path / "cache.json"
+def test_cache_save_error(tmp_path: Path) -> None:
+    """A store that cannot be written raises, rather than reporting success.
+
+    Induced by a real condition: a directory sits where the database belongs,
+    so opening it for write fails. Silence here would be the worst outcome --
+    the run would believe it had left a warm cache behind.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    cache_path.mkdir()
     cache = Cache(cache_path)
-
-    def _raise_fsync(_fd: int) -> None:
-        raise OSError("nope")
-
-    monkeypatch.setattr(os, "fsync", _raise_fsync)
 
     with pytest.raises(CacheError):
         cache.save()
@@ -1803,7 +1935,7 @@ def test_cache_legacy_secret_warning_combined_with_other_warning(
     cache = Cache(cache_path)
     cache.load()
     assert cache.load_warning is not None
-    assert "Cache corrupted; ignoring cache." in cache.load_warning
+    assert "Cache corrupted; ignoring cache" in cache.load_warning
     assert "Legacy cache secret file detected" in cache.load_warning
 
 
@@ -1825,94 +1957,94 @@ def test_cache_legacy_secret_check_oserror_sets_warning(
     assert "Legacy cache secret check failed" in cache.load_warning
 
 
-def test_cache_load_invalid_top_level_type(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache_path.write_text("[]", "utf-8")
+def test_cache_load_foreign_database_is_refused_and_left_untouched(
+    tmp_path: Path,
+) -> None:
+    """A SQLite file that is not a cache is refused without being written to.
+
+    ``--cache-path`` takes any path the user names. Creating our tables inside
+    somebody else's database in order to find out it is not ours would be a
+    write performed by a read, so the load opens read-only and refuses. The
+    second half of this test is the part that matters: the foreign schema is
+    exactly as it was.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    with _open_store(cache_path) as conn:
+        conn.execute("CREATE TABLE somebody_elses(id INTEGER PRIMARY KEY)")
+    before = cache_path.read_bytes()
+
     cache = Cache(cache_path)
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
     assert cache.data["files"] == {}
+    assert cache.load_status is CacheStatus.INVALID_TYPE
+
+    with _open_store(cache_path) as conn:
+        tables = {
+            str(name)
+            for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+    assert tables == {"somebody_elses"}
+    assert cache_path.read_bytes() == before
 
 
-def test_cache_load_missing_v_field(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+def test_cache_load_missing_version_mark(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _drop_cache_meta(cache_path, META_KEY_VERSION)
     cache = Cache(cache_path)
-    payload = _analysis_payload(cache, files={})
-    sig = cache_payload_checksum(payload)
-    cache_path.write_text(json.dumps({"payload": payload, "checksum": sig}), "utf-8")
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
 
 
-def test_cache_load_missing_payload_or_sig(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+def test_cache_load_missing_envelope_checksum(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _drop_cache_meta(cache_path, META_KEY_CHECKSUM)
     cache = Cache(cache_path)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": {}}), "utf-8"
-    )
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
 
 
 @pytest.mark.parametrize(
-    "payload_factory",
-    [
-        lambda cache: {"fp": cache.data["fingerprint_version"], "files": {}},
-        lambda cache: {"py": cache.data["python_tag"], "files": {}},
-    ],
+    "dropped_key",
+    [META_KEY_PYTHON_TAG, META_KEY_FINGERPRINT],
     ids=["missing_python_tag", "missing_fingerprint_version"],
 )
-def test_cache_load_rejects_missing_required_payload_fields(
+def test_cache_load_rejects_missing_required_meta_fields(
     tmp_path: Path,
-    payload_factory: Callable[[Cache], dict[str, object]],
+    dropped_key: str,
 ) -> None:
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _drop_cache_meta(cache_path, dropped_key)
     cache = Cache(cache_path)
-    payload = payload_factory(cache)
-    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
-        "utf-8",
-    )
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
 
 
 def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _remint_envelope(cache_path, **{META_KEY_PYTHON_TAG: "cp999"})
     cache = Cache(cache_path)
-    payload = {
-        "py": "cp999",
-        "fp": cache.data["fingerprint_version"],
-        "files": {},
-    }
-    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
-        "utf-8",
-    )
     cache.load()
     assert cache.load_warning is not None
     assert "python tag mismatch" in cache.load_warning
 
 
 def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _remint_envelope(cache_path, **{META_KEY_FINGERPRINT: "old"})
     cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": "old",
-        "files": {},
-    }
-    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
-        "utf-8",
-    )
     cache.load()
     assert cache.load_warning is not None
     assert "fingerprint version mismatch" in cache.load_warning
@@ -1955,14 +2087,12 @@ def test_cache_dependent_lane_rejects_api_surface_mismatch(
 
 
 def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    # A correctly checksummed row whose entry the wire decoder refuses: the
+    # integrity gate passes and the decode gate is what this still exercises.
+    _write_cache_row(cache_path, "x.py", {"st": "bad"})
     cache = Cache(cache_path)
-    payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
-    sig = cache_envelope_checksum(cache._CACHE_VERSION, payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "checksum": sig}),
-        "utf-8",
-    )
     cache.load()
     assert cache.load_warning is not None
     assert "format invalid" in cache.load_warning
@@ -1988,10 +2118,7 @@ def test_cache_save_skips_none_entry_from_lookup(
 
     monkeypatch.setattr(Cache, "get_file_entry", _always_none)
     cache.save()
-    raw = json.loads(cache_path.read_text("utf-8"))
-    payload = cast(dict[str, object], raw["payload"])
-    files = cast(dict[str, object], payload["files"])
-    assert files == {}
+    assert _read_cache_rows(cache_path) == {}
 
 
 def test_wire_filepath_outside_root_falls_back_to_runtime_path(tmp_path: Path) -> None:
@@ -3600,25 +3727,27 @@ def test_cache_put_file_entry_rejects_unregistered_and_foreign_names(
         )
 
 
-def test_cache_load_retries_stat_after_transient_failure(
+def test_cache_load_survives_a_transient_stat_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A transient stat failure inside the first probe is retried before the
-    size ceiling is enforced.
+    """A flaky stat costs telemetry, never the warm path.
 
-    ``Path.exists`` is patched alongside the flaky ``Path.stat`` because on
-    CPython <= 3.13 ``Path.exists()`` is implemented via ``self.stat()``: left
-    unpatched, the flaky stat fires inside the existence probe, ``load()``
-    takes the MISSING branch, and the size-probe retry under test never runs.
-    Owning both seams pins the product's first-probe-tolerated -> second-probe
-    retry on every supported interpreter instead of a pathlib implementation
-    detail.
+    This replaces ``test_cache_load_retries_stat_after_transient_failure``,
+    which pinned a second stat probe that existed only to feed the load-side
+    size ceiling: the first failure was tolerated, then the size was re-probed
+    because the ceiling had to be enforced before reading. With no ceiling to
+    enforce there is no second probe and nothing to retry -- the size is now a
+    span counter and nothing else.
+
+    So the property worth pinning inverted with it. What must hold is that a
+    stat failure cannot cost the cache: the load proceeds, the entries arrive,
+    and only ``cache_file_bytes`` goes unreported.
     """
 
-    cache_path = tmp_path / "cache.json"
-    cache_path.write_text("{}", encoding="utf-8")
-    cache = Cache(cache_path, root=tmp_path)
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    cache = Cache(cache_path, root=cache_path.parent)
 
     calls = {"count": 0}
     real_stat = Path.stat
@@ -3629,16 +3758,17 @@ def test_cache_load_retries_stat_after_transient_failure(
             return True
         return real_exists(self, *args, **kwargs)
 
-    def flaky_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+    def failing_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
         if self == cache_path:
             calls["count"] += 1
-            if calls["count"] == 1:
-                raise OSError("transient stat failure")
+            raise OSError("transient stat failure")
         return real_stat(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "exists", fake_exists)
-    monkeypatch.setattr(Path, "stat", flaky_stat)
+    monkeypatch.setattr(Path, "stat", failing_stat)
     cache.load()
     monkeypatch.undo()
-    assert calls["count"] == 2
-    assert cache.load_status is CacheStatus.INVALID_TYPE
+
+    assert calls["count"] == 1
+    assert cache.load_status is CacheStatus.OK
+    assert cache.get_file_entry("x.py") is not None

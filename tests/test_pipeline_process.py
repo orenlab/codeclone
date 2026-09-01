@@ -1566,40 +1566,42 @@ def test_worker_identity_guards_fail_closed(
     assert "module registry is not installed" in result.error
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "perf-ledger #1 save/load cap asymmetry remains by maintainer ruling "
-        "2026-08-04: save() ignores max_size_bytes while load() rejects "
-        "TOO_LARGE, so a repository whose cache outgrows the cap loses the "
-        "warm path on every subsequent run. The default cap was raised "
-        "50 -> 256 MB as the bridge, which moves the cliff without fixing "
-        "the class; the real fix (cache backend redesign) is deferred to the "
-        "post-release cache-backend phase. Do not resolve this xfail by "
-        "raising the cap again or by compressing the monolith (rejected as "
-        "a de-facto backend format choice)."
-    ),
-)
 def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
     """Pinned maintainer predicate: cache larger than cap => second run must
     still get cached > 0.
 
-    Today ``save()`` never enforces ``max_size_bytes`` while ``load()`` hard
-    rejects any file above it, so the tool writes caches it then refuses to
-    read (Django 5.2 shape: 73 MB written vs the then-default 50 MB load cap
-    => permanently cold at defaults; the 256 MB default since the 2026-08-04
-    ruling moves that cliff without removing it). This strict xfail keeps the
-    defect pinned:
-    it starts erroring the moment save/load symmetry is restored, and any fix
-    that only suppresses the write without giving the second run its cache
-    hits back keeps failing the ``cache_hits`` assertion by design.
+    This was a strict xfail from 2026-08-04 to 2026-09-01.  While the cache was
+    one JSON document, ``save()`` never enforced ``max_size_bytes`` and
+    ``load()`` hard-rejected any file above it, so the tool wrote caches it then
+    refused to read (Django 5.2 shape: 73 MB written against the then-default
+    50 MB load cap => permanently cold at defaults; raising the default to
+    256 MB moved that cliff without removing it).  The xfail was written to
+    start erroring the moment save/load symmetry was restored, and it did:
+    moving the cache onto the row-addressed SQLite backend turned it
+    ``XPASS(strict)``.
+
+    The body below is unchanged from the pinned version -- same cap, same
+    premise assertion, same ``cache_hits`` predicate.  Only the marker is gone,
+    because the predicate now holds.  Two things keep it honest rather than
+    decorative:
+
+    * the premise assertion still demands the store be *over* its cap, so a
+      regression that made the cap refuse writes would fail here, not pass;
+    * ``cache_hits > 0`` still demands the next run actually warm, so a
+      regression that dropped the entry to satisfy the budget would fail too.
+
+    Neither escape route the ruling forbade is taken: the cap is not raised
+    (it is still 256 bytes, still smaller than one entry) and the monolith is
+    not compressed (there is no monolith).  What changed is that reading an
+    entry no longer requires reading the store, so store size stopped being a
+    reason to refuse.
     """
     (tmp_path / "mod.py").write_text(
         "def alpha(left, right):\n    total = left + right\n    return total\n",
         "utf-8",
     )
     boot = analysis_boot(tmp_path, min_loc=1, min_stmt=1, skip_metrics=True)
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
     # Any saved single-entry cache is larger than this cap; the unit-scale
     # mirror of a real-repo cache outgrowing its configured cap (the default
     # moved 50 -> 256 MB on 2026-08-04; the cliff moved with it).
@@ -1610,8 +1612,9 @@ def test_cache_saved_over_cap_must_still_warm_next_run(tmp_path: Path) -> None:
     process(boot=boot, discovery=cold_discovery, cache=cold_cache)
     cold_cache.save()
 
-    # Defect premise, true today: save() itself wrote a file above its own
-    # configured cap without shrinking, splitting, or refusing.
+    # Premise, still true: save() wrote a store above its own configured cap
+    # rather than shrinking, splitting, or refusing it.  The budget evicts only
+    # rows an older generation left behind, and this run owns every row here.
     assert cache_path.stat().st_size > cap_bytes
 
     warm_cache = Cache(cache_path, root=tmp_path, max_size_bytes=cap_bytes)

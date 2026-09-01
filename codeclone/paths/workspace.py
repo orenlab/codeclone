@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Final, Protocol
 
 WORKSPACE_DIR_NAME: Final = ".codeclone"
+CACHE_DB_DIR_NAME: Final = "db"
 LEGACY_WORKSPACE_DIR_PARTS: Final = (".cache", "codeclone")
 
-REL_CACHE_PATH: Final = f"{WORKSPACE_DIR_NAME}/cache.json"
+REL_CACHE_PATH: Final = f"{WORKSPACE_DIR_NAME}/{CACHE_DB_DIR_NAME}/cache.sqlite3"
 REL_REPORT_HTML_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.html"
 REL_REPORT_JSON_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.json"
 REL_REPORT_MARKDOWN_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.md"
@@ -55,8 +56,27 @@ def legacy_home_cache_path() -> Path:
     return Path("~/.cache/codeclone/cache.json").expanduser()
 
 
+def workspace_dir_for_cache_path(cache_path: Path) -> Path:
+    """The workspace directory a cache path belongs to.
+
+    Artifacts that are not cache state used to derive their home from the cache
+    file's parent, which was the workspace directory only because the cache
+    happened to sit directly inside it. Moving the cache into ``db/`` broke that
+    coincidence, so the derivation lives here, with the module that owns the
+    layout, instead of being restated wherever somebody needs it.
+    """
+
+    parent = cache_path.parent
+    return parent.parent if parent.name == CACHE_DB_DIR_NAME else parent
+
+
 def default_cache_path(root: Path) -> Path:
-    return repo_workspace_dir(root) / "cache.json"
+    # The analysis cache is a row-addressed SQLite store, so it sits in db/
+    # beside the audit, intent and run stores rather than as a JSON monolith at
+    # the workspace root.  Shared infrastructure, separate semantics: db/ holds
+    # both the immutable run authority and this disposable acceleration state,
+    # and the cache may lag a published run but must never lead it.
+    return repo_workspace_dir(root) / CACHE_DB_DIR_NAME / "cache.sqlite3"
 
 
 def legacy_repo_workspace_has_artifacts(root: Path) -> bool:
@@ -106,6 +126,7 @@ def workspace_glob_patterns() -> tuple[str, ...]:
 
 
 __all__ = [
+    "CACHE_DB_DIR_NAME",
     "FORBIDDEN_WORKSPACE_GLOBS",
     "LEGACY_WORKSPACE_DIR_PARTS",
     "REGISTRY_DIR_PARTS",
@@ -129,5 +150,6 @@ __all__ = [
     "legacy_repo_workspace_dir",
     "legacy_repo_workspace_has_artifacts",
     "repo_workspace_dir",
+    "workspace_dir_for_cache_path",
     "workspace_glob_patterns",
 ]

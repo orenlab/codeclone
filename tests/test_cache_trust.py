@@ -33,7 +33,6 @@ spelled like a revision and rode a warm hit unnoticed.
 from __future__ import annotations
 
 import copy
-import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -56,6 +55,13 @@ from codeclone.metrics.complexity import risk_level
 from codeclone.metrics.coupling import coupling_risk
 from codeclone.models import DigestObject
 from codeclone.paths.module_identity.manifest import build_module_identity_manifest
+from tests._cache_store_fixtures import (
+    META_KEY_VERSION,
+    read_cache_meta,
+    sole_cache_row,
+    write_cache_meta,
+    write_cache_row,
+)
 from tests.test_cache import (
     _bind_module_paths,
     _content_hit_decision,
@@ -80,9 +86,9 @@ def _reload_with_forged_envelope(
 ) -> Cache:
     """Read the on-disk envelope, let a test forge it, then reload the cache."""
 
-    raw = cast(dict[str, object], json.loads(cache_path.read_text("utf-8")))
+    raw = cast(dict[str, object], dict(read_cache_meta(cache_path)))
     mutate(raw)
-    cache_path.write_text(json.dumps(raw), "utf-8")
+    write_cache_meta(cache_path, **{k: str(v) for k, v in raw.items()})
     loaded = Cache(cache_path, root=cache_path.parent)
     loaded.load()
     return loaded
@@ -144,7 +150,7 @@ def test_cache_envelope_v_is_inside_signed_scope(
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
-    genuine_mark = cast(str, json.loads(cache_path.read_text("utf-8"))["v"])
+    genuine_mark = read_cache_meta(cache_path)[META_KEY_VERSION]
     forged_mark = f"{genuine_mark}-migrated"
 
     # Load with a runtime whose generation gate equals the forged mark, so the
@@ -152,7 +158,7 @@ def test_cache_envelope_v_is_inside_signed_scope(
     monkeypatch.setattr(Cache, "_CACHE_VERSION", forged_mark)
     # Tamper ONLY the generation gate; payload and sig stay byte-identical.
     loaded = _reload_with_forged_envelope(
-        cache_path, lambda raw: raw.__setitem__("v", forged_mark)
+        cache_path, lambda raw: raw.__setitem__(META_KEY_VERSION, forged_mark)
     )
 
     assert loaded.load_status is CacheStatus.INTEGRITY_FAILED
@@ -320,19 +326,17 @@ def test_cache_checksum_is_keyless_not_authentication(
     re-mints over the current public envelope algorithm.
     """
 
-    cache_path = tmp_path / "cache.json"
+    cache_path = tmp_path / "cache.sqlite3"
     _save_single_cache_entry(cache_path)
 
-    def forge(raw: dict[str, object]) -> None:
-        payload = cast(dict[str, object], raw["payload"])
-        files = cast(dict[str, object], payload["files"])
-        (genuine_key,) = tuple(files)
-        # Inject a cached fact with no key, no secret - just the public payload.
-        files["forged.py"] = copy.deepcopy(files[genuine_key])
-        # Re-mint the checksum from the public algorithm alone (keyless).
-        raw["checksum"] = cache_envelope_checksum(cast(str, raw["v"]), payload)
+    _genuine_key, genuine_entry = sole_cache_row(cache_path)
+    # Inject a cached fact with no key, no secret - just the public row and the
+    # public algorithm. Row addressing moved WHERE the sum is taken, not that
+    # the sum needs a secret to re-mint.
+    write_cache_row(cache_path, "forged.py", copy.deepcopy(genuine_entry))
 
-    loaded = _reload_with_forged_envelope(cache_path, forge)
+    loaded = Cache(cache_path, root=cache_path.parent)
+    loaded.load()
 
     assert loaded.load_status is CacheStatus.OK
     assert loaded.get_file_entry("forged.py") is not None

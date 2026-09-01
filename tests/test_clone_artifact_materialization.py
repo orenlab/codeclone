@@ -31,19 +31,18 @@ reports five — the exact silent lie the witness makes structurally illegal.
 
 from __future__ import annotations
 
-import json
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from codeclone.cache.integrity import cache_envelope_checksum
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
 from codeclone.models import ContentIdentityVerdict, Unit
 from tests._ast_metrics_helpers import module_registry_context
+from tests._cache_store_fixtures import read_cache_rows, write_cache_row
 from tests._pipeline_fixtures import (
     analysis_boot,
     discover_and_process,
@@ -210,8 +209,10 @@ def _group_signature(
 
 
 def _neutral_wires(cache_path: Path) -> list[dict[str, object]]:
-    raw = json.loads(cache_path.read_text("utf-8"))
-    return [entry["n"] for entry in raw["payload"]["files"].values()]
+    return [
+        cast(dict[str, object], cast(dict[str, object], entry)["n"])
+        for entry in read_cache_rows(cache_path).values()
+    ]
 
 
 def _cold_cache(
@@ -374,16 +375,12 @@ def _rewrite_neutral_wires(
     cache_path: Path,
     mutate: Callable[[dict[str, object]], None],
 ) -> None:
-    raw = json.loads(cache_path.read_text("utf-8"))
-    payload = raw["payload"]
-    for entry in payload["files"].values():
-        mutate(entry["n"])
-    envelope = {
-        "v": raw["v"],
-        "payload": payload,
-        "checksum": cache_envelope_checksum(raw["v"], payload),
-    }
-    cache_path.write_text(json.dumps(envelope), "utf-8")
+    for wire_path, entry in read_cache_rows(cache_path).items():
+        typed = cast(dict[str, object], entry)
+        mutate(cast(dict[str, object], typed["n"]))
+        # Re-checksum each row so the rewrite reaches the decode gate under
+        # test rather than stopping at the integrity gate in front of it.
+        write_cache_row(cache_path, wire_path, typed)
 
 
 def _loaded_cache_status(cache_path: Path, root: Path) -> CacheStatus:

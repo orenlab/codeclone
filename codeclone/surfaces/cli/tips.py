@@ -99,6 +99,17 @@ _COHESION_LCOM4_MIGRATIONS: tuple[_CohesionLcom4Migration, ...] = (
 
 
 def _tips_state_path(cache_path: Path) -> Path:
+    # KNOWN COUPLING, reported 2026-09-01, deliberately not fixed here.
+    # Tip state is not cache state, but it takes its home from the cache
+    # file's parent -- true only while the cache sat directly in
+    # ``.codeclone/``. With the cache in ``.codeclone/db/`` this file follows
+    # it, which resets every reader's tip history once.
+    # The fix is NOT an import of ``paths.workspace`` from here: that is an
+    # r4 -> r2 edge, and the Phase 39S ratchet is shrink-only. It belongs in
+    # ``cli/runtime.py``, which already owns that edge, handing the resolved
+    # path down. That is a signature change across the tip entry points and
+    # their callers, so it is the maintainer's call, not a side effect of a
+    # cache migration.
     return cache_path.parent / "tips.json"
 
 

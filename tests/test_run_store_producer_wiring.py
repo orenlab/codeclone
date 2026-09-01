@@ -94,7 +94,7 @@ from codeclone.models import (
     RunStoreConfig,
 )
 from codeclone.paths.module_identity.inventory import build_module_registry
-from codeclone.paths.workspace import REL_RUN_STORE_DB_PATH
+from codeclone.paths.workspace import REL_CACHE_PATH, REL_RUN_STORE_DB_PATH
 from tests.conftest import RunStoreCorpusRunner
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -519,7 +519,18 @@ def test_a_default_run_publishes_nothing_at_all(
     meta = cast("dict[str, object]", json.loads(report_path.read_text("utf-8"))["meta"])
     assert meta["analysis_mode"] == "full"
     assert not (corpus / REL_RUN_STORE_DB_PATH).exists()
-    assert not list(corpus.glob("**/*.sqlite3"))
+    # The wider net stays -- a run store appearing under any other name is
+    # still caught -- but it now excludes the disposable analysis cache.
+    # That cache became a SQLite store on 2026-09-01, and a cache write is
+    # not a publish: it takes no part in publish correctness, never enters
+    # run_id, and deleting it changes no result. Letting it fail this pin
+    # would be the exact confusion the boundary forbids, asserted from the
+    # test side.
+    assert not [
+        found
+        for found in corpus.glob("**/*.sqlite3")
+        if found != corpus / REL_CACHE_PATH
+    ]
 
 
 def test_an_enabled_full_run_advances_the_canonical_head(

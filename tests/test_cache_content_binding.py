@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from dataclasses import replace
@@ -17,7 +16,6 @@ import pytest
 import codeclone.cache.reuse as cache_reuse
 import codeclone.paths.git_snapshot as git_snapshot_mod
 from codeclone.cache._wire_decode import _decode_wire_file_entry
-from codeclone.cache.integrity import cache_envelope_checksum
 from codeclone.cache.reuse import (
     binding_context_digest,
     git_blob_identity_for_parsed_source,
@@ -52,6 +50,7 @@ from codeclone.paths.git_snapshot import (
     dirty_entry_digest,
 )
 from codeclone.paths.module_identity.inventory import build_module_registry
+from tests._cache_store_fixtures import write_cache_row
 
 
 def _blob(object_id: str = "1" * 40) -> GitBlobIdentity:
@@ -825,26 +824,15 @@ def test_dirty_source_write_never_persists_blob_identity(tmp_path: Path) -> None
 def test_signed_envelope_without_content_binding_cannot_authorize_hit(
     tmp_path: Path,
 ) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "files": {"module.py": {"st": [1, 2]}},
-    }
-    cache_path.write_text(
-        json.dumps(
-            {
-                "v": Cache._CACHE_VERSION,
-                "payload": payload,
-                # Envelope sig over {v, payload} so the sig gate passes and the
-                # missing-content-binding gate is what this still exercises.
-                "checksum": cache_envelope_checksum(Cache._CACHE_VERSION, payload),
-            }
-        ),
-        "utf-8",
-    )
+    cache_path = tmp_path / "cache.sqlite3"
+    # An empty save creates the store with a valid meta envelope, so the row
+    # written next is the only thing under test.
+    Cache(cache_path, root=tmp_path).save()
+    # A correctly checksummed row with no content binding: the integrity gate
+    # passes and the missing-content-binding gate is what this still exercises.
+    write_cache_row(cache_path, "module.py", {"st": [1, 2]})
 
+    cache = Cache(cache_path, root=tmp_path)
     cache.load()
 
     assert cache.load_warning == "Cache format invalid; ignoring cache."

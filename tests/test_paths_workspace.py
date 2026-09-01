@@ -25,7 +25,7 @@ from codeclone.surfaces.cli.console import PlainConsole
 def test_default_cache_path_under_codeclone_dir(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
-    assert default_cache_path(root) == root / ".codeclone" / "cache.json"
+    assert default_cache_path(root) == root / ".codeclone" / "db" / "cache.sqlite3"
 
 
 def test_legacy_repo_workspace_has_artifacts_detects_entries(tmp_path: Path) -> None:
