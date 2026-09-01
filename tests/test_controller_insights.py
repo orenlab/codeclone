@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import cast
 
@@ -26,9 +28,15 @@ from codeclone.surfaces.mcp._session_shared import MCPServiceContractError
 from codeclone.surfaces.mcp.server import build_mcp_server
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
+from .test_cli_session_stats import _write_intent_file
+
 
 def test_workspace_session_stats_payload_shape(tmp_path: Path) -> None:
-    payload = workspace_session_stats_payload(tmp_path)
+    payload = workspace_session_stats_payload(
+        tmp_path,
+        own_pid=os.getpid(),
+        own_start_epoch=int(time.time()),
+    )
     assert payload["status"] == "ok"
     assert "workspace" in payload
     assert "counts" in payload
@@ -172,6 +180,43 @@ def test_mcp_insights_tools_with_ide_channel(tmp_path: Path) -> None:
     assert cast(dict[str, int], trail["counts"])["total_events"] == 1
 
 
+def test_mcp_insights_session_stats_reads_the_session_own_intent_as_own(
+    tmp_path: Path,
+) -> None:
+    """The MCP path answers as the session, not as the moment of the call.
+
+    An MCP session lives for hours and stamps its identity once, at
+    construction. If ``get_workspace_session_stats`` recovered that identity
+    by reading the clock when the tool is invoked, the session would disown
+    every intent it had itself declared, and the IDE would show the user's own
+    held scope as a foreign agent's.
+    """
+
+    service = CodeCloneMCPService(history_limit=4, ide_governance_channel=True)
+    session = service.session
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    _write_intent_file(
+        intents_dir,
+        pid=session._agent_pid,
+        start_epoch=session._agent_start_epoch,
+        declared_epoch=int(time.time()) - 600,
+        status="active",
+    )
+
+    # Put the tool call in a strictly later second than the session's stamp:
+    # that gap is what separates naming the session from naming the call.
+    while int(time.time()) <= session._agent_start_epoch:
+        time.sleep(0.05)
+
+    stats = service.get_workspace_session_stats(root=str(tmp_path.resolve()))
+
+    agents = cast(list[dict[str, object]], stats["agents"])
+    intents = cast(list[dict[str, object]], agents[0]["intents"])
+    # own_stale, not foreign_stale: the lease ran out, the ownership did not.
+    assert [intent["ownership"] for intent in intents] == ["own_stale"]
+
+
 def test_mcp_insights_audit_trail_limit_validation(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4, ide_governance_channel=True)
     root = str(tmp_path.resolve())
@@ -188,7 +233,7 @@ def test_mcp_insights_session_stats_surfaces_reader_errors(
     service = CodeCloneMCPService(history_limit=4, ide_governance_channel=True)
     root = str(tmp_path.resolve())
 
-    def _boom(_root_path: Path) -> dict[str, object]:
+    def _boom(_root_path: Path, **_identity: int) -> dict[str, object]:
         raise RuntimeError("stats backend down")
 
     monkeypatch.setattr(insights_mixin_mod, "workspace_session_stats_payload", _boom)

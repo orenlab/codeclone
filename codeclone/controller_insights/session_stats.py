@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections import defaultdict
 from collections.abc import Mapping
@@ -91,7 +90,23 @@ class SessionSnapshot:
     latest_run_findings_unavailable: int | None = None
 
 
-def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
+def collect_session_snapshot(
+    root_path: Path,
+    *,
+    own_pid: int,
+    own_start_epoch: int,
+) -> SessionSnapshot:
+    """Read the workspace as seen by the agent identified by the arguments.
+
+    ``own_start_epoch`` is the epoch the calling agent stamped inside itself
+    when it started -- ``surfaces.cli.state.CLI_SESSION_START_EPOCH`` for the
+    CLI, ``self._agent_start_epoch`` for an MCP session -- and it is the same
+    number that agent writes into the records it declares. It is required, and
+    it is required to come from the caller: this module cannot read a clock to
+    recover it, because a clock read here names the moment of *this call*, and
+    ownership would then hold only for a record declared in the same second.
+    """
+
     from ..surfaces.mcp._workspace_intents import (
         IntentOwnership,
         classify_intent_ownership,
@@ -100,8 +115,6 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
     )
 
     now = utc_now()
-    own_pid = os.getpid()
-    own_start_epoch = _process_start_epoch()
 
     try:
         records = list_workspace_intent_records_for_recovery(root=root_path)
@@ -142,7 +155,7 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
         agent_key = (record.agent_pid, record.agent_start_epoch)
         agent_labels[agent_key] = record.agent_label
         if agent_key not in agent_alive:
-            agent_alive[agent_key] = _is_pid_alive(record.agent_pid)
+            agent_alive[agent_key] = _record_agent_is_live(record)
 
         agent_intents[agent_key].append(
             IntentSnapshot(
@@ -469,20 +482,23 @@ def _lease_remaining_seconds(record: WorkspaceIntentRecord, now: datetime) -> in
     return max(0, int(delta))
 
 
-def _is_pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+def _record_agent_is_live(record: WorkspaceIntentRecord) -> bool:
+    """Is the agent this record names still running?
 
+    Existence of the pid number proves nothing -- the kernel reissues it -- so
+    this asks the same seam the ownership verdict asks, and gets the same
+    answer: liveness of the *recorded agent*, decided by its identity.
 
-def _process_start_epoch() -> int:
-    return int(time.time())
+    The tri-state collapses one way only. UNKNOWN, which is what an unreadable
+    start time yields, stays on the live side: reporting an agent the machine
+    will not vouch for as dead would show an occupied workspace as idle and
+    invite a cleanup nobody asked for.
+    """
+
+    from ..surfaces.mcp._workspace_intents import _record_liveness
+    from ..workspace_intent.lifecycle import PidLiveness
+
+    return _record_liveness(record) is not PidLiveness.DEAD
 
 
 def _read_audit_config(root_path: Path) -> tuple[bool, str | None]:
@@ -679,8 +695,19 @@ def session_snapshot_to_payload(snapshot: SessionSnapshot) -> dict[str, object]:
     }
 
 
-def workspace_session_stats_payload(root_path: Path) -> dict[str, object]:
-    return session_snapshot_to_payload(collect_session_snapshot(root_path))
+def workspace_session_stats_payload(
+    root_path: Path,
+    *,
+    own_pid: int,
+    own_start_epoch: int,
+) -> dict[str, object]:
+    return session_snapshot_to_payload(
+        collect_session_snapshot(
+            root_path,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+        )
+    )
 
 
 __all__ = [

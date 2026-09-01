@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from codeclone.surfaces.mcp import _workspace_intent_paths as intent_paths
 from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
 from codeclone.surfaces.mcp._workspace_intent_models import IntentScopeModel
+from codeclone.surfaces.mcp._workspace_intent_staleness import is_stale
 from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 from codeclone.utils.json_io import read_json_object, write_json_document_atomically
 
@@ -888,7 +889,56 @@ def test_workspace_intent_update_status_can_extend_ttl(tmp_path: Path) -> None:
     updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
     assert updated.ttl_seconds == workspace_intents.MIN_TTL_SECONDS
     assert updated.lease_renewed_at_utc != record.lease_renewed_at_utc
-    assert updated.lease_renewed_at_utc == updated.declared_at_utc
+    # The renewal is stamped now; the declaration is not restamped, so the two
+    # coincide only for a record declared in this same second. This fixture's
+    # record is, which is exactly why the equality above used to look like a
+    # law -- see the TTL-extension pin below for the record declared earlier.
+    assert updated.declared_at_utc == record.declared_at_utc
+
+
+def test_workspace_intent_ttl_extension_keeps_the_original_declaration_moment(
+    tmp_path: Path,
+) -> None:
+    """A renewed hold is not a fresh declaration.
+
+    Extending a TTL happens now. The declaration happened when the agent
+    declared it, and on the reset path that agent is a *different*, already
+    dead one whose ``agent_pid`` and ``agent_start_epoch`` the record keeps.
+    Stamping now over ``declared_at_utc`` makes the row say that agent
+    declared its intent after it was recovered, and moves the row inside
+    ``record_sort_key`` -- the order the edit gate reads its queue in.
+    """
+
+    declared_long_ago = workspace_intents.utc_now() - timedelta(hours=2)
+    record = replace(
+        _record(lease_renewed_delta=timedelta(minutes=-2)),
+        declared_at_utc=workspace_intents.format_utc(declared_long_ago),
+    )
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+
+    assert workspace_intents.update_workspace_intent_status(
+        root=tmp_path,
+        pid=record.agent_pid,
+        start_epoch=record.agent_start_epoch,
+        intent_id=record.intent_id,
+        new_status="active",
+        ttl_seconds=workspace_intents.MIN_TTL_SECONDS,
+    )
+
+    updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
+    assert updated.declared_at_utc == record.declared_at_utc
+    # The other side of the same law: the new hold must run from now, not from
+    # that old declaration -- an expiry measured from two hours ago would hand
+    # back an intent that is already dead.
+    renewed_at = datetime.fromisoformat(
+        updated.lease_renewed_at_utc.replace("Z", "+00:00")
+    )
+    assert updated.expires_at_utc == workspace_intents.expires_at(
+        declared_at=renewed_at,
+        ttl_seconds=workspace_intents.MIN_TTL_SECONDS,
+    )
+    assert not is_stale(updated)
+    assert updated.lease_renewed_at_utc != record.lease_renewed_at_utc
 
 
 def test_workspace_intent_renew_lease_rejects_foreign_owner(tmp_path: Path) -> None:

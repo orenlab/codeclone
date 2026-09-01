@@ -668,13 +668,20 @@ def _updated_record(
 ) -> WorkspaceIntentRecord:
     if ttl_seconds is None:
         return replace(record, status=new_status)
-    declared_at = utc_now()
+    renewed_at = utc_now()
+    # ``declared_at_utc`` is deliberately not restamped. The hold starts now,
+    # so the expiry and the lease do run from now -- but the declaration
+    # happened when the recorded agent declared it, and on the reset path that
+    # agent is a different, already dead one whose pid and start epoch this
+    # record keeps. Writing now over it would make the row say that agent
+    # declared its intent after it was recovered, and would move the row
+    # inside ``record_sort_key``, which is the order the edit gate reads its
+    # queue in.
     return replace(
         record,
-        declared_at_utc=format_utc(declared_at),
-        expires_at_utc=expires_at(declared_at=declared_at, ttl_seconds=ttl_seconds),
+        expires_at_utc=expires_at(declared_at=renewed_at, ttl_seconds=ttl_seconds),
         ttl_seconds=ttl_seconds,
-        lease_renewed_at_utc=format_utc(declared_at),
+        lease_renewed_at_utc=format_utc(renewed_at),
         status=new_status,
     )
 

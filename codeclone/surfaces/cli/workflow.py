@@ -63,7 +63,7 @@ from .attrs import bool_attr
 from .subcommands import dispatch_subcommand
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
-_CLI_SESSION_START_EPOCH = int(time.time())
+_CLI_SESSION_START_EPOCH = cli_state.CLI_SESSION_START_EPOCH
 
 
 class _AuditEnabledArgs(Protocol):

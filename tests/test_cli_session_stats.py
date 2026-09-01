@@ -32,7 +32,6 @@ from codeclone.controller_insights.session_stats import (
     _format_age,
     _format_duration,
     _has_scope_overlap,
-    _is_pid_alive,
     _lease_remaining_seconds,
     _read_audit_config,
     _read_audit_token_footprint,
@@ -41,13 +40,18 @@ from codeclone.controller_insights.session_stats import (
 )
 from codeclone.surfaces.cli.session_stats import render_session_stats
 from codeclone.surfaces.cli.types import PrinterLike
+from codeclone.surfaces.cli.workflow import _CLI_SESSION_START_EPOCH
+from codeclone.surfaces.mcp import _workspace_intent_pid as pid_mod
 from codeclone.surfaces.mcp._workspace_intent_paths import registry_dir
 from codeclone.surfaces.mcp._workspace_intents import (
     MIN_LEASE_SECONDS,
+    PidLiveness,
     WorkspaceIntentRecord,
+    _record_liveness,
     compute_scope_digest,
     expires_at,
     format_utc,
+    list_workspace_intent_records_for_recovery,
     write_workspace_intent,
 )
 from codeclone.utils.run_identity import report_run_identity
@@ -111,6 +115,20 @@ class _RecordingPrinter:
         return "\n".join(self.lines)
 
 
+def _collect(root_path: Path) -> SessionSnapshot:
+    """Collect as this very process, for tests whose subject is not ownership.
+
+    Naming a real identity rather than a convenient one keeps these tests from
+    quietly re-acquiring the premise the fixed code refuses to invent.
+    """
+
+    return collect_session_snapshot(
+        root_path,
+        own_pid=os.getpid(),
+        own_start_epoch=_CLI_SESSION_START_EPOCH,
+    )
+
+
 def _write_intent_file(
     intents_dir: Path,
     *,
@@ -124,11 +142,21 @@ def _write_intent_file(
     allowed_files: list[str] | None = None,
     ttl_seconds: int = 3600,
     lease_seconds: int = 300,
+    declared_epoch: int | None = None,
 ) -> Path:
-    """Write a synthetic workspace intent JSON file."""
+    """Write a synthetic workspace intent JSON file.
+
+    ``declared_epoch`` separates *when the agent started* from *when it
+    declared this intent*. Defaulting the two to one number is what let a
+    fabricated "own start epoch" look right: a record declared in the same
+    second as the read matches a clock read as happily as it matches a real
+    stamp, so the fixture could not tell the two apart.
+    """
     now_epoch = start_epoch or int(time.time())
-    now_utc = datetime.fromtimestamp(now_epoch, tz=timezone.utc)
-    declared = format_utc(now_utc)
+    declared_utc = datetime.fromtimestamp(
+        now_epoch if declared_epoch is None else declared_epoch, tz=timezone.utc
+    )
+    declared = format_utc(declared_utc)
     scope_files = allowed_files or ["src/a.py"]
     scope: dict[str, object] = {
         "allowed_files": scope_files,
@@ -143,7 +171,7 @@ def _write_intent_file(
         agent_label=label,
         run_id="a" * 64,
         declared_at_utc=declared,
-        expires_at_utc=expires_at(declared_at=now_utc, ttl_seconds=ttl_seconds),
+        expires_at_utc=expires_at(declared_at=declared_utc, ttl_seconds=ttl_seconds),
         ttl_seconds=ttl_seconds,
         status=status,
         intent="test intent",
@@ -502,7 +530,10 @@ def test_session_stats_stale_quiet(tmp_path: Path) -> None:
     )
     printer = _RecordingPrinter()
 
-    with patch.object(insights_mod, "_is_pid_alive", return_value=False):
+    with patch(
+        "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive",
+        return_value=False,
+    ):
         exit_code = render_session_stats(
             console=printer,
             root_path=tmp_path,
@@ -916,7 +947,7 @@ def test_session_stats_contract_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def raise_collection_error(root_path: Path) -> object:
+    def raise_collection_error(root_path: Path, **_identity: int) -> object:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(
@@ -958,8 +989,9 @@ def test_collect_session_snapshot_tolerates_non_list_allowed_files(
         "codeclone.surfaces.mcp._workspace_intents.list_workspace_intent_records_for_recovery",
         lambda **_: (record,),
     )
-    monkeypatch.setattr(insights_mod, "_process_start_epoch", lambda: 100)
-    snapshot = collect_session_snapshot(tmp_path)
+    snapshot = collect_session_snapshot(
+        tmp_path, own_pid=os.getpid(), own_start_epoch=100
+    )
     assert len(snapshot.agents) == 1
     assert snapshot.agents[0].intents[0].allowed_files == ()
 
@@ -992,21 +1024,17 @@ def test_session_stats_counts_expired_stale_and_recoverable(
         start_epoch=own_start_epoch - 4000,
     )
 
-    monkeypatch.setattr(insights_mod, "_process_start_epoch", lambda: own_start_epoch)
-    monkeypatch.setattr(
-        insights_mod,
-        "_is_pid_alive",
-        lambda pid: pid == os.getpid(),
-    )
-    # ``recoverable_count`` is decided by classify_intent_ownership, which reads
-    # the mcp seam -- not the insights one patched above. Without this the count
-    # is a function of whether pid 999999 happens to exist on this machine.
+    # One seam now, not two: the ``alive`` column and ``recoverable_count`` are
+    # both decided by the mcp pid seam, so pinning it pins both. Without this
+    # the counts are a function of whether pid 999999 happens to exist here.
     monkeypatch.setattr(
         "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive",
         lambda pid: pid == os.getpid(),
     )
 
-    snapshot = collect_session_snapshot(tmp_path)
+    snapshot = collect_session_snapshot(
+        tmp_path, own_pid=os.getpid(), own_start_epoch=own_start_epoch
+    )
 
     assert snapshot.stale_count == 1
     assert snapshot.recoverable_count == 1
@@ -1029,8 +1057,9 @@ def test_session_stats_groups_multiple_intents_per_agent(
             allowed_files=[f"src/{index}.py"],
         )
 
-    monkeypatch.setattr(insights_mod, "_process_start_epoch", lambda: start_epoch)
-    snapshot = collect_session_snapshot(tmp_path)
+    snapshot = collect_session_snapshot(
+        tmp_path, own_pid=os.getpid(), own_start_epoch=start_epoch
+    )
 
     assert len(snapshot.agents) == 1
     assert len(snapshot.agents[0].intents) == 2
@@ -1447,21 +1476,6 @@ def test_lease_remaining_handles_invalid_lease() -> None:
     assert _lease_remaining_seconds(record, now_utc) == 0
 
 
-def test_is_pid_alive_edges(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _is_pid_alive(0) is False
-
-    def raise_process_lookup(pid: int, signal: int) -> None:
-        raise ProcessLookupError
-
-    def raise_permission(pid: int, signal: int) -> None:
-        raise PermissionError
-
-    monkeypatch.setattr(os, "kill", raise_process_lookup)
-    assert _is_pid_alive(123) is False
-    monkeypatch.setattr(os, "kill", raise_permission)
-    assert _is_pid_alive(123) is True
-
-
 # ── Token footprint in verbose plain mode ──
 
 
@@ -1845,7 +1859,7 @@ def test_collect_session_snapshot_prefers_audit_latest_run(tmp_path: Path) -> No
     assert _document_file_count(document) != 11
 
     _assert_snapshot_latest_run_from_audit(
-        collect_session_snapshot(tmp_path),
+        _collect(tmp_path),
         run_id="runaudit",
         health=93,
         findings=2,
@@ -1868,7 +1882,7 @@ def test_collect_session_snapshot_transports_novelty_tristate(
         findings={"total": 26, "new": 0, "known": 0, "unavailable": 26},
     )
 
-    snapshot = collect_session_snapshot(tmp_path)
+    snapshot = _collect(tmp_path)
     assert snapshot.latest_run_findings == 26
     assert snapshot.latest_run_findings_new == 0
     assert snapshot.latest_run_findings_known == 0
@@ -1973,12 +1987,12 @@ def test_the_disk_report_answers_only_where_the_audit_trail_cannot(
     assert _document_run_id(also_on_disk) != "runaudit"
 
     assert _read_audit_config(without_audit) == (False, None)
-    no_trail = collect_session_snapshot(without_audit)
+    no_trail = _collect(without_audit)
     assert no_trail.latest_run_source == "disk_report"
     assert no_trail.latest_run_id == _document_run_id(disk_only)
 
     assert _read_audit_config(with_audit)[0] is True
-    trail = collect_session_snapshot(with_audit)
+    trail = _collect(with_audit)
     assert trail.latest_run_source == "audit_mcp"
     assert trail.latest_run_id == "runaudit"
     assert trail.latest_run_id != _document_run_id(also_on_disk)
@@ -1998,7 +2012,7 @@ def test_collect_session_snapshot_tolerates_audit_read_failure(
         "codeclone.audit.reader.read_latest_analysis_run",
         _boom,
     )
-    snapshot = collect_session_snapshot(tmp_path)
+    snapshot = _collect(tmp_path)
     assert snapshot.latest_run_source == "disk_report"
 
 
@@ -2040,3 +2054,165 @@ def test_verbose_rich_omits_cache_row_without_cache() -> None:
     )
     assert exit_code == 0
     assert "ghi13579" in output.getvalue()
+
+
+# ── The moment this process started is not the moment somebody asked ──
+#
+# ``--session-stats`` runs at an arbitrary point in the CLI's life. Every
+# ownership verdict below turns on one comparison: the epoch this process
+# stamped when it started, against the epoch written into a record. The four
+# pins split into the two opposite errors, each held by its own test, plus the
+# two liveness directions the ``alive`` column decides.
+
+
+def _only_record(root_path: Path) -> WorkspaceIntentRecord:
+    """The one record on disk, read the way the collector reads them.
+
+    Not the filtered listing: that one drops the orphaned and stale rows,
+    which are exactly the rows these liveness pins are about.
+    """
+
+    records = list_workspace_intent_records_for_recovery(root=root_path)
+    assert len(records) == 1
+    return records[0]
+
+
+def _quiet_text(root_path: Path) -> str:
+    printer = _RecordingPrinter()
+    assert render_session_stats(
+        console=printer, root_path=root_path, quiet=True
+    ) == int(ExitCode.SUCCESS)
+    return printer.text
+
+
+def _await_a_later_whole_second(epoch: int) -> None:
+    """Put the read in a strictly later second than ``epoch``.
+
+    That gap is the whole difference between naming the moment this process
+    started and naming the moment somebody asked. In a suite run it has
+    already passed and this returns without sleeping.
+    """
+
+    while int(time.time()) <= epoch:
+        time.sleep(0.05)
+
+
+def test_session_stats_still_reads_this_process_own_intent_as_own(
+    tmp_path: Path,
+) -> None:
+    """Side A: an intent this process declared stays this process's.
+
+    An "own start epoch" read off the clock names the read, not the start, so
+    it matches only a record declared inside the same whole second. Every
+    older intent of this very process is then reported as somebody else's,
+    and the operator is told to coordinate with themselves.
+    """
+
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    _write_intent_file(
+        intents_dir,
+        pid=os.getpid(),
+        start_epoch=_CLI_SESSION_START_EPOCH,
+        declared_epoch=int(time.time()) - 10 * MIN_LEASE_SECONDS,
+        lease_seconds=MIN_LEASE_SECONDS,
+        status="active",
+    )
+    _await_a_later_whole_second(_CLI_SESSION_START_EPOCH)
+
+    # Own with a run-out lease is own_stale and counts; the same record read as
+    # somebody else's is foreign_stale and counts for nothing.
+    assert "stale=1" in _quiet_text(tmp_path)
+
+
+def test_session_stats_does_not_claim_a_recycled_pid_record_as_own(
+    tmp_path: Path,
+) -> None:
+    """Side B, the opposite error: a pid we hold is not an agent we are.
+
+    The kernel reissues pid numbers. A record left by the previous tenant of
+    this number must never be counted as this process's own work -- that would
+    hand one agent silent authority over another's declared scope.
+    """
+
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    _write_intent_file(
+        intents_dir,
+        pid=os.getpid(),
+        start_epoch=_CLI_SESSION_START_EPOCH - 1,
+        declared_epoch=int(time.time()) - 10 * MIN_LEASE_SECONDS,
+        lease_seconds=MIN_LEASE_SECONDS,
+        status="active",
+    )
+    _await_a_later_whole_second(_CLI_SESSION_START_EPOCH)
+
+    assert "stale=0" in _quiet_text(tmp_path)
+
+
+def test_session_stats_reports_an_unreadable_agent_as_live_not_idle(
+    tmp_path: Path,
+) -> None:
+    """Liveness side A: unknown is never death.
+
+    pid 1 is real, it is running, and this process may not signal it, so the
+    kernel answers UNKNOWN rather than yes or no. Reading that as death would
+    report an occupied workspace as idle and invite a cleanup nobody asked
+    for. The input is the machine's own, not a patched seam.
+    """
+
+    assert pid_mod.agent_pid_liveness(1) is PidLiveness.UNKNOWN
+
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    _write_intent_file(
+        intents_dir,
+        pid=1,
+        start_epoch=int(time.time()),
+        status="active",
+    )
+    # Reachability, measured at the seam the column consults rather than
+    # asserted: this record's agent is neither alive nor dead to this machine.
+    assert _record_liveness(_only_record(tmp_path)) is PidLiveness.UNKNOWN
+
+    text = _quiet_text(tmp_path)
+    assert "live_agents=1" in text
+    assert "session-stats: idle" not in text
+
+
+def test_session_stats_reports_a_recycled_pid_agent_as_not_live(
+    tmp_path: Path,
+) -> None:
+    """Liveness side B: a live number is not a live agent.
+
+    The record names a pid that is unquestionably alive -- ours -- and an
+    epoch no process on this machine ever started at. Counting it as a live
+    agent tells the operator to coordinate with a process that was reaped
+    long ago.
+    """
+
+    ghost_epoch = 100
+
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    _write_intent_file(
+        intents_dir,
+        pid=os.getpid(),
+        start_epoch=ghost_epoch,
+        # Declared now, on purpose. Letting the declaration follow the ghost
+        # epoch would expire the record before any liveness question is
+        # asked, and this test would pass without ever reaching the branch it
+        # exists to hold.
+        declared_epoch=int(time.time()),
+        status="active",
+    )
+
+    # Reachability of the guarded branch, proven by the input rather than
+    # asserted: the pid is alive, and the agent the record names is not.
+    record = _only_record(tmp_path)
+    assert pid_mod.agent_pid_liveness(record.agent_pid) is PidLiveness.ALIVE
+    assert _record_liveness(record) is PidLiveness.DEAD
+
+    text = _quiet_text(tmp_path)
+    assert "live_agents=0" in text
+    assert "session-stats: idle" in text

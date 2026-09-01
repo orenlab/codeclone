@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from ...controller_insights.session_stats import (
     latest_run_source_label,
 )
 from . import console as cli_console
+from .state import CLI_SESSION_START_EPOCH
 from .types import PrinterLike
 
 _MAX_ALLOWED_FILES_SHOWN = 2
@@ -47,7 +49,13 @@ def render_session_stats(
 ) -> int:
     """Render workspace session status. Returns ExitCode int."""
     try:
-        snapshot = collect_session_snapshot(root_path)
+        snapshot = collect_session_snapshot(
+            root_path,
+            # This process, named by what it stamped when it started -- not by
+            # what the clock says at the moment somebody ran --session-stats.
+            own_pid=os.getpid(),
+            own_start_epoch=CLI_SESSION_START_EPOCH,
+        )
     except Exception as exc:
         console.print(
             ui.fmt_contract_error(ui.SESSION_STATS_READ_FAILED.format(error=exc))

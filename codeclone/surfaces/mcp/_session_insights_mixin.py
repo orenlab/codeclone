@@ -29,6 +29,8 @@ IDE_INSIGHTS_UNAVAILABLE_NEXT_STEP = (
 
 class _MCPSessionInsightsMixin:
     _ide_governance: IdeGovernanceSessionState
+    _agent_pid: int
+    _agent_start_epoch: int
 
     def _require_ide_insights_channel(self, *, tool_name: str) -> None:
         if not self._ide_governance.channel_enabled:
@@ -41,7 +43,14 @@ class _MCPSessionInsightsMixin:
         self._require_ide_insights_channel(tool_name="get_workspace_session_stats")
         root_path = _helpers._resolve_root(root)
         try:
-            payload = workspace_session_stats_payload(root_path)
+            payload = workspace_session_stats_payload(
+                root_path,
+                # The identity this session stamped at construction and writes
+                # into every record it declares; re-reading the clock here
+                # would name this call instead and disown them all.
+                own_pid=self._agent_pid,
+                own_start_epoch=self._agent_start_epoch,
+            )
         except Exception as exc:
             raise MCPServiceContractError(
                 f"Failed to read workspace session stats: {exc}"
