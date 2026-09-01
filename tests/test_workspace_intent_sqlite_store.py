@@ -642,3 +642,118 @@ def test_sqlite_store_find_raw_resolves_a_duplicated_id_to_the_queue_tail(
     expected = max((older, newer), key=lambda record: record.declared_at_utc)
     assert found is not None
     assert found.agent_pid == expected.agent_pid
+
+
+# ── The store hands out the queue in order, and nobody re-sorts it ──
+#
+# Each store is the single owner of ``record_sort_key`` order on its own
+# backend; every consumer inherits the sequence instead of re-deriving it.
+# The fixtures below are built so the owner's INPUT order disagrees with the
+# key order -- the lower pid declares later, so the file name puts it first
+# and the key puts it last, and the sqlite rows are inserted against the key.
+# Without that disagreement, dropping the owner's sort would be an equivalent
+# mutation and these pins would prove nothing.
+
+
+def _queue_split_only_by_declaration() -> tuple[
+    workspace_intents.WorkspaceIntentRecord, workspace_intents.WorkspaceIntentRecord
+]:
+    """Earlier declaration carries the HIGHER pid and the LATER intent_id."""
+
+    now = workspace_intents.utc_now()
+    early = replace(
+        _record(intent_id="intent-ffffffff-002", pid=210_002),
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=3)),
+    )
+    later = replace(
+        _record(intent_id="intent-aaaaaaaa-001", pid=210_000),
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=1)),
+    )
+    return early, later
+
+
+def _queue_split_only_by_pid() -> tuple[
+    workspace_intents.WorkspaceIntentRecord, workspace_intents.WorkspaceIntentRecord
+]:
+    """Declared together; the LOWER pid carries the LATER intent_id."""
+
+    declared = workspace_intents.format_utc(
+        workspace_intents.utc_now() - timedelta(hours=3)
+    )
+    lower = replace(
+        _record(intent_id="intent-ffffffff-002", pid=210_000),
+        declared_at_utc=declared,
+    )
+    higher = replace(
+        _record(intent_id="intent-aaaaaaaa-001", pid=210_002),
+        declared_at_utc=declared,
+    )
+    return lower, higher
+
+
+def _file_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_BACKEND", raising=False)
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_PATH", raising=False)
+    clear_workspace_intent_store_cache()
+    return tmp_path
+
+
+def _written(
+    root: Path, records: tuple[workspace_intents.WorkspaceIntentRecord, ...]
+) -> list[str]:
+    store = get_workspace_intent_store(root)
+    for record in records:
+        assert store.write(record)
+    return [item.intent_id for item in store.list_records()]
+
+
+def test_file_store_hands_out_the_queue_in_declaration_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File owner, first key component."""
+
+    root = _file_root(tmp_path, monkeypatch)
+    early, later = _queue_split_only_by_declaration()
+    listed = _written(root, (later, early))  # written out of order on purpose
+
+    expected = min((early, later), key=lambda record: record.declared_at_utc)
+    assert listed[0] == expected.intent_id
+
+
+def test_file_store_breaks_a_declaration_tie_by_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File owner, second key component."""
+
+    root = _file_root(tmp_path, monkeypatch)
+    lower, higher = _queue_split_only_by_pid()
+    listed = _written(root, (higher, lower))
+
+    expected = min((lower, higher), key=lambda record: record.agent_pid)
+    assert listed[0] == expected.intent_id
+
+
+def test_sqlite_store_hands_out_the_queue_in_declaration_order(
+    sqlite_root: Path,
+) -> None:
+    """Sqlite owner, first key component.
+
+    The rows are inserted against the key order, so the sequence cannot come
+    from the insert order once SQL stopped being asked for it.
+    """
+
+    early, later = _queue_split_only_by_declaration()
+    listed = _written(sqlite_root, (later, early))
+
+    expected = min((early, later), key=lambda record: record.declared_at_utc)
+    assert listed[0] == expected.intent_id
+
+
+def test_sqlite_store_breaks_a_declaration_tie_by_pid(sqlite_root: Path) -> None:
+    """Sqlite owner, second key component."""
+
+    lower, higher = _queue_split_only_by_pid()
+    listed = _written(sqlite_root, (higher, lower))
+
+    expected = min((lower, higher), key=lambda record: record.agent_pid)
+    assert listed[0] == expected.intent_id

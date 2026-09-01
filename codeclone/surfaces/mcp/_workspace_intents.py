@@ -82,9 +82,6 @@ from ...workspace_intent.paths import (
     is_safe_intent_path as _is_safe_intent_path,
 )
 from ...workspace_intent.paths import (
-    record_sort_key as _record_sort_key,
-)
-from ...workspace_intent.paths import (
     unlink as _unlink,
 )
 from ._workspace_intent_paths import (
@@ -379,12 +376,14 @@ def list_workspace_intents(
     root: Path,
     exclude_stale: bool = True,
 ) -> tuple[WorkspaceIntentRecord, ...]:
-    records = [
+    # No sort: the store owns queue order and a filter preserves it. This
+    # facade passes the sequence through so that a store which got the order
+    # wrong is visible here rather than silently repaired.
+    return tuple(
         record
         for record in _intent_store(root).list_records()
         if not exclude_stale or stale_reason(record) is None
-    ]
-    return tuple(sorted(records, key=_record_sort_key))
+    )
 
 
 def list_workspace_intent_records_raw(

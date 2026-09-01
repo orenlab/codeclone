@@ -140,12 +140,15 @@ class FileWorkspaceIntentStore:
         return tuple(sorted(records, key=record_sort_key))
 
     def _active_records_unlocked(self) -> tuple[WorkspaceIntentRecord, ...]:
-        records = [
+        # No sort: ``_all_valid_records_unlocked`` is this store's one owner of
+        # queue order and a filter preserves it. Re-sorting here made a second
+        # owner of the same law, and a broken owner was silently corrected
+        # instead of caught.
+        return tuple(
             record
             for record in self._all_valid_records_unlocked()
             if not is_terminal_workspace_intent_status(record.status)
-        ]
-        return tuple(sorted(records, key=record_sort_key))
+        )
 
     def find(self, intent_id: str) -> WorkspaceIntentRecord | None:
         with registry_transaction(self):
@@ -302,12 +305,13 @@ class SqliteWorkspaceIntentStore:
             return self._load_all_records_unlocked()
 
     def _list_records_raw_unlocked(self) -> tuple[WorkspaceIntentRecord, ...]:
-        records = [
+        # No sort: ``_load_all_records_unlocked`` owns the order here, and a
+        # filter preserves it.
+        return tuple(
             record
             for record in self._load_all_records_unlocked()
             if not is_terminal_workspace_intent_status(record.status)
-        ]
-        return tuple(sorted(records, key=record_sort_key))
+        )
 
     def _active_records_unlocked(self) -> tuple[WorkspaceIntentRecord, ...]:
         return self._list_records_raw_unlocked()
@@ -399,12 +403,16 @@ class SqliteWorkspaceIntentStore:
         return cursor.rowcount > 0
 
     def _load_all_records_unlocked(self) -> tuple[WorkspaceIntentRecord, ...]:
+        # No ORDER BY: the sort at the end of this method owns the sequence.
+        # Asking SQL for it too applied the same law twice, and measurably
+        # worse -- ordering by the declared index turns a plain table scan into
+        # an index scan that must still fetch ``payload_json`` per row, for a
+        # query with no LIMIT that materialises everything anyway.
         try:
             rows = self._conn.execute(
                 """
                 SELECT payload_json
                 FROM workspace_intents
-                ORDER BY declared_at_utc, agent_pid, intent_id
                 """
             ).fetchall()
         except sqlite3.Error:

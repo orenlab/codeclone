@@ -1628,3 +1628,35 @@ def test_hygiene_blocks_start_edit_continue_own_wip() -> None:
         foreign,
         dirty_scope_policy=DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
     )
+
+
+def test_list_workspace_intents_passes_the_store_queue_order_through(
+    tmp_path: Path,
+) -> None:
+    """The facade inherits the order; it does not re-derive it.
+
+    ``list_workspace_intents`` filters the store's listing. Filtering keeps
+    the sequence, so re-sorting here would make the facade a second owner of
+    ``record_sort_key`` and would silently repair a store that got the order
+    wrong. The expected head is re-derived from the rule -- earliest
+    declaration -- and the fixture makes pid and intent_id contradict it.
+    """
+
+    now = workspace_intents.utc_now()
+    early = replace(
+        _record(intent_id="intent-ffffffff-002", pid=220_002),
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=3)),
+    )
+    later = replace(
+        _record(intent_id="intent-aaaaaaaa-001", pid=220_000),
+        declared_at_utc=workspace_intents.format_utc(now - timedelta(hours=1)),
+    )
+    for record in (later, early):  # written out of order on purpose
+        assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+
+    listed = workspace_intents.list_workspace_intents(
+        root=tmp_path, exclude_stale=False
+    )
+
+    expected = min((early, later), key=lambda record: record.declared_at_utc)
+    assert listed[0].intent_id == expected.intent_id
