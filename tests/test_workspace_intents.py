@@ -896,6 +896,17 @@ def test_workspace_intent_update_status_can_extend_ttl(tmp_path: Path) -> None:
     assert updated.declared_at_utc == record.declared_at_utc
 
 
+def _reset_candidate_declared_two_hours_ago() -> WorkspaceIntentRecord:
+    """A record whose declaration is unmistakably older than any reset of it."""
+
+    return replace(
+        _record(lease_renewed_delta=timedelta(minutes=-2)),
+        declared_at_utc=workspace_intents.format_utc(
+            workspace_intents.utc_now() - timedelta(hours=2)
+        ),
+    )
+
+
 def test_workspace_intent_ttl_extension_keeps_the_original_declaration_moment(
     tmp_path: Path,
 ) -> None:
@@ -909,11 +920,7 @@ def test_workspace_intent_ttl_extension_keeps_the_original_declaration_moment(
     ``record_sort_key`` -- the order the edit gate reads its queue in.
     """
 
-    declared_long_ago = workspace_intents.utc_now() - timedelta(hours=2)
-    record = replace(
-        _record(lease_renewed_delta=timedelta(minutes=-2)),
-        declared_at_utc=workspace_intents.format_utc(declared_long_ago),
-    )
+    record = _reset_candidate_declared_two_hours_ago()
     assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
 
     assert workspace_intents.update_workspace_intent_status(
@@ -927,9 +934,32 @@ def test_workspace_intent_ttl_extension_keeps_the_original_declaration_moment(
 
     updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
     assert updated.declared_at_utc == record.declared_at_utc
-    # The other side of the same law: the new hold must run from now, not from
-    # that old declaration -- an expiry measured from two hours ago would hand
-    # back an intent that is already dead.
+
+
+def test_workspace_intent_ttl_extension_runs_the_new_hold_from_now(
+    tmp_path: Path,
+) -> None:
+    """The opposite error, held apart on purpose.
+
+    Keeping the declaration moment must not drag the hold back with it. An
+    expiry measured from a declaration two hours old hands back an intent that
+    is already dead, which is how "do not restamp" turns into a reset that
+    resets nothing.
+    """
+
+    record = _reset_candidate_declared_two_hours_ago()
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+
+    assert workspace_intents.update_workspace_intent_status(
+        root=tmp_path,
+        pid=record.agent_pid,
+        start_epoch=record.agent_start_epoch,
+        intent_id=record.intent_id,
+        new_status="active",
+        ttl_seconds=workspace_intents.MIN_TTL_SECONDS,
+    )
+
+    updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
     renewed_at = datetime.fromisoformat(
         updated.lease_renewed_at_utc.replace("Z", "+00:00")
     )
@@ -937,8 +967,8 @@ def test_workspace_intent_ttl_extension_keeps_the_original_declaration_moment(
         declared_at=renewed_at,
         ttl_seconds=workspace_intents.MIN_TTL_SECONDS,
     )
-    assert not is_stale(updated)
     assert updated.lease_renewed_at_utc != record.lease_renewed_at_utc
+    assert not is_stale(updated)
 
 
 def test_workspace_intent_renew_lease_rejects_foreign_owner(tmp_path: Path) -> None:
