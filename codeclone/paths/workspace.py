@@ -11,16 +11,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final, Protocol
 
+from ..contracts.storage_paths import DEFAULT_CACHE_PATH
+
 WORKSPACE_DIR_NAME: Final = ".codeclone"
 CACHE_DB_DIR_NAME: Final = "db"
 LEGACY_WORKSPACE_DIR_PARTS: Final = (".cache", "codeclone")
 
-REL_CACHE_PATH: Final = f"{WORKSPACE_DIR_NAME}/{CACHE_DB_DIR_NAME}/cache.sqlite3"
-REL_REPORT_HTML_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.html"
-REL_REPORT_JSON_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.json"
-REL_REPORT_MARKDOWN_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.md"
-REL_REPORT_SARIF_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.sarif"
-REL_REPORT_TEXT_PATH: Final = f"{WORKSPACE_DIR_NAME}/report.txt"
+# The cache and the five report paths are product default paths with
+# cross-layer consumers, so they are owned by contracts.storage_paths and
+# not composed a second time here. What stays below is the workspace
+# layout: artifacts whose only reader is this ring.
 REL_AUDIT_DB_PATH: Final = f"{WORKSPACE_DIR_NAME}/db/audit.sqlite3"
 REL_INTENT_REGISTRY_DB_PATH: Final = f"{WORKSPACE_DIR_NAME}/db/intents.sqlite3"
 # Canonical run-store location — W1, ratified 2026-08-24 (§5: W2 separate
@@ -37,7 +37,6 @@ FORBIDDEN_WORKSPACE_GLOBS: Final = (
 )
 
 REGISTRY_DIR_PARTS: Final = (WORKSPACE_DIR_NAME, "intents")
-REPORT_JSON_PARTS: Final = (WORKSPACE_DIR_NAME, "report.json")
 
 
 class _PrinterLike(Protocol):
@@ -76,7 +75,10 @@ def default_cache_path(root: Path) -> Path:
     # the workspace root.  Shared infrastructure, separate semantics: db/ holds
     # both the immutable run authority and this disposable acceleration state,
     # and the cache may lag a published run but must never lead it.
-    return repo_workspace_dir(root) / CACHE_DB_DIR_NAME / "cache.sqlite3"
+    #
+    # Where it sits is not decided here: this projects the ratified
+    # DEFAULT_CACHE_PATH contract onto one repository root.
+    return root / DEFAULT_CACHE_PATH
 
 
 def legacy_repo_workspace_has_artifacts(root: Path) -> bool:
@@ -131,18 +133,11 @@ __all__ = [
     "LEGACY_WORKSPACE_DIR_PARTS",
     "REGISTRY_DIR_PARTS",
     "REL_AUDIT_DB_PATH",
-    "REL_CACHE_PATH",
     "REL_INTENT_REGISTRY_DB_PATH",
     "REL_MEMORY_DB_PATH",
-    "REL_REPORT_HTML_PATH",
-    "REL_REPORT_JSON_PATH",
-    "REL_REPORT_MARKDOWN_PATH",
-    "REL_REPORT_SARIF_PATH",
-    "REL_REPORT_TEXT_PATH",
     "REL_RUN_STORE_DB_PATH",
     "REL_SEMANTIC_EMBEDDING_CACHE_DIR",
     "REL_SEMANTIC_INDEX_PATH",
-    "REPORT_JSON_PARTS",
     "WORKSPACE_DIR_NAME",
     "default_cache_path",
     "emit_legacy_workspace_warnings",

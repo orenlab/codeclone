@@ -9,6 +9,17 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Final, Literal
 
+# The product default storage paths have one normative owner. They are
+# re-exported here so every consumer keeps the import name it already uses.
+from .storage_paths import (
+    DEFAULT_CACHE_PATH,
+    DEFAULT_HTML_REPORT_PATH,
+    DEFAULT_JSON_REPORT_PATH,
+    DEFAULT_MARKDOWN_REPORT_PATH,
+    DEFAULT_SARIF_REPORT_PATH,
+    DEFAULT_TEXT_REPORT_PATH,
+)
+
 BASELINE_SCHEMA_VERSION: Final = "3.0"
 # Version "3" carries two changes that land together and are not separable:
 # the norm CFG (post-terminator statements become real unreachable blocks, and
@@ -601,11 +612,6 @@ DEFAULT_MAX_CACHE_SIZE_MB: Final = 256
 DEFAULT_MAX_BASELINE_SIZE_MB: Final = 5
 DEFAULT_COVERAGE_MIN: Final = 50
 DEFAULT_BASELINE_PATH: Final = "codeclone.baseline.json"
-DEFAULT_HTML_REPORT_PATH: Final = ".codeclone/report.html"
-DEFAULT_JSON_REPORT_PATH: Final = ".codeclone/report.json"
-DEFAULT_MARKDOWN_REPORT_PATH: Final = ".codeclone/report.md"
-DEFAULT_SARIF_REPORT_PATH: Final = ".codeclone/report.sarif"
-DEFAULT_TEXT_REPORT_PATH: Final = ".codeclone/report.txt"
 
 # Complexity risk bands. Reviewed and kept unchanged through the Wave D
 # source-decision recalibration (see the health block below).
@@ -922,6 +928,7 @@ __all__ = [
     "DEFAULT_BASELINE_PATH",
     "DEFAULT_BLOCK_MIN_LOC",
     "DEFAULT_BLOCK_MIN_STMT",
+    "DEFAULT_CACHE_PATH",
     "DEFAULT_COHESION_THRESHOLD",
     "DEFAULT_COMPLEXITY_THRESHOLD",
     "DEFAULT_COUPLING_THRESHOLD",

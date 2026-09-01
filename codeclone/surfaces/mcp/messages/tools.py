@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from ....contracts import DEFAULT_JSON_REPORT_PATH
+
 ANALYZE_REPOSITORY: Final = (
     "Run a deterministic CodeClone analysis and register it as the "
     "latest MCP run. Pass an absolute repository root; relative roots "
@@ -213,7 +215,7 @@ GET_REPORT_SECTION: Final = (
     "metrics_detail paginates metric items. This tool no longer returns the "
     "whole report: the removed 'all' section answers with a typed refusal. "
     "For the full document, generate it on disk with "
-    "`codeclone <root> --json .codeclone/report.json` and read the file."
+    f"`codeclone <root> --json {DEFAULT_JSON_REPORT_PATH}` and read the file."
 )
 
 LIST_FINDINGS: Final = (

@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ....contracts import DEFAULT_HTML_REPORT_PATH
 from ....ui_messages import help as help_ui
 from ..console import make_query_console, supports_rich_console
 from ..types import PrinterLike
@@ -44,12 +45,12 @@ _DEMO_STATS_SCAN: tuple[str, ...] = (
 
 _DEMO_STATS_SUCCESS: tuple[str, ...] = (
     "741 files · 249,108 LOC · 10 known · 0 new",
-    "HTML report: .codeclone/report.html",
+    f"HTML report: {DEFAULT_HTML_REPORT_PATH}",
 )
 
 _DEMO_STATS_REGRESSION: tuple[str, ...] = (
     "NEW clones: 2 · health delta: -3",
-    "Review: .codeclone/report.html",
+    f"Review: {DEFAULT_HTML_REPORT_PATH}",
 )
 
 

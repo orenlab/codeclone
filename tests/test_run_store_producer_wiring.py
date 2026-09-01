@@ -62,6 +62,7 @@ from codeclone.canonical.semantic_grammar import (
     surface_head,
 )
 from codeclone.canonical.store import HeadState, RunStore
+from codeclone.contracts import DEFAULT_CACHE_PATH
 from codeclone.core._types import AnalysisResult
 from codeclone.core.canonical_snapshot import (
     ENV_RUN_STORE_ENABLED,
@@ -94,7 +95,7 @@ from codeclone.models import (
     RunStoreConfig,
 )
 from codeclone.paths.module_identity.inventory import build_module_registry
-from codeclone.paths.workspace import REL_CACHE_PATH, REL_RUN_STORE_DB_PATH
+from codeclone.paths.workspace import REL_RUN_STORE_DB_PATH
 from tests.conftest import RunStoreCorpusRunner
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -529,7 +530,7 @@ def test_a_default_run_publishes_nothing_at_all(
     assert not [
         found
         for found in corpus.glob("**/*.sqlite3")
-        if found != corpus / REL_CACHE_PATH
+        if found != corpus / DEFAULT_CACHE_PATH
     ]
 
 

@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from ..audit.reader import AnalysisRunSnapshot
     from ..surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 
+from ..contracts import DEFAULT_JSON_REPORT_PATH
 from ..contracts.scope_grammar import overlapping_entries
-from ..paths.workspace import REPORT_JSON_PARTS as _REPORT_PATH_PARTS
 from ..utils.run_identity import ReportRunIdentityError, report_run_identity
 from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
 
@@ -365,7 +365,7 @@ def _read_audit_latest_run(root_path: Path) -> AnalysisRunSnapshot | None:
 def _read_disk_report(
     root_path: Path,
 ) -> tuple[str | None, int | None, int | None, int | None, int | None, bool]:
-    report_path = root_path.joinpath(*_REPORT_PATH_PARTS)
+    report_path = root_path / DEFAULT_JSON_REPORT_PATH
     if not report_path.is_file():
         return None, None, None, None, None, False
     try:

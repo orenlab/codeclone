@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from ...contracts import FAMILY_CLONES
+from ...contracts import DEFAULT_JSON_REPORT_PATH, FAMILY_CLONES
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ...utils.finding_groups import (
@@ -30,7 +30,7 @@ _REMOVED_SECTION_NEXT_STEP: Final = (
     "get_report_section(section='meta'|'inventory'|'findings'|'metrics'|"
     "'metrics_detail'|'changed'|'derived'|'module_map'|'integrity'). "
     "For the whole canonical document, generate it on disk with "
-    "`codeclone <root> --json .codeclone/report.json` and read the file; "
+    f"`codeclone <root> --json {DEFAULT_JSON_REPORT_PATH}` and read the file; "
     "MCP no longer serves the full report."
 )
 

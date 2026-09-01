@@ -708,6 +708,7 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     ),
     # ── no stored output: locations, budgets, process shape and links
     "DEFAULT_BASELINE_PATH": (_LANE_NONE, "filesystem location"),
+    "DEFAULT_CACHE_PATH": (_LANE_NONE, "filesystem location"),
     "DEFAULT_HTML_REPORT_PATH": (_LANE_NONE, "filesystem location"),
     "DEFAULT_JSON_REPORT_PATH": (_LANE_NONE, "filesystem location"),
     "DEFAULT_MARKDOWN_REPORT_PATH": (_LANE_NONE, "filesystem location"),

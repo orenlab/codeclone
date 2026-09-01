@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..contracts import (
     DEFAULT_BASELINE_PATH,
+    DEFAULT_CACHE_PATH,
     DEFAULT_COVERAGE_MIN,
     DEFAULT_HTML_REPORT_PATH,
     DEFAULT_JSON_REPORT_PATH,
@@ -84,8 +85,7 @@ HELP_RENAMED_STRUCTURE = (
     "Advisory only; never enters clone gates or the baseline."
 )
 HELP_CACHE_PATH = (
-    "Path to the cache file.\n"
-    "If FILE is omitted, uses <root>/.codeclone/db/cache.sqlite3."
+    f"Path to the cache file.\nIf FILE is omitted, uses <root>/{DEFAULT_CACHE_PATH}."
 )
 HELP_CACHE_DIR_LEGACY = (
     "Legacy alias for --cache-path.\nPrefer --cache-path in new configurations."
@@ -277,7 +277,7 @@ HELP_TOUR_STEP_CLONES_BODY = (
 )
 HELP_TOUR_STEP_CACHE_TITLE = "Reusing structural facts"
 HELP_TOUR_STEP_CACHE_BODY = (
-    "The integrity-checked cache under `.codeclone/db/cache.sqlite3` speeds\n"
+    f"The integrity-checked cache under `{DEFAULT_CACHE_PATH}` speeds\n"
     "repeat runs.\n"
     "Cache is optimization only, never analysis truth. Reports record whether\n"
     "cache was used; profile mismatch or invalid cache is ignored safely."
@@ -298,7 +298,7 @@ HELP_TOUR_STEP_REPORTS_TITLE = "Publishing the same evidence"
 HELP_TOUR_STEP_REPORTS_BODY = (
     "The canonical report powers HTML triage, JSON, Markdown, SARIF 2.1, and text.\n"
     "Export SARIF for GitHub code scanning. Browse the public sample report from\n"
-    "the documentation site. Default HTML path: `.codeclone/report.html`."
+    f"the documentation site. Default HTML path: `{DEFAULT_HTML_REPORT_PATH}`."
 )
 HELP_TOUR_STEP_BASELINE_TITLE = "Baseline-aware CI gating"
 HELP_TOUR_STEP_BASELINE_BODY = (
