@@ -327,6 +327,76 @@ def candidate_projection_documents(
 
 
 # ---------------------------------------------------------------------------
+# The sink and violation rows, read twice.
+#
+# Same builder as the candidate fixture above and for the same reason: the
+# acceptance is read through a consumer surface (r4) while the projection it
+# compares is an r2 fact, so the splice lives here rather than in either
+# test module.  The violation projection deliberately omits ``locations``,
+# so the rebuilt document keeps the reported value for that ONE key -- the
+# fixture is for paging and byte comparison of what the projection claims,
+# and smuggling an invented location into it would make the omission
+# invisible exactly where it matters.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def authority_projection_documents(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, object], dict[str, object], str]:
+    """``(report document, same document rebuilt from the store, run id)``."""
+    from codeclone.canonical.authority_projection import (
+        VIOLATION_UNPROJECTED_COLUMNS,
+        sink_projection_rows,
+        violation_projection_rows,
+    )
+    from tests._projection_equivalence import build_corpus
+
+    base = tmp_path_factory.mktemp("authority-projection")
+    tree = base / "tree"
+    tree.mkdir()
+    corpus = build_corpus(tree, store_path=base / "runs.sqlite3")
+
+    document = json.loads(json.dumps(corpus.document))
+    rebuilt = json.loads(json.dumps(corpus.document))
+    items = rebuilt["metrics"]["families"]["semantic_authority"]["items"]
+    projected = {
+        "sink": iter(dict(row) for row in sink_projection_rows(corpus.stored_model)),
+        "violation": iter(
+            dict(row) for row in violation_projection_rows(corpus.stored_model)
+        ),
+    }
+
+    def _rebuild(item: dict[str, object]) -> dict[str, object]:
+        """One item, rebuilt where a projection owns it.
+
+        Assembled by walking the REPORT row's keys rather than the
+        projection's, so the rebuilt row carries the document builder's own
+        key ORDER -- without which a byte comparison of two serialized pages
+        would report a difference that is not one.  A key the projection
+        does not claim falls back to the reported value, and the only key
+        allowed to take that path is asserted below.
+        """
+
+        rows = projected.get(str(item.get("item_kind")))
+        if rows is None:
+            return item
+        row = next(rows)
+        assert set(row) - set(item) == set(), "the projection invented a column"
+        assert set(item) - set(row) == set(VIOLATION_UNPROJECTED_COLUMNS) or set(
+            item
+        ) == set(row), "the projection dropped a column nobody exempted"
+        return {key: row.get(key, value) for key, value in item.items()}
+
+    rebuilt["metrics"]["families"]["semantic_authority"]["items"] = [
+        _rebuild(item) for item in items
+    ]
+    for kind, rows in projected.items():
+        assert next(rows, None) is None, f"the {kind} projection outran the report"
+    return document, rebuilt, corpus.run_id
+
+
+# ---------------------------------------------------------------------------
 # The producer-wiring corpus runner (backend step 7).
 #
 # Lives here, beside the wire-freeze runner and for the same reason: the

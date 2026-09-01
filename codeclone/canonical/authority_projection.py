@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""The candidate row projection: canonical facts → the public row shape.
+"""The authority row projections: canonical facts → the public row shape.
 
 Backend P0 step 8.  ``surfaces/mcp/_authority_candidates`` hands the report's
 candidate row to its client WHOLE, so a consumer that moves onto the run
@@ -54,6 +54,20 @@ The projection reproduces the FULL published row, union placeholders
 included, in the document builder's own key order and the document
 builder's own candidate order — so equivalence against the report path is
 decidable byte for byte rather than field by field.
+
+The sink and violation rows follow, under the same law and with the same
+obligation to be measured rather than declared.  The nine unrepresented
+SINK columns all close: three are the function contract's, read off the
+stored graph node the producer built from the same entry (14 837/14 837
+self-repo rows and 292/292 corpus rows byte-identical, 0 disagreements);
+the rest are a ranking term, a provenance label and four union
+placeholders.  Of the seven VIOLATION columns, six close (143/143 corpus
+rows byte-identical over 22 columns) and ``locations`` does NOT — see
+:data:`VIOLATION_UNPROJECTED_COLUMNS`.  That single column is why
+``authority.violations`` stays ``partial`` while ``authority.sinks``
+becomes ``equivalent``: closing it means canonicalizing a value whose
+basis is outside the subset, which is a wire decision and not a
+projection.
 """
 
 from __future__ import annotations
@@ -65,17 +79,37 @@ from codeclone.canonical.authority_identity import (
     candidate_handle,
     candidate_level_score,
     candidate_total_order_key,
+    violation_handle,
 )
 from codeclone.canonical.codec import legacy_symbol_keys
 from codeclone.canonical.errors import CanonicalModelError
-from codeclone.canonical.identity import SymbolId
-from codeclone.canonical.model import CandidateRow, CanonicalModel
+from codeclone.canonical.identity import ProducerRoot, SymbolId
+from codeclone.canonical.model import (
+    CandidateRow,
+    CanonicalModel,
+    SinkRoleRow,
+    ViolationRow,
+)
+from codeclone.canonical.semantic_grammar import format_root_set
 from codeclone.contracts import AUTHORITY_ANALYSIS_REVISION
 from codeclone.domain.source_scope import SOURCE_KIND_ORDER, SOURCE_KIND_OTHER
 from codeclone.paths import classify_source_kind
 from codeclone.utils.coerce import as_int, as_sequence
 
 CANDIDATE_ROW_PROJECTION_CONTRACT: Final = "candidate_row_projection.v1"
+SINK_ROW_PROJECTION_CONTRACT: Final = "sink_row_projection.v1"
+VIOLATION_ROW_PROJECTION_CONTRACT: Final = "violation_row_projection.v1"
+
+#: The published violation columns this projection does NOT emit, and the
+#: only reason it may omit one: the value's derivation basis lies outside
+#: the stored subset, so S8.V.3 makes it a CANONICALIZATION decision rather
+#: than a projection gap.  ``locations`` is the producer's distillation of
+#: ``FunctionContractSummary.events`` -- the first three source sites of the
+#: sink's own events -- and that event stream is not a family of the
+#: wave-1..4 model.  Emitting ``[]`` here would be worse than omitting it:
+#: on a corpus whose violations happen to carry no location the empty list
+#: would read as a rebuilt column and mint an exemption nobody measured.
+VIOLATION_UNPROJECTED_COLUMNS: Final = ("locations",)
 
 #: The closed status vocabulary a candidate group assigns its producers.
 #: ``authoritative`` is a sink-level verdict and is unreachable per producer
@@ -108,13 +142,17 @@ def producer_source_kind(producers: Sequence[str]) -> str:
 class _AuthorityGraphView:
     """The stored authority graph, read for the conclusions it settles."""
 
-    __slots__ = ("_edges", "_signature", "_unresolved")
+    __slots__ = ("_edges", "_resolution", "_roots", "_signature", "_unresolved")
 
     def __init__(self, model: CanonicalModel) -> None:
         facts = model.facts.analysis
         self._signature = {
             node.function: node.effect_signature for node in facts.graph_nodes
         }
+        self._resolution = {
+            node.function: node.resolution_state for node in facts.graph_nodes
+        }
+        self._roots = {node.function: node.root_set for node in facts.graph_nodes}
         self._unresolved = {
             node.function: node.resolution_state == "unavailable"
             for node in facts.graph_nodes
@@ -123,6 +161,44 @@ class _AuthorityGraphView:
         for edge in facts.semantic_edges:
             edges.setdefault(edge.source, []).append(edge.target)
         self._edges = edges
+
+    def sink_columns(
+        self, symbol: SymbolId, legacy: Mapping[SymbolId, str]
+    ) -> tuple[list[str], str, str]:
+        """The three published sink columns the SINK role does not own.
+
+        ``SinkRoleRow`` carries only what the role itself owns -- the symbol
+        and the status weakest over its groups.  The other three are the
+        contract's, and the producer reads them off exactly the same
+        ``by_function[...]`` entry it built the graph node from
+        (``semantics/authority.py``: ``provenance_roots``,
+        ``effect_signatures[function]``, and the same ``unresolved``
+        ternary).  Same expression, same place -- so the basis is INSIDE
+        the subset and the value is derived, not stored twice.
+        """
+
+        self.require_known(frozenset({symbol}))
+        return (
+            format_root_set(self._roots[symbol], legacy),
+            self._signature[symbol],
+            self._resolution[symbol],
+        )
+
+    def producer_root_targets(self) -> set[SymbolId]:
+        """Every SYMBOL a stored root set names, so its legacy key exists.
+
+        A ``ProducerRoot`` names a symbol that need not be a sink, a
+        candidate producer or a violation party; rendering its row without
+        that key would raise ``KeyError`` deep inside the formatter instead
+        of failing where the population is decided.
+        """
+
+        return {
+            root.target
+            for root_set in self._roots.values()
+            for root in root_set
+            if isinstance(root, ProducerRoot)
+        }
 
     def reaches_member(self, source: SymbolId, members: frozenset[SymbolId]) -> bool:
         """Does ``source`` reach another member of its own group?"""
@@ -266,9 +342,189 @@ def candidate_projection_rows(
     )
 
 
+def _sink_row(
+    row: SinkRoleRow,
+    *,
+    graph: _AuthorityGraphView,
+    legacy: Mapping[SymbolId, str],
+) -> dict[str, object]:
+    """One published sink row, union placeholders included.
+
+    Nine columns of this row are not on ``SinkRoleRow``.  Three are the
+    contract's, read off the graph node the producer built from the same
+    entry (:meth:`_AuthorityGraphView.sink_columns`).  ``source_kind`` is
+    the document layer's ranking term over ``producers`` -- and a sink row
+    carries none, so the owner is asked with an empty group rather than
+    told the answer.  ``algorithm_revision`` is run provenance.  The
+    remaining four are the union container's placeholders: the authority
+    producer emits no ``score``, ``independence``, ``semantic_divergence``
+    or ``suppressed`` key on a sink item at all, so the document builder's
+    ``_as_int(None)`` / ``bool(None)`` settle them for every sink in every
+    configuration.
+    """
+
+    producer_root_ids, effect_signature, resolution_state = graph.sink_columns(
+        row.symbol, legacy
+    )
+    return {
+        "item_kind": "sink",
+        "sink_identity": legacy[row.symbol],
+        "violation_id": "",
+        "contract_id": "",
+        "kind": "",
+        "canonical_owner": "",
+        "authority_status": row.authority_status,
+        "producer_root_ids": producer_root_ids,
+        "effect_signature": effect_signature,
+        "resolution_state": resolution_state,
+        "unresolved_reasons": [],
+        "candidate_id": "",
+        "level": "",
+        "score": 0,
+        "producers": [],
+        "shared_fact": "",
+        "source_kind": producer_source_kind(()),
+        "independence": False,
+        "semantic_divergence": False,
+        "suppressed": False,
+        "locations": [],
+        "sink_statuses": [],
+        "algorithm_revision": AUTHORITY_ANALYSIS_REVISION,
+    }
+
+
+def sink_projection_rows(model: CanonicalModel) -> tuple[dict[str, object], ...]:
+    """Rebuild the published sink rows from canonical facts alone.
+
+    The document builder sorts the whole union by ``(item_kind,
+    contract_id, sink_identity, kind, -score, source_kind, -len(producers),
+    candidate tail)``.  Every one of those terms except ``sink_identity``
+    is constant across sink rows, and ``sink_identity`` is unique per sink
+    (the producer keys its sinks by function), so the order is total and
+    settled by that single term.
+    """
+
+    facts = model.facts.analysis
+    graph = _AuthorityGraphView(model)
+    legacy = legacy_symbol_keys(
+        {row.symbol for row in facts.sink_roles} | graph.producer_root_targets(),
+        model.file_modules,
+    )
+    return tuple(
+        sorted(
+            (_sink_row(row, graph=graph, legacy=legacy) for row in facts.sink_roles),
+            key=lambda row: str(row["sink_identity"]),
+        )
+    )
+
+
+def _violation_row(
+    row: ViolationRow,
+    *,
+    legacy: Mapping[SymbolId, str],
+) -> dict[str, object]:
+    """One published violation row, minus the column with no stored basis.
+
+    ``locations`` is absent by measurement, not by oversight -- see
+    :data:`VIOLATION_UNPROJECTED_COLUMNS`.  Of the six columns that ARE
+    rebuilt, ``producer_root_ids`` is stored outright (``root_set``),
+    ``source_kind`` is the document layer's ranking term over the stored
+    producer set, ``algorithm_revision`` is run provenance, and ``score``,
+    ``independence`` and ``semantic_divergence`` are union placeholders the
+    producer emits no key for on a violation item.
+    """
+
+    sink_identity = legacy[row.sink_identity]
+    producers = sorted(legacy[producer] for producer in row.producer_set)
+    return {
+        "item_kind": "violation",
+        "sink_identity": sink_identity,
+        "violation_id": violation_handle(
+            contract_id=row.contract_id,
+            kind=row.kind,
+            sink_identity=sink_identity,
+            producers=producers,
+        ),
+        "contract_id": row.contract_id,
+        "kind": row.kind,
+        "canonical_owner": legacy[row.canonical_owner],
+        "authority_status": row.authority_status,
+        "producer_root_ids": format_root_set(row.root_set, legacy),
+        "effect_signature": row.effect_signature,
+        "resolution_state": row.resolution_state,
+        "unresolved_reasons": [],
+        "candidate_id": "",
+        "level": "",
+        "score": 0,
+        "producers": producers,
+        "shared_fact": "",
+        "source_kind": producer_source_kind(producers),
+        "independence": False,
+        "semantic_divergence": False,
+        "suppressed": row.suppressed,
+        "sink_statuses": [],
+        "algorithm_revision": AUTHORITY_ANALYSIS_REVISION,
+    }
+
+
+def _violation_document_order(row: Mapping[str, object]) -> tuple[object, ...]:
+    """The document builder's violation ordering, restricted to violations.
+
+    ``item_kind`` and ``-score`` are constant here, and the candidate tail
+    is empty for every non-candidate item, so the builder's key reduces to
+    the terms below.  The last term is NOT one of the builder's: the
+    builder leans on a stable sort over the producer's own order, which is
+    ``(contract_id, kind, sink_identity, violation_id)`` -- so within a
+    group that ties on everything above, the surviving discriminator is the
+    handle.  Spelling it out makes the order total instead of inherited
+    from a list this projection never saw.
+    """
+
+    return (
+        str(row["contract_id"]),
+        str(row["sink_identity"]),
+        str(row["kind"]),
+        SOURCE_KIND_ORDER.get(str(row["source_kind"]), len(SOURCE_KIND_ORDER)),
+        -len(as_sequence(row["producers"])),
+        str(row["violation_id"]),
+    )
+
+
+def violation_projection_rows(model: CanonicalModel) -> tuple[dict[str, object], ...]:
+    """Rebuild the published violation rows, minus ``locations``."""
+
+    facts = model.facts.analysis
+    graph = _AuthorityGraphView(model)
+    symbols = {
+        symbol
+        for row in facts.violations
+        for symbol in (row.sink_identity, row.canonical_owner, *row.producer_set)
+    }
+    roots = {
+        root.target
+        for row in facts.violations
+        for root in row.root_set
+        if isinstance(root, ProducerRoot)
+    }
+    legacy = legacy_symbol_keys(
+        symbols | roots | graph.producer_root_targets(), model.file_modules
+    )
+    return tuple(
+        sorted(
+            (_violation_row(row, legacy=legacy) for row in facts.violations),
+            key=_violation_document_order,
+        )
+    )
+
+
 __all__ = [
     "CANDIDATE_PRODUCER_STATUSES",
     "CANDIDATE_ROW_PROJECTION_CONTRACT",
+    "SINK_ROW_PROJECTION_CONTRACT",
+    "VIOLATION_ROW_PROJECTION_CONTRACT",
+    "VIOLATION_UNPROJECTED_COLUMNS",
     "candidate_projection_rows",
     "producer_source_kind",
+    "sink_projection_rows",
+    "violation_projection_rows",
 ]

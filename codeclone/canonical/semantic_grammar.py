@@ -289,6 +289,76 @@ def parse_root_set(
     return frozenset(parse_effect_root(index, value, where) for value in values)
 
 
+def format_operation_head(head: OperationHead) -> str:
+    """The producer spelling of one operation head.
+
+    The inverse of :func:`parse_operation_head`, and it lives here for the
+    same reason the forward rule does: a head variant is a grammar fact,
+    and a second module deciding how a ``KnownModule`` spells itself is the
+    drift this owner exists to remove.
+    """
+
+    match head:
+        case KnownModule():
+            return head.module.module
+        case AnalysisFile():
+            return head.file.path
+        case OpaqueDottedHead():
+            return head.text
+
+
+def _operation_target_text(target: OperationTarget) -> str:
+    """``head`` alone for the opaque form, ``head:local`` otherwise.
+
+    The empty local name is not a missing value: it is the measured form
+    (21 of 1 080 corpus targets) in which the producer asserted ONE opaque
+    dotted string, and re-gluing a colon onto it would mint a spelling the
+    producer never wrote.
+    """
+
+    head = format_operation_head(target.head)
+    return f"{head}:{target.local_name}" if target.local_name else head
+
+
+def format_effect_root(root: EffectRoot, legacy: Mapping[SymbolId, str]) -> str:
+    """The producer spelling of one effect root -- inverse of the parse rule.
+
+    ``legacy`` supplies the ModuleKey-headed key of a ``ProducerRoot``'s
+    SYMBOL, for the same reason this module takes ``(path, module)`` pairs
+    instead of a registry handle: the head is the caller's fact, the
+    GRAMMAR over it is this module's.
+
+    Round-trip, not merely shape: ``parse_effect_root`` resolves a head
+    against the run's own registry, so a rendered root is only correct if
+    re-parsing it yields the same variant. That is a measured claim about
+    the (index, root) pair and is pinned by test, never assumed here.
+    """
+
+    match root:
+        case UnresolvedRoot():
+            return UNRESOLVED_ROOT_TEXT
+        case ProducerRoot():
+            return f"{ROOT_FAMILY_PRODUCER}:{legacy[root.target]}"
+        case EffectLabelRoot():
+            return f"{ROOT_FAMILY_EFFECT}:{root.effect_kind}:{root.label}"
+        case OperationRoot():
+            target = _operation_target_text(root.target)
+            return f"{ROOT_FAMILY_OPERATION}:{root.operation_kind}:{target}"
+
+
+def format_root_set(
+    roots: Iterable[EffectRoot], legacy: Mapping[SymbolId, str]
+) -> list[str]:
+    """One root set as the published column: rendered, then sorted.
+
+    Sorted here because the document builder sorts the strings it was
+    handed, and a set has no order to preserve -- the ordering law belongs
+    with the spelling law, not with each consumer that rebuilds a row.
+    """
+
+    return sorted(format_effect_root(root, legacy) for root in roots)
+
+
 def parse_symbol_set(
     index: IdentityIndex, values: Iterable[str], where: str
 ) -> frozenset[SymbolId]:
@@ -305,6 +375,9 @@ __all__ = [
     "OperationTarget",
     "SemanticGrammarError",
     "build_identity_index",
+    "format_effect_root",
+    "format_operation_head",
+    "format_root_set",
     "parse_dead_code_entity",
     "parse_effect_root",
     "parse_endpoint",

@@ -75,7 +75,11 @@ from codeclone.canonical.authority_identity import (
     legacy_symbol_key,
     violation_handle,
 )
-from codeclone.canonical.authority_projection import candidate_projection_rows
+from codeclone.canonical.authority_projection import (
+    candidate_projection_rows,
+    sink_projection_rows,
+    violation_projection_rows,
+)
 from codeclone.contracts.schemas import ReportMeta
 from codeclone.core._types import (
     AnalysisResult,
@@ -1119,6 +1123,12 @@ LANES: tuple[LaneSpec, ...] = (
             "suppressed",
             "violation_id",
         ),
+        # Six of the seven remaining columns are rebuilt: a stored root
+        # set, a document-layer ranking term over the stored producers, a
+        # run-provenance label and three union placeholders. The seventh,
+        # ``locations``, has no stored basis at all -- the projection does
+        # not emit it, so this lane stays honestly ``partial``.
+        projection=violation_projection_rows,
     ),
     LaneSpec(
         name="authority.sinks",
@@ -1127,6 +1137,10 @@ LANES: tuple[LaneSpec, ...] = (
         report_reader=_report_sinks,
         model_reader=_model_sinks,
         represented_fields=("authority_status", "item_kind", "sink_identity"),
+        # The other nine published columns are rebuilt, not stored: three
+        # contract columns the stored graph node already carries, a ranking
+        # term, a run-provenance label and the union's four placeholders.
+        projection=sink_projection_rows,
     ),
     LaneSpec(
         name="dependencies.relations",

@@ -143,7 +143,20 @@ class GraphNodeRow:
 
 @dataclass(frozen=True, slots=True)
 class SinkRoleRow:
-    """SINK role payload: only what the role itself owns (§8.1)."""
+    """SINK role payload: only what the role itself owns (§8.1).
+
+    Nine published columns are absent, and none of them was canonicalized:
+    ``effect_signature``, ``producer_root_ids`` and ``resolution_state``
+    belong to the function CONTRACT and are read off the same
+    ``by_function`` entry the producer builds the graph node from — the
+    §8.V.3 test lands inside the subset, so storing them would be one fact
+    in two places.  ``source_kind`` is a document-layer ranking term over a
+    producer list a sink row does not carry, ``algorithm_revision`` is run
+    provenance, and ``score``/``independence``/``semantic_divergence``/
+    ``suppressed`` are the union container's placeholders: the authority
+    producer emits no such key on a sink item at all.  The one owner that
+    rebuilds them is ``codeclone.canonical.authority_projection``.
+    """
 
     symbol: SymbolId
     authority_status: str
@@ -412,6 +425,18 @@ class ViolationRow:
     ``sink_identity`` and every producer must carry the FUNCTION role (the
     producer indexes the contract table with both); ``canonical_owner`` is a
     registry declaration and carries no role requirement.
+
+    Of the seven published columns this row does not carry, six are rebuilt
+    by ``codeclone.canonical.authority_projection``: ``producer_root_ids``
+    is ``root_set`` rendered, ``source_kind`` is a document-layer ranking
+    term over the stored producer set, ``algorithm_revision`` is run
+    provenance, and ``score``/``independence``/``semantic_divergence`` are
+    union placeholders the producer emits no key for.  The seventh,
+    ``locations``, is the one authority column measured NOT derivable: the
+    producer distills it from ``FunctionContractSummary.events``, and that
+    event stream is no family of this subset — under §8.V.3 the basis lies
+    OUTSIDE, so closing it is a canonicalization decision (a new stored
+    column, and therefore a wire change), not a projection.
     """
 
     contract_id: str

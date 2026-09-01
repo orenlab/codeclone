@@ -92,9 +92,19 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATABLE = (
     "analysis_population.states",
     "authority.candidates",
+    "authority.sinks",
     "dependencies.relations",
     "dependencies.occurrences",
 )
+
+#: The one authority column no projection can rebuild, and the lane it
+#: keeps ``partial``. ``locations`` is the violation's source evidence,
+#: distilled by the producer from ``FunctionContractSummary.events``; the
+#: event stream is not a family of the wave-1..4 subset, so under S8.V.3
+#: the basis lies OUTSIDE the subset and the value must be canonicalized
+#: rather than derived. Named here so the remaining gap is a measured
+#: number, not an omission.
+_VIOLATION_GAP = ("locations",)
 
 #: Measured, not assumed: the report's dead-code family is a classification
 #: over the observation population, and the model carries the population.
@@ -168,6 +178,25 @@ def test_the_migration_frontier_is_exactly_the_equivalent_lanes(
         if lane.lane in _MIGRATABLE:
             assert lane.verdict == VERDICT_EQUIVALENT
             assert lane.unrepresented_fields == ()
+
+
+def test_the_violation_lane_keeps_exactly_one_measured_gap(
+    corpus: ProjectionCorpus,
+) -> None:
+    """What the violation projection cannot rebuild, stated as a number.
+
+    Six of the seven unrepresented violation columns are rebuilt from
+    stored facts; ``locations`` is not, because its basis -- the producer's
+    per-function event stream -- is not a family this subset carries. The
+    lane therefore stays ``partial`` on purpose, and the assertion is an
+    equality rather than a membership so that a NEW gap appearing here
+    fails instead of hiding behind the one we already know about.
+    """
+
+    report = compare_projections(corpus.document, corpus.stored_model)
+    lane = report.lane("authority.violations")
+    assert lane.verdict == VERDICT_PARTIAL
+    assert lane.unrepresented_fields == _VIOLATION_GAP
 
 
 def test_a_partial_lane_is_never_migratable(corpus: ProjectionCorpus) -> None:
@@ -324,9 +353,9 @@ def test_an_undeclared_metric_family_is_unmeasured_not_equivalent(
     assert report.lane("security_surfaces.items").witness == WITNESS_DECLARED
     # Exactly the withdrawal's reach: the two dependency lanes lose their
     # witness and the population lane disagrees with the run's own
-    # declaration. A lane of another family keeps its verdict, which is what
-    # makes this a withdrawal rather than a blanket refusal.
-    assert report.migratable_lanes == ("authority.candidates",)
+    # declaration. The lanes of another family keep their verdict, which is
+    # what makes this a withdrawal rather than a blanket refusal.
+    assert report.migratable_lanes == ("authority.candidates", "authority.sinks")
 
 
 def test_a_withheld_observation_lane_is_unmeasured_not_equivalent(
