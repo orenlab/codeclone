@@ -85,6 +85,14 @@ def _corpus(tmp_path: Path) -> tuple[BootstrapResult, Path]:
     return boot, tmp_path / "cache.sqlite3"
 
 
+def _reloaded(tmp_path: Path, cache_path: Path) -> Cache:
+    """A fresh Cache over an existing store, loaded and nothing more."""
+
+    warm = Cache(cache_path, root=tmp_path)
+    warm.load()
+    return warm
+
+
 def _cold_and_saved(tmp_path: Path) -> tuple[BootstrapResult, Path, PipelineRun]:
     """Write the corpus, run it cold, and leave a saved store behind."""
 
@@ -242,6 +250,56 @@ def test_a_second_run_inside_the_window_rewrites_no_recency_marks(
     assert _epochs(cache_path) == before
 
 
+def test_the_lane_reader_is_one_connection_not_one_per_entry(
+    tmp_path: Path,
+) -> None:
+    """Materialising N entries opens one connection, not N.
+
+    Measured before this held: a warm run over 1133 files opened 1133
+    read-only connections and paid 33 MB of filesystem output for it -- the
+    N+1 shape the observer's db_cost section exists to name, built by hand.
+
+    The handle identity is the assertion because a count of opens is not
+    observable from outside; the same object serving every lane is.
+    """
+
+    _boot, cache_path, _cold = _cold_and_saved(tmp_path)
+
+    warm = _reloaded(tmp_path, cache_path)
+    assert warm._reader is None, "a load must not open the lane reader"
+
+    handles: list[CacheBackend | None] = []
+    for name in sorted(_MODULES):
+        assert warm.get_file_entry(str(tmp_path / name)) is not None
+        handles.append(warm._reader)
+
+    assert len(handles) == len(_MODULES)
+    assert all(handle is handles[0] for handle in handles)
+    assert handles[0] is not None
+
+    # And it is released rather than left open for the process lifetime.
+    warm.release_loaded_entries()
+    assert warm._reader is None
+
+
+def test_the_recency_window_is_derived_from_the_ttl_it_serves() -> None:
+    """Pin the rule the number comes from, not the number.
+
+    ``test_a_run_past_the_window_does_refresh_the_marks`` reads the constant to
+    build its own deadline, so it stays green for *any* value of it -- the
+    relative-invariant hole. Measured: setting the window to 2^40 seconds left
+    that test green while marks could never move again.
+
+    The rule is stated where the constant lives: coarse enough that a TTL
+    measured in days cannot tell the difference, and strictly positive, because
+    a zero window is the per-run write amplification that made it necessary. So
+    the window must be inside a day, and above nothing.
+    """
+
+    one_day = 24 * 60 * 60
+    assert 0 < RECENCY_GRANULARITY_SECONDS <= one_day
+
+
 def test_a_run_past_the_window_does_refresh_the_marks(tmp_path: Path) -> None:
     """The other side: coarse is not the same as never.
 
@@ -341,8 +399,7 @@ def test_a_save_writes_only_the_rows_that_moved(tmp_path: Path) -> None:
 
     _boot, cache_path, _cold = _cold_and_saved(tmp_path)
 
-    warm = Cache(cache_path, root=tmp_path)
-    warm.load()
+    warm = _reloaded(tmp_path, cache_path)
     files = warm.data["files"]
     dirty = getattr(files, "dirty", None)
     deleted = getattr(files, "deleted", None)

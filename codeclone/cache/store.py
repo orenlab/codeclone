@@ -199,6 +199,7 @@ class Cache:
         "_module_dependent_profile",
         "_module_names_by_runtime_path",
         "_module_neutral_profile",
+        "_reader",
         "_used_wire_paths",
         "_write_enabled",
         "_written_bytes",
@@ -292,6 +293,11 @@ class Cache:
         # from one nothing has wanted for weeks.
         self._used_wire_paths: set[str] = set()
         self._written_bytes: int = 0
+        # One read connection for the whole materialisation phase. Opening one
+        # per entry made a warm run open 1133 of them -- the N+1 shape the
+        # observer's db_cost section exists to catch, measured at 33 MB of
+        # extra filesystem output per run before it was closed.
+        self._reader: CacheBackend | None = None
         # A store whose load was refused must not survive piecewise. See
         # _write_backend_rows.
         self._discard_store: bool = False
@@ -660,6 +666,7 @@ class Cache:
             return
         if not self._dirty:
             return
+        self._close_reader()
         tracked = tracked_files(self.data)
         generation = self._generation + 1
         try:
@@ -833,6 +840,7 @@ class Cache:
             # Releasing drops entries from memory, never from the store: the
             # rows stay on disk and a later save must not read this as a
             # deletion of every one of them.
+            self._close_reader()
             self.data["files"] = new_tracked_files()
             # Identity stays. Releasing frees the lanes, which is where the
             # memory is; forgetting which rows exist would turn the next
@@ -881,6 +889,26 @@ class Cache:
             return entry_obj
         return self._materialize(runtime_lookup_key)
 
+    def _lane_reader(self) -> CacheBackend | None:
+        """The one read connection the materialisation phase shares.
+
+        Opened on first need and held until the run stops reading. A
+        connection per entry is not a small waste: it is the N+1 shape, and it
+        cost 33 MB of filesystem output per warm run on this repository.
+        """
+
+        if self._reader is None:
+            try:
+                self._reader = CacheBackend(self.path, read_only=True)
+            except (CacheBackendUnusable, OSError):
+                return None
+        return self._reader
+
+    def _close_reader(self) -> None:
+        if self._reader is not None:
+            self._reader.close()
+            self._reader = None
+
     def _mark_used(self, runtime_path: str) -> None:
         known = self._identity.get(runtime_path)
         if known is not None:
@@ -899,10 +927,10 @@ class Cache:
             return None
         file_id, identity = known
         try:
-            with (
-                span(name="cache.backend.load_generation") as lane_span,
-                CacheBackend(self.path, read_only=True) as backend,
-            ):
+            backend = self._lane_reader()
+            if backend is None:
+                return None
+            with span(name="cache.backend.load_generation") as lane_span:
                 neutral = backend.read_lane(TABLE_NEUTRAL, file_id)
                 dependent = backend.read_lane(TABLE_DEPENDENT, file_id)
                 lane_span.set_counter(
