@@ -70,6 +70,13 @@ _AGENTS_DOC: Final = _REPO_ROOT / "AGENTS.md"
 _DOCS_INTERNAL: Final = _REPO_ROOT / "docs" / "internal"
 _DOCS_REFERENCE: Final = _REPO_ROOT / "docs" / "reference"
 _JSON_OUTPUT_DOC: Final = _DOCS_REFERENCE / "json-output.md"
+_CLI_REFERENCE_DOC: Final = _DOCS_REFERENCE / "cli.md"
+_CLI_HELP_GOLDEN: Final = (
+    _REPO_ROOT / "tests" / "fixtures" / "contract_snapshots" / "cli_help.txt"
+)
+_DOC_FLAG_ROW_RE: Final = re.compile(r"^\|\s*`(--[a-z0-9-]+)[^`]*`\s*\|(.*)$")
+_DOC_DEFAULT_RE: Final = re.compile(r"Default:\s*(.+?)\s*(?:\||$)")
+_GOLDEN_OPTION_RE: Final = re.compile(r"^  (--[a-z0-9-]+)")
 
 pytestmark = pytest.mark.skipif(
     not _AGENTS_DOC.is_file() or not _DOCS_INTERNAL.is_dir(),
@@ -285,4 +292,93 @@ def test_json_output_doc_states_every_novelty_word_the_producers_emit() -> None:
     missing = sorted(word for word in emitted if f"`{word}`" not in doc_text)
     assert not missing, (
         f"docs/reference/json-output.md omits novelty words the report emits: {missing}"
+    )
+
+
+def _golden_option_blocks() -> dict[str, str]:
+    """Map each long option in the committed help golden to its help text.
+
+    argparse prints an option at a two-space indent and wraps its help at a
+    deeper one, so a block runs from the option line until the indentation
+    returns or a blank line ends the group.
+    """
+
+    blocks: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in _CLI_HELP_GOLDEN.read_text(encoding="utf-8").splitlines():
+        match = _GOLDEN_OPTION_RE.match(line)
+        if match:
+            current = match.group(1)
+            blocks.setdefault(current, []).append(line[2:].strip())
+            continue
+        if current is not None and line.startswith(" " * 24):
+            blocks[current].append(line.strip())
+            continue
+        current = None
+    return {option: " ".join(parts) for option, parts in blocks.items()}
+
+
+def _doc_default_claims() -> dict[str, str]:
+    """Every ``Default: X`` the CLI reference states for a ``codeclone`` option.
+
+    Rows are skipped by SECTION, not by flag name: the same page documents
+    ``codeclone-mcp``, a separate launcher with its own help text, and both
+    producers own a ``--debug``. Matching on the name alone read the MCP row's
+    "Default: disabled" against the analyzer's ``--debug`` block and reported a
+    drift that does not exist -- measured on the first run of this guard.
+    """
+
+    claims: dict[str, str] = {}
+    foreign_producer = False
+    for line in _CLI_REFERENCE_DOC.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            foreign_producer = "codeclone-mcp" in line
+            continue
+        row = None if foreign_producer else _DOC_FLAG_ROW_RE.match(line)
+        default = None if row is None else _DOC_DEFAULT_RE.search(row.group(2))
+        if row is not None and default is not None:
+            claims[row.group(1)] = default.group(1).strip().strip("`").rstrip(".")
+    return claims
+
+
+def test_the_cli_reference_states_the_defaults_the_cli_actually_prints() -> None:
+    """A default written by hand in the reference table must match the producer.
+
+    ``test_version_literals_in_docs_match_contracts`` cannot see this class:
+    its matcher fires only on a claim that NAMES a constant, and ``DEFAULT_*``
+    is excluded there on purpose. A table row reading "Maximum cache size.
+    Default: 50" names nothing, so nothing could check it -- and it said 50
+    while ``DEFAULT_MAX_CACHE_SIZE_MB`` was 256, a public reference page off by
+    5.12x, for as long as it took someone to read both pages side by side.
+
+    The authority here is not the constants module but the CLI's own committed
+    ``--help`` golden, which is regenerated from the producer. That keeps this
+    guard free of a second inventory: a flag whose default moves reaches the
+    golden through the normal regeneration, and a doc row that did not follow
+    reds here.
+
+    Deliberately conservative, in the same spirit as the checks above. Only
+    long options appearing in BOTH the table and the golden participate, and
+    only the ``Default:`` shape is read from the table; a default stated in
+    prose elsewhere on the page is not absent, only unmeasured.
+    """
+
+    golden = _golden_option_blocks()
+    claims = _doc_default_claims()
+    compared = {option: value for option, value in claims.items() if option in golden}
+
+    # A parser that matched nothing would pass this test in silence, which is
+    # the failure mode a guard like this dies of. Pin the population, and pin
+    # by name the row whose drift is the reason the guard exists.
+    assert len(compared) >= 8, sorted(compared)
+    assert "--max-cache-size-mb" in compared
+
+    mismatched = sorted(
+        f"{option}: reference says {value!r}, help says {golden[option]!r}"
+        for option, value in compared.items()
+        if not re.search(rf"(?<![\w.-]){re.escape(value)}(?![\w-])", golden[option])
+    )
+    assert not mismatched, (
+        "docs/reference/cli.md states defaults the CLI does not print: "
+        + "; ".join(mismatched)
     )
