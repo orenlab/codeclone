@@ -118,6 +118,7 @@ from tests._cache_store_fixtures import (
     META_KEY_CHECKSUM,
     META_KEY_FINGERPRINT,
     META_KEY_PYTHON_TAG,
+    META_KEY_SCHEMA,
     META_KEY_VERSION,
     TABLE_NEUTRAL,
     envelope_checksum,
@@ -2056,6 +2057,29 @@ def test_cache_load_foreign_database_is_refused_and_left_untouched(
         }
     assert tables == {"somebody_elses"}
     assert cache_path.read_bytes() == before
+
+
+def test_a_store_from_an_older_physical_schema_is_a_version_mismatch(
+    tmp_path: Path,
+) -> None:
+    """An earlier schema generation is a mismatch, not damage.
+
+    Without this gate the load reaches a table the old generation never had
+    and reports corruption, which sends a user looking for a fault that is not
+    there. The store is intact; it is simply the previous shape.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _save_single_cache_entry(cache_path)
+    _write_cache_meta(cache_path, **{META_KEY_SCHEMA: "1"})
+
+    cache = Cache(cache_path, root=cache_path.parent)
+    cache.load()
+
+    assert cache.load_status is CacheStatus.VERSION_MISMATCH
+    assert cache.load_warning is not None
+    assert "schema mismatch" in cache.load_warning
+    assert cache.data["files"] == {}
 
 
 def test_cache_load_missing_version_mark(tmp_path: Path) -> None:
