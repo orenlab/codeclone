@@ -77,7 +77,7 @@ Manage the agent change-intent lifecycle for the current MCP session and the opt
 **`check_patch_contract(mode, ...)`**
 Pre-edit budget query (`mode="budget"`) or post-edit structural verification (`mode="verify"`). Composes stored runs, gate evaluation, run comparison, and the session-local change intent without running analysis or mutating repository state.
 
-**`get_blast_radius(paths)`**
+**`get_blast_radius(files, run_id, root, ...)`**
 Return the deterministic structural risk boundary for changing the given files: direct dependents, clone cohort members, coverage gaps, do-not-touch paths, and review-only context. Derived from the canonical report; no new analysis is performed.
 
 ### Triage Tools
@@ -85,10 +85,10 @@ Return the deterministic structural risk boundary for changing the given files: 
 **`get_production_triage(run_id)`**
 Production-first triage view: health, cache freshness, production hotspots, and suggestions. Prioritizes issues likely to affect production over global metrics. Use as default first-pass review on noisy repositories.
 
-**`list_findings(run_id, family, scope, limit, ...)`**
+**`list_findings(run_id, family, severity, limit, ...)`**
 List canonical finding groups with deterministic ordering and optional filters. Returns compact summary cards by default. Prefer `list_hotspots` or focused `check_*` tools for first-pass triage.
 
-**`list_hotspots(run_id, ...)`**
+**`list_hotspots(kind, run_id, ...)`**
 Return one of the derived CodeClone hotlists for the latest or specified run, using compact summary cards by default. Prefer this for first-pass triage before broader `list_findings` calls.
 
 ### Focused Check Tools
@@ -101,7 +101,7 @@ Return clone / cohesion / complexity / coupling / dead-code findings respectivel
 **`check_authority`**
 Return active canonical semantic-authority violation findings for one run, with deterministic ordering and bounded detail. See [Semantic authority governance](../concepts/semantic-authority.md).
 
-**`get_finding(finding_id, detail)`**
+**`get_finding(finding_id, detail_level)`**
 Return a single canonical finding group by short or full id. Unknown ids return a structured `status="not_found"` response instead of an error.
 
 **`get_remediation(finding_id)`**
@@ -115,7 +115,7 @@ Return ranked, evidence-linked engineering memory for the declared edit scope. R
 **`manage_engineering_memory(root, action, ...)`**
 Engineering memory governance for agents. Actions: `refresh_from_run`, `record_candidate`, `promote_experience`, `validate_claims`, `propose_from_receipt`, `rebuild_semantic_index`, `rebuild_trajectories`, `enqueue_projection_rebuild`, `projection_rebuild_status`, `run_projection_jobs_once`. Approve, reject, and archive are not available to agents.
 
-**`query_engineering_memory(mode, ...)`**
+**`query_engineering_memory(root, mode, ...)`**
 Mode-based engineering memory inspection router. Modes include `search`, `get`, `for_path`, `for_symbol`, `stale`, `drafts`, `coverage`, `status`, `trajectory_status`, `trajectory_search`, `trajectory_get`, `experience_get`, `trajectory_anomalies`, `trajectory_agents`, and `trajectory_dashboard`. Read-only.
 
 **`get_memory_projection_page(root, cursor, ...)`**
@@ -126,24 +126,24 @@ Return an exact page for a `get_relevant_memory` omitted tail using the digest-b
 **`create_review_receipt(...)`**
 Generate a deterministic, auditable review receipt from stored MCP state: report provenance, intent scope, blast radius, reviewed findings, patch-contract status, and human decision points. Markdown or JSON output; does not mutate repository state.
 
-**`get_review_receipt(run_id, receipt_digest)`**
+**`get_review_receipt(root, run_id, receipt_digest, ...)`**
 Fetch a durably stored review receipt from the audit trail exactly as it was created. Read-only.
 
-**`get_patch_trail(run_id, patch_trail_digest)`**
+**`get_patch_trail(root, run_id, patch_trail_digest, ...)`**
 Fetch the full forensic patch trail from the audit trail: declared/changed/untouched files, scope check, verification, workspace hygiene, and evidence. Read-only.
 
-**`get_blast_artifact(run_id, blast_artifact_id, ...)`**
+**`get_blast_artifact(root, run_id, blast_artifact_id, ...)`**
 Fetch a durably stored start-time blast artifact from the audit trail, exactly as it was persisted when `start_controlled_change` produced its slim summary. Read-only.
 
-**`validate_review_claims(review_text, ...)`**
+**`validate_review_claims(text, ...)`**
 Validate cited review text against canonical report semantics: catches Security Surfaces called vulnerabilities, report-only signals called CI failures, known baseline debt called new, and other deterministic mischaracterizations.
 
 ### Navigation Tools
 
-**`generate_pr_summary(run_id, changed_files, format)`**
+**`generate_pr_summary(run_id, changed_paths, format)`**
 Generate a PR-friendly CodeClone summary. Format `markdown` (default) produces LLM-facing compact output; `json` is for machine post-processing.
 
-**`compare_runs(run_id_a, run_id_b)`**
+**`compare_runs(before_run_id, after_run_id, ...)`**
 Compare two runs by finding groups and health deltas. Returns incomparable when repository roots or settings differ.
 
 **`help(topic)`**
@@ -163,7 +163,7 @@ List in-memory reviewed findings for the current or specified run.
 **`mark_finding_reviewed(finding_id, run_id)`**
 Mark a finding reviewed in this MCP session only; cleared on process restart or `clear_session_runs`.
 
-**`query_platform_observability(section, ...)`**
+**`query_platform_observability(root, section, ...)`**
 Read-only sectioned diagnostics over CodeClone's own runtime telemetry (not part of user-facing repository analysis). Intended for CodeClone maintainers, not for user-facing quality claims about a repository.
 
 ## Inputs and outputs
