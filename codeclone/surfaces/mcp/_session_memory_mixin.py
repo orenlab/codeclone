@@ -895,26 +895,30 @@ def _attach_budgeted_memory_retrieval_context(
     limit: int | None = None,
 ) -> dict[str, object]:
     effective_limit = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT if limit is None else limit
+    # The envelope describes the response, so it publishes the level the
+    # response actually carries. Echoing the raw request here made one message
+    # say `normal` in the envelope and `compact` in the payload under the same
+    # field name; the request is preserved by detail_level_resolution instead.
     normalized_detail = "full" if detail_level == "full" else "compact"
     publishable = dict(payload)
     projection_request = publishable.pop("_memory_projection_request", None)
     if normalized_detail == "full":
         return attach_memory_retrieval_context_governance(
             publishable,
-            detail_level=detail_level,
+            detail_level=normalized_detail,
             max_records=max_records,
             limit=effective_limit,
         )
     packed, omitted = _pack_compact_memory_response(
         publishable,
-        detail_level=detail_level,
+        detail_level=normalized_detail,
         max_records=max_records,
         limit=effective_limit,
         projection_request=projection_request,
     )
     return attach_memory_retrieval_context_governance(
         packed,
-        detail_level=detail_level,
+        detail_level=normalized_detail,
         max_records=max_records,
         evidence_omitted=omitted,
         limit=effective_limit,

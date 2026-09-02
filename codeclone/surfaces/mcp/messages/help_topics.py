@@ -877,6 +877,22 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "(target <=300 chars). detail_level=full or mode=get for full text."
             ),
             (
+                "detail_level accepts compact|summary|normal|full, but only two "
+                "projections exist: summary and normal are aliases of compact, "
+                "and mode=get/experience_get always project in full. When the "
+                "level returned differs from the one asked for, the response "
+                "carries detail_level_resolution with requested, effective, "
+                "reason and next_step."
+            ),
+            (
+                "Every projected record states created_at_utc and "
+                "updated_at_utc; the full shape adds created_by and, when set, "
+                "last_verified_at_utc, approved_at_utc, created_on_branch and "
+                "created_at_commit. Record expiry is not projected: retention "
+                "is decided from status, a configured window and "
+                "updated_at_utc, never from a stored per-record deadline."
+            ),
+            (
                 "Statements accept a safe Markdown subset: one optional "
                 "'## ' title as the first line (H2 is the enforced level), "
                 "`code spans` for paths/symbols/digests, **bold**/*italic*, "

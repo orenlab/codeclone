@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import wraps
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, ParamSpec
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
@@ -124,13 +125,123 @@ QUERY_MODES: tuple[str, ...] = (
 
 MemoryDetailLevel = Literal["compact", "full"]
 
+#: Parameters of the memory query router, carried through the reconciler
+#: so wrapping it costs the caller no signature.
+_QueryParams = ParamSpec("_QueryParams")
+
+#: The level a caller gets by asking for nothing. Named once so the retrieval
+#: entry points and the reconciler that reads their keyword cannot drift into
+#: disagreeing about what "unspecified" meant.
+DEFAULT_MEMORY_DETAIL_LEVEL: str = "compact"
+
+#: Requested levels that resolve to the compact projection. The accepted input
+#: vocabulary is wider than the projection vocabulary: ``summary`` and
+#: ``normal`` are aliases kept for callers, not distinct projections.
+_COMPACT_DETAIL_LEVEL_REQUESTS: frozenset[str] = frozenset(
+    {"compact", "summary", "normal"}
+)
+
+#: Closed set of reasons a response carries a level other than the requested
+#: one. Each ships with an executable next step: a typed outcome that names no
+#: way forward is a downgrade the caller still cannot act on.
+DETAIL_LEVEL_ALIAS_REASON: str = "requested_level_is_an_alias_of_compact"
+DETAIL_LEVEL_MODE_FIXED_REASON: str = "mode_projection_is_always_full"
+
+_DETAIL_LEVEL_NEXT_STEP: dict[str, str] = {
+    DETAIL_LEVEL_ALIAS_REASON: (
+        "Pass detail_level='full' for complete statements, record payload and "
+        "birth provenance; 'compact', 'summary' and 'normal' all return the "
+        "compact projection."
+    ),
+    DETAIL_LEVEL_MODE_FIXED_REASON: (
+        "This mode returns one object and always projects it in full; request "
+        "detail_level='full' to state that intent, or use a list mode "
+        "(for_path, for_symbol, search) for compact previews."
+    ),
+}
+
 
 def _normalize_detail_level(detail_level: str) -> MemoryDetailLevel:
     if detail_level == "full":
         return "full"
-    if detail_level in {"compact", "summary", "normal"}:
+    if detail_level in _COMPACT_DETAIL_LEVEL_REQUESTS:
         return "compact"
     raise MemoryContractError("detail_level must be compact, summary, normal, or full.")
+
+
+def _detail_level_resolution(
+    *,
+    requested: str,
+    effective: str,
+) -> dict[str, str] | None:
+    """Why the response carries *effective* when *requested* was asked for.
+
+    ``None`` when the request was honoured verbatim: a resolution block on an
+    honoured request would report a change that did not happen, which is the
+    same dishonesty pointed the other way.
+    """
+
+    if requested == effective:
+        return None
+    reason = (
+        DETAIL_LEVEL_MODE_FIXED_REASON
+        if effective == "full"
+        else DETAIL_LEVEL_ALIAS_REASON
+    )
+    return {
+        "requested": requested,
+        "effective": effective,
+        "reason": reason,
+        "next_step": _DETAIL_LEVEL_NEXT_STEP[reason],
+    }
+
+
+def _with_detail_level_resolution(
+    response: dict[str, object],
+    *,
+    requested: str,
+) -> dict[str, object]:
+    """Stamp the resolution onto any response that publishes a detail level.
+
+    One owner for every mode, including the modes that pin their own level: a
+    per-branch stamp drifts the first time a mode is added.
+    """
+
+    effective = response.get("detail_level")
+    if not isinstance(effective, str):
+        # Modes that project no record at any level (status, coverage,
+        # trajectory_agents) publish no level, so there is none to reconcile.
+        return response
+    resolution = _detail_level_resolution(requested=requested, effective=effective)
+    if resolution is not None:
+        response["detail_level_resolution"] = resolution
+    return response
+
+
+def _reconciles_detail_level(
+    route: Callable[_QueryParams, dict[str, object]],
+) -> Callable[_QueryParams, dict[str, object]]:
+    """Reconcile every routed response against the level its caller asked for.
+
+    Wrapping the router instead of stamping each branch keeps one owner for
+    the modes that honour the request and the modes that pin their own level,
+    and it leaves the router's own identity alone: renaming it to hang a
+    wrapper off the public name re-mints its known complexity debt as a new
+    regression, which is a gate failure that says nothing about the code.
+    """
+
+    @wraps(route)
+    def reconcile(
+        *args: _QueryParams.args,
+        **kwargs: _QueryParams.kwargs,
+    ) -> dict[str, object]:
+        requested = kwargs.get("detail_level", DEFAULT_MEMORY_DETAIL_LEVEL)
+        return _with_detail_level_resolution(
+            route(*args, **kwargs),
+            requested=str(requested),
+        )
+
+    return reconcile
 
 
 def _statement_preview(
@@ -466,6 +577,36 @@ def _retrieval_lane_payload(record: MemoryRecord) -> dict[str, object]:
     return {"retrieval_lane": lane} if lane is not None else {}
 
 
+def _record_birth_provenance(record: MemoryRecord) -> dict[str, object]:
+    """Full-shape-only provenance: who wrote the fact, when, and from where.
+
+    Withheld from the compact lane on cost, not on principle. A list of twenty
+    records multiplies every field, and the questions these answer -- when was
+    it last re-verified, when was it approved, which branch was it born on --
+    are drill-down questions, asked of one record at a time. The compact lane
+    already carries the trust signals a reader scans for: ``status``,
+    ``confidence``, ``approved`` and ``stale_reason``.
+
+    ``expires_at_utc`` is deliberately absent from every shape. It is NULL for
+    every record the store has ever held, no production path can write it a
+    value (each construction site passes the literal ``None``), and record
+    retention is owned elsewhere: :mod:`codeclone.memory.vacuum` decides from
+    status, a configured window and ``updated_at_utc``. Projecting a column
+    that is always null would publish a retention policy that does not exist.
+    """
+
+    optional = (
+        ("last_verified_at_utc", record.last_verified_at_utc),
+        ("approved_at_utc", record.approved_at_utc),
+        ("created_on_branch", record.created_on_branch),
+        ("created_at_commit", record.created_at_commit),
+    )
+    return {
+        "created_by": record.created_by,
+        **{key: value for key, value in optional if value},
+    }
+
+
 def _serialize_record_summary(
     *,
     record: MemoryRecord,
@@ -495,9 +636,16 @@ def _serialize_record_summary(
         "statement_length": statement_length,
         "subjects": [_serialize_subject(item) for item in serialized_subjects],
         "evidence_count": evidence_count,
+        # Age and last change reach every shape a record appears in. Both are
+        # NOT NULL in the store, and a reader who cannot see them cannot tell
+        # a fact written yesterday from one written three months ago -- the
+        # first thing anyone asks of a remembered claim.
+        "created_at_utc": record.created_at_utc,
+        "updated_at_utc": record.updated_at_utc,
     }
     if detail_level == "full":
         payload["payload"] = record.payload
+        payload.update(_record_birth_provenance(record))
     else:
         payload["subject_count"] = len(subjects)
         payload["subjects_truncated"] = len(serialized_subjects) < len(subjects)
@@ -700,7 +848,7 @@ def get_relevant_memory(
     include_stale: bool = False,
     include_drafts: bool = False,
     include_routine: bool = False,
-    detail_level: str = "compact",
+    detail_level: str = DEFAULT_MEMORY_DETAIL_LEVEL,
 ) -> dict[str, object]:
     normalized_detail = _normalize_detail_level(detail_level)
     raw_scope = scope_paths or ()
@@ -819,6 +967,7 @@ def get_relevant_memory(
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
+    _with_detail_level_resolution(payload, requested=detail_level)
     projection_request = _memory_projection_request(
         scope_paths=normalized_scope,
         symbols=tuple(sorted(normalized_symbols)),
@@ -2175,6 +2324,7 @@ def _handle_semantic_search_mode(
     }
 
 
+@_reconciles_detail_level
 def query_engineering_memory(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -2192,7 +2342,7 @@ def query_engineering_memory(
     max_results: int = 20,
     include_stale: bool = False,
     include_drafts: bool = False,
-    detail_level: str = "compact",
+    detail_level: str = DEFAULT_MEMORY_DETAIL_LEVEL,
     semantic: bool = False,
     semantic_index: SemanticIndex | None = None,
     embedding_provider: EmbeddingProvider | None = None,

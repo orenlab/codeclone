@@ -799,3 +799,48 @@ def test_mcp_propose_from_receipt_warns_on_batch_mean(
         )
         warnings = cast("list[str]", proposed.get("warnings", []))
         assert any("batch mean" in item.lower() for item in warnings)
+
+
+def test_mcp_get_relevant_memory_envelope_states_the_level_it_returned(
+    tmp_path: Path,
+) -> None:
+    """`normal` is an alias of `compact`, and the response says so, once.
+
+    The envelope's ``response.detail_level`` echoed the raw request, so one
+    message said ``normal`` there and ``compact`` in the payload under the
+    same field name. The envelope now describes the response; the request
+    survives, named as a request, in ``detail_level_resolution``.
+    """
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        record_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            subject_path="pkg/mod.py",
+            max_candidates=20,
+            statement="Aliased detail level must not read as two answers.",
+        )
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            scope=["pkg/mod.py"],
+            max_records=6,
+            detail_level="normal",
+        )
+
+    records = payload["records"]
+    assert isinstance(records, list)
+    assert records, "empty record lane: the assertions below would compare nothing"
+    assert payload["detail_level"] == "compact"
+    response = _nested_dict(payload, "context_governance", "response")
+    assert response["detail_level"] == "compact"
+    resolution = _nested_dict(payload, "detail_level_resolution")
+    assert resolution["requested"] == "normal"
+    assert resolution["effective"] == "compact"
+    assert resolution["reason"] == "requested_level_is_an_alias_of_compact"
+    assert "detail_level='full'" in str(resolution["next_step"])
+    first = records[0]
+    assert isinstance(first, dict)
+    assert isinstance(first["created_at_utc"], str)
+    assert isinstance(first["updated_at_utc"], str)
