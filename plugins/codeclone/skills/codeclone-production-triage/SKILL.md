@@ -1,17 +1,18 @@
 ---
 name: codeclone-production-triage
-description: Fast production-first triage — health, top hotspots, baseline-relative regressions, and the recommended next review action.
+description: Triage a Python repository against its CodeClone baseline — which findings are new since the baseline, production-first hotspots, and the recommended next review action. Requires a baseline; without one the regression view is empty. For worst-right-now, use codeclone-hotspots.
 ---
 
 # CodeClone Production Triage
 
-Fast, production-focused first pass: health, top hotspots, baseline-relative
-regressions, next action — without a full review loop.
+What changed against the baseline, production first: which findings the comparison
+called new, the worst production hotspots, and the next review action.
 
 ## When to use
 
-- "State of this repo?" / "Production regressions vs baseline?" / "What to review first?" / before starting a task.
-- For one metric or "worst hotspot?" without baseline snapshot framing, use `codeclone-hotspots` instead.
+- "Production regressions vs baseline?" / "What to review first?" / "State of this repo?" / before starting a task.
+- Needs a baseline: without one the comparison has nothing to report and `baseline.status`
+  says so. For "worst hotspot?" or one metric on any repository, use `codeclone-hotspots`.
 - Baseline-relative `new`/`known` is NOT patch-local proof; patch-local regressions need the change-control before→after
   verify.
 
@@ -23,7 +24,7 @@ analyze_repository(root=<abs>) → get_production_triage
 
 Two calls. Stop unless asked for more.
 
-- Drill a hotspot: `get_finding(finding_id)` → `get_remediation(finding_id)`.
+- Drill a hotspot: `get_finding(finding_id=…)` → `get_remediation(finding_id=…)`.
 - Changed-files context:
   `analyze_changed_paths(root=…, changed_paths=[...]) → get_report_section(section="changed")`.
 - Which findings trip the gate: `evaluate_gates(run_id=…, …)` →

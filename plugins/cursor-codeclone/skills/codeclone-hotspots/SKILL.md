@@ -1,45 +1,54 @@
 ---
 name: codeclone-hotspots
-description: Fast CodeClone quality snapshot — health, top risks, or one metric, without a full review loop.
+description: Rank what is worst in a Python repository right now — health, top hotspots, or one metric. Needs no baseline and answers on a repository that has never had one. For what changed against a baseline, use codeclone-production-triage.
 ---
 
 # CodeClone Hotspots
 
-Fast quality answer (health, worst hotspots, one metric) — not a full review session.
+What is worst **right now** — ranked inside the current run, never against a previous one.
 
 ## When to use
 
-- "How healthy is this repo?" / "Worst hotspots?" / "Complexity hotspots?" / pre-merge sanity.
-- Baseline-relative `new`/`known` is NOT patch-local proof — for "did my patch cause this?" use the change-control
-  before→after verify path.
+- "Worst hotspots?" / "Complexity hotspots?" / "How healthy is this repo?" / pre-merge sanity.
+- No baseline in the repository, or you do not care what changed: this is the skill that still answers.
+- "What changed since the baseline?" is the other question — use `codeclone-production-triage`.
+- "Did my patch cause this?" is neither — use the change-control before→after verify path.
 
 ## Loop
 
 ```
-analyze_repository(root=<abs>) → get_production_triage
+analyze_repository(root=<abs>) → list_hotspots(kind="production_hotspots")
 ```
 
-Cheapest useful path. Stop there unless asked for more.
+Cheapest useful path. Stop there unless asked for more. `health.score` / `grade` / `dimensions` ride
+the `analyze_repository` response itself — no second call for the health question.
 
+- Other rankings: `list_hotspots(kind="most_actionable")`, `list_hotspots(kind="highest_priority")`,
+  `list_hotspots(kind="highest_spread")`, `list_hotspots(kind="test_fixture_hotspots")`.
 - Specific metric:
   `analyze_repository → check_complexity | check_coupling | check_cohesion | check_dead_code | check_clones`
 - Adoption / API surface / coverage join: `get_report_section(section="metrics")` (coverage unclear →
   `help(topic="coverage")`)
-- Gate preview → its findings: `evaluate_gates(run_id=…, fail_on_new=…, fail_complexity=…, …)` → for the actual
-  findings,
-  `list_findings(novelty="new", family=…, source_kind="production")`.
+- Drill one row: `get_finding(finding_id=…)` → `get_remediation(finding_id=…)`.
 
 ## Reading the response
 
 > Key / easily-misread fields; the real response carries more.
 
-| Field                                         | Meaning                                                        |
-|-----------------------------------------------|----------------------------------------------------------------|
-| `health.score`/`grade`                        | 0–100 / A–F; `dimensions` = per-family                         |
-| `findings.new`/`known`                        | baseline-relative — NOT patch-local proof                      |
-| `new_by_source_kind`                          | new split prod / tests / fixtures (the gate counts production) |
-| `evaluate_gates.would_fail` + `reasons[]`     | gate verdict + cause tokens                                    |
-| check item `novelty` / `clone_type` / `scope` | new vs known / Type-1..4 / production vs tests                 |
+| Field                        | Meaning                                                                   |
+|------------------------------|---------------------------------------------------------------------------|
+| `kind`                       | which ranking was requested — an ordering, not a severity filter          |
+| `total` vs `returned`        | how many rank under that kind; how many this call carried back            |
+| item `severity` / `priority` | impact class; composite rank within this run                              |
+| item `scope`                 | production vs tests vs fixtures                                           |
+| item `spread`                | how widely the finding is distributed                                     |
+| item `novelty`               | baseline-relative — `unavailable` when nothing compared it; see below     |
+| `empty_reason`               | why a ranking came back empty (no findings of that kind, all reviewed, …) |
+
+`list_hotspots` runs no baseline comparison. Its response carries no `baseline` block and no
+new-vs-known count, so it cannot say what a patch or a release regressed. The per-item `novelty` is
+carried through from the run and reads `unavailable` when nothing compared it — it is not a
+regression report. For that, and for `baseline.status`, use `codeclone-production-triage`.
 
 ## Rules
 

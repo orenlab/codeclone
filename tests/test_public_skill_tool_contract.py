@@ -18,8 +18,10 @@ tool, drop a parameter, or write a call the schema rejects, and this reds.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Final, NamedTuple, cast
 
@@ -34,7 +36,7 @@ from codeclone.surfaces.mcp._session_shared import (
     _VALID_REPORT_SECTIONS,
 )
 from codeclone.surfaces.mcp.server import build_mcp_server
-from tests.plugin_test_helpers import CODEX_PLUGIN_SKILL_NAMES
+from tests.plugin_test_helpers import CODEX_PLUGIN_SKILL_NAMES, parse_frontmatter
 
 #: Where a closed vocabulary lives, for the parameters the skills spell out
 #: with literal values. The bindings are here; the values stay with their
@@ -64,6 +66,37 @@ NON_TOOL_CALL_SHAPES: Final[dict[str, str]] = {
 #: Floor on how much this guard actually inspected. Extraction returning
 #: nothing would otherwise pass every assertion below without reading a line.
 MIN_CALLS_INSPECTED: Final = 25
+
+#: The two public skills a router has to tell apart, and the tool each one's
+#: answer is built by. Which side of the discriminator a skill sits on is
+#: deliberately NOT written here: it is measured out of the handler below, so
+#: a handler that gains or loses its baseline comparison moves the requirement
+#: on the description instead of leaving a stale promise behind a green gate.
+ROUTING_PAIR: Final[dict[str, str]] = {
+    "codeclone-hotspots": "list_hotspots",
+    "codeclone-production-triage": "get_production_triage",
+}
+
+#: Where those handlers are written. Their text is read rather than their
+#: return value sampled, because the question is which keys each one
+#: publishes at all, not what a fixture happens to make them contain.
+HANDLER_SOURCES: Final[tuple[str, ...]] = (
+    "codeclone/surfaces/mcp/_session_finding_mixin.py",
+    "codeclone/surfaces/mcp/_session_state_mixin.py",
+)
+
+#: A handler is baseline-coupled when its own body publishes the baseline
+#: comparison: the ``baseline`` block, or the new-vs-known split that only a
+#: comparison can produce. Both are keys of the response a caller reads.
+_PUBLISHES_BASELINE = re.compile(r'"baseline"|new_by_source_kind')
+
+#: How a description declares its side of the discriminator. Both directions
+#: are needed, and they are asserted separately: a description that declares
+#: neither cannot route, and one that declares both is not a discriminator.
+_DECLARES_BASELINE_REQUIRED = re.compile(r"\brequires? a baseline\b", re.IGNORECASE)
+_DECLARES_BASELINE_OPTIONAL = re.compile(
+    r"\bno baseline\b|\bwithout a baseline\b", re.IGNORECASE
+)
 
 # No whitespace before "(": prose such as "fixtures (the gate counts
 # production)" is a parenthetical, never a call, and admitting it would
@@ -274,3 +307,150 @@ def test_public_skill_calls_quote_only_values_the_vocabulary_admits() -> None:
 
     assert bound, "no vocabulary-bound literal was read; extraction is broken"
     assert not invalid, f"public skills quote values the tool rejects: {invalid}"
+
+
+class RoutingStance(NamedTuple):
+    """One routable skill, its handler, and the two readings that must agree."""
+
+    skill: str
+    tool: str
+    handler_read: bool
+    handler_publishes_baseline: bool
+    declares_required: bool
+    declares_optional: bool
+
+
+@lru_cache(maxsize=1)
+def _handler_bodies() -> dict[str, str]:
+    """Source of every handler in the routing pair, keyed by tool name.
+
+    One traversal for all four lanes below, so no lane can end up reading a
+    different corpus than its neighbours. A name defined twice is refused
+    rather than resolved, because picking one silently is how a lane starts
+    measuring the wrong function.
+    """
+
+    wanted = set(ROUTING_PAIR.values())
+    bodies: dict[str, str] = {}
+    for relative in HANDLER_SOURCES:
+        source = (_repo_root() / relative).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.FunctionDef) or node.name not in wanted:
+                continue
+            assert node.name not in bodies, f"{node.name} is defined more than once"
+            bodies[node.name] = ast.get_source_segment(source, node) or ""
+    return bodies
+
+
+def _routing_stances() -> list[RoutingStance]:
+    """Both sides of the discriminator, each measured from its own owner.
+
+    The handler side comes from the shipped server source; the declared side
+    comes from the shipped skill frontmatter. Nothing here states which skill
+    ought to need a baseline — that is the comparison the lanes make.
+    """
+
+    texts = _skill_texts()
+    bodies = _handler_bodies()
+    stances: list[RoutingStance] = []
+    for skill, tool in sorted(ROUTING_PAIR.items()):
+        body = bodies.get(tool, "")
+        description = parse_frontmatter(texts[skill])["description"]
+        stances.append(
+            RoutingStance(
+                skill=skill,
+                tool=tool,
+                handler_read=bool(body),
+                handler_publishes_baseline=bool(_PUBLISHES_BASELINE.search(body)),
+                declares_required=bool(_DECLARES_BASELINE_REQUIRED.search(description)),
+                declares_optional=bool(_DECLARES_BASELINE_OPTIONAL.search(description)),
+            )
+        )
+    return stances
+
+
+def test_routing_pair_handlers_still_split_on_the_baseline() -> None:
+    """The discriminator these skills are written around still exists.
+
+    Read first, because every lane below compares a description against this
+    measurement: if the handlers were never found, or both landed on the same
+    side, the prose lanes would agree with an instrument that measured
+    nothing and pass while saying nothing.
+    """
+
+    stances = _routing_stances()
+    unread = sorted(
+        f"{stance.skill} -> {stance.tool}"
+        for stance in stances
+        if not stance.handler_read
+    )
+
+    assert len(stances) == len(ROUTING_PAIR)
+    assert not unread, f"routing handlers were not found in the server source: {unread}"
+    measured = sorted(
+        (stance.tool, stance.handler_publishes_baseline) for stance in stances
+    )
+
+    assert {publishes for _, publishes in measured} == {True, False}, (
+        f"the routing pair no longer splits on the baseline comparison: {measured}. "
+        "Two tools that answer the same question cannot be routed between by "
+        "any description, so the skills need redesigning, not rewording."
+    )
+
+
+def test_routing_pair_descriptions_declare_a_baseline_stance() -> None:
+    """Each description says which side of the discriminator it is on.
+
+    A router picks from descriptions alone. One that mentions neither leaves
+    the choice to adjectives; one that mentions both discriminates nothing.
+    """
+
+    silent = sorted(
+        stance.skill
+        for stance in _routing_stances()
+        if stance.declares_required == stance.declares_optional
+    )
+
+    assert not silent, (
+        f"public skill descriptions declare no single baseline stance: {silent}. "
+        "Each must state whether it needs a baseline or answers without one."
+    )
+
+
+def test_routing_pair_descriptions_declare_the_stance_their_handler_has() -> None:
+    """The side a description claims is the side its handler is actually on.
+
+    This is the edge the discriminator rides on. A skill that advertises
+    baseline-relative content its tool never publishes sends the router to a
+    tool that cannot answer, and the failure reads as the product being wrong.
+    """
+
+    wrong = sorted(
+        f"{stance.skill}: description says baseline "
+        f"{'required' if stance.declares_required else 'not required'}, "
+        f"but {stance.tool} "
+        f"{'publishes' if stance.handler_publishes_baseline else 'never publishes'} "
+        "the baseline comparison"
+        for stance in _routing_stances()
+        if stance.declares_required != stance.handler_publishes_baseline
+    )
+
+    assert not wrong, f"public skill descriptions contradict their handlers: {wrong}"
+
+
+def test_routing_pair_descriptions_declare_opposite_stances() -> None:
+    """The pair lands on opposite sides, which is what makes it routable.
+
+    Each skill can be individually truthful and the pair still be useless:
+    two descriptions on the same side leave a model splitting hairs on
+    adjectives, which is the state this guard exists to keep out.
+    """
+
+    stances = _routing_stances()
+    requires = sorted(stance.skill for stance in stances if stance.declares_required)
+    optional = sorted(stance.skill for stance in stances if stance.declares_optional)
+
+    assert len(requires) == 1 and len(optional) == 1, (
+        f"the routing pair does not declare opposite baseline stances: "
+        f"requires={requires} optional={optional}"
+    )
