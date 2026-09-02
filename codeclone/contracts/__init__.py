@@ -227,10 +227,35 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # implementation - two INDEPENDENT roots, never a pair. "Resolved" means the
 # decorator expression resolves to the canonical ``pluggy.HookspecMarker`` /
 # ``pluggy.HookimplMarker`` identity through module-scope assignments and
-# import aliases; the decorator NAME alone is never evidence. Bump this
-# constant whenever what counts as LIVE changes; verdicts across versions
-# are not comparable. Cached liveness inputs move with it by construction:
-# the constant is an input of the module-dependent cache reuse profile
+# import aliases; the decorator NAME alone is never evidence.
+#
+# Version "3" corrects what an evidence row MEANS, and in one arm what counts
+# as live. (1) The wildcard re-export arm now asks the TARGET module what
+# ``from <target> import *`` binds - its own ``__all__`` when it declares one -
+# carried per symbol as ``DeadCandidate.star_import_bound``. It previously
+# admitted any public class in a wildcard target that the project referenced,
+# with a leading-underscore naming convention standing in for the language
+# rule, so a class the target's ``__all__`` excludes was rooted through a
+# binding that does not exist at runtime. This is the arm that moves verdicts:
+# a member reachable only through its defining module is now dead. (2) An
+# ``@overload`` stub no longer roots the symbol it declares - every stub shares
+# the implementation's qualname, so admitting one let a symbol stand as its own
+# external-decorator evidence; a symbol whose ONLY root was its own stub
+# therefore moves to dead. (3) An export root is emitted only for a candidate
+# the liveness owner does not already hold live, measured from
+# ``classify_liveness`` before any export root exists. The old test compared
+# qualnames alone, which an attribute call never reaches, so it could not match
+# an attribute-called method in any configuration. (3) moves no verdict for the
+# candidate it withholds a root from: the evidence that made that candidate
+# already-live is the same evidence the classifier reads.
+#
+# What "3" does NOT move: the verdict vocabulary, the ``__all__``-plus-package
+# named export chain (Y2), the rule-3 abstention for an unresolved external
+# base, and the two life proofs version "2" added - both still hold.
+#
+# Bump this constant whenever what counts as LIVE changes; verdicts across
+# versions are not comparable. Cached liveness inputs move with it by
+# construction: the constant is an input of the module-dependent cache profile
 # (codeclone/cache/reuse.py), so a bump misses exactly the lane that
 # carries ``referenced_qualnames``, dead candidates and live-root reasons,
 # and never touches the neutral fingerprint lane.

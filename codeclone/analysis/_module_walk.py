@@ -1615,6 +1615,14 @@ def _resolve_star_import_bound_qualnames(
     empty and falls to the public-name arm. That is the pre-existing reading,
     and it is the conservative one: under-binding here would re-assert that
     live public API is dead, which is the failure this fact exists to prevent.
+
+    Known limitation, with its direction: ``exported_names`` is a bare set, so
+    an ABSENT ``__all__``, an explicitly empty ``__all__ = []`` and one built
+    dynamically are indistinguishable here - all three take the public-name
+    arm. ``__all__ = []`` binds nothing under ``import *``, so that one case is
+    OVER-bound: it can leave a member live that the star does not carry, never
+    the reverse. Telling the three apart needs a tri-state on the walk state,
+    which is a per-symbol cache-wire fact and a separate decision.
     """
 
     top_level_functions = {
