@@ -59,6 +59,26 @@ def build_run_manifest(
     return dict(sorted(manifest.items()))
 
 
+def build_run_content_manifest(
+    *,
+    root: Path,
+    digests: Iterable[tuple[str, str]],
+) -> dict[str, str]:
+    """Repo-relative sha256 of the bytes one run's facts rest on, per file.
+
+    The stat manifest says which files the run scanned; this says what it
+    read. Only the second can tell an edit the run observed from one that
+    merely kept the file's ``(mtime_ns, size)``.
+    """
+    manifest: dict[str, str] = {}
+    for filepath, digest in digests:
+        relative_path = _repo_relative_path(root, filepath)
+        if relative_path is None:
+            continue
+        manifest[relative_path] = digest
+    return dict(sorted(manifest.items()))
+
+
 def compute_drift(
     record: MCPRunRecord,
     paths: Sequence[str] | None = None,
@@ -276,6 +296,7 @@ __all__ = [
     "WorkspaceDrift",
     "WorkspaceDriftStatus",
     "WorkspaceDriftStrength",
+    "build_run_content_manifest",
     "build_run_manifest",
     "compute_drift",
 ]

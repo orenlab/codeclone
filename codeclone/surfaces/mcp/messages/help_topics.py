@@ -1006,13 +1006,14 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "analyzer_invariant also requires the after-run to have observed "
                 "the edit and to be the newest analysis of its root. A recorded "
-                "manifest stat that no longer matches the file on disk proves "
-                "the run predates the edit, and is refused rather than treated "
-                "as merely unproven."
+                "manifest digest that no longer matches the bytes on disk proves "
+                "the run did not read them, and is refused rather than treated "
+                "as merely unproven. A matching stat is not evidence: a same-size "
+                "rewrite keeps (mtime_ns, size) intact."
             ),
             (
                 "Residual limitation: files analysis never reads, such as "
-                "pyproject.toml, carry no manifest stat, so per-file observation "
+                "pyproject.toml, carry no manifest digest, so per-file observation "
                 "cannot be proved for them unless the run saw them modified. "
                 "Acceptance then rests on the run being the newest analysis of "
                 "the root, and verification.limitations names those files. A "

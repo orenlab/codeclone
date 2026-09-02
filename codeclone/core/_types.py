@@ -121,6 +121,10 @@ class DiscoveryResult:
     cached_methods: int = 0
     cached_classes: int = 0
     cached_source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
+    # Content identity of every cache hit, as (runtime path, sha256 hex). A hit
+    # is granted only once its bytes are proven, so this is the digest the
+    # reused facts describe.
+    cached_source_digest_by_file: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +185,10 @@ class ProcessingResult:
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
     function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
     source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
+    # The bytes this run's facts rest on, per file: worker digests for what was
+    # parsed, proven cache digests for what was reused. A consumer that must
+    # know whether the run observed an edit compares against this, never a stat.
+    source_digest_by_file: tuple[tuple[str, str], ...] = ()
     phase_snapshot: PhaseSnapshot | None = field(
         default=None,
         compare=False,

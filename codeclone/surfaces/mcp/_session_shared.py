@@ -707,6 +707,7 @@ class MCPRunRecord:
     new_block: frozenset[str]
     metrics_diff: MetricsDiff | None
     manifest: Mapping[str, FileStat] | None = None
+    content_manifest: Mapping[str, str] | None = None
     dirty_snapshot: DirtySnapshot | None = None
     unit_inventory: tuple[MCPUnitLocation, ...] = ()
     relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()

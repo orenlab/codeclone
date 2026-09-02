@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import importlib
 import json
 import os
@@ -14825,17 +14826,6 @@ def _forged_finish_is_refused(root: Path, *, edit: Callable[[Path], None]) -> No
     assert _analyze_root(service, root) != before_run
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the manifest lane is stat-only: _manifest_matches_disk compares "
-        "(mtime_ns, size), which a same-size rewrite plus os.utime reproduces. "
-        "Closing it needs the content digest the run already computes carried "
-        "in the run manifest, produced outside "
-        "codeclone/surfaces/mcp/_analyzer_invariance.py. Remove this marker "
-        "when that lands; strict makes the fix fail loudly until it is removed."
-    ),
-)
 def test_mcp_finish_refuses_edit_forged_under_the_recorded_stat(
     tmp_path: Path,
 ) -> None:
@@ -14850,16 +14840,6 @@ def test_mcp_finish_refuses_edit_forged_under_the_recorded_stat(
     _forged_finish_is_refused(tmp_path, edit=_edit_nothing)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "same stat-only manifest lane as "
-        "test_mcp_finish_refuses_edit_forged_under_the_recorded_stat; this "
-        "case additionally shows that ordering evidence would not be enough, "
-        "because the recompute genuinely postdates an edit. Remove both "
-        "markers together when the content digest lands."
-    ),
-)
 def test_mcp_finish_refuses_recompute_that_read_earlier_bytes_than_disk(
     tmp_path: Path,
 ) -> None:
@@ -14941,51 +14921,127 @@ def test_mcp_verify_analyzer_invariant_names_unobserved_changed_files(
 
 
 def test_analyzer_invariance_observation_fails_closed(tmp_path: Path) -> None:
-    """Unreadable evidence is a mismatch, never a clean bill of health."""
+    """Unreadable evidence is a mismatch, never a clean bill of health.
+
+    The content lane is the evidence; the stat lane only says which files the
+    run scanned. Stat is never consulted for a verdict, in either direction.
+    """
     from codeclone.surfaces.mcp._analyzer_invariance import observation_evidence
 
     tracked = tmp_path / "kept.py"
     tracked.write_text("x = 1\n", encoding="utf-8")
     stat = tracked.stat()
+    stat_entry = {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
+    digest = hashlib.sha256(tracked.read_bytes()).hexdigest()
     empty: frozenset[str] = frozenset()
 
-    # A stat that still matches disk is the only clean case.
-    contradicted, unobserved = observation_evidence(
-        root=tmp_path,
-        changed_files=["./kept.py"],
-        manifest={"kept.py": {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}},
-        dirty_paths=empty,
-    )
-    assert (contradicted, unobserved) == ((), ())
-
-    # A recorded file that no longer exists cannot be re-stat'd.
-    contradicted, _unobserved = observation_evidence(
-        root=tmp_path,
-        changed_files=["gone.py"],
-        manifest={"gone.py": {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}},
-        dirty_paths=empty,
-    )
-    assert contradicted == ("gone.py",)
-
-    # Malformed manifest entries are refused rather than trusted.
-    for broken in ({"mtime_ns": "nope", "size": 1}, "not-a-mapping"):
-        contradicted, _unobserved = observation_evidence(
+    def classify(
+        *,
+        changed: list[str],
+        manifest: Mapping[str, object] | None,
+        content: Mapping[str, object] | None,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return observation_evidence(
             root=tmp_path,
-            changed_files=["kept.py"],
-            manifest={"kept.py": broken},
+            changed_files=changed,
+            manifest=manifest,
+            content_manifest=content,
             dirty_paths=empty,
         )
-        assert contradicted == ("kept.py",)
 
-    # Outside the manifest, the run's dirty snapshot is the remaining lane.
+    # The bytes the run read are the bytes on disk: the only clean case.
+    assert classify(
+        changed=["./kept.py"],
+        manifest={"kept.py": stat_entry},
+        content={"kept.py": digest},
+    ) == ((), ())
+
+    # A scanned file the run holds no digest for was never analysis input.
+    assert classify(
+        changed=["kept.py"], manifest={"kept.py": stat_entry}, content=None
+    ) == (("kept.py",), ())
+
+    # Same stat, different bytes -- the forgery. Stat must not rescue it.
+    tracked.write_text("y = 2\n", encoding="utf-8")
+    os.utime(tracked, ns=(stat.st_mtime_ns, stat.st_mtime_ns))
+    assert file_stat_signature(str(tracked)) == stat_entry
+    assert classify(
+        changed=["kept.py"],
+        manifest={"kept.py": stat_entry},
+        content={"kept.py": digest},
+    ) == (("kept.py",), ())
+
+    # Different stat, same bytes -- a touch. Still what the run read.
+    tracked.write_text("x = 1\n", encoding="utf-8")
+    later = stat.st_mtime_ns + 1_000_000_000
+    os.utime(tracked, ns=(later, later))
+    assert file_stat_signature(str(tracked)) != stat_entry
+    assert classify(
+        changed=["kept.py"],
+        manifest={"kept.py": stat_entry},
+        content={"kept.py": digest},
+    ) == ((), ())
+
+    # A recorded file that no longer exists cannot be re-read.
+    assert classify(
+        changed=["gone.py"],
+        manifest={"gone.py": stat_entry},
+        content={"gone.py": digest},
+    ) == (("gone.py",), ())
+
+    # Malformed digests are refused rather than trusted.
+    for broken in ("", "nope", digest.upper(), 12, None):
+        assert classify(
+            changed=["kept.py"],
+            manifest={"kept.py": stat_entry},
+            content={"kept.py": broken},
+        ) == (("kept.py",), ()), broken
+
+    # Outside both manifests, the run's dirty snapshot is the remaining lane.
     contradicted, unobserved = observation_evidence(
         root=tmp_path,
         changed_files=["pyproject.toml", "docs/guide.md"],
         manifest=None,
+        content_manifest=None,
         dirty_paths=frozenset({"pyproject.toml"}),
     )
     assert contradicted == ()
     assert unobserved == ("docs/guide.md",)
+
+
+def test_mcp_verify_accepts_analyzer_invariant_after_repeated_recompute(
+    tmp_path: Path,
+) -> None:
+    """A second recompute reuses the edited file from cache and still proves it.
+
+    The first post-edit run parses the comment edit; the second finds the
+    same bytes under the same stat, proves them against the cache entry and
+    reuses the facts. Its content manifest must carry the proven digest for
+    that hit, or the newest run would refuse a file it demonstrably observed.
+    The premise is asserted: the second run really did reuse the cache.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pkg/a.py"], edit=_edit_python_comment
+    )
+    first = _analyze_root(service, tmp_path)
+    second_payload = service.analyze_repository(MCPAnalysisRequest(root=str(tmp_path)))
+    second = str(second_payload["run_id"])
+    assert first == second == before_run
+    assert cast("dict[str, object]", second_payload["cache"])["freshness"] == "reused"
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=second,
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+    outcome = (
+        verified["status"],
+        verified["reason"],
+        verified["observed_changed_files"],
+    )
+    assert outcome == ("accepted", "analyzer_invariant", True)
 
 
 def test_mcp_after_run_not_new_next_step_is_executable(tmp_path: Path) -> None:
@@ -15077,7 +15133,7 @@ def test_mcp_typed_outcomes_are_documented_not_tribal_knowledge() -> None:
     profiles_topic = str(HELP_TOPIC_SPECS["verification_profiles"])
     assert "Residual limitation" in profiles_topic
     assert "newest analysis" in profiles_topic
-    assert "manifest stat" in profiles_topic
+    assert "manifest digest" in profiles_topic
 
 
 def test_mcp_help_documents_analyzer_invariant_outcome() -> None:

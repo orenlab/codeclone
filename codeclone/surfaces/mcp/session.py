@@ -88,7 +88,7 @@ from ._session_shared import (
 )
 from ._session_state_mixin import _MCPSessionStateMixin
 from ._session_workflow_mixin import _MCPSessionWorkflowMixin
-from ._workspace_drift import build_run_manifest
+from ._workspace_drift import build_run_content_manifest, build_run_manifest
 from ._workspace_hygiene import collect_dirty_snapshot
 
 
@@ -346,6 +346,10 @@ class MCPSession(
                     process_span,
                     phase_snapshot=processing_result.phase_snapshot,
                 )
+        run_content_manifest = build_run_content_manifest(
+            root=root_path,
+            digests=processing_result.source_digest_by_file,
+        )
         unit_inventory = build_unit_location_inventory(
             root=root_path,
             units=processing_result.units,
@@ -575,6 +579,7 @@ class MCPSession(
             new_block=frozenset(new_block or ()),
             metrics_diff=metrics_diff,
             manifest=run_manifest,
+            content_manifest=run_content_manifest,
             dirty_snapshot=run_dirty_snapshot,
             unit_inventory=unit_inventory,
             relationship_facts=processing_result.function_relationship_facts,
@@ -609,6 +614,7 @@ class MCPSession(
             new_block=frozenset(new_block or ()),
             metrics_diff=metrics_diff,
             manifest=run_manifest,
+            content_manifest=run_content_manifest,
             dirty_snapshot=run_dirty_snapshot,
             unit_inventory=unit_inventory,
             relationship_facts=processing_result.function_relationship_facts,

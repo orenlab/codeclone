@@ -805,8 +805,8 @@ class _MCPSessionPatchContractMixin:
         """Unobserved changed paths, or ``None`` when invariance is refused.
 
         Freshness cannot see ordering, so a fresh run must also have observed
-        the edit. A recorded stat that no longer matches disk proves the run
-        predates the edit and is refused outright. An empty tuple is the
+        the edit. A recorded content digest that no longer matches disk proves
+        the run did not read these bytes and is refused outright. An empty tuple is the
         strongest result, not a falsy failure — test against ``None``.
         """
 
@@ -816,6 +816,7 @@ class _MCPSessionPatchContractMixin:
             root=after.root,
             changed_files=changed_files,
             manifest=after.manifest,
+            content_manifest=after.content_manifest,
             dirty_paths=_run_dirty_paths(after),
         )
         return None if contradicted else unobserved

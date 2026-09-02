@@ -174,6 +174,7 @@ def process(
             structural_findings=discovery.cached_structural_findings,
             function_relationship_facts=discovery.cached_function_relationship_facts,
             source_stats_by_file=discovery.cached_source_stats_by_file,
+            source_digest_by_file=discovery.cached_source_digest_by_file,
         )
 
     all_units: list[GroupItem] = list(discovery.cached_units)
@@ -242,6 +243,7 @@ def process(
             classes,
         ) in discovery.cached_source_stats_by_file
     }
+    source_digest_by_file: dict[str, str] = dict(discovery.cached_source_digest_by_file)
     neutral_reuse_by_file = dict(discovery.neutral_reuse_by_file)
     failed_files: list[str] = []
     source_read_failures: list[str] = []
@@ -307,6 +309,7 @@ def process(
                 result.methods,
                 result.classes,
             )
+            source_digest_by_file[result.filepath] = result.source_content_digest.value
             if result.units:
                 all_units.extend(_unit_to_group_item(unit) for unit in result.units)
             if result.blocks:
@@ -647,5 +650,6 @@ def process(
             (filepath, *stats)
             for filepath, stats in sorted(source_stats_by_file.items())
         ),
+        source_digest_by_file=tuple(sorted(source_digest_by_file.items())),
         phase_snapshot=phase_snapshot,
     )

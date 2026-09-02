@@ -271,6 +271,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     cached_sf: list[StructuralFindingGroup] = []
     cached_relationship_facts: list[FunctionRelationshipFacts] = []
     cached_source_stats_by_file: list[tuple[str, int, int, int, int]] = []
+    cached_source_digest_by_file: list[tuple[str, str]] = []
     cached_semantic_events: list[SemanticEvent] = []
     cached_function_contract_summaries: list[FunctionContractSummary] = []
     neutral_reuse_by_file: list[tuple[str, RehydratedCacheNeutral]] = []
@@ -438,6 +439,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     cached_classes += classes
                     cached_source_stats_by_file.append(
                         (filepath, lines, functions, methods, classes)
+                    )
+                    cached_source_digest_by_file.append(
+                        (filepath, cached.source_content_digest.value)
                     )
                     cached_units.extend(
                         _unit_to_group_item(unit) for unit in neutral.units
@@ -621,4 +625,5 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_source_stats_by_file=tuple(
             sorted(cached_source_stats_by_file, key=lambda row: row[0])
         ),
+        cached_source_digest_by_file=tuple(sorted(cached_source_digest_by_file)),
     )
