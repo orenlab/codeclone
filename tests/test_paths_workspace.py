@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from codeclone.paths.workspace import (
+    WORKSPACE_DIR_NAME,
     default_cache_path,
     emit_legacy_workspace_warnings,
     is_service_path,
@@ -221,3 +222,78 @@ def test_is_service_path_refuses_a_traversal_back_out_of_the_workspace(
     escape = root / ".codeclone" / ".." / ".." / "elsewhere" / "cache.sqlite3"
     assert is_service_path(escape, root=root) is False
     assert is_service_path(tmp_path / ".codeclone-not-ours", root=root) is False
+
+
+def test_is_service_path_admits_a_root_reached_through_a_symlink(
+    tmp_path: Path,
+) -> None:
+    """A symlinked checkout must still be allowed to write its own cache.
+
+    The queried path is resolved, so the directories it is held against have to
+    be resolved too. Compare a resolved path with an unresolved prefix and the
+    predicate refuses CodeClone's *own* store: the cold-forever defect this
+    boundary exists to remove, walking back in through a symlink, and silently,
+    because that refusal is a warning rather than an error.
+
+    Not hypothetical: macOS ``/tmp`` is a symlink, and so is any checkout
+    reached through one.
+    """
+
+    real = tmp_path / "checkout"
+    (real / WORKSPACE_DIR_NAME / "db").mkdir(parents=True)
+    linked_root = tmp_path / "link-to-checkout"
+    linked_root.symlink_to(real, target_is_directory=True)
+    store = linked_root / WORKSPACE_DIR_NAME / "db" / "cache.sqlite3"
+
+    # Population: without a symlink actually in the path this asserts nothing.
+    assert store.resolve() != store, "the fixture built no symlink to traverse"
+    assert is_service_path(store, root=linked_root) is True
+
+
+def test_is_service_path_admits_a_workspace_relocated_behind_a_symlink(
+    tmp_path: Path,
+) -> None:
+    """The same failure, on the root the MCP surface actually passes.
+
+    ``_resolve_root`` hands every analysis an already-resolved root, so a
+    symlinked *root* cannot reach the predicate through ``analyze_repository``.
+    A symlinked ``.codeclone`` under a resolved root can, and does: an operator
+    who parks workspace state on another volume gets a store CodeClone refuses
+    to write. This is the input that proves the resolved-directory side of the
+    predicate is reachable in production, not only in a probe.
+    """
+
+    root = (tmp_path / "checkout").resolve()
+    root.mkdir()
+    storage = tmp_path / "state"
+    (storage / "db").mkdir(parents=True)
+    (root / WORKSPACE_DIR_NAME).symlink_to(storage, target_is_directory=True)
+    store = root / WORKSPACE_DIR_NAME / "db" / "cache.sqlite3"
+
+    assert root.resolve() == root, "the root must be resolved, as the surface passes it"
+    assert store.resolve() != store, "the fixture built no symlink to traverse"
+    assert is_service_path(store, root=root) is True
+
+
+def test_is_service_path_refuses_a_symlink_pointing_out_of_the_workspace(
+    tmp_path: Path,
+) -> None:
+    """Escaping by symlink, which is not the same escape as ``..``.
+
+    ``..`` collapses under any lexical normalisation, so the traversal test
+    above stays green even if the queried path were normalised textually rather
+    than resolved. A symlink out of the workspace survives that normalisation
+    and is caught only by real resolution -- so this pins that the queried side
+    is resolved physically, which its sibling cannot.
+    """
+
+    root = (tmp_path / "checkout").resolve()
+    workspace = root / WORKSPACE_DIR_NAME
+    workspace.mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (workspace / "escape").symlink_to(outside, target_is_directory=True)
+    target = workspace / "escape" / "cache.sqlite3"
+
+    assert target.resolve() != target, "the fixture built no symlink to traverse"
+    assert is_service_path(target, root=root) is False
