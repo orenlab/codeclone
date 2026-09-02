@@ -156,6 +156,8 @@ def test_embedding_lancedb_only(
     analytics_repo: tuple[Path, Path, AnalyticsConfig],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("pyarrow")
+    pytest.importorskip("lancedb")
     _root, config, _snapshot, embed = _snapshot_and_embed(analytics_repo, monkeypatch)
     conn = open_analytics_db(config.db_path)
     try:
@@ -801,6 +803,8 @@ def test_run_embed_unknown_snapshot_reports_known_ids(
     analytics_repo: tuple[Path, Path, AnalyticsConfig],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("pyarrow")
+    pytest.importorskip("lancedb")
     root, _audit_db, config = analytics_repo
     patch_snapshot_missing_memory_db(monkeypatch, config)
     snapshot = run_snapshot(
@@ -814,6 +818,8 @@ def test_run_embed_unknown_snapshot_reports_known_ids(
 
 
 def test_run_embed_unknown_snapshot_without_known(tmp_path: Path) -> None:
+    pytest.importorskip("pyarrow")
+    pytest.importorskip("lancedb")
     root = tmp_path / "repo"
     root.mkdir()
     config = resolve_analytics_config(root)
@@ -1302,6 +1308,8 @@ def test_run_sweep_skips_missing_persisted_run(
     analytics_repo: tuple[Path, Path, AnalyticsConfig],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("pyarrow")
+    pytest.importorskip("lancedb")
     from codeclone.analytics.workflow import _run_sweep
 
     config, snapshot, embed, store, vector_store, items, item_ids, vectors = (

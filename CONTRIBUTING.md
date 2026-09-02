@@ -525,7 +525,7 @@ The full operational and post-sync checklist is in
 
 ## Development Setup
 
-CodeClone supports Python 3.10 through 3.14.
+CodeClone supports Python 3.10 through 3.15.
 
 ```bash
 git clone https://github.com/orenlab/codeclone.git
@@ -576,8 +576,15 @@ uv run pytest \
   --cov-fail-under=99
 ```
 
-CI runs this suite on Python 3.10, 3.11, 3.12, 3.13, and 3.14. A test that only
-passes on the contributor's interpreter is not sufficient.
+CI runs this suite on Python 3.10, 3.11, 3.12, 3.13, 3.14, and 3.15. A test
+that only passes on the contributor's interpreter is not sufficient.
+
+The 3.15 leg runs the tests without the coverage floor. Nothing upstream ships
+a cp315 distribution for `pyarrow`, `onnxruntime`, `scikit-learn` or `hdbscan`,
+so the `analytics`, `semantic-lancedb`, `semantic-fastembed` and
+`semantic-local` extras install empty there and their tests skip; holding a
+floor calibrated on the full extra set against that smaller population would
+compare two different measurements. Test failures on 3.15 still fail CI.
 
 Run focused tests while developing, but do not use them as a substitute for
 the required full validation when the change can affect shared behavior.
@@ -736,7 +743,7 @@ Examples:
 
 ## Code Style
 
-- Python 3.10 through 3.14
+- Python 3.10 through 3.15
 - required type annotations and precise types
 - minimal use of `Any`
 - `ruff format`, `ruff check`, and `mypy` must pass

@@ -1764,14 +1764,23 @@ def test_profile_ranking_neutral_direction_term() -> None:
 def test_check_capability_import_error_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib as importlib_module
+    """Both probes of the ``embed`` capability are answered by this test.
 
-    original = importlib_module.import_module
+    ``check_capability("embed")`` asks about ``fastembed`` and ``lancedb``.
+    Letting the second probe fall through to the real environment made the
+    verdict ambient: on an interpreter with no ``lancedb`` wheel (measured on
+    CPython 3.15) the same production code reported two missing packages and
+    this test failed for a reason it does not test. One probe raises, one
+    succeeds, and an unexpected third probe is an error rather than a silent
+    pass -- so the asserted tuple is the whole probed population.
+    """
 
     def _import(name: str, package: str | None = None) -> object:
         if name == "fastembed":
             raise ImportError("missing")
-        return original(name, package)
+        if name == "lancedb":
+            return types.ModuleType("lancedb")
+        raise AssertionError(f"unexpected capability probe: {name}")
 
     monkeypatch.setattr(
         "codeclone.analytics.capabilities.importlib.import_module",
@@ -1844,6 +1853,9 @@ def test_profile_loader_validate_pair_rejects_inverted_bounds() -> None:
 def test_generate_embeddings_normalizes_fastembed_model_id(
     tmp_path: Path,
 ) -> None:
+    # AnalyticsVectorStore imports pyarrow, then lancedb, at construction.
+    pytest.importorskip("pyarrow")
+    pytest.importorskip("lancedb")
     from codeclone.analytics.contracts import CorpusItemRecord
     from codeclone.analytics.embedding.generation import (
         generate_embeddings_for_snapshot,

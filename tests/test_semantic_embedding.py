@@ -685,9 +685,12 @@ def test_fastembed_probe_passage_token_counts_without_encode_batch(
     assert counts.raw == counts.effective
 
 
-def test_fastembed_chunk_text_without_tokenizer_returns_original() -> None:
+def test_fastembed_chunk_text_without_tokenizer_returns_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
 
+    _install_fake_fastembed(monkeypatch)
     provider = FastEmbedEmbeddingProvider(
         model_name="BAAI/bge-small-en-v1.5",
         dimension=384,
@@ -698,7 +701,9 @@ def test_fastembed_chunk_text_without_tokenizer_returns_original() -> None:
     assert provider.chunk_text("short text") == ("short text",)
 
 
-def test_fastembed_without_an_inner_model_falls_back_everywhere() -> None:
+def test_fastembed_without_an_inner_model_falls_back_everywhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An embedding model carrying no inner model reaches the narrowing.
 
     The inner model used to be taken on trust through a cast, so this shape
@@ -711,6 +716,7 @@ def test_fastembed_without_an_inner_model_falls_back_everywhere() -> None:
         known_model_max_tokens,
     )
 
+    _install_fake_fastembed(monkeypatch)
     model_name = "BAAI/bge-small-en-v1.5"
     provider = FastEmbedEmbeddingProvider(
         model_name=model_name,
@@ -756,6 +762,7 @@ def test_fastembed_chunk_text_without_encode_ops_returns_original(
     class _Tokenizer:
         truncation = _declared_truncation(512)
 
+    _install_fake_fastembed(monkeypatch)
     provider = FastEmbedEmbeddingProvider(
         model_name="BAAI/bge-small-en-v1.5",
         dimension=384,

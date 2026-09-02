@@ -53,6 +53,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -75,21 +76,36 @@ token-bench = [
 coverage-xml = [
     "defusedxml>=0.7.1,<0.8",
 ]
+# The `python_version < '3.15'` markers below record a measurement, not a
+# preference. On CPython 3.15.0rc2 none of these four has a cp315 distribution,
+# and no sdist fallback builds:
+#   lancedb      -> pyarrow 25.0.1   no cp315 wheel; sdist needs Arrow C++
+#   fastembed    -> onnxruntime 1.29 no cp315 wheel and no sdist at all
+#   scikit-learn 1.9.0               no cp315 wheel; sdist backtracks to a
+#                                    scipy that does not build either
+#   hdbscan      0.8.44              no cp315 wheel; same scipy wall
+# Ungated, `uv sync --all-extras` — the command CI runs on every matrix leg —
+# aborts on 3.15 before installing anything, so the whole environment is lost
+# to extras that could never work. Gated, it resolves.
+# The cost, to be removed when the wheels land: on 3.15 these four extras
+# resolve to nothing, so `codeclone[analytics]` installs cleanly and the
+# analytics and semantic-search features stay unavailable there. That is the
+# same shape as the 3.14 umap-learn gate below.
 semantic-lancedb = [
-    "lancedb>=0.38.0",
+    "lancedb>=0.38.0; python_version < '3.15'",
 ]
 semantic-fastembed = [
-    "fastembed>=0.8.0,<0.9",
+    "fastembed>=0.8.0,<0.9; python_version < '3.15'",
 ]
 semantic-local = [
-    "lancedb>=0.38.0",
-    "fastembed>=0.8.0,<0.9",
+    "lancedb>=0.38.0; python_version < '3.15'",
+    "fastembed>=0.8.0,<0.9; python_version < '3.15'",
 ]
 analytics = [
-    "hdbscan>=0.8.44",
-    "scikit-learn>=1.5.0",
-    "lancedb>=0.38.0",
-    "fastembed>=0.8.0,<0.9",
+    "hdbscan>=0.8.44; python_version < '3.15'",
+    "scikit-learn>=1.5.0; python_version < '3.15'",
+    "lancedb>=0.38.0; python_version < '3.15'",
+    "fastembed>=0.8.0,<0.9; python_version < '3.15'",
     "umap-learn>=0.5.6; python_version < '3.14'",
     # umap-learn → pynndescent → numba/llvmlite.
     # pynndescent 0.5.x allows llvmlite>=0.30 → uv may pick 0.36 (Python <3.10 only).
