@@ -234,7 +234,7 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # (codeclone/cache/reuse.py), so a bump misses exactly the lane that
 # carries ``referenced_qualnames``, dead candidates and live-root reasons,
 # and never touches the neutral fingerprint lane.
-LIVENESS_POLICY_VERSION: Final = "2"
+LIVENESS_POLICY_VERSION: Final = "3"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
 # Generation of the adoption-coverage policy: WHAT COUNTS as an annotated
 # parameter (the receiver of a non-static method is not one; ``*args`` and

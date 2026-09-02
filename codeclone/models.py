@@ -1292,6 +1292,11 @@ class DeadCandidateDict(DeadCandidateDictBase, total=False):
     # CACHE_VERSION 3.2 liveness-reason fact. Optional: a row written without
     # it decodes to None, which is exactly "no root rule fired".
     live_root_reason: str
+    # LIVENESS_POLICY_VERSION 3 star-binding fact. Optional, and its absence is
+    # NOT "unbound": a row without it predates the fact, and the policy version
+    # keying the dependent cache lane is what keeps such a row from being read
+    # as an answer to a question it was never asked.
+    star_import_bound: bool
 
 
 class SecuritySurfaceDict(TypedDict):
@@ -2557,6 +2562,12 @@ class DeadCandidate:
     # The candidate is the carrier because it is the one per-symbol fact that
     # already rides the cache wire, which keeps the reason warm-safe.
     live_root_reason: LiveRootReason | None = None
+    # Whether ``from <this symbol's module> import *`` binds this name. The
+    # wildcard re-export owner needs the target's ``__all__`` rule and cannot
+    # see it from a dependency edge, which names the module and never the
+    # symbol. Same carrier argument as the reason above: it rides the wire with
+    # the symbol, so a warm run answers the binding question as a cold one does.
+    star_import_bound: bool = False
 
 
 @dataclass(frozen=True, slots=True)

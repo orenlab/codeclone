@@ -88,6 +88,7 @@ from codeclone.models import (
     CacheReuseDecision,
     ClassMetrics,
     ContentIdentityVerdict,
+    DeadCandidateDict,
     DigestObject,
     FileMetrics,
     FunctionRelationshipFacts,
@@ -2395,6 +2396,50 @@ def test_resolve_root_oserror_returns_none(
     assert _resolve_root(tmp_path) is None
 
 
+def test_wire_round_trip_keeps_the_star_import_binding_fact() -> None:
+    """The compact wire carries the binding fact, in BOTH of its states.
+
+    The fact decides what a wildcard edge re-exports, and every warm run reads
+    it from here. A wire that dropped it would answer the binding question with
+    the value it had before the question existed - silently, and only on the
+    second run of any project.
+    """
+
+    bound: DeadCandidateDict = {
+        "qualname": "pkg.impl:StarBound",
+        "local_name": "StarBound",
+        "filepath": "pkg/impl.py",
+        "start_line": 1,
+        "end_line": 2,
+        "kind": "class",
+        "star_import_bound": True,
+    }
+    unbound: DeadCandidateDict = {
+        "qualname": "pkg.impl:Omitted",
+        "local_name": "Omitted",
+        "filepath": "pkg/impl.py",
+        "start_line": 4,
+        "end_line": 5,
+        "kind": "class",
+    }
+    dependent = replace(
+        _empty_v3_entry().module_dependent,
+        dead_candidates=(bound, unbound),
+    )
+    entry = replace(_empty_v3_entry(), module_dependent=dependent)
+
+    wire = _encode_wire_file_entry(entry)
+    decoded = _decode_wire_file_entry(
+        wire, "pkg/impl.py", analysed_filepath="pkg/impl.py"
+    )
+
+    assert decoded is not None
+    assert {
+        row["qualname"]: row.get("star_import_bound", False)
+        for row in decoded.module_dependent.dead_candidates
+    } == {"pkg.impl:StarBound": True, "pkg.impl:Omitted": False}
+
+
 def test_decode_wire_file_entry_rejects_malformed_v3_lanes() -> None:
     wire = _encode_wire_file_entry(_empty_v3_entry())
     malformed_neutral = dict(wire)
@@ -2618,6 +2663,12 @@ def test_cache_v3_type_guards_validate_both_lane_payload_shapes() -> None:
     assert cache_validators._is_dead_candidate_dict(dead)
     assert not cache_validators._is_dead_candidate_dict(
         {**dead, "suppressed_rules": [1]}
+    )
+    # The star-binding fact: the real value is admitted, and a row that spells
+    # it as anything but a bool is rejected rather than read as "unbound".
+    assert cache_validators._is_dead_candidate_dict({**dead, "star_import_bound": True})
+    assert not cache_validators._is_dead_candidate_dict(
+        {**dead, "star_import_bound": "yes"}
     )
 
 

@@ -287,6 +287,11 @@ def _is_dead_candidate_dict(value: object) -> TypeGuard[DeadCandidateDict]:
         int_keys=("start_line", "end_line"),
     ):
         return False
+    # A present-but-wrongly-typed binding fact is a writer the reader does not
+    # understand, not a symbol that happens to be unbound: absence is the only
+    # honest way to say "this row predates the fact".
+    if not isinstance(value.get("star_import_bound", False), bool):
+        return False
     suppressed_rules = value.get("suppressed_rules")
     if suppressed_rules is None:
         return True

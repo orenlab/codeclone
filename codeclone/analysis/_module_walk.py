@@ -1597,6 +1597,41 @@ def _resolve_referenced_qualnames(
     return frozenset(resolved)
 
 
+def _resolve_star_import_bound_qualnames(
+    *,
+    module_name: str,
+    collector: _qualnames.QualnameCollector,
+    state: _ModuleWalkState,
+) -> frozenset[str]:
+    """The locally defined names ``from <this module> import *`` binds.
+
+    The language rule, not a heuristic: a module that declares ``__all__``
+    binds exactly the names it lists, and a module that does not binds every
+    top-level name that does not start with an underscore. Only local
+    definitions are resolved, because the one consumer asks whether a class
+    DEFINED here reaches a namespace that stars this module.
+
+    An ``__all__`` the walk could not read statically leaves ``exported_names``
+    empty and falls to the public-name arm. That is the pre-existing reading,
+    and it is the conservative one: under-binding here would re-assert that
+    live public API is dead, which is the failure this fact exists to prevent.
+    """
+
+    top_level_functions = {
+        local_name for local_name, _node in collector.units if "." not in local_name
+    }
+    top_level_classes = {
+        qualname for qualname, _node in collector.class_nodes if "." not in qualname
+    }
+    local_top_level = top_level_functions | top_level_classes
+    bound = (
+        {name for name in state.exported_names if name in local_top_level}
+        if state.exported_names
+        else {name for name in local_top_level if not name.startswith("_")}
+    )
+    return frozenset(f"{module_name}:{name}" for name in bound)
+
+
 def _collect_external_decorator_root_reasons(
     *,
     module_name: str,
@@ -1605,16 +1640,30 @@ def _collect_external_decorator_root_reasons(
     local_top_level_names: frozenset[str],
 ) -> dict[str, _LocalLivenessRootReason]:
     hook_marker_aliases = _resolve_hook_marker_aliases(state)
+    overload_aliases = frozenset(state.non_runtime_decorator_aliases)
     return {
         f"{module_name}:{local_name}": "external_decorator"
+        # An ``@overload`` stub is a DECLARATION of this symbol, not a use of
+        # it: every stub shares the implementation's qualname, so admitting one
+        # lets a symbol stand as its own external evidence. ``typing.overload``
+        # resolves through an external module alias and is otherwise
+        # indistinguishable from a framework registration, which is how a
+        # method whose only real evidence was an ordinary call site came to be
+        # recorded as live because something external decorated it.
         for local_name, function_node in collector.units
-        if _has_external_decorator(
+        if not _is_typing_overload_stub(
             function_node,
-            external_symbol_aliases=state.external_symbol_aliases,
-            external_module_aliases=state.external_module_aliases,
-            local_top_level_names=local_top_level_names,
+            overload_aliases=overload_aliases,
         )
-        or _has_hook_marker_decorator(function_node, hook_marker_aliases)
+        and (
+            _has_external_decorator(
+                function_node,
+                external_symbol_aliases=state.external_symbol_aliases,
+                external_module_aliases=state.external_module_aliases,
+                local_top_level_names=local_top_level_names,
+            )
+            or _has_hook_marker_decorator(function_node, hook_marker_aliases)
+        )
     }
 
 
@@ -1754,6 +1803,11 @@ class _ModuleWalkResult(NamedTuple):
     referenced_names: frozenset[str]
     referenced_qualnames: frozenset[str]
     liveness_root_reasons: tuple[tuple[str, _LocalLivenessRootReason], ...]
+    #: What ``from <this module> import *`` binds among the module's own
+    #: definitions. A binding fact, independent of whether anything references
+    #: the name: the wildcard re-export rule needs to know what an edge CARRIES
+    #: before it can ask what the project holds live.
+    star_import_bound_qualnames: frozenset[str]
     # Rule-3 facts, keyed by module-LOCAL qualname; units.py adds the module
     # prefix when it attaches them to the owning ClassMetrics.
     class_base_names: tuple[tuple[str, tuple[str, ...]], ...]
@@ -2010,6 +2064,11 @@ def _collect_module_walk_data(
         referenced_names=frozenset(state.referenced_names),
         referenced_qualnames=resolved,
         liveness_root_reasons=tuple(sorted(state.liveness_root_reasons.items())),
+        star_import_bound_qualnames=_resolve_star_import_bound_qualnames(
+            module_name=module_name,
+            collector=collector,
+            state=state,
+        ),
         class_base_names=class_base_names,
         unresolved_external_base_classes=unresolved_external_base_classes,
         decorator_evidenced_methods=_collect_decorator_evidenced_methods(

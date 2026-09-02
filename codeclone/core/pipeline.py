@@ -91,6 +91,7 @@ from ._types import (
 )
 from .bootstrap import _resolve_optional_runtime_path
 from .entrypoints import (
+    already_live_candidate_qualnames,
     collect_project_entrypoint_qualnames,
     collect_project_export_root_evidence,
 )
@@ -399,24 +400,40 @@ def analyze(
         *processing.structural_findings,
         *cohort_structural_findings,
     )
+    # Whether an imported callable is a class is a whole-project fact, so it is
+    # resolved once and every consumer below reads the same coupling numbers.
+    # It is resolved BEFORE the export roots because the liveness owner reads
+    # these same rows: the export-root rule must be measured against the
+    # verdict this run will actually reach, not against a different one.
+    class_metrics = resolve_project_class_coupling(processing.class_metrics)
     # Export roots are a whole-project fact, so they are resolved once here and
     # folded onto the candidates. External-decorator reasons already ride the
     # candidates from the module walk (and therefore the cache), which is what
     # keeps the merged set identical on cold and warm runs.
+    #
+    # The already-live set is computed from the candidates BEFORE any export
+    # root exists, which is what makes an emitted root a causal statement: the
+    # symbols in it are exactly the ones whose liveness the export chain
+    # actually decides.
+    already_live_qualnames = already_live_candidate_qualnames(
+        dead_candidates=processing.dead_candidates,
+        referenced_names=processing.referenced_names,
+        referenced_qualnames=processing.referenced_qualnames,
+        runtime_reachability=processing.runtime_reachability,
+        class_metrics=class_metrics,
+        module_registry=discovery.module_registry,
+    )
     export_root_evidence = collect_project_export_root_evidence(
         module_deps=processing.module_deps,
         referenced_qualnames=processing.referenced_qualnames,
         dead_candidates=processing.dead_candidates,
         module_registry=discovery.module_registry,
+        already_live_qualnames=already_live_qualnames,
     )
     dead_candidates = _with_export_root_reasons(
         processing.dead_candidates,
         evidence=export_root_evidence,
     )
-    # Same shape as the export-root fold above: whether an imported callable is
-    # a class is a whole-project fact, so it is resolved once and every
-    # consumer below reads the same coupling numbers.
-    class_metrics = resolve_project_class_coupling(processing.class_metrics)
     # The api-surface track is decided once, here, and both consumers below
     # are handed the same product surface: the metric family that feeds
     # ``api_breaking_changes`` and the gate, and the observation lane that

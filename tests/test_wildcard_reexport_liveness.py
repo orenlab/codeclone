@@ -33,28 +33,15 @@ a property of one ``httpx`` version, not of the defect.
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
 from pathlib import Path
 
-import pytest
-
-# The CLI is SPAWNED, never imported: these pins live at the report layer and
-# importing the CLI surface would make the module a ring-4 test reaching into
-# ring-2 internals. Same pattern as the dependency-cycle policy suite.
-_CLI_ENTRY = "from codeclone.surfaces.cli.workflow import main; main()"
+from tests._liveness_report_helpers import (
+    dead_code_family,
+    dead_qualnames,
+)
 
 #: Baseline update and gating both require a stable canonical scope id.
 _SCOPE_ID = "0192f3aa-6c51-7b28-9d44-1ea5c07b6f39"
-
-#: Every tree here is three or four tiny files and returns in about a second,
-#: so this is a DEADLINE, not a performance budget: it exists to turn a
-#: non-terminating walk into a bounded red. A run that has to be killed cannot
-#: be told apart from one still working, which is the one failure mode a
-#: dead-code analyzer must never have - the user gets no wrong finding, they
-#: get nothing, and no reason why.
-_RUN_DEADLINE_SECONDS = 120.0
 
 _IMPL_SOURCE = """
 class StarBoundWidget:
@@ -338,85 +325,24 @@ class OrphanWidget:
 }
 
 
-def _write_tree(root: Path, tree: dict[str, str]) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    for name, source in tree.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source.lstrip(), encoding="utf-8")
-    (root / "pyproject.toml").write_text(
-        f'[tool.codeclone]\nbaseline_scope_id = "{_SCOPE_ID}"\n',
-        encoding="utf-8",
-    )
-    return root
-
-
-def _run_bounded(
-    argv: list[str],
-    *,
+def _dead_qualnames(
+    tmp_path: Path,
+    tree: dict[str, str],
     name: str,
-) -> subprocess.CompletedProcess[str]:
-    """Spawn one analysis under a deadline, and fail loudly if it is hit.
+    *,
+    expect_warm_cache: bool = False,
+) -> frozenset[str]:
+    """Dead-code qualnames of one generated tree, behind the shared witness."""
 
-    ``subprocess.run`` without a timeout turns a non-terminating walk into a
-    hung suite, which reads exactly like a slow one. The deadline converts that
-    into an ordinary red naming the duty that broke.
-    """
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_RUN_DEADLINE_SECONDS,
+    return dead_qualnames(
+        dead_code_family(
+            tmp_path,
+            tree,
+            name,
+            scope_id=_SCOPE_ID,
+            expect_warm_cache=expect_warm_cache,
         )
-    except subprocess.TimeoutExpired:
-        pytest.fail(
-            f"analysis of tree {name!r} did not terminate within "
-            f"{_RUN_DEADLINE_SECONDS:.0f}s: the re-export walk must converge on "
-            f"every input, including a cyclic one"
-        )
-
-
-def _dead_qualnames(tmp_path: Path, tree: dict[str, str], name: str) -> frozenset[str]:
-    """Dead-code qualnames of one generated tree, behind the witness chain.
-
-    A count read without its witness is the benchmark defect this project
-    already measured: with no metrics flag the run silently degrades to
-    ``clones_only`` and EVERY family reads zero. So the producer, the mode and
-    the family are asserted before a single finding is read.
-    """
-
-    project_root = _write_tree(tmp_path / name, tree)
-    report_path = tmp_path / f"{name}-report.json"
-    completed = _run_bounded(
-        [
-            sys.executable,
-            "-c",
-            _CLI_ENTRY,
-            str(project_root),
-            "--baseline",
-            str(tmp_path / f"{name}-baseline.json"),
-            "--cache-path",
-            str(tmp_path / f"{name}-cache.json"),
-            "--json",
-            str(report_path),
-            "--no-skip-metrics",
-            "--no-skip-dead-code",
-            "--no-progress",
-        ],
-        name=name,
     )
-    assert report_path.exists(), completed.stdout + completed.stderr
-    payload = json.loads(report_path.read_text("utf-8"))
-    assert isinstance(payload, dict)
-    meta = payload["meta"]
-    assert isinstance(meta, dict)
-    assert meta["analysis_mode"] == "full", meta["analysis_mode"]
-    assert "dead_code" in meta["computed_metric_families"]
-    family = payload["metrics"]["families"]["dead_code"]
-    assert isinstance(family, dict)
-    return frozenset(str(item["qualname"]) for item in family["items"])
 
 
 def test_wildcard_reexport_resolves_the_bindings_its_all_names(
@@ -623,3 +549,90 @@ def test_reexport_chain_terminates_on_a_mutual_wildcard_cycle(
     assert "pkg.b:CycleWidget.render_cycle" not in dead
     assert "pkg.b:OrphanWidget" in dead
     assert "pkg.b:OrphanWidget.never_called" in dead
+
+
+#: The binding layer itself, stated as a difference of ONE name. ``pkg.impl``
+#: declares ``__all__``, so ``from .impl import *`` binds exactly what it
+#: lists - the language rule, not a heuristic. ``OmittedWidget`` is public and
+#: a sibling module holds it live, which is precisely the shape that used to
+#: root it: being referenced was read as being carried out. Runtime disagrees,
+#: ``hasattr(pkg, "OmittedWidget")`` is False, and a member reachable only
+#: through the defining module is not on the public surface.
+def _target_all_tree(*, exports: tuple[str, ...]) -> dict[str, str]:
+    listed = ", ".join(f'"{name}"' for name in exports)
+    return {
+        "pkg/__init__.py": """
+from .impl import *  # noqa: F403
+
+__all__ = ["StarBoundWidget"]
+""",
+        "pkg/impl.py": f"""
+__all__ = [{listed}]
+
+
+class StarBoundWidget:
+    def render_panel(self) -> str:
+        return "panel"
+
+
+class OmittedWidget:
+    def render_omitted(self) -> str:
+        return "omitted"
+""",
+        "pkg/consumer.py": """
+from .impl import OmittedWidget
+
+
+def take_omitted() -> object:
+    return OmittedWidget()
+""",
+    }
+
+
+def test_wildcard_does_not_bind_a_name_the_target_all_omits(tmp_path: Path) -> None:
+    """Take the name out of the target ``__all__`` and the star edge goes.
+
+    The class stays referenced - the sibling import is untouched - so a rule
+    that reads "public class in a wildcard target that the project references"
+    keeps rooting it. Only a rule that consults the binding moves.
+    """
+
+    dead = _dead_qualnames(
+        tmp_path,
+        _target_all_tree(exports=("StarBoundWidget",)),
+        "targetallomits",
+    )
+
+    # The rule still runs on this tree: the listed class keeps its member live.
+    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
+    assert "pkg.impl:OmittedWidget.render_omitted" in dead
+
+
+def test_wildcard_binds_the_name_the_target_all_lists(tmp_path: Path) -> None:
+    """Put it back and the star edge returns: the same tree, one name apart."""
+
+    dead = _dead_qualnames(
+        tmp_path,
+        _target_all_tree(exports=("StarBoundWidget", "OmittedWidget")),
+        "targetalllists",
+    )
+
+    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
+    assert "pkg.impl:OmittedWidget.render_omitted" not in dead
+
+
+def test_wildcard_binding_survives_a_warm_cache(tmp_path: Path) -> None:
+    """The binding fact has to reach a run that never walks the module.
+
+    Every per-file liveness fact this rule reads comes off the cache on a warm
+    run, so a binding the walk resolves and the wire drops would give two
+    different answers for one tree - and the second one would be the answer
+    from before the rule existed. Same tree, same cache path, twice.
+    """
+
+    tree = _target_all_tree(exports=("StarBoundWidget",))
+    cold = _dead_qualnames(tmp_path, tree, "warmbinding")
+    warm = _dead_qualnames(tmp_path, tree, "warmbinding", expect_warm_cache=True)
+
+    assert "pkg.impl:OmittedWidget.render_omitted" in cold
+    assert warm == cold

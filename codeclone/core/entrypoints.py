@@ -12,7 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from ..models import DeadCandidate, ModuleDep, ModuleRegistryHandle
+from ..metrics.dead_code import classify_liveness
+from ..models import (
+    ClassMetrics,
+    DeadCandidate,
+    ModuleDep,
+    ModuleRegistryHandle,
+    RuntimeReachabilityFact,
+)
 from ..utils.coerce import as_mapping
 
 if TYPE_CHECKING:
@@ -131,12 +138,56 @@ def collect_project_entrypoint_qualnames(
     return frozenset(sorted(resolved))
 
 
+def already_live_candidate_qualnames(
+    *,
+    dead_candidates: Sequence[DeadCandidate],
+    referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str],
+    runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
+    class_metrics: Sequence[ClassMetrics] = (),
+    module_registry: ModuleRegistryHandle | None = None,
+) -> frozenset[str]:
+    """Candidates the project holds live WITHOUT any export-root evidence.
+
+    The one population an export root has to be measured against, and it is
+    read from the liveness owner rather than restated here. Restating it was
+    the defect: the export-root rule excluded a candidate only when its
+    QUALNAME was already referenced, while an ordinary ``obj.method()`` call
+    reaches the liveness decision as a bare name and never as a qualname. The
+    comparison could therefore not match an attribute-called method in any
+    configuration, and the rule recorded "live because exported" for symbols a
+    call site already held live.
+
+    An abstention is deliberately NOT already-live: a method whose owner
+    inherits an opaque external base is neither dead nor live, so an export
+    root remains a real contribution there.
+    """
+
+    classification = classify_liveness(
+        definitions=tuple(dead_candidates),
+        referenced_names=referenced_names,
+        referenced_qualnames=referenced_qualnames,
+        runtime_reachability=tuple(runtime_reachability),
+        module_registry=module_registry,
+        class_metrics=tuple(class_metrics),
+    )
+    undecided = {item.qualname for item in classification.dead_items} | {
+        item.qualname for item in classification.unresolved_overrides
+    }
+    return frozenset(
+        candidate.qualname
+        for candidate in dead_candidates
+        if candidate.qualname not in undecided
+    )
+
+
 def collect_project_export_root_qualnames(
     *,
     module_deps: Sequence[ModuleDep],
     referenced_qualnames: frozenset[str],
     dead_candidates: Sequence[DeadCandidate],
     module_registry: ModuleRegistryHandle,
+    already_live_qualnames: frozenset[str],
 ) -> frozenset[str]:
     """Resolve the public methods reached through a package-boundary export."""
     return frozenset(
@@ -146,6 +197,7 @@ def collect_project_export_root_qualnames(
             referenced_qualnames=referenced_qualnames,
             dead_candidates=dead_candidates,
             module_registry=module_registry,
+            already_live_qualnames=already_live_qualnames,
         )
     )
 
@@ -166,11 +218,17 @@ def _wildcard_reexported_classes(
     A wildcard names no symbol, so the named export chain sees only
     ``target:*`` and roots nothing - which is how a package spelled with
     ``import *`` came to assert, with high confidence, that its own public
-    methods were dead. What such an edge binds is the target's public exports,
-    and the walk has already resolved which of those the project holds live,
-    so the edge is expanded against exactly that set rather than against every
-    symbol the target happens to define. Underscore names are excluded because
-    ``import *`` does not bind them.
+    methods were dead.
+
+    What such an edge binds is decided by the TARGET, and only by the target:
+    a module declaring ``__all__`` binds exactly the names it lists. That fact
+    rides each candidate as ``star_import_bound``, because a dependency edge
+    names the module and never the symbol, so it cannot answer the question on
+    its own. Being referenced is a separate condition and stays a separate
+    condition: a name the star does not bind is not carried out no matter who
+    else holds it live, which is how a class excluded from its target's
+    ``__all__`` used to have its uncalled member rooted as externally
+    reachable while ``hasattr(package, name)`` was executably False.
 
     A repository with no wildcard re-export has no such edge and gets the
     empty set, so this rule cannot move a verdict outside its own class.
@@ -187,7 +245,7 @@ def _wildcard_reexported_classes(
         candidate.qualname
         for candidate in dead_candidates
         if candidate.kind == "class"
-        and not candidate.local_name.startswith("_")
+        and candidate.star_import_bound
         and candidate.qualname.partition(":")[0] in wildcard_targets
         and candidate.qualname in referenced_qualnames
     }
@@ -237,6 +295,7 @@ def collect_project_export_root_evidence(
     referenced_qualnames: frozenset[str],
     dead_candidates: Sequence[DeadCandidate],
     module_registry: ModuleRegistryHandle,
+    already_live_qualnames: frozenset[str],
 ) -> tuple[tuple[str, Literal["export_root"]], ...]:
     """Resolve export roots that nothing upstream already holds live.
 
@@ -247,6 +306,18 @@ def collect_project_export_root_evidence(
     unioned back into the very set it was drawn from. This owner therefore adds
     only the roots the chain implies but nothing records: the public methods
     reached through a class that the export chain made live.
+
+    "Nothing already holds live" is measured against
+    ``already_live_qualnames`` - the liveness owner's own verdict, taken
+    before any export root exists - and not against ``referenced_qualnames``,
+    which cannot contain an attribute-called method by construction. The
+    result is an evidence lane that explains the verdict the tool actually
+    reached: a root here is the reason the symbol is live, not a second
+    description of a symbol something else already holds.
+
+    The parameter carries no default on purpose. A caller that forgets it
+    would silently restore the old, unmatchable comparison, and the rule would
+    go on recording roots for symbols it does not root.
     """
     package_modules = {
         module
@@ -298,7 +369,7 @@ def collect_project_export_root_evidence(
         if (
             separator
             and owner in exported_classes
-            and candidate.qualname not in referenced_qualnames
+            and candidate.qualname not in already_live_qualnames
         ):
             roots.add(candidate.qualname)
     return tuple((qualname, "export_root") for qualname in sorted(roots))
@@ -310,6 +381,7 @@ def _matches_entrypoint_suffix(qualname: str, ref: _EntryPointRef) -> bool:
 
 
 __all__ = [
+    "already_live_candidate_qualnames",
     "collect_project_entrypoint_qualnames",
     "collect_project_export_root_evidence",
     "collect_project_export_root_qualnames",

@@ -476,6 +476,8 @@ def _dead_candidate_dict_from_model(
         result["suppressed_rules"] = sorted(set(candidate.suppressed_rules))
     if candidate.live_root_reason is not None:
         result["live_root_reason"] = candidate.live_root_reason
+    if candidate.star_import_bound:
+        result["star_import_bound"] = True
     return result
 
 

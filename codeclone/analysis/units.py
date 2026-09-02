@@ -264,6 +264,28 @@ def _with_walk_live_root_reasons(
     )
 
 
+def _with_star_import_bindings(
+    candidates: tuple[DeadCandidate, ...],
+    *,
+    star_import_bound_qualnames: frozenset[str],
+) -> tuple[DeadCandidate, ...]:
+    """Attach the module's ``import *`` binding fact to its own candidates.
+
+    Folded here for the same reason the reason above is: the walk resolves the
+    module's ``__all__`` only once the whole module is read, and the candidate
+    is the carrier that reaches a warm run.
+    """
+
+    if not star_import_bound_qualnames:
+        return candidates
+    return tuple(
+        replace(candidate, star_import_bound=True)
+        if candidate.qualname in star_import_bound_qualnames
+        else candidate
+        for candidate in candidates
+    )
+
+
 def extract_units_and_stats_from_source(
     source: str,
     filepath: str,
@@ -621,6 +643,10 @@ def extract_units_and_stats_from_source(
         dead_candidates = _with_walk_live_root_reasons(
             dead_candidates,
             reasons=_walk.liveness_root_reasons,
+        )
+        dead_candidates = _with_star_import_bindings(
+            dead_candidates,
+            star_import_bound_qualnames=_walk.star_import_bound_qualnames,
         )
 
     sorted_class_metrics = tuple(

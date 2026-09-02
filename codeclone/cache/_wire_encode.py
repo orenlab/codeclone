@@ -412,6 +412,17 @@ def _encode_dead_candidates(entry: CacheFactsDict, wire: dict[str, object]) -> N
                 encoded.append(live_root_reason)
             encoded_dead_candidates.append(encoded)
         wire["dc"] = encoded_dead_candidates
+    # The star-binding fact rides beside the rows rather than inside them: the
+    # candidate row is a positional tail, and a fourth optional slot would make
+    # every reader fill the ones before it to stay unambiguous. A sorted name
+    # list is the same shape the referenced-name sections already use.
+    star_bound = sorted(
+        str(candidate["qualname"])
+        for candidate in dead_candidates
+        if candidate.get("star_import_bound")
+    )
+    if star_bound:
+        wire["sb"] = star_bound
 
 
 def _encode_name_lists(entry: CacheFactsDict, wire: dict[str, object]) -> None:

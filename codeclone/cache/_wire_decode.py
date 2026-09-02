@@ -1012,6 +1012,7 @@ def _decode_wire_file_sections(
         filepath=filepath,
         decode_item=_decode_wire_dead_candidate,
     )
+    star_bound = _decode_optional_wire_names(obj=obj, key="sb")
     if (
         units is None
         or blocks is None
@@ -1019,8 +1020,14 @@ def _decode_wire_file_sections(
         or class_metrics is None
         or module_deps is None
         or dead_candidates is None
+        or star_bound is None
     ):
         return None
+    if star_bound:
+        bound = frozenset(star_bound)
+        for candidate in dead_candidates:
+            if candidate["qualname"] in bound:
+                candidate["star_import_bound"] = True
     return (
         units,
         blocks,

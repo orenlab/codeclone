@@ -1055,17 +1055,27 @@ def test_export_roots_add_only_qualnames_nothing_else_holds_live() -> None:
         }
     )
 
+    # No call site anywhere in this constructed population, so "already live"
+    # is exactly the referenced set - which is what makes this the pin on the
+    # export rule alone, with the call-site arm held at zero.
+    already_live = entrypoints_mod.already_live_candidate_qualnames(
+        dead_candidates=dead_candidates,
+        referenced_names=frozenset(),
+        referenced_qualnames=referenced_qualnames,
+    )
     evidence = entrypoints_mod.collect_project_export_root_evidence(
         module_deps=module_deps,
         referenced_qualnames=referenced_qualnames,
         dead_candidates=dead_candidates,
         module_registry=registry,
+        already_live_qualnames=already_live,
     )
     roots = entrypoints_mod.collect_project_export_root_qualnames(
         module_deps=module_deps,
         referenced_qualnames=referenced_qualnames,
         dead_candidates=dead_candidates,
         module_registry=registry,
+        already_live_qualnames=already_live,
     )
 
     # Exactly the public method of the exported class, and nothing already held.
@@ -1829,6 +1839,7 @@ def test_export_root_extension_stops_at_the_package_export_chain() -> None:
 
         module_deps: list[ModuleDep] = []
         referenced_qualnames: set[str] = set()
+        referenced_names: set[str] = set()
         dead_candidates: list[DeadCandidate] = []
         for relative_path in (
             f"{package_module}/__init__.py",
@@ -1842,6 +1853,7 @@ def test_export_root_extension_stops_at_the_package_export_chain() -> None:
             )
             module_deps.extend(metrics.module_deps)
             referenced_qualnames |= set(metrics.referenced_qualnames)
+            referenced_names |= set(metrics.referenced_names)
             dead_candidates.extend(metrics.dead_candidates)
 
         # The premise of the discrimination: BOTH owning classes are referenced.
@@ -1855,6 +1867,13 @@ def test_export_root_extension_stops_at_the_package_export_chain() -> None:
                 referenced_qualnames=frozenset(referenced_qualnames),
                 dead_candidates=tuple(dead_candidates),
                 module_registry=registry,
+                already_live_qualnames=(
+                    entrypoints_mod.already_live_candidate_qualnames(
+                        dead_candidates=tuple(dead_candidates),
+                        referenced_names=frozenset(referenced_names),
+                        referenced_qualnames=frozenset(referenced_qualnames),
+                    )
+                ),
             )
         )
 

@@ -608,6 +608,7 @@ def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate
         kind=kind,
         suppressed_rules=_as_sorted_str_tuple(dead_row.get("suppressed_rules", [])),
         live_root_reason=_live_root_reason(dead_row.get("live_root_reason")),
+        star_import_bound=dead_row.get("star_import_bound", False) is True,
     )
 
 

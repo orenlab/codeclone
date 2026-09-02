@@ -1925,7 +1925,13 @@ def test_dead_code_distinguishes_test_only_reference_from_unreferenced() -> None
     )
     assert dead_by_symbol["unused_private"].test_reference_sources == ()
     assert dead_by_symbol["run"].test_reference_sources == ()
-    assert contracts.LIVENESS_POLICY_VERSION == "2"
+    # Declared generation of the liveness policy. It moved to "3" when an
+    # export root stopped being recorded for a symbol an internal call
+    # already holds live, an ``@overload`` stub stopped rooting its own
+    # symbol, and the wildcard rule started consulting the target
+    # ``__all__``: all three change WHAT COUNTS AS LIVE, which is exactly
+    # what this constant declares.
+    assert contracts.LIVENESS_POLICY_VERSION == "3"
 
 
 def test_extraction_uses_module_identity_for_test_named_package_trees() -> None:
