@@ -54,9 +54,13 @@ from codeclone.cache.store import Cache
 from codeclone.canonical.model import CanonicalModel
 from codeclone.canonical.store import RunStore
 from codeclone.contracts import DEFAULT_CACHE_PATH
+from codeclone.core._types import AnalysisResult, DiscoveryResult, ProcessingResult
 from codeclone.core.canonical_snapshot import (
+    CLONES_ONLY_MODE,
     RUN_SNAPSHOT_NAMESPACE,
     ProducerSnapshotUnavailable,
+    canonical_snapshot_from_producers,
+    producer_execution_population,
     publish_run_snapshot,
 )
 from codeclone.core.discovery_cache import load_cached_metrics_extended
@@ -74,10 +78,62 @@ from codeclone.models import (
 from codeclone.observability import bootstrap, operation, shutdown
 from tests._ast_metrics_helpers import module_registry_context
 from tests.conftest import RunStoreCorpusRunner
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 from tests.test_run_store_producer_wiring import (  # noqa: F401
     _FULL_METRICS_ARGS,
     corpus,
 )
+
+
+def _producers(
+    *, files_found: int, files_analyzed: int, near_miss: bool, renamed: bool
+) -> tuple[DiscoveryResult, AnalysisResult]:
+    """Real producer results, so the pin rots the day the reader widens."""
+
+    discovery = DiscoveryResult(
+        files_found=files_found,
+        cache_hits=0,
+        files_skipped=0,
+        all_file_paths=(),
+        cached_units=(),
+        cached_blocks=(),
+        cached_segments=(),
+        cached_class_metrics=(),
+        cached_module_deps=(),
+        cached_dead_candidates=(),
+        cached_referenced_names=frozenset(),
+        files_to_process=(),
+        skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="placeholder.py", module_name="placeholder"
+        )[1],
+    )
+    analysis = AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        low_value_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=files_analyzed,
+        project_metrics=None,
+        metrics_payload=None,
+        suggestions=(),
+        segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+        near_miss_pairs=() if near_miss else None,
+        renamed_structure_groups=() if renamed else None,
+    )
+    return discovery, analysis
+
+
+_CONTAINMENT_DISCOVERY, _CONTAINMENT_ANALYSIS = _producers(
+    files_found=1, files_analyzed=1, near_miss=False, renamed=False
+)
+
 
 _SOURCE_CONTENT_DIGEST = DigestObject(
     domain="codeclone.source-content.v1",
@@ -344,9 +400,9 @@ def test_an_unheard_of_failure_behind_the_edge_does_not_fail_the_analysis(
     )
     publication = publish_run_snapshot(
         config=_enabled(tmp_path),
-        discovery=None,  # type: ignore[arg-type]
+        discovery=_CONTAINMENT_DISCOVERY,
         processing=None,  # type: ignore[arg-type]
-        analysis=None,  # type: ignore[arg-type]
+        analysis=_CONTAINMENT_ANALYSIS,
         report_meta={},
     )
     assert publication.outcome == RUN_SNAPSHOT_PUBLICATION_FAILED
@@ -539,9 +595,9 @@ def test_a_contained_failure_is_named_and_counted(
     with operation(name="cli.analyze", surface="cli"):
         publication = publish_run_snapshot(
             config=_enabled(observed),
-            discovery=None,  # type: ignore[arg-type]
+            discovery=_CONTAINMENT_DISCOVERY,
             processing=None,  # type: ignore[arg-type]
-            analysis=None,  # type: ignore[arg-type]
+            analysis=_CONTAINMENT_ANALYSIS,
             report_meta={},
         )
     shutdown()
@@ -579,9 +635,9 @@ def test_the_typed_refusal_keeps_its_own_outcome(
     )
     publication = publish_run_snapshot(
         config=_enabled(tmp_path),
-        discovery=None,  # type: ignore[arg-type]
+        discovery=_CONTAINMENT_DISCOVERY,
         processing=None,  # type: ignore[arg-type]
-        analysis=None,  # type: ignore[arg-type]
+        analysis=_CONTAINMENT_ANALYSIS,
         report_meta={},
     )
     assert publication.outcome == RUN_SNAPSHOT_PUBLICATION_REFUSED
@@ -609,8 +665,108 @@ def test_the_boundary_does_not_contain_the_process_coming_down(
     with pytest.raises(KeyboardInterrupt):
         publish_run_snapshot(
             config=_enabled(tmp_path),
-            discovery=None,  # type: ignore[arg-type]
+            discovery=_CONTAINMENT_DISCOVERY,
             processing=None,  # type: ignore[arg-type]
-            analysis=None,  # type: ignore[arg-type]
+            analysis=_CONTAINMENT_ANALYSIS,
             report_meta={},
         )
+
+
+# ---------------------------------------------------------------------------
+# The population is TOTAL: the reason the enabled path needs no guard for it
+# ---------------------------------------------------------------------------
+
+
+_POPULATION_CONFIGURATIONS: tuple[tuple[str, dict[str, object], int, int], ...] = (
+    ("full run", {"analysis_mode": "full", "metrics_computed": ["complexity"]}, 7, 7),
+    ("clones only", {"analysis_mode": CLONES_ONLY_MODE}, 7, 7),
+    ("truncated", {"analysis_mode": "full", "metrics_computed": ["complexity"]}, 7, 3),
+    ("empty tree", {"analysis_mode": "full", "metrics_computed": []}, 0, 0),
+    ("no report meta", {}, 7, 7),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "report_meta", "files_found", "files_analyzed"),
+    _POPULATION_CONFIGURATIONS,
+    ids=[case[0] for case in _POPULATION_CONFIGURATIONS],
+)
+@pytest.mark.parametrize("optional_lanes", [False, True], ids=["off", "on"])
+def test_the_producer_edge_always_has_a_population_to_publish(
+    label: str,
+    report_meta: dict[str, object],
+    files_found: int,
+    files_analyzed: int,
+    optional_lanes: bool,
+) -> None:
+    """The precondition that makes a "no population" guard unreachable.
+
+    ``_publish_enabled`` carried ``if population is None: raise`` marked
+    ``pragma: no cover`` since it was written, and the pragma was the whole
+    evidence for it.  Measured: the population is TOTAL over the run
+    configuration -- mode, declared producers, the two opt-in lanes and the
+    realized file population are the only inputs that shape it, and every
+    combination of them yields a record.  A guard no input can reach is not
+    a guard, so it is gone, and this is what its removal rests on.
+
+    The pin is on the PROPERTY, not on the deleted line: the day somebody
+    gives this function a road that returns nothing, the guard has to be
+    argued again rather than reappearing as another unexecuted comment.
+    """
+
+    discovery, analysis = _producers(
+        files_found=files_found,
+        files_analyzed=files_analyzed,
+        near_miss=optional_lanes,
+        renamed=optional_lanes,
+    )
+
+    population = producer_execution_population(
+        discovery=discovery, analysis=analysis, report_meta=report_meta
+    )
+
+    assert population is not None, label
+    assert population.producer_states, "an empty population states nothing"
+
+
+def test_the_snapshot_the_builder_hands_the_store_carries_that_population() -> None:
+    """The other half of the edge: what the builder puts in the model.
+
+    The guard read ``model.facts.analysis.analysis_population``, one call
+    after the model was built here, so the property above is only half of
+    why it could not fire.  This is the other half, and it is pinned on a
+    model the real builder produced.
+    """
+
+    discovery, analysis = _producers(
+        files_found=1, files_analyzed=1, near_miss=False, renamed=False
+    )
+    model = canonical_snapshot_from_producers(
+        discovery=discovery,
+        processing=ProcessingResult(
+            units=(),
+            blocks=(),
+            segments=(),
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            files_analyzed=1,
+            files_skipped=0,
+            analyzed_lines=0,
+            analyzed_functions=0,
+            analyzed_methods=0,
+            analyzed_classes=0,
+            failed_files=(),
+            source_read_failures=(),
+        ),
+        analysis=analysis,
+        report_meta={"analysis_mode": "full", "metrics_computed": []},
+        population=producer_execution_population(
+            discovery=discovery,
+            analysis=analysis,
+            report_meta={"analysis_mode": "full", "metrics_computed": []},
+        ),
+    )
+
+    assert model.facts.analysis.analysis_population is not None

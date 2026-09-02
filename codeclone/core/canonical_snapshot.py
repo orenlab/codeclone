@@ -869,8 +869,20 @@ def canonical_snapshot_from_producers(
     processing: ProcessingResult,
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
+    population: AnalysisPopulation,
 ) -> CanonicalModel:
     """Build one normalized model straight from the run's producers.
+
+    ``population`` is taken as an argument rather than derived here, and the
+    caller is the reason: ``_publish_enabled`` needs the same record for the
+    head decision it is about to make, so deriving it twice would put one
+    run's completeness under two readings.  Passing it also removes an
+    impossible state -- the model's field is optional because ingest and the
+    store decode can legitimately answer "no population", and a publish path
+    that read the population back OUT of the model inherited that optional
+    for a value it had just produced itself.  That is what the removed
+    ``if population is None`` guard was standing on: an unreachable branch
+    manufactured by a round trip through a wider type.
 
     Total over the wave-4 family set, the six semantic-authority families
     included: their producer rows carry the same glued identity strings the
@@ -909,11 +921,7 @@ def canonical_snapshot_from_producers(
         adoption_counts=_adoption_rows(structural.adoption_counts, index),
         security_surfaces=_security_surface_rows(payload, index),
         run_scalars=_run_scalars(discovery, processing),
-        analysis_population=producer_execution_population(
-            discovery=discovery,
-            analysis=analysis,
-            report_meta=report_meta,
-        ),
+        analysis_population=population,
     )
     files = frozenset(FileId(path) for path in analyzed)
     return CanonicalModel(
@@ -1028,15 +1036,18 @@ def _publish_enabled(
     step added here inherits the containment without a second decision.
     """
 
+    population = producer_execution_population(
+        discovery=discovery,
+        analysis=analysis,
+        report_meta=report_meta,
+    )
     model = canonical_snapshot_from_producers(
         discovery=discovery,
         processing=processing,
         analysis=analysis,
         report_meta=report_meta,
+        population=population,
     )
-    population = model.facts.analysis.analysis_population
-    if population is None:  # pragma: no cover - the builder always writes it
-        raise ProducerSnapshotUnavailable("the snapshot carries no population")
     admissible = population_is_admissible(population)
     target = profile_head_target(population)
     path.parent.mkdir(parents=True, exist_ok=True)
