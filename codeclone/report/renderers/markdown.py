@@ -650,7 +650,14 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         (
             "dead-code-metrics",
             "Dead Code",
-            ("total", "high_confidence", "suppressed", "unreachable_statements"),
+            (
+                "total",
+                "high_confidence",
+                "suppressed",
+                "unreachable_statements",
+                "unresolved",
+                "world_contract",
+            ),
             ("kind", "confidence"),
         ),
     ):

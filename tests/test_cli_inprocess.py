@@ -4932,6 +4932,8 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
         "new_items": 0,
         "unreachable_statements": 0,
         "unresolved_external_override": 0,
+        "unresolved": 0,
+        "world_contract": "open",
         "live_roots": 0,
     }
 

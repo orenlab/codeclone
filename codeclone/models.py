@@ -83,8 +83,27 @@ DeadCodeCandidateKind = Literal["function", "class", "method", "import"]
 # whole extension point, so a new row type costs no further bump.
 DeadCodeObservationKind = Literal["symbol", "unreachable_statement"]
 # Why a symbol is held live by a root rule rather than by a plain reference.
-# Evidence, not a verdict: it explains an already-live outcome.
+# Evidence, not a verdict: it explains an already-live outcome. ``export_root``
+# is registered and no longer produced: the export chain became reachability
+# evidence (below) when RULING 2026-09-01 landed, and a wire that once carried
+# the value keeps reading it.
 LiveRootReason = Literal["external_decorator", "export_root"]
+# The world contract a dead-code verdict is derived under (RULING 2026-09-01).
+# ``open``: consumers outside the analysis root may exist, so a symbol they
+# could reach is never asserted dead on internal evidence alone - it is
+# reported as unresolved. ``closed``: every consumer is inside the root and
+# reachability is moot. The product default is ``open`` because a tool that
+# has not been told otherwise cannot know that nobody else calls the code.
+WorldContract = Literal["open", "closed"]
+WORLD_CONTRACTS: Final[tuple[WorldContract, ...]] = ("open", "closed")
+DEFAULT_DEAD_CODE_WORLD: Final[WorldContract] = "open"
+# External reachability of a symbol: whether a public import path to it exists
+# by CPython binding rules and the underscore convention, ``unresolved`` when
+# the construct deciding that cannot be read statically. Evidence, never a
+# verdict; the evaluator combines it with liveness evidence and the world.
+ReachabilityState = Literal["reachable", "not_reachable", "unresolved"]
+# Why the evaluator could call a symbol neither dead nor live.
+UnresolvedReason = Literal["externally_reachable", "reachability_unresolved"]
 DependencyResolution = Literal[
     "analyzed",
     "known_internal_not_analyzed",
@@ -2649,6 +2668,46 @@ class UnresolvedOverrideItem:
 
 
 @dataclass(frozen=True, slots=True)
+class ExternalReachability:
+    """One symbol's external reachability and the construct witnessing it.
+
+    ``witness`` is ``<kind>:<subject>``: the public path for a reachable
+    symbol (``public_module:pkg.mod``, ``package_reexport:pkg``,
+    ``star_reexport:pkg``, ``exposed_subclass:<class>``,
+    ``exposed_ancestor:<class>``) or the construct that could not be read
+    for an unresolved one (``module_getattr:<package>``,
+    ``lazy_namespace:<package>``, ``unresolved_base:<spelling>``); empty when
+    not reachable.
+    """
+
+    qualname: str
+    state: ReachabilityState
+    witness: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class UnresolvedReachabilityItem:
+    """A symbol the evaluator could call neither dead nor live.
+
+    No internal evidence holds it live, and under the open world contract a
+    consumer outside the analysis root could reach it - or the export
+    semantics that would decide that could not be resolved. Not a finding
+    and not a low-confidence finding: the absence of a verdict, said out
+    loud, in its own lane beside the rule-3 abstention.
+    """
+
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    kind: DeadCodeCandidateKind
+    reachability: ReachabilityState
+    witness: str
+    world_contract: WorldContract
+    reason: UnresolvedReason
+
+
+@dataclass(frozen=True, slots=True)
 class UnreachableStatementFinding:
     """One unreachable region, located in the repository (39Y Y9).
 
@@ -2677,6 +2736,10 @@ class LivenessClassification:
 
     dead_items: tuple[DeadItem, ...]
     unresolved_overrides: tuple[UnresolvedOverrideItem, ...] = ()
+    # The reachability abstentions (RULING 2026-09-01): its own lane, so a
+    # consumer can tell "no live evidence and nothing outside could reach it"
+    # from "no live evidence and CodeClone cannot know".
+    unresolved_reachability: tuple[UnresolvedReachabilityItem, ...] = ()
 
 
 RuntimeReachabilityFramework = Literal[
@@ -3261,6 +3324,11 @@ class ProjectMetrics:
     # inside a live symbol can run, so the two are never summed.
     unreachable_statements: tuple[UnreachableStatementFinding, ...] = ()
     live_root_reasons: tuple[tuple[str, LiveRootReason], ...] = ()
+    # Reachability abstentions, and the world contract every dead-code
+    # verdict above was derived under. The contract rides with the verdicts
+    # because they are not comparable across worlds.
+    unresolved_reachability: tuple[UnresolvedReachabilityItem, ...] = ()
+    dead_code_world: WorldContract = DEFAULT_DEAD_CODE_WORLD
     api_surface: ApiSurfaceSnapshot | None = None
     semantic_authority: SemanticAuthorityResult | None = None
 
@@ -4395,6 +4463,12 @@ class MetricProjectContext:
     referenced_names: frozenset[str]
     referenced_qualnames: frozenset[str]
     module_registry: ModuleRegistryHandle
+    #: The world contract the dead-code evaluator runs under. Required, not
+    #: defaulted: the product default has one owner (the config spec), and a
+    #: context that forgot to carry it must fail loudly rather than answer
+    #: under a world nobody declared.
+    dead_code_world: WorldContract
+    external_reachability: tuple[ExternalReachability, ...] = ()
     test_reference_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()

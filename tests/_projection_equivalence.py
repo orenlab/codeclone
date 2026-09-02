@@ -341,6 +341,11 @@ def _boot(root: Path) -> BootstrapResult:
             skip_metrics=False,
             skip_dependencies=False,
             skip_dead_code=False,
+            # The corpus measures projection equivalence of the dead-code
+            # EVIDENCE lanes; under the open world the report side would
+            # carry unresolved rows instead of dead items and the lane would
+            # be judged on an empty comparison. Closed keeps the dead items.
+            dead_code_world="closed",
             near_miss=False,
             renamed_structure=False,
             semantic_authority=True,

@@ -136,6 +136,11 @@ def _summary_dead_code_payload(block: Mapping[str, object]) -> dict[str, object]
         "unresolved_external_override": _as_int(
             block.get("unresolved_external_override", 0), 0
         ),
+        # The reachability abstentions and their world, the same seam: a
+        # consumer must be able to tell "nothing unresolved" from "the lane
+        # was never carried" here too.
+        "unresolved": _as_int(block.get("unresolved", 0), 0),
+        "world_contract": str(block.get("world_contract", "")),
         "live_roots": _as_int(block.get("live_roots", 0), 0),
     }
 

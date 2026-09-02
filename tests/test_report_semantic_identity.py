@@ -256,6 +256,24 @@ def test_clone_floor_params_move_identity() -> None:
     assert report_run_identity(narrow) != report_run_identity(wide)
 
 
+def test_world_contract_params_move_identity() -> None:
+    """RULING 2026-09-01 §5: the world contract is a realized parameter of
+    the dead-code derivation. Two runs over one tree that answer under
+    different worlds utter different verdicts, so they may not share a name
+    even when both happen to utter zero dead findings."""
+
+    def _dead_code(world: str) -> dict[str, object]:
+        return {"dead_code": {"summary": {"world_contract": world}}}
+
+    open_world = _document(metrics=_dead_code("open"))
+    closed_world = _document(metrics=_dead_code("closed"))
+    realized = section(open_world, "integrity.semantic.realized_contracts.analysis")
+    dead_code = realized.get("dead_code")
+    assert isinstance(dead_code, dict)
+    assert dead_code["params"] == {"world_contract": "open"}
+    assert report_run_identity(open_world) != report_run_identity(closed_world)
+
+
 def test_identity_is_deterministic() -> None:
     first = _document(near_miss_pairs=[_near_miss_pair()])
     second = _document(near_miss_pairs=[_near_miss_pair()])

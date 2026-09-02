@@ -76,12 +76,32 @@ def _metrics_flags_requested(args: object) -> bool:
     )
 
 
+#: Mirror of ``codeclone.models.WORLD_CONTRACTS``. The ring law forbids this
+#: surface from importing the model ring, and argparse may not refuse the
+#: value at parse time (every value option must accept a sample), so the two
+#: words are spelled here and held to the owner by the closed-world wire pin
+#: in ``tests/test_dead_code_world_contract.py``.
+_DEAD_CODE_WORLD_CONTRACTS: tuple[str, ...] = ("open", "closed")
+
+
 def configure_metrics_mode(
     *,
     args: object,
     metrics_baseline_exists: bool,
     console: PrinterLike,
 ) -> None:
+    # Checked once here for both doors - the flag and the pyproject key - so
+    # a typo is a contract error with the vocabulary named, not a traceback.
+    world_contract = getattr(args, "dead_code_world", None)
+    if world_contract is not None and world_contract not in _DEAD_CODE_WORLD_CONTRACTS:
+        console.print(
+            ui.fmt_contract_error(
+                "dead_code_world must be one of "
+                f"{', '.join(_DEAD_CODE_WORLD_CONTRACTS)}; got {world_contract!r}"
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+
     metrics_flags_requested = _metrics_flags_requested(args)
 
     if bool_attr(args, "skip_metrics") and metrics_flags_requested:

@@ -152,6 +152,7 @@ value applies the built-in threshold shown in parentheses.
 |-----|------|---------|----------|---------|
 | `skip_metrics` | bool | `false` | `--skip-metrics` | Clone-only mode, skip full metrics |
 | `skip_dead_code` | bool | `false` | `--skip-dead-code` | Skip dead code detection |
+| `dead_code_world` | str | `"open"` | `--dead-code-world` | World contract for dead-code verdicts: `open` reports externally reachable symbols with no internal evidence as `unresolved`; `closed` calls them dead |
 | `skip_dependencies` | bool | `false` | `--skip-dependencies` | Skip dependency graph analysis |
 
 ### Reporting

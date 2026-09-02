@@ -2038,15 +2038,17 @@ def test_package_export_chain_roots_only_exported_symbols() -> None:
         non_exported = next(
             symbol
             for symbol, expected in expected_by_symbol.items()
-            if not expected["live"]
+            if not expected["live"] and "." not in symbol
         )
         assert f"{api_module}:{non_exported}" not in referenced_qualnames
         assert f"{api_module}:{non_exported}" in dead
-        # Methods are not rooted by the walk; core.entrypoints owns that step.
+        # Methods are not rooted by the walk; external reachability owns that
+        # question, and under the open world an uncalled reachable method is
+        # unresolved rather than live.
         exported_method = next(
             symbol
             for symbol, expected in expected_by_symbol.items()
-            if expected["live"] and "." in symbol
+            if expected.get("status") == "unresolved" and "." in symbol
         )
         assert f"{api_module}:{exported_method}" not in referenced_qualnames
 

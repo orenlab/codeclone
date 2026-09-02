@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TypeGuard
 
 from ..contracts import COMPLEXITY_RISK_LOW_MAX
@@ -16,6 +16,7 @@ from ..findings.clones.golden_fixtures import (
     path_is_declared_golden_fixture,
 )
 from ..models import (
+    DEFAULT_DEAD_CODE_WORLD,
     ApiSurfaceSnapshot,
     DeadItem,
     DependencyCycleDetail,
@@ -33,6 +34,8 @@ from ..models import (
     UnreachableStatementFinding,
     UnreachableStatementItem,
     UnresolvedOverrideItem,
+    UnresolvedReachabilityItem,
+    WorldContract,
     cycle_kind_counts,
 )
 from ..utils.coerce import as_int as _as_int
@@ -154,6 +157,10 @@ def project_metrics_defaults() -> dict[str, object]:
         "dependency_longest_chains": (),
         "dead_code": (),
         "unresolved_overrides": (),
+        "unresolved_reachability": (),
+        # The world uttered when the family never ran. Every consumer that
+        # reads this block already gates on the metrics-skipped signal.
+        "dead_code_world": DEFAULT_DEAD_CODE_WORLD,
         "unreachable_statements": (),
         "live_root_reasons": (),
         "runtime_reachability": (),
@@ -207,6 +214,11 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
             project_fields,
             "unresolved_overrides",
         ),
+        unresolved_reachability=_result_unresolved_reachability(
+            project_fields,
+            "unresolved_reachability",
+        ),
+        dead_code_world=_result_world_contract(project_fields, "dead_code_world"),
         unreachable_statements=_result_unreachable_statements(
             project_fields,
             "unreachable_statements",
@@ -294,6 +306,30 @@ def _is_tuple_of_live_root_reasons(
         and item[1] in ("external_decorator", "export_root")
         for item in value
     )
+
+
+def _is_tuple_of_unresolved_reachability(
+    value: object,
+) -> TypeGuard[tuple[UnresolvedReachabilityItem, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, UnresolvedReachabilityItem) for item in value
+    )
+
+
+def _result_unresolved_reachability(
+    result: Mapping[str, object] | MetricResult,
+    key: str,
+) -> tuple[UnresolvedReachabilityItem, ...]:
+    value = result.get(key)
+    return value if _is_tuple_of_unresolved_reachability(value) else ()
+
+
+def _result_world_contract(
+    result: Mapping[str, object] | MetricResult,
+    key: str,
+) -> WorldContract:
+    value = result.get(key)
+    return "closed" if value == "closed" else DEFAULT_DEAD_CODE_WORLD
 
 
 def _result_unresolved_overrides(
@@ -673,6 +709,7 @@ def _collect_unreachable_statements(
 def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
     dead_items: tuple[DeadItem, ...] = ()
     unresolved_overrides: tuple[UnresolvedOverrideItem, ...] = ()
+    unresolved_reachability: tuple[UnresolvedReachabilityItem, ...] = ()
     if not context.skip_dead_code:
         # classify_liveness rather than find_unused: the abstention lane is
         # the point of the rule-3 tri-state, and find_unused discards it by
@@ -686,6 +723,8 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
             test_reference_sources=context.test_reference_sources,
             module_registry=context.module_registry,
             class_metrics=context.class_metrics,
+            external_reachability=context.external_reachability,
+            world_contract=context.dead_code_world,
         )
         # No golden-fixture filter on this lane, deliberately. Declared
         # patterns are validated to target tests/ or tests/fixtures/ only, and
@@ -694,6 +733,7 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
         # would be a guard no input can reach.
         dead_items = classification.dead_items
         unresolved_overrides = classification.unresolved_overrides
+        unresolved_reachability = classification.unresolved_reachability
     return {
         "unreachable_statements": _collect_unreachable_statements(
             context.units,
@@ -703,6 +743,11 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
         "dead_code": dead_items,
         "dead_items": dead_items,
         "unresolved_overrides": unresolved_overrides,
+        "unresolved_reachability": unresolved_reachability,
+        # Config, not measurement: uttered whether or not the lane ran, so a
+        # reader always learns which world the (possibly empty) verdicts
+        # belong to.
+        "dead_code_world": context.dead_code_world,
         "live_root_reasons": tuple(
             sorted(
                 (candidate.qualname, candidate.live_root_reason)
@@ -735,6 +780,11 @@ def _aggregate_dead_code_family(results: list[MetricResult]) -> MetricAggregate:
                 if _is_tuple_of_unresolved_overrides(unresolved_overrides)
                 else ()
             ),
+            "unresolved_reachability": _result_unresolved_reachability(
+                result,
+                "unresolved_reachability",
+            ),
+            "dead_code_world": _result_world_contract(result, "dead_code_world"),
             "live_root_reasons": (
                 live_root_reasons
                 if _is_tuple_of_live_root_reasons(live_root_reasons)

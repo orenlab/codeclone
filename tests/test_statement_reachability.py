@@ -584,12 +584,17 @@ def _fixture_boot(root: Path) -> BootstrapResult:
     """Lay the fixture package out under ``root`` and bootstrap over it."""
 
     package_tree(root, FIXTURE_ROOT / "cases.py")
-    return analysis_boot(
+    boot = analysis_boot(
         root,
         min_loc=FIXTURE_MIN_LOC,
         min_stmt=FIXTURE_MIN_STMT,
         skip_metrics=False,
     )
+    # The fixture's unused symbol is public; the world is held closed so it
+    # stays a dead FINDING beside the unreachable-statement rows instead of
+    # an open-world unresolved record (RULING 2026-09-01).
+    boot.args.dead_code_world = "closed"
+    return boot
 
 
 def _unreachable_signature(units: Sequence[Any]) -> tuple[str, ...]:

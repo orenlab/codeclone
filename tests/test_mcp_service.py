@@ -172,7 +172,10 @@ def _write_quality_fixture(root: Path) -> None:
             "        return total + self.alpha\n\n"
             "    def render(self) -> str:\n"
             "        return f'{self.beta}:{self.gamma}'\n\n"
-            "def unused_helper() -> int:\n"
+            # Private on purpose: under the open world contract a public,
+            # unreferenced helper is externally reachable and lands in the
+            # unresolved lane, and these pins need a dead FINDING to page.
+            "def _unused_helper() -> int:\n"
             "    return 42\n"
         ),
     )
@@ -10965,6 +10968,12 @@ def test_get_run_summary_surfaces_dead_code_unresolved_external_override(
     assert dead_code["live_roots"] == report_block["live_roots"]
     assert dead_code["high_confidence"] == report_block["high_confidence"]
     assert dead_code["suppressed"] == report_block["suppressed"]
+    # The reachability lane crosses the same seam with its world: the two
+    # public methods abstain under rule 3 and stay in their own lane, while
+    # the public, unreferenced class itself is reachable with no evidence and
+    # is the one row this lane carries - a measured one beside a stated world.
+    assert dead_code["unresolved"] == report_block["unresolved"] == 1
+    assert dead_code["world_contract"] == report_block["world_contract"] == "open"
 
     # Additive only: the pre-existing top-level findings summary still stands.
     assert "findings" in run_summary
@@ -11006,6 +11015,11 @@ def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
         "total": 0,
         "unreachable_statements": 0,
         "unresolved_external_override": 0,
+        # RULING 2026-09-01: the reachability lane rides the same block. A
+        # family that never ran states no world - "" is the honest absence,
+        # not a default smuggled in as a measurement.
+        "unresolved": 0,
+        "world_contract": "",
     }
     # ... but neither the stored summary nor get_run_summary surfaces it, the
     # same way health reports metrics as skipped rather than a real score.

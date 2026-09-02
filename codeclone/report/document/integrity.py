@@ -357,6 +357,7 @@ def _realized_analysis_contracts(
     groups: Mapping[str, object],
     meta: Mapping[str, object],
     producers: Mapping[str, object],
+    metrics: Mapping[str, object] = {},
 ) -> dict[str, object]:
     contracts: dict[str, object] = {}
     for spec in REPORT_SEMANTIC_PRODUCERS:
@@ -385,6 +386,18 @@ def _realized_analysis_contracts(
             budget = container.get("max_edit_statements")
             if budget is not None:
                 params = {"max_edit_statements": budget}
+        elif family == "dead_code":
+            # The world contract is a realized parameter of the derivation:
+            # two runs over one tree that answer under different worlds
+            # utter different verdicts and may not share a name, even when
+            # both happen to utter zero dead findings.
+            world = _as_mapping(
+                _as_mapping(
+                    _as_mapping(_as_mapping(metrics).get("families")).get("dead_code")
+                ).get("summary")
+            ).get("world_contract")
+            if isinstance(world, str) and world:
+                params = {"world_contract": world}
         contracts[family] = {
             "activation": spec_activation(spec),
             "algorithm_revisions": revisions,
@@ -497,6 +510,7 @@ def _semantic_block(
                 groups=groups,
                 meta=meta,
                 producers=producers,
+                metrics=metrics,
             ),
             "comparison": _realized_comparison_contract(meta),
             "evaluation": _realized_evaluation_contract(

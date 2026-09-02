@@ -166,6 +166,8 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     dead_high_conf = _as_int(summary.get("high_confidence"))
     dead_suppressed_total = _as_int(summary.get("suppressed", 0))
     dead_unresolved_total = _as_int(summary.get("unresolved_external_override", 0))
+    dead_unresolved_reach_total = _as_int(summary.get("unresolved", 0))
+    dead_world_contract = str(summary.get("world_contract", ""))
     # Published once by the metrics payload and read here, exactly as the
     # gate and the text/markdown surfaces read it. This panel used to say
     # "No dead code detected." beside ten published statement findings
@@ -201,6 +203,12 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
             answer += (
                 f" {dead_unresolved_total} unresolved override(s) abstained:"
                 " neither dead nor live."
+            )
+        if dead_unresolved_reach_total:
+            answer += (
+                f" {dead_unresolved_reach_total} unresolved: externally reachable"
+                " with no internal evidence under the"
+                f" {dead_world_contract or 'declared'} world contract."
             )
         if dead_high_conf > 0 or dead_unreachable_total > 0:
             tone = "risk"

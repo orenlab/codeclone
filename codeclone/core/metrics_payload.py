@@ -33,6 +33,7 @@ from ..models import (
     SemanticAuthorityResult,
     UnreachableStatementFinding,
     UnresolvedOverrideItem,
+    UnresolvedReachabilityItem,
 )
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
@@ -466,6 +467,23 @@ def build_metrics_report_payload(
             "reason": item.reason,
         }
 
+    def _serialize_unresolved_reachability(
+        item: UnresolvedReachabilityItem,
+    ) -> dict[str, object]:
+        # The ruling's minimal row: identity, reason code, reachability
+        # state, world-contract context, location. No graph rides here.
+        return {
+            "qualname": item.qualname,
+            "filepath": item.filepath,
+            "start_line": item.start_line,
+            "end_line": item.end_line,
+            "kind": item.kind,
+            "reason": item.reason,
+            "reachability": item.reachability,
+            "witness": item.witness,
+            "world_contract": item.world_contract,
+        }
+
     def _serialize_unreachable_statement(
         item: UnreachableStatementFinding,
     ) -> dict[str, object]:
@@ -482,6 +500,7 @@ def build_metrics_report_payload(
         }
 
     unresolved_override_items = tuple(project_metrics.unresolved_overrides)
+    unresolved_reachability_items = tuple(project_metrics.unresolved_reachability)
     unreachable_statement_items = tuple(project_metrics.unreachable_statements)
 
     payload = {
@@ -560,6 +579,15 @@ def build_metrics_report_payload(
                 _serialize_unresolved_override(item)
                 for item in unresolved_override_items
             ],
+            # The sibling lane RULING 2026-09-01 §4 ratified: symbols the
+            # evaluator could call neither dead nor live under the world
+            # contract. Its own list and its own counter, never a value of
+            # an existing finding, so "no finding because proven live" and
+            # "no finding because CodeClone could not decide" stay apart.
+            "unresolved": [
+                _serialize_unresolved_reachability(item)
+                for item in unresolved_reachability_items
+            ],
             # Same family, deliberately its own list: a dead symbol and an
             # unreachable statement inside a live symbol are different defects
             # and are never added together (39Y Y9). The list stays the
@@ -592,6 +620,9 @@ def build_metrics_report_payload(
                 # abstention is neither dead nor live, so folding it into
                 # "total" would be the claim the tri-state exists to refuse.
                 "unresolved_external_override": len(unresolved_override_items),
+                "unresolved": len(unresolved_reachability_items),
+                # The world every verdict in this block was derived under.
+                "world_contract": project_metrics.dead_code_world,
                 # The one place this lane is counted. Every surface that shows
                 # the number reads this field; nothing downstream re-measures
                 # the list beside it.

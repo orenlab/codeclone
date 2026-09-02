@@ -30,14 +30,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codeclone.core import entrypoints as entrypoints_mod
 from codeclone.metrics.dead_code import classify_liveness
-from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
-from tests._ast_metrics_helpers import build_test_module_registry
+from codeclone.metrics.external_reachability import collect_external_reachability
+from codeclone.models import DeadCandidate, ExternalReachability, ModuleDep
 from tests._liveness_report_helpers import (
     dead_code_family,
     dead_qualnames,
     live_root_reason_by_qualname,
+    unresolved_by_qualname,
 )
 
 #: Baseline update and gating both require a stable canonical scope id.
@@ -104,15 +104,15 @@ def run() -> int:
 }
 
 
-def test_export_root_is_not_the_recorded_reason_for_a_called_member(
+def test_a_called_member_gets_no_record_while_its_uncalled_sibling_is_unresolved(
     tmp_path: Path,
 ) -> None:
     """Report layer, direction A: a call site is the reason, not the export.
 
-    ``Service.refresh`` is called as ``Service().refresh()``. The export-root
-    rule reaches it - its owner is on the package's export chain - and before
-    this wave it stamped ``export_root`` on it, which reads as "live because
-    exported" where the truth is "live because called".
+    ``Service.refresh`` is called as ``Service().refresh()`` and gets no record
+    in either lane. ``Service.render`` is uncalled and reachable, so it gets an
+    unresolved record - and no lane spells ``export_root``, which used to read
+    as "live because exported" where the truth was "live because called".
     """
 
     family = dead_code_family(
@@ -122,11 +122,15 @@ def test_export_root_is_not_the_recorded_reason_for_a_called_member(
         scope_id=_SCOPE_ID,
     )
     reasons = live_root_reason_by_qualname(family)
+    unresolved = unresolved_by_qualname(family)
 
-    # Reachability of the guard: the export-root rule DID run on this tree and
-    # did root the member nothing else holds live. A pin that only asserted an
-    # absence would also pass on a tree the rule never reached.
-    assert reasons.get("pkg.api:Service.render") == "export_root"
+    # Reachability of the guard: the reachability rule DID run on this tree
+    # and did reach the member nothing else holds live - as an unresolved
+    # record, never as a live root. A pin that only asserted an absence would
+    # also pass on a tree the rule never reached.
+    assert "export_root" not in set(reasons.values())
+    assert unresolved["pkg.api:Service.render"]["witness"] == "public_module:pkg.api"
+    assert "pkg.api:Service.refresh" not in unresolved
     assert "pkg.api:Service.refresh" not in reasons
     assert "pkg.api:Service.refresh" not in dead_qualnames(family)
 
@@ -161,7 +165,9 @@ def _candidate(qualname: str, *, kind: str = "method") -> DeadCandidate:
     )
 
 
-_API_MODULE = "distillations.api"
+#: A PRIVATE api module: its class reaches the world only through the package
+#: re-export edge, which is what makes that edge the causal construct below.
+_API_MODULE = "distillations._api"
 _PACKAGE_MODULE = "distillations"
 
 
@@ -175,8 +181,8 @@ def _liveness_inputs() -> tuple[
 
     ``Service`` is on the package export chain. ``Service.refresh`` carries an
     ordinary attribute call, which reaches the liveness decision as a bare name
-    in ``referenced_names`` - never as a qualname, which is exactly why the
-    export-root owner's old qualname-only exclusion could not see it.
+    in ``referenced_names`` - never as a qualname. ``Service.render`` carries
+    nothing.
     """
 
     module_deps = (
@@ -199,48 +205,90 @@ def _liveness_inputs() -> tuple[
     return module_deps, candidates, referenced_qualnames, referenced_names
 
 
-def _export_root_evidence() -> tuple[tuple[str, str], ...]:
+def _reachability(
+    module_deps: tuple[ModuleDep, ...],
+    candidates: tuple[DeadCandidate, ...],
+) -> dict[str, ExternalReachability]:
+    return {
+        row.qualname: row
+        for row in collect_external_reachability(
+            dead_candidates=candidates,
+            module_deps=module_deps,
+            class_metrics=(),
+            package_modules=frozenset({_PACKAGE_MODULE}),
+        )
+    }
+
+
+def _edge_rows() -> tuple[
+    tuple[DeadCandidate, ...],
+    dict[str, ExternalReachability],
+    frozenset[str],
+    frozenset[str],
+]:
+    """The population with its re-export edge, resolved: candidates, rows,
+    referenced qualnames, referenced names."""
+
     module_deps, candidates, referenced_qualnames, referenced_names = _liveness_inputs()
-    registry = build_test_module_registry(
-        root=Path(__file__).parent / "fixtures" / "liveness_policy"
+    return (
+        candidates,
+        _reachability(module_deps, candidates),
+        referenced_qualnames,
+        referenced_names,
     )
-    already_live = entrypoints_mod.already_live_candidate_qualnames(
-        dead_candidates=candidates,
+
+
+def _open_world_lanes(
+    candidates: tuple[DeadCandidate, ...],
+    rows: dict[str, ExternalReachability],
+    *,
+    referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str],
+) -> tuple[set[str], set[str]]:
+    """The dead and unresolved qualnames the evaluator utters under ``open``."""
+
+    classification = classify_liveness(
+        definitions=candidates,
+        referenced_names=referenced_names,
+        referenced_qualnames=referenced_qualnames,
+        external_reachability=tuple(rows.values()),
+        world_contract="open",
+    )
+    return (
+        {item.qualname for item in classification.dead_items},
+        {item.qualname for item in classification.unresolved_reachability},
+    )
+
+
+def test_reachability_is_evidence_for_every_member_called_or_not() -> None:
+    """Direction A, the layering: reachability does not read liveness.
+
+    Both members are reachable through the same edge. The called one is live
+    for its own reason and the evaluator never consults its reachability; the
+    fact still exists, because one symbol may carry both facts.
+    """
+
+    candidates, rows, referenced_qualnames, referenced_names = _edge_rows()
+    render, refresh = f"{_API_MODULE}:Service.render", f"{_API_MODULE}:Service.refresh"
+
+    assert {name: rows[name].state for name in (render, refresh)} == {
+        render: "reachable",
+        refresh: "reachable",
+    }
+    assert rows[render].witness == "package_reexport:distillations"
+
+    dead, unresolved = _open_world_lanes(
+        candidates,
+        rows,
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
     )
-    return entrypoints_mod.collect_project_export_root_evidence(
-        module_deps=module_deps,
-        referenced_qualnames=referenced_qualnames,
-        dead_candidates=candidates,
-        module_registry=registry,
-        already_live_qualnames=already_live,
-    )
+    assert f"{_API_MODULE}:Service.render" in unresolved
+    assert f"{_API_MODULE}:Service.refresh" not in unresolved
+    assert f"{_API_MODULE}:Service.refresh" not in dead
 
 
-def test_export_root_evidence_skips_what_an_internal_call_already_holds_live() -> None:
-    """Direction A, the causal claim: no export root for a called member."""
-
-    _, candidates, referenced_qualnames, referenced_names = _liveness_inputs()
-    already_live = entrypoints_mod.already_live_candidate_qualnames(
-        dead_candidates=candidates,
-        referenced_names=referenced_names,
-        referenced_qualnames=referenced_qualnames,
-    )
-
-    # The population the guard compares, asserted rather than assumed: a guard
-    # whose comparison set never contains the member cannot fire, and would
-    # pass this pin in silence.
-    assert f"{_API_MODULE}:Service.refresh" in already_live
-    assert f"{_API_MODULE}:Service.render" not in already_live
-
-    evidence = _export_root_evidence()
-
-    assert (f"{_API_MODULE}:Service.render", "export_root") in evidence
-    assert f"{_API_MODULE}:Service.refresh" not in dict(evidence)
-
-
-def test_a_called_member_stays_live_when_the_export_root_evidence_is_removed() -> None:
+def test_a_called_member_stays_live_when_the_reachability_evidence_is_removed() -> None:
     """Direction A, the causal independence: the call site carries it alone."""
 
     _, candidates, referenced_qualnames, referenced_names = _liveness_inputs()
@@ -249,6 +297,7 @@ def test_a_called_member_stays_live_when_the_export_root_evidence_is_removed() -
         definitions=candidates,
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
+        world_contract="open",
     )
 
     dead = {item.qualname for item in without_evidence.dead_items}
@@ -256,85 +305,36 @@ def test_a_called_member_stays_live_when_the_export_root_evidence_is_removed() -
     # The same run must still be able to call something dead, or "not in dead"
     # is a statement about an empty set.
     assert f"{_API_MODULE}:Service.render" in dead
+    assert without_evidence.unresolved_reachability == ()
 
 
-def test_an_uncalled_exported_member_depends_on_the_export_root_evidence() -> None:
-    """Direction B: remove the export root and the verdict actually moves."""
+def test_an_uncalled_exported_member_depends_on_the_reexport_edge() -> None:
+    """Direction B, the causal pin on EVIDENCE (RULING 2026-09-01 §1).
 
-    _, candidates, referenced_qualnames, referenced_names = _liveness_inputs()
-    evidence = _export_root_evidence()
-    rooted = frozenset(qualname for qualname, _reason in evidence)
-    assert f"{_API_MODULE}:Service.render" in rooted
-
-    with_evidence = classify_liveness(
-        definitions=candidates,
-        referenced_names=referenced_names,
-        referenced_qualnames=referenced_qualnames | rooted,
-    )
-
-    dead = {item.qualname for item in with_evidence.dead_items}
-    assert f"{_API_MODULE}:Service.render" not in dead
-
-
-def _opaque_base_class_metrics(qualname: str) -> ClassMetrics:
-    return ClassMetrics(
-        qualname=qualname,
-        filepath=f"{qualname.partition(':')[0].replace('.', '/')}.py",
-        start_line=1,
-        end_line=9,
-        cbo=0,
-        lcom4=1,
-        method_count=2,
-        instance_var_count=0,
-        risk_coupling="low",
-        risk_cohesion="low",
-        base_names=("external.Base",),
-        has_unresolved_external_base=True,
-    )
-
-
-def test_an_abstained_member_is_not_already_live_and_keeps_its_export_root() -> None:
-    """The carve-out, pinned: an abstention is neither dead nor live.
-
-    A method whose owner inherits a base outside the analysis root abstains
-    rather than being called dead, and an abstention is not a symbol something
-    already holds live. Folding abstentions into "already live" would silently
-    retire a root that is still the only export evidence there is - and would
-    move the symbol from live into ``unresolved_external_override``, which is a
-    different answer to the user, not a tidier one.
+    Remove the package re-export edge and ``ExternalReachability(render)``
+    itself moves from ``reachable`` to ``not_reachable``; the verdict follows
+    from that fact and only from it. Asserting only the verdict would let the
+    world contract stand in for the defect.
     """
 
-    module_deps, candidates, referenced_qualnames, referenced_names = _liveness_inputs()
-    class_metrics = (_opaque_base_class_metrics(f"{_API_MODULE}:Service"),)
-    already_live = entrypoints_mod.already_live_candidate_qualnames(
-        dead_candidates=candidates,
-        referenced_names=referenced_names,
-        referenced_qualnames=referenced_qualnames,
-        class_metrics=class_metrics,
-    )
+    candidates, with_edge, _, _ = _edge_rows()
+    without_edge = _reachability((), candidates)
+    render = f"{_API_MODULE}:Service.render"
 
-    # The population really does abstain here, or the pin below is vacuous.
-    abstained = {
-        item.qualname
-        for item in classify_liveness(
-            definitions=candidates,
-            referenced_names=referenced_names,
-            referenced_qualnames=referenced_qualnames,
-            class_metrics=class_metrics,
-        ).unresolved_overrides
+    assert (
+        with_edge[render].state,
+        without_edge[render].state,
+        without_edge[render].witness,
+    ) == ("reachable", "not_reachable", "")
+
+    verdicts = {
+        label: _open_world_lanes(
+            candidates,
+            rows,
+            referenced_names=frozenset(),
+            referenced_qualnames=frozenset({f"{_API_MODULE}:Service"}),
+        )[0]
+        for label, rows in (("with_edge", with_edge), ("without_edge", without_edge))
     }
-    assert f"{_API_MODULE}:Service.render" in abstained
-    assert f"{_API_MODULE}:Service.render" not in already_live
-
-    registry = build_test_module_registry(
-        root=Path(__file__).parent / "fixtures" / "liveness_policy"
-    )
-    evidence = entrypoints_mod.collect_project_export_root_evidence(
-        module_deps=module_deps,
-        referenced_qualnames=referenced_qualnames,
-        dead_candidates=candidates,
-        module_registry=registry,
-        already_live_qualnames=already_live,
-    )
-
-    assert (f"{_API_MODULE}:Service.render", "export_root") in evidence
+    assert f"{_API_MODULE}:Service.render" not in verdicts["with_edge"]
+    assert f"{_API_MODULE}:Service.render" in verdicts["without_edge"]

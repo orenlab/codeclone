@@ -584,8 +584,11 @@ def test_memory_analysis_mounts_the_autodetected_source_root(tmp_path: Path) -> 
     root = (tmp_path / "repo").resolve()
     (root / "src" / "pkg").mkdir(parents=True)
     (root / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    # Private on purpose: a public unreferenced function is externally
+    # reachable under the default open world and lands in the unresolved lane
+    # rather than as a finding, and this pin reads a finding id.
     (root / "src" / "pkg" / "mod.py").write_text(
-        "def f():\n    return 1\n", encoding="utf-8"
+        "def _f():\n    return 1\n", encoding="utf-8"
     )
 
     document = run_memory_analysis_report(root_path=root)
@@ -596,7 +599,7 @@ def test_memory_analysis_mounts_the_autodetected_source_root(tmp_path: Path) -> 
     dead_code_groups = _rows(_field(_field(groups, "dead_code"), "groups"))
 
     # The finding id is what the user is shown; the mount is why it says that.
-    assert _field(dead_code_groups[0], "id") == "dead_code:pkg.mod:f"
+    assert _field(dead_code_groups[0], "id") == "dead_code:pkg.mod:_f"
     assert [_field(mount, "path") for mount in mounts] == ["src"]
 
 

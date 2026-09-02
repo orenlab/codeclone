@@ -4,31 +4,31 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""``from x import *`` loses the binding, so a live public API reads as dead.
+"""``from x import *`` binds what the target says, and the wire says so.
 
-A package ``__init__`` that re-exports through a wildcard and then names those
-symbols in its own ``__all__`` had no resolvable binding at all: the walk skips
-every alias whose name is ``*``, so nothing rooted the re-exported symbol and
-the export chain never reached the public methods of a re-exported class. The
-measured consequence was not a missed finding but the opposite - a
-high-confidence assertion that live public API is dead. On ``httpx`` the
-wildcard spelling produced seventeen such findings where the equivalent named
-imports produced none.
+The measured class: a package ``__init__`` that re-exports through a wildcard
+carried live public API to its users while the analyzer, seeing no named
+binding, asserted that API dead with high confidence. RULING 2026-09-01 moved
+the export chain out of liveness and into external reachability: a symbol the
+wildcard carries to a public module is REACHABLE, and with no internal evidence
+it is ``unresolved`` under the open world - never dead, never silently live.
 
-These pins hold the recovered binding at both layers, in both directions:
+The targets here are PRIVATE modules on purpose. A public module exposes its
+own public names by construction, so a wildcard into it would prove nothing;
+only a private target lets the wildcard edge be the sole construct that
+decides, which is what makes every pin below a statement about the binding:
 
-* an ``__all__`` entry with no local definition and no named import resolves
-  through the wildcard edge (the target may carry no ``__all__`` of its own);
-* the export chain reaches the public methods of a class the wildcard
-  re-exports;
-* a name the re-exporting ``__all__`` does NOT list stays dead, and a private
-  class of the target stays dead even when the project holds it live - the
-  wildcard never binds an underscore name;
-* the wildcard spelling and its named equivalent produce the SAME dead set;
-* a package with no wildcard re-export is untouched by this rule.
+* a name the target's ``__all__`` rule binds is carried, and its public
+  methods are unresolved, not dead;
+* a name the target's ``__all__`` omits is not carried, and stays dead;
+* an underscore name is never carried, whoever imports it;
+* the chain continues through wildcard edges and through what a reached
+  module imports by name, and it stops where nothing public carries it;
+* a wildcard with no target ``__all__`` binds MORE than the named spelling
+  of the same import, and the difference is reported as unresolved.
 
-The pins are stated as rules over qualnames, never as counts: the seventeen is
-a property of one ``httpx`` version, not of the defect.
+The pins are stated as rules over qualnames, never as counts: the seventeen
+of the original ``httpx`` measurement was a property of one version.
 """
 
 from __future__ import annotations
@@ -38,6 +38,8 @@ from pathlib import Path
 from tests._liveness_report_helpers import (
     dead_code_family,
     dead_qualnames,
+    live_root_reason_by_qualname,
+    unresolved_by_qualname,
 )
 
 #: Baseline update and gating both require a stable canonical scope id.
@@ -62,48 +64,57 @@ def unexported_helper() -> str:
     return "unexported"
 """
 
-#: The measured class: the re-exporting ``__init__`` carries BOTH the wildcard
-#: and the ``__all__`` naming what the wildcard bound. The target module has no
-#: ``__all__`` of its own, so the re-exporting ``__all__`` is the only static
-#: export evidence in the tree.
+#: The measured class: the re-exporting ``__init__`` carries the wildcard and
+#: an ``__all__`` naming part of what it bound. The target has no ``__all__``
+#: of its own, so by the language every public name of the target is bound
+#: into ``pkg`` - the re-exporter's ``__all__`` narrows ``from pkg import *``
+#: downstream, not what ``pkg`` holds.
 _STAR_TREE = {
     "pkg/__init__.py": """
-from .impl import *  # noqa: F403
+from ._impl import *  # noqa: F403
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/impl.py": _IMPL_SOURCE,
+    "pkg/_impl.py": _IMPL_SOURCE,
 }
 
-#: Byte-for-byte the same tree with the wildcard spelled out. Whatever the
-#: wildcard binds, this binds by name; the two dead sets must agree.
+#: The same tree with the wildcard spelled out. A named import binds exactly
+#: the names it lists, so what the wildcard bound beyond them stays private.
 _NAMED_TREE = {
     "pkg/__init__.py": """
-from .impl import StarBoundWidget, star_bound_helper
+from ._impl import StarBoundWidget, star_bound_helper
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/impl.py": _IMPL_SOURCE,
+    "pkg/_impl.py": _IMPL_SOURCE,
 }
 
-#: The ``httpx`` shape exactly: the target module also declares ``__all__``, so
-#: the class was already live before this rule and ONLY its public methods were
-#: falsely dead.
+#: The ``httpx`` shape exactly: the target declares ``__all__`` too, so the
+#: wildcard binds one name and the named spelling of that import agrees.
 _STAR_TARGET_ALL_TREE = {
     "pkg/__init__.py": """
-from .impl import *  # noqa: F403
+from ._impl import *  # noqa: F403
 
 __all__ = ["StarBoundWidget"]
 """,
-    "pkg/impl.py": '__all__ = ["StarBoundWidget"]\n' + _IMPL_SOURCE,
+    "pkg/_impl.py": '__all__ = ["StarBoundWidget"]\n' + _IMPL_SOURCE,
 }
 
-#: No wildcard anywhere. The boundary of this wave: a class the project holds
-#: live through its own ``__all__``, which no package ``__init__`` re-exports,
-#: keeps its dead public method.
+_NAMED_TARGET_ALL_TREE = {
+    "pkg/__init__.py": """
+from ._impl import StarBoundWidget
+
+__all__ = ["StarBoundWidget"]
+""",
+    "pkg/_impl.py": '__all__ = ["StarBoundWidget"]\n' + _IMPL_SOURCE,
+}
+
+#: No wildcard anywhere and nothing re-exports the private module: the class
+#: is held live by its own ``__all__`` (the walk's binding), and its public
+#: method has no public path at all.
 _NO_WILDCARD_TREE = {
     "pkg/__init__.py": "",
-    "pkg/impl.py": """
+    "pkg/_impl.py": """
 __all__ = ["LocalOnlyWidget"]
 
 
@@ -114,15 +125,15 @@ class LocalOnlyWidget:
 }
 
 #: A private class of the wildcard target, held live by a named import from a
-#: sibling module. ``import *`` never binds an underscore name, so the export
-#: chain must not reach its public method.
+#: sibling module. ``import *`` never binds an underscore name, and neither
+#: does anything else.
 _PRIVATE_TARGET_TREE = {
     "pkg/__init__.py": """
-from .impl import *  # noqa: F403
+from ._impl import *  # noqa: F403
 
 __all__ = ["StarBoundWidget"]
 """,
-    "pkg/impl.py": """
+    "pkg/_impl.py": """
 class StarBoundWidget:
     def render_panel(self) -> str:
         return "panel"
@@ -133,7 +144,7 @@ class _HiddenWidget:
         return "secret"
 """,
     "pkg/consumer.py": """
-from .impl import _HiddenWidget
+from ._impl import _HiddenWidget
 
 
 def take_hidden() -> object:
@@ -141,88 +152,81 @@ def take_hidden() -> object:
 """,
 }
 
-
-#: The residual class of the SAME defect: the chain passes through a plain
-#: module. ``pkg`` re-exports ``pkg.api`` through ``import *`` + its own
-#: ``__all__``, and ``pkg.api`` re-exports ``pkg.impl`` the same way. Both hops
-#: carry the ``__all__`` this wave already treats as authoritative, so the class
-#: itself resolves live - only the export chain stopped at the first hop that
-#: was not a package ``__init__``, leaving the public method of a live
-#: re-exported class asserted dead with HIGH confidence.
+#: The chain passes through a plain PRIVATE module by wildcard at both hops.
 _CHAINED_STAR_TREE = {
     "pkg/__init__.py": """
-from .api import *  # noqa: F403
+from ._api import *  # noqa: F403
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/api.py": """
-from .impl import *  # noqa: F403
+    "pkg/_api.py": """
+from ._impl import *  # noqa: F403
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/impl.py": _IMPL_SOURCE,
+    "pkg/_impl.py": _IMPL_SOURCE,
 }
 
-#: The same chain with a NAMED middle hop - the spelling a package facade most
-#: often carries. The wildcard sits only at the package boundary, so the middle
-#: module is reached wholesale and then re-exports by name.
+#: The same chain with a NAMED middle hop: the wildcard sits at the package
+#: boundary, the reached module re-exports by name.
 _CHAINED_NAMED_MIDDLE_TREE = {
     "pkg/__init__.py": """
-from .api import *  # noqa: F403
+from ._api import *  # noqa: F403
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/api.py": """
-from .impl import StarBoundWidget, star_bound_helper
+    "pkg/_api.py": """
+from ._impl import StarBoundWidget, star_bound_helper
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/impl.py": _IMPL_SOURCE,
+    "pkg/_impl.py": _IMPL_SOURCE,
 }
 
-#: The ceiling of the chain rule, and the input that proves its origin guard is
-#: reachable. ``pkg.api`` re-exports ``pkg.impl`` exactly as above, but NO
-#: package ``__init__`` re-exports ``pkg.api``, so nothing carries those names
-#: to a package boundary and the public method stays dead. A rule that followed
-#: wildcard edges from anywhere - rather than from a package outward - would
-#: move this verdict.
+#: Nothing public carries ``_api`` outward, so its wildcard exposes nothing.
 _UNANCHORED_CHAIN_TREE = {
     "pkg/__init__.py": "",
-    "pkg/api.py": """
-from .impl import *  # noqa: F403
+    "pkg/_api.py": """
+from ._impl import *  # noqa: F403
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/impl.py": _IMPL_SOURCE,
+    "pkg/_impl.py": _IMPL_SOURCE,
 }
 
+#: A PUBLIC plain module's wildcard is a public path by the language:
+#: ``pkg.api.StarBoundWidget`` exists, whatever PEP 8 says about facades.
+_PUBLIC_PLAIN_STAR_TREE = {
+    "pkg/__init__.py": "",
+    "pkg/api.py": """
+from ._impl import *  # noqa: F403
+""",
+    "pkg/_impl.py": _IMPL_SOURCE,
+}
 
-#: The second ceiling: only a WILDCARD edge extends the chain. ``pkg.api``
-#: reaches ``pkg.impl`` by NAME, so ``pkg.impl`` is not re-exported wholesale
-#: and what IT imports by name never reaches the package. ``DeepWidget`` is
-#: held live by that internal use, but ``pkg.DeepWidget`` does not exist at
-#: runtime, so its public method is genuinely unreachable. A chain that walked
-#: named edges as well would root it.
+#: Only a wildcard edge, or what a wildcard-reached module imports by name,
+#: extends the chain. ``_impl`` is reached BY NAME, so what it imports goes
+#: no further: ``pkg.DeepWidget`` does not exist at runtime.
 _NAMED_EDGE_CEILING_TREE = {
     "pkg/__init__.py": """
-from .api import *  # noqa: F403
+from ._api import *  # noqa: F403
 
 __all__ = ["StarBoundWidget"]
 """,
-    "pkg/api.py": """
-from .impl import StarBoundWidget
+    "pkg/_api.py": """
+from ._impl import StarBoundWidget
 
 __all__ = ["StarBoundWidget"]
 """,
-    "pkg/impl.py": """
-from .deep import DeepWidget
+    "pkg/_impl.py": """
+from ._deep import DeepWidget
 
 
 class StarBoundWidget:
     def render_panel(self) -> str:
         return DeepWidget().identify()
 """,
-    "pkg/deep.py": """
+    "pkg/_deep.py": """
 class DeepWidget:
     def identify(self) -> str:
         return "deep"
@@ -232,21 +236,16 @@ class DeepWidget:
 """,
 }
 
-
-#: The third ceiling, measured on ``qutip``: a module the chain REACHED carries
-#: only what put it on the chain. ``pkg.api`` is reached by a wildcard, which
-#: skips underscore names, so its private named import is not an export - while
-#: a package ``__init__`` doing the same import really does bind ``pkg._Hidden``
-#: and keeps its pre-existing treatment.
+#: Measured on ``qutip``: a reached module's private import is not an export.
 _PRIVATE_IMPORT_ON_THE_CHAIN_TREE = {
     "pkg/__init__.py": """
-from .api import *  # noqa: F403
+from ._api import *  # noqa: F403
 
 __all__ = ["StarBoundWidget"]
 """,
-    "pkg/api.py": """
+    "pkg/_api.py": """
 from ._private import _Hidden
-from .impl import StarBoundWidget
+from ._impl import StarBoundWidget
 
 __all__ = ["StarBoundWidget"]
 
@@ -254,7 +253,7 @@ __all__ = ["StarBoundWidget"]
 def build_hidden() -> _Hidden:
     return _Hidden()
 """,
-    "pkg/impl.py": """
+    "pkg/_impl.py": """
 class StarBoundWidget:
     def render_panel(self) -> str:
         return "panel"
@@ -266,49 +265,42 @@ class _Hidden:
 """,
 }
 
-
-#: Two re-exporters, one target: the chain must converge rather than walk the
-#: same module twice. A diamond is the ordinary shape of a package facade, and
-#: it is also the input that reaches the "already on the chain" arm of the walk.
+#: Two re-exporters, one target: the walk converges rather than repeating.
 _DIAMOND_CHAIN_TREE = {
     "pkg/__init__.py": """
-from .left import *  # noqa: F403
-from .right import *  # noqa: F403
+from ._left import *  # noqa: F403
+from ._right import *  # noqa: F403
 
 __all__ = ["StarBoundWidget", "star_bound_helper"]
 """,
-    "pkg/left.py": """
-from .impl import *  # noqa: F403
+    "pkg/_left.py": """
+from ._impl import *  # noqa: F403
 
 __all__ = ["StarBoundWidget"]
 """,
-    "pkg/right.py": """
-from .impl import *  # noqa: F403
+    "pkg/_right.py": """
+from ._impl import *  # noqa: F403
 
 __all__ = ["star_bound_helper"]
 """,
-    "pkg/impl.py": _IMPL_SOURCE,
+    "pkg/_impl.py": _IMPL_SOURCE,
 }
 
-
-#: Mutual ``import *`` - legal Python, and present in real packages. Every other
-#: tree here is a one-way chain or a diamond, and BOTH still terminate without a
-#: visited set: a DAG frontier drains on its own. Only a cycle turns the visited
-#: set from an optimisation into the thing that ends the walk, so this is the
-#: only input in the suite that holds it.
+#: Mutual ``import *`` - legal Python, present in real packages, and the only
+#: input here on which the walk's visited set is what ends the walk.
 _CYCLIC_CHAIN_TREE = {
     "pkg/__init__.py": """
-from .a import *  # noqa: F403
+from ._a import *  # noqa: F403
 
 __all__ = ["CycleWidget"]
 """,
-    "pkg/a.py": """
-from .b import *  # noqa: F403
+    "pkg/_a.py": """
+from ._b import *  # noqa: F403
 
 __all__ = ["CycleWidget"]
 """,
-    "pkg/b.py": """
-from .a import *  # noqa: F403
+    "pkg/_b.py": """
+from ._a import *  # noqa: F403
 
 __all__ = ["CycleWidget"]
 
@@ -324,250 +316,14 @@ class OrphanWidget:
 """,
 }
 
-
-def _dead_qualnames(
-    tmp_path: Path,
-    tree: dict[str, str],
-    name: str,
-    *,
-    expect_warm_cache: bool = False,
-) -> frozenset[str]:
-    """Dead-code qualnames of one generated tree, behind the shared witness."""
-
-    return dead_qualnames(
-        dead_code_family(
-            tmp_path,
-            tree,
-            name,
-            scope_id=_SCOPE_ID,
-            expect_warm_cache=expect_warm_cache,
-        )
-    )
-
-
-def test_wildcard_reexport_resolves_the_bindings_its_all_names(
-    tmp_path: Path,
-) -> None:
-    """The core recovery: ``__all__`` plus a wildcard edge IS a binding.
-
-    Neither symbol is defined in the re-exporting module and neither is
-    imported by name, so before the recovery nothing rooted them at all.
-    """
-
-    dead = _dead_qualnames(tmp_path, _STAR_TREE, "star")
-
-    assert "pkg.impl:StarBoundWidget" not in dead
-    assert "pkg.impl:star_bound_helper" not in dead
-
-
-def test_wildcard_reexport_carries_the_export_chain_to_public_methods(
-    tmp_path: Path,
-) -> None:
-    """The measured ``httpx`` defect, stated as a rule rather than a count.
-
-    No public method of a class a package re-exports through
-    ``import *`` + ``__all__`` may be called dead - that is the
-    high-confidence assertion the maintainer ruled unacceptable.
-    """
-
-    for tree, name in ((_STAR_TREE, "star"), (_STAR_TARGET_ALL_TREE, "startarget")):
-        dead = _dead_qualnames(tmp_path, tree, name)
-        assert "pkg.impl:StarBoundWidget.render_panel" not in dead, name
-
-
-def test_wildcard_reexport_does_not_revive_what_all_omits(tmp_path: Path) -> None:
-    """The opposite ditch: the recovery is a binding, not a blanket root."""
-
-    dead = _dead_qualnames(tmp_path, _STAR_TREE, "star")
-
-    assert "pkg.impl:unexported_helper" in dead
-    assert "pkg.impl:UnexportedWidget" in dead
-    assert "pkg.impl:UnexportedWidget.render_hidden" in dead
-
-
-def test_wildcard_reexport_never_binds_a_private_target_class(
-    tmp_path: Path,
-) -> None:
-    """``import *`` skips underscore names, so the chain must skip them too.
-
-    The class is deliberately held live by a named import from a sibling
-    module: without the underscore guard the export chain would reach it, so
-    this input proves the guard is reachable rather than decorative.
-    """
-
-    dead = _dead_qualnames(tmp_path, _PRIVATE_TARGET_TREE, "private")
-
-    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
-    assert "pkg.impl:_HiddenWidget.render_secret" in dead
-
-
-def test_wildcard_and_named_reexport_agree_on_liveness(tmp_path: Path) -> None:
-    """Equivalent spellings, one verdict.
-
-    The wildcard was measured to be strictly WEAKER than the named import it
-    stands for. Equality in both directions is the acceptance condition, so
-    the assertion is set equality, not containment.
-    """
-
-    star = _dead_qualnames(tmp_path, _STAR_TREE, "star")
-    named = _dead_qualnames(tmp_path, _NAMED_TREE, "named")
-
-    assert star == named
-
-
-def test_package_without_wildcard_keeps_its_dead_public_method(
-    tmp_path: Path,
-) -> None:
-    """The frozen boundary of this wave.
-
-    ``LocalOnlyWidget`` is live through its module's own ``__all__``, and no
-    package ``__init__`` re-exports it. A rule that rooted the public methods
-    of every live class - rather than of the classes a wildcard re-exports -
-    would move this verdict, and this repository's own modules with it.
-    """
-
-    dead = _dead_qualnames(tmp_path, _NO_WILDCARD_TREE, "nowildcard")
-
-    assert "pkg.impl:LocalOnlyWidget" not in dead
-    assert "pkg.impl:LocalOnlyWidget.render_local" in dead
-
-
-def test_chained_reexport_through_a_plain_module_keeps_public_methods_live(
-    tmp_path: Path,
-) -> None:
-    """The residual of the measured class, stated as a rule.
-
-    The re-exporting hop being a package ``__init__`` rather than a plain
-    module is a spelling, not a fact about the API: both chains bind
-    ``pkg.StarBoundWidget`` at runtime. Deciding liveness by the spelling is
-    what produced a high-confidence assertion that live public API is dead.
-    """
-
-    for tree, name in (
-        (_CHAINED_STAR_TREE, "chainstar"),
-        (_CHAINED_NAMED_MIDDLE_TREE, "chainnamed"),
-    ):
-        dead = _dead_qualnames(tmp_path, tree, name)
-
-        assert "pkg.impl:StarBoundWidget" not in dead, name
-        assert "pkg.impl:StarBoundWidget.render_panel" not in dead, name
-
-
-def test_chained_reexport_still_reports_what_the_chain_omits(
-    tmp_path: Path,
-) -> None:
-    """The opposite ditch of the same edit.
-
-    Following the chain one hop further must not become "every symbol of every
-    module the chain touches is live": the names the chain never carries stay
-    dead, class, method and function alike.
-    """
-
-    for tree, name in (
-        (_CHAINED_STAR_TREE, "chainstar"),
-        (_CHAINED_NAMED_MIDDLE_TREE, "chainnamed"),
-    ):
-        dead = _dead_qualnames(tmp_path, tree, name)
-
-        assert "pkg.impl:UnexportedWidget" in dead, name
-        assert "pkg.impl:UnexportedWidget.render_hidden" in dead, name
-        assert "pkg.impl:unexported_helper" in dead, name
-
-
-def test_reexport_chain_is_anchored_at_the_package_boundary(
-    tmp_path: Path,
-) -> None:
-    """The origin guard, proven reachable by an input that trips it.
-
-    ``pkg.api`` re-exports the class exactly as the chained trees do, and its
-    own ``__all__`` still holds the class live - but no package ``__init__``
-    carries those names outward, so the public method is genuinely unreachable
-    and must stay dead.
-    """
-
-    dead = _dead_qualnames(tmp_path, _UNANCHORED_CHAIN_TREE, "unanchored")
-
-    assert "pkg.impl:StarBoundWidget" not in dead
-    assert "pkg.impl:StarBoundWidget.render_panel" in dead
-
-
-def test_reexport_chain_walks_wildcard_edges_only(tmp_path: Path) -> None:
-    """The chain carries a NAMESPACE, and only ``import *`` carries one.
-
-    A named import binds one name for the importing module's own use. Treating
-    it as a chain hop would root what a module merely consumes, which is the
-    "hundreds of new false positives" ditch this wave has to stay out of.
-    """
-
-    dead = _dead_qualnames(tmp_path, _NAMED_EDGE_CEILING_TREE, "namededge")
-
-    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
-    assert "pkg.deep:DeepWidget.render_deep" in dead
-
-
-def test_reached_module_does_not_reexport_its_private_imports(
-    tmp_path: Path,
-) -> None:
-    """The ``qutip`` measurement, stated as a rule.
-
-    ``_Hidden`` is live - ``pkg.api`` builds one - but ``pkg._Hidden`` does not
-    exist, because the wildcard that put ``pkg.api`` on the chain never binds an
-    underscore name. Rooting its methods would retire a true finding, which is
-    the same error as the defect, pointed the other way.
-    """
-
-    dead = _dead_qualnames(tmp_path, _PRIVATE_IMPORT_ON_THE_CHAIN_TREE, "privchain")
-
-    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
-    assert "pkg._private:_Hidden.secret_method" in dead
-
-
-def test_reexport_chain_converges_on_a_shared_target(tmp_path: Path) -> None:
-    """A diamond is one chain, not two, and it still reports what it omits."""
-
-    dead = _dead_qualnames(tmp_path, _DIAMOND_CHAIN_TREE, "diamond")
-
-    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
-    assert "pkg.impl:UnexportedWidget.render_hidden" in dead
-
-
-def test_reexport_chain_terminates_on_a_mutual_wildcard_cycle(
-    tmp_path: Path,
-) -> None:
-    """A cycle must converge, and still answer correctly on both sides.
-
-    ``pkg.a`` and ``pkg.b`` re-export each other, so the walk revisits a module
-    it has already placed on the frontier. Without the visited set this input
-    does not finish - and a walk that does not finish is worse than a wrong
-    verdict, because it is indistinguishable from one still running. The
-    deadline in ``_run_bounded`` is what makes that failure legible.
-    """
-
-    dead = _dead_qualnames(tmp_path, _CYCLIC_CHAIN_TREE, "cyclic")
-
-    assert "pkg.b:CycleWidget" not in dead
-    assert "pkg.b:CycleWidget.render_cycle" not in dead
-    assert "pkg.b:OrphanWidget" in dead
-    assert "pkg.b:OrphanWidget.never_called" in dead
-
-
-#: The binding layer itself, stated as a difference of ONE name. ``pkg.impl``
-#: declares ``__all__``, so ``from .impl import *`` binds exactly what it
-#: lists - the language rule, not a heuristic. ``OmittedWidget`` is public and
-#: a sibling module holds it live, which is precisely the shape that used to
-#: root it: being referenced was read as being carried out. Runtime disagrees,
-#: ``hasattr(pkg, "OmittedWidget")`` is False, and a member reachable only
-#: through the defining module is not on the public surface.
-def _target_all_tree(*, exports: tuple[str, ...]) -> dict[str, str]:
-    listed = ", ".join(f'"{name}"' for name in exports)
-    return {
-        "pkg/__init__.py": """
-from .impl import *  # noqa: F403
-
-__all__ = ["StarBoundWidget"]
+#: The binding fact is the TARGET's: ``__all__`` in the target decides what
+#: the wildcard carries, whatever the re-exporter lists.
+_TARGET_ALL_OMITS_TREE = {
+    "pkg/__init__.py": """
+from ._impl import *  # noqa: F403
 """,
-        "pkg/impl.py": f"""
-__all__ = [{listed}]
+    "pkg/_impl.py": """
+__all__ = ["StarBoundWidget"]
 
 
 class StarBoundWidget:
@@ -579,60 +335,236 @@ class OmittedWidget:
     def render_omitted(self) -> str:
         return "omitted"
 """,
-        "pkg/consumer.py": """
-from .impl import OmittedWidget
+}
+
+_TARGET_ALL_LISTS_TREE = {
+    "pkg/__init__.py": _TARGET_ALL_OMITS_TREE["pkg/__init__.py"],
+    "pkg/_impl.py": _TARGET_ALL_OMITS_TREE["pkg/_impl.py"].replace(
+        '__all__ = ["StarBoundWidget"]',
+        '__all__ = ["StarBoundWidget", "OmittedWidget"]',
+    ),
+}
 
 
-def take_omitted() -> object:
-    return OmittedWidget()
-""",
+def _lanes(
+    tmp_path: Path,
+    tree: dict[str, str],
+    name: str,
+    *,
+    expect_warm_cache: bool = False,
+) -> tuple[frozenset[str], dict[str, str]]:
+    """Both lanes of one generated tree: the dead set, and unresolved -> witness."""
+
+    family = dead_code_family(
+        tmp_path,
+        tree,
+        name,
+        scope_id=_SCOPE_ID,
+        expect_warm_cache=expect_warm_cache,
+    )
+    # The export chain is reachability evidence now; a live root spelled
+    # ``export_root`` would be the old lie in the old place.
+    assert "export_root" not in set(live_root_reason_by_qualname(family).values())
+    return dead_qualnames(family), {
+        qualname: str(row["witness"])
+        for qualname, row in unresolved_by_qualname(family).items()
     }
 
 
-def test_wildcard_does_not_bind_a_name_the_target_all_omits(tmp_path: Path) -> None:
-    """Take the name out of the target ``__all__`` and the star edge goes.
+def test_wildcard_reexport_carries_the_public_methods_as_unresolved(
+    tmp_path: Path,
+) -> None:
+    dead, unresolved = _lanes(tmp_path, _STAR_TREE, "star")
 
-    The class stays referenced - the sibling import is untouched - so a rule
-    that reads "public class in a wildcard target that the project references"
-    keeps rooting it. Only a rule that consults the binding moves.
-    """
+    # The bound names themselves are live through the re-exporter's __all__.
+    assert "pkg._impl:StarBoundWidget" not in dead
+    assert "pkg._impl:StarBoundWidget" not in unresolved
+    assert "pkg._impl:star_bound_helper" not in dead
+    # Their public methods have no internal evidence and a public path.
+    assert "pkg._impl:StarBoundWidget.render_panel" not in dead
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == "star_reexport:pkg"
 
-    dead = _dead_qualnames(
-        tmp_path,
-        _target_all_tree(exports=("StarBoundWidget",)),
-        "targetallomits",
+
+def test_a_wildcard_with_no_target_all_binds_what_the_reexporter_omits(
+    tmp_path: Path,
+) -> None:
+    """``pkg.UnexportedWidget`` exists at runtime: the re-exporter's ``__all__``
+    narrows ``from pkg import *``, not the names ``pkg`` holds."""
+
+    dead, unresolved = _lanes(tmp_path, _STAR_TREE, "star-omits")
+
+    for qualname in (
+        "pkg._impl:UnexportedWidget",
+        "pkg._impl:UnexportedWidget.render_hidden",
+        "pkg._impl:unexported_helper",
+    ):
+        assert qualname not in dead, qualname
+        assert unresolved[qualname] == "star_reexport:pkg", qualname
+
+
+def test_a_named_reexport_leaves_the_unnamed_siblings_dead(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _NAMED_TREE, "named")
+
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == (
+        "package_reexport:pkg"
+    )
+    assert "pkg._impl:UnexportedWidget" in dead
+    assert "pkg._impl:UnexportedWidget.render_hidden" in dead
+    assert "pkg._impl:unexported_helper" in dead
+    assert not {name for name in unresolved if "nexported" in name}
+
+
+def test_wildcard_and_named_reexport_agree_when_the_target_declares_all(
+    tmp_path: Path,
+) -> None:
+    """The httpx shape: with a target ``__all__`` the two spellings bind the same
+    names, so both lanes must agree - the wildcard only changes the witness."""
+
+    star_dead, star_unresolved = _lanes(tmp_path, _STAR_TARGET_ALL_TREE, "star-all")
+    named_dead, named_unresolved = _lanes(tmp_path, _NAMED_TARGET_ALL_TREE, "named-all")
+
+    assert star_dead == named_dead
+    assert set(star_unresolved) == set(named_unresolved)
+    assert "pkg._impl:UnexportedWidget.render_hidden" in star_dead
+    assert star_unresolved["pkg._impl:StarBoundWidget.render_panel"] == (
+        "star_reexport:pkg"
+    )
+    assert named_unresolved["pkg._impl:StarBoundWidget.render_panel"] == (
+        "package_reexport:pkg"
     )
 
-    # The rule still runs on this tree: the listed class keeps its member live.
-    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
-    assert "pkg.impl:OmittedWidget.render_omitted" in dead
+
+def test_wildcard_reexport_never_binds_a_private_target_class(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _PRIVATE_TARGET_TREE, "private-target")
+
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == "star_reexport:pkg"
+    assert "pkg._impl:_HiddenWidget.render_secret" in dead
+    assert "pkg._impl:_HiddenWidget.render_secret" not in unresolved
+
+
+def test_a_private_module_nothing_reexports_keeps_its_dead_public_method(
+    tmp_path: Path,
+) -> None:
+    dead, unresolved = _lanes(tmp_path, _NO_WILDCARD_TREE, "no-wildcard")
+
+    assert "pkg._impl:LocalOnlyWidget" not in dead
+    assert "pkg._impl:LocalOnlyWidget.render_local" in dead
+    assert unresolved == {}
+
+
+def test_chained_reexport_through_a_private_module_keeps_the_path(
+    tmp_path: Path,
+) -> None:
+    for name, tree in (
+        ("chain-star", _CHAINED_STAR_TREE),
+        ("chain-named-middle", _CHAINED_NAMED_MIDDLE_TREE),
+    ):
+        dead, unresolved = _lanes(tmp_path, tree, name)
+        assert "pkg._impl:StarBoundWidget" not in dead, name
+        assert "pkg._impl:StarBoundWidget.render_panel" not in dead, name
+        assert unresolved["pkg._impl:StarBoundWidget.render_panel"].startswith(
+            "star_reexport:"
+        ), name
+
+
+def test_chained_reexport_still_reports_what_no_hop_carries(tmp_path: Path) -> None:
+    """``_api`` imports two names from ``_impl``; ``UnexportedWidget`` is never
+    bound anywhere on the chain, so no public path reaches it."""
+
+    dead, unresolved = _lanes(tmp_path, _CHAINED_NAMED_MIDDLE_TREE, "chain-omits")
+
+    assert "pkg._impl:UnexportedWidget" in dead
+    assert "pkg._impl:UnexportedWidget.render_hidden" in dead
+    assert "pkg._impl:unexported_helper" in dead
+    assert "pkg._impl:UnexportedWidget.render_hidden" not in unresolved
+
+
+def test_reexport_chain_is_anchored_at_the_public_frontier(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _UNANCHORED_CHAIN_TREE, "unanchored")
+
+    # Bound into _api by the walk's own __all__ binding, but no public path.
+    assert "pkg._impl:StarBoundWidget" not in dead
+    assert "pkg._impl:StarBoundWidget.render_panel" in dead
+    assert unresolved == {}
+
+
+def test_a_public_plain_module_wildcard_is_a_public_path(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _PUBLIC_PLAIN_STAR_TREE, "public-plain")
+
+    assert "pkg._impl:StarBoundWidget.render_panel" not in dead
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == (
+        "star_reexport:pkg.api"
+    )
+
+
+def test_reexport_chain_walks_wildcard_edges_only(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _NAMED_EDGE_CEILING_TREE, "named-ceiling")
+
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == (
+        "star_reexport:pkg._api"
+    )
+    assert "pkg._deep:DeepWidget.render_deep" in dead
+    assert "pkg._deep:DeepWidget.render_deep" not in unresolved
+
+
+def test_reached_module_does_not_reexport_its_private_imports(
+    tmp_path: Path,
+) -> None:
+    dead, unresolved = _lanes(tmp_path, _PRIVATE_IMPORT_ON_THE_CHAIN_TREE, "qutip")
+
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == (
+        "star_reexport:pkg._api"
+    )
+    assert "pkg._private:_Hidden.secret_method" in dead
+
+
+def test_reexport_chain_converges_on_a_shared_target(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _DIAMOND_CHAIN_TREE, "diamond")
+
+    assert "pkg._impl:StarBoundWidget.render_panel" not in dead
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"].startswith(
+        "star_reexport:pkg._"
+    )
+
+
+def test_reexport_chain_terminates_on_a_mutual_wildcard_cycle(
+    tmp_path: Path,
+) -> None:
+    dead, unresolved = _lanes(tmp_path, _CYCLIC_CHAIN_TREE, "cycle")
+
+    assert "pkg._b:CycleWidget" not in dead
+    assert unresolved["pkg._b:CycleWidget.render_cycle"] == "star_reexport:pkg._a"
+    # Not in _b's __all__, so no wildcard ever binds it: dead in a private
+    # module, and not a row in the sibling lane.
+    assert "pkg._b:OrphanWidget" in dead
+    assert "pkg._b:OrphanWidget.never_called" in dead
+    assert "pkg._b:OrphanWidget.never_called" not in unresolved
+
+
+def test_wildcard_does_not_bind_a_name_the_target_all_omits(tmp_path: Path) -> None:
+    dead, unresolved = _lanes(tmp_path, _TARGET_ALL_OMITS_TREE, "target-omits")
+
+    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == "star_reexport:pkg"
+    assert "pkg._impl:OmittedWidget" in dead
+    assert "pkg._impl:OmittedWidget.render_omitted" in dead
+    assert "pkg._impl:OmittedWidget.render_omitted" not in unresolved
 
 
 def test_wildcard_binds_the_name_the_target_all_lists(tmp_path: Path) -> None:
-    """Put it back and the star edge returns: the same tree, one name apart."""
+    dead, unresolved = _lanes(tmp_path, _TARGET_ALL_LISTS_TREE, "target-lists")
 
-    dead = _dead_qualnames(
-        tmp_path,
-        _target_all_tree(exports=("StarBoundWidget", "OmittedWidget")),
-        "targetalllists",
-    )
-
-    assert "pkg.impl:StarBoundWidget.render_panel" not in dead
-    assert "pkg.impl:OmittedWidget.render_omitted" not in dead
+    assert "pkg._impl:OmittedWidget" not in dead
+    assert "pkg._impl:OmittedWidget.render_omitted" not in dead
+    assert unresolved["pkg._impl:OmittedWidget.render_omitted"] == "star_reexport:pkg"
 
 
 def test_wildcard_binding_survives_a_warm_cache(tmp_path: Path) -> None:
-    """The binding fact has to reach a run that never walks the module.
+    """The binding fact rides the cache with the candidate, and reachability
+    reads only wired facts, so a warm run utters exactly the cold lanes."""
 
-    Every per-file liveness fact this rule reads comes off the cache on a warm
-    run, so a binding the walk resolves and the wire drops would give two
-    different answers for one tree - and the second one would be the answer
-    from before the rule existed. Same tree, same cache path, twice.
-    """
+    cold = _lanes(tmp_path, _TARGET_ALL_OMITS_TREE, "warm")
+    warm = _lanes(tmp_path, _TARGET_ALL_OMITS_TREE, "warm", expect_warm_cache=True)
 
-    tree = _target_all_tree(exports=("StarBoundWidget",))
-    cold = _dead_qualnames(tmp_path, tree, "warmbinding")
-    warm = _dead_qualnames(tmp_path, tree, "warmbinding", expect_warm_cache=True)
-
-    assert "pkg.impl:OmittedWidget.render_omitted" in cold
+    assert "pkg._impl:OmittedWidget.render_omitted" in cold[0]
+    assert cold[1]["pkg._impl:StarBoundWidget.render_panel"] == "star_reexport:pkg"
     assert warm == cold

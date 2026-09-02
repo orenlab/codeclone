@@ -22,7 +22,7 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 | `BASELINE_SCHEMA_VERSION` | `"3.0"` | baseline.json structure | Defines JSON schema for baseline artifacts. Bump only when baseline dict structure changes. |
 | `BASELINE_FINGERPRINT_VERSION` | `"3"` | fingerprint algorithm | Never change without explicit `BASELINE_FINGERPRINT_VERSION` review. Alters cloning semantics. |
 | `CACHE_VERSION` | `"4.0"` | analysis cache store | Invalidates `.codeclone/db/cache.sqlite3` on mismatch. Bump on cache schema or serialization change. See the note below. |
-| `REPORT_SCHEMA_VERSION` | `"3.2"` | report artifact JSON | Governs report.json, report.sarif structure. Bump on schema shape change. |
+| `REPORT_SCHEMA_VERSION` | `"3.3"` | report artifact JSON | Governs report.json, report.sarif structure. Bump on schema shape change. |
 | `METRICS_BASELINE_SCHEMA_VERSION` | `"1.3"` | metrics baseline JSON | Structure of the metrics baseline artifact used for regression gating. |
 | `PATCH_TRAIL_SCHEMA_VERSION` | `"1"` | audit trail encoding | Controls patch_trail.json serialization in intent workspaces. |
 | `AUDIT_PROJECTION_VERSION` | `"audit-v1"` | audit event marshaling | Semantic versioning for audit fact format. |

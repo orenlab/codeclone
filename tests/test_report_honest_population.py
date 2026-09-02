@@ -879,8 +879,11 @@ def test_population_rides_every_surface_even_when_measured() -> None:
 #:
 #: Updating one side alone reds. Updating both is a two-line acknowledgement,
 #: and the acknowledgement is the point.
+#: 3.2 -> 3.3 moved for another reason (RULING 2026-09-01: the dead-code
+#: ``unresolved`` lane and ``world_contract``); the members are unchanged and
+#: are recorded here against the new version, as the pin asks.
 _POPULATION_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.2",
+    "3.3",
     ("complete_empty", "complete_nonempty", "partial", "unmeasured"),
 )
 

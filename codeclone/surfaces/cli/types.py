@@ -95,6 +95,7 @@ class CLIArgsLike(Protocol):
     skip_metrics: bool
     skip_dead_code: bool
     skip_dependencies: bool
+    dead_code_world: str
     update_baseline: bool
     fail_on_new: bool
     fail_threshold: int

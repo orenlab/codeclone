@@ -144,6 +144,7 @@ Seven new keys, plus the authority array of tables:
 | `semantic_authority` | `--semantic-authority` | Report-only authority candidates |
 | `fail_on_authority_violation` | `--fail-on-authority-violation` | Exit 3 on a governed-contract violation |
 | `fail_on_unresolved_dead_code` | `--fail-on-unresolved-dead-code` | Exit 3 on unresolved external overrides |
+| `dead_code_world` | `--dead-code-world` | World contract for dead-code verdicts (`open` by default): a symbol consumers outside the repository could reach is reported as `unresolved`, never asserted dead on internal evidence alone; `closed` calls it dead |
 | `near_miss` | `--near-miss` | Advisory near-miss clone channel |
 | `[[tool.codeclone.authority]]` | — | The reviewed authority registry |
 

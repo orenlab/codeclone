@@ -511,7 +511,22 @@ CACHE_VERSION: Final = "4.0"
 # stored 3.0 report is refused rather than silently misread against the new
 # value set. ``tests/test_report_honest_population.py`` pins the coupling —
 # the enum cannot move again without this constant moving with it.
-REPORT_SCHEMA_VERSION: Final = "3.2"
+#
+# 3.2 -> 3.3 (RULING 2026-09-01, external reachability): the ``dead_code``
+# family gains a semantic state the old wire could not express. A symbol with
+# no internal evidence that a consumer outside the repository could reach is
+# neither a dead finding nor a live omission; it is uttered as its own record
+# type in ``dead_code.unresolved`` (reason code, reachability state, witness,
+# world contract, location), counted in ``summary.unresolved``, and every
+# verdict in the family now names the world it was derived under in
+# ``summary.world_contract``. Not a new value of an existing finding and not a
+# confidence level: a reader that switched on the old wire would read the
+# absence of a finding as "proven live", which is the ambiguity the state
+# exists to end. Baseline schema, cache generation, module identity and the
+# semantic identity generation stay where they are; the new payload enters the
+# run identity through the observation lane's ``abstained`` rows and the
+# realized ``world_contract`` parameter, not through a generation bump.
+REPORT_SCHEMA_VERSION: Final = "3.3"
 # The clone vocabulary of the report wire: what the document calls the family
 # and what a clone group calls its kind. These are facts about the payload, not
 # a layer's opinion about it, and they live here because of who has to read

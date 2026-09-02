@@ -449,6 +449,36 @@ def _normalize_metrics_families(
         ),
         key=lambda item: (item["qualname"], item["reason"]),
     )
+    # Carried whole, field by field: the ruling fixes the row's minimal
+    # content, and a projection that dropped one would leave the wire unable
+    # to say why CodeClone could not decide.
+    dead_unresolved = sorted(
+        (
+            {
+                "qualname": str(item_map.get("qualname", "")),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "kind": str(item_map.get("kind", "")),
+                "reason": str(item_map.get("reason", "")),
+                "reachability": str(item_map.get("reachability", "")),
+                "witness": str(item_map.get("witness", "")),
+                "world_contract": str(item_map.get("world_contract", "")),
+            }
+            for item in _as_sequence(dead_code.get("unresolved"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+        ),
+    )
 
     health = _as_mapping(metrics_map.get("health"))
     health_comparison = _as_mapping(health.get("summary"))
@@ -929,6 +959,11 @@ def _normalize_metrics_families(
                 "unresolved_external_override": _as_int(
                     dead_code_summary.get("unresolved_external_override")
                 ),
+                # The reachability abstentions and the world they were
+                # derived under, read from the one producer and never
+                # recomputed from the list beside them.
+                "unresolved": _as_int(dead_code_summary.get("unresolved")),
+                "world_contract": str(dead_code_summary.get("world_contract", "")),
                 # Carried forward, never recomputed here: the metrics payload
                 # owns this count, and every surface reading this document —
                 # text, markdown, HTML and the gate — takes it from here.
@@ -940,6 +975,7 @@ def _normalize_metrics_families(
             "items": dead_items,
             "suppressed_items": dead_suppressed_items,
             "unresolved_overrides": dead_unresolved_overrides,
+            "unresolved": dead_unresolved,
             # Projected, not merely computed: the findings builder reads this
             # document rather than the raw metrics payload, so a list left out
             # here is dropped before any finding is built and the detector goes

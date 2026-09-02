@@ -33,6 +33,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--min-docstring-coverage PERCENT] [--coverage-min PERCENT]
                  [--skip-metrics | --no-skip-metrics]
                  [--skip-dead-code | --no-skip-dead-code]
+                 [--dead-code-world {open,closed}]
                  [--skip-dependencies | --no-skip-dependencies]
                  [--html [FILE]] [--json [FILE]] [--md [FILE]]
                  [--sarif [FILE]] [--text [FILE]]
@@ -186,6 +187,11 @@ Analysis stages:
                         Skip full metrics analysis and run in clone-only mode.
   --skip-dead-code, --no-skip-dead-code
                         Skip dead code detection.
+  --dead-code-world {open,closed}
+                        World contract for dead-code verdicts.
+                        open (default): a symbol consumers outside the repository could reach is
+                        never asserted dead on internal evidence alone; it is reported as
+                        unresolved. closed: every consumer is inside the repository.
   --skip-dependencies, --no-skip-dependencies
                         Skip dependency graph analysis.
 

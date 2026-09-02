@@ -200,6 +200,12 @@ HELP_CI = (
 )
 HELP_SKIP_METRICS = "Skip full metrics analysis and run in clone-only mode."
 HELP_SKIP_DEAD_CODE = "Skip dead code detection."
+HELP_DEAD_CODE_WORLD = (
+    "World contract for dead-code verdicts.\n"
+    "open (default): a symbol consumers outside the repository could reach is\n"
+    "never asserted dead on internal evidence alone; it is reported as\n"
+    "unresolved. closed: every consumer is inside the repository."
+)
 HELP_SKIP_DEPENDENCIES = "Skip dependency graph analysis."
 HELP_HTML = (
     "Generate an HTML report.\n"

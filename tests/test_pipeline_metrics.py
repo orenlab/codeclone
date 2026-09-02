@@ -57,7 +57,7 @@ from codeclone.core.metrics_payload import (
     build_metrics_report_payload,
 )
 from codeclone.core.parallelism import _should_use_parallel
-from codeclone.core.pipeline import _with_export_root_reasons, compute_project_metrics
+from codeclone.core.pipeline import compute_project_metrics
 from codeclone.core.reporting import _metrics_for_report
 from codeclone.metrics import overloaded_modules as overloaded_modules_mod
 from codeclone.metrics.overloaded_modules import (
@@ -86,7 +86,6 @@ from codeclone.models import (
     FunctionRelationshipFactsDict,
     HealthScore,
     LaneTrust,
-    LiveRootReason,
     MetricsDiff,
     ModuleApiSurface,
     ModuleApiSurfaceDict,
@@ -521,57 +520,6 @@ def test_compute_project_metrics_uses_runtime_reachability_for_dead_code() -> No
     assert len(project_metrics.runtime_reachability) == 1
 
 
-def test_export_root_evidence_is_folded_onto_candidates_without_overwriting() -> None:
-    """39Y cycle 2b, content (b): the export_root half of the reason lane.
-
-    Export roots are a whole-project fact resolved after the per-file walk, so
-    they are merged in afterwards. A walk-resolved reason must win: the walk
-    saw the decorator directly, which is the more specific evidence.
-    """
-    plain = DeadCandidate(
-        qualname="pkg.mod:Exported.method",
-        local_name="method",
-        filepath="pkg/mod.py",
-        start_line=1,
-        end_line=2,
-        kind="method",
-    )
-    already_rooted = DeadCandidate(
-        qualname="pkg.mod:framework_handler",
-        local_name="framework_handler",
-        filepath="pkg/mod.py",
-        start_line=4,
-        end_line=5,
-        kind="function",
-        live_root_reason="external_decorator",
-    )
-    untouched = DeadCandidate(
-        qualname="pkg.mod:plain_unused",
-        local_name="plain_unused",
-        filepath="pkg/mod.py",
-        start_line=7,
-        end_line=8,
-        kind="function",
-    )
-    evidence: tuple[tuple[str, LiveRootReason], ...] = (
-        ("pkg.mod:Exported.method", "export_root"),
-        ("pkg.mod:framework_handler", "export_root"),
-    )
-
-    merged = _with_export_root_reasons(
-        (plain, already_rooted, untouched),
-        evidence=evidence,
-    )
-
-    assert [candidate.live_root_reason for candidate in merged] == [
-        "export_root",
-        "external_decorator",
-        None,
-    ]
-    # No evidence at all is an identity transform, not an empty rewrite.
-    assert _with_export_root_reasons((plain,), evidence=()) == (plain,)
-
-
 def test_metrics_payload_carries_abstentions_without_inflating_dead() -> None:
     """39Y cycle 2b, content (a) and (b): both keys must carry real rows.
 
@@ -667,6 +615,8 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
         "high_confidence": 1,
         "suppressed": 1,
         "unresolved_external_override": 0,
+        "unresolved": 0,
+        "world_contract": "open",
         "unreachable_statements": 0,
         "live_roots": 0,
     }

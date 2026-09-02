@@ -844,37 +844,48 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             payload["summary"] = dict(
                 _helpers._as_mapping(family_payload.get("summary"))
             )
-        if "unresolved_overrides" in family_payload:
-            override_rows = [
-                dict(_helpers._as_mapping(row))
-                for row in _helpers._as_sequence(
-                    family_payload.get("unresolved_overrides")
+        # Both abstention lanes ride the SAME (offset, limit) cursor as
+        # ``items`` but are surfaced as their own paginated sibling blocks, so
+        # no list's bound is conflated with another's and none is ever an
+        # unbounded dump.
+        for lane in ("unresolved_overrides", "unresolved"):
+            if lane in family_payload:
+                payload[lane] = self._paginated_sibling_lane(
+                    family_payload.get(lane),
+                    normalized_path=normalized_path,
+                    offset=offset,
+                    limit=limit,
                 )
-                if not normalized_path
-                or _helpers._metric_item_matches_path(
-                    _helpers._as_mapping(row),
-                    normalized_path,
-                )
-            ]
-            # The abstention list rides the SAME (offset, limit) cursor as
-            # ``items`` but is surfaced as its own paginated sibling block, so
-            # neither list's bound is conflated with the other's and the list is
-            # never an unbounded dump.
-            override_page = paginate(
-                override_rows,
-                offset=offset,
-                limit=limit,
-                max_limit=200,
-            )
-            payload["unresolved_overrides"] = {
-                "offset": override_page.offset,
-                "limit": override_page.limit,
-                "returned": len(override_page.items),
-                "total": override_page.total,
-                "has_more": override_page.next_offset is not None,
-                "items": override_page.items,
-            }
         return payload
+
+    @staticmethod
+    def _paginated_sibling_lane(
+        rows: object,
+        *,
+        normalized_path: str,
+        offset: int,
+        limit: int,
+    ) -> dict[str, object]:
+        """One abstention lane, path-filtered and paged on the shared cursor."""
+
+        matching = [
+            dict(_helpers._as_mapping(row))
+            for row in _helpers._as_sequence(rows)
+            if not normalized_path
+            or _helpers._metric_item_matches_path(
+                _helpers._as_mapping(row),
+                normalized_path,
+            )
+        ]
+        page = paginate(matching, offset=offset, limit=limit, max_limit=200)
+        return {
+            "offset": page.offset,
+            "limit": page.limit,
+            "returned": len(page.items),
+            "total": page.total,
+            "has_more": page.next_offset is not None,
+            "items": page.items,
+        }
 
     def _derived_section_payload(self, record: MCPRunRecord) -> dict[str, object]:
         derived = _helpers._as_mapping(record.report_document.get("derived"))

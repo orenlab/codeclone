@@ -8,22 +8,29 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ..analysis.suppressions import DEAD_CODE_RULE_ID
 from ..domain.findings import SYMBOL_KIND_FUNCTION, SYMBOL_KIND_METHOD
 from ..domain.quality import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
 from ..models import (
+    WORLD_CONTRACTS,
     ClassMetrics,
     DeadCandidate,
     DeadItem,
+    ExternalReachability,
     FunctionRelationshipFacts,
     LivenessClassification,
     ModuleRegistryHandle,
     RuntimeReachabilityFact,
     UnresolvedOverrideItem,
+    UnresolvedReachabilityItem,
+    WorldContract,
 )
 from ..paths import is_test_filepath
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _DYNAMIC_METHOD_PREFIXES = ("visit_",)
 _MODULE_RUNTIME_HOOK_NAMES = {"__getattr__", "__dir__"}
@@ -41,6 +48,21 @@ _DYNAMIC_HOOK_NAMES = {
 }
 
 
+def world_contract_from_value(value: object) -> WorldContract:
+    """The one spelling of the world-contract vocabulary check.
+
+    Every surface that accepts the value - the CLI flag, the pyproject key,
+    the MCP request - funnels through here, so an unknown world is refused
+    once, by name, and never silently read as one of the two.
+    """
+
+    if isinstance(value, str) and value in WORLD_CONTRACTS:
+        return "open" if value == "open" else "closed"
+    raise ValueError(
+        f"dead_code_world must be one of {', '.join(WORLD_CONTRACTS)}; got {value!r}"
+    )
+
+
 def find_unused(
     *,
     definitions: tuple[DeadCandidate, ...],
@@ -51,8 +73,10 @@ def find_unused(
     test_reference_sources: Mapping[str, tuple[str, ...]] | None = None,
     module_registry: ModuleRegistryHandle | None = None,
     class_metrics: tuple[ClassMetrics, ...] = (),
+    external_reachability: Sequence[ExternalReachability] = (),
+    world_contract: WorldContract = "closed",
 ) -> tuple[DeadItem, ...]:
-    """Dead symbols only. Rule-3 abstentions are excluded by construction."""
+    """Dead symbols only. Both abstention lanes are excluded by construction."""
     return classify_liveness(
         definitions=definitions,
         referenced_names=referenced_names,
@@ -62,6 +86,8 @@ def find_unused(
         test_reference_sources=test_reference_sources,
         module_registry=module_registry,
         class_metrics=class_metrics,
+        external_reachability=external_reachability,
+        world_contract=world_contract,
     ).dead_items
 
 
@@ -75,6 +101,8 @@ def classify_liveness(
     test_reference_sources: Mapping[str, tuple[str, ...]] | None = None,
     module_registry: ModuleRegistryHandle | None = None,
     class_metrics: tuple[ClassMetrics, ...] = (),
+    external_reachability: Sequence[ExternalReachability] = (),
+    world_contract: WorldContract = "closed",
 ) -> LivenessClassification:
     """Tri-state liveness: ``live`` (omitted), ``dead``, or abstained.
 
@@ -93,9 +121,25 @@ def classify_liveness(
 
     Every evidence row resolves to ``live`` (the symbol is omitted). Only the
     absence of all of them abstains; only a symbol outside rule 3 can be dead.
+
+    The second abstention (RULING 2026-09-01) sits after every liveness row
+    and before the dead verdict: under the ``open`` world contract a symbol
+    with no live evidence that ``external_reachability`` calls reachable, or
+    cannot resolve, is ``unresolved`` rather than dead - CodeClone has no
+    basis for either answer. Under ``closed`` reachability is moot. The
+    default here is ``closed`` because it is the evidence-only reading: a
+    caller that states no world gets no world-dependent abstention. The
+    PRODUCT default is ``open`` and has one owner, the config spec; the
+    pipeline always passes it.
     """
     items: list[DeadItem] = []
     abstentions: list[UnresolvedOverrideItem] = []
+    unresolved: list[UnresolvedReachabilityItem] = []
+    reachability_by_qualname = (
+        {row.qualname: row for row in external_reachability}
+        if world_contract == "open"
+        else {}
+    )
     runtime_reachable_qualnames = _runtime_reachable_qualnames(runtime_reachability)
     opaque_base_classes = {
         metric.qualname: metric
@@ -156,6 +200,27 @@ def classify_liveness(
                 )
             continue
 
+        reachability = reachability_by_qualname.get(symbol.qualname)
+        if reachability is not None and reachability.state != "not_reachable":
+            unresolved.append(
+                UnresolvedReachabilityItem(
+                    qualname=symbol.qualname,
+                    filepath=symbol.filepath,
+                    start_line=symbol.start_line,
+                    end_line=symbol.end_line,
+                    kind=symbol.kind,
+                    reachability=reachability.state,
+                    witness=reachability.witness,
+                    world_contract=world_contract,
+                    reason=(
+                        "externally_reachable"
+                        if reachability.state == "reachable"
+                        else "reachability_unresolved"
+                    ),
+                )
+            )
+            continue
+
         sources = sources_by_target.get(symbol.qualname, ())
         items.append(
             DeadItem(
@@ -176,11 +241,12 @@ def classify_liveness(
     return LivenessClassification(
         dead_items=tuple(sorted(items, key=_liveness_item_sort_key)),
         unresolved_overrides=tuple(sorted(abstentions, key=_liveness_item_sort_key)),
+        unresolved_reachability=tuple(sorted(unresolved, key=_liveness_item_sort_key)),
     )
 
 
 def _liveness_item_sort_key(
-    item: DeadItem | UnresolvedOverrideItem,
+    item: DeadItem | UnresolvedOverrideItem | UnresolvedReachabilityItem,
 ) -> tuple[str, int, int, str, str]:
     return (
         item.filepath,
@@ -227,6 +293,15 @@ def find_suppressed_unused(
     module_registry: ModuleRegistryHandle | None = None,
     class_metrics: tuple[ClassMetrics, ...] = (),
 ) -> tuple[DeadItem, ...]:
+    """What a ``# codeclone: ignore[dead-code]`` directive silences.
+
+    Evidence-only, deliberately: the directive answers "would the dead-code
+    rule fire on this symbol's evidence", not "under which world contract".
+    Reading it under the open world would make a directive on a reachable
+    symbol silence nothing and vanish from the report, and the self-repo
+    ratchet that retires a directive once its symbol gains a consumer would
+    retire it for the wrong reason.
+    """
     suppressed_definitions = tuple(
         replace(symbol, suppressed_rules=())
         for symbol in definitions

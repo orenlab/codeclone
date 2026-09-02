@@ -670,6 +670,16 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         pyproject_type=bool,
     ),
     _option(
+        dest="dead_code_world",
+        group="Analysis stages",
+        cli_kind="value",
+        flags=("--dead-code-world",),
+        default=domain_models.DEFAULT_DEAD_CODE_WORLD,
+        metavar="{open,closed}",
+        help_text=ui.HELP_DEAD_CODE_WORLD,
+        pyproject_type=str,
+    ),
+    _option(
         dest="skip_dependencies",
         group="Analysis stages",
         cli_kind="bool_optional",

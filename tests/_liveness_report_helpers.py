@@ -40,8 +40,19 @@ CLI_ENTRY = "from codeclone.surfaces.cli.workflow import main; main()"
 RUN_DEADLINE_SECONDS = 120.0
 
 
-def write_tree(root: Path, tree: dict[str, str], *, scope_id: str) -> Path:
-    """Materialize one generated project, with a stable canonical scope id."""
+def write_tree(
+    root: Path,
+    tree: dict[str, str],
+    *,
+    scope_id: str,
+    pyproject_lines: tuple[str, ...] = (),
+) -> Path:
+    """Materialize one generated project, with a stable canonical scope id.
+
+    ``pyproject_lines`` are appended verbatim under ``[tool.codeclone]``: the
+    one way a suite can exercise a repository-level policy key through the
+    same door a user turns.
+    """
 
     root.mkdir(parents=True, exist_ok=True)
     for name, source in tree.items():
@@ -49,7 +60,13 @@ def write_tree(root: Path, tree: dict[str, str], *, scope_id: str) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source.lstrip(), encoding="utf-8")
     (root / "pyproject.toml").write_text(
-        f'[tool.codeclone]\nbaseline_scope_id = "{scope_id}"\n',
+        "".join(
+            (
+                "[tool.codeclone]\n",
+                f'baseline_scope_id = "{scope_id}"\n',
+                *(f"{line}\n" for line in pyproject_lines),
+            )
+        ),
         encoding="utf-8",
     )
     return root
@@ -79,19 +96,22 @@ def run_bounded(argv: list[str], *, name: str) -> subprocess.CompletedProcess[st
         )
 
 
-def dead_code_family(
+def run_cli(
     tmp_path: Path,
     tree: dict[str, str],
     name: str,
     *,
     scope_id: str,
+    cli_args: tuple[str, ...] = (),
+    pyproject_lines: tuple[str, ...] = (),
     expect_warm_cache: bool = False,
-) -> dict[str, object]:
-    """The dead-code family of one generated tree, behind the witness chain.
+) -> subprocess.CompletedProcess[str]:
+    """Spawn one full analysis of a generated tree and return the process.
 
-    The producer, the mode and the family are asserted before a single row is
-    read. ``expect_warm_cache`` additionally proves the run REUSED the cache
-    rather than merely opening it.
+    The report lands at ``<tmp_path>/<name>-report.json``; callers that need
+    the document go through :func:`analysis_report`, which also asserts the
+    witness chain. This entry point exists for the runs whose whole point is
+    the exit status - a refused flag value has no report to read.
     """
 
     # Rewriting the tree for a second run is what defeats the cache: the bytes
@@ -100,10 +120,14 @@ def dead_code_family(
     project_root = (
         tmp_path / name
         if expect_warm_cache
-        else write_tree(tmp_path / name, tree, scope_id=scope_id)
+        else write_tree(
+            tmp_path / name,
+            tree,
+            scope_id=scope_id,
+            pyproject_lines=pyproject_lines,
+        )
     )
-    report_path = tmp_path / f"{name}-report.json"
-    completed = run_bounded(
+    return run_bounded(
         [
             sys.executable,
             "-c",
@@ -114,13 +138,43 @@ def dead_code_family(
             "--cache-path",
             str(tmp_path / f"{name}-cache.json"),
             "--json",
-            str(report_path),
+            str(tmp_path / f"{name}-report.json"),
             "--no-skip-metrics",
             "--no-skip-dead-code",
             "--no-progress",
+            *cli_args,
         ],
         name=name,
     )
+
+
+def analysis_report(
+    tmp_path: Path,
+    tree: dict[str, str],
+    name: str,
+    *,
+    scope_id: str,
+    cli_args: tuple[str, ...] = (),
+    pyproject_lines: tuple[str, ...] = (),
+    expect_warm_cache: bool = False,
+) -> dict[str, object]:
+    """The whole report document of one generated tree, behind the witness chain.
+
+    The producer, the mode and the family are asserted before a single row is
+    read. ``expect_warm_cache`` additionally proves the run REUSED the cache
+    rather than merely opening it.
+    """
+
+    completed = run_cli(
+        tmp_path,
+        tree,
+        name,
+        scope_id=scope_id,
+        cli_args=cli_args,
+        pyproject_lines=pyproject_lines,
+        expect_warm_cache=expect_warm_cache,
+    )
+    report_path = tmp_path / f"{name}-report.json"
     assert report_path.exists(), completed.stdout + completed.stderr
     payload = json.loads(report_path.read_text("utf-8"))
     assert isinstance(payload, dict)
@@ -140,7 +194,31 @@ def dead_code_family(
         assert files["analyzed"] == 0, files
     family = payload["metrics"]["families"]["dead_code"]
     assert isinstance(family, dict)
-    return family
+    return payload
+
+
+def dead_code_family(
+    tmp_path: Path,
+    tree: dict[str, str],
+    name: str,
+    *,
+    scope_id: str,
+    cli_args: tuple[str, ...] = (),
+    pyproject_lines: tuple[str, ...] = (),
+    expect_warm_cache: bool = False,
+) -> dict[str, object]:
+    """The dead-code family of one generated tree, behind the witness chain."""
+
+    payload = analysis_report(
+        tmp_path,
+        tree,
+        name,
+        scope_id=scope_id,
+        cli_args=cli_args,
+        pyproject_lines=pyproject_lines,
+        expect_warm_cache=expect_warm_cache,
+    )
+    return dead_code_family_of(payload)
 
 
 def dead_qualnames(family: dict[str, object]) -> frozenset[str]:
@@ -157,3 +235,33 @@ def live_root_reason_by_qualname(family: dict[str, object]) -> dict[str, str]:
     rows = family["live_root_reasons"]
     assert isinstance(rows, list)
     return {str(row["qualname"]): str(row["reason"]) for row in rows}
+
+
+def unresolved_by_qualname(family: dict[str, object]) -> dict[str, dict[str, object]]:
+    """The sibling lane: symbols the run could call neither dead nor live.
+
+    Keyed by qualname so a pin reads the row it names; the row itself is
+    returned whole because the ruling fixes its minimal content (reason code,
+    reachability state, world contract, location) and a pin on one field
+    would leave the others free to vanish.
+    """
+
+    rows = family["unresolved"]
+    assert isinstance(rows, list)
+    by_qualname: dict[str, dict[str, object]] = {}
+    for row in rows:
+        assert isinstance(row, dict)
+        by_qualname[str(row["qualname"])] = dict(row)
+    return by_qualname
+
+
+def dead_code_family_of(payload: dict[str, object]) -> dict[str, object]:
+    """The dead-code family of an already-witnessed report document."""
+
+    metrics = payload["metrics"]
+    assert isinstance(metrics, dict)
+    families = metrics["families"]
+    assert isinstance(families, dict)
+    family = families["dead_code"]
+    assert isinstance(family, dict)
+    return family

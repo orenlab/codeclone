@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 
 from ..contracts import (
     CLONE_KIND_BLOCK,
@@ -38,6 +37,11 @@ from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
 from ..metrics.dead_code import (
     collect_test_reference_sources,
     find_suppressed_unused,
+    world_contract_from_value,
+)
+from ..metrics.external_reachability import (
+    collect_external_reachability,
+    package_modules_from_registry,
 )
 from ..metrics.registry import (
     METRIC_FAMILIES,
@@ -45,14 +49,15 @@ from ..metrics.registry import (
     project_metrics_defaults,
 )
 from ..models import (
+    DEFAULT_DEAD_CODE_WORLD,
     ClassMetrics,
     CoverageJoinResult,
     DeadCandidate,
     DeadItem,
     DepGraph,
+    ExternalReachability,
     FunctionRelationshipFacts,
     GroupItemLike,
-    LiveRootReason,
     MetricProjectContext,
     ModuleApiSurface,
     ModuleDep,
@@ -65,6 +70,7 @@ from ..models import (
     SemanticAuthorityResult,
     StructuralFindingGroup,
     Suggestion,
+    WorldContract,
 )
 from ..observability.runtime import span
 from ..observations.contracts import ObservationContractError
@@ -89,11 +95,7 @@ from ._types import (
     _segment_groups_digest,
 )
 from .bootstrap import _resolve_optional_runtime_path
-from .entrypoints import (
-    already_live_candidate_qualnames,
-    collect_project_entrypoint_qualnames,
-    collect_project_export_root_evidence,
-)
+from .entrypoints import collect_project_entrypoint_qualnames
 from .metrics_payload import build_metrics_report_payload
 
 
@@ -110,28 +112,6 @@ def _artifact_dead_items(
         if len(dead_items) == len(value):
             return dead_items
     return default
-
-
-def _with_export_root_reasons(
-    candidates: Sequence[DeadCandidate],
-    *,
-    evidence: Sequence[tuple[str, LiveRootReason]],
-) -> tuple[DeadCandidate, ...]:
-    """Fold whole-project export-root reasons onto the per-file candidates.
-
-    A candidate that already carries a walk-resolved reason keeps it: the
-    module walk saw direct evidence, which is the more specific fact.
-    """
-    if not evidence:
-        return tuple(candidates)
-    reason_by_qualname = dict(evidence)
-    return tuple(
-        replace(candidate, live_root_reason=reason)
-        if candidate.live_root_reason is None
-        and (reason := reason_by_qualname.get(candidate.qualname)) is not None
-        else candidate
-        for candidate in candidates
-    )
 
 
 def compute_project_metrics(
@@ -156,6 +136,10 @@ def compute_project_metrics(
     module_registry: ModuleRegistryHandle,
     skip_dependencies: bool,
     skip_dead_code: bool,
+    # Defaulted to the one product default so a caller that states no world
+    # answers under the shipped one, never under an undeclared second one.
+    dead_code_world: WorldContract = DEFAULT_DEAD_CODE_WORLD,
+    external_reachability: Sequence[ExternalReachability] = (),
     scan_root: str = "",
     golden_fixture_paths: Sequence[str] = (),
 ) -> tuple[ProjectMetrics, DepGraph, tuple[DeadItem, ...]]:
@@ -184,6 +168,8 @@ def compute_project_metrics(
         function_clone_groups=function_clone_groups,
         block_clone_groups=block_clone_groups,
         module_registry=module_registry,
+        dead_code_world=dead_code_world,
+        external_reachability=tuple(external_reachability),
         skip_dependencies=skip_dependencies,
         skip_dead_code=skip_dead_code,
         scan_root=scan_root,
@@ -406,34 +392,26 @@ def analyze(
     # these same rows: the export-root rule must be measured against the
     # verdict this run will actually reach, not against a different one.
     class_metrics = resolve_project_class_coupling(processing.class_metrics)
-    # Export roots are a whole-project fact, so they are resolved once here and
-    # folded onto the candidates. External-decorator reasons already ride the
-    # candidates from the module walk (and therefore the cache), which is what
-    # keeps the merged set identical on cold and warm runs.
-    #
-    # The already-live set is computed from the candidates BEFORE any export
-    # root exists, which is what makes an emitted root a causal statement: the
-    # symbols in it are exactly the ones whose liveness the export chain
-    # actually decides.
-    already_live_qualnames = already_live_candidate_qualnames(
-        dead_candidates=processing.dead_candidates,
-        referenced_names=processing.referenced_names,
-        referenced_qualnames=processing.referenced_qualnames,
-        runtime_reachability=processing.runtime_reachability,
-        class_metrics=class_metrics,
-        module_registry=discovery.module_registry,
+    # External reachability is a whole-project fact read from the facts the
+    # per-file walk already produced (and therefore the cache): candidates
+    # with their star-binding, dependency edges, class bases. It is evidence
+    # for the evaluator, never a live root - the export chain used to be
+    # folded onto the candidates as ``export_root``, which recorded "live
+    # because exported" for symbols nothing had proven live.
+    # Read as the other optional args are read (``api_surface`` below): a
+    # caller that built its Namespace by hand answers under the product
+    # default, and a value that is present is checked by the vocabulary's one
+    # owner whichever door it came through.
+    dead_code_world = world_contract_from_value(
+        getattr(boot.args, "dead_code_world", DEFAULT_DEAD_CODE_WORLD)
     )
-    export_root_evidence = collect_project_export_root_evidence(
+    external_reachability = collect_external_reachability(
+        dead_candidates=processing.dead_candidates,
         module_deps=processing.module_deps,
-        referenced_qualnames=processing.referenced_qualnames,
-        dead_candidates=processing.dead_candidates,
-        module_registry=discovery.module_registry,
-        already_live_qualnames=already_live_qualnames,
+        class_metrics=class_metrics,
+        package_modules=package_modules_from_registry(discovery.module_registry),
     )
-    dead_candidates = _with_export_root_reasons(
-        processing.dead_candidates,
-        evidence=export_root_evidence,
-    )
+    dead_candidates = processing.dead_candidates
     # The api-surface track is decided once, here, and both consumers below
     # are handed the same product surface: the metric family that feeds
     # ``api_breaking_changes`` and the gate, and the observation lane that
@@ -455,7 +433,6 @@ def analyze(
                     root=boot.root,
                     dead_candidates=dead_candidates,
                 ),
-                *(qualname for qualname, _reason in export_root_evidence),
             }
         )
         project_metrics, dep_graph, _ = compute_project_metrics(
@@ -479,6 +456,8 @@ def analyze(
             module_registry=discovery.module_registry,
             skip_dependencies=boot.args.skip_dependencies,
             skip_dead_code=boot.args.skip_dead_code,
+            dead_code_world=dead_code_world,
+            external_reachability=external_reachability,
             scan_root=str(boot.root),
             golden_fixture_paths=golden_fixture_paths,
         )
@@ -545,8 +524,16 @@ def analyze(
     collect_api_surface = collect_metrics and bool(
         getattr(boot.args, "api_surface", False)
     )
-    unresolved_override_items = (
-        () if project_metrics is None else project_metrics.unresolved_overrides
+    # Only the rule-3 abstention projects as ``abstained`` on the observation
+    # row: that lane is EVIDENCE, and evidence may not depend on the world
+    # contract. A reachability abstention is an evaluation outcome; it reaches
+    # the run identity through the realized ``world_contract`` parameter and
+    # through the dead findings it displaces, while "proven live" and
+    # "unresolved" already differ on the row's own reference and root facts.
+    abstained_qualnames: frozenset[str] = (
+        frozenset()
+        if project_metrics is None
+        else frozenset(item.qualname for item in project_metrics.unresolved_overrides)
     )
     with span(name="observations.build") as observation_span:
         try:
@@ -558,9 +545,7 @@ def analyze(
                 module_deps=processing.module_deps,
                 api_modules=api_modules,
                 dead_candidates=dead_candidates,
-                abstained_qualnames=frozenset(
-                    item.qualname for item in unresolved_override_items
-                ),
+                abstained_qualnames=abstained_qualnames,
                 referenced_names=processing.referenced_names,
                 referenced_qualnames=processing.referenced_qualnames,
                 runtime_reachability=processing.runtime_reachability,

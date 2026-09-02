@@ -76,15 +76,12 @@ from codeclone.models import (
     GitStatusEntryInput,
     GitTrackedContent,
     GitWorkspaceSnapshot,
-    ModuleDep,
     SemanticFileFacts,
     SourceStatsDict,
 )
 from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
 from tests._ast_metrics_helpers import (
-    build_test_module_registry,
-    extract_file_metrics,
     module_registry_context,
 )
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
@@ -858,6 +855,8 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         "high_confidence": 0,
         "suppressed": 1,
         "unresolved_external_override": 0,
+        "unresolved": 0,
+        "world_contract": "open",
         "unreachable_statements": 0,
         "live_roots": 0,
     }
@@ -994,101 +993,6 @@ poetry-cli = "pkg.poetry:main"
             "pkg.poetry:main",
         }
     )
-
-
-def test_export_roots_add_only_qualnames_nothing_else_holds_live() -> None:
-    """The export-root helper must never re-emit an already-referenced qualname.
-
-    ``__all__`` membership and the package ``__init__`` re-export chain are
-    resolved upstream by the module walk, so exported functions and classes are
-    already inside ``referenced_qualnames``. Returning them again would be a
-    provable no-op: the result is unioned straight back into the set it came
-    from. The helper's only real contribution is extending an exported class to
-    its public methods.
-    """
-    api_module = "distillations.api"
-    package_module = "distillations"
-    registry = build_test_module_registry(
-        root=Path(__file__).parent / "fixtures" / "liveness_policy"
-    )
-    module_deps = (
-        ModuleDep(
-            source=package_module,
-            target=api_module,
-            import_type="from_import",
-            line=1,
-            resolution="analyzed",
-            # The names the package actually re-exported. The real walk always
-            # supplies them for a ``from .api import X, Y`` (verified against
-            # the liveness_policy fixture); the export rule reads exactly this.
-            requested_names=("DocumentedService", "exported_function"),
-        ),
-        # A sibling module importing a NON-exported class: the class becomes
-        # referenced without ever joining the package export chain.
-        ModuleDep(
-            source=f"{package_module}.internal_use",
-            target=api_module,
-            import_type="from_import",
-            line=1,
-            resolution="analyzed",
-            requested_names=("InternalHelper",),
-        ),
-    )
-    dead_candidates = (
-        _dead_candidate(f"{api_module}:DocumentedService", kind="class"),
-        _dead_candidate(f"{api_module}:DocumentedService.render", kind="method"),
-        _dead_candidate(f"{api_module}:DocumentedService._hidden", kind="method"),
-        _dead_candidate(f"{api_module}:exported_function"),
-        _dead_candidate(f"{api_module}:internal_function"),
-        _dead_candidate(f"{api_module}:InternalHelper", kind="class"),
-        _dead_candidate(
-            f"{api_module}:InternalHelper.never_called_public_method", kind="method"
-        ),
-    )
-    # What the module walk already holds live: the export chain for the
-    # exported pair, the sibling import for the internal helper.
-    referenced_qualnames = frozenset(
-        {
-            f"{api_module}:DocumentedService",
-            f"{api_module}:exported_function",
-            f"{api_module}:InternalHelper",
-        }
-    )
-
-    # No call site anywhere in this constructed population, so "already live"
-    # is exactly the referenced set - which is what makes this the pin on the
-    # export rule alone, with the call-site arm held at zero.
-    already_live = entrypoints_mod.already_live_candidate_qualnames(
-        dead_candidates=dead_candidates,
-        referenced_names=frozenset(),
-        referenced_qualnames=referenced_qualnames,
-    )
-    evidence = entrypoints_mod.collect_project_export_root_evidence(
-        module_deps=module_deps,
-        referenced_qualnames=referenced_qualnames,
-        dead_candidates=dead_candidates,
-        module_registry=registry,
-        already_live_qualnames=already_live,
-    )
-    roots = entrypoints_mod.collect_project_export_root_qualnames(
-        module_deps=module_deps,
-        referenced_qualnames=referenced_qualnames,
-        dead_candidates=dead_candidates,
-        module_registry=registry,
-        already_live_qualnames=already_live,
-    )
-
-    # Exactly the public method of the exported class, and nothing already held.
-    assert roots == frozenset({f"{api_module}:DocumentedService.render"})
-    assert roots.isdisjoint(referenced_qualnames)
-    assert evidence == ((f"{api_module}:DocumentedService.render", "export_root"),)
-    # A private method of an exported class is not a root.
-    assert f"{api_module}:DocumentedService._hidden" not in roots
-    # A non-exported sibling function is never rooted.
-    assert f"{api_module}:internal_function" not in roots
-    # Being referenced is not being exported: a class that only a sibling
-    # module imports never extends liveness to its public methods.
-    assert f"{api_module}:InternalHelper.never_called_public_method" not in roots
 
 
 def test_project_entrypoints_ignore_invalid_metadata_shapes(tmp_path: Path) -> None:
@@ -1232,6 +1136,10 @@ tool = "pkg.cli:main"
             skip_metrics=False,
             skip_dependencies=True,
             skip_dead_code=False,
+            # The claim here is about entry points as liveness EVIDENCE; the
+            # world is held closed so the uncalled public function stays the
+            # dead control instead of becoming an open-world abstention.
+            dead_code_world="closed",
             min_loc=1,
             min_stmt=1,
             processes=1,
@@ -1810,81 +1718,6 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
 
     cli._run_analysis_stages(args=args, boot=boot, cache=cast(Cache, _BadCache()))
     cli.print_banner(root=None)
-
-
-def test_export_root_extension_stops_at_the_package_export_chain() -> None:
-    """A class extends liveness to its methods only if the package exported IT.
-
-    The unit contract above proves the rule on constructed inputs; this proves
-    it on the real fixture facts, so the two cannot drift apart. The
-    discriminating ground-truth pair is ROOT-DOCUMENTED | NEG-EXPORT-METHOD
-    (and its rename twin): both classes live in the same module the package
-    ``__init__`` imports, and both sit in ``referenced_qualnames`` - the
-    exported one through the package re-export, the other through a sibling
-    module's import. A rule keyed on "referenced class in an imported module"
-    roots both; only a rule keyed on the re-exported NAMES roots one and leaves
-    the other dead. Both directions are asserted, because under-rooting a
-    genuinely exported class is the symmetric defect.
-    """
-    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
-    ground_truth = orjson.loads((fixture_root / "ground_truth.json").read_bytes())
-    registry = build_test_module_registry(root=fixture_root)
-
-    for package_module in ("distillations", "distillations_renamed"):
-        api_path = f"{package_module}/api.py"
-        api_module = f"{package_module}.api"
-        method_cases = {
-            case["symbol"]: case["expected"]
-            for case in ground_truth["cases"]
-            if case["path"] == api_path and "." in case["symbol"]
-        }
-        # One exported class method, one non-exported class method.
-        assert len(method_cases) == 2
-
-        module_deps: list[ModuleDep] = []
-        referenced_qualnames: set[str] = set()
-        referenced_names: set[str] = set()
-        dead_candidates: list[DeadCandidate] = []
-        for relative_path in (
-            f"{package_module}/__init__.py",
-            api_path,
-            f"{package_module}/internal_use.py",
-        ):
-            metrics = extract_file_metrics(
-                source=(fixture_root / relative_path).read_text(),
-                filepath=relative_path,
-                module_registry=registry,
-            )
-            module_deps.extend(metrics.module_deps)
-            referenced_qualnames |= set(metrics.referenced_qualnames)
-            referenced_names |= set(metrics.referenced_names)
-            dead_candidates.extend(metrics.dead_candidates)
-
-        # The premise of the discrimination: BOTH owning classes are referenced.
-        assert {
-            f"{api_module}:{symbol.partition('.')[0]}" for symbol in method_cases
-        } <= referenced_qualnames
-
-        rooted = dict(
-            entrypoints_mod.collect_project_export_root_evidence(
-                module_deps=tuple(module_deps),
-                referenced_qualnames=frozenset(referenced_qualnames),
-                dead_candidates=tuple(dead_candidates),
-                module_registry=registry,
-                already_live_qualnames=(
-                    entrypoints_mod.already_live_candidate_qualnames(
-                        dead_candidates=tuple(dead_candidates),
-                        referenced_names=frozenset(referenced_names),
-                        referenced_qualnames=frozenset(referenced_qualnames),
-                    )
-                ),
-            )
-        )
-
-        assert {
-            symbol: f"{api_module}:{symbol}" in rooted for symbol in method_cases
-        } == {symbol: expected["live"] for symbol, expected in method_cases.items()}
-        assert set(rooted.values()) == {"export_root"}
 
 
 def test_load_cached_metrics_extended_skips_unparseable_rows() -> None:
