@@ -423,7 +423,10 @@ See `AGENTS.md` §3 for surface-specific commands.
   contract/schema change rationale.
 - Never change fingerprint semantics without `BASELINE_FINGERPRINT_VERSION` review.
 - Never make base `codeclone` depend on MCP runtime packages.
-- Never let MCP mutate baselines, source files, canonical reports, or analysis cache.
+- Never let MCP write outside CodeClone's own service directories (`.codeclone/`, the per-user cache
+  dir). Inside them it writes the service data it produced, including the analysis cache from its own
+  run. Baselines, source files and canonical reports stay read-only; a cache configured outside those
+  directories is read, never written.
 - Ephemeral coordination state (workspace intents) and audit trail under `.codeclone/` are allowed only through
   controller and audit contracts.
 - Never iterate sets/dicts without sorting when output order matters.

@@ -370,12 +370,17 @@ remedy.
 
 ## 6) Reports and explainability
 
-**MCP1 — MCP boundary.** MCP MUST stay read-only with respect to repository source, baselines,
-canonical and generated reports, and analysis cache. Bounded local state is permitted **only**
-through its owning contract: session-local runs and review markers · workspace intent
-coordination · optional audit evidence · governed memory drafts and projection metadata · opt-in
-observability telemetry. None of these MAY alter canonical report identity, baseline
-admissibility, cache compatibility, findings, gates, or edit authorization. MCP MUST NOT
+**MCP1 — MCP boundary.** MCP MUST NOT write outside CodeClone's own service directories —
+`.codeclone/` in the analysed repository and the per-user CodeClone cache directory. The boundary
+is containment, not an enumeration of forbidden targets: an enumeration is too wide and too narrow
+at once, forbidding a service write that was always legitimate while saying nothing about
+everything else outside those directories. Inside them MCP MAY write the service data it produced
+itself: the analysis cache from its own run · session-local runs and review markers · workspace
+intent coordination · optional audit evidence · governed memory drafts and projection metadata ·
+opt-in observability telemetry. MCP MUST stay read-only with respect to repository source,
+baselines, and canonical or generated reports, and an analysis cache configured outside the
+service directories is read and never written. None of these MAY alter canonical report identity,
+baseline admissibility, cache compatibility, findings, gates, or edit authorization. MCP MUST NOT
 re-synthesize design findings from raw metrics; it MUST read the canonical findings group.
 
 **RP1 — Report invariants.** Ordering MUST be deterministic. Provenance MUST be consistent across
