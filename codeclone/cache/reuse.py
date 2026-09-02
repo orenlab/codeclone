@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from time import perf_counter_ns
-from typing import Literal
+from typing import Final, Literal
 
 import orjson
 
@@ -53,6 +53,12 @@ from ..models import (
 _BINDING_CONTEXT_DOMAIN = b"codeclone.cache.binding-context.v1\x00"
 _NEUTRAL_PROFILE_DOMAIN = b"codeclone.cache.profile.neutral.v1\x00"
 _DEPENDENT_PROFILE_DOMAIN = b"codeclone.cache.profile.dependent.v1\x00"
+#: Which names the per-file collector admits into a module's api payload.
+#: ``__all__`` first, then the public-name arm for a public module, nothing
+#: for a bare private one; module privacy narrows a declared ``__all__`` never.
+#: A different reading writes a different payload for unchanged source, so it
+#: keys the dependent lane (below).
+_API_COLLECTION_POLICY: Final = "python-visibility-v1"
 _DEPENDENCY_OBSERVATION_REVISION = "2"
 
 
@@ -165,6 +171,13 @@ def build_module_dependent_profile(
             "adoption_coverage_policy_version": ADOPTION_COVERAGE_POLICY_VERSION,
             "api_surface": collect_api_surface,
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
+            # Measured 2026-09-02 inside one cache generation: an unreleased
+            # build of 4.1 whose collector dropped private modules wrote rows
+            # this reader served as "collected, empty" -- ``public_symbols`` 9
+            # cold, 2 warm, exit 0, cache status ok. ``amt`` cannot tell those
+            # rows apart (both collected), so the policy keys this lane and
+            # such a row misses on ``dependent_profile_mismatch`` instead.
+            "api_collection_policy": _API_COLLECTION_POLICY,
             "call_resolution_version": "1",
             # The coupling and cohesion bands classify at extraction exactly as
             # the complexity band does on the neutral lane, and their words are

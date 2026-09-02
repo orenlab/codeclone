@@ -6,9 +6,11 @@
 
 """External reachability: does a public import path to a symbol exist?
 
-The evidence layer under the dead-code evaluator (RULING 2026-09-01). One
-central rule, stated as the language states it and read only from facts that
-already ride the cache wire, so a warm run answers exactly as a cold one:
+The evidence layer under the dead-code evaluator (RULING 2026-09-01), and the
+binding oracle under the api-surface evaluator: the rule is the language's and
+the same for both, only the population and the namespaces are the caller's.
+One central rule, stated as the language states it and read only from facts
+that already ride the cache wire, so a warm run answers exactly as a cold one:
 
 * a name is **publicly bound** in a module when the module defines it, when a
   wildcard import binds it there (``from x import *`` binds what the target's
@@ -26,21 +28,48 @@ already ride the cache wire, so a warm run answers exactly as a cold one:
   its class is exposed itself (a caller holding the ancestor's type dispatches
   into the override);
 * the state is ``unresolved`` when the construct that decides exposure cannot
-  be read statically: a public package with a module-level ``__getattr__``
-  (PEP 562 can serve any name below it), a public package whose namespace
+  be read statically: a reachable package with a module-level ``__getattr__``
+  (PEP 562 can serve any name below it), a reachable package whose namespace
   ``lazy_loader`` builds from a stub the walk never reads, or a class whose
-  base no edge binds.
+  base no edge binds - and whatever such a namespace carries outward is
+  unresolved too.
+
+The order is the algorithm, and it is forced (RULING 2026-09-02): the raw
+binding graph carries no verdict; the seeds are the namespaces provably
+external by construction and they do not depend on the world contract; the
+graph is closed to a fixed point in which a namespace is ``reachable``,
+``unresolved`` or neither and can only rise; and only after convergence is a
+definition's exposure read off the edges whose importer namespace converged.
+Whether a package ``__init__`` is an export surface is therefore decided by
+the graph, never by its syntax or its privacy alone, and ``unresolved`` is a
+front of its own: a plain least fixed point would read everything it never
+reached as ``not_reachable``, which is confidence laundering built into the
+algorithm.
 
 Everything else is ``not_reachable``. Every rule over-approximates in the
 same direction: a name the project could expose is called reachable, never
 the reverse, because the failure this layer exists to prevent is a
-high-confidence assertion that live public API is dead.
+high-confidence assertion that live public API is dead - or, on the api lane,
+a gate that goes confidently silent where its data is insufficient.
+
+The population is whatever definitions the caller hands in: the dead-code
+evaluator passes the walk's candidates, the api-surface evaluator passes the
+same candidates plus its public symbols (a module-level constant is never a
+candidate and is api surface), and both are read through the four facts
+every definition carries. The namespaces are the caller's too. By default a
+module is a public namespace when the language says so, which is the
+dead-code evaluator's open world; the api evaluator names the product's
+public paths instead, because a public-named module of an unshipped tree or
+of the test track is a Python module and not a place the project promises a
+name at.
 
 What is deliberately NOT decided here: ``__all__`` as a language beyond the
 binding fact the walk already resolved (dynamic ``__all__``, concatenation,
-imported ``__all__``) and the liveness question itself. Reachability is
-evidence; the evaluator in :mod:`codeclone.metrics.dead_code` combines it with
-liveness evidence and the world contract.
+imported ``__all__``), the liveness question itself, and what counts as a
+namespace. Reachability is evidence; the evaluator in
+:mod:`codeclone.metrics.dead_code` combines it with liveness evidence and the
+world contract, and :mod:`codeclone.metrics.api_population` combines it with
+the surface kind.
 """
 
 from __future__ import annotations
@@ -49,15 +78,38 @@ import builtins
 from collections import deque
 from typing import TYPE_CHECKING, Final
 
-from ..models import ExternalReachability
+from ..models import ExternalReachability, ReachabilityState
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
+    from typing import Protocol
 
-    from ..models import ClassMetrics, DeadCandidate, ModuleDep, ModuleRegistryHandle
+    from ..models import ClassMetrics, ModuleDep, ModuleRegistryHandle
 
-    #: The one seam every exposure rule writes through: qualname, witness.
-    _Expose = Callable[[str, str], None]
+    #: The one seam every exposure rule writes through: qualname, rank, witness.
+    _Expose = Callable[[str, int, str], None]
+
+    class _Definition(Protocol):
+        """The four facts every exposure rule reads off a definition.
+
+        ``DeadCandidate`` carries them as it rides the cache wire;
+        ``SymbolDefinition`` is the shape a caller adapts anything else into.
+        A rule that needed a fifth fact would be a rule one population could
+        not answer, so none may.
+        """
+
+        @property
+        def qualname(self) -> str: ...
+
+        @property
+        def local_name(self) -> str: ...
+
+        @property
+        def kind(self) -> str: ...
+
+        @property
+        def star_import_bound(self) -> bool: ...
+
 
 #: A base spelled as a builtin (``Exception``, ``dict``) binds outside the
 #: project without an import edge; it is resolved, not unresolved.
@@ -65,6 +117,16 @@ _BUILTIN_NAMES: Final = frozenset(dir(builtins))
 #: Bound on the named-binding walk: a re-export chain deeper than this is not
 #: a package facade, and the walk must terminate on any input.
 _BINDING_HOPS: Final = 32
+#: The three states, ordered: a proven path beats an unreadable one, which
+#: beats none. Ranks only rise during the fixed point, which is what makes it
+#: one, and what keeps the answer independent of the order edges are read in.
+_NOT_REACHED: Final = 0
+_UNRESOLVED: Final = 1
+_REACHABLE: Final = 2
+_STATE_OF_RANK: Final[dict[int, ReachabilityState]] = {
+    _UNRESOLVED: "unresolved",
+    _REACHABLE: "reachable",
+}
 
 
 def package_modules_from_registry(
@@ -88,10 +150,19 @@ def _is_public_module(module: str) -> bool:
     )
 
 
-def _is_public_path(local: str) -> bool:
-    return bool(local) and not any(
-        segment.startswith("_") for segment in local.split(".")
-    )
+def _is_public_path(local: str, public_leaves: frozenset[str] = frozenset()) -> bool:
+    """The underscore rule over a local path, except a leaf the caller's
+    population calls public: a protocol dunder method (``__init__``,
+    ``__call__``) is dispatched to from outside its class by the language, so
+    an api population counts its signature as the class's contract. The
+    default is the plain rule, which is the dead-code evaluator's reading."""
+
+    if not local:
+        return False
+    *owners, leaf = local.split(".")
+    if any(segment.startswith("_") for segment in owners):
+        return False
+    return not leaf.startswith("_") or leaf in public_leaves
 
 
 def _closure(start: str, edges: dict[str, set[str]]) -> tuple[str, ...]:
@@ -137,18 +208,20 @@ def _index_edges(
 
 
 def _index_definitions(
-    dead_candidates: Sequence[DeadCandidate],
+    definitions_in: Sequence[_Definition],
     class_metrics: Sequence[ClassMetrics],
 ) -> tuple[set[str], set[str], dict[str, set[str]], dict[str, set[str]]]:
     """Project classes and module-level definitions, by module and by leaf."""
 
     classes = {metric.qualname for metric in class_metrics} | {
-        candidate.qualname for candidate in dead_candidates if candidate.kind == "class"
+        definition.qualname
+        for definition in definitions_in
+        if definition.kind == "class"
     }
     definitions = set(classes) | {
-        candidate.qualname
-        for candidate in dead_candidates
-        if candidate.kind != "method"
+        definition.qualname
+        for definition in definitions_in
+        if definition.kind != "method"
     }
     definitions_by_module: dict[str, set[str]] = {}
     for qualname in definitions:
@@ -163,13 +236,12 @@ def _index_definitions(
 
 
 def _dynamic_packages(
-    dead_candidates: Sequence[DeadCandidate],
+    definitions: Sequence[_Definition],
     *,
     package_modules: frozenset[str],
-    public_modules: frozenset[str],
     import_targets: Mapping[str, set[str]],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Public packages whose namespace no static read can settle.
+) -> dict[str, str]:
+    """Packages whose namespace no static read can settle, with the witness.
 
     A module-level ``def __getattr__`` (PEP 562) can serve any name below the
     package. ``import lazy_loader`` in a package ``__init__`` is the one wired
@@ -178,26 +250,24 @@ def _dynamic_packages(
     namespace is as dynamic as a spelled-out ``__getattr__``. Measured on
     mne-python: without the second rule ten documented ``Brain`` methods read
     as high-confidence dead under the open world.
+
+    This is an input to the graph, not a verdict: a dynamic package marks what
+    sits below it only once the fixed point has reached the package itself.
     """
 
-    public_packages = package_modules & public_modules
-    getattr_packages = tuple(
-        sorted(
-            candidate.qualname.partition(":")[0]
-            for candidate in dead_candidates
-            if candidate.kind == "function"
-            and candidate.local_name == "__getattr__"
-            and candidate.qualname.partition(":")[0] in public_packages
-        )
-    )
-    lazy_packages = tuple(
-        sorted(
-            module
-            for module in public_packages
-            if "lazy_loader" in import_targets.get(module, set())
-        )
-    )
-    return getattr_packages, lazy_packages
+    dynamic: dict[str, str] = {}
+    for package in sorted(package_modules):
+        if "lazy_loader" in import_targets.get(package, set()):
+            dynamic[package] = f"lazy_namespace:{package}"
+    for definition in definitions:
+        package = definition.qualname.partition(":")[0]
+        if (
+            definition.kind == "function"
+            and definition.local_name == "__getattr__"
+            and package in package_modules
+        ):
+            dynamic[package] = f"module_getattr:{package}"
+    return dynamic
 
 
 class _Population:
@@ -206,14 +276,23 @@ class _Population:
     def __init__(
         self,
         *,
-        dead_candidates: Sequence[DeadCandidate],
+        definitions: Sequence[_Definition],
         module_deps: Sequence[ModuleDep],
         class_metrics: Sequence[ClassMetrics],
         package_modules: frozenset[str],
+        public_modules: frozenset[str] | None,
+        public_leaves: frozenset[str],
     ) -> None:
-        self.candidates = {
-            candidate.qualname: candidate for candidate in dead_candidates
-        }
+        self.public_leaves = public_leaves
+        # Two populations may name one definition (a class is both a walk
+        # candidate and a public symbol); the star-binding fact is the same
+        # language rule read by both, and a name either calls bound is bound -
+        # the over-approximating direction, and order-independent.
+        self.star_bound_qualnames = frozenset(
+            definition.qualname
+            for definition in definitions
+            if definition.star_import_bound
+        )
         (
             self.star_edges,
             self.named_imports,
@@ -225,13 +304,19 @@ class _Population:
             self.definitions,
             self.definitions_by_module,
             self.classes_by_leaf,
-        ) = _index_definitions(dead_candidates, class_metrics)
+        ) = _index_definitions(definitions, class_metrics)
         modules |= set(package_modules)
         modules.update(
-            qualname.partition(":")[0] for qualname in (*self.candidates, *self.classes)
+            qualname.partition(":")[0]
+            for qualname in (*self.definitions, *self.classes)
         )
-        self.public_modules = frozenset(
-            module for module in modules if _is_public_module(module)
+        self.modules = frozenset(modules)
+        # The namespaces are the caller's: absent a set, the language's own
+        # privacy rule over every module the facts name.
+        self.public_modules = (
+            frozenset(module for module in modules if _is_public_module(module))
+            if public_modules is None
+            else public_modules
         )
         self.package_modules = package_modules
         self.external_base_classes = frozenset(
@@ -240,16 +325,14 @@ class _Population:
             if metric.has_unresolved_external_base
         )
         self.class_metrics = tuple(class_metrics)
-        self.getattr_packages, self.lazy_packages = _dynamic_packages(
-            dead_candidates,
+        self.dynamic_packages = _dynamic_packages(
+            definitions,
             package_modules=package_modules,
-            public_modules=self.public_modules,
             import_targets=self.import_targets,
         )
 
     def star_bound(self, qualname: str) -> bool:
-        candidate = self.candidates.get(qualname)
-        return candidate is not None and candidate.star_import_bound
+        return qualname in self.star_bound_qualnames
 
     def resolve_binding(self, module: str, name: str) -> frozenset[str]:
         """The definitions ``<module>.<name>`` binds, by CPython's rules.
@@ -322,70 +405,150 @@ class _Population:
         return frozenset(by_prefix or in_targets or named)
 
 
-def _expose_definitions(population: _Population, expose: _Expose) -> None:
-    """E1: defined in a public module."""
+class _Namespaces:
+    """The fixed point: every namespace's rank, and how it got there.
+
+    ``path`` holds the seeds - the public paths a caller can spell by
+    construction. ``star`` holds every module a wildcard edge carried, with
+    the rank of the namespace that carried it and, for a proven carry, the
+    first module whose edge did (deterministic: seeds in sorted order, then
+    breadth-first). ``dynamic`` holds every module under a dynamic package
+    the fixed point reached, with that package's witness. A rank only rises,
+    so the closure is order-independent and terminates.
+    """
+
+    def __init__(self, population: _Population) -> None:
+        self.rank: dict[str, int] = {}
+        self.star: dict[str, tuple[int, str]] = {}
+        self.dynamic: dict[str, str] = {}
+        self._population = population
+        # Two fronts, drained proven-first: a namespace the proven front
+        # reaches later is upgraded, and its witness is then the first proven
+        # carrier, exactly as a single proven walk would have recorded it.
+        self._fronts: dict[int, deque[str]] = {
+            _REACHABLE: deque(),
+            _UNRESOLVED: deque(),
+        }
+        for module in sorted(population.public_modules):
+            self._raise(module, _REACHABLE)
+        self._close()
+
+    def _raise(self, module: str, rank: int) -> None:
+        if self.rank.get(module, _NOT_REACHED) < rank:
+            self.rank[module] = rank
+            self._fronts[rank].append(module)
+
+    def _pop(self) -> str | None:
+        for rank in (_REACHABLE, _UNRESOLVED):
+            if self._fronts[rank]:
+                return self._fronts[rank].popleft()
+        return None
+
+    def _close(self) -> None:
+        population = self._population
+        while (module := self._pop()) is not None:
+            rank = self.rank[module]
+            for target in sorted(population.star_edges.get(module, ())):
+                if self.star.get(target, (_NOT_REACHED, ""))[0] < rank:
+                    self.star[target] = (rank, self._carry_witness(module, rank))
+                    self._raise(target, rank)
+            witness = population.dynamic_packages.get(module)
+            if witness is None:
+                continue
+            for below in sorted(population.modules):
+                if below != module and not below.startswith(f"{module}."):
+                    continue
+                if below not in self.dynamic:
+                    self.dynamic[below] = witness
+                    self._raise(below, _UNRESOLVED)
+
+    def _carry_witness(self, module: str, rank: int) -> str:
+        """What a wildcard edge from ``module`` stamps on its target: the
+        proven carrier, or the construct that left ``module`` unreadable -
+        its own dynamic package, or the unreadable carrier that reached it."""
+
+        if rank == _REACHABLE:
+            return f"star_reexport:{module}"
+        dynamic = self.dynamic.get(module)
+        if dynamic is not None:
+            return dynamic
+        # The only other way a rank is raised to unresolved is a wildcard
+        # from an unreadable namespace; the carrier's own witness travels on.
+        return self.star[module][1]
+
+    def unresolved_witness(self, module: str) -> str | None:
+        """Why every definition in ``module`` is unreadable, if it is: the
+        module sits under a dynamic package the fixed point reached.
+
+        A wildcard that reached the module at the unresolved rank is NOT
+        that: it carries the module's star-bound names and nothing else,
+        exactly as a proven wildcard does, and those names are stamped one
+        by one by the chain rule. Reading the whole module as unresolved
+        here would turn a name ``import *`` never binds into API.
+        """
+
+        return self.dynamic.get(module)
+
+
+def _expose_definitions(
+    population: _Population, namespaces: _Namespaces, expose: _Expose
+) -> None:
+    """E1: defined in a public path."""
 
     for qualname in sorted(population.definitions):
         module = qualname.partition(":")[0]
         if module in population.public_modules:
-            expose(qualname, f"public_module:{module}")
+            expose(qualname, _REACHABLE, f"public_module:{module}")
 
 
-def _expose_package_reexports(population: _Population, expose: _Expose) -> None:
-    """E2: imported by name into a public package ``__init__``."""
+def _expose_package_reexports(
+    population: _Population, namespaces: _Namespaces, expose: _Expose
+) -> None:
+    """E2: imported by name into a package ``__init__`` whose namespace the
+    fixed point reached - a public path, or a package a dynamic namespace
+    could serve. Which of the two it is decides the rank, not the syntax."""
 
-    for package in sorted(population.public_modules & population.package_modules):
+    for package in sorted(population.package_modules):
+        if package in population.public_modules:
+            rank, witness = _REACHABLE, f"package_reexport:{package}"
+        elif package in namespaces.dynamic:
+            rank, witness = _UNRESOLVED, namespaces.dynamic[package]
+        else:
+            continue
         for target, name in sorted(population.named_imports.get(package, ())):
             if name.startswith("_"):
                 continue
             for qualname in sorted(population.resolve_binding(target, name)):
-                expose(qualname, f"package_reexport:{package}")
-
-
-def _star_frontier(population: _Population) -> dict[str, str]:
-    """Every module a public module reaches through wildcard edges, hop by
-    hop, with the first module whose edge carried it."""
-
-    frontier: set[str] = set(population.public_modules)
-    star_source: dict[str, str] = {}
-    queue: deque[str] = deque(sorted(population.public_modules))
-    while queue:
-        source = queue.popleft()
-        for target in sorted(population.star_edges.get(source, ())):
-            star_source.setdefault(target, source)
-            if target not in frontier:
-                frontier.add(target)
-                queue.append(target)
-    return star_source
+                expose(qualname, rank, witness)
 
 
 def _expose_star_chain(
-    population: _Population,
-    star_source: Mapping[str, str],
-    expose: _Expose,
+    population: _Population, namespaces: _Namespaces, expose: _Expose
 ) -> None:
-    """E3: carried outward by a wildcard edge from a public module."""
+    """E3: carried outward by a wildcard edge from a namespace the fixed
+    point reached, at that namespace's rank."""
 
-    for target in sorted(star_source):
-        source = star_source[target]
+    for target in sorted(namespaces.star):
+        rank, witness = namespaces.star[target]
         for qualname in sorted(population.definitions_by_module.get(target, ())):
             if "." not in qualname.partition(":")[2] and population.star_bound(
                 qualname
             ):
-                expose(qualname, f"star_reexport:{source}")
+                expose(qualname, rank, witness)
         # A module the wildcard reached re-exports what it imports by name on
         # the same terms; whether its own ``__all__`` narrows that is not on
         # the wire, so the name is carried (the over-approximating direction).
+        carried = f"star_reexport:{target}" if rank == _REACHABLE else witness
         for dep_target, name in sorted(population.named_imports.get(target, ())):
             if name.startswith("_"):
                 continue
             for qualname in sorted(population.resolve_binding(dep_target, name)):
-                expose(qualname, f"star_reexport:{target}")
+                expose(qualname, rank, carried)
 
 
 def _expose_nested(
     population: _Population,
-    exposed: Mapping[str, str],
+    exposed: Mapping[str, tuple[int, str]],
     expose: _Expose,
 ) -> None:
     """A nested definition rides its root: ``pkg.mod.Outer.Inner`` is reached
@@ -394,32 +557,36 @@ def _expose_nested(
     for qualname in sorted(population.definitions):
         module, _, local = qualname.partition(":")
         if "." in local and qualname not in exposed:
-            root_witness = exposed.get(f"{module}:{local.partition('.')[0]}")
-            if root_witness is not None:
-                expose(qualname, root_witness)
+            root = exposed.get(f"{module}:{local.partition('.')[0]}")
+            if root is not None:
+                expose(qualname, *root)
 
 
-def _exposure(population: _Population) -> tuple[dict[str, str], frozenset[str]]:
-    """Every definition on a public path, with the construct that puts it there.
+def _exposure(
+    population: _Population, namespaces: _Namespaces
+) -> dict[str, tuple[int, str]]:
+    """Every definition a converged namespace exposes, with its rank and the
+    construct that puts it there.
 
-    Rules apply in a fixed order so the witness is deterministic: the direct
-    public module, then the package re-export, then the wildcard chain, then
-    the roots of nested definitions. Returns the witness map and the modules
-    a public module reaches through wildcard edges.
+    Read only after the fixed point, in a fixed order so the witness is
+    deterministic: the direct public path, then the package re-export, then
+    the wildcard chain, then the roots of nested definitions. A higher rank
+    replaces a lower one; at equal rank the first construct stands.
     """
 
-    exposed: dict[str, str] = {}
+    exposed: dict[str, tuple[int, str]] = {}
 
-    def expose(qualname: str, witness: str) -> None:
-        if _is_public_path(qualname.partition(":")[2]):
-            exposed.setdefault(qualname, witness)
+    def expose(qualname: str, rank: int, witness: str) -> None:
+        if not _is_public_path(qualname.partition(":")[2], population.public_leaves):
+            return
+        if exposed.get(qualname, (_NOT_REACHED, ""))[0] < rank:
+            exposed[qualname] = (rank, witness)
 
-    _expose_definitions(population, expose)
-    _expose_package_reexports(population, expose)
-    star_source = _star_frontier(population)
-    _expose_star_chain(population, star_source, expose)
+    _expose_definitions(population, namespaces, expose)
+    _expose_package_reexports(population, namespaces, expose)
+    _expose_star_chain(population, namespaces, expose)
     _expose_nested(population, exposed, expose)
-    return exposed, frozenset(star_source)
+    return exposed
 
 
 def _hierarchy(
@@ -450,77 +617,100 @@ def _hierarchy(
     return parents, children, unresolved_base
 
 
-def _dynamic_namespace(population: _Population, module: str) -> str | None:
-    """The construct that makes ``module``'s public path unreadable, if any."""
+def _best(candidates: Iterable[tuple[int, str]]) -> tuple[int, str] | None:
+    """The highest rank, and at equal rank the first construct offered."""
 
-    for package in population.getattr_packages:
-        if module == package or module.startswith(f"{package}."):
-            return f"module_getattr:{package}"
-    for package in population.lazy_packages:
-        if module == package or module.startswith(f"{package}."):
-            return f"lazy_namespace:{package}"
-    return None
+    best: tuple[int, str] | None = None
+    for candidate in candidates:
+        if best is None or candidate[0] > best[0]:
+            best = candidate
+    return best
 
 
 def collect_external_reachability(
     *,
-    dead_candidates: Sequence[DeadCandidate],
+    definitions: Sequence[_Definition],
     module_deps: Sequence[ModuleDep],
     class_metrics: Sequence[ClassMetrics],
     package_modules: frozenset[str],
+    public_modules: frozenset[str] | None = None,
+    public_leaves: frozenset[str] = frozenset(),
 ) -> tuple[ExternalReachability, ...]:
-    """One reachability row per candidate, sorted by qualname."""
+    """One reachability row per definition, sorted by qualname.
+
+    ``definitions`` is the binding universe and the population answered for,
+    in one: a name is found by a re-export only if it is defined here, and
+    every definition given gets a row. A qualname two callers both hand in
+    gets one row, from the first definition that named it. ``public_modules``
+    is the seed set; ``None`` derives the language's privacy rule over every
+    module the facts name. Seeds are world-invariant: a world contract may
+    refuse exposure as a basis for liveness, it never empties them.
+    ``public_leaves`` names the underscore leaves the caller's population
+    calls public - the protocol dunder methods an api collector admits - and
+    is empty under the plain rule.
+    """
 
     population = _Population(
-        dead_candidates=dead_candidates,
+        definitions=definitions,
         module_deps=module_deps,
         class_metrics=class_metrics,
         package_modules=package_modules,
+        public_modules=public_modules,
+        public_leaves=public_leaves,
     )
-    exposed, _star_reached = _exposure(population)
+    namespaces = _Namespaces(population)
+    exposed = _exposure(population, namespaces)
     parents, children, unresolved_base = _hierarchy(population)
 
-    def type_witness(class_qualname: str) -> str | None:
-        if class_qualname in exposed:
-            return exposed[class_qualname]
-        for descendant in _closure(class_qualname, children):
-            if descendant in exposed:
-                return f"exposed_subclass:{descendant}"
-        return None
+    def type_witness(class_qualname: str) -> tuple[int, str] | None:
+        own = exposed.get(class_qualname)
+        if own is not None and own[0] == _REACHABLE:
+            return own
+        through_subclass = _best(
+            (rank, f"exposed_subclass:{descendant}")
+            for descendant in _closure(class_qualname, children)
+            if (rank := exposed.get(descendant, (_NOT_REACHED, ""))[0])
+        )
+        return _best(item for item in (own, through_subclass) if item is not None)
 
-    def ancestor_witness(class_qualname: str) -> str | None:
-        for ancestor in _closure(class_qualname, parents):
-            if ancestor in exposed:
-                return f"exposed_ancestor:{ancestor}"
-        return None
+    def ancestor_witness(class_qualname: str) -> tuple[int, str] | None:
+        return _best(
+            (rank, f"exposed_ancestor:{ancestor}")
+            for ancestor in _closure(class_qualname, parents)
+            if (rank := exposed.get(ancestor, (_NOT_REACHED, ""))[0])
+        )
 
-    def unresolved_witness(module: str, class_qualname: str | None) -> str | None:
-        if class_qualname is not None and class_qualname in unresolved_base:
-            return f"unresolved_base:{unresolved_base[class_qualname]}"
-        return _dynamic_namespace(population, module)
-
-    def row(candidate: DeadCandidate) -> ExternalReachability:
-        module, _, local = candidate.qualname.partition(":")
-        if not _is_public_path(local):
-            return ExternalReachability(candidate.qualname, "not_reachable", "")
+    def row(definition: _Definition) -> ExternalReachability:
+        module, _, local = definition.qualname.partition(":")
+        qualname = definition.qualname
+        if not _is_public_path(local, population.public_leaves):
+            return ExternalReachability(qualname, "not_reachable", "")
         owner: str | None = None
-        witness: str | None
-        if candidate.kind == "method":
+        if definition.kind == "method":
             owner = f"{module}:{local.rpartition('.')[0]}"
-            witness = type_witness(owner) or ancestor_witness(owner)
+            found = _best(
+                item
+                for item in (type_witness(owner), ancestor_witness(owner))
+                if item is not None
+            )
         else:
-            witness = exposed.get(candidate.qualname)
-        if witness is not None:
-            return ExternalReachability(candidate.qualname, "reachable", witness)
-        unresolved = unresolved_witness(module, owner)
+            found = exposed.get(qualname)
+        if found is not None and found[0] == _REACHABLE:
+            return ExternalReachability(qualname, "reachable", found[1])
+        if owner is not None and owner in unresolved_base:
+            witness = f"unresolved_base:{unresolved_base[owner]}"
+            return ExternalReachability(qualname, "unresolved", witness)
+        if found is not None:
+            return ExternalReachability(qualname, _STATE_OF_RANK[found[0]], found[1])
+        unresolved = namespaces.unresolved_witness(module)
         if unresolved is not None:
-            return ExternalReachability(candidate.qualname, "unresolved", unresolved)
-        return ExternalReachability(candidate.qualname, "not_reachable", "")
+            return ExternalReachability(qualname, "unresolved", unresolved)
+        return ExternalReachability(qualname, "not_reachable", "")
 
-    return tuple(
-        row(candidate)
-        for candidate in sorted(dead_candidates, key=lambda item: item.qualname)
-    )
+    subjects: dict[str, _Definition] = {}
+    for definition in definitions:
+        subjects.setdefault(definition.qualname, definition)
+    return tuple(row(subjects[qualname]) for qualname in sorted(subjects))
 
 
 def reachability_by_qualname(

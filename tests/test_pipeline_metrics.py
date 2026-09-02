@@ -59,6 +59,7 @@ from codeclone.core.metrics_payload import (
 from codeclone.core.parallelism import _should_use_parallel
 from codeclone.core.pipeline import compute_project_metrics
 from codeclone.core.reporting import _metrics_for_report
+from codeclone.domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
 from codeclone.metrics import overloaded_modules as overloaded_modules_mod
 from codeclone.metrics.overloaded_modules import (
     _percentile_rank,
@@ -267,8 +268,20 @@ def _project_metrics_with_adoption_and_api() -> ProjectMetrics:
                                 ),
                             ),
                             returns_hash="int",
+                            exposure="reachable",
+                        ),
+                        # Collected but not API: nothing public binds it. The
+                        # family must report the visible projection, so this
+                        # row is what proves the projection is applied.
+                        PublicSymbol(
+                            qualname="pkg.mod:unbound",
+                            kind="function",
+                            start_line=14,
+                            end_line=15,
+                            exposure="not_reachable",
                         ),
                     ),
+                    surface_kind=SURFACE_KIND_PRODUCT_PUBLIC,
                 ),
             )
         ),

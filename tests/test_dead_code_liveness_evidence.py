@@ -212,7 +212,7 @@ def _reachability(
     return {
         row.qualname: row
         for row in collect_external_reachability(
-            dead_candidates=candidates,
+            definitions=candidates,
             module_deps=module_deps,
             class_metrics=(),
             package_modules=frozenset({_PACKAGE_MODULE}),

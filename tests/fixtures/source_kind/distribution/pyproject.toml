@@ -3,4 +3,4 @@ name = "shipped"
 version = "0.0.0"
 
 [tool.setuptools]
-packages = ["shipped", "shipped.testing"]
+packages = ["shipped", "shipped.testing", "lazy"]

@@ -174,6 +174,27 @@ def _assert_profile_input_misses_only_dependent_lane(
     assert decision.dependent.reason == "dependent_profile_mismatch"
 
 
+def test_api_collection_policy_misses_only_dependent_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A row written under another api collection policy must miss.
+
+    Measured 2026-09-02 inside one cache generation: the per-file api payload
+    is a function of which names the collector admits, and two builds sharing
+    ``CACHE_VERSION`` 4.1 disagreed on it -- one dropped private modules, the
+    other reads Python visibility. The reader served the first build's rows as
+    "collected, empty": ``public_symbols`` 9 cold, 2 warm, exit 0, cache
+    status ok. The policy keys the dependent lane so that row misses instead.
+    """
+
+    _assert_profile_input_misses_only_dependent_lane(
+        monkeypatch,
+        profile_input="_API_COLLECTION_POLICY",
+        legacy_value="module-privacy-v0",
+        current_value="python-visibility-v1",
+    )
+
+
 def test_dependency_observation_revision_misses_only_dependent_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

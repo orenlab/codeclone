@@ -2677,6 +2677,24 @@ class UnresolvedOverrideItem:
 
 
 @dataclass(frozen=True, slots=True)
+class SymbolDefinition:
+    """A definition the external-reachability owner can answer for.
+
+    The four facts every exposure rule reads: the definition's identity, its
+    local name (a module-level ``__getattr__`` is found by it), its kind (a
+    method is exposed through its class) and whether ``from <module> import *``
+    binds it. ``DeadCandidate`` carries the same four as it rides the cache
+    wire and is accepted as-is; the api population adapts its public symbols
+    into this shape, which is what lets one owner answer for both.
+    """
+
+    qualname: str
+    local_name: str
+    kind: str
+    star_import_bound: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ExternalReachability:
     """One symbol's external reachability and the construct witnessing it.
 
@@ -3421,6 +3439,15 @@ class PublicSymbol:
     params: tuple[ApiParamSpec, ...] = ()
     returns_hash: str = ""
     exported_via: Literal["all", "name"] = "name"
+    #: Whether a public namespace binds this symbol, from the run's
+    #: external-reachability owner over the namespaces the api population
+    #: owner names. The per-file collector reports Python visibility and
+    #: cannot know this — the binding graph is a whole-run fact — so the run
+    #: stamps it once, after collection, and every consumer reads the column.
+    #: ``None`` means "no run classified this", which a run never leaves
+    #: behind and which no projection may read as included: ``unresolved`` is
+    #: a verdict and is included; the absence of one is not.
+    exposure: ReachabilityState | None = None
 
 
 @dataclass(frozen=True, slots=True)

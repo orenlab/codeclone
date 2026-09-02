@@ -31,7 +31,7 @@ from ..findings.clones.renamed_structure import build_renamed_structure_groups
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
-from ..metrics.api_population import ApiSurfacePopulation
+from ..metrics.api_population import ApiSurfacePopulation, classify_api_exposure
 from ..metrics.api_surface import product_api_modules
 from ..metrics.coupling import resolve_project_class_coupling
 from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
@@ -410,11 +410,12 @@ def analyze(
     dead_code_world = world_contract_from_value(
         getattr(boot.args, "dead_code_world", DEFAULT_DEAD_CODE_WORLD)
     )
+    package_modules = package_modules_from_registry(discovery.module_registry)
     external_reachability = collect_external_reachability(
-        dead_candidates=processing.dead_candidates,
+        definitions=processing.dead_candidates,
         module_deps=processing.module_deps,
         class_metrics=class_metrics,
-        package_modules=package_modules_from_registry(discovery.module_registry),
+        package_modules=package_modules,
     )
     dead_candidates = processing.dead_candidates
     # The api-surface track is decided once, here, and both consumers below
@@ -431,14 +432,29 @@ def analyze(
     # (scan root, module registry, distribution manifest) exist at exactly one
     # point in a run and fifteen of the nineteen historic call sites of the old
     # predicate held an incomplete set of them.
+    #
+    # The kind says where a module sits; it does not say whether a symbol is
+    # API. That is the binding question -- is there a provable path from a
+    # public namespace to this symbol -- and it is answered per symbol by the
+    # same external-reachability owner the dead-code evaluator reads, over the
+    # namespaces the population owner names, with the walk's definitions as
+    # the binding universe. Where a fact is defined is not where it becomes
+    # externally observable; the verdict rides each symbol as ``exposure``.
     api_population = ApiSurfacePopulation(
         scan_root=str(boot.root),
         module_registry=discovery.module_registry,
         distributed_packages=collect_project_distributed_packages(boot.root),
+        include_private_modules=bool(
+            getattr(boot.args, "api_include_private_modules", False)
+        ),
     )
-    api_modules = product_api_modules(
-        processing.api_modules,
+    api_modules = classify_api_exposure(
+        product_api_modules(processing.api_modules, population=api_population),
         population=api_population,
+        definitions=processing.dead_candidates,
+        module_deps=processing.module_deps,
+        class_metrics=class_metrics,
+        package_modules=package_modules,
     )
     if not boot.args.skip_metrics:
         referenced_qualnames = frozenset(

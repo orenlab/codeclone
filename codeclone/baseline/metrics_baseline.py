@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import UUID
 
@@ -21,8 +21,11 @@ from ..contracts import (
     COUPLING_RISK_MEDIUM_MAX,
 )
 from ..contracts.errors import BaselineValidationError
-from ..domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
-from ..metrics._visibility import is_public_module_name
+from ..metrics.api_population import (
+    is_api_visible,
+    is_product_surface,
+    visible_api_surface,
+)
 from ..metrics.api_surface import is_product_api_module
 from ..metrics.dependencies import (
     build_import_graph,
@@ -668,57 +671,73 @@ def _gating_api_surfaces(
     """Narrow both sides of the api comparison to the gating surface.
 
     ``api_breaking_changes`` is a verdict about the project's published
-    contract, and it was being computed over every module the run collected —
-    a repository's own ``scripts/`` tree, a distributed package's private
-    modules, everything importable. This is where the owner's verdict becomes
-    the gate's population, and it is done to BOTH sides together: narrowing
-    only the current one would report each dropped module's stored symbols as
-    ``removed``, which is the same false-teardown mechanism an unmaterialized
-    cache row produced.
+    contract, and it was being computed over every symbol the run collected —
+    a repository's own ``scripts/`` tree, every public-named definition of a
+    distributed package's private modules, everything importable. This is
+    where the owner's verdicts become the gate's population, and it is done to
+    BOTH sides together: narrowing only the current one would report each
+    dropped symbol's stored row as ``removed``, which is the same
+    false-teardown mechanism an unmaterialized cache row produced.
 
-    A stored module the current run has no row for at all is kept. Its absence
-    is the ordinary reason a public symbol disappears — a deleted module — and
-    withholding that from the gate would trade a false positive for a false
-    negative. Only a module the run classified, and classified as non-gating,
-    is dropped from both sides.
+    The current side is the run's visible surface. A stored symbol the run
+    still holds follows the run's verdict for it: a private helper nothing
+    binds leaves both sides, a re-exported one stays on both. A stored symbol
+    the run no longer holds is kept — its removal is the signal the lane
+    exists for, and whether a namespace bound it at baseline time is not
+    provable now, which is ``unresolved`` and lands on the included side —
+    unless its module is one the run classified as never gating, an unshipped
+    tree or the test track, whose symbols were not API in any reading. A
+    stored module the run has no row for at all is a deleted module and is
+    kept whole.
 
-    The kinds come from the run, never from the container: what a project ships
-    is a property of the checkout being analysed, and the baseline predates any
-    answer to it.
+    The verdicts come from the run, never from the container: what a project
+    ships and what its namespaces bind are properties of the checkout being
+    analysed, and the baseline predates any answer to them. The one case that
+    needs the CONTAINER's own answer — a symbol whose re-export was removed
+    while its definition stayed — is not decidable from these inputs and is
+    reported where the lane's wire form is decided, not guessed at here.
 
-    The join is the MODULE IDENTITY, not the file path, and that is measured
-    rather than stylistic: a run carries absolute runtime paths while the
-    container stores repository-relative ones, so a path join matches nothing
-    and every narrowed module falls through the "the run never classified it"
-    branch. Measured on this repository with a path join: 183 breaking changes
-    instead of 51, of which 138 were ``benchmarks``, ``scripts`` and ``plugins``
-    modules reported as removed on an untouched tree — the exact false teardown
-    this function exists to prevent, produced by the function itself.
-    ``compare_api_surfaces`` already keys on ``module:qualname``, so module
-    identity is the join the rest of the lane uses.
+    The join is the SYMBOL IDENTITY, ``module:qualname``, never the file
+    path, and that is measured rather than stylistic: a run carries absolute
+    runtime paths while the container stores repository-relative ones, so a
+    path join matches nothing and every stored row falls through the "the run
+    never classified it" branch. Measured on this repository with a path
+    join: 183 breaking changes instead of 51, of which 138 were
+    ``benchmarks``, ``scripts`` and ``plugins`` modules reported as removed on
+    an untouched tree — the exact false teardown this function exists to
+    prevent, produced by the function itself. ``compare_api_surfaces`` keys
+    on the same identity.
     """
 
     if current is None:
         return baseline, current
-    gating = {
-        module.module
-        for module in current.modules
-        if module.surface_kind == SURFACE_KIND_PRODUCT_PUBLIC
-    }
-    classified = {module.module for module in current.modules}
-    narrowed_current = ApiSurfaceSnapshot(
-        modules=tuple(module for module in current.modules if module.module in gating)
-    )
+    narrowed_current = visible_api_surface(current)
     if baseline is None:
         return None, narrowed_current
-    narrowed_baseline = ApiSurfaceSnapshot(
-        modules=tuple(
-            module
-            for module in baseline.modules
-            if module.module in gating or module.module not in classified
-        )
-    )
-    return narrowed_baseline, narrowed_current
+    classified = {module.module for module in current.modules}
+    product = {
+        module.module for module in current.modules if is_product_surface(module)
+    }
+    held = {
+        symbol.qualname: is_api_visible(module, symbol)
+        for module in current.modules
+        for symbol in module.symbols
+    }
+
+    def kept(module: ModuleApiSurface, symbol: PublicSymbol) -> bool:
+        if module.module not in classified:
+            return True
+        verdict = held.get(symbol.qualname)
+        if verdict is not None:
+            return verdict
+        return module.module in product
+
+    narrowed: list[ModuleApiSurface] = []
+    for module in baseline.modules:
+        symbols = tuple(symbol for symbol in module.symbols if kept(module, symbol))
+        if symbols:
+            narrowed.append(replace(module, symbols=symbols))
+    return ApiSurfaceSnapshot(modules=tuple(narrowed)), narrowed_current
 
 
 def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot | None:
@@ -752,20 +771,13 @@ def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot 
     rows: dict[tuple[str, str], list[PublicSymbol]] = {}
     for item in payload.symbols:
         module = item.owner.python_module
-        # One refusal, three reasons, because they are one question: is this
-        # stored row something a run still produces? The privacy term is the
-        # newer half. A baseline published while ``include_private_modules``
-        # was inert still holds a row per public-named symbol of every private
-        # module declaring ``__all__``; a run collects none of them, so passing
-        # them through would report each as removed from the public API.
-        # Unconditional, and that is the safe direction: a run that DOES ask
-        # for private modules keeps more than this bridge, which can only turn
-        # a stored symbol into ``added``, never into ``removed``.
-        if (
-            module is None
-            or not is_product_api_module(item.owner.file.path)
-            or not is_public_module_name(module.module)
-        ):
+        # One refusal, two reasons, because they are one question: is this
+        # stored row something a run still produces? A private module's rows
+        # are kept: where a symbol is defined is not where it becomes
+        # observable, and whether a namespace binds a stored symbol is the
+        # gate's per-symbol question, answered in ``_gating_api_surfaces``
+        # from the run's verdicts - never here, where no binding fact exists.
+        if module is None or not is_product_api_module(item.owner.file.path):
             continue
         key = (module.module, item.owner.file.path)
         rows.setdefault(key, []).append(

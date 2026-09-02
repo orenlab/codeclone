@@ -34,36 +34,25 @@ class PublicClass:
 """,
         module_name="pkg._internal",
     )
-    excluded = build_module_visibility(
+    visibility = build_module_visibility(
         tree=tree,
         module_name="pkg._internal",
         collector=collector,
         imported_names=import_names,
     )
-    admitted = build_module_visibility(
-        tree=tree,
-        module_name="pkg._internal",
-        collector=collector,
-        imported_names=import_names,
-        include_private_modules=True,
-    )
 
-    # Until 2026-09-02 this asserted the opposite, and that was the defect:
-    # ``__all__`` was consulted before module privacy, so a private module's
-    # export list was admitted whatever ``include_private_modules`` said and no
-    # input reached the privacy branch at all. ``strict_exports`` still reports
-    # that the module DECLARES ``__all__`` -- a fact about the source -- while
-    # ``exported_names`` reports what this run admits, which is the decision.
-    assert excluded.is_public_module is False
-    assert excluded.strict_exports is True
-    assert excluded.exported_names == frozenset()
-    assert excluded.exported_via("public_fn") is None
-
-    assert admitted.is_public_module is True
-    assert admitted.strict_exports is True
-    assert admitted.exported_names == frozenset({"PublicClass", "public_fn"})
-    assert admitted.exported_via("public_fn") == "all"
-    assert admitted.exported_via("_private_fn") is None
+    # The collector reports Python visibility: ``__all__`` is the language's
+    # export list and is read first, in a private module as in a public one.
+    # Module privacy is a fact about the namespace (``is_public_module``), not
+    # a filter on the names, because where a definition sits is not where it
+    # becomes externally observable -- ``httpx.Client`` is defined in
+    # ``httpx._client``. Whether a collected name is API is decided one layer
+    # up, per symbol, from its binding path.
+    assert visibility.is_public_module is False
+    assert visibility.strict_exports is True
+    assert visibility.exported_names == frozenset({"PublicClass", "public_fn"})
+    assert visibility.exported_via("public_fn") == "all"
+    assert visibility.exported_via("_private_fn") is None
 
 
 def test_collect_module_adoption_counts_annotations_docstrings_and_any() -> None:

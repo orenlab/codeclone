@@ -186,5 +186,163 @@
     "DIST-SHIPPED-PUBLIC|DIST-UNSHIPPED": "identical public surface, identical source kind; only the distribution manifest separates the verdicts",
     "DIST-SHIPPED-PUBLIC|DIST-SHIPPED-PRIVATE": "same distributed package; only the module's own name privacy separates the verdicts",
     "DIST-SHIPPED-TESTING|DIST-TESTS": "both sit under a test-named segment; only the module registry separates a shipped testing subpackage from the repository's own suite"
-  }
+  },
+  "api_exposure_cases": [
+    {
+      "id": "EXPO-REEXPORTED-BY-NAME",
+      "qualname": "shipped._internal:helper",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-NO-PUBLIC-BINDING",
+      "qualname": "shipped._internal:hidden",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "not_reachable",
+        "api_visible": false
+      }
+    },
+    {
+      "id": "EXPO-ALIASED-REEXPORT",
+      "qualname": "shipped._alias:Original",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-ALIASED-REEXPORT-METHOD",
+      "qualname": "shipped._alias:Original.touch",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-MULTI-HOP-REEXPORT",
+      "qualname": "shipped._deep:hopped",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-STAR-UNDER-ALL",
+      "qualname": "shipped._star:starred",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-UNRESOLVED-GETATTR-CLASS",
+      "qualname": "lazy._impl:Thing",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "unresolved",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-UNRESOLVED-GETATTR-METHOD",
+      "qualname": "lazy._impl:Thing.method",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "unresolved",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-PUBLIC-MODULE",
+      "qualname": "shipped.tool:run",
+      "expected": {
+        "surface_kind": "product_public",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-SHIPPED-TESTING-SUBPACKAGE",
+      "qualname": "shipped.testing.helpers:make_case",
+      "expected": {
+        "surface_kind": "product_public",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-UNSHIPPED-PUBLIC-MODULE",
+      "qualname": "scripts.tool:run",
+      "expected": {
+        "surface_kind": "repository_support",
+        "exposure": "not_reachable",
+        "api_visible": false
+      }
+    },
+    {
+      "id": "EXPO-REEXPORTED-CONSTANT",
+      "qualname": "shipped._internal:LIMIT",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-NO-BINDING-CONSTANT",
+      "qualname": "shipped._internal:HIDDEN_LIMIT",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "not_reachable",
+        "api_visible": false
+      }
+    },
+    {
+      "id": "EXPO-STAR-CONSTANT",
+      "qualname": "shipped._star:STAR_LIMIT",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    },
+    {
+      "id": "EXPO-ALIASED-REEXPORT-INIT",
+      "qualname": "shipped._alias:Original.__init__",
+      "expected": {
+        "surface_kind": "product_internal",
+        "exposure": "reachable",
+        "api_visible": true
+      }
+    }
+  ],
+  "api_exposure_twins": {
+    "EXPO-REEXPORTED-BY-NAME|EXPO-NO-PUBLIC-BINDING": "same private module, same __all__; only the named import in shipped/__init__.py separates the verdicts",
+    "EXPO-NO-PUBLIC-BINDING|EXPO-UNRESOLVED-GETATTR-CLASS": "neither has a provable binding; only the module-level __getattr__ on the owning package separates exclusion from unresolved inclusion",
+    "EXPO-PUBLIC-MODULE|EXPO-UNSHIPPED-PUBLIC-MODULE": "identical module, identical public name; only the distribution manifest separates a public namespace from repository support",
+    "EXPO-NO-PUBLIC-BINDING|EXPO-STAR-UNDER-ALL": "scripts/tool.py star-imports shipped._internal exactly as shipped/__init__.py star-imports shipped._star; only the importing module's surface kind separates a public namespace from one that is not",
+    "EXPO-REEXPORTED-BY-NAME|EXPO-REEXPORTED-CONSTANT": "same package re-export; only the definition's kind differs, and a module-level constant is never a dead candidate, so it reaches the owner through the api population alone",
+    "EXPO-STAR-UNDER-ALL|EXPO-STAR-CONSTANT": "same wildcard edge, same __all__; the function is also a walk candidate carrying the star-binding fact, the constant is not, so only the api population's own fact can bind it",
+    "EXPO-ALIASED-REEXPORT-METHOD|EXPO-ALIASED-REEXPORT-INIT": "same class, same binding; only the method's name differs, and __init__ is public by the collector's protocol-dunder vocabulary although the plain underscore rule calls it private"
+  },
+  "api_absent_cases": [
+    {
+      "id": "ABSENT-TEST-TRACK",
+      "qualname": "tests.test_probe:test_probe",
+      "reason": "test support is never collected into the api population"
+    },
+    {
+      "id": "ABSENT-NOT-PYTHON-VISIBLE",
+      "qualname": "shipped._star:unlisted",
+      "reason": "a name its module's __all__ does not list is not Python-visible and is never collected"
+    }
+  ]
 }

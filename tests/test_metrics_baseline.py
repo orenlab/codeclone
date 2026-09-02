@@ -813,19 +813,18 @@ def test_metrics_baseline_fallback_projections_remain_typed(
     assert api_snapshot.modules == ()
 
 
-def test_the_bridge_drops_a_stored_private_module_from_the_api_snapshot() -> None:
-    """A baseline written while the privacy guard was inert still holds them.
+def test_the_bridge_keeps_a_stored_private_module_in_the_api_snapshot() -> None:
+    """A stored private-module row is a stored definition, and it is kept.
 
-    ``include_private_modules=False`` was inert for any module declaring
-    ``__all__``, so a container published before the fix carries a row per
-    public-named symbol of every private module. A run no longer collects any
-    of them, so handing them over unchanged would report each as removed from
-    the public API on an untouched tree. The bridge drops them, and it must do
-    so unconditionally: that direction can only ever turn a stored symbol into
-    ``added``, never into ``removed``.
+    Where a symbol is defined is not where it becomes externally observable:
+    ``httpx.Client`` is stored under ``httpx._client``. A bridge that dropped
+    private modules would drop the very rows the api-break gate must compare
+    when a package re-export disappears. Whether a stored symbol may gate is
+    decided later, per symbol, from the run's exposure verdict — the bridge
+    rebuilds the stored population and narrows it by the test track only.
 
-    Both directions are here from one payload, so an over-eager drop fails as
-    loudly as an absent one.
+    Both rows come from one payload, so an over-eager drop fails as loudly as
+    a lost public one.
     """
 
     container = build_container(_bundle(), _SCOPE_ID)
@@ -869,7 +868,10 @@ def test_the_bridge_drops_a_stored_private_module_from_the_api_snapshot() -> Non
     )
     snapshot = metrics_mod._api_surface_snapshot(api_container)
     assert snapshot is not None
-    assert [module.module for module in snapshot.modules] == ["pkg.public"]
+    assert [module.module for module in snapshot.modules] == [
+        "pkg._internal",
+        "pkg.public",
+    ]
 
 
 def test_metrics_baseline_required_contract_reason_is_schema_mismatch(

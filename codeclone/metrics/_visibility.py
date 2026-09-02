@@ -16,13 +16,20 @@ if TYPE_CHECKING:
     from ..qualnames import QualnameCollector
 
 __all__ = [
+    "PUBLIC_METHOD_DUNDERS",
     "ModuleVisibility",
     "build_module_visibility",
     "is_public_method_name",
     "is_public_module_name",
 ]
 
-_PUBLIC_METHOD_DUNDERS = frozenset(
+#: The protocol methods a public class exposes although their names start
+#: with an underscore: the language dispatches to them from outside the class
+#: (construction, calls, ``with``, iteration), so their signatures are part
+#: of the class's contract. The one place the api lane's publicity differs
+#: from the plain underscore rule, and therefore a named fact the exposure
+#: owner is handed rather than a second rule spelled beside it.
+PUBLIC_METHOD_DUNDERS = frozenset(
     {"__call__", "__enter__", "__exit__", "__init__", "__iter__"}
 )
 
@@ -49,7 +56,7 @@ def is_public_module_name(module_name: str) -> bool:
 
 
 def is_public_method_name(name: str) -> bool:
-    return not name.startswith("_") or name in _PUBLIC_METHOD_DUNDERS
+    return not name.startswith("_") or name in PUBLIC_METHOD_DUNDERS
 
 
 def build_module_visibility(
@@ -64,33 +71,34 @@ def build_module_visibility(
     public_module = include_private_modules or is_public_module_name(module_name)
     top_level_names = _top_level_declared_names(tree=tree, collector=collector)
     imported = frozenset(imported_names)
-    # Module privacy is asked FIRST, and that order is the whole guard.
-    # ``__all__`` used to be consulted before it, which made
-    # ``include_private_modules=False`` inert for any private module declaring
-    # one: measured on this repository, 303 of 5409 collected symbols entered
-    # the surface through a module with an underscore-prefixed segment --
-    # ``codeclone.cache._wire_decode:_decode_wire_file_entry`` among them --
-    # and reached the api-break gate. No input reached the privacy branch at
-    # all, so the flag was theatre rather than a policy.
+    # This is the language's visibility rule and nothing more. ``__all__`` is
+    # the export list and is read first, in a private module exactly as in a
+    # public one; without it a module exports its public-named definitions,
+    # and a private module without it exports nothing unless the run says its
+    # private modules are part of the surface.
     #
-    # The two meanings of ``__all__`` are what made it look right: in a
-    # published module it declares the export list, and in a private one this
-    # project uses it as internal import discipline. Only the second reading is
-    # available to a rule that cannot see the module's own privacy, so privacy
-    # decides admission and ``__all__`` decides the names of an admitted one.
+    # Module privacy deliberately does NOT narrow a declared ``__all__``. Where
+    # a definition sits is not where it becomes externally observable:
+    # ``httpx.Client`` is defined in ``httpx._client`` and bound as
+    # ``httpx.Client``. A collector that dropped private modules would drop
+    # the definitions the binding walk has to find, and the api population
+    # could never hold them -- measured on httpx as ``public_symbols`` 254 -> 1.
+    # Whether a collected name is API is decided one layer up, per symbol, by
+    # the external-reachability owner; ``is_public_module`` below is the fact
+    # it reads, not a filter applied here.
     exported_names: frozenset[str]
-    if not public_module:
-        exported_names = frozenset()
-    elif declared_all is not None:
+    if declared_all is not None:
         exported_names = frozenset(
             name for name in declared_all if name and name in top_level_names
         )
-    else:
+    elif public_module:
         exported_names = frozenset(
             name
             for name in top_level_names
             if not name.startswith("_") and name not in imported
         )
+    else:
+        exported_names = frozenset()
     return ModuleVisibility(
         module_name=module_name,
         exported_names=exported_names,

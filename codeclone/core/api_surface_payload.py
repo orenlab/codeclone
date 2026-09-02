@@ -8,12 +8,18 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ..metrics.api_population import visible_api_surface
 from ..models import ApiBreakingChange, ApiSurfaceSnapshot
 from ..utils.coerce import as_int, as_str
 
 
 def _api_surface_summary(api_surface: ApiSurfaceSnapshot | None) -> dict[str, object]:
-    modules = api_surface.modules if api_surface is not None else ()
+    # The family is the API, not the collection: the run keeps every collected
+    # symbol because that is what the lane stores, and reports the visible
+    # projection of it -- the symbols a public namespace provably or possibly
+    # binds. ``enabled`` is about the lane, so it reads the collection.
+    visible = visible_api_surface(api_surface)
+    modules = visible.modules if visible is not None else ()
     return {
         "enabled": api_surface is not None,
         "modules": len(modules),
@@ -27,10 +33,11 @@ def _api_surface_summary(api_surface: ApiSurfaceSnapshot | None) -> dict[str, ob
 def _api_surface_rows(
     api_surface: ApiSurfaceSnapshot | None,
 ) -> list[dict[str, object]]:
-    if api_surface is None:
+    visible = visible_api_surface(api_surface)
+    if visible is None:
         return []
     rows: list[dict[str, object]] = []
-    for module in api_surface.modules:
+    for module in visible.modules:
         rows.extend(
             {
                 "record_kind": "symbol",

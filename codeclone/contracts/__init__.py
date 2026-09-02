@@ -508,6 +508,16 @@ TIER_STATE_COMPLETE: Final = "complete"
 # is re-analysed rather than read as "collected, and empty". The row's meaning
 # changed, so the generation moves with it.
 #
+# The same generation's api payload is what the collector admits under the
+# language's visibility rule (``__all__`` first; a bare private module only
+# when the run includes private modules): where a symbol is defined is not
+# where it becomes observable, so privacy narrows nothing at collection and
+# the external-reachability owner decides exposure per symbol afterwards. An
+# unreleased build of this generation collected privacy-first, and this
+# reader served its rows as "collected, empty" (measured: ``public_symbols``
+# 9 cold, 2 warm). The dependent profile carries ``api_collection_policy`` so
+# such a row misses; the number does not move for a build that never shipped.
+#
 # It is disposable acceleration state and never truth, so this constant reaches
 # no report, no baseline and no content address: nothing downstream of a run
 # changes value because the cache changed shape.

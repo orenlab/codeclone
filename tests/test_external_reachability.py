@@ -121,7 +121,7 @@ def _reachability(
     from codeclone.metrics.external_reachability import collect_external_reachability
 
     rows = collect_external_reachability(
-        dead_candidates=candidates,
+        definitions=candidates,
         module_deps=module_deps,
         class_metrics=class_metrics,
         package_modules=package_modules,
@@ -786,7 +786,7 @@ def test_reachability_follows_the_package_reexport_and_not_a_sibling_import() ->
     rows = {
         row.qualname: row
         for row in collect_external_reachability(
-            dead_candidates=dead_candidates,
+            definitions=dead_candidates,
             module_deps=module_deps,
             class_metrics=(),
             package_modules=frozenset({package_module}),
@@ -866,7 +866,7 @@ def test_reachability_on_the_real_fixture_reads_the_named_export_chain() -> None
         rows = {
             row.qualname: row
             for row in collect_external_reachability(
-                dead_candidates=tuple(dead_candidates),
+                definitions=tuple(dead_candidates),
                 module_deps=tuple(module_deps),
                 class_metrics=tuple(class_metrics),
                 package_modules=package_modules_from_registry(registry),
@@ -887,3 +887,363 @@ def test_reachability_on_the_real_fixture_reads_the_named_export_chain() -> None
             symbol: expected["witness_kind"]
             for symbol, expected in method_cases.items()
         }
+
+
+# ---------------------------------------------------------------------------
+# Population generality: the rule is the language's; the population and the
+# namespace set are the caller's.
+# ---------------------------------------------------------------------------
+
+
+def test_the_namespace_set_is_the_callers_when_given() -> None:
+    """E1 exposes by definition only inside the namespaces the caller names.
+
+    The default derives the language's privacy rule over every module the
+    facts name, which is the dead-code evaluator's open world. The api-surface
+    evaluator hands in the product's public namespaces instead: a public-named
+    module of an unshipped tree is a Python module and not a place the project
+    promises a name at, so a definition there is not exposed by definition.
+    """
+
+    from codeclone.metrics.external_reachability import collect_external_reachability
+
+    candidates = (_candidate("scripts.tool:run", kind="function"),)
+
+    def state(public_modules: frozenset[str] | None) -> tuple[str, str]:
+        rows = collect_external_reachability(
+            definitions=candidates,
+            module_deps=(),
+            class_metrics=(),
+            package_modules=frozenset(),
+            public_modules=public_modules,
+        )
+        (row,) = rows
+        return row.state, row.witness
+
+    assert state(None) == ("reachable", "public_module:scripts.tool")
+    assert state(frozenset({"scripts.tool"})) == (
+        "reachable",
+        "public_module:scripts.tool",
+    )
+    assert state(frozenset({"pkg"})) == ("not_reachable", "")
+
+
+def test_any_definition_shape_is_carried_by_a_package_re_export() -> None:
+    """The population is not the dead-candidate population.
+
+    A module-level constant is never a dead candidate and is part of an api
+    surface; the owner reads the four facts every definition carries and
+    nothing that only a candidate has. ``httpx.DEFAULT_TIMEOUT_CONFIG`` is
+    this shape: defined in ``httpx._config``, imported by name in the package
+    ``__init__``.
+    """
+
+    from codeclone.metrics.external_reachability import collect_external_reachability
+    from codeclone.models import SymbolDefinition
+
+    definitions = (
+        SymbolDefinition(
+            qualname="pkg._config:DEFAULT_TIMEOUT",
+            local_name="DEFAULT_TIMEOUT",
+            kind="constant",
+            star_import_bound=True,
+        ),
+    )
+    (row,) = collect_external_reachability(
+        definitions=definitions,
+        module_deps=(_dep("pkg", "pkg._config", "DEFAULT_TIMEOUT"),),
+        class_metrics=(),
+        package_modules=frozenset({"pkg"}),
+    )
+    assert (row.state, row.witness) == ("reachable", "package_reexport:pkg")
+
+
+def test_the_star_binding_fact_is_read_from_any_definition_shape() -> None:
+    """E3 reads ``star_import_bound`` off the definition, whatever carries it."""
+
+    from codeclone.metrics.external_reachability import collect_external_reachability
+    from codeclone.models import SymbolDefinition
+
+    def state(star_import_bound: bool) -> tuple[str, str]:
+        (row,) = collect_external_reachability(
+            definitions=(
+                SymbolDefinition(
+                    qualname="pkg._star:starred",
+                    local_name="starred",
+                    kind="function",
+                    star_import_bound=star_import_bound,
+                ),
+            ),
+            module_deps=(_dep("pkg", "pkg._star", "*"),),
+            class_metrics=(),
+            package_modules=frozenset({"pkg"}),
+        )
+        return row.state, row.witness
+
+    assert state(True) == ("reachable", "star_reexport:pkg")
+    assert state(False) == ("not_reachable", "")
+
+
+def test_a_dynamic_package_is_read_from_the_definitions_it_is_given() -> None:
+    """``__getattr__`` is found in the population, so a population that lacks
+    the walk's definitions cannot see it: the api evaluator hands both in."""
+
+    from codeclone.metrics.external_reachability import collect_external_reachability
+    from codeclone.models import SymbolDefinition
+
+    thing = SymbolDefinition(
+        qualname="lazy._impl:Thing",
+        local_name="Thing",
+        kind="class",
+        star_import_bound=True,
+    )
+    getattr_hook = _candidate("lazy:__getattr__", kind="function")
+
+    def state(*definitions: object) -> tuple[str, str]:
+        rows = collect_external_reachability(
+            definitions=definitions,  # type: ignore[arg-type]
+            module_deps=(),
+            class_metrics=(),
+            package_modules=frozenset({"lazy"}),
+        )
+        return next((r.state, r.witness) for r in rows if r.qualname == thing.qualname)
+
+    assert state(thing) == ("not_reachable", "")
+    assert state(thing, getattr_hook) == ("unresolved", "module_getattr:lazy")
+
+
+def test_a_protocol_dunder_method_is_public_when_its_population_says_so() -> None:
+    """The leaf's publicity is the caller's vocabulary; the default is the rule.
+
+    ``Beta.__init__`` is private under the plain underscore rule, and that is
+    the dead-code reading. An api collector calls the protocol dunders public
+    because the language dispatches to them from outside the class, and hands
+    that set in; measured without it, a constructor signature left the api
+    population (``public_symbols`` 5 -> 4 on the cross-surface fixture).
+    """
+
+    from codeclone.metrics.external_reachability import collect_external_reachability
+
+    definitions = (
+        _candidate("pkg.mod:Beta", kind="class"),
+        _candidate("pkg.mod:Beta.__init__", kind="method"),
+        _candidate("pkg.mod:Beta.run", kind="method"),
+    )
+
+    def states(public_leaves: frozenset[str]) -> dict[str, str]:
+        rows = collect_external_reachability(
+            definitions=definitions,
+            module_deps=(),
+            class_metrics=(_class("pkg.mod:Beta"),),
+            package_modules=frozenset(),
+            public_leaves=public_leaves,
+        )
+        return {row.qualname: row.state for row in rows}
+
+    plain = states(frozenset())
+    assert plain["pkg.mod:Beta.__init__"] == "not_reachable"
+    assert plain["pkg.mod:Beta.run"] == "reachable"
+    admitted = states(frozenset({"__init__"}))
+    assert admitted["pkg.mod:Beta.__init__"] == "reachable"
+    assert admitted["pkg.mod:Beta.run"] == "reachable"
+
+
+# ---------------------------------------------------------------------------
+# The fixed point: raw graph, world-invariant seeds, three-valued closure.
+# ---------------------------------------------------------------------------
+
+
+def _states(
+    definitions: tuple[object, ...],
+    deps: tuple[ModuleDep, ...],
+    *,
+    packages: frozenset[str],
+    public_modules: frozenset[str],
+    class_metrics: tuple[ClassMetrics, ...] = (),
+) -> dict[str, tuple[str, str]]:
+    from codeclone.metrics.external_reachability import collect_external_reachability
+
+    rows = collect_external_reachability(
+        definitions=definitions,  # type: ignore[arg-type]
+        module_deps=deps,
+        class_metrics=class_metrics,
+        package_modules=packages,
+        public_modules=public_modules,
+    )
+    return {row.qualname: (row.state, row.witness) for row in rows}
+
+
+def test_the_fixed_point_reaches_a_cycle_from_one_public_entry_in_any_order() -> None:
+    """RULING 2026-09-02: the discriminator is not local.
+
+    ``_a.__init__`` and ``_b.__init__`` star-import each other and ``_b``
+    re-exports ``Foo`` by name. Whether either private ``__init__`` is an
+    export surface is decided by the graph, not by its syntax: with no public
+    entry all three are unreachable; one proven ``cyclic -> _a`` edge and,
+    after convergence, all three are reachable - whatever order the edges
+    are read in, which is what kills an order-dependent implementation.
+    """
+
+    definitions = (
+        _candidate("cyclic._a:a_thing", kind="function", star_import_bound=True),
+        _candidate("cyclic._b:b_thing", kind="function", star_import_bound=True),
+        _candidate("cyclic._b._impl:Foo", kind="class", star_import_bound=True),
+    )
+    cycle = (
+        _dep("cyclic._a", "cyclic._b", "*"),
+        _dep("cyclic._b", "cyclic._a", "*"),
+        _dep("cyclic._b", "cyclic._b._impl", "Foo"),
+    )
+    entry = _dep("cyclic", "cyclic._a", "*")
+    packages = frozenset({"cyclic", "cyclic._a", "cyclic._b"})
+
+    def states(deps: tuple[ModuleDep, ...]) -> dict[str, tuple[str, str]]:
+        return _states(
+            definitions, deps, packages=packages, public_modules=frozenset({"cyclic"})
+        )
+
+    assert states(cycle) == {
+        "cyclic._a:a_thing": ("not_reachable", ""),
+        "cyclic._b:b_thing": ("not_reachable", ""),
+        "cyclic._b._impl:Foo": ("not_reachable", ""),
+    }
+    converged = {
+        "cyclic._a:a_thing": ("reachable", "star_reexport:cyclic"),
+        "cyclic._b:b_thing": ("reachable", "star_reexport:cyclic._a"),
+        "cyclic._b._impl:Foo": ("reachable", "star_reexport:cyclic._b"),
+    }
+    assert states((entry, *cycle)) == converged
+    assert states((*cycle, entry)) == converged
+    assert states(tuple(reversed((entry, *cycle)))) == converged
+
+
+def test_unresolved_is_a_front_of_its_own() -> None:
+    """A plain least fixed point reads everything it never reached as
+    ``not_reachable``. A namespace a dynamic package could serve is
+    ``unresolved`` instead, and so is whatever it carries outward - by a
+    wildcard edge, or by a name its ``__init__`` imports. A proven path,
+    arriving in any order, still wins.
+    """
+
+    definitions = (
+        _candidate("pkg:__getattr__", kind="function"),
+        _candidate("other._impl:Carried", kind="function", star_import_bound=True),
+        # Not star-bound: only the name ``pkg._sub`` imports can carry it, so
+        # the package re-export rule is the one input that reaches it.
+        _candidate("other._impl:Named", kind="class"),
+        _candidate("other._impl:Named.run", kind="method"),
+        # Star-bound by nothing and imported by nobody: a wildcard from an
+        # unreadable namespace carries the module's star-bound names and
+        # nothing else, so this one stays unreached.
+        _candidate("other._impl:Unlisted", kind="function"),
+        # Two hops out on the unresolved front: the witness travels with it.
+        _candidate("third._impl:Far", kind="function", star_import_bound=True),
+        _candidate("pkg.pub:Sub", kind="class"),
+    )
+    deps = (
+        _dep("pkg._sub", "other._impl", "*"),
+        _dep("pkg._sub", "other._impl", "Named"),
+        _dep("other._impl", "third._impl", "*"),
+        # A plain public module's import binds the base for the hierarchy and
+        # exposes nothing by itself (PEP 8: not a re-export).
+        _dep("pkg.pub", "other._impl", "Named"),
+    )
+    packages = frozenset({"pkg", "pkg._sub", "other", "third"})
+    sub_of_named = (_class("pkg.pub:Sub", "Named"),)
+
+    def states(
+        definitions: tuple[object, ...], deps: tuple[ModuleDep, ...]
+    ) -> dict[str, tuple[str, str]]:
+        return _states(
+            definitions,
+            deps,
+            packages=packages,
+            public_modules=frozenset({"pkg", "pkg.pub"}),
+            class_metrics=sub_of_named,
+        )
+
+    # Nothing reaches ``pkg._sub``, so it carries nothing.
+    silent = states(definitions[1:], deps)
+    assert silent["other._impl:Carried"] == ("not_reachable", "")
+    assert silent["other._impl:Named"] == ("not_reachable", "")
+    # ``pkg.__getattr__`` can serve ``pkg._sub``; what it carries is unresolved,
+    # and only what it carries: the wildcard binds star-bound names, the
+    # ``__init__`` binds the name it imports, and ``Unlisted`` is neither.
+    front = states(definitions, deps)
+    assert front["other._impl:Carried"] == ("unresolved", "module_getattr:pkg")
+    assert front["other._impl:Named"] == ("unresolved", "module_getattr:pkg")
+    assert front["other._impl:Unlisted"] == ("not_reachable", "")
+    assert front["third._impl:Far"] == ("unresolved", "module_getattr:pkg")
+    # The subclass in a public module is proven; the method rides the higher
+    # rank, not the first construct offered.
+    assert front["other._impl:Named.run"] == (
+        "reachable",
+        "exposed_subclass:pkg.pub:Sub",
+    )
+    # A proven wildcard edge upgrades the namespace, in either order.
+    proven = (*deps, _dep("pkg", "pkg._sub", "*"))
+    for order in (proven, tuple(reversed(proven))):
+        upgraded = states(definitions, order)
+        assert upgraded["other._impl:Carried"] == (
+            "reachable",
+            "star_reexport:pkg._sub",
+        )
+        assert upgraded["other._impl:Named"] == ("reachable", "star_reexport:pkg._sub")
+        assert upgraded["other._impl:Unlisted"] == ("not_reachable", "")
+        assert upgraded["third._impl:Far"] == ("reachable", "star_reexport:other._impl")
+
+
+def test_a_private_dynamic_package_marks_its_subtree_only_once_reached() -> None:
+    """Dynamic packages are inputs to the graph, gated by the fixed point:
+    a private ``__getattr__`` package no path reaches marks nothing, and one
+    a public wildcard reaches marks what sits below it."""
+
+    definitions = (
+        _candidate("pkg._lazy:__getattr__", kind="function"),
+        _candidate("pkg._lazy._impl:Thing", kind="class"),
+    )
+    packages = frozenset({"pkg", "pkg._lazy"})
+    unreached = _states(
+        definitions, (), packages=packages, public_modules=frozenset({"pkg"})
+    )
+    assert unreached["pkg._lazy._impl:Thing"] == ("not_reachable", "")
+    reached = _states(
+        definitions,
+        (_dep("pkg", "pkg._lazy", "*"),),
+        packages=packages,
+        public_modules=frozenset({"pkg"}),
+    )
+    assert reached["pkg._lazy._impl:Thing"] == (
+        "unresolved",
+        "module_getattr:pkg._lazy",
+    )
+
+
+def test_the_first_definition_of_a_qualname_decides_its_kind() -> None:
+    """Two populations may name one qualname; the first one handed in is the
+    one answered for. The kind is what that decides, and it is observable:
+    a method of a class whose base no edge binds abstains, a function does
+    not, and only the kind tells them apart.
+    """
+
+    from codeclone.metrics.external_reachability import collect_external_reachability
+    from codeclone.models import SymbolDefinition
+
+    as_function = SymbolDefinition(
+        qualname="pkg._m:Outer.inner", local_name="inner", kind="function"
+    )
+    as_method = _candidate("pkg._m:Outer.inner", kind="method")
+    weird_base = (_class("pkg._m:Outer", "Unknown"),)
+
+    def state(*definitions: object) -> tuple[str, str]:
+        rows = collect_external_reachability(
+            definitions=definitions,  # type: ignore[arg-type]
+            module_deps=(),
+            class_metrics=weird_base,
+            package_modules=frozenset({"pkg"}),
+        )
+        (row,) = [r for r in rows if r.qualname == "pkg._m:Outer.inner"]
+        return row.state, row.witness
+
+    assert state(as_method, as_function) == ("unresolved", "unresolved_base:Unknown")
+    assert state(as_function, as_method) == ("not_reachable", "")
