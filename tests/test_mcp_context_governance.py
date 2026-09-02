@@ -21,10 +21,12 @@ from codeclone.surfaces.mcp._context_governance import (
     DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
     FINISH_RESPONSE_PROJECTION_KIND,
     IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+    MEMORY_QUERY_RESPONSE_PROJECTION_KIND,
     MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     START_RESPONSE_PROJECTION_KIND,
     attach_finish_context_governance,
     attach_implementation_context_governance,
+    attach_memory_query_context_governance,
     attach_memory_retrieval_context_governance,
     attach_passive_context_governance,
     attach_start_context_governance,
@@ -370,9 +372,11 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         ],
     } == {
         "memory_record_lookup": "available",
-        "memory_record_route": "query_engineering_memory(mode='get', record_id=...)",
+        "memory_record_route": (
+            "query_engineering_memory(root=..., mode='get', record_id=...)"
+        ),
         "memory_tail_continuation": "available",
-        "memory_tail_route": "get_memory_projection_page(cursor=...)",
+        "memory_tail_route": "get_memory_projection_page(root=..., cursor=...)",
         "trajectory_lookup": "available",
         "trajectory_tail_continuation": "available",
         "receipt_current_path": "receipt.receipt",
@@ -383,7 +387,7 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "blast_route": "get_blast_artifact(run_id=..., blast_artifact_id=...)",
         "experience_lookup": "available",
         "experience_route": (
-            "query_engineering_memory(mode='experience_get', record_id=...)"
+            "query_engineering_memory(root=..., mode='experience_get', record_id=...)"
         ),
         "experience_tail_continuation": "available",
         "context_facet_lookup": "available",
@@ -797,3 +801,36 @@ def test_envelope_shape_and_contract_version_move_together() -> None:
         "enforcement",
         "enforcement_blocked",
     }
+
+
+def test_memory_query_envelope_observes_and_never_claims_enforcement() -> None:
+    """The query router MUST publish the envelope without claiming a budget.
+
+    It caps by the caller's ``max_results`` and mints no cursor, so an
+    ``enforcement`` claim here would be a claim the surface cannot deliver.
+    The two boundaries are pinned together: the shape is the sibling's, the
+    enforcement is observe-only.
+    """
+    governed = attach_memory_query_context_governance(
+        {"mode": "for_path", "status": "ok", "payload": {"records": []}},
+        mode="for_path",
+        max_results=20,
+        detail_level="compact",
+    )
+    envelope = cast("dict[str, object]", governed["context_governance"])
+    response = cast("dict[str, object]", envelope["response"])
+    digest = cast("dict[str, object]", response["projection_digest"])
+
+    assert envelope["contract_version"] == CONTEXT_GOVERNANCE_CONTRACT_VERSION
+    assert envelope["estimator"] == CONTEXT_GOVERNANCE_ESTIMATOR
+    assert envelope["limit"] == DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT
+    assert envelope["mode"] == "observe"
+    assert envelope["enforcement"] == {
+        "response_budget": False,
+        "nested_budget": False,
+        "omission": False,
+    }
+    assert envelope["truncated"] is False
+    assert digest["kind"] == MEMORY_QUERY_RESPONSE_PROJECTION_KIND
+    assert response["mode"] == "for_path"
+    assert response["detail_level"] == "compact"

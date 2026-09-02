@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 import secrets
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -24,12 +27,16 @@ from codeclone.memory.ide_governance import (
     compute_governance_proof,
 )
 from codeclone.memory.staleness import StalenessReport
+from codeclone.surfaces.mcp._context_governance import (
+    passive_drill_down_reachability,
+)
 from codeclone.surfaces.mcp._session_shared import (
     MCPAnalysisRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
 )
+from codeclone.surfaces.mcp.server import build_mcp_server
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
 from .memory_fixtures import cli_memory_repo
@@ -844,3 +851,389 @@ def test_mcp_get_relevant_memory_envelope_states_the_level_it_returned(
     assert isinstance(first, dict)
     assert isinstance(first["created_at_utc"], str)
     assert isinstance(first["updated_at_utc"], str)
+
+
+# --------------------------------------------------------------------------
+# Defect 1 — query_engineering_memory published no context_governance at all
+# --------------------------------------------------------------------------
+
+
+_ENVELOPE_BASE_KEYS: frozenset[str] = frozenset(
+    {
+        "contract_version",
+        "estimator",
+        "limit",
+        "estimated",
+        "truncated",
+        "mandatory_overflow",
+        "mode",
+        "enforcement",
+        "enforcement_blocked",
+        "response",
+    }
+)
+
+
+def test_mcp_query_engineering_memory_publishes_the_sibling_envelope(
+    tmp_path: Path,
+) -> None:
+    """A bounded memory response MUST say what it measured and against what.
+
+    ``query_engineering_memory`` shipped with no ``context_governance`` at
+    all: no contract version, no estimator, no limit. A caller could not tell
+    which contract the answer was written against, nor how close it came to
+    the budget. The envelope is the one ``get_relevant_memory`` already
+    publishes -- the same dialect, read off the sibling here so the two cannot
+    drift into describing the same thing differently.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        queried = service.query_engineering_memory(
+            root=str(root.resolve()),
+            mode="for_path",
+            path="pkg/mod.py",
+        )
+        sibling_payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            scope=["pkg/mod.py"],
+        )
+
+    governance = _nested_dict(queried, "context_governance")
+    sibling = _nested_dict(sibling_payload, "context_governance")
+    response = _nested_dict(governance, "response")
+    estimated = governance["estimated"]
+
+    assert set(governance) == _ENVELOPE_BASE_KEYS
+    assert {
+        "contract_version": governance["contract_version"],
+        "estimator": governance["estimator"],
+        "limit": governance["limit"],
+    } == {
+        "contract_version": sibling["contract_version"],
+        "estimator": sibling["estimator"],
+        "limit": sibling["limit"],
+    }
+    assert response["tool"] == "query_engineering_memory"
+    assert response["mode"] == "for_path"
+    assert isinstance(estimated, int)
+    assert estimated > 0
+
+
+def test_mcp_query_engineering_memory_envelope_names_the_capped_tail(
+    tmp_path: Path,
+) -> None:
+    """A response that omits MUST say it omits, why, and where the rest is.
+
+    ``max_results`` caps the list and the payload flag says only that a tail
+    exists. The envelope has to carry the omission the way every other
+    governed response does, and the continuation index has to name a route the
+    caller can actually execute -- here a wider re-query, because this surface
+    mints no cursor.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        for index in range(4):
+            record_candidate(
+                store,
+                project=project,
+                record_type="change_rationale",
+                subject_path="pkg/mod.py",
+                max_candidates=20,
+                statement=f"capped tail record {index}",
+            )
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.query_engineering_memory(
+            root=str(root.resolve()),
+            mode="for_path",
+            path="pkg/mod.py",
+            max_results=1,
+        )
+
+    body = _nested_dict(payload, "payload")
+    governance = _nested_dict(payload, "context_governance")
+    omitted = _nested_dict(governance, "omitted", "records")
+    continuation = _nested_dict(payload, "_continuation")
+    lanes = cast("list[dict[str, object]]", continuation["lanes"])
+
+    assert body["truncated"] is True
+    assert governance["truncated"] is True
+    assert {
+        "shown": omitted["shown"],
+        "reason": omitted["reason"],
+        "evaluation": omitted["evaluation"],
+    } == {
+        "shown": 1,
+        "reason": "max_results_cap",
+        "evaluation": "unmeasured",
+    }
+    assert "total" not in omitted
+    assert "omitted" not in omitted
+    assert [lane["lane"] for lane in lanes] == ["records"]
+    assert lanes[0]["tool"] == "query_engineering_memory"
+    assert "max_results" in str(lanes[0]["route"])
+
+
+def test_mcp_query_engineering_memory_envelope_claims_nothing_when_complete(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: a complete answer MUST NOT report an omission.
+
+    A truncation flag that is always on is as useless as one that is never
+    on. This pins the other side, so a fix that hard-codes the omission dies
+    here.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.query_engineering_memory(
+            root=str(root.resolve()),
+            mode="for_path",
+            path="pkg/mod.py",
+            max_results=20,
+        )
+
+    body = _nested_dict(payload, "payload")
+    governance = _nested_dict(payload, "context_governance")
+
+    assert body["truncated"] is False
+    assert governance["truncated"] is False
+    assert "omitted" not in governance
+    assert "_continuation" not in payload
+
+
+# --------------------------------------------------------------------------
+# Defect 3 — a published continuation route the server refuses
+# --------------------------------------------------------------------------
+
+
+_ROUTE_PATTERN = re.compile(r"^(?P<tool>[A-Za-z_][A-Za-z0-9_]*)\((?P<args>.*)\)$")
+_MEMORY_DRILL_DOWN_ENTRIES: tuple[str, ...] = (
+    "memory_record",
+    "trajectory",
+    "experience",
+)
+
+
+def _parse_published_route(route: str) -> tuple[str, frozenset[str]]:
+    """Split a published route into the tool it names and the arguments it names."""
+
+    match = _ROUTE_PATTERN.match(route.strip())
+    assert match is not None, route
+    body = match.group("args").strip()
+    named = {
+        part.split("=", 1)[0].strip()
+        for part in body.split(",")
+        if "=" in part and part.strip()
+    }
+    return match.group("tool"), frozenset(named)
+
+
+def _structured_result(result: object) -> dict[str, object]:
+    if isinstance(result, dict):
+        return cast("dict[str, object]", result)
+    assert isinstance(result, tuple)
+    payload = result[1]
+    assert isinstance(payload, dict)
+    return cast("dict[str, object]", payload)
+
+
+def _dotted(payload: Mapping[str, object], path: str) -> object:
+    current: object = payload
+    for key in path.split("."):
+        assert isinstance(current, Mapping), path
+        current = current[key]
+    return current
+
+
+def test_published_memory_routes_name_every_argument_the_server_requires() -> None:
+    """A published route MUST be complete against the tool it names.
+
+    The rule, not a literal: every argument the registered MCP tool marks
+    required has to appear in the route string the surface hands a caller.
+    ``get_memory_projection_page(cursor=...)`` satisfied no such rule -- it
+    omitted ``root``, which the server requires, so a caller who followed the
+    instruction verbatim was refused at validation. Re-deriving the required
+    set from the server's own schema is what keeps the two contracts from
+    drifting apart again.
+    """
+    pytest.importorskip("mcp.server.fastmcp")
+    server = build_mcp_server(history_limit=2)
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+    reachability = passive_drill_down_reachability()
+
+    incomplete: dict[str, list[str]] = {}
+    checked = 0
+    for entry in _MEMORY_DRILL_DOWN_ENTRIES:
+        for key in ("route", "continuation_route"):
+            route = reachability[entry][key]
+            assert isinstance(route, str) and route, (entry, key)
+            tool_name, named = _parse_published_route(route)
+            assert tool_name in tools, route
+            required = frozenset(
+                cast("list[str]", tools[tool_name].inputSchema["required"])
+            )
+            checked += 1
+            missing = sorted(required - named)
+            if missing:
+                incomplete[f"{entry}.{key}"] = missing
+
+    assert checked == 6, checked
+    assert incomplete == {}
+
+
+def test_published_memory_tail_route_is_callable_exactly_as_published(
+    tmp_path: Path,
+) -> None:
+    """The effected behaviour: a caller who obeys the response MUST be served.
+
+    Not "the parameter is accepted" -- the whole published loop, over the real
+    MCP tool surface: retrieve, read the continuation the response advertises,
+    take the cursor from the ``cursor_path`` it names, call the tool named by
+    ``route`` with exactly the arguments that route names, and get a page.
+    """
+    pytest.importorskip("mcp.server.fastmcp")
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        for index in range(4):
+            record_candidate(
+                store,
+                project=project,
+                record_type="change_rationale",
+                subject_path="pkg/mod.py",
+                max_candidates=20,
+                statement=f"published route record {index}",
+            )
+        root_str = str(root.resolve())
+        server = build_mcp_server(history_limit=2)
+        retrieved = _structured_result(
+            asyncio.run(
+                server.call_tool(
+                    "get_relevant_memory",
+                    {"root": root_str, "scope": ["pkg/mod.py"], "max_records": 1},
+                )
+            )
+        )
+        lanes = cast(
+            "list[dict[str, object]]",
+            _dotted(retrieved, "_continuation.lanes"),
+        )
+        lane = next(lane for lane in lanes if lane["lane"] == "records")
+        tool_name, named = _parse_published_route(str(lane["route"]))
+        cursor = _dotted(retrieved, str(lane["cursor_path"]))
+        available: dict[str, object] = {"root": root_str, "cursor": cursor}
+        assert named <= set(available), named
+        page = _structured_result(
+            asyncio.run(
+                server.call_tool(tool_name, {key: available[key] for key in named})
+            )
+        )
+
+    assert lane["tool"] == tool_name
+    assert page["status"] == "ok"
+    assert page["lane"] == "records"
+    assert cast("list[object]", page["items"])
+
+
+def test_query_engineering_memory_tail_route_is_callable_exactly_as_published(
+    tmp_path: Path,
+) -> None:
+    """The capped-tail route MUST be executable as published, and reach the tail.
+
+    Same law as the cursor route next door: the surface may only name a way
+    forward it can honour. Here the way forward is a wider re-query, so the
+    pin drives it -- parse the published route, check it against the tool's
+    own required arguments, execute it, and see the record the capped answer
+    withheld.
+    """
+    pytest.importorskip("mcp.server.fastmcp")
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        for index in range(4):
+            record_candidate(
+                store,
+                project=project,
+                record_type="change_rationale",
+                subject_path="pkg/mod.py",
+                max_candidates=20,
+                statement=f"published requery record {index}",
+            )
+        root_str = str(root.resolve())
+        server = build_mcp_server(history_limit=2)
+        tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+        capped = _structured_result(
+            asyncio.run(
+                server.call_tool(
+                    "query_engineering_memory",
+                    {
+                        "root": root_str,
+                        "mode": "for_path",
+                        "path": "pkg/mod.py",
+                        "max_results": 1,
+                    },
+                )
+            )
+        )
+        lanes = cast("list[dict[str, object]]", _dotted(capped, "_continuation.lanes"))
+        tool_name, named = _parse_published_route(str(lanes[0]["route"]))
+        required = frozenset(
+            cast("list[str]", tools[tool_name].inputSchema["required"])
+        )
+        widened = _structured_result(
+            asyncio.run(
+                server.call_tool(
+                    tool_name,
+                    {
+                        "root": root_str,
+                        "mode": "for_path",
+                        "path": "pkg/mod.py",
+                        "max_results": 20,
+                    },
+                )
+            )
+        )
+
+    capped_count = _dotted(capped, "payload.record_count")
+    widened_count = _dotted(widened, "payload.record_count")
+
+    assert tool_name == "query_engineering_memory"
+    assert required <= named, sorted(required - named)
+    assert capped_count == 1
+    assert isinstance(widened_count, int)
+    assert widened_count > 1
+    assert _dotted(widened, "payload.truncated") is False
+
+
+def test_mcp_query_engineering_memory_envelope_attributes_the_trajectory_lane(
+    tmp_path: Path,
+) -> None:
+    """Lane attribution MUST follow the answer, not a default.
+
+    ``records`` is the lane most modes cap, so a selector that always said
+    ``records`` would look right on every record-shaped mode. Reachability is
+    established in two measured halves rather than asserted: the live router
+    is asked which count key a trajectory mode publishes beside ``truncated``,
+    and the selector is then given exactly that shape with the flag raised.
+    Neither half is a reading of the source.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        router_shape = service.query_engineering_memory(
+            root=str(root.resolve()),
+            mode="trajectory_search",
+            query="no trajectory answers this",
+            max_results=1,
+        )
+
+    body = _nested_dict(router_shape, "payload")
+    capped = dict(body)
+    capped["truncated"] = True
+    omitted = mcp_memory_mixin_mod._memory_query_omitted(
+        capped,
+        mode="trajectory_search",
+        max_results=1,
+    )
+    lane = cast("dict[str, object]", omitted["trajectories"])
+
+    assert "trajectory_count" in body
+    assert "record_count" not in body
+    assert body["truncated"] is False
+    assert _nested_dict(router_shape, "context_governance")["truncated"] is False
+    assert set(omitted) == {"trajectories"}
+    assert lane["shown"] == body["trajectory_count"]
+    assert lane["reason"] == "max_results_cap"

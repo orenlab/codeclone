@@ -55,6 +55,7 @@ from . import _session_helpers as _helpers
 from ._context_governance import (
     DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
     MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND,
+    attach_memory_query_context_governance,
     attach_memory_retrieval_context_governance,
     attach_passive_context_governance,
     passive_drill_down_reachability,
@@ -280,7 +281,11 @@ class _MCPSessionMemoryMixin:
                 store=store,
                 project_id=project.id,
             )
-            return payload
+            return _attach_memory_query_context(
+                payload,
+                mode=mode,
+                max_results=max_results,
+            )
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
@@ -885,6 +890,79 @@ class _MCPSessionMemoryMixin:
     @staticmethod
     def _memory_continuation_request_key(project_id: str, digest_value: str) -> str:
         return f"{project_id}:{digest_value}"
+
+
+#: The count key each capped lane publishes beside its own ``truncated`` flag.
+#: The router names exactly one of these per answer, which is what lets the
+#: envelope attribute the cap to a lane without a fallback nobody can reach.
+_MEMORY_QUERY_LANE_BY_COUNT_KEY: Final[tuple[tuple[str, str], ...]] = (
+    ("record_count", "records"),
+    ("trajectory_count", "trajectories"),
+)
+_MEMORY_QUERY_OMISSION_REASON: Final = "max_results_cap"
+
+
+def _attach_memory_query_context(
+    payload: Mapping[str, object],
+    *,
+    mode: str,
+    max_results: int,
+) -> dict[str, object]:
+    """Publish the governance envelope for one ``query_engineering_memory`` answer."""
+
+    body = payload.get("payload")
+    detail_level = payload.get("detail_level")
+    return attach_memory_query_context_governance(
+        payload,
+        mode=mode,
+        max_results=max_results,
+        detail_level=detail_level if isinstance(detail_level, str) else None,
+        evidence_omitted=_memory_query_omitted(
+            body if is_record_mapping(body) else None,
+            mode=mode,
+            max_results=max_results,
+        ),
+    )
+
+
+def _memory_query_omitted(
+    body: Mapping[str, object] | None,
+    *,
+    mode: str,
+    max_results: int,
+) -> dict[str, object]:
+    """Name the capped lane, its shown count, and the route to the rest.
+
+    The router fetches one item past the cap to learn that a tail exists; it
+    never counts that tail. So the omission record states ``shown`` and stops:
+    publishing a ``total`` here would be arithmetic nobody performed. The only
+    route out of this surface is a wider re-query -- it mints no cursor, and
+    naming a continuation cursor it cannot honour is the defect next door.
+
+    Lanes are selected, never defaulted: an answer carrying no count key for a
+    lane simply does not produce one, so there is no fallback branch waiting
+    for an input the router cannot send it.
+    """
+
+    if body is None or body.get("truncated") is not True:
+        return {}
+    return {
+        lane: {
+            "evaluation": "unmeasured",
+            "shown": body[count_key],
+            "truncated": True,
+            "reason": _MEMORY_QUERY_OMISSION_REASON,
+            "drill_down": {
+                "tool": "query_engineering_memory",
+                "route": (
+                    "query_engineering_memory(root=..., "
+                    f"mode={mode!r}, max_results=<greater than {max_results}>)"
+                ),
+            },
+        }
+        for count_key, lane in _MEMORY_QUERY_LANE_BY_COUNT_KEY
+        if isinstance(body.get(count_key), int)
+    }
 
 
 def _attach_budgeted_memory_retrieval_context(

@@ -52,6 +52,7 @@ MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = "memory_retrieval_projection_
 MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND: Final = (
     "memory_continuation_projection_v1"
 )
+MEMORY_QUERY_RESPONSE_PROJECTION_KIND: Final = "memory_query_projection_v1"
 PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = (
     "patch_trail_retrieval_projection_v1"
 )
@@ -98,30 +99,40 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "omitted_evidence_continuation": True,
 }
 
+#: Every route here is published to a caller as an instruction, so it names
+#: every argument the registered MCP tool marks required -- ``root`` included.
+#: A route that named only the cursor was refused by the server's own argument
+#: validation before it ever reached the memory store, which is the surface
+#: telling a caller "continue here" and then declining. The rule is pinned
+#: against the live tool schema, not against these literals.
 _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
     "memory_record": {
         "object_lookup": "available",
-        "route": "query_engineering_memory(mode='get', record_id=...)",
+        "route": "query_engineering_memory(root=..., mode='get', record_id=...)",
         "continuation": "available",
-        "continuation_route": "get_memory_projection_page(cursor=...)",
+        "continuation_route": "get_memory_projection_page(root=..., cursor=...)",
         "snapshot_identity": (
             "memory continuation cursor + lane identity digest + request digest"
         ),
     },
     "trajectory": {
         "object_lookup": "available",
-        "route": "query_engineering_memory(mode='trajectory_get', record_id=...)",
+        "route": (
+            "query_engineering_memory(root=..., mode='trajectory_get', record_id=...)"
+        ),
         "continuation": "available",
-        "continuation_route": "get_memory_projection_page(cursor=...)",
+        "continuation_route": "get_memory_projection_page(root=..., cursor=...)",
         "snapshot_identity": (
             "memory continuation cursor + lane identity digest + request digest"
         ),
     },
     "experience": {
         "object_lookup": "available",
-        "route": "query_engineering_memory(mode='experience_get', record_id=...)",
+        "route": (
+            "query_engineering_memory(root=..., mode='experience_get', record_id=...)"
+        ),
         "continuation": "available",
-        "continuation_route": "get_memory_projection_page(cursor=...)",
+        "continuation_route": "get_memory_projection_page(root=..., cursor=...)",
         "snapshot_identity": (
             "memory continuation cursor + lane identity digest + request digest"
         ),
@@ -251,6 +262,45 @@ def attach_memory_retrieval_context_governance(
         enforcement=(
             _MEMORY_RESPONSE_ENFORCEMENT if enforce_budget else _OBSERVE_ENFORCEMENT
         ),
+        evidence_omitted=evidence_omitted,
+    )
+
+
+def attach_memory_query_context_governance(
+    payload: Mapping[str, object],
+    *,
+    mode: str,
+    max_results: int,
+    detail_level: str | None = None,
+    evidence_omitted: Mapping[str, object] | None = None,
+    limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+) -> dict[str, object]:
+    """Attach response governance for ``query_engineering_memory`` responses.
+
+    The router observes its budget rather than enforcing one: it caps lists by
+    the caller's own ``max_results`` and mints no cursor, so claiming an
+    enforced response budget here would be a claim this surface does not
+    deliver. What it does owe -- the contract version, the estimator, the
+    limit it was measured against, and a named omission with a route when a
+    list was capped -- is the same envelope its siblings publish.
+    """
+
+    response: dict[str, object] = {
+        "tool": "query_engineering_memory",
+        "budget_scope": "whole_response",
+        "evidence_policy": "observed_with_max_results_cap",
+        "mode": mode,
+        "max_results": max_results,
+    }
+    if detail_level is not None:
+        response["detail_level"] = detail_level
+    return _attach_context_governance(
+        payload,
+        limit=limit,
+        projection_kind=MEMORY_QUERY_RESPONSE_PROJECTION_KIND,
+        response=response,
+        mode="observe",
+        enforcement=_OBSERVE_ENFORCEMENT,
         evidence_omitted=evidence_omitted,
     )
 
@@ -592,6 +642,7 @@ __all__ = [
     "FINISH_RESPONSE_PROJECTION_KIND",
     "IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT",
     "IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND",
+    "MEMORY_QUERY_RESPONSE_PROJECTION_KIND",
     "MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND",
     "PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND",
     "RESPONSE_BUDGET_NOT_ENFORCED_REASON",
@@ -599,6 +650,7 @@ __all__ = [
     "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",
     "attach_implementation_context_governance",
+    "attach_memory_query_context_governance",
     "attach_memory_retrieval_context_governance",
     "attach_passive_context_governance",
     "attach_start_context_governance",
