@@ -1610,6 +1610,64 @@ class GitContentSnapshot:
         return None
 
 
+# --- Nested worktree topology (codeclone.paths.worktree_topology) ----------
+# Read from the filesystem alone, never from a git subprocess: these facts
+# decide what a run SAYS about its own contents, and a missing git executable
+# must not change that answer. Behaviour -- the walk, the predicate and the
+# warning wording -- lives with the module named above; only the record shapes
+# are here, on the same footing as the GitContentSnapshot family above.
+
+
+#: Why one checkout's git topology could not be read. Closed vocabulary: an
+#: unreadable or malformed marker is a typed absence of an answer, never a
+#: silent verdict in either direction.
+UnresolvedGitTopologyReason = Literal[
+    "git_marker_unreadable",
+    "git_marker_malformed",
+    "git_dir_missing",
+    "common_dir_unreadable",
+]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitCheckoutTopology:
+    """Where one directory's git metadata lives."""
+
+    checkout_root: Path
+    git_dir: Path
+    common_git_dir: Path
+    #: True when ``.git`` was a file -- a linked worktree or a submodule.
+    linked: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UnresolvedGitTopology:
+    """One checkout whose git topology could not be read, and why."""
+
+    checkout_root: Path
+    reason: UnresolvedGitTopologyReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NestedWorktree:
+    """A linked worktree of the analysed repository, inside the analysis root."""
+
+    path: Path
+    #: POSIX path relative to the analysis root: what the user has to move.
+    relative_path: str
+    #: The shared common git directory -- the proof this is the same repo.
+    common_git_dir: Path
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NestedWorktreeReport:
+    """Everything one topology scan of an analysis root established."""
+
+    root_topology_unresolved: UnresolvedGitTopology | None
+    nested: tuple[NestedWorktree, ...]
+    unresolved: tuple[UnresolvedGitTopology, ...]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ContentIdentityVerdict:
     hit: bool

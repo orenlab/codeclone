@@ -42,6 +42,7 @@ from ..models import (
 from ..observability import SpanHandle, span
 from ..paths.git_snapshot import collect_git_content_snapshot
 from ..paths.module_identity.inventory import build_module_registry
+from ..paths.worktree_topology import nested_worktree_warnings
 from ._types import (
     BootstrapResult,
     DiscoveryResult,
@@ -305,6 +306,13 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         files_found += 1
         files_skipped += 1
         skipped_warnings.append(f"{unreadable_path}: unreadable path, not scanned")
+    # A git worktree of this same repository nested inside the root is the
+    # opposite absence: nothing was lost, a whole second copy of the project
+    # was gained, and the run said nothing. It rides the same warning channel
+    # both surfaces already read -- the CLI prints it, the MCP run summary
+    # carries it -- and touches no counter, because phase 1 changes what the
+    # run SAYS and not one file of what it analysed.
+    skipped_warnings.extend(nested_worktree_warnings(boot.root))
     blob_hits = digest_hits = digest_misses = 0
     dirty_fallbacks = git_unavailable_fallbacks = 0
     index_ambiguous_fallbacks = racy_fallbacks = untracked_fallbacks = 0
