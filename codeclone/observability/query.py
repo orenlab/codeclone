@@ -424,6 +424,29 @@ def _span_row(span: SpanView) -> dict[str, object]:
     }
 
 
+def _span_truncation(op: OperationView) -> dict[str, object]:
+    """State, for one operation, what the span budget kept and what it spent."""
+    dropped = op.spans_dropped
+    if dropped is None:
+        return {
+            "status": "unknown",
+            "truncated": None,
+            "reason": "operation row predates span retention accounting",
+        }
+    retained = len(op.spans)
+    return {
+        "status": "known",
+        "truncated": dropped > 0,
+        "spans_retained": retained,
+        "spans_dropped": dropped,
+        "spans_observed": retained + dropped,
+        # A truncated operation retained exactly its cap, so this is the cap it
+        # ran under — read off the row, never off this reader's configuration.
+        "effective_cap": retained if dropped else None,
+        "retention_rule": op.span_retention_rule,
+    }
+
+
 def _iter_operations(ops: tuple[OperationView, ...]) -> Iterator[OperationView]:
     for op in ops:
         yield op
@@ -457,6 +480,7 @@ def _operation_detail_body(
         "cpu_user_ms": _round1(op.cpu_user_ms),
         "cpu_system_ms": _round1(op.cpu_system_ms),
         "span_count": len(op.spans),
+        "span_truncation": _span_truncation(op),
         "spans": [_span_row(span) for span in op.spans[:cap]],
     }
 
@@ -602,6 +626,41 @@ def _apply_plane_coverage(
         )
 
 
+def _apply_span_retention(
+    response: dict[str, object], *, trace: TraceView, warnings: list[str]
+) -> None:
+    """Publish what the per-operation span budget discarded in this window.
+
+    Every other bounded surface in this project reports its omissions; this one
+    used to drop silently, which made every aggregate above it a claim about
+    the spans that survived, worded as a claim about the run.
+    """
+    response["span_retention"] = {
+        "truncated": trace.span_retention_truncated,
+        "operations_truncated": trace.span_retention_truncated_operations,
+        "operations_unknown": trace.span_retention_unknown_operations,
+        "spans_retained": trace.spans_retained,
+        "spans_dropped": trace.spans_dropped,
+        "spans_observed": trace.spans_observed,
+        "effective_cap": trace.span_retention_cap,
+        "retention_rule": trace.span_retention_rule,
+    }
+    if trace.span_retention_truncated:
+        warnings.append(
+            f"{trace.span_retention_truncated_operations} operation(s) exceeded "
+            f"the per-operation span budget: {trace.spans_dropped} of "
+            f"{trace.spans_observed} spans were dropped by rule "
+            f"{trace.span_retention_rule!r}; every aggregate in this window "
+            "covers the retained spans only"
+        )
+    if trace.span_retention_unknown_operations:
+        warnings.append(
+            f"{trace.span_retention_unknown_operations} operation(s) predate "
+            "span retention accounting; whether their spans were truncated is "
+            "unknown, not none"
+        )
+
+
 def _aggregate_status(agg: AggregatesView) -> str:
     return "ok" if agg.operation_count else "empty"
 
@@ -725,6 +784,7 @@ def query_platform_observability(
         conn.close()
 
     _apply_plane_coverage(response, trace=trace, warnings=warnings)
+    _apply_span_retention(response, trace=trace, warnings=warnings)
     response["mixed_semantics"] = counter_semantics.mixed_semantics
     response["counter_semantics"] = {
         "stored_version": counter_semantics.stored_version,

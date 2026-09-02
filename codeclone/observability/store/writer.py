@@ -27,9 +27,11 @@ _OPERATION_SQL = (
     "operation_id, parent_operation_id, correlation_id, surface, name, "
     "started_at_utc, duration_ms, status, plane, error_kind, session_id, "
     "repo_root_digest, request_bytes, response_bytes, request_tokens, "
-    "response_tokens, rss_mb, rss_delta_mb, peak_rss_mb, peak_rss_delta_mb, "
+    "response_tokens, spans_dropped, span_retention_rule, "
+    "rss_mb, rss_delta_mb, peak_rss_mb, peak_rss_delta_mb, "
     "cpu_user_ms, cpu_system_ms, open_fds, thread_count) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+    "?, ?, ?)"
 )
 
 _SPAN_SQL = (
@@ -77,6 +79,8 @@ def _operation_row(operation: OperationRecord) -> tuple[object, ...]:
         operation.response_bytes,
         operation.request_tokens,
         operation.response_tokens,
+        operation.spans_dropped,
+        operation.span_retention_rule,
         *_profile_cols(operation.profile),
     )
 

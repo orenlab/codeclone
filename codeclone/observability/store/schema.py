@@ -25,6 +25,8 @@ _SCHEMA_META_KEY = "schema_version"
 _COUNTER_VERSION_META_KEY = "db_counter_version"
 _LEGACY_COUNTER_VERSION = "legacy"
 _PLANE_COLUMN = "plane"
+_SPANS_DROPPED_COLUMN = "spans_dropped"
+_SPAN_RETENTION_RULE_COLUMN = "span_retention_rule"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS platform_meta (
@@ -49,6 +51,8 @@ CREATE TABLE IF NOT EXISTS platform_operations (
     response_bytes INTEGER,
     request_tokens INTEGER,
     response_tokens INTEGER,
+    spans_dropped INTEGER,
+    span_retention_rule TEXT,
     rss_mb REAL,
     rss_delta_mb REAL,
     peak_rss_mb REAL,
@@ -138,6 +142,18 @@ def _ensure_operation_columns(conn: sqlite3.Connection) -> None:
         # rather than in _SCHEMA because CREATE TABLE IF NOT EXISTS leaves an
         # older table untouched — the index must not exist before its column.
         conn.execute(f"ALTER TABLE platform_operations ADD COLUMN {_PLANE_COLUMN} TEXT")
+    # Same additive shape, same reason: an older row cannot say whether its
+    # spans were truncated, and NULL is how it says so.
+    if _SPANS_DROPPED_COLUMN not in existing:
+        conn.execute(
+            "ALTER TABLE platform_operations "
+            f"ADD COLUMN {_SPANS_DROPPED_COLUMN} INTEGER"
+        )
+    if _SPAN_RETENTION_RULE_COLUMN not in existing:
+        conn.execute(
+            "ALTER TABLE platform_operations "
+            f"ADD COLUMN {_SPAN_RETENTION_RULE_COLUMN} TEXT"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_platform_operations_plane "
         f"ON platform_operations ({_PLANE_COLUMN}, started_at_utc)"

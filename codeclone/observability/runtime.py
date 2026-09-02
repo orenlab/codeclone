@@ -23,10 +23,9 @@ import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from ..config.observability import resolve_observability_config
 from ..models import DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR, ObservabilityConfig
@@ -47,6 +46,30 @@ if TYPE_CHECKING:
 # Bound how many distinct SQL shapes a span persists; the diagnostic value is in
 # the few high-count statements, not the long tail.
 _DB_FINGERPRINT_TOP_N = 8
+
+# Which spans the per-operation budget spends when it cannot keep them all.
+#
+# Spans are appended in CLOSE order, so a keep-first cap discards the outermost
+# spans first -- the worst possible choice for a diagnostic store, because the
+# spans that close last are the ones that summarise the run. Measured on a warm
+# 578-file CLI run: 606 spans closed, 579 of them one repeated name
+# (cache.backend.load_generation), the other 27 names appeared exactly once, and
+# every one of the 16 names closing after index 589 was a phase summary. A cap
+# of 100 kept 89 repetitions of a single name and lost both cache summary spans
+# and every pipeline.* summary.
+#
+# This rule spends a repetition instead: at capacity an arriving span evicts the
+# last retained occurrence of the most repeated retained name, but only while
+# that name is repeated more often than the arriving one -- so a name the
+# operation has never recorded always displaces a duplicate, and a window of
+# entirely distinct names degrades to keep-first rather than churning. Exactly
+# one span is lost per over-cap append either way, so spans_dropped stays an
+# exact count of what the operation observed and could not keep.
+#
+# Persisted per operation next to the count. The rule is a property of the build
+# that wrote the row, not of the build that reads it, so a reader reports what
+# actually ran rather than assuming its own policy applied.
+SPAN_RETENTION_RULE: Final = "protect_distinct_names"
 
 _ENABLED: bool = False
 _RUNTIME: _ActiveRuntime | None = None
@@ -96,16 +119,39 @@ class OperationHandle:
         self._request_tokens: int | None = None
         self._response_tokens: int | None = None
         self._spans: list[SpanRecord] = []
+        self._span_name_counts: dict[str, int] = {}
+        self._spans_dropped = 0
+
+    def _retain(self, record: SpanRecord) -> None:
+        self._spans.append(record)
+        self._span_name_counts[record.name] = (
+            self._span_name_counts.get(record.name, 0) + 1
+        )
 
     def _append_span(self, record: SpanRecord) -> None:
+        """Admit a closed span under SPAN_RETENTION_RULE (see its comment)."""
         if len(self._spans) < self._max_spans_per_operation:
-            self._spans.append(record)
+            self._retain(record)
             return
-        validate_counter_key("spans_dropped")
-        final = self._spans[-1]
-        counters = dict(final.counters)
-        counters["spans_dropped"] = counters.get("spans_dropped", 0) + 1
-        self._spans[-1] = replace(final, counters=counters)
+        # One span is lost on every over-cap append; which one is decided below.
+        self._spans_dropped += 1
+        # Deterministic victim regardless of dict order: (count, name) is a
+        # total order over the retained names.
+        victim_name, victim_count = max(
+            self._span_name_counts.items(), key=lambda item: (item[1], item[0])
+        )
+        if victim_count <= self._span_name_counts.get(record.name, 0) + 1:
+            # No retained name is more repeated than the arriving one, so
+            # evicting would not buy diversity: the arriving span is what goes.
+            return
+        index = max(
+            position
+            for position, span_record in enumerate(self._spans)
+            if span_record.name == victim_name
+        )
+        del self._spans[index]
+        self._span_name_counts[victim_name] = victim_count - 1
+        self._retain(record)
 
     # Wired by the 29.9 MCP registrar (per-tool request/response payload sizes).
     def set_request(
@@ -146,6 +192,10 @@ class OperationHandle:
             response_tokens=self._response_tokens,
             profile=profile,
             spans=tuple(self._spans),
+            spans_dropped=self._spans_dropped,
+            # Named only when it actually acted: an untruncated operation must
+            # not read as though a retention rule chose anything for it.
+            span_retention_rule=(SPAN_RETENTION_RULE if self._spans_dropped else None),
         )
 
 
@@ -624,6 +674,7 @@ def counting_connection_factory() -> type[sqlite3.Connection] | None:
 
 __all__ = [
     "DB_COUNTER_VERSION",
+    "SPAN_RETENTION_RULE",
     "OperationHandle",
     "SpanHandle",
     "bind_root",

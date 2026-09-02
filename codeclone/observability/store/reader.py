@@ -143,6 +143,22 @@ def _optional_float(row: sqlite3.Row, key: str) -> float | None:
     return float(value) if value is not None else None
 
 
+def _optional_int(row: sqlite3.Row, key: str) -> int | None:
+    columns = row.keys()
+    if key not in columns:
+        return None
+    value = row[key]
+    return int(value) if value is not None else None
+
+
+def _optional_str(row: sqlite3.Row, key: str) -> str | None:
+    columns = row.keys()
+    if key not in columns:
+        return None
+    value = row[key]
+    return str(value) if value is not None else None
+
+
 def _span_view(row: sqlite3.Row) -> SpanView:
     # sqlite3.Row membership (`x in row`) tests values, so probe column names via
     # keys() to stay tolerant of stores written before db_fingerprints existed.
@@ -223,6 +239,8 @@ def _operation_view(
         children=children,
         cpu_user_ms=row["cpu_user_ms"],
         cpu_system_ms=row["cpu_system_ms"],
+        spans_dropped=_optional_int(row, "spans_dropped"),
+        span_retention_rule=_optional_str(row, "span_retention_rule"),
     )
 
 
@@ -766,6 +784,28 @@ def _aggregates(
     )
 
 
+def _span_retention(
+    flat: list[OperationView],
+) -> tuple[int, int, int, int, int | None, str | None]:
+    """Window totals for the per-operation span budget, in TraceView order:
+    (retained, dropped, truncated_operations, unknown_operations, cap, rule).
+
+    Derived here rather than in a renderer or in the query slicer so every
+    projection of this fact reads one derivation of it.
+    """
+    truncated = [op for op in flat if (op.spans_dropped or 0) > 0]
+    caps = {len(op.spans) for op in truncated}
+    rules = {op.span_retention_rule for op in truncated if op.span_retention_rule}
+    return (
+        sum(len(op.spans) for op in flat),
+        sum(op.spans_dropped or 0 for op in flat),
+        len(truncated),
+        sum(1 for op in flat if op.spans_dropped is None),
+        next(iter(caps)) if len(caps) == 1 else None,
+        next(iter(rules)) if len(rules) == 1 else None,
+    )
+
+
 def _epoch_ms(iso: str) -> float:
     """Parse a store timestamp to epoch milliseconds (0.0 when absent/unparsable)."""
     if not iso:
@@ -890,6 +930,14 @@ def build_trace_view(
     starts = [str(row["started_at_utc"]) for row in rows]
     operation_tree = _build_forest(rows, spans_by_op)
     plane_counts = _plane_counts(conn, plane_column=plane_column)
+    (
+        spans_retained,
+        spans_dropped,
+        truncated_operations,
+        unknown_retention_operations,
+        retention_cap,
+        retention_rule,
+    ) = _span_retention(flat)
     return TraceView(
         schema_version=PLATFORM_OBSERVABILITY_SCHEMA_VERSION,
         window_started_at_utc=min(starts) if starts else "",
@@ -900,6 +948,12 @@ def build_trace_view(
         observer_plane_operations=plane_counts[1],
         unattributed_plane_operations=plane_counts[2],
         aggregates=_aggregates(flat, spans_by_op),
+        spans_retained=spans_retained,
+        spans_dropped=spans_dropped,
+        span_retention_truncated_operations=truncated_operations,
+        span_retention_unknown_operations=unknown_retention_operations,
+        span_retention_cap=retention_cap,
+        span_retention_rule=retention_rule,
         focus_operation=by_id.get(focus_id) if focus_id is not None else None,
         operation_tree=operation_tree,
         correlated_operations=tuple(flat),

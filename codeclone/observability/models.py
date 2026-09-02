@@ -74,6 +74,13 @@ class OperationRecord:
     response_tokens: int | None = None
     profile: ProfileSample | None = None
     spans: tuple[SpanRecord, ...] = ()
+    # How many spans the per-operation budget discarded, and the rule that
+    # chose them. Truncation is a property of the operation, not of whichever
+    # span happened to be last, so it rides the operation row. ``None`` means a
+    # store written before these fields existed: truncation is unknown there
+    # and must never be reported as "nothing was dropped".
+    spans_dropped: int | None = None
+    span_retention_rule: str | None = None
 
 
 __all__ = ["OperationRecord", "ProfileSample", "SpanRecord"]

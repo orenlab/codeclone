@@ -835,3 +835,74 @@ def test_query_names_a_downgraded_context_unit_estimator(
         "applies_to": "reader_process_configuration",
     }
     assert any("tiktoken" in warning for warning in _texts(out["warnings"]))
+
+
+def _emit_capped_operation(root: Path, *, cap: int, repeats: int) -> None:
+    """Drive the real runtime so the query red is a reader observation, not a
+    hand-written row: the store is written exactly as a capped run writes it."""
+    from codeclone.observability import bootstrap, operation, shutdown, span
+
+    bootstrap(ObservabilityConfig(enabled=True, max_spans_per_operation=cap), root=root)
+    try:
+        with operation(name="cli.analyze", surface="cli"):
+            for _ in range(repeats):
+                with span(name="cache.backend.load_generation"):
+                    pass
+            with span(name="cache.content_identity"):
+                pass
+    finally:
+        shutdown()
+
+
+def test_summary_reports_that_the_span_cap_truncated_the_operation(
+    tmp_path: Path,
+) -> None:
+    _emit_capped_operation(tmp_path, cap=3, repeats=8)
+
+    response = query_platform_observability(root=tmp_path, section="summary")
+
+    retention = cast("dict[str, object]", response["span_retention"])
+    assert retention["truncated"] is True
+    assert retention["operations_truncated"] == 1
+    assert retention["spans_dropped"] == 6
+    assert retention["spans_retained"] == 3
+    assert retention["spans_observed"] == 9
+    assert retention["effective_cap"] == 3
+    assert retention["retention_rule"] == "protect_distinct_names"
+    assert any(
+        "span" in text and "dropped" in text for text in _texts(response["warnings"])
+    )
+
+
+def test_summary_reports_no_truncation_for_an_operation_inside_the_cap(
+    tmp_path: Path,
+) -> None:
+    _emit_capped_operation(tmp_path, cap=50, repeats=8)
+
+    response = query_platform_observability(root=tmp_path, section="summary")
+
+    retention = cast("dict[str, object]", response["span_retention"])
+    assert retention["truncated"] is False
+    assert retention["operations_truncated"] == 0
+    assert retention["spans_dropped"] == 0
+    assert retention["retention_rule"] is None
+    assert not any("dropped" in text for text in _texts(response.get("warnings", [])))
+
+
+def test_operation_detail_reports_its_own_span_truncation(tmp_path: Path) -> None:
+    _emit_capped_operation(tmp_path, cap=3, repeats=8)
+    summary = query_platform_observability(root=tmp_path, section="slow_operations")
+    operation_id = _rows(summary["rows"])[0]["operation_id"]
+
+    response = query_platform_observability(
+        root=tmp_path,
+        section="operation_detail",
+        operation_id=cast("str", operation_id),
+    )
+
+    assert response["span_count"] == 3
+    truncation = cast("dict[str, object]", response["span_truncation"])
+    assert truncation["truncated"] is True
+    assert truncation["spans_dropped"] == 6
+    assert truncation["spans_observed"] == 9
+    assert truncation["retention_rule"] == "protect_distinct_names"

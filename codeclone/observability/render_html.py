@@ -491,10 +491,19 @@ def _header(trace: TraceView) -> str:
         else "no operations recorded"
     )
     digest = f" · repo {_esc(trace.repo_root_digest)}" if trace.repo_root_digest else ""
+    # The cockpit reads the same derived fact as the JSON slicer; it does not
+    # re-derive truncation from the spans it happens to have been given.
+    dropped = (
+        f" · <b>{trace.spans_dropped}</b> of {trace.spans_observed} spans "
+        f"dropped by the per-operation budget "
+        f"({_esc(str(trace.span_retention_rule))}, cap {trace.span_retention_cap})"
+        if trace.span_retention_truncated
+        else ""
+    )
     return (
         f'<div class="head">{_LOGO}<h1>CodeClone Platform Observability</h1></div>'
         f'<p class="sub"><b>{agg.operation_count}</b> operations · '
-        f"{window}{digest}</p>"
+        f"{window}{digest}{dropped}</p>"
     )
 
 

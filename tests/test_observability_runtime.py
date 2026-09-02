@@ -205,33 +205,37 @@ def test_runtime_optional_payload_root_and_empty_sql_edges(tmp_path: Path) -> No
     assert active._conn is None
 
 
-def test_span_cap_records_dropped_count_on_final_retained_span(
+def test_span_cap_does_not_hang_the_drop_count_on_an_unrelated_span(
     tmp_path: Path,
 ) -> None:
+    """Truncation is a fact about the operation, so no span may carry it.
+
+    It used to ride the counters of whichever span happened to be retained
+    last — a counter whose subject was not its span, the same shape of hole as
+    the cache lane totals — and it sat behind a detail cap that no default
+    response reached.
+    """
     bootstrap(
         ObservabilityConfig(enabled=True, max_spans_per_operation=2),
         root=tmp_path,
     )
     with operation(name="capped", surface="cli"):
-        with span(name="pipeline.discover"):
-            pass
-        with span(name="pipeline.process"):
-            pass
-        with span(name="pipeline.analyze"):
-            pass
+        for stage in ("pipeline.discover", "pipeline.process", "pipeline.analyze"):
+            with span(name=stage):
+                pass
     shutdown()
 
     conn = open_observability_store(observability_store_path(tmp_path))
     try:
-        rows = conn.execute(
-            "SELECT name, counters_json FROM platform_spans "
-            "ORDER BY started_at_utc, span_id"
-        ).fetchall()
+        counters = [
+            orjson.loads(row[0] or b"{}")
+            for row in conn.execute("SELECT counters_json FROM platform_spans")
+        ]
     finally:
         conn.close()
-    assert len(rows) == 2
-    dropped = sum(orjson.loads(row[1] or b"{}").get("spans_dropped", 0) for row in rows)
-    assert dropped == 1
+    assert len(counters) == 2
+    assert all("spans_dropped" not in counter for counter in counters)
+    assert _operation_retention(tmp_path)[0] == 1
 
 
 def test_process_operation_write_cap_is_enforced(tmp_path: Path) -> None:
@@ -282,3 +286,108 @@ def test_bootstrap_runs_retention_gc(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert count == 0
+
+
+def _retained_span_names(root: Path) -> list[str]:
+    conn = open_observability_store(observability_store_path(root))
+    try:
+        return [
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM platform_spans ORDER BY rowid"
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _operation_retention(root: Path) -> tuple[object, object]:
+    conn = open_observability_store(observability_store_path(root))
+    try:
+        row = conn.execute(
+            "SELECT spans_dropped, span_retention_rule FROM platform_operations"
+        ).fetchone()
+    finally:
+        conn.close()
+    return (row[0], row[1])
+
+
+def test_span_cap_keeps_a_first_of_its_kind_span_over_a_repeated_one(
+    tmp_path: Path,
+) -> None:
+    """A summary span closes last, so a keep-first cap loses it by construction.
+
+    Measured on a warm 578-file CLI run: 606 spans, 579 of them one repeated
+    name, and every pipeline summary span closes after index 589. The retention
+    rule must spend a repetition rather than a name it has never seen.
+    """
+    bootstrap(
+        ObservabilityConfig(enabled=True, max_spans_per_operation=3),
+        root=tmp_path,
+    )
+    with operation(name="cli.analyze", surface="cli"):
+        for _ in range(3):
+            with span(name="cache.backend.load_generation"):
+                pass
+        with span(name="cache.content_identity"):
+            pass
+    shutdown()
+
+    names = _retained_span_names(tmp_path)
+    assert len(names) == 3
+    assert "cache.content_identity" in names
+    assert names.count("cache.backend.load_generation") == 2
+
+
+def test_span_cap_drops_the_incoming_span_when_no_retained_name_repeats(
+    tmp_path: Path,
+) -> None:
+    """The other branch: with nothing repeated there is no cheaper victim, so
+    the incoming span is what goes — and it is still counted as dropped."""
+    bootstrap(
+        ObservabilityConfig(enabled=True, max_spans_per_operation=2),
+        root=tmp_path,
+    )
+    with operation(name="cli.analyze", surface="cli"):
+        with span(name="pipeline.discover"):
+            pass
+        with span(name="pipeline.process"):
+            pass
+        with span(name="pipeline.report"):
+            pass
+    shutdown()
+
+    assert _retained_span_names(tmp_path) == ["pipeline.discover", "pipeline.process"]
+    assert _operation_retention(tmp_path) == (1, "protect_distinct_names")
+
+
+def test_truncated_operation_records_dropped_count_and_retention_rule(
+    tmp_path: Path,
+) -> None:
+    bootstrap(
+        ObservabilityConfig(enabled=True, max_spans_per_operation=2),
+        root=tmp_path,
+    )
+    with operation(name="cli.analyze", surface="cli"):
+        for _ in range(5):
+            with span(name="cache.backend.load_generation"):
+                pass
+    shutdown()
+
+    assert _operation_retention(tmp_path) == (3, "protect_distinct_names")
+
+
+def test_untruncated_operation_records_zero_dropped_and_names_no_rule(
+    tmp_path: Path,
+) -> None:
+    """Opposite boundary: an operation inside the cap must not claim a rule
+    acted on it, and must say zero rather than leave truncation unknowable."""
+    bootstrap(
+        ObservabilityConfig(enabled=True, max_spans_per_operation=8),
+        root=tmp_path,
+    )
+    with operation(name="cli.analyze", surface="cli"), span(name="pipeline.discover"):
+        pass
+    shutdown()
+
+    assert _operation_retention(tmp_path) == (0, None)

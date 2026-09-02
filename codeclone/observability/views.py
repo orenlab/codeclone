@@ -87,6 +87,11 @@ class OperationView:
     children: tuple[OperationView, ...] = ()
     cpu_user_ms: float | None = None
     cpu_system_ms: float | None = None
+    # None when the row predates span-retention accounting — truncation
+    # unknown, never read as "nothing was dropped". ``span_retention_rule`` is
+    # set only on an operation a rule actually acted on.
+    spans_dropped: int | None = None
+    span_retention_rule: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,11 +270,43 @@ class TraceView:
     runtime_plane_operations: int = 0
     observer_plane_operations: int = 0
     unattributed_plane_operations: int = 0
+    # What the per-operation span budget spent across this window.
+    #
+    # A bounded buffer that discards without saying so makes every aggregate
+    # above it a statement about the spans that survived, worded as a statement
+    # about the run. These are that omission, carried beside the numbers it
+    # bounds. Flat fields rather than a nested view on purpose:
+    # codeclone.observability is not a model store and the Phase 39S boundary
+    # allowlist is shrink-only.
+    #
+    # ``span_retention_cap`` is derived, never configured: a truncated
+    # operation retained exactly ``max_spans_per_operation`` spans, so its
+    # retained count IS the cap the writing process ran under. None when the
+    # window holds no truncated operation, or when truncated operations
+    # disagree — the reader never substitutes its own configuration for the
+    # writer's. ``span_retention_unknown_operations`` counts rows written
+    # before the accounting existed: unknown, not "nothing dropped".
+    spans_retained: int = 0
+    spans_dropped: int = 0
+    span_retention_truncated_operations: int = 0
+    span_retention_unknown_operations: int = 0
+    span_retention_cap: int | None = None
+    span_retention_rule: str | None = None
     repo_root_digest: str | None = None
     focus_operation: OperationView | None = None
     operation_tree: tuple[OperationView, ...] = ()
     correlated_operations: tuple[OperationView, ...] = ()
     waterfall: tuple[WaterfallGroup, ...] = ()
+
+    @property
+    def span_retention_truncated(self) -> bool:
+        """Did the span budget discard anything in this window?"""
+        return self.span_retention_truncated_operations > 0
+
+    @property
+    def spans_observed(self) -> int:
+        """Spans the window's operations closed, retained or not."""
+        return self.spans_retained + self.spans_dropped
 
 
 __all__ = [

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from codeclone.contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
@@ -14,6 +15,7 @@ from codeclone.observability.models import (
     ProfileSample,
     SpanRecord,
 )
+from codeclone.observability.query import query_platform_observability
 from codeclone.observability.store.reader import (
     build_trace_view,
     open_observability_store_readonly,
@@ -529,3 +531,122 @@ def test_reader_counter_and_optional_float_helpers() -> None:
         assert _optional_float(numeric, "value") == 1.5
     finally:
         conn.close()
+
+
+_PRE_RETENTION_STORE_SQL = """
+CREATE TABLE platform_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT INTO platform_meta(key, value) VALUES('schema_version', '1.1');
+CREATE TABLE platform_operations (
+    operation_id TEXT PRIMARY KEY,
+    parent_operation_id TEXT,
+    correlation_id TEXT NOT NULL,
+    surface TEXT NOT NULL,
+    name TEXT NOT NULL,
+    started_at_utc TEXT NOT NULL,
+    duration_ms REAL NOT NULL,
+    status TEXT NOT NULL,
+    plane TEXT,
+    error_kind TEXT,
+    session_id TEXT,
+    repo_root_digest TEXT,
+    request_bytes INTEGER,
+    response_bytes INTEGER,
+    request_tokens INTEGER,
+    response_tokens INTEGER,
+    rss_mb REAL,
+    rss_delta_mb REAL,
+    peak_rss_mb REAL,
+    peak_rss_delta_mb REAL,
+    cpu_user_ms REAL,
+    cpu_system_ms REAL,
+    open_fds INTEGER,
+    thread_count INTEGER
+);
+CREATE TABLE platform_spans (
+    span_id TEXT PRIMARY KEY,
+    operation_id TEXT NOT NULL,
+    parent_span_id TEXT,
+    name TEXT NOT NULL,
+    started_at_utc TEXT NOT NULL,
+    duration_ms REAL NOT NULL,
+    status TEXT NOT NULL,
+    reason_kind TEXT,
+    reason TEXT,
+    dedupe_key TEXT,
+    counters_json TEXT,
+    db_fingerprints TEXT,
+    rss_mb REAL,
+    rss_delta_mb REAL,
+    peak_rss_mb REAL,
+    peak_rss_delta_mb REAL,
+    cpu_user_ms REAL,
+    cpu_system_ms REAL,
+    open_fds INTEGER,
+    thread_count INTEGER
+);
+INSERT INTO platform_operations(
+    operation_id, correlation_id, surface, name, started_at_utc,
+    duration_ms, status, plane
+) VALUES('legacy', 'legacy', 'cli', 'cli.analyze',
+         '2026-01-01T00:00:00.000000Z', 5.0, 'ok', 'runtime');
+INSERT INTO platform_spans(
+    span_id, operation_id, name, started_at_utc, duration_ms, status
+) VALUES('legacy-span', 'legacy', 'pipeline.discover',
+         '2026-01-01T00:00:00.000000Z', 1.0, 'ok');
+"""
+
+
+def _seed_pre_retention_store(root: Path) -> None:
+    """A store written before the operation carried its truncation fact.
+
+    Built by hand rather than by migration: open_observability_store would add
+    the columns back, and the point is the shape that has neither.
+    """
+    path = observability_store_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(_PRE_RETENTION_STORE_SQL)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_store_written_before_span_retention_reads_as_unknown(tmp_path: Path) -> None:
+    """The tolerance path is reachable, and it says unknown -- not "none".
+
+    A row with no truncation columns cannot tell whether its spans were cut.
+    Reporting zero there would be the same silence this accounting replaced,
+    just relocated to the reader.
+    """
+    _seed_pre_retention_store(tmp_path)
+
+    conn = open_observability_store_readonly(tmp_path)
+    assert conn is not None
+    try:
+        trace = build_trace_view(conn)
+    finally:
+        conn.close()
+
+    assert trace.span_retention_unknown_operations == 1
+    assert trace.span_retention_truncated is False
+    assert trace.span_retention_truncated_operations == 0
+    assert trace.span_retention_rule is None
+    assert trace.span_retention_cap is None
+    assert trace.spans_dropped == 0
+    assert trace.operation_tree[0].spans_dropped is None
+    assert trace.operation_tree[0].span_retention_rule is None
+
+
+def test_query_warns_that_a_pre_retention_store_cannot_say(tmp_path: Path) -> None:
+    _seed_pre_retention_store(tmp_path)
+
+    response = query_platform_observability(root=tmp_path, section="summary")
+
+    retention = response["span_retention"]
+    assert isinstance(retention, dict)
+    assert retention["operations_unknown"] == 1
+    assert retention["truncated"] is False
+    warnings = response["warnings"]
+    assert isinstance(warnings, list)
+    assert any("unknown, not none" in str(text) for text in warnings)

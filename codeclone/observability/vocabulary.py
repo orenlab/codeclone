@@ -635,6 +635,9 @@ PARKED_COUNTER_KEYS: Final[Mapping[str, str]] = {
     "memory_subjects_mapped": PARK_SUBSYSTEM_ABSENT,
     "memory_subjects_unchanged": PARK_SUBSYSTEM_ABSENT,
     "memory_subjects_unresolved": PARK_SUBSYSTEM_ABSENT,
+    # Truncation is a fact about the operation, not about whichever span was
+    # retained last; platform_operations.spans_dropped records it there.
+    "spans_dropped": PARK_SUPERSEDED,  # platform_operations.spans_dropped
     "memory_unique_record_ids": PARK_SUBSYSTEM_ABSENT,
     "memory_vector_candidates": PARK_SUPERSEDED,  # retrieval.vector_memory_hits
     "memory_vector_fts_overlap": PARK_SUPERSEDED,  # retrieval.fts_vector_overlap
