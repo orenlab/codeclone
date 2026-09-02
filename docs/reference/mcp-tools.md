@@ -118,7 +118,7 @@ Engineering memory governance for agents. Actions: `refresh_from_run`, `record_c
 **`query_engineering_memory(mode, ...)`**
 Mode-based engineering memory inspection router. Modes include `search`, `get`, `for_path`, `for_symbol`, `stale`, `drafts`, `coverage`, `status`, `trajectory_status`, `trajectory_search`, `trajectory_get`, `experience_get`, `trajectory_anomalies`, `trajectory_agents`, and `trajectory_dashboard`. Read-only.
 
-**`get_memory_projection_page(cursor, ...)`**
+**`get_memory_projection_page(root, cursor, ...)`**
 Return an exact page for a `get_relevant_memory` omitted tail using the digest-bound cursor returned in that response. Fails closed if the underlying memory projection no longer matches the cursor identity.
 
 ### Audit and Receipt Tools

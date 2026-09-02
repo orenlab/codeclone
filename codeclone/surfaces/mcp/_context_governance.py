@@ -99,6 +99,16 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "omitted_evidence_continuation": True,
 }
 
+#: The memory lanes' drill-down routes, and only those. Contract 1.1 took this
+#: table out of the per-response payload and gave every other continuation
+#: route to the omission site that mints it -- the blast artifact to
+#: ``_blast_radius``, the receipt and patch trail to ``_session_workflow_mixin``,
+#: the context facet to ``_implementation_context_pages``. The rows for those
+#: four stayed here with no reader, so nothing exercised them and none of them
+#: ever gained the ``root`` the server requires: a published instruction the
+#: server would have refused. They are gone; the lanes below are the ones
+#: ``_memory_lane_continuation_route`` actually serves.
+#:
 #: Every route here is published to a caller as an instruction, so it names
 #: every argument the registered MCP tool marks required -- ``root`` included.
 #: A route that named only the cursor was refused by the server's own argument
@@ -135,35 +145,6 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
         "continuation_route": "get_memory_projection_page(root=..., cursor=...)",
         "snapshot_identity": (
             "memory continuation cursor + lane identity digest + request digest"
-        ),
-    },
-    "structured_receipt": {
-        "object_lookup": "available",
-        "route": "get_review_receipt(run_id=..., receipt_digest=...)",
-        "continuation": "blocked",
-        "current_complete_path": "receipt.receipt",
-    },
-    "patch_trail": {
-        "object_lookup": "available",
-        "route": "get_patch_trail(run_id=..., patch_trail_digest=...)",
-        "continuation": "blocked",
-        "current_complete_path": "patch_trail",
-    },
-    "blast_artifact": {
-        "object_lookup": "available",
-        "route": "get_blast_artifact(run_id=..., blast_artifact_id=...)",
-        "continuation": "blocked",
-        "snapshot_identity": "blast_artifact_id + run_id + projection_digest",
-    },
-    "implementation_context_facet": {
-        "object_lookup": "available",
-        "route": (
-            "get_implementation_context_page(context_projection_digest=..., facet=...)"
-        ),
-        "continuation": "available",
-        "snapshot_identity": (
-            "context_artifact_digest + context_projection_digest "
-            "+ facet_identity_digest"
         ),
     },
 }

@@ -1005,11 +1005,6 @@ def test_mcp_query_engineering_memory_envelope_claims_nothing_when_complete(
 
 
 _ROUTE_PATTERN = re.compile(r"^(?P<tool>[A-Za-z_][A-Za-z0-9_]*)\((?P<args>.*)\)$")
-_MEMORY_DRILL_DOWN_ENTRIES: tuple[str, ...] = (
-    "memory_record",
-    "trajectory",
-    "experience",
-)
 
 
 def _parse_published_route(route: str) -> tuple[str, frozenset[str]]:
@@ -1043,40 +1038,51 @@ def _dotted(payload: Mapping[str, object], path: str) -> object:
     return current
 
 
-def test_published_memory_routes_name_every_argument_the_server_requires() -> None:
-    """A published route MUST be complete against the tool it names.
+def test_published_drill_down_routes_name_exactly_what_the_server_accepts() -> None:
+    """Every published route MUST be complete AND callable against its tool.
 
-    The rule, not a literal: every argument the registered MCP tool marks
-    required has to appear in the route string the surface hands a caller.
-    ``get_memory_projection_page(cursor=...)`` satisfied no such rule -- it
-    omitted ``root``, which the server requires, so a caller who followed the
-    instruction verbatim was refused at validation. Re-deriving the required
-    set from the server's own schema is what keeps the two contracts from
-    drifting apart again.
+    One rule, both boundaries, re-derived from the live ``list_tools()`` schema
+    rather than from these spellings: a route has to name every argument the
+    registered tool marks required -- or the server refuses the very call the
+    surface just instructed -- and it must not name an argument the tool does
+    not accept, which the server refuses for the opposite reason.
+
+    The rule reads every entry the table publishes, not a named subset. Naming
+    the rows kept the rule from noticing the rows nobody had fixed: four routes
+    omitted ``root`` while the three listed here were complete, and a rule that
+    checks three of seven rows is a rule with a hole.
     """
     pytest.importorskip("mcp.server.fastmcp")
     server = build_mcp_server(history_limit=2)
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     reachability = passive_drill_down_reachability()
 
-    incomplete: dict[str, list[str]] = {}
-    checked = 0
-    for entry in _MEMORY_DRILL_DOWN_ENTRIES:
-        for key in ("route", "continuation_route"):
-            route = reachability[entry][key]
-            assert isinstance(route, str) and route, (entry, key)
-            tool_name, named = _parse_published_route(route)
-            assert tool_name in tools, route
-            required = frozenset(
-                cast("list[str]", tools[tool_name].inputSchema["required"])
-            )
-            checked += 1
-            missing = sorted(required - named)
-            if missing:
-                incomplete[f"{entry}.{key}"] = missing
+    published = [
+        (f"{entry}.{key}", route)
+        for entry, body in sorted(reachability.items())
+        for key, route in sorted(body.items())
+        if key.endswith("route") and isinstance(route, str) and route
+    ]
+    assert published, reachability
 
-    assert checked == 6, checked
-    assert incomplete == {}
+    unserved: dict[str, dict[str, list[str]]] = {}
+    demanded: set[str] = set()
+    for label, route in published:
+        tool_name, named = _parse_published_route(route)
+        assert tool_name in tools, route
+        schema = tools[tool_name].inputSchema
+        required = frozenset(cast("list[str]", schema["required"]))
+        accepted = frozenset(cast("dict[str, object]", schema["properties"]))
+        demanded |= required
+        defect = {
+            "missing_required": sorted(required - named),
+            "not_accepted": sorted(named - accepted),
+        }
+        if any(defect.values()):
+            unserved[label] = defect
+
+    assert unserved == {}
+    assert demanded, published
 
 
 def test_published_memory_tail_route_is_callable_exactly_as_published(

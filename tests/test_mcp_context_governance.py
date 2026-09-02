@@ -14,6 +14,7 @@ import orjson
 import pytest
 
 import codeclone.surfaces.mcp._context_governance as governance_mod
+import codeclone.surfaces.mcp._session_memory_mixin as memory_mixin_mod
 from codeclone.surfaces.mcp._context_governance import (
     CONTEXT_GOVERNANCE_CONTRACT_VERSION,
     CONTEXT_GOVERNANCE_DIGEST_VERSION,
@@ -342,7 +343,34 @@ def test_implementation_context_governance_enforces_compact_budget() -> None:
     }
 
 
+def test_every_published_drill_down_entry_is_read_by_a_consumer() -> None:
+    """The table MUST NOT publish a route no consumer ever serves.
+
+    Contract 1.1 took the drill-down table out of the per-response payload and
+    moved each route to the omission site that mints it. The memory lanes kept
+    this table as their owner; the receipt, patch-trail, blast-artifact and
+    implementation-context entries stayed behind with no reader at all. Being
+    unread, they never got the ``root`` the server requires -- the table was
+    instructing callers with routes no surface published and no caller could
+    execute, and removing all four moved exactly one assertion in the suite.
+
+    Reachability is the invariant, not spelling: an entry earns its place here
+    by having a consumer, and a consumer is what keeps its route honest.
+    """
+    assert set(governance_mod.passive_drill_down_reachability()) == set(
+        memory_mixin_mod._MEMORY_LANE_DRILL_DOWN_KEYS.values()
+    )
+
+
 def test_context_governance_declares_drill_down_reachability() -> None:
+    """The lookup/continuation classification each memory lane publishes.
+
+    The route strings are checked against the live tool schema by
+    ``test_published_drill_down_routes_name_exactly_what_the_server_accepts``;
+    what is pinned here is the classification the table asserts about each
+    lane, which no schema can derive.
+    """
+
     drill_down = governance_mod.passive_drill_down_reachability()
 
     assert {
@@ -352,24 +380,9 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "memory_tail_route": drill_down["memory_record"]["continuation_route"],
         "trajectory_lookup": drill_down["trajectory"]["object_lookup"],
         "trajectory_tail_continuation": drill_down["trajectory"]["continuation"],
-        "receipt_current_path": drill_down["structured_receipt"][
-            "current_complete_path"
-        ],
-        "receipt_lookup": drill_down["structured_receipt"]["object_lookup"],
-        "patch_trail_lookup": drill_down["patch_trail"]["object_lookup"],
-        "patch_trail_route": drill_down["patch_trail"]["route"],
-        "blast_lookup": drill_down["blast_artifact"]["object_lookup"],
-        "blast_route": drill_down["blast_artifact"]["route"],
         "experience_lookup": drill_down["experience"]["object_lookup"],
         "experience_route": drill_down["experience"]["route"],
         "experience_tail_continuation": drill_down["experience"]["continuation"],
-        "context_facet_lookup": drill_down["implementation_context_facet"][
-            "object_lookup"
-        ],
-        "context_facet_route": drill_down["implementation_context_facet"]["route"],
-        "context_facet_continuation": drill_down["implementation_context_facet"][
-            "continuation"
-        ],
     } == {
         "memory_record_lookup": "available",
         "memory_record_route": (
@@ -379,22 +392,11 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "memory_tail_route": "get_memory_projection_page(root=..., cursor=...)",
         "trajectory_lookup": "available",
         "trajectory_tail_continuation": "available",
-        "receipt_current_path": "receipt.receipt",
-        "receipt_lookup": "available",
-        "patch_trail_lookup": "available",
-        "patch_trail_route": "get_patch_trail(run_id=..., patch_trail_digest=...)",
-        "blast_lookup": "available",
-        "blast_route": "get_blast_artifact(run_id=..., blast_artifact_id=...)",
         "experience_lookup": "available",
         "experience_route": (
             "query_engineering_memory(root=..., mode='experience_get', record_id=...)"
         ),
         "experience_tail_continuation": "available",
-        "context_facet_lookup": "available",
-        "context_facet_route": (
-            "get_implementation_context_page(context_projection_digest=..., facet=...)"
-        ),
-        "context_facet_continuation": "available",
     }
 
 
