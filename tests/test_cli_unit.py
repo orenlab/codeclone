@@ -1529,6 +1529,30 @@ def test_cli_internal_error_marker(
     assert_contains_none(out, "Traceback:")
 
 
+def test_cli_diagnosed_configuration_error_is_not_an_internal_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One real family, end to end, through the real envelope.
+
+    ``test_diagnosed_user_errors`` pins the envelope on the marker class and
+    the configuration rings pin their own families; this is the join of the
+    two -- a family raised by production code reaching ``main`` and coming
+    out as a contract error rather than a bug report.  It lives here because
+    this module already owns the import edge into the configuration ring.
+    """
+
+    def _boom() -> None:
+        raise ConfigValidationError("pyproject.toml must not be a symlink.")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert_contains_all(out, "CONTRACT ERROR:", "pyproject.toml must not be a symlink.")
+    assert_contains_none(out, "INTERNAL ERROR:", "Unexpected exception.")
+
+
 def test_cli_internal_error_debug_flag_includes_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

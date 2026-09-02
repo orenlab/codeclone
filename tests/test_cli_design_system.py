@@ -37,6 +37,7 @@ from uuid import UUID
 import pytest
 
 from codeclone import ui_messages as ui
+from codeclone.contracts.errors import DiagnosedUserError
 from codeclone.ui_messages import styling
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -293,6 +294,13 @@ def _build_catalog() -> dict[str, str]:
         ),
         "fmt_baseline_lock_recovered": ui.fmt_baseline_lock_recovered(
             path=_PINNED_PATH
+        ),
+        "fmt_diagnosed_user_error": ui.fmt_diagnosed_user_error(
+            DiagnosedUserError(
+                "observability profile=true requires the codeclone[perf] "
+                "extra (psutil).",
+                remediation='Run: pip install "codeclone[perf]"',
+            )
         ),
         "fmt_internal_error": ui.fmt_internal_error(ValueError("boom")),
         "version_output": ui.version_output("2.1.0"),

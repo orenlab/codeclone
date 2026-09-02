@@ -15,10 +15,13 @@ from codeclone.budget.estimator import (
     TOKEN_ESTIMATOR_MODES,
     TOKEN_ESTIMATOR_TIKTOKEN,
 )
+from codeclone.config.intent_registry import IntentRegistryConfigError
 from codeclone.config.observability import (
     ObservabilityConfigError,
     resolve_observability_config,
 )
+from codeclone.config.pyproject_loader import ConfigValidationError
+from codeclone.contracts.errors import DiagnosedUserError
 from codeclone.models import DEFAULT_OBSERVABILITY_TOKEN_ESTIMATOR, ObservabilityConfig
 
 
@@ -208,3 +211,59 @@ def test_env_flag_false_values_are_honored() -> None:
         CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES="false",
     )
     assert cfg.capture_payload_sizes is False
+
+
+# ---------------------------------------------------------------------------
+# Classification: these are the user's configuration, not CodeClone's faults
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "error_class",
+    [ConfigValidationError, IntentRegistryConfigError, ObservabilityConfigError],
+)
+def test_every_configuration_family_is_classified_diagnosed(
+    error_class: type[Exception],
+) -> None:
+    """The classification, not the instance.
+
+    Each of these is raised only while validating configuration the user
+    supplied, and each already names the exact key and the exact
+    expectation. A family left off this list is a family the CLI envelope
+    reports as "Unexpected exception" with a bug-report link -- measured on
+    the observability family on 2026-09-01, and the reason the envelope now
+    reads the marker class rather than a list of exceptions it has met.
+    """
+
+    assert issubclass(error_class, DiagnosedUserError)
+
+
+def test_the_missing_perf_extra_carries_the_command_that_installs_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The measured condition, with the step that resolves it attached.
+
+    The message alone told the user what was wrong and nothing about what to
+    do; the envelope filled that gap with a traceback offer and a bug report,
+    neither of which can help. The step belongs to the code that diagnosed
+    the condition, because that is the only place that knows it.
+    """
+
+    monkeypatch.setattr("codeclone.config.observability.find_spec", lambda name: None)
+
+    with pytest.raises(ObservabilityConfigError) as raised:
+        _resolve(
+            CODECLONE_OBSERVABILITY_ENABLED="1",
+            CODECLONE_OBSERVABILITY_PROFILE="1",
+        )
+
+    assert str(raised.value) == (
+        "observability profile=true requires the codeclone[perf] extra (psutil)."
+    )
+    assert raised.value.remediation == 'Run: pip install "codeclone[perf]"'
+
+
+def test_a_family_that_has_nothing_to_add_carries_no_step() -> None:
+    """A next step is attached where one exists, never invented."""
+
+    assert ConfigValidationError("bad key").remediation == ""

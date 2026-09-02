@@ -17,6 +17,7 @@ from ..budget.estimator import (
     TOKEN_ESTIMATOR_TIKTOKEN,
     TokenEstimatorMode,
 )
+from ..contracts.errors import DiagnosedUserError
 from ..utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -58,7 +59,7 @@ MAX_PAYLOAD_JSON_LEN = 262_144
 MAX_EVENT_CORE_JSON_LEN = 65_536
 
 
-class AuditConfigError(ValueError):
+class AuditConfigError(DiagnosedUserError, ValueError):
     """Raised for invalid audit configuration."""
 
 

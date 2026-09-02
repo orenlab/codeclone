@@ -26,6 +26,7 @@ from ...contracts import (
     ExitCode,
     observed_population,
 )
+from ...contracts.errors import DiagnosedUserError
 from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
 from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.bootstrap import bootstrap
@@ -858,6 +859,13 @@ def main() -> None:
         _main_impl()
     except SystemExit:
         raise
+    except DiagnosedUserError as exc:
+        # Ahead of the internal envelope and reading the CLASS, not a list of
+        # exceptions: the diagnosed families are marked at their own
+        # definitions, so a new one is routed correctly the day it is written
+        # rather than the day somebody notices it in a bug report.
+        _console().print(ui.fmt_diagnosed_user_error(exc))
+        raise SystemExit(ExitCode.CONTRACT_ERROR) from exc
     except Exception as exc:
         _console().print(
             ui.fmt_internal_error(

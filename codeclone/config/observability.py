@@ -24,6 +24,7 @@ from ..budget.estimator import (
     TOKEN_ESTIMATOR_MODES,
     TOKEN_ESTIMATOR_TIKTOKEN,
 )
+from ..contracts.errors import DiagnosedUserError
 from ..models import (
     DEFAULT_OBSERVABILITY_MAX_OPERATIONS,
     DEFAULT_OBSERVABILITY_MAX_SPANS,
@@ -37,7 +38,7 @@ _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
 
 
-class ObservabilityConfigError(ValueError):
+class ObservabilityConfigError(DiagnosedUserError, ValueError):
     """Invalid observability configuration (profile without [perf], reserved key)."""
 
 
@@ -120,7 +121,8 @@ def resolve_observability_config(
     profile = _env_flag(env, "CODECLONE_OBSERVABILITY_PROFILE")
     if profile and find_spec("psutil") is None:
         raise ObservabilityConfigError(
-            "observability profile=true requires the codeclone[perf] extra (psutil)."
+            "observability profile=true requires the codeclone[perf] extra (psutil).",
+            remediation='Run: pip install "codeclone[perf]"',
         )
     token_estimator, token_estimator_downgraded = _resolve_token_estimator(env)
     return ObservabilityConfig(

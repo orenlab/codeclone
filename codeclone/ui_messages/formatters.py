@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Final
 
 from .. import __version__
 from ..contracts import ISSUES_URL
+from ..contracts.errors import DiagnosedUserError
 from .labels import (
     CLI_LAYOUT_MAX_WIDTH,
     SUMMARY_COMPACT,
@@ -895,6 +896,41 @@ def fmt_baseline_lock_recovery_failed(*, path: Path, reason: str) -> str:
 
 def fmt_baseline_lock_recovered(*, path: Path) -> str:
     return SUCCESS_BASELINE_LOCK_RECOVERED.format(path=path)
+
+
+def fmt_diagnosed_user_error(error: DiagnosedUserError) -> str:
+    """Render a condition CodeClone diagnosed and the user can act on.
+
+    A contract error and not an internal one, because that is what it is:
+    the process validated the user's configuration, rejected it by name, and
+    the sentence it produced is the whole diagnosis. The internal envelope
+    was measured saying "Unexpected exception" over exactly such a sentence,
+    then offering a traceback and a bug report for it -- three next steps,
+    none of which can help, printed over an answer that already could.
+
+    The remediation block appears only when there is a step; an error with
+    nothing to add prints the diagnosis alone rather than a heading over
+    nothing. Refusing an undiagnosed error is deliberate: this frame asserts
+    "not our bug, and here is yours to fix", and it may not be put around a
+    fault nobody classified.
+    """
+
+    if not isinstance(error, DiagnosedUserError):
+        raise TypeError(
+            "fmt_diagnosed_user_error renders a DiagnosedUserError; "
+            f"{type(error).__name__} is not classified as one"
+        )
+    # ``esc`` and not the raw text: these diagnoses quote the user's own
+    # configuration back at them, and the two things they quote most --
+    # ``[tool.codeclone]`` and ``codeclone[perf]`` -- are exactly what Rich
+    # reads as a style tag and swallows. The one message whose job is to
+    # name the wrong key may not be the message that loses it.
+    message = esc(str(error).strip()) or "<no message>"
+    if not error.remediation:
+        return fmt_contract_error(message)
+    return fmt_contract_error(
+        "\n".join((message, "", "Next steps:", f"- {esc(error.remediation)}"))
+    )
 
 
 def fmt_internal_error(

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
+from ..contracts.errors import DiagnosedUserError
 from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Set
 
 
-class ConfigValidationError(ValueError):
+class ConfigValidationError(DiagnosedUserError, ValueError):
     """Raised when pyproject.toml contains invalid CodeClone configuration."""
 
 

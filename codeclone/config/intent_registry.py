@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TypeGuard
 
+from ..contracts.errors import DiagnosedUserError
 from ..utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -30,7 +31,7 @@ INTENT_REGISTRY_BACKENDS: Final[frozenset[str]] = frozenset({"file", "sqlite"})
 _VALID_DB_SUFFIXES: Final[frozenset[str]] = frozenset({".sqlite3", ".db"})
 
 
-class IntentRegistryConfigError(ValueError):
+class IntentRegistryConfigError(DiagnosedUserError, ValueError):
     """Raised for invalid workspace intent registry configuration."""
 
 
