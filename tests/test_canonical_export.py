@@ -185,7 +185,12 @@ _TARGET = "worktree-a"
 #                                artifact stays at 86eea25d…, so (d) touched
 #                                the run identity and nothing in the
 #                                projection, and (d1)+(d2) is one basis
-_FIXTURE_RUN_ID = "f4bd11bde7c43551b1855b9f324f7dc8b077aaeec843d5cf0cb194a836dcd62f"
+# Moves with LIVENESS_POLICY_VERSION: the dead-code observation family embeds
+# the generation in its content-address namespace (canonical/store.py), so a
+# generation bump is a run-identity change by construction. Retiring "2" moved
+# this from f4bd11bd... ; the artifact digest below did not move, which is the
+# point - identity changed, the exported artifact did not.
+_FIXTURE_RUN_ID = "ade126a30a203ba4012736c1365730ee445b3b85e13a3d86d5ba75903dd153cd"
 _FIXTURE_ARTIFACT = "86eea25dc5e94d0788d7ea3abeb4df94f0757a10c6549f07a784b86e3fe4be3f"
 
 

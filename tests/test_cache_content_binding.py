@@ -24,6 +24,7 @@ from codeclone.cache.reuse import (
 )
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
+from codeclone.contracts import LIVENESS_POLICY_VERSION
 from codeclone.models import (
     CacheDependentPayload,
     CacheEntryV3,
@@ -197,8 +198,12 @@ def test_liveness_policy_version_misses_only_dependent_lane(
     _assert_profile_input_misses_only_dependent_lane(
         monkeypatch,
         profile_input="LIVENESS_POLICY_VERSION",
-        legacy_value="1",
-        current_value="2",
+        # Generation "2" is named as a fact about history, not copied from the
+        # constant: rows written under it carry no ``star_import_bound``, and
+        # decoding that absence as "not bound" was measured asserting live
+        # public API dead at high confidence on upgrade. They must miss.
+        legacy_value="2",
+        current_value=LIVENESS_POLICY_VERSION,
     )
 
 

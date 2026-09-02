@@ -256,18 +256,28 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # external base.
 #
 # Bump this constant whenever what counts as LIVE changes; verdicts across
-# versions are not comparable. A generation is SPENT WHEN IT SHIPS, not when
-# it is written: while a generation has never reached a release, no artifact
-# anywhere carries it, there is nothing for a later reading to be incomparable
-# against, and the definition is refined in place under the same number. The
-# number moves once the semantics it names have shipped.
+# versions are not comparable.
+#
+# "3" retires "2" and carries the same three changes. It exists because the
+# release boundary is the wrong test for whether a generation may be refined
+# in place. The earlier reasoning here - a generation never released carries
+# no artifact, so refine it under the same number - was measured false: an
+# UNRELEASED build writes a cache too. "2" and "3" share CACHE_VERSION, so a
+# lane written before ``star_import_bound`` existed is accepted by a build
+# that reads it, the missing key decodes as "not bound", and the wildcard arm
+# concludes that live public API is dead - measured on httpx, five methods at
+# high confidence, ``AsyncClient.post`` among them, reachable only on upgrade
+# and invisible to any cold run. The honest test is not "has it shipped" but
+# "can a reachable artifact still carry the old meaning".
 #
 # Cached liveness inputs move with a bump by construction: the constant is
 # an input of the module-dependent cache reuse profile
 # (codeclone/cache/reuse.py), so a bump misses exactly the lane that
 # carries ``referenced_qualnames``, dead candidates and live-root reasons,
-# and never touches the neutral fingerprint lane.
-LIVENESS_POLICY_VERSION: Final = "2"
+# and never touches the neutral fingerprint lane. That miss is what this
+# bump buys, and it is pinned by
+# ``test_liveness_policy_version_misses_only_dependent_lane``.
+LIVENESS_POLICY_VERSION: Final = "3"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
 # Generation of the adoption-coverage policy: WHAT COUNTS as an annotated
 # parameter (the receiver of a non-static method is not one; ``*args`` and

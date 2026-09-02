@@ -1925,11 +1925,12 @@ def test_dead_code_distinguishes_test_only_reference_from_unreferenced() -> None
     )
     assert dead_by_symbol["unused_private"].test_reference_sources == ()
     assert dead_by_symbol["run"].test_reference_sources == ()
-    # Declared generation of the liveness policy. It stays "2": that
-    # generation was introduced after the last release and has never
-    # shipped, so this wave refined its definition in place rather than
-    # spending a number no artifact carries.
-    assert contracts.LIVENESS_POLICY_VERSION == "2"
+    # Declared generation of the liveness policy, kept as a literal so a bump
+    # cannot pass unnoticed. It moved 2 -> 3 when measurement showed an
+    # unreleased generation still reaches users: "2" and "3" share
+    # CACHE_VERSION, so a lane written under "2" was accepted by a "3" reader
+    # and its missing ``star_import_bound`` decoded as "not bound".
+    assert contracts.LIVENESS_POLICY_VERSION == "3"
 
 
 def test_extraction_uses_module_identity_for_test_named_package_trees() -> None:
