@@ -107,6 +107,17 @@ _LOOP_FENCE = re.compile(
 )
 _PRIMARY_TOOL = re.compile(r"^([a-z][a-z0-9_]*)")
 
+#: The table under "## Reading the response" is the response contract a skill
+#: teaches a reader to expect. Only its rows are read, and only the first
+#: cell of each: the sentence that CORRECTS a wrong table necessarily says
+#: the word "baseline", so a section-wide match would red on the fix and pass
+#: a table full of the wrong fields. Header and separator rows carry no
+#: backticks and drop out without being special-cased.
+_RESPONSE_TABLE = re.compile(
+    r"^## Reading the response\n(?P<body>.*?)(?=\n## |\Z)", re.MULTILINE | re.DOTALL
+)
+_TABLE_FIELD = re.compile(r"`([^`]+)`")
+
 # No whitespace before "(": prose such as "fixtures (the gate counts
 # production)" is a parenthetical, never a call, and admitting it would
 # bury the real findings under English.
@@ -343,6 +354,8 @@ class RoutingStance(NamedTuple):
     primary_tool: str
     primary_handler_read: bool
     primary_publishes_baseline: bool
+    documented_fields: tuple[str, ...] | None
+    baseline_fields: tuple[str, ...]
     declares_required: bool
     declares_optional: bool
 
@@ -366,6 +379,41 @@ def _handler_bodies(names: frozenset[str]) -> dict[str, str]:
             assert node.name not in bodies, f"{node.name} is defined more than once"
             bodies[node.name] = ast.get_source_segment(source, node) or ""
     return bodies
+
+
+def _as_response_key(field: str) -> str:
+    """Render a documented field name as the response key it names.
+
+    The handler side is read as Python source, where a published key appears
+    quoted. Quoting here lets both sides be asked the same question by the
+    same pattern, instead of keeping a second vocabulary for prose that would
+    drift away from the one the handlers are measured against.
+    """
+
+    return f'"{field.split(".")[0]}"'
+
+
+def _documented_fields(text: str) -> tuple[str, ...] | None:
+    """Field names the response table teaches, or ``None`` when there is none.
+
+    Returning ``None`` rather than an empty tuple keeps "this skill documents
+    no baseline field" distinct from "this guard could not find a table to
+    read", so a reshaped table fails loudly instead of passing vacuously.
+    """
+
+    section = _RESPONSE_TABLE.search(text)
+    if section is None:
+        return None
+    rows = [
+        line
+        for line in section.group("body").splitlines()
+        if line.lstrip().startswith("|")
+    ]
+    fields: list[str] = []
+    for row in rows:
+        first_cell = row.strip().strip("|").split("|")[0]
+        fields.extend(_TABLE_FIELD.findall(first_cell))
+    return tuple(fields) if rows else None
 
 
 def _primary_tool(text: str) -> str:
@@ -398,6 +446,7 @@ def _routing_stances() -> list[RoutingStance]:
         body = bodies.get(tool, "")
         primary = primaries[skill]
         primary_body = bodies.get(primary, "")
+        documented = _documented_fields(texts[skill])
         description = parse_frontmatter(texts[skill])["description"]
         stances.append(
             RoutingStance(
@@ -409,6 +458,12 @@ def _routing_stances() -> list[RoutingStance]:
                 primary_handler_read=bool(primary_body),
                 primary_publishes_baseline=bool(
                     _PUBLISHES_BASELINE.search(primary_body)
+                ),
+                documented_fields=documented,
+                baseline_fields=tuple(
+                    field
+                    for field in documented or ()
+                    if _PUBLISHES_BASELINE.search(_as_response_key(field))
                 ),
                 declares_required=bool(_DECLARES_BASELINE_REQUIRED.search(description)),
                 declares_optional=bool(_DECLARES_BASELINE_OPTIONAL.search(description)),
@@ -559,3 +614,46 @@ def test_routing_pair_bodies_teach_a_tool_matching_their_declared_stance() -> No
         "No wording can route between two skills whose loops end at the same "
         "call, however well their descriptions discriminate."
     )
+
+
+def test_routing_pair_response_tables_document_only_their_own_fields() -> None:
+    """A response table teaches fields the skill's own answer carries.
+
+    The description says which question is answered and the Loop says which
+    tool answers it; this says the reader is told to look for the right
+    fields. A skill can route correctly and still document the neighbouring
+    tool's response, which sends the reading agent hunting for a baseline
+    verdict that is not there — and an agent that cannot find a field it was
+    promised is the one that invents it.
+
+    Only table rows are inspected. The paragraph that corrects such a table
+    has to name the baseline to say the response carries none, so a lane that
+    read the surrounding prose would red on the fix and pass the defect.
+    """
+
+    stances = _routing_stances()
+    unreadable = sorted(
+        stance.skill for stance in stances if stance.documented_fields is None
+    )
+    wrong: list[str] = []
+    for stance in stances:
+        if stance.declares_required == bool(stance.baseline_fields):
+            continue
+        if stance.baseline_fields:
+            wrong.append(
+                f"{stance.skill}: needs no baseline, yet its response table "
+                f"documents {list(stance.baseline_fields)}, which only the "
+                "baseline comparison produces"
+            )
+        else:
+            wrong.append(
+                f"{stance.skill}: requires a baseline, yet its response table "
+                "documents no field the baseline comparison produces"
+            )
+
+    assert not unreadable, (
+        f"no response table could be read for: {unreadable}. "
+        "The rows under '## Reading the response' are what this guard "
+        "measures; a reshaped table must not read as an empty one."
+    )
+    assert not wrong, f"public skill response tables document the wrong fields: {wrong}"
