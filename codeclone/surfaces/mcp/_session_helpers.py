@@ -36,6 +36,7 @@ from ...domain.source_scope import (
 from ...models import MetricsDiff
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils import coerce as _coerce
+from ...utils.lane_selection import api_surface_collection_enabled
 from ...utils.payload_narrow import is_record_mapping
 from ...utils.repo_paths import (
     PathOutsideRepoError,
@@ -780,7 +781,7 @@ def _build_cache(
         block_min_stmt=_as_int(args.block_min_stmt, DEFAULT_BLOCK_MIN_STMT),
         segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
         segment_min_stmt=_as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
-        collect_api_surface=bool(getattr(args, "api_surface", False)),
+        collect_api_surface=api_surface_collection_enabled(args),
         write_enabled=write_enabled,
     )
     cache.load()

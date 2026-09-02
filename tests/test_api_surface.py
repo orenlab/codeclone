@@ -10,8 +10,10 @@ import ast
 from pathlib import Path
 from typing import Literal, cast
 
+from codeclone.domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
 from codeclone.metrics import api_surface as api_surface_mod
 from codeclone.metrics._visibility import ModuleVisibility
+from codeclone.metrics.api_population import ApiSurfacePopulation
 from codeclone.metrics.api_surface import (
     collect_module_api_surface,
     compare_api_surfaces,
@@ -752,4 +754,6 @@ def test_product_api_modules_filters_without_reordering() -> None:
             ("c", "pkg/c.py"),
         )
     )
-    assert [module.module for module in product_api_modules(modules)] == ["b", "c"]
+    kept = product_api_modules(modules, population=ApiSurfacePopulation())
+    assert [module.module for module in kept] == ["b", "c"]
+    assert {module.surface_kind for module in kept} == {SURFACE_KIND_PRODUCT_PUBLIC}

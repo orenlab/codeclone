@@ -239,3 +239,55 @@ def test_run_memory_analysis_report_raises_when_document_missing(
         ),
     ):
         run_memory_analysis_report(root_path=root)
+
+
+def _api_surface_cache_flag(root: Path, *, configured: bool) -> bool:
+    """What ``collect_api_surface`` this surface hands its store for ``root``."""
+
+    package = root / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "mod.py").write_text(
+        "def run(value: int) -> int:\n    return value\n", encoding="utf-8"
+    )
+    (root / "pyproject.toml").write_text(
+        "[tool.codeclone]\napi_surface = true\n" if configured else "", encoding="utf-8"
+    )
+
+    seen: list[bool] = []
+    real_cache = memory_analysis_mod.Cache  # type: ignore[attr-defined]
+
+    def recording_cache(path: Path, **kwargs: object) -> object:
+        seen.append(bool(kwargs["collect_api_surface"]))
+        return real_cache(path, **kwargs)  # type: ignore[arg-type]
+
+    with patch.object(memory_analysis_mod, "Cache", recording_cache):
+        run_memory_analysis_report(root_path=root)
+    assert len(seen) == 1, seen
+    return seen[0]
+
+
+def test_memory_analysis_asks_the_lane_owner_when_the_lane_is_configured_on(
+    tmp_path: Path,
+) -> None:
+    """This site keyed its store with a hardcoded ``True`` until 2026-09-02.
+
+    A literal is wrong in both directions and each direction fails differently,
+    so the two are separate pins: this one fails if the site stops asking and
+    answers ``False``, and its twin below fails if it answers ``True``.
+    """
+
+    assert _api_surface_cache_flag(tmp_path / "configured", configured=True) is True
+
+
+def test_memory_analysis_asks_the_lane_owner_when_the_lane_is_not_configured(
+    tmp_path: Path,
+) -> None:
+    """The direction the hardcoded literal actually got wrong.
+
+    A repository that never asked for the lane had its rows keyed as if it had,
+    which is the profile-key half of the defect the materialization witness
+    now refuses on the read side.
+    """
+
+    assert _api_surface_cache_flag(tmp_path / "plain", configured=False) is False

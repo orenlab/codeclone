@@ -342,6 +342,7 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
         "cache_lane_dependent_miss": 0,
         "cache_profile_hit": 0,
         "cache_profile_miss": 1,
+        "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
         "cache_lane_dependent_profile_mismatch": 0,
         "cache_lane_neutral_binding_context_mismatch": 0,
@@ -382,6 +383,7 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_dependent_miss": 0,
         "cache_profile_hit": 1,
         "cache_profile_miss": 0,
+        "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
         "cache_lane_dependent_profile_mismatch": 0,
         "cache_lane_neutral_binding_context_mismatch": 0,
@@ -406,6 +408,7 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_dependent_profile_mismatch": 1,
         "cache_profile_hit": 0,
         "cache_profile_miss": 2,
+        "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
         "cache_lane_neutral_binding_context_mismatch": 0,
         "cache_lane_neutral_clone_channels_mismatch": 0,
@@ -1030,6 +1033,7 @@ def test_process_cache_put_file_entry_receives_required_binding_fields(
             file_metrics: object | None = None,
             structural_findings: object | None = None,
             materialized_clone_channels: tuple[str, ...] = (),
+            materialized_api_surface: bool = False,
         ) -> None:
             self.calls += 1
 
@@ -1097,6 +1101,7 @@ def test_process_cache_put_file_entry_type_error_is_raised(
             file_metrics: object | None = None,
             structural_findings: object | None = None,
             materialized_clone_channels: tuple[str, ...] = (),
+            materialized_api_surface: bool = False,
         ) -> None:
             raise TypeError("broken cache write")
 
@@ -1145,6 +1150,7 @@ def _reason_boot(
     report_output: bool,
     min_loc: int = 1,
     near_miss: bool = False,
+    api_surface: bool = False,
 ) -> BootstrapResult:
     """A boot whose knobs decide the lane profile, channels and sections.
 
@@ -1165,6 +1171,7 @@ def _reason_boot(
             segment_min_loc=20,
             segment_min_stmt=10,
             skip_metrics=False,
+            api_surface=api_surface,
             near_miss=near_miss,
             renamed_structure=False,
         ),
@@ -1362,13 +1369,16 @@ def _warm_counters(
     *,
     warm_boot: BootstrapResult,
     warm_cache: Cache | None = None,
+    cold_cache: Cache | None = None,
     mutate: Callable[[], None] | None = None,
     legacy_cold_rows: bool = False,
 ) -> dict[str, int]:
     """Write a cold generation, optionally disturb it, then read the warm one."""
 
     cold = _reason_boot(tmp_path, report_output=False)
-    cache = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
+    cache = cold_cache or Cache(
+        tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1
+    )
     discovery = core_discovery.discover(boot=cold, cache=cache)
     with ExitStack() as stack:
         if legacy_cold_rows:
@@ -1462,6 +1472,33 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
             warm_cache=Cache(moved / "cache.json", root=moved, min_loc=2, min_stmt=1),
         ),
         "cache_lane_neutral_profile_mismatch",
+    )
+
+    # The row was keyed as api-collecting and written by a run that collected
+    # nothing: the exact shape a metrics-skipping run left behind. Both caches
+    # carry the same dependent profile digest, so only the witness can refuse.
+    witness = _seed("witness")
+    _record(
+        _warm_counters(
+            witness,
+            monkeypatch,
+            cold_cache=Cache(
+                witness / "cache.json",
+                root=witness,
+                min_loc=1,
+                min_stmt=1,
+                collect_api_surface=True,
+            ),
+            warm_boot=_reason_boot(witness, report_output=False, api_surface=True),
+            warm_cache=Cache(
+                witness / "cache.json",
+                root=witness,
+                min_loc=1,
+                min_stmt=1,
+                collect_api_surface=True,
+            ),
+        ),
+        "cache_lane_dependent_api_surface_witness_mismatch",
     )
 
     # The run needs a section the row was written without.
@@ -1568,6 +1605,7 @@ def test_the_binding_context_lane_reason_is_reachable_from_the_decision(
         dependent_profile=entry.module_dependent_profile,
         binding_context=moved,
         required_clone_channels=(),
+        requires_api_surface=False,
     )
     assert decision.neutral.reason == "binding_context_mismatch"
     assert decision.neutral.hit is False
@@ -1597,7 +1635,7 @@ def test_cache_reuse_reason_counters_are_the_decisions_own_vocabulary() -> None:
 
     assert (
         set(core_discovery._NEUTRAL_LANE_REASON_COUNTERS)
-        | {"dependent_profile_mismatch"}
+        | {"api_surface_witness_mismatch", "dependent_profile_mismatch"}
         == decidable
     )
     assert set(core_discovery._DEPENDENT_LANE_REASON_COUNTERS) <= decidable

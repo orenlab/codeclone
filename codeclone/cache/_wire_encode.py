@@ -754,6 +754,12 @@ def _encode_wire_file_entry(entry: CacheEntryV3) -> dict[str, object]:
     _encode_blocks(neutral_facts, neutral_wire)
     _encode_segments(neutral_facts, neutral_wire)
     _encode_semantic_facts(entry, neutral_wire)
+    # The api-surface materialization witness (CACHE_VERSION 4.1), mandatory on
+    # every entry exactly as ``mt`` is above and for the same reason: the api
+    # payload is absent both when a file exports nothing and when nobody looked,
+    # and a reader that had to tell those apart from which keys exist would be
+    # guessing. Stamped from the same derivation the workers used.
+    dependent_wire["amt"] = entry.module_dependent.materialized_api_surface
     _encode_class_metrics(dependent_facts, dependent_wire)
     _encode_module_deps(dependent_facts, dependent_wire)
     _encode_dead_candidates(dependent_facts, dependent_wire)

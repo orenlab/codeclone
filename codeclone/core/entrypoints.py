@@ -137,4 +137,111 @@ def _matches_entrypoint_suffix(qualname: str, ref: _EntryPointRef) -> bool:
     return bool(separator) and local == ref.local and module.endswith(f".{ref.module}")
 
 
-__all__ = ["collect_project_entrypoint_qualnames"]
+__all__ = [
+    "collect_project_distributed_packages",
+    "collect_project_entrypoint_qualnames",
+]
+
+
+def collect_project_distributed_packages(root: Path) -> frozenset[str] | None:
+    """What ``root`` declares that it ships, or ``None`` if it declares nothing.
+
+    Read here rather than beside the population owner because ``metrics`` may
+    not import ``config`` and this module already owns the interpreter-split
+    TOML reader; a third copy of it is what this placement avoids.
+
+    Three build backends are read because the axis this input exists for is
+    external repositories, and a reader that only understood this project's own
+    backend would be a manifest owner that works on exactly one repository.
+    ``None`` and ``frozenset()`` are different answers: the first is "no
+    manifest", the second is "a manifest that ships nothing", and only the
+    first leaves the population alone.
+    """
+
+    payload = _load_toml_payload(root / "pyproject.toml")
+    tool = payload.get("tool")
+    if not isinstance(tool, dict):
+        return None
+    declared: set[str] = set()
+    declared.update(_setuptools_packages(tool.get("setuptools")))
+    declared.update(_hatch_packages(tool.get("hatch")))
+    declared.update(_poetry_packages(tool.get("poetry")))
+    return frozenset(declared) if declared else None
+
+
+def _setuptools_packages(table: object) -> set[str]:
+    if not isinstance(table, dict):
+        return set()
+    names = set(_string_list(table.get("packages")))
+    packages = table.get("packages")
+    if isinstance(packages, dict):
+        find = packages.get("find")
+        if isinstance(find, dict):
+            names.update(_glob_prefixes(_string_list(find.get("include"))))
+    return {name for name in names if name}
+
+
+def _hatch_packages(table: object) -> set[str]:
+    if not isinstance(table, dict):
+        return set()
+    build = table.get("build")
+    if not isinstance(build, dict):
+        return set()
+    targets = build.get("targets")
+    if not isinstance(targets, dict):
+        return set()
+    wheel = targets.get("wheel")
+    if not isinstance(wheel, dict):
+        return set()
+    return {_module_of_path(entry) for entry in _string_list(wheel.get("packages"))} - {
+        ""
+    }
+
+
+def _poetry_packages(table: object) -> set[str]:
+    if not isinstance(table, dict):
+        return set()
+    entries = table.get("packages")
+    if not isinstance(entries, list):
+        return set()
+    return {
+        _module_of_path(str(entry["include"]))
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("include"), str)
+    } - {""}
+
+
+def _string_list(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(entry for entry in value if isinstance(entry, str))
+
+
+def _glob_prefixes(patterns: tuple[str, ...]) -> set[str]:
+    """``codeclone*`` and ``codeclone.*`` both declare the ``codeclone`` tree.
+
+    Only the literal head of a pattern is kept. A pattern is a search
+    expression over module names, and the owner needs a prefix it can compare
+    against a dotted module identity, so anything from the first wildcard on is
+    dropped rather than guessed at.
+    """
+
+    prefixes: set[str] = set()
+    for pattern in patterns:
+        head = pattern.split("*", maxsplit=1)[0].rstrip(".")
+        if head:
+            prefixes.add(head)
+    return prefixes
+
+
+def _module_of_path(value: str) -> str:
+    """``src/example`` and ``example/`` both name the module ``example``."""
+
+    parts = [
+        part for part in value.replace("\\", "/").split("/") if part and part != "."
+    ]
+    if not parts:
+        return ""
+    if len(parts) > 1 and parts[0] in {"src", "lib"}:
+        parts = parts[1:]
+    return ".".join(parts)

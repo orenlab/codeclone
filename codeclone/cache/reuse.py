@@ -277,6 +277,7 @@ def cache_reuse_decision(
     dependent_profile: DigestObject,
     binding_context: DigestObject,
     required_clone_channels: tuple[CloneArtifactChannel, ...],
+    requires_api_surface: bool,
 ) -> CacheReuseDecision:
     if not content.hit:
         miss = CacheLaneVerdict(hit=False, reason="content_miss")
@@ -300,7 +301,19 @@ def cache_reuse_decision(
     neutral_hit = (
         entry.module_neutral_profile == neutral_profile and binding_hit and channels_hit
     )
-    dependent_hit = entry.module_dependent_profile == dependent_profile
+    # The api-surface twin of the channel witness, and equality for the same
+    # reason in both directions. The profile key answers "was the flag set",
+    # which a metrics-skipping run also answers yes to; the witness answers
+    # "did the extraction run", which is the question a reader needs. A row
+    # that did not collect has nothing to serve and must be recomputed; a row
+    # that did collect, served to a run that does not, would hand a warm run a
+    # payload its own cold path never produces.
+    api_witness_hit = entry.module_dependent.materialized_api_surface == bool(
+        requires_api_surface
+    )
+    dependent_hit = (
+        entry.module_dependent_profile == dependent_profile and api_witness_hit
+    )
     neutral_reason: CacheLaneReuseReason = "hit"
     if not binding_hit:
         neutral_reason = "binding_context_mismatch"
@@ -308,12 +321,14 @@ def cache_reuse_decision(
         neutral_reason = "neutral_profile_mismatch"
     elif not channels_hit:
         neutral_reason = "clone_channels_mismatch"
+    dependent_reason: CacheLaneReuseReason = "hit"
+    if entry.module_dependent_profile != dependent_profile:
+        dependent_reason = "dependent_profile_mismatch"
+    elif not api_witness_hit:
+        dependent_reason = "api_surface_witness_mismatch"
     return CacheReuseDecision(
         neutral=CacheLaneVerdict(hit=neutral_hit, reason=neutral_reason),
-        dependent=CacheLaneVerdict(
-            hit=dependent_hit,
-            reason="hit" if dependent_hit else "dependent_profile_mismatch",
-        ),
+        dependent=CacheLaneVerdict(hit=dependent_hit, reason=dependent_reason),
     )
 
 

@@ -632,6 +632,7 @@ def _capture_cache_path_for_args(
             file_metrics: object | None = None,
             structural_findings: object | None = None,
             materialized_clone_channels: tuple[str, ...] = (),
+            materialized_api_surface: bool = False,
         ) -> None:
             return None
 
@@ -989,6 +990,7 @@ def test_cli_default_cache_dir_per_root(
             file_metrics: object | None = None,
             structural_findings: object | None = None,
             materialized_clone_channels: tuple[str, ...] = (),
+            materialized_api_surface: bool = False,
         ) -> None:
             return None
 
@@ -1201,6 +1203,7 @@ def test_cli_no_legacy_warning_when_paths_match(
             file_metrics: object | None = None,
             structural_findings: object | None = None,
             materialized_clone_channels: tuple[str, ...] = (),
+            materialized_api_surface: bool = False,
         ) -> None:
             return None
 
@@ -1262,6 +1265,7 @@ def test_cli_cache_status_string_fallback(
             file_metrics: object | None = None,
             structural_findings: object | None = None,
             materialized_clone_channels: tuple[str, ...] = (),
+            materialized_api_surface: bool = False,
         ) -> None:
             return None
 

@@ -54,6 +54,7 @@ from codeclone.models import (
     ObservationLaneDescriptor,
     ProjectMetrics,
     PublicSymbol,
+    PythonModuleIdentity,
     ResolvedSourceIdentity,
     RiskColumnarPayload,
     RiskObservationPayload,
@@ -810,6 +811,65 @@ def test_metrics_baseline_fallback_projections_remain_typed(
     api_snapshot = metrics_mod._api_surface_snapshot(api_container)
     assert api_snapshot is not None
     assert api_snapshot.modules == ()
+
+
+def test_the_bridge_drops_a_stored_private_module_from_the_api_snapshot() -> None:
+    """A baseline written while the privacy guard was inert still holds them.
+
+    ``include_private_modules=False`` was inert for any module declaring
+    ``__all__``, so a container published before the fix carries a row per
+    public-named symbol of every private module. A run no longer collects any
+    of them, so handing them over unchanged would report each as removed from
+    the public API on an untouched tree. The bridge drops them, and it must do
+    so unconditionally: that direction can only ever turn a stored symbol into
+    ``added``, never into ``removed``.
+
+    Both directions are here from one payload, so an over-eager drop fails as
+    loudly as an absent one.
+    """
+
+    container = build_container(_bundle(), _SCOPE_ID)
+    payload = ApiSurfaceObservationPayload(
+        symbols=tuple(
+            ApiSymbolObservation(
+                owner=ResolvedSourceIdentity(
+                    file=FileIdentity(path=path),
+                    python_module=PythonModuleIdentity(
+                        module=module,
+                        package=module.rsplit(".", 1)[0],
+                        is_package=False,
+                        mount_path=path,
+                        origin="import_mount",
+                        node_kind="module_file",
+                    ),
+                ),
+                symbol="public_name",
+                symbol_kind="constant",
+                visibility="all",
+                parameters=(),
+                returns_digest=None,
+            )
+            for module, path in (
+                ("pkg._internal", "pkg/_internal.py"),
+                ("pkg.public", "pkg/public.py"),
+            )
+        )
+    )
+    api_container = replace(
+        container,
+        lanes=replace(
+            container.lanes,
+            rows=tuple(
+                (name, replace(lane, payload=_encode_api_surface_lane(payload.symbols)))
+                if name == "api_surface"
+                else (name, lane)
+                for name, lane in container.lanes.rows
+            ),
+        ),
+    )
+    snapshot = metrics_mod._api_surface_snapshot(api_container)
+    assert snapshot is not None
+    assert [module.module for module in snapshot.modules] == ["pkg.public"]
 
 
 def test_metrics_baseline_required_contract_reason_is_schema_mismatch(

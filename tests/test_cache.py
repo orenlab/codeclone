@@ -378,6 +378,10 @@ def _roundtrip_cache_entry_with_metrics(
         [],
         source_content_digest=_SOURCE_CONTENT_DIGEST,
         file_metrics=file_metrics,
+        # A row holding a collected api surface has to claim it: the reader
+        # trusts the witness over the payload, so an unclaimed surface would be
+        # silently dropped on the way back in.
+        materialized_api_surface=file_metrics.api_surface is not None,
     )
     cache.save()
 
@@ -1250,6 +1254,62 @@ def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> 
     assert entry.module_dependent.structural_findings == ()
 
 
+def test_a_row_may_not_carry_an_api_surface_its_witness_disowns(
+    tmp_path: Path,
+) -> None:
+    """The producer-side twin of the clone-channel witness honesty check.
+
+    A reader trusts the witness over the payload, so a row holding a collected
+    surface while claiming it collected none would have that surface silently
+    dropped -- work paid for and thrown away behind a row that says it never
+    happened. The refusal is loud instead, and this is the input that reaches
+    it: without one the guard would be theatre.
+
+    Only that direction is refused. A row may claim the lane and hold nothing:
+    a module that exports nothing really is empty, which the second half here
+    asserts so the guard cannot quietly become "any disagreement".
+    """
+
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    _bind_module_paths(cache, "x.py")
+    metrics = FileMetrics(
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        import_names=frozenset(),
+        class_names=frozenset(),
+        api_surface=ModuleApiSurface(
+            module="pkg.mod",
+            filepath="x.py",
+            all_declared=("run",),
+            symbols=(),
+        ),
+    )
+    with pytest.raises(ValueError, match="witness does not claim"):
+        cache.put_file_entry(
+            "x.py",
+            {"mtime_ns": 1, "size": 10},
+            [],
+            [],
+            [],
+            source_content_digest=_SOURCE_CONTENT_DIGEST,
+            file_metrics=metrics,
+            materialized_api_surface=False,
+        )
+
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+        file_metrics=replace(metrics, api_surface=None),
+        materialized_api_surface=True,
+    )
+
+
 def test_cache_roundtrip_preserves_api_surface_parameter_order(
     tmp_path: Path,
 ) -> None:
@@ -1998,7 +2058,7 @@ def test_cache_refuses_a_legacy_json_monolith_at_the_cache_path(
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "4.0"
+    assert Cache._CACHE_VERSION == "4.1"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -2013,7 +2073,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     )
     old_cache.save()
 
-    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "4.0"
+    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "4.1"
     _write_cache_meta(cache_path, **{META_KEY_VERSION: "2.10"})
 
     regenerated = Cache(cache_path, root=tmp_path)
@@ -4082,7 +4142,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     assert "SECURITY_SURFACE_CATALOG_VERSION" in source
     assert "RUNTIME_REACHABILITY_CATALOG_VERSION" in source
     assert "STRUCTURAL_FINDINGS_CATALOG_VERSION" in source
-    assert CACHE_VERSION == "4.0"
+    assert CACHE_VERSION == "4.1"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

@@ -21,6 +21,8 @@ from ..contracts import (
     COUPLING_RISK_MEDIUM_MAX,
 )
 from ..contracts.errors import BaselineValidationError
+from ..domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
+from ..metrics._visibility import is_public_module_name
 from ..metrics.api_surface import is_product_api_module
 from ..metrics.dependencies import (
     build_import_graph,
@@ -278,11 +280,15 @@ class MetricsBaseline:
         else:
             baseline_snapshot = _snapshot(container)
             self.snapshot = baseline_snapshot
+        baseline_api, current_api = _gating_api_surfaces(
+            baseline=self.api_surface_snapshot,
+            current=current.api_surface,
+        )
         return diff_metrics(
             baseline_snapshot=baseline_snapshot,
             current_snapshot=_current_snapshot(current),
-            baseline_api_surface=self.api_surface_snapshot,
-            current_api_surface=current.api_surface,
+            baseline_api_surface=baseline_api,
+            current_api_surface=current_api,
         )
 
 
@@ -654,6 +660,67 @@ def _import_dependency(item: ImportOccurrenceObservation) -> ModuleDep:
     )
 
 
+def _gating_api_surfaces(
+    *,
+    baseline: ApiSurfaceSnapshot | None,
+    current: ApiSurfaceSnapshot | None,
+) -> tuple[ApiSurfaceSnapshot | None, ApiSurfaceSnapshot | None]:
+    """Narrow both sides of the api comparison to the gating surface.
+
+    ``api_breaking_changes`` is a verdict about the project's published
+    contract, and it was being computed over every module the run collected —
+    a repository's own ``scripts/`` tree, a distributed package's private
+    modules, everything importable. This is where the owner's verdict becomes
+    the gate's population, and it is done to BOTH sides together: narrowing
+    only the current one would report each dropped module's stored symbols as
+    ``removed``, which is the same false-teardown mechanism an unmaterialized
+    cache row produced.
+
+    A stored module the current run has no row for at all is kept. Its absence
+    is the ordinary reason a public symbol disappears — a deleted module — and
+    withholding that from the gate would trade a false positive for a false
+    negative. Only a module the run classified, and classified as non-gating,
+    is dropped from both sides.
+
+    The kinds come from the run, never from the container: what a project ships
+    is a property of the checkout being analysed, and the baseline predates any
+    answer to it.
+
+    The join is the MODULE IDENTITY, not the file path, and that is measured
+    rather than stylistic: a run carries absolute runtime paths while the
+    container stores repository-relative ones, so a path join matches nothing
+    and every narrowed module falls through the "the run never classified it"
+    branch. Measured on this repository with a path join: 183 breaking changes
+    instead of 51, of which 138 were ``benchmarks``, ``scripts`` and ``plugins``
+    modules reported as removed on an untouched tree — the exact false teardown
+    this function exists to prevent, produced by the function itself.
+    ``compare_api_surfaces`` already keys on ``module:qualname``, so module
+    identity is the join the rest of the lane uses.
+    """
+
+    if current is None:
+        return baseline, current
+    gating = {
+        module.module
+        for module in current.modules
+        if module.surface_kind == SURFACE_KIND_PRODUCT_PUBLIC
+    }
+    classified = {module.module for module in current.modules}
+    narrowed_current = ApiSurfaceSnapshot(
+        modules=tuple(module for module in current.modules if module.module in gating)
+    )
+    if baseline is None:
+        return None, narrowed_current
+    narrowed_baseline = ApiSurfaceSnapshot(
+        modules=tuple(
+            module
+            for module in baseline.modules
+            if module.module in gating or module.module not in classified
+        )
+    )
+    return narrowed_baseline, narrowed_current
+
+
 def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot | None:
     """Rebuild the stored api surface the way a run names its symbols.
 
@@ -685,7 +752,20 @@ def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot 
     rows: dict[tuple[str, str], list[PublicSymbol]] = {}
     for item in payload.symbols:
         module = item.owner.python_module
-        if module is None or not is_product_api_module(item.owner.file.path):
+        # One refusal, three reasons, because they are one question: is this
+        # stored row something a run still produces? The privacy term is the
+        # newer half. A baseline published while ``include_private_modules``
+        # was inert still holds a row per public-named symbol of every private
+        # module declaring ``__all__``; a run collects none of them, so passing
+        # them through would report each as removed from the public API.
+        # Unconditional, and that is the safe direction: a run that DOES ask
+        # for private modules keeps more than this bridge, which can only turn
+        # a stored symbol into ``added``, never into ``removed``.
+        if (
+            module is None
+            or not is_product_api_module(item.owner.file.path)
+            or not is_public_module_name(module.module)
+        ):
             continue
         key = (module.module, item.owner.file.path)
         rows.setdefault(key, []).append(

@@ -190,7 +190,7 @@ lane matches the current runtime contract.
 ### Invalid cache (contract error, exit code 2)
 
 - Cache file is corrupted
-- Cache schema version does not match `CACHE_VERSION` ("4.0")
+- Cache schema version does not match `CACHE_VERSION` ("4.1")
 
 **Remediation:** Delete `.codeclone/db/cache.sqlite3*` and re-run.
 

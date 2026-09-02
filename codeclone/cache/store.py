@@ -407,6 +407,10 @@ class Cache:
             dependent_profile=self._module_dependent_profile,
             binding_context=self._binding_context_for(runtime_path),
             required_clone_channels=required_clone_channels,
+            # The store already holds the run's answer, and it is the same
+            # value ``put_file_entry`` stamps: one derivation reaches both the
+            # witness and the requirement, so they cannot drift.
+            requires_api_surface=self._collect_api_surface,
         )
 
     def _set_load_warning(self, message: str | None) -> None:
@@ -977,9 +981,14 @@ class Cache:
         structural_findings: list[StructuralFindingGroup] | None = None,
         function_relationship_facts: Sequence[FunctionRelationshipFacts] | None = None,
         materialized_clone_channels: tuple[CloneArtifactChannel, ...] = (),
+        materialized_api_surface: bool = False,
     ) -> None:
         if not self._write_enabled:
             return
+        _validate_materialized_api_surface(
+            file_metrics=file_metrics,
+            materialized_api_surface=materialized_api_surface,
+        )
         # T2 witness honesty, producer side: an artifact the witness does not
         # claim would be silently dropped by the encoder — computed work
         # thrown away behind a row that says it never existed. The default
@@ -1189,6 +1198,7 @@ class Cache:
                 docstring_coverage=docstring_coverage,
                 api_surface=api_surface,
                 structural_findings=structural_rows,
+                materialized_api_surface=materialized_api_surface,
             ),
         )
         self._store_canonical_file_entry(
@@ -1225,6 +1235,27 @@ class Cache:
             self._canonical_runtime_paths.discard(runtime_path)
         self._dirty = True
         return len(stale_runtime_paths)
+
+
+def _validate_materialized_api_surface(
+    *,
+    file_metrics: FileMetrics | None,
+    materialized_api_surface: bool,
+) -> None:
+    """The api twin of the clone-channel witness honesty check.
+
+    Its safe direction is the mirror of the clone one: a row may claim the lane
+    and hold no symbols, because a module that exports nothing really is empty.
+    The opposite is a silent loss — a reader trusts the witness over the
+    payload, so a collected surface a row disowns is dropped on the way back in.
+    """
+
+    surface = None if file_metrics is None else file_metrics.api_surface
+    if surface is not None and not materialized_api_surface:
+        raise ValueError(
+            "cache entry carries an api surface the materialization "
+            "witness does not claim"
+        )
 
 
 def _validate_materialized_clone_channels(

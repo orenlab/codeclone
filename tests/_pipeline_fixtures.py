@@ -116,6 +116,7 @@ def analysis_boot(
     skip_dead_code: bool = False,
     near_miss: bool = False,
     renamed_structure: bool = False,
+    api_surface: bool = False,
 ) -> BootstrapResult:
     """A bootstrap over ``root`` with the clone floors the caller declares."""
 
@@ -131,6 +132,7 @@ def analysis_boot(
             segment_min_loc=20,
             segment_min_stmt=10,
             skip_metrics=skip_metrics,
+            api_surface=api_surface,
             skip_dependencies=skip_dependencies,
             skip_dead_code=skip_dead_code,
             near_miss=near_miss,

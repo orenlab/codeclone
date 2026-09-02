@@ -56,7 +56,7 @@ graph TB
 
 The four core tiers:
 
-1. **Analysis engine**: Deterministic detector, fingerprint matching, metric aggregation. No mutation of source, baseline, or cache. Outputs keyed to schema versions (`BASELINE_FINGERPRINT_VERSION=3`, `CACHE_VERSION=4.0`, `REPORT_SCHEMA_VERSION=3.3`).
+1. **Analysis engine**: Deterministic detector, fingerprint matching, metric aggregation. No mutation of source, baseline, or cache. Outputs keyed to schema versions (`BASELINE_FINGERPRINT_VERSION=3`, `CACHE_VERSION=4.1`, `REPORT_SCHEMA_VERSION=3.3`).
 
 2. **Structural controller**: Pre-edit intent declaration, workspace liveness checking, scope verification. Single active intent per MCP session; eviction on new `start_controlled_change` without prior `finish`. No memory of prior intents across restart.
 

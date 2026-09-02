@@ -1402,6 +1402,7 @@ class StructuralFindingGroupDict(TypedDict):
 
 
 CacheLaneReuseReason = Literal[
+    "api_surface_witness_mismatch",
     "binding_context_mismatch",
     "clone_channels_mismatch",
     "content_miss",
@@ -1506,6 +1507,14 @@ class CacheDependentPayload:
     docstring_coverage: ModuleDocstringCoverageDict | None
     api_surface: ModuleApiSurfaceDict | None
     structural_findings: tuple[StructuralFindingGroupDict, ...] | None
+    #: The api-surface materialization witness, the dependent-lane twin of
+    #: ``materialized_clone_channels``: did the writing extraction actually
+    #: collect this file's api surface? ``api_surface: None`` cannot answer it
+    #: — a module with no public symbols and a module nobody looked at are the
+    #: same absence — and the cache profile key answered a strictly weaker
+    #: question than the workers did, so a metrics-skipping run stamped rows
+    #: claiming a lane it never filled. The reuse gate reads THIS.
+    materialized_api_surface: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -3420,6 +3429,17 @@ class ModuleApiSurface:
     filepath: str
     symbols: tuple[PublicSymbol, ...]
     all_declared: tuple[str, ...] | None = None
+    #: Which surface this module's symbols belong to, from
+    #: ``metrics.api_population``. The per-file collector cannot know it — the
+    #: verdict needs the scan root, the module registry and the distribution
+    #: manifest, none of which a single file carries — so the run attaches it
+    #: once, after collection, and every later consumer reads the column
+    #: instead of re-deriving the population it happens to have inputs for.
+    #: The empty default means "no run classified this", which a run never
+    #: leaves behind: the vocabulary lives in ``domain.source_scope`` and this
+    #: module may import only ``codeclone.contracts``, so the word is supplied
+    #: by the owner rather than spelled a second time here.
+    surface_kind: str = ""
 
 
 @dataclass(frozen=True, slots=True)

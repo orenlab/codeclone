@@ -621,9 +621,10 @@ def _decode_wire_file_entry(
     source_stats = _decode_optional_wire_source_stats(obj=neutral_obj)
     semantic_facts = _decode_semantic_facts(neutral_obj, filepath=filepath)
     materialized_clone_channels = _decode_materialized_clone_channels(neutral_obj)
+    materialized_api_surface = _decode_materialized_api_surface(dependent_obj)
     if source_stats is None or semantic_facts is None:
         return None
-    if materialized_clone_channels is None:
+    if materialized_clone_channels is None or materialized_api_surface is None:
         return None
     facts_obj = dict(dependent_obj)
     facts_obj.update(neutral_obj)
@@ -729,6 +730,7 @@ def _decode_wire_file_entry(
                 if has_structural_findings
                 else None
             ),
+            materialized_api_surface=materialized_api_surface,
         ),
     )
 
@@ -880,6 +882,18 @@ _CLONE_KEY_CLAIMS: Final[tuple[tuple[str, tuple[CloneArtifactChannel, ...]], ...
     ("uc", ("renamed_structure",)),
     ("urs", ("near_miss", "renamed_structure")),
 )
+
+
+def _decode_materialized_api_surface(obj: dict[str, object]) -> bool | None:
+    """Decode the mandatory ``amt`` witness, fail-closed like ``mt``.
+
+    ``None`` is "this row predates the witness or carries a malformed one", and
+    the caller drops the whole entry: a row that cannot say what it collected
+    is a row whose api payload cannot be served.
+    """
+
+    witness = obj.get("amt")
+    return witness if isinstance(witness, bool) else None
 
 
 def _decode_materialized_clone_channels(

@@ -36,6 +36,7 @@ from ..observability import record_counter, span
 from ..semantics.authority import build_semantic_authority
 from ..semantics.events import event_counter_key
 from ..semantics.registry import parse_authority_registry
+from ..utils.lane_selection import api_surface_collection_enabled
 from ._types import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_RUNTIME_PROCESSES,
@@ -204,9 +205,7 @@ def process(
     all_api_modules: list[ModuleApiSurface] = list(discovery.cached_api_modules)
 
     collect_structural_findings = structural_findings_required()
-    collect_api_surface = not boot.args.skip_metrics and bool(
-        getattr(boot.args, "api_surface", False)
-    )
+    collect_api_surface = api_surface_collection_enabled(boot.args)
     api_include_private_modules = bool(
         getattr(boot.args, "api_include_private_modules", False)
     )
@@ -297,6 +296,9 @@ def process(
                 file_metrics=result.file_metrics,
                 structural_findings=result.structural_findings,
                 materialized_clone_channels=materialized_clone_channels,
+                # Same value that told the workers whether to collect, so the
+                # row cannot claim a lane this extraction did not fill.
+                materialized_api_surface=collect_api_surface,
             )
             files_analyzed += 1
             analyzed_lines += result.lines

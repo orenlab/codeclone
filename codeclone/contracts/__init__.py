@@ -495,10 +495,23 @@ TIER_STATE_COMPLETE: Final = "complete"
 # The bump records the generation break for anything that reads this constant
 # to reason about compatibility.
 #
+# 4.0 -> 4.1 gives the api-surface lane the materialization witness the clone
+# lane got at 3.8, and for the identical reason on the other lane: a row's
+# ``api_surface`` payload is absent both when a module exports nothing and when
+# no extraction looked at it, while the profile key was computed from
+# ``bool(args.api_surface)`` and the workers materialized on
+# ``not skip_metrics and args.api_surface``. Measured: one metrics-skipping run
+# through either surface left rows keyed as api-collecting and empty, and the
+# next full run reused them and reported ``public_symbols: 0`` against 5409 and
+# ``breaking: 4949`` against 50. The mandatory ``amt`` key is the legal way for
+# a row to say "did not collect"; decode rejects a row without it, so a 4.0 row
+# is re-analysed rather than read as "collected, and empty". The row's meaning
+# changed, so the generation moves with it.
+#
 # It is disposable acceleration state and never truth, so this constant reaches
 # no report, no baseline and no content address: nothing downstream of a run
 # changes value because the cache changed shape.
-CACHE_VERSION: Final = "4.0"
+CACHE_VERSION: Final = "4.1"
 # 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
 # changed. "complete" became "complete_nonempty" and "complete_empty" joined
 # it, because one word was carrying two facts — a population that exists and

@@ -302,6 +302,7 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "cache_content_decision_racy",
         "cache_content_decision_untracked",
         "cache_content_digest_verify_cost_us",
+        "cache_lane_dependent_api_surface_witness_mismatch",
         "cache_lane_dependent_content_miss",
         "cache_lane_dependent_hit",
         "cache_lane_dependent_miss",

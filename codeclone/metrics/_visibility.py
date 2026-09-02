@@ -64,18 +64,33 @@ def build_module_visibility(
     public_module = include_private_modules or is_public_module_name(module_name)
     top_level_names = _top_level_declared_names(tree=tree, collector=collector)
     imported = frozenset(imported_names)
-    if declared_all is not None:
+    # Module privacy is asked FIRST, and that order is the whole guard.
+    # ``__all__`` used to be consulted before it, which made
+    # ``include_private_modules=False`` inert for any private module declaring
+    # one: measured on this repository, 303 of 5409 collected symbols entered
+    # the surface through a module with an underscore-prefixed segment --
+    # ``codeclone.cache._wire_decode:_decode_wire_file_entry`` among them --
+    # and reached the api-break gate. No input reached the privacy branch at
+    # all, so the flag was theatre rather than a policy.
+    #
+    # The two meanings of ``__all__`` are what made it look right: in a
+    # published module it declares the export list, and in a private one this
+    # project uses it as internal import discipline. Only the second reading is
+    # available to a rule that cannot see the module's own privacy, so privacy
+    # decides admission and ``__all__`` decides the names of an admitted one.
+    exported_names: frozenset[str]
+    if not public_module:
+        exported_names = frozenset()
+    elif declared_all is not None:
         exported_names = frozenset(
             name for name in declared_all if name and name in top_level_names
         )
-    elif public_module:
+    else:
         exported_names = frozenset(
             name
             for name in top_level_names
             if not name.startswith("_") and name not in imported
         )
-    else:
-        exported_names = frozenset()
     return ModuleVisibility(
         module_name=module_name,
         exported_names=exported_names,

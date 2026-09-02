@@ -12,6 +12,7 @@ from ...cache.versioning import CacheStatus
 from ...contracts.schemas import ReportMeta
 from ...report import meta as _report_meta
 from ...report.meta import build_report_meta as _build_report_meta
+from ...utils.lane_selection import api_surface_collection_enabled
 from .types import CLIArgsLike
 
 if TYPE_CHECKING:
@@ -66,7 +67,7 @@ def build_cli_report_meta(
             metrics_payload=analysis_result.metrics_payload,
             skip_dependencies=args.skip_dependencies,
             skip_dead_code=args.skip_dead_code,
-            api_surface=args.api_surface,
+            api_surface=api_surface_collection_enabled(args),
         ),
         min_loc=args.min_loc,
         min_stmt=args.min_stmt,

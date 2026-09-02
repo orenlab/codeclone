@@ -32,6 +32,7 @@ from ...core.pipeline import analyze
 from ...core.reporting import gate_required_lanes, report
 from ...memory.report_trust import assess_cached_report_trust
 from ...report.html import build_html_report
+from ...utils.lane_selection import api_surface_collection_enabled
 from . import baseline_state as cli_baseline_state
 from . import execution as cli_execution
 from . import post_run as cli_post_run
@@ -153,7 +154,7 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
         block_min_stmt=args.block_min_stmt,
         segment_min_loc=args.segment_min_loc,
         segment_min_stmt=args.segment_min_stmt,
-        collect_api_surface=True,
+        collect_api_surface=api_surface_collection_enabled(args),
     )
     cache.load()
     boot = bootstrap(

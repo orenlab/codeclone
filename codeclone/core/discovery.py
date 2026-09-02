@@ -86,6 +86,7 @@ _NEUTRAL_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
 }
 
 _DEPENDENT_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
+    "api_surface_witness_mismatch": "cache_lane_dependent_api_surface_witness_mismatch",
     "content_miss": "cache_lane_dependent_content_miss",
     "dependent_profile_mismatch": "cache_lane_dependent_profile_mismatch",
     "hit": "cache_lane_dependent_hit",

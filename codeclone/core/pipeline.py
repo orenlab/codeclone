@@ -31,6 +31,7 @@ from ..findings.clones.renamed_structure import build_renamed_structure_groups
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
+from ..metrics.api_population import ApiSurfacePopulation
 from ..metrics.api_surface import product_api_modules
 from ..metrics.coupling import resolve_project_class_coupling
 from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
@@ -87,6 +88,7 @@ from ..report.segments import (
     prepare_segment_report_groups,
 )
 from ..report.suggestions import generate_suggestions
+from ..utils.lane_selection import api_surface_collection_enabled
 from ._types import (
     AnalysisResult,
     BootstrapResult,
@@ -95,7 +97,10 @@ from ._types import (
     _segment_groups_digest,
 )
 from .bootstrap import _resolve_optional_runtime_path
-from .entrypoints import collect_project_entrypoint_qualnames
+from .entrypoints import (
+    collect_project_distributed_packages,
+    collect_project_entrypoint_qualnames,
+)
 from .metrics_payload import build_metrics_report_payload
 
 
@@ -420,10 +425,20 @@ def analyze(
     # them into one report. It cannot move down into the per-file collector
     # either — that result is cached per file, and a warm cache written before
     # this split would hand the test modules straight back.
-    api_modules = product_api_modules(
-        processing.api_modules,
+    # The population owner is built once, here, with every input it needs, and
+    # read everywhere else. Its verdict rides each module as ``surface_kind``
+    # rather than being recomputed by the consumers, because the three inputs
+    # (scan root, module registry, distribution manifest) exist at exactly one
+    # point in a run and fifteen of the nineteen historic call sites of the old
+    # predicate held an incomplete set of them.
+    api_population = ApiSurfacePopulation(
         scan_root=str(boot.root),
         module_registry=discovery.module_registry,
+        distributed_packages=collect_project_distributed_packages(boot.root),
+    )
+    api_modules = product_api_modules(
+        processing.api_modules,
+        population=api_population,
     )
     if not boot.args.skip_metrics:
         referenced_qualnames = frozenset(
@@ -521,9 +536,7 @@ def analyze(
         )
 
     collect_metrics = not bool(boot.args.skip_metrics)
-    collect_api_surface = collect_metrics and bool(
-        getattr(boot.args, "api_surface", False)
-    )
+    collect_api_surface = api_surface_collection_enabled(boot.args)
     # Only the rule-3 abstention projects as ``abstained`` on the observation
     # row: that lane is EVIDENCE, and evidence may not depend on the world
     # contract. A reachability abstention is an evaluation outcome; it reaches

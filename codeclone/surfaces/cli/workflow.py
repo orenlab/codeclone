@@ -46,6 +46,7 @@ from ...core.reporting import (
 from ...observability import bootstrap as start_observability
 from ...observability import operation, span
 from ...report.html import build_html_report
+from ...utils.lane_selection import api_surface_collection_enabled
 from ...utils.run_identity import report_run_identity
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
@@ -494,7 +495,7 @@ def _main_impl() -> None:
                 block_min_stmt=args.block_min_stmt,
                 segment_min_loc=args.segment_min_loc,
                 segment_min_stmt=args.segment_min_stmt,
-                collect_api_surface=bool(args.api_surface),
+                collect_api_surface=api_surface_collection_enabled(args),
             )
             cache.load()
         if cache.load_warning:

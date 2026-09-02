@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from dataclasses import replace
 from functools import lru_cache
 from typing import TYPE_CHECKING, Final, Literal
 
+from ..domain.source_scope import SURFACE_KIND_TEST_SUPPORT
 from ..models import (
     ApiBreakingChange,
     ApiParamSpec,
@@ -24,6 +26,7 @@ from ._visibility import (
     build_module_visibility,
     is_public_method_name,
 )
+from .api_population import ApiSurfacePopulation
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -84,24 +87,37 @@ def is_product_api_module(
 def product_api_modules(
     modules: Sequence[ModuleApiSurface],
     *,
-    scan_root: str = "",
-    module_registry: ModuleRegistryHandle | None = None,
+    population: ApiSurfacePopulation,
 ) -> tuple[ModuleApiSurface, ...]:
-    """Keep only the product track of a run's collected module surfaces.
+    """Keep the product track, and stamp what survives with its surface kind.
+
+    Two jobs, deliberately in one pass, because they are one decision. The
+    test/support track leaves the collected population entirely — its symbols
+    are not the project's contract in any reading, and keeping them made
+    ``fail_on_api_break`` fail a run for a renamed test. Everything else stays
+    collected and carries the owner's verdict as data, so the comparison can
+    decide what may gate without any consumer re-deriving a population from
+    whichever inputs it happens to hold.
+
+    Narrowing what is *collected* by anything finer than the test track is not
+    an option here: the collected surface is what the baseline stores, and a
+    run that drops modules an earlier build stored reads every one of their
+    symbols as ``removed``.
 
     Order is the caller's; this filters and never reorders, so the sort the
     producer already applied survives.
     """
 
-    return tuple(
-        module
-        for module in modules
-        if is_product_api_module(
-            module.filepath,
-            scan_root=scan_root,
-            module_registry=module_registry,
+    kept: list[ModuleApiSurface] = []
+    for module in modules:
+        kind = population.surface_kind(
+            filepath=module.filepath,
+            module=module.module,
         )
-    )
+        if kind == SURFACE_KIND_TEST_SUPPORT:
+            continue
+        kept.append(replace(module, surface_kind=kind))
+    return tuple(kept)
 
 
 @lru_cache(maxsize=1)
