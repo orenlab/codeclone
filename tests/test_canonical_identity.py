@@ -32,7 +32,9 @@ from codeclone.canonical import (
     FileLine,
     KnownModule,
     ModuleId,
+    ModuleSymbol,
     OpaqueDottedHead,
+    OpaqueEntity,
     OperationRoot,
     OperationTarget,
     ProducerRoot,
@@ -355,3 +357,24 @@ def test_fact_vocabularies_mirror_the_producer_literals() -> None:
     assert get_args(ApiSymbolKind) == API_SYMBOL_KINDS
     assert get_args(ApiVisibility) == API_VISIBILITIES
     assert get_args(ApiParameterKind) == API_PARAMETER_KINDS
+
+
+def test_named_dead_code_variants_refuse_an_empty_name() -> None:
+    """Two of the three entity variants carry names the SYMBOL domain does not.
+
+    ``SymbolId`` gets its names from a file identity that was already
+    validated; these two are built straight from producer text, so the empty
+    string is theirs to refuse. Each name has its own refusal, because an
+    entity missing its head and one missing its qualname are different
+    corruptions and an operator has to be told which.
+    """
+
+    with pytest.raises(CanonicalModelError, match="module symbol qualname"):
+        ModuleSymbol(ModuleId("pkg.a"), "")
+    with pytest.raises(CanonicalModelError, match="opaque entity head"):
+        OpaqueEntity("", "handler")
+    with pytest.raises(CanonicalModelError, match="opaque entity qualname"):
+        OpaqueEntity("pkg.a", "")
+
+    assert ModuleSymbol(ModuleId("pkg.a"), "handler").qualname == "handler"
+    assert OpaqueEntity("pkg.a", "handler").head == "pkg.a"

@@ -30,6 +30,8 @@ from __future__ import annotations
 import ast
 import textwrap
 
+import pytest
+
 from codeclone.analysis.cfg import CFGBuilder
 from codeclone.analysis.fingerprint import _cfg_fingerprint_and_complexity
 from codeclone.analysis.normalizer import NormalizationConfig
@@ -272,3 +274,482 @@ def test_own_domain_never_collides_with_fp3() -> None:
         return total
     """
     assert _digest(source) != _exact_fingerprint(source)
+
+
+# Each row is ``(case, base, renamed, distinct)``. ``renamed`` is a consistent
+# renaming of ``base`` and must share its digest; ``distinct`` differs
+# structurally and must not. Both directions are asserted for every row, so an
+# over-rigid canonicalizer fails the first assertion and an over-loose one
+# fails the second. The rows are constructs the unit's own straight-line body
+# cannot reach: inner scopes, pattern nodes, and the receiver shapes that
+# decide whether an attribute is renameable at all.
+_ALPHA_EQUIVALENCE_CASES: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "nested_def",
+        """
+        def f(items):
+            def scale(value):
+                return value * value
+            return [scale(item) for item in items]
+        """,
+        """
+        def f(entries):
+            def grow(amount):
+                return amount * amount
+            return [grow(entry) for entry in entries]
+        """,
+        """
+        def f(items):
+            def scale(value, factor):
+                return factor * value
+            return [scale(item, item) for item in items]
+        """,
+    ),
+    (
+        "lambda",
+        """
+        def f(rows):
+            pick = lambda left, right: left - right
+            return pick(rows, rows)
+        """,
+        """
+        def f(cells):
+            take = lambda first, second: first - second
+            return take(cells, cells)
+        """,
+        """
+        def f(rows):
+            pick = lambda left, right: right - left
+            return pick(rows, rows)
+        """,
+    ),
+    (
+        "nested_class",
+        """
+        def f(seed):
+            class Holder:
+                limit = seed
+            return Holder
+        """,
+        """
+        def f(start):
+            class Keeper:
+                bound = start
+            return Keeper
+        """,
+        """
+        def f(seed):
+            class Holder:
+                limit = seed
+                extra = seed
+            return Holder
+        """,
+    ),
+    # A handler reaches the walker as a real ``ExceptHandler`` only from an
+    # inner scope: the unit's own ``try`` is lowered into CFG blocks, so its
+    # handler never becomes a block statement.
+    (
+        "nested_except_binding",
+        """
+        def f(source):
+            def read(handle):
+                try:
+                    return handle.load()
+                except ValueError as failure:
+                    return failure
+            return read(source)
+        """,
+        """
+        def f(origin):
+            def fetch(stream):
+                try:
+                    return stream.load()
+                except ValueError as problem:
+                    return problem
+            return fetch(origin)
+        """,
+        """
+        def f(source):
+            def read(handle):
+                try:
+                    return handle.load()
+                except TypeError as failure:
+                    return failure
+            return read(source)
+        """,
+    ),
+    (
+        "nested_match_captures",
+        """
+        def f(payload):
+            def classify(event):
+                match event:
+                    case [head, *tail]:
+                        return head, tail, head
+                    case {"a": one, **rest}:
+                        return one, rest, one
+                    case _:
+                        return None
+            return classify(payload)
+        """,
+        """
+        def f(payload):
+            def sort(signal):
+                match signal:
+                    case [first, *others]:
+                        return first, others, first
+                    case {"a": single, **remainder}:
+                        return single, remainder, single
+                    case _:
+                        return None
+            return sort(payload)
+        """,
+        """
+        def f(payload):
+            def classify(event):
+                match event:
+                    case [head, *tail]:
+                        return tail, head, head
+                    case {"a": one, **rest}:
+                        return one, rest, one
+                    case _:
+                        return None
+            return classify(payload)
+        """,
+    ),
+    # An ``as`` capture over a sub-pattern, against the same mapping with no
+    # ``**rest``: the sub-pattern and the double-star are structure.
+    (
+        "nested_match_as_capture",
+        """
+        def f(payload):
+            def read(event):
+                match event:
+                    case {"a": inner} as whole:
+                        return inner, whole, inner
+                    case _:
+                        return None
+            return read(payload)
+        """,
+        """
+        def f(payload):
+            def scan(signal):
+                match signal:
+                    case {"a": part} as entire:
+                        return part, entire, part
+                    case _:
+                        return None
+            return scan(payload)
+        """,
+        """
+        def f(payload):
+            def read(event):
+                match event:
+                    case {"a": inner}:
+                        return inner, inner, inner
+                    case _:
+                        return None
+            return read(payload)
+        """,
+    ),
+    # The unit's OWN match arrives as ``__CC_META__`` markers that spell the
+    # pattern shape with capture names already replaced by ``_VAR_``. So
+    # renaming captures is invisible here while the shape still separates.
+    (
+        "top_level_match_marker",
+        """
+        def f(event):
+            match event:
+                case [head, *tail]:
+                    return head, tail, head
+                case _:
+                    return None
+        """,
+        """
+        def f(event):
+            match event:
+                case [first, *others]:
+                    return first, others, first
+                case _:
+                    return None
+        """,
+        """
+        def f(event):
+            match event:
+                case [head, extra]:
+                    return head, extra, head
+                case _:
+                    return None
+        """,
+    ),
+    (
+        "dict_comprehension",
+        """
+        def f(pairs):
+            return {pair.key: pair.value for pair in pairs}
+        """,
+        """
+        def f(items):
+            return {item.name: item.datum for item in items}
+        """,
+        """
+        def f(pairs):
+            return {pair.key: pair.key for pair in pairs}
+        """,
+    ),
+    # ``{**base}`` stores ``None`` in ``Dict.keys`` -- the one list field the
+    # walker recurses into that can hold something other than a node.
+    (
+        "dict_unpacking",
+        """
+        def f(base, extra):
+            return {**base, "k": extra}
+        """,
+        """
+        def f(origin, other):
+            return {**origin, "k": other}
+        """,
+        """
+        def f(base, extra):
+            return {"k": extra}
+        """,
+    ),
+    (
+        "parameter_defaults",
+        """
+        def f(base):
+            def apply(value=base, *, plain, scale=base):
+                return value, plain, scale
+            return apply
+        """,
+        """
+        def f(seed):
+            def run(amount=seed, *, bare, factor=seed):
+                return amount, bare, factor
+            return run
+        """,
+        """
+        def f(base):
+            def apply(value=base, *, plain, scale=value):
+                return value, plain, scale
+            return apply
+        """,
+    ),
+    (
+        "classmethod_receiver",
+        """
+        class C:
+            @classmethod
+            def f(cls, total):
+                cls.registry = total
+                return cls.registry
+        """,
+        """
+        class C:
+            @classmethod
+            def f(cls, amount):
+                cls.store = amount
+                return cls.store
+        """,
+        """
+        class C:
+            @classmethod
+            def f(cls, total):
+                cls.registry = total
+                return total
+        """,
+    ),
+    (
+        "subscript_receiver_is_rigid",
+        """
+        def f(self, rows):
+            return self.items[0].label + rows.label
+        """,
+        """
+        def f(self, cells):
+            return self.items[0].label + cells.label
+        """,
+        """
+        def f(self, rows):
+            return self.items[0].other + rows.label
+        """,
+    ),
+    # A renameable chain is walked link by link, and its length is emitted.
+    (
+        "receiver_chain_depth",
+        """
+        def f(obj):
+            return obj.inner.leaf
+        """,
+        """
+        def f(holder):
+            return holder.middle.tip
+        """,
+        """
+        def f(obj):
+            return obj.leaf
+        """,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("case", "base", "renamed", "distinct"),
+    _ALPHA_EQUIVALENCE_CASES,
+    ids=[row[0] for row in _ALPHA_EQUIVALENCE_CASES],
+)
+def test_canonicalization_is_alpha_equivalent_and_no_looser(
+    case: str, base: str, renamed: str, distinct: str
+) -> None:
+    """One relation, asserted over every construct that can carry it."""
+
+    assert _digest(base) == _digest(renamed), (
+        f"{case}: a consistent renaming changed the digest"
+    )
+    assert _digest(base) != _digest(distinct), (
+        f"{case}: a structural difference was absorbed into one digest"
+    )
+
+
+def test_global_stays_rigid_while_nonlocal_renames() -> None:
+    """The two bound-name statements reach opposite rigidity verdicts.
+
+    A ``global`` name has no provable local binding, so it stays literal and a
+    renaming is a different unit. A ``nonlocal`` name resolves to a local of
+    the enclosing scope, so it takes an ordinal and renames like any other.
+    """
+
+    global_base = """
+    def f():
+        global counter
+        counter = counter + 1
+        return counter
+    """
+    global_renamed = """
+    def f():
+        global tally
+        tally = tally + 1
+        return tally
+    """
+    nonlocal_base = """
+    def f(seed):
+        stored = seed
+        def bump(step):
+            nonlocal stored
+            stored = stored + step
+            return stored
+        return bump
+    """
+    nonlocal_renamed = """
+    def f(origin):
+        kept = origin
+        def raise_by(delta):
+            nonlocal kept
+            kept = kept + delta
+            return kept
+        return raise_by
+    """
+    assert _digest(global_base) != _digest(global_renamed)
+    assert _digest(nonlocal_base) == _digest(nonlocal_renamed)
+
+
+def _import_position_source(body: str, *, module: str, alias: str | None = None) -> str:
+    """A unit whose body puts an import-rooted chain in one syntactic slot."""
+
+    header = f"import {module}" if alias is None else f"import {module} as {alias}"
+    return f"{header}\n\ndef f(rows):\n{body.format(root=alias or module)}"
+
+
+# The syntactic slots in which a canonicalized child can REPLACE its copy
+# rather than be rewritten in place. Replacement happens only where an
+# import-rooted attribute chain collapses to a single identity node, so each
+# slot below is the only route to its own replacement branch.
+_IMPORT_COLLAPSE_POSITIONS: tuple[tuple[str, str], ...] = (
+    ("bare_name", "    return {root}(rows)\n"),
+    ("return_value", "    return {root}.dumps\n"),
+    ("list_element", "    return [{root}.dumps, rows]\n"),
+    ("comprehension_iterable", "    return [item for item in {root}.registry]\n"),
+    ("comprehension_element", "    return [{root}.dumps for item in rows]\n"),
+    ("comprehension_target", "    return [item for {root}.slot in rows]\n"),
+    (
+        "dict_comprehension_pair",
+        "    return {{{root}.key: {root}.value for item in rows}}\n",
+    ),
+    ("lambda_body", "    return lambda: {root}.dumps\n"),
+    (
+        "decorator_and_defaults",
+        "    @{root}.cache\n"
+        "    def inner(value={root}.default, *, plain, kw={root}.other):\n"
+        "        return value, plain, kw\n"
+        "    return inner\n",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("position", "body"),
+    _IMPORT_COLLAPSE_POSITIONS,
+    ids=[row[0] for row in _IMPORT_COLLAPSE_POSITIONS],
+)
+def test_import_identity_is_rigid_in_every_syntactic_position(
+    position: str, body: str
+) -> None:
+    """An imported chain is one rigid identity wherever it is written.
+
+    The alias is the renaming that must NOT move the digest and the different
+    module is the identity change that must. Running the pair through every
+    slot is what proves the collapse is applied by position, rather than only
+    where existing tests happened to put it.
+    """
+
+    plain = _import_position_source(body, module="json")
+    aliased = _import_position_source(body, module="json", alias="codec")
+    other = _import_position_source(body, module="pickle")
+    assert _digest(plain) == _digest(aliased), (
+        f"{position}: aliasing the import changed the digest"
+    )
+    assert _digest(plain) != _digest(other), (
+        f"{position}: a different imported identity collapsed to one digest"
+    )
+
+
+def _nested_handler_source(clause: str, body: str) -> str:
+    """A nested unit whose inner function carries one ``except`` clause."""
+
+    return (
+        "def f(source):\n"
+        "    def read(handle):\n"
+        "        try:\n"
+        "            return handle.load()\n"
+        f"        {clause}\n"
+        f"            {body}\n"
+        "    return read(source)\n"
+    )
+
+
+def test_except_clause_parts_are_each_structural() -> None:
+    """A handler's caught type and bound name are independently optional.
+
+    The type is an ordinary expression, so it can itself be an imported
+    identity that must collapse; and dropping either the type or the binding
+    is a shape change the digest has to carry.
+    """
+
+    imported = "import json\n\n" + _nested_handler_source(
+        "except json.JSONDecodeError as failure:", "return failure"
+    )
+    imported_aliased = "import json as codec\n\n" + _nested_handler_source(
+        "except codec.JSONDecodeError as problem:", "return problem"
+    )
+    imported_other = "import pickle\n\n" + _nested_handler_source(
+        "except pickle.UnpicklingError as failure:", "return failure"
+    )
+    bare = _nested_handler_source("except:", "return None")
+    typed = _nested_handler_source("except ValueError:", "return None")
+    typed_and_bound = _nested_handler_source(
+        "except ValueError as failure:", "return None"
+    )
+    assert _digest(imported) == _digest(imported_aliased)
+    assert _digest(imported) != _digest(imported_other)
+    assert _digest(bare) != _digest(typed)
+    assert _digest(typed) != _digest(typed_and_bound)

@@ -52,6 +52,12 @@ from codeclone.canonical import (
     decode_canonical_json,
     encode_canonical_json,
 )
+from codeclone.canonical.ingest import (
+    _mapping,
+    _root_string,
+    _sequence,
+    _string,
+)
 
 _MAKE = "pkg.mod:make"
 _RUN = "scripts/tool.py:run"
@@ -1588,3 +1594,28 @@ def test_ingest_reads_the_violation_evidence_without_inheriting_its_order() -> N
         "scripts/tool.py",
         "third_party/x.py",
     ]
+
+
+def test_legacy_shape_readers_name_the_slot_they_refuse() -> None:
+    """A legacy document is untrusted input, so each slot reader is total.
+
+    The four readers below are the ones every other legacy reader is built
+    from, so a slot they let through becomes a wrong value deep inside the
+    ingest rather than a refusal at the edge. Each names the slot and the
+    shape it wanted; each still returns the value it was given when the shape
+    is right.
+    """
+
+    with pytest.raises(LegacyIngestError, match="header is not an object"):
+        _mapping("nope", "header")
+    with pytest.raises(LegacyIngestError, match="items is not an array"):
+        _sequence("nope", "items")
+    with pytest.raises(LegacyIngestError, match=r"entry\.path is not a string"):
+        _string({"path": 1}, "path", "entry")
+    with pytest.raises(LegacyIngestError, match="root entry is not a string"):
+        _root_string(1, "roots")
+
+    assert _mapping({"a": 1}, "header") == {"a": 1}
+    assert list(_sequence([1, 2], "items")) == [1, 2]
+    assert _string({"path": "pkg/a.py"}, "path", "entry") == "pkg/a.py"
+    assert _root_string("unresolved", "roots") == "unresolved"

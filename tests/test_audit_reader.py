@@ -560,3 +560,36 @@ def test_read_event_payload_rows_open_failure_raises_audit_read_error(
     )
     with pytest.raises(AuditReadError, match="cannot open audit database"):
         _read_event_payload_rows(db_path, "analysis.completed")
+
+
+def test_novelty_counters_prefer_the_nested_full_row_shape(tmp_path: Path) -> None:
+    """A full row's nested counters win over the flattened compact keys.
+
+    The reader accepts two stored shapes for the same fact, so a row that
+    carries both has to name one winner. The nested mapping is the full row's
+    own record; the flat keys are the compact projection of it. Reading the
+    flat key off a row that also nests would report the projection over the
+    record it was derived from, and there is no shape in which that is right.
+
+    The opposite error -- ignoring the flat keys -- is held by the compact and
+    legacy rows, which carry no nested mapping at all.
+    """
+
+    payload = {
+        "source": "cli",
+        "health_score": 72,
+        "files": 42,
+        "findings": {"total": 11, "new": 3, "known": 5, "unavailable": 2},
+        "findings_new": 90,
+        "findings_known": 91,
+        "findings_unavailable": 92,
+    }
+    snapshot = _read_latest_analysis_run_with_payload(tmp_path, payload)
+    assert snapshot is not None
+    assert snapshot.findings == 11
+    novelty = (
+        snapshot.findings_new,
+        snapshot.findings_known,
+        snapshot.findings_unavailable,
+    )
+    assert novelty == (3, 5, 2), "flat keys shadowed the nested record"

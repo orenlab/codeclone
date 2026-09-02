@@ -27,8 +27,10 @@ import pytest
 
 from codeclone.canonical import (
     CanonicalModel,
+    CanonicalModelError,
     PublishReceipt,
     RunStore,
+    RunStoreError,
     StoreCompatibilityError,
     StoreFenceError,
     StoreIntegrityError,
@@ -59,7 +61,27 @@ from codeclone.canonical.model import (
     SinkRoleRow,
     ViolationRow,
 )
-from codeclone.canonical.store import _payload_bytes
+from codeclone.canonical.store import (
+    _decode_clone_group_row,
+    _decode_clone_item_value,
+    _decode_dead_code_entity_value,
+    _decode_dead_code_markers_value,
+    _decode_dead_code_observation_row,
+    _decode_endpoint,
+    _decode_head,
+    _decode_root,
+    _decode_root_set,
+    _decode_security_surface_row,
+    _decode_source_location,
+    _decode_source_locations,
+    _decode_symbol_set,
+    _payload_bytes,
+    _require_bool,
+    _require_field,
+    _require_publish_inputs,
+    _require_str,
+    _require_str_list,
+)
 from codeclone.contracts import STORAGE_SCHEMA_REVISION
 from tests.test_canonical_roundtrip import fixture_model
 
@@ -1488,3 +1510,218 @@ def test_a_row_filed_under_the_wrong_family_is_refused() -> None:
     node = next(iter(fixture_model().normalize().facts.analysis.graph_nodes))
     with pytest.raises(StoreIntegrityError, match="carries a GraphNodeRow"):
         _collected_model({"contract": [node]})
+
+
+# Every stored value a reader can meet that the writer could not have
+# produced. Each row is one refusal: the malformed value, the error class the
+# reader owes its caller, and the fragment that names WHICH shape was wrong.
+# A reader that guesses instead of refusing is the failure these rows exist to
+# forbid -- a mis-decoded row would otherwise re-enter the model as fact.
+_STORE_DECODE_REFUSALS: tuple[tuple[str, object, type[Exception], str], ...] = (
+    (
+        "payload_without_json_form",
+        lambda: _payload_bytes({"k": object()}),
+        CanonicalModelError,
+        "no storage form",
+    ),
+    (
+        "endpoint_not_a_pair",
+        lambda: _decode_endpoint("nope", "w"),
+        StoreIntegrityError,
+        "endpoint is not a",
+    ),
+    (
+        "endpoint_parts_not_strings",
+        lambda: _decode_endpoint([1, 2], "w"),
+        StoreIntegrityError,
+        "endpoint is not a",
+    ),
+    (
+        "head_not_a_pair",
+        lambda: _decode_head("nope", "w"),
+        StoreIntegrityError,
+        "head is not a",
+    ),
+    (
+        "head_parts_not_strings",
+        lambda: _decode_head([1, 2], "w"),
+        StoreIntegrityError,
+        "head is not a",
+    ),
+    (
+        "head_unknown_tag",
+        lambda: _decode_head(["mystery", "x"], "w"),
+        StoreIntegrityError,
+        "unknown head tag",
+    ),
+    (
+        "root_without_family_tag",
+        lambda: _decode_root("nope", "w"),
+        StoreIntegrityError,
+        "no family tag",
+    ),
+    (
+        "root_operation_parts_not_strings",
+        lambda: _decode_root(["operation", 1, ["module", "m"], "n"], "w"),
+        StoreIntegrityError,
+        "malformed operation root",
+    ),
+    (
+        "root_unknown_family",
+        lambda: _decode_root(["mystery"], "w"),
+        StoreIntegrityError,
+        "unknown stored root family",
+    ),
+    (
+        "root_set_not_an_array",
+        lambda: _decode_root_set("nope", "w"),
+        StoreIntegrityError,
+        "root set is not an array",
+    ),
+    (
+        "symbol_set_not_an_array",
+        lambda: _decode_symbol_set("nope", "w"),
+        StoreIntegrityError,
+        "symbol set is not an array",
+    ),
+    (
+        "dead_code_entity_parts_not_strings",
+        lambda: _decode_dead_code_entity_value([1, 2, 3], "w"),
+        StoreIntegrityError,
+        "dead-code entity is not a",
+    ),
+    (
+        "markers_not_an_array",
+        lambda: _decode_dead_code_markers_value("nope", "w"),
+        StoreIntegrityError,
+        "markers are not an array",
+    ),
+    (
+        "marker_not_a_pair",
+        lambda: _decode_dead_code_markers_value([["a"]], "w"),
+        StoreIntegrityError,
+        "marker is not a",
+    ),
+    (
+        "marker_parts_not_strings",
+        lambda: _decode_dead_code_markers_value([[1, 2]], "w"),
+        StoreIntegrityError,
+        "marker is not a",
+    ),
+    (
+        "live_root_reason_not_a_string",
+        lambda: _decode_dead_code_observation_row({"live_root_reason": 1}, "w"),
+        StoreIntegrityError,
+        "'live_root_reason' is not a string",
+    ),
+    (
+        "source_location_not_a_triple",
+        lambda: _decode_source_location("nope", "w"),
+        StoreIntegrityError,
+        "source location is not a",
+    ),
+    (
+        "source_location_parts_not_strings",
+        lambda: _decode_source_location([1, "p", 2], "w"),
+        StoreIntegrityError,
+        "source location is not a",
+    ),
+    (
+        "source_location_line_not_an_int",
+        lambda: _decode_source_location(["file", "p", True], "w"),
+        StoreIntegrityError,
+        "line is not an int",
+    ),
+    (
+        "source_location_unknown_tag",
+        lambda: _decode_source_location(["mystery", "p", 2], "w"),
+        StoreIntegrityError,
+        "unknown source location tag",
+    ),
+    (
+        "source_locations_not_an_array",
+        lambda: _decode_source_locations("nope", "w"),
+        StoreIntegrityError,
+        "source locations is not an array",
+    ),
+    (
+        "clone_item_names_not_strings",
+        lambda: _decode_clone_item_value([1, 2, 3, 4], "w"),
+        StoreIntegrityError,
+        "clone item names are not strings",
+    ),
+    (
+        "clone_item_span_not_an_int",
+        lambda: _decode_clone_item_value(["p", "q", True, 2], "w"),
+        StoreIntegrityError,
+        "clone item span is not an int",
+    ),
+    (
+        "clone_group_items_not_an_array",
+        lambda: _decode_clone_group_row({"items": "nope"}, "w"),
+        StoreIntegrityError,
+        "'items' is not an array",
+    ),
+    (
+        "security_qualname_not_a_string",
+        lambda: _decode_security_surface_row({"qualname": 1}, "w"),
+        StoreIntegrityError,
+        "'qualname' is not a string",
+    ),
+    (
+        "row_field_missing",
+        lambda: _require_field({}, "k", "w"),
+        StoreIntegrityError,
+        "missing 'k'",
+    ),
+    (
+        "row_field_not_a_string",
+        lambda: _require_str({"k": 1}, "k", "w"),
+        StoreIntegrityError,
+        "'k' is not a string",
+    ),
+    (
+        "row_field_not_an_array",
+        lambda: _require_str_list({"k": 1}, "k", "w"),
+        StoreIntegrityError,
+        "'k' is not an array",
+    ),
+    (
+        "row_field_not_a_boolean",
+        lambda: _require_bool({"k": 1}, "k", "w"),
+        StoreIntegrityError,
+        "'k' is not a boolean",
+    ),
+    (
+        "publish_namespace_empty",
+        lambda: _require_publish_inputs("", "t"),
+        RunStoreError,
+        "namespace must be non-empty",
+    ),
+    (
+        "publish_target_empty",
+        lambda: _require_publish_inputs("n", ""),
+        RunStoreError,
+        "target must be non-empty",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("case", "call", "error", "fragment"),
+    _STORE_DECODE_REFUSALS,
+    ids=[row[0] for row in _STORE_DECODE_REFUSALS],
+)
+def test_a_malformed_stored_value_is_refused_by_name(
+    case: str, call: object, error: type[Exception], fragment: str
+) -> None:
+    """The reader refuses, with the class and the wording its caller acts on.
+
+    Both halves are load-bearing. The class is what separates a corrupt store
+    from a bug in the caller, and the fragment is what tells an operator which
+    field is wrong -- a refusal that says only "invalid" cannot be acted on.
+    """
+
+    with pytest.raises(error) as raised:
+        call()  # type: ignore[operator]
+    assert fragment in str(raised.value), f"{case}: refusal did not name the shape"
