@@ -121,6 +121,7 @@ from tests._cache_store_fixtures import (
     META_KEY_PYTHON_TAG,
     META_KEY_SCHEMA,
     META_KEY_VERSION,
+    TABLE_DEPENDENT,
     TABLE_NEUTRAL,
     envelope_checksum,
 )
@@ -487,6 +488,263 @@ def test_cache_sqlite_work_reaches_the_observers_db_cost_section(
         assert cast(int, row["queries"]) > 0
     assert "cache.backend.write_generation" in cache_rows
     assert "cache.backend.load_generation" in cache_rows
+
+
+_LANES_PER_ENTRY = len((TABLE_NEUTRAL, TABLE_DEPENDENT))
+
+
+def _cache_spans(root: Path) -> list[tuple[str, dict[str, int]]]:
+    """Every cache span the store holds, in write order, with its counters."""
+
+    conn = open_observability_store(observability_store_path(root))
+    try:
+        rows = conn.execute(
+            "SELECT name, counters_json FROM platform_spans "
+            "WHERE name LIKE 'cache.%' ORDER BY rowid"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [(str(name), json.loads(counters or "{}")) for name, counters in rows]
+
+
+def _lane_span_counters(root: Path) -> list[dict[str, int]]:
+    return [
+        counters
+        for name, counters in _cache_spans(root)
+        if name == "cache.backend.load_generation"
+    ]
+
+
+def _saved_cache_for_materialisation(tmp_path: Path, names: tuple[str, ...]) -> Path:
+    """Persist ``names`` with the size budget off, so no unspanned sweep runs."""
+
+    cache_path = tmp_path / "cache.sqlite3"
+    cache = Cache(cache_path, root=tmp_path, max_size_bytes=0)
+    _bind_module_paths(cache, *names)
+    for index, name in enumerate(names):
+        cache.put_file_entry(
+            name,
+            {"mtime_ns": index + 1, "size": 10 + index},
+            [],
+            [],
+            [],
+            source_content_digest=_SOURCE_CONTENT_DIGEST,
+        )
+    cache.save()
+    return cache_path
+
+
+def test_cache_lane_spans_carry_their_own_cost_not_the_readers_running_total(
+    tmp_path: Path,
+) -> None:
+    """A span reports the work it did, never the work the connection has done.
+
+    The lane reader is one connection deliberately shared by the whole
+    materialisation phase, so its lifetime counters are a running total for the
+    operation.  A span that published those totals made every consumer that
+    sums spans wrong *by construction*: measured on this repository, db_cost
+    reported 6810 queries over 83 spans -- 82 per call -- where two statements
+    per materialisation had actually run.
+
+    The population is asserted rather than assumed: a run that materialised
+    nothing would otherwise leave this comparing an empty list and passing in
+    silence.
+    """
+
+    names = ("m0.py", "m1.py", "m2.py", "m3.py", "m4.py", "m5.py")
+    cache_path = _saved_cache_for_materialisation(tmp_path, names)
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_db_cost", surface="test"):
+            warm = Cache(cache_path, root=tmp_path, max_size_bytes=0)
+            _bind_module_paths(warm, *names)
+            warm.load()
+            for name in names:
+                assert warm.get_file_entry(name) is not None, name
+            reader = warm._reader
+            assert reader is not None, "the shared lane reader must have opened"
+            reader_lifetime_queries = reader.queries
+    finally:
+        shutdown()
+
+    lane_spans = _lane_span_counters(tmp_path)
+    # One span for the generation load itself, then one per materialised entry.
+    assert len(lane_spans) == len(names) + 1
+    per_entry = lane_spans[1:]
+    assert [c["db_queries"] for c in per_entry] == [_LANES_PER_ENTRY] * len(names)
+
+    # The subtraction is reachable, not decorative: the reader really is
+    # shared, so its lifetime total is many times any single span's cost.  A
+    # per-span counter that merely happened to equal the lifetime total would
+    # fail here.
+    assert reader_lifetime_queries == _LANES_PER_ENTRY * len(names)
+    assert per_entry[-1]["db_queries"] < reader_lifetime_queries
+
+    section = query_platform_observability(root=tmp_path, section="db_cost")
+    rows = cast("list[dict[str, object]]", section["rows"])
+    row = next(r for r in rows if r["span"] == "cache.backend.load_generation")
+    assert row["calls"] == len(names) + 1
+    assert row["queries"] == sum(c["db_queries"] for c in lane_spans)
+    assert row["queries_per_call"] == _LANES_PER_ENTRY
+
+
+def test_cache_db_cost_publishes_every_statement_its_spans_ran(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing the spans ran is left out of what db_cost reports.
+
+    Counted independently of the counters under test, by wrapping the two
+    statement entry points the backend has.  The counterpart error to a total
+    wider than its span is a total narrower than it: publishing part-way
+    through a span silently drops whatever that span does afterwards, and the
+    aggregate under-reports leaving no trace that anything went missing.
+    """
+
+    names = ("m0.py", "m1.py", "m2.py")
+    cache_path = _saved_cache_for_materialisation(tmp_path, names)
+
+    # The backend class comes from a live handle rather than an import: this
+    # module already sits in the r2p ring, so naming codeclone.cache.backend
+    # would hand the architecture ratchet a new boundary edge to absorb.
+    probe = Cache(cache_path, root=tmp_path, max_size_bytes=0)
+    _bind_module_paths(probe, *names)
+    probe.load()
+    assert probe.get_file_entry(names[0]) is not None
+    reader = probe._reader
+    assert reader is not None, "the shared lane reader must have opened"
+    backend_cls = type(reader)
+    probe.release_loaded_entries()
+
+    executed = {"statements": 0}
+    real_query = backend_cls._query
+    real_executemany = backend_cls._executemany
+
+    def _spy_query(self: Any, *args: Any, **kwargs: Any) -> Any:
+        executed["statements"] += 1
+        return real_query(self, *args, **kwargs)
+
+    def _spy_executemany(self: Any, *args: Any, **kwargs: Any) -> Any:
+        executed["statements"] += 1
+        return real_executemany(self, *args, **kwargs)
+
+    monkeypatch.setattr(backend_cls, "_query", _spy_query)
+    monkeypatch.setattr(backend_cls, "_executemany", _spy_executemany)
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_db_cost", surface="test"):
+            executed["statements"] = 0
+            warm = Cache(cache_path, root=tmp_path, max_size_bytes=0)
+            _bind_module_paths(warm, *names)
+            warm.load()
+            for name in names:
+                assert warm.get_file_entry(name) is not None, name
+            # Dirty it, so the write path is inside the conserved population
+            # too: that is the span whose publication point used to sit before
+            # the work it still had left to do.
+            warm.put_file_entry(
+                names[0],
+                {"mtime_ns": 99, "size": 99},
+                [],
+                [],
+                [],
+                source_content_digest=_SOURCE_CONTENT_DIGEST,
+            )
+            warm.save()
+            statements = executed["statements"]
+    finally:
+        shutdown()
+
+    spans = _cache_spans(tmp_path)
+    carrying = [counters for _name, counters in spans if "db_queries" in counters]
+    # One generation load, one span per materialised entry, one generation write.
+    assert len(carrying) == len(names) + 2, spans
+    assert statements > 0
+    assert sum(c["db_queries"] for c in carrying) == statements
+
+
+def test_cache_prune_span_reports_the_sweeps_own_database_work(
+    tmp_path: Path,
+) -> None:
+    """The collector publishes through the same owner every other span does.
+
+    The sweep used to set the three counters itself, from the backend totals,
+    in a second copy of the publication rule.  Two copies of a rule are two
+    rules, and this one was right only because its backend happens to live
+    exactly as long as its span -- an accident, not an invariant.
+
+    A sweep that collects nothing runs reads and nothing else, so its own work
+    is fully described: no writes, and one parameter set per statement.
+    """
+
+    names = ("m0.py", "m1.py")
+    cache_path = tmp_path / "cache.sqlite3"
+    cache = Cache(cache_path, root=tmp_path, max_size_bytes=64 * 1024 * 1024)
+    _bind_module_paths(cache, *names)
+    for index, name in enumerate(names):
+        cache.put_file_entry(
+            name,
+            {"mtime_ns": index + 1, "size": 10 + index},
+            [],
+            [],
+            [],
+            source_content_digest=_SOURCE_CONTENT_DIGEST,
+        )
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_db_cost", surface="test"):
+            cache.save()
+    finally:
+        shutdown()
+
+    prune = [
+        counters
+        for name, counters in _cache_spans(tmp_path)
+        if name == "cache.backend.prune"
+    ]
+    assert len(prune) == 1, "the size budget must have run the collector once"
+    counters = prune[0]
+    assert counters["db_queries"] > 0
+    assert counters["db_writes"] == 0
+    assert counters["db_rows"] == counters["db_queries"]
+
+
+def test_cache_read_statements_report_their_row_volume(tmp_path: Path) -> None:
+    """``db_rows`` speaks one dialect across the process, reads included.
+
+    Every other store opens through the counting connection, where a statement
+    contributes its parameter-set volume: one for ``execute``, ``len(params)``
+    for ``executemany``.  The cache counted rows for its writes only, so its
+    read spans published "0 rows for N queries" into the same aggregate -- not
+    "no rows measured", but a second meaning of the field.
+    """
+
+    names = ("m0.py", "m1.py", "m2.py", "m3.py")
+    cache_path = _saved_cache_for_materialisation(tmp_path, names)
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_db_cost", surface="test"):
+            warm = Cache(cache_path, root=tmp_path, max_size_bytes=0)
+            _bind_module_paths(warm, *names)
+            warm.load()
+            for name in names:
+                assert warm.get_file_entry(name) is not None, name
+    finally:
+        shutdown()
+
+    per_entry = _lane_span_counters(tmp_path)[1:]
+    assert len(per_entry) == len(names)
+    for counters in per_entry:
+        assert counters["db_queries"] == _LANES_PER_ENTRY
+        assert counters["db_rows"] == counters["db_queries"]
+
+    section = query_platform_observability(root=tmp_path, section="db_cost")
+    rows = cast("list[dict[str, object]]", section["rows"])
+    row = next(r for r in rows if r["span"] == "cache.backend.load_generation")
+    assert row["rows"] == row["queries"]
 
 
 def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:

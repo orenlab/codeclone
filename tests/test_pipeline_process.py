@@ -22,7 +22,11 @@ import codeclone.core.pipeline as core_pipeline
 import codeclone.core.worker as core_worker
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import INERT_PHASE_LEDGER, PhaseLedger
-from codeclone.cache.reuse import binding_context_digest, source_content_digest
+from codeclone.cache.reuse import (
+    binding_context_digest,
+    cache_reuse_decision,
+    source_content_digest,
+)
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.canonical.identity import DEAD_CODE_CANDIDATE_KINDS
 from codeclone.core._types import (
@@ -34,7 +38,10 @@ from codeclone.core._types import (
     OutputPaths,
     ProcessingResult,
 )
-from codeclone.core.discovery_cache import usable_cached_source_stats
+from codeclone.core.discovery_cache import (
+    CachedSourceStatsRefusal,
+    usable_cached_source_stats,
+)
 from codeclone.core.parallelism import (
     _parallel_min_files,
     _resolve_process_count,
@@ -47,13 +54,16 @@ from codeclone.metrics.coverage_join import CoverageJoinParseError
 from codeclone.models import (
     CacheDependentPayload,
     CacheEntryV3,
+    CacheLaneReuseReason,
     CacheNeutralPayload,
+    ContentIdentityVerdict,
     DeadCodeCandidateKind,
     DepGraph,
     DigestObject,
     HealthScore,
     ModuleDep,
     ProjectMetrics,
+    PythonModuleIdentity,
     RehydratedCacheNeutral,
     SemanticFileFacts,
     SourceStatsDict,
@@ -316,11 +326,22 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
         "cache_content_digest_verify_cost_us",
         "cache_stat_fast_reject",
     }
+    # No row was cached, so no lane judged anything: every reason reads a
+    # measured zero rather than being absent, which is what tells "none of
+    # these happened" apart from "this span never ran".
     assert recorded[1].counters == {
         "cache_lane_neutral_hit": 0,
+        "cache_lane_dependent_hit": 0,
         "cache_lane_dependent_miss": 0,
         "cache_profile_hit": 0,
         "cache_profile_miss": 1,
+        "cache_lane_dependent_content_miss": 0,
+        "cache_lane_dependent_profile_mismatch": 0,
+        "cache_lane_neutral_binding_context_mismatch": 0,
+        "cache_lane_neutral_clone_channels_mismatch": 0,
+        "cache_lane_neutral_content_miss": 0,
+        "cache_lane_neutral_profile_mismatch": 0,
+        "cache_reuse_structural_findings_absent": 0,
     }
 
 
@@ -350,9 +371,17 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
     # The span said reuse happened; these two say whether it hit.
     assert recorded[1].counters == {
         "cache_lane_neutral_hit": 1,
+        "cache_lane_dependent_hit": 1,
         "cache_lane_dependent_miss": 0,
         "cache_profile_hit": 1,
         "cache_profile_miss": 0,
+        "cache_lane_dependent_content_miss": 0,
+        "cache_lane_dependent_profile_mismatch": 0,
+        "cache_lane_neutral_binding_context_mismatch": 0,
+        "cache_lane_neutral_clone_channels_mismatch": 0,
+        "cache_lane_neutral_content_miss": 0,
+        "cache_lane_neutral_profile_mismatch": 0,
+        "cache_reuse_structural_findings_absent": 0,
     }
 
     (tmp_path / "added.py").write_text("VALUE = 1\n", "utf-8")
@@ -360,11 +389,22 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
     partial = core_discovery.discover(boot=boot, cache=cache)
     assert partial.cache_hits == 0
     assert [stage.name for stage in recorded].count("cache.profile_reuse") == 1
+    # Adding a module moves the module manifest, which the dependent profile
+    # embeds -- so the surviving row keeps its neutral lane and loses its
+    # dependent one, and now says which of the two it was.
     assert recorded[1].counters == {
         "cache_lane_neutral_hit": 1,
+        "cache_lane_dependent_hit": 0,
         "cache_lane_dependent_miss": 1,
+        "cache_lane_dependent_profile_mismatch": 1,
         "cache_profile_hit": 0,
         "cache_profile_miss": 2,
+        "cache_lane_dependent_content_miss": 0,
+        "cache_lane_neutral_binding_context_mismatch": 0,
+        "cache_lane_neutral_clone_channels_mismatch": 0,
+        "cache_lane_neutral_content_miss": 0,
+        "cache_lane_neutral_profile_mismatch": 0,
+        "cache_reuse_structural_findings_absent": 0,
     }
 
 
@@ -1068,6 +1108,446 @@ def test_process_cache_put_file_entry_type_error_is_raised(
             discovery=discovery,
             cache=_BrokenCache(),  # type: ignore[arg-type]
         )
+
+
+def _reason_boot(
+    tmp_path: Path,
+    *,
+    structural: bool,
+    min_loc: int = 1,
+    near_miss: bool = False,
+) -> BootstrapResult:
+    """A boot whose knobs decide the lane profile, channels and sections."""
+
+    return BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(
+            processes=1,
+            min_loc=min_loc,
+            min_stmt=1,
+            block_min_loc=20,
+            block_min_stmt=8,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+            skip_metrics=False,
+            near_miss=near_miss,
+            renamed_structure=False,
+        ),
+        output_paths=OutputPaths(json=tmp_path / "report.json" if structural else None),
+        cache_path=tmp_path / "cache.json",
+    )
+
+
+def _profile_counters(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    boot: BootstrapResult,
+    cache: Cache,
+) -> dict[str, int]:
+    recorded: list[_ObservedAnalysisSpan] = []
+
+    @contextmanager
+    def _recording_span(*, name: str) -> Iterator[_ObservedAnalysisSpan]:
+        observed = _ObservedAnalysisSpan(name)
+        recorded.append(observed)
+        yield observed
+
+    monkeypatch.setattr(core_discovery, "span", _recording_span)
+    core_discovery.discover(boot=boot, cache=cache)
+    monkeypatch.undo()
+    by_name = {observed.name: observed for observed in recorded}
+    assert "cache.profile_reuse" in by_name, sorted(by_name)
+    return dict(by_name["cache.profile_reuse"].counters)
+
+
+def test_cache_profile_reuse_names_which_reason_refused_each_lane(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cold run caused by a profile move must say so, per lane.
+
+    The content half of the same decision has been diagnosable per reason for
+    a while -- eight ``cache_content_decision_*`` counters -- while the lane
+    half published totals only. So "the cache went cold" was answerable when
+    the file changed and unanswerable when the profile did, and the reason was
+    computed on every entry and thrown away.
+    """
+
+    (tmp_path / "module.py").write_text("def example():\n    return 1\n", "utf-8")
+    cache = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
+    cold = _reason_boot(tmp_path, structural=False)
+    discovery = core_discovery.discover(boot=cold, cache=cache)
+    process(boot=cold, discovery=discovery, cache=cache)
+    cache.save()
+
+    def _at_profile(min_loc: int) -> dict[str, int]:
+        """Read the lane counters through a handle opened at ``min_loc``.
+
+        The neutral lane keys on the analysis profile the *cache* was opened
+        with, so a moved profile has to reach the same store through its own
+        handle -- and reading both profiles through one helper keeps the two
+        readings from being the same six lines twice.
+        """
+
+        handle = Cache(
+            tmp_path / "cache.json", root=tmp_path, min_loc=min_loc, min_stmt=1
+        )
+        handle.load()
+        return _profile_counters(
+            monkeypatch,
+            boot=_reason_boot(tmp_path, structural=False, min_loc=min_loc),
+            cache=handle,
+        )
+
+    lanes = (
+        "cache_lane_neutral_hit",
+        "cache_lane_neutral_profile_mismatch",
+        "cache_lane_dependent_hit",
+        "cache_lane_dependent_profile_mismatch",
+    )
+    unchanged = _at_profile(1)
+    assert {key: unchanged[key] for key in lanes} == {
+        "cache_lane_neutral_hit": 1,
+        "cache_lane_neutral_profile_mismatch": 0,
+        "cache_lane_dependent_hit": 1,
+        "cache_lane_dependent_profile_mismatch": 0,
+    }
+
+    # The dependent lane embeds the neutral digest, so a moved neutral profile
+    # refuses both lanes -- each naming its own reason rather than a shared
+    # "miss".
+    moved = _at_profile(2)
+    assert {key: moved[key] for key in lanes} == {
+        "cache_lane_neutral_hit": 0,
+        "cache_lane_neutral_profile_mismatch": 1,
+        "cache_lane_dependent_hit": 0,
+        "cache_lane_dependent_profile_mismatch": 1,
+    }
+
+
+def test_cache_reuse_refusal_after_the_lanes_is_named_not_silent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both lanes hit and the entry is still refused -- say which section is missing.
+
+    Measured 2026-09-02 on this repository: an MCP analysis reused none of the
+    rows a CLI run had just written, with ``cache_lane_neutral_hit`` equal to
+    the entry count and ``cache_lane_dependent_miss`` zero. Every lane agreed
+    and every entry was still processed, because the rows were written without
+    structural findings and the MCP run needs them -- a refusal that reached no
+    counter at all, which is why the cause could not be named for two days.
+    """
+
+    (tmp_path / "module.py").write_text("def example():\n    return 1\n", "utf-8")
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    without_structural = _reason_boot(tmp_path, structural=False)
+    discovery = core_discovery.discover(boot=without_structural, cache=cache)
+    process(boot=without_structural, discovery=discovery, cache=cache)
+
+    wants_structural = _reason_boot(tmp_path, structural=True)
+    counters = _profile_counters(monkeypatch, boot=wants_structural, cache=cache)
+
+    # The lanes are unanimous -- nothing about the profile, the binding context
+    # or the content rejected this row -- and it was processed anyway, now with
+    # the reason beside it. Read as one mapping rather than a run of asserts:
+    # the whole verdict is the claim, and a run of them is a clone the block
+    # lane names on sight.
+    decisive = (
+        "cache_lane_neutral_hit",
+        "cache_lane_dependent_hit",
+        "cache_lane_dependent_miss",
+        "cache_profile_hit",
+        "cache_profile_miss",
+        "cache_reuse_structural_findings_absent",
+    )
+    assert {key: counters[key] for key in decisive} == {
+        "cache_lane_neutral_hit": 1,
+        "cache_lane_dependent_hit": 1,
+        "cache_lane_dependent_miss": 0,
+        "cache_profile_hit": 0,
+        "cache_profile_miss": 1,
+        "cache_reuse_structural_findings_absent": 1,
+    }
+
+    # The partition closes: one cached row was judged, so each lane family sums
+    # to exactly one. A reason that stopped being counted, or one counted
+    # twice, breaks this without needing a test per reason.
+    assert (
+        sum(
+            counters[key]
+            for key in core_discovery._NEUTRAL_LANE_REASON_COUNTERS.values()
+        )
+        == 1
+    )
+    assert (
+        sum(
+            counters[key]
+            for key in core_discovery._DEPENDENT_LANE_REASON_COUNTERS.values()
+        )
+        == 1
+    )
+
+
+def _rewrite(path: Path, text: str) -> None:
+    """Write and discard the byte count, so the callable stays ``() -> None``."""
+
+    path.write_text(text, "utf-8")
+
+
+def _warm_counters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    warm_boot: BootstrapResult,
+    warm_cache: Cache | None = None,
+    mutate: Callable[[], None] | None = None,
+) -> dict[str, int]:
+    """Write a cold generation, optionally disturb it, then read the warm one."""
+
+    cold = _reason_boot(tmp_path, structural=False)
+    cache = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
+    discovery = core_discovery.discover(boot=cold, cache=cache)
+    process(boot=cold, discovery=discovery, cache=cache)
+    cache.save()
+    if mutate is not None:
+        mutate()
+    warm = warm_cache
+    if warm is None:
+        warm = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
+    warm.load()
+    return _profile_counters(monkeypatch, boot=warm_boot, cache=warm)
+
+
+def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each counter is shown non-zero by a real run, or by the decision itself.
+
+    A counter no configuration can raise is the same theatre as a guard no
+    input reaches, and declaring one is how a vocabulary comes to describe a
+    build that cannot produce it. So the families are not merely declared here
+    -- each member is driven to a non-zero value, and the set that was driven
+    is compared against the set that was declared.
+    """
+
+    raised: set[str] = set()
+    source = "def example(a, b):\n    return a + b\n"
+
+    def _record(counters: dict[str, int], expected: str) -> None:
+        """One scenario, one counter: the set alone is blind to mis-attribution.
+
+        Measured 2026-09-02: a mutation that swaps two reasons in the mapping
+        leaves the *set* of non-zero counters unchanged and survived an earlier
+        version of this test. What each input raises is the assertion.
+        """
+
+        moved = {key for key, value in counters.items() if value}
+        assert expected in moved, (expected, sorted(moved))
+        raised.update(moved)
+
+    def _seed(name: str) -> Path:
+        root = tmp_path / name
+        root.mkdir()
+        (root / "module.py").write_text(source, "utf-8")
+        return root
+
+    # Nothing moved: both lanes hit.
+    unchanged = _seed("unchanged")
+    _record(
+        _warm_counters(
+            unchanged, monkeypatch, warm_boot=_reason_boot(unchanged, structural=False)
+        ),
+        "cache_lane_neutral_hit",
+    )
+
+    # The file changed: content refuses both lanes before either is consulted.
+    changed = _seed("changed")
+    _record(
+        _warm_counters(
+            changed,
+            monkeypatch,
+            warm_boot=_reason_boot(changed, structural=False),
+            mutate=lambda: _rewrite(changed / "module.py", source + "VALUE = 1\n"),
+        ),
+        "cache_lane_neutral_content_miss",
+    )
+
+    # The run asks for clone artifacts the stored row was not materialised with.
+    channels = _seed("channels")
+    _record(
+        _warm_counters(
+            channels,
+            monkeypatch,
+            warm_boot=_reason_boot(channels, structural=False, near_miss=True),
+        ),
+        "cache_lane_neutral_clone_channels_mismatch",
+    )
+
+    # The analysis profile moved, so the row describes a different question.
+    moved = _seed("moved")
+    _record(
+        _warm_counters(
+            moved,
+            monkeypatch,
+            warm_boot=_reason_boot(moved, structural=False, min_loc=2),
+            warm_cache=Cache(moved / "cache.json", root=moved, min_loc=2, min_stmt=1),
+        ),
+        "cache_lane_neutral_profile_mismatch",
+    )
+
+    # The run needs a section the row was written without.
+    sections = _seed("sections")
+    _record(
+        _warm_counters(
+            sections, monkeypatch, warm_boot=_reason_boot(sections, structural=True)
+        ),
+        "cache_reuse_structural_findings_absent",
+    )
+
+    declared = set(core_discovery._REUSE_REASON_COUNTER_KEYS)
+    assert declared, "no reuse reason counter was declared, so nothing was compared"
+    # binding_context_mismatch is reached by the decision, not by a layout:
+    # eight probed layouts (2026-09-02) all moved the module manifest first, so
+    # the dependent lane refused before the binding context could. Its input is
+    # the decision's own, exercised below.
+    binding_counter = core_discovery._NEUTRAL_LANE_REASON_COUNTERS[
+        "binding_context_mismatch"
+    ]
+    assert declared - raised == {binding_counter}, sorted(declared - raised)
+
+
+def _entry_with_binding(binding: DigestObject) -> CacheEntryV3:
+    """A minimal complete row whose only interesting field is its binding."""
+
+    stats: SourceStatsDict = {"lines": 5, "functions": 2, "methods": 1, "classes": 1}
+    return CacheEntryV3(
+        cache_content_binding_version="1",
+        binding_context_digest=binding,
+        source_content_digest=source_content_digest(b"source"),
+        git_blob_id_at_write=None,
+        stat={"mtime_ns": 1, "size": 1},
+        module_neutral_profile=DigestObject(
+            domain="codeclone.cache.profile.neutral.v1",
+            algorithm="sha256",
+            value="1" * 64,
+        ),
+        module_dependent_profile=DigestObject(
+            domain="codeclone.cache.profile.dependent.v1",
+            algorithm="sha256",
+            value="2" * 64,
+        ),
+        module_neutral=CacheNeutralPayload(
+            source_stats=stats,
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=(),
+            referenced_qualnames=(),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=(),
+        ),
+    )
+
+
+def test_the_binding_context_lane_reason_is_reachable_from_the_decision(
+    tmp_path: Path,
+) -> None:
+    """The one reason no layout reached still has an input that decides it.
+
+    Left uncounted it would be a hole in the partition; declared without an
+    input it would be theatre. The input is the decision's own argument: a row
+    written under one binding context, read under another.
+    """
+
+    entry = _entry_with_binding(binding_context_digest(None))
+    moved = binding_context_digest(
+        PythonModuleIdentity(
+            module="pkg.module",
+            package="pkg",
+            is_package=False,
+            mount_path="pkg/module.py",
+            origin="import_mount",
+            node_kind="module_file",
+        )
+    )
+    decision = cache_reuse_decision(
+        content=ContentIdentityVerdict(
+            hit=True,
+            reason="blob_hit",
+            git_fallback_reason=None,
+            digest_verify_cost_us=0,
+            stat_fast_reject=False,
+        ),
+        entry=entry,
+        neutral_profile=entry.module_neutral_profile,
+        dependent_profile=entry.module_dependent_profile,
+        binding_context=moved,
+        required_clone_channels=(),
+    )
+    assert decision.neutral.reason == "binding_context_mismatch"
+    assert decision.neutral.hit is False
+    assert (
+        core_discovery._NEUTRAL_LANE_REASON_COUNTERS[decision.neutral.reason]
+        == "cache_lane_neutral_binding_context_mismatch"
+    )
+
+
+def test_cache_reuse_reason_counters_are_the_decisions_own_vocabulary() -> None:
+    """The declared counters are re-derived from what decides them.
+
+    A prefix rule would bless any plausible-looking key, including one no
+    decision can produce. Each family here is the domain of its own decider,
+    so a counter with no reason behind it, or a reason with no counter, fails.
+    """
+
+    from codeclone.observability.vocabulary import COUNTER_KEYS
+
+    lane_reasons = set(get_args(CacheLaneReuseReason))
+    assert lane_reasons, "the lane reason vocabulary is empty, so nothing was compared"
+    # malformed_payload is declared by the alias and constructed by no producer
+    # in this build (measured 2026-09-02: zero construction sites); a counter
+    # for it could never leave zero, which is the theatre this file rejects
+    # elsewhere. It is instrumented when something can decide it.
+    decidable = lane_reasons - {"malformed_payload"}
+
+    assert (
+        set(core_discovery._NEUTRAL_LANE_REASON_COUNTERS)
+        | {"dependent_profile_mismatch"}
+        == decidable
+    )
+    assert set(core_discovery._DEPENDENT_LANE_REASON_COUNTERS) <= decidable
+    assert {
+        key for key in COUNTER_KEYS if key.startswith("cache_lane_neutral_")
+    } == set(core_discovery._NEUTRAL_LANE_REASON_COUNTERS.values())
+    dependent_family = {
+        key for key in COUNTER_KEYS if key.startswith("cache_lane_dependent_")
+    } - {"cache_lane_dependent_miss"}
+    assert dependent_family == set(
+        core_discovery._DEPENDENT_LANE_REASON_COUNTERS.values()
+    )
+
+    refusals = set(get_args(CachedSourceStatsRefusal))
+    assert refusals, "the post-lane refusal vocabulary is empty"
+    assert set(core_discovery._POST_LANE_REFUSAL_COUNTERS) == refusals
+    assert set(core_discovery._POST_LANE_REFUSAL_COUNTERS.values()) == {
+        key for key in COUNTER_KEYS if key.startswith("cache_reuse_")
+    }
 
 
 def test_usable_cached_source_stats_respects_required_sections() -> None:

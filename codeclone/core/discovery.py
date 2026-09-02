@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Final
 
 from ..cache._validators import _is_relationship_record_dict
 from ..cache.entries import (
@@ -19,6 +20,8 @@ from ..cache.projection import rehydrate_cache_neutral
 from ..cache.reuse import clone_artifact_channels, prove_cached_source_identity
 from ..cache.store import Cache, file_stat_signature
 from ..models import (
+    CacheEntryV3,
+    CacheLaneReuseReason,
     ClassMetrics,
     ContentIdentityVerdict,
     DeadCandidate,
@@ -36,7 +39,7 @@ from ..models import (
     SemanticEvent,
     StructuralFindingGroup,
 )
-from ..observability import span
+from ..observability import SpanHandle, span
 from ..paths.git_snapshot import collect_git_content_snapshot
 from ..paths.module_identity.inventory import build_module_registry
 from ._types import (
@@ -52,6 +55,10 @@ from ._types import (
     _should_collect_structural_findings,
     _unit_to_group_item,
 )
+from .discovery_cache import CachedSourceStatsRefusal
+from .discovery_cache import (
+    cached_source_stats_refusal as _cached_source_stats_refusal,
+)
 from .discovery_cache import (
     decode_cached_structural_finding_group as _decode_cached_structural_finding_group,
 )
@@ -62,6 +69,43 @@ from .discovery_cache import (
     load_cached_metrics_extended as load_cached_metrics_extended,
 )
 from .discovery_cache import usable_cached_source_stats as _usable_cached_source_stats
+
+# Each reuse decision already carried its reason; nothing published it, so a
+# cold run caused by content was diagnosable to its cause and a cold run caused
+# by a profile, a binding context or a channel set was not diagnosable at all.
+# The keys are literals because the closed vocabulary is checked literally, and
+# they are keyed by the decision's own alias so a reason with no counter (or a
+# counter with no reason) fails in tests rather than going quiet in a run.
+_NEUTRAL_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
+    "binding_context_mismatch": "cache_lane_neutral_binding_context_mismatch",
+    "clone_channels_mismatch": "cache_lane_neutral_clone_channels_mismatch",
+    "content_miss": "cache_lane_neutral_content_miss",
+    "hit": "cache_lane_neutral_hit",
+    "neutral_profile_mismatch": "cache_lane_neutral_profile_mismatch",
+}
+
+_DEPENDENT_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
+    "content_miss": "cache_lane_dependent_content_miss",
+    "dependent_profile_mismatch": "cache_lane_dependent_profile_mismatch",
+    "hit": "cache_lane_dependent_hit",
+}
+
+# The refusal that happens AFTER both lanes agree. This is the one that
+# reached nothing at all: the row is still true, it simply does not carry the
+# sections this run asked for, and every entry rejected this way was
+# indistinguishable from an entry that was never cached.
+_POST_LANE_REFUSAL_COUNTERS: Final[Mapping[CachedSourceStatsRefusal, str]] = {
+    "structural_findings_absent": "cache_reuse_structural_findings_absent",
+}
+
+#: Every member is published on every run, zero included, so a zero means
+#: "measured none" and an absent key means "this span did not run". A family
+#: that only appears when it is non-zero cannot tell those apart.
+_REUSE_REASON_COUNTER_KEYS: Final[tuple[str, ...]] = (
+    *_NEUTRAL_LANE_REASON_COUNTERS.values(),
+    *_DEPENDENT_LANE_REASON_COUNTERS.values(),
+    *_POST_LANE_REFUSAL_COUNTERS.values(),
+)
 
 
 def _decode_cached_relationship_record(value: object) -> RelationshipRecord | None:
@@ -156,6 +200,48 @@ def _content_identity_counters(
     )
 
 
+def _count_lane_reason(
+    counts: dict[str, int],
+    counters: Mapping[CacheLaneReuseReason, str],
+    reason: CacheLaneReuseReason,
+) -> None:
+    """Attribute one lane verdict to its reason, when that lane can decide it.
+
+    Each lane decides a subset of the alias: a dependent lane never answers
+    ``clone_channels_mismatch``. A reason outside the lane's own domain is not
+    counted here rather than being folded into a neighbouring key, so the
+    family sums to the number of rows the lane actually judged -- which is the
+    arithmetic the tests hold this to, and what would break if a new reason
+    appeared with no counter behind it.
+    """
+
+    counter_key = counters.get(reason)
+    if counter_key is not None:
+        counts[counter_key] += 1
+
+
+def _count_post_lane_refusal(
+    counts: dict[str, int],
+    entry: CacheEntryV3,
+    *,
+    collect_structural_findings: bool,
+) -> None:
+    """Attribute a row both lanes accepted but this run cannot serve."""
+
+    refusal = _cached_source_stats_refusal(
+        entry, collect_structural_findings=collect_structural_findings
+    )
+    if refusal is not None:
+        counts[_POST_LANE_REFUSAL_COUNTERS[refusal]] += 1
+
+
+def _publish_reuse_reasons(handle: SpanHandle, counts: Mapping[str, int]) -> None:
+    """Put every declared reason on the span, zeros included."""
+
+    for counter_key, counted in counts.items():
+        handle.set_counter(counter_key, counted)
+
+
 def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     files_found = 0
     cache_hits = 0
@@ -224,6 +310,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     index_ambiguous_fallbacks = racy_fallbacks = untracked_fallbacks = 0
     digest_verify_cost_us = stat_fast_rejects = 0
     neutral_hits = dependent_misses = 0
+    reuse_reasons: dict[str, int] = dict.fromkeys(_REUSE_REASON_COUNTER_KEYS, 0)
     # T2: same flag derivation the processing stage uses for the workers and
     # for the witness it writes; here it is what a cached row's witness must
     # equal before its units are served warm.
@@ -281,6 +368,16 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                 )
                 neutral_hits += int(decision.neutral.hit)
                 dependent_misses += int(not decision.dependent.hit)
+                _count_lane_reason(
+                    reuse_reasons,
+                    _NEUTRAL_LANE_REASON_COUNTERS,
+                    decision.neutral.reason,
+                )
+                _count_lane_reason(
+                    reuse_reasons,
+                    _DEPENDENT_LANE_REASON_COUNTERS,
+                    decision.dependent.reason,
+                )
                 if decision.neutral.hit:
                     registry_entry = module_registry.entries_by_path.get(
                         Path(filepath)
@@ -289,6 +386,12 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                         .as_posix()
                     )
                     if registry_entry is None:
+                        # Not counted: no input in eight probed layouts (2026-09-02
+                        # -- namespace and regular packages, src layouts, name
+                        # collisions, non-identifier names) reaches this branch,
+                        # and a counter nothing can raise is not telemetry. If it
+                        # ever fires, the lane families stop summing to the rows
+                        # judged, which is the arithmetic the tests hold.
                         files_to_process.append(filepath)
                         continue
                     python_module = registry_entry.identity.python_module
@@ -312,6 +415,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                         collect_structural_findings=collect_structural_findings,
                     )
                     if cached_source_stats is None:
+                        _count_post_lane_refusal(
+                            reuse_reasons,
+                            cached,
+                            collect_structural_findings=collect_structural_findings,
+                        )
                         files_to_process.append(filepath)
                         continue
                     cache_hits += 1
@@ -414,6 +522,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         # reuse happened and nothing about whether it worked.
         profile_span.set_counter("cache_profile_hit", cache_hits)
         profile_span.set_counter("cache_profile_miss", len(files_to_process))
+        _publish_reuse_reasons(profile_span, reuse_reasons)
 
     cache.prune_file_entries(all_file_paths)
 

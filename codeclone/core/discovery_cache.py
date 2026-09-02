@@ -315,15 +315,56 @@ def _cache_entry_source_stats(entry: CacheEntryV3) -> tuple[int, int, int, int]:
     return stats["lines"], stats["functions"], stats["methods"], stats["classes"]
 
 
+#: Why a row both lanes accepted is still not servable to *this* run.  The
+#: lanes answer "is this row still true"; this answers "does it carry the
+#: sections this run asked for", which is a different question and was the one
+#: nothing recorded: a run that needs structural findings refuses every row
+#: written by a run that did not collect them, and did so with no counter at
+#: all (measured 2026-09-02 -- an MCP analysis reused none of the rows a CLI
+#: run had just written, every lane agreeing).
+#:
+#: The metrics guard below is deliberately NOT a member: measured 2026-09-02,
+#: ``CacheEntryV3.module_dependent`` is not optional and no producer writes
+#: ``None`` into it, so that branch cannot be reached by any input and a
+#: counter for it could never leave zero.  The guard stays -- it is not this
+#: change's to remove -- but naming it in telemetry would be theatre.
+CachedSourceStatsRefusal = Literal["structural_findings_absent"]
+
+
+def cached_source_stats_refusal(
+    entry: CacheEntryV3,
+    *,
+    collect_structural_findings: bool,
+) -> CachedSourceStatsRefusal | None:
+    """Name the section this row is missing, or ``None`` when it carries them."""
+
+    if collect_structural_findings and not _cache_entry_has_structural_findings(entry):
+        return "structural_findings_absent"
+    return None
+
+
 def usable_cached_source_stats(
     entry: CacheEntryV3,
     *,
     skip_metrics: bool,
     collect_structural_findings: bool,
 ) -> tuple[int, int, int, int] | None:
+    """The row's source stats, or ``None`` when a required section is absent.
+
+    The structural half delegates rather than restating the rule: the reason a
+    row is refused and the fact that it is refused are the same rule, and two
+    copies of one rule are two rules that will disagree.
+    """
+
     if not skip_metrics and not _cache_entry_has_metrics(entry):
         return None
-    if collect_structural_findings and not _cache_entry_has_structural_findings(entry):
+    if (
+        cached_source_stats_refusal(
+            entry,
+            collect_structural_findings=collect_structural_findings,
+        )
+        is not None
+    ):
         return None
     return _cache_entry_source_stats(entry)
 

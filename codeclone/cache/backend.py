@@ -104,14 +104,16 @@ for the ruled threat model.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import Final
+from typing import Final, NamedTuple
 
 import orjson
 
 from ..models import EntryIdentity
+from ..observability import SpanHandle
 from ..utils.sqlite_store import (
     initialize_schema_v1,
     open_sqlite_db,
@@ -277,6 +279,58 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
     )
 
 
+class CacheBackendCost(NamedTuple):
+    """One reading of a backend's running SQLite totals, taken to be differenced."""
+
+    queries: int
+    writes: int
+    rows: int
+
+
+def _backend_cost(backend: CacheBackend) -> CacheBackendCost:
+    """Read a handle's running totals.
+
+    A module function rather than a method: the reading is for the span that
+    borrows the handle, not a service the handle offers, and putting it on the
+    class coupled ``CacheBackend`` to one more type than the coupling gate
+    allows it (measured: cbo 7 -> 8, over the high-risk boundary).
+    """
+
+    return CacheBackendCost(backend.queries, backend.writes, backend.rows)
+
+
+@contextmanager
+def attribute_db_cost(handle: SpanHandle, backend: CacheBackend) -> Iterator[None]:
+    """Publish onto ``handle`` exactly the SQLite work done inside this block.
+
+    The counters are a delta over the backend's own totals, and they are
+    published when the block ends, so that what a span reports and what a span
+    covers are the same interval by construction.  Both halves are load
+    bearing, and each answers a measured error:
+
+    * A backend can outlive the span using it -- the lane reader is one
+      connection shared by every materialisation -- so its totals are a running
+      total for the whole operation.  Publishing them made consecutive spans
+      read 2, 4, 6, 8 ... and every consumer that sums spans over-report:
+      measured 6810 queries against 164 executed, "82 queries per call" for
+      work that costs two.
+    * Publishing part-way through a block drops whatever the block does after
+      that point, which is the same error pointing the other way, and it leaves
+      no trace in the aggregate at all.
+
+    This is telemetry, never audit or contract truth.
+    """
+
+    before = _backend_cost(backend)
+    try:
+        yield
+    finally:
+        after = _backend_cost(backend)
+        handle.set_counter("db_queries", after.queries - before.queries)
+        handle.set_counter("db_writes", after.writes - before.writes)
+        handle.set_counter("db_rows", after.rows - before.rows)
+
+
 class CacheBackend:
     """One open connection to the cache database, for one load or one save.
 
@@ -284,10 +338,13 @@ class CacheBackend:
     bounded number of times per run, so holding one between them would buy
     nothing and would keep a WAL lock alive across the whole analysis.
 
-    ``queries``, ``writes`` and ``rows`` count the SQLite work this handle did.
-    The caller reads them back into the ``db_queries`` / ``db_writes`` /
-    ``db_rows`` span counters, which is what puts the cache into the observer's
-    ``db_cost`` section.  A cache whose work cannot be looked at is a black
+    ``queries``, ``writes`` and ``rows`` count the SQLite work this handle has
+    done since it was opened, and they only ever grow.  They reach the
+    observer's ``db_cost`` section as the ``db_queries`` / ``db_writes`` /
+    ``db_rows`` span counters through :func:`attribute_db_cost`, which
+    publishes the *difference* across a span rather than these running totals:
+    one backend can serve many spans, and a span carrying a lifetime total is
+    not describing itself.  A cache whose work cannot be looked at is a black
     box, and the store that accelerates every run is the last place that should
     be one.
     """
@@ -667,6 +724,12 @@ class CacheBackend:
 
     def _query(self, statement: str, params: tuple[object, ...] = ()) -> sqlite3.Cursor:
         self.queries += 1
+        # One statement, one parameter set -- the same volume the counting
+        # connection every other store opens through records for ``execute``.
+        # Leaving this at zero did not mean "rows not measured"; it meant this
+        # one store spoke a second dialect of ``db_rows`` into a shared
+        # aggregate, which read back as N queries that produced nothing.
+        self.rows += 1
         try:
             return self._connection.execute(statement, params)
         except sqlite3.Error as exc:

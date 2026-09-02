@@ -51,7 +51,7 @@ from ..models import (
     GcJobReport,
 )
 from ..observability import span
-from .backend import CacheBackend, CacheBackendUnusable
+from .backend import CacheBackend, CacheBackendUnusable, attribute_db_cost
 
 GC_JOB_NAME: Final = "cache_store"
 
@@ -77,6 +77,7 @@ def collect_cache_garbage(
         with (
             span(name="cache.backend.prune") as prune_span,
             CacheBackend(path) as backend,
+            attribute_db_cost(prune_span, backend),
         ):
             candidates = backend.entry_count()
             corrupt = set(backend.corrupt_ids(version))
@@ -106,9 +107,6 @@ def collect_cache_garbage(
                 backend.reclaim()
             prune_span.set_counter("cache_backend_pruned", len(doomed))
             prune_span.set_counter("cache_backend_orphans", len(orphaned))
-            prune_span.set_counter("db_queries", backend.queries)
-            prune_span.set_counter("db_writes", backend.writes)
-            prune_span.set_counter("db_rows", backend.rows)
     except CacheBackendUnusable as error:
         # The cache's own storage rolled the sweep back, so no count beside
         # this refusal could be true.

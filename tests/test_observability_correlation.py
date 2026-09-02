@@ -218,6 +218,98 @@ def test_mcp_analyze_repository_emits_pipeline_spans(tmp_path: Path) -> None:
     } <= names
 
 
+def _cache_counter_keys(root: Path, operation_id: str) -> set[str]:
+    """Every counter key the cache spans of one operation published."""
+
+    conn = open_observability_store(observability_store_path(root))
+    try:
+        rows = conn.execute(
+            "SELECT name, counters_json FROM platform_spans WHERE operation_id=?",
+            (operation_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        key
+        for name, counters in rows
+        if name.startswith("cache.")
+        for key in json.loads(counters or "{}")
+    }
+
+
+def _last_operation(root: Path, surface: str) -> str:
+    conn = open_observability_store(observability_store_path(root))
+    try:
+        rows = conn.execute(
+            "SELECT operation_id FROM platform_operations "
+            "WHERE surface=? ORDER BY rowid",
+            (surface,),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows, f"no {surface} operation was recorded"
+    return str(rows[-1][0])
+
+
+def test_cache_counters_do_not_depend_on_which_surface_ran(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both surfaces publish the same cache counters for the same run.
+
+    The belief this pins against is "the CLI is warm, so the cache works": one
+    surface reporting reuse it never got, or reporting nothing at all, is how a
+    live cache defect stayed unattributed for two days. Both surfaces reach the
+    counters through one discovery path, and this fails if either grows a
+    private dialect.
+
+    The compared set is asserted non-empty and asserted to contain the reuse
+    reasons, because two empty sets are equal and would pass in silence.
+    """
+
+    for index in range(2):
+        (tmp_path / f"module{index}.py").write_text(
+            f"def example{index}(a, b):\n    return a + b + {index}\n", encoding="utf-8"
+        )
+    monkeypatch.setenv("CODECLONE_OBSERVABILITY_ENABLED", "1")
+    monkeypatch.setenv("CODECLONE_OBSERVABILITY_FORCE", "1")
+
+    from codeclone.surfaces.cli.workflow import main as cli_main
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+    from codeclone.surfaces.mcp.session import MCPAnalysisRequest
+
+    # Cold then warm, so the warm run is the one with rows to judge.
+    for _ in range(2):
+        monkeypatch.setattr("sys.argv", ["codeclone", str(tmp_path), "--quiet"])
+        try:
+            cli_main()
+        except SystemExit as exit_signal:  # pragma: no cover - defensive
+            assert exit_signal.code in (0, None), exit_signal.code
+    cli_keys = _cache_counter_keys(tmp_path, _last_operation(tmp_path, "cli"))
+
+    service = CodeCloneMCPService(history_limit=4)
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="mcp.analyze_repository", surface="mcp") as op:
+            service.analyze_repository(
+                MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+            )
+            mcp_operation = op.operation_id
+    finally:
+        shutdown()
+    mcp_keys = _cache_counter_keys(tmp_path, mcp_operation)
+
+    assert cli_keys, "the CLI operation published no cache counters at all"
+    assert mcp_keys, "the MCP operation published no cache counters at all"
+    assert {
+        "cache_profile_hit",
+        "cache_profile_miss",
+        "cache_lane_neutral_hit",
+        "cache_lane_dependent_hit",
+        "cache_reuse_structural_findings_absent",
+    } <= cli_keys
+    assert cli_keys == mcp_keys
+
+
 def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     try:

@@ -47,7 +47,7 @@ from ..models import (
     StructuralFindingGroup,
     Unit,
 )
-from ..observability import SpanHandle, span
+from ..observability import span
 from ..paths.workspace import workspace_dir_for_cache_path
 from ._wire_decode import _decode_wire_file_entry
 from ._wire_encode import _encode_wire_file_entry
@@ -68,6 +68,7 @@ from .backend import (
     CacheBackendUnusable,
     EntryIdentity,
     WireShapeRefused,
+    attribute_db_cost,
     join_wire_entry,
     split_wire_entry,
     verify_envelope,
@@ -137,20 +138,6 @@ def _now_epoch() -> int:
     """
 
     return int(time.time())
-
-
-def _record_db_cost(handle: SpanHandle, backend: CacheBackend) -> None:
-    """Publish this handle's SQLite work into the observer's db_cost section.
-
-    A span joins ``db_cost`` by carrying ``db_queries``; the other two give the
-    section its N+1 shape (many statements, few rows). Without these the cache
-    is the one store in the process whose work cannot be looked at, which is
-    exactly the black box the observer exists to prevent.
-    """
-
-    handle.set_counter("db_queries", backend.queries)
-    handle.set_counter("db_writes", backend.writes)
-    handle.set_counter("db_rows", backend.rows)
 
 
 def _as_generation(raw: str | None) -> int:
@@ -523,21 +510,21 @@ class Cache:
                     load_span.set_counter("cache_file_bytes", size)
                 backend = CacheBackend(self.path, read_only=True)
                 try:
-                    parsed = self._load_from_backend(backend)
-                    load_span.set_counter(
-                        "cache_backend_entries", backend.entry_count()
-                    )
-                    # Bytes this load actually read, not bytes the store holds:
-                    # the lanes were left on disk, and a counter that claimed
-                    # them would report work nobody did.
-                    load_span.set_counter(
-                        "cache_backend_read_bytes",
-                        sum(
-                            len(identity.wire_path)
-                            for _fid, identity in self._identity.values()
-                        ),
-                    )
-                    _record_db_cost(load_span, backend)
+                    with attribute_db_cost(load_span, backend):
+                        parsed = self._load_from_backend(backend)
+                        load_span.set_counter(
+                            "cache_backend_entries", backend.entry_count()
+                        )
+                        # Bytes this load actually read, not bytes the store
+                        # holds: the lanes were left on disk, and a counter
+                        # that claimed them would report work nobody did.
+                        load_span.set_counter(
+                            "cache_backend_read_bytes",
+                            sum(
+                                len(identity.wire_path)
+                                for _fid, identity in self._identity.values()
+                            ),
+                        )
                 finally:
                     backend.close()
             if parsed is None:
@@ -673,6 +660,7 @@ class Cache:
             with (
                 span(name="cache.backend.write_generation") as write_span,
                 CacheBackend(self.path) as backend,
+                attribute_db_cost(write_span, backend),
             ):
                 written, removed = self._write_backend_rows(
                     backend,
@@ -683,7 +671,6 @@ class Cache:
                 write_span.set_counter("cache_backend_changed_entries", written)
                 write_span.set_counter("cache_backend_removed_entries", removed)
                 write_span.set_counter("cache_backend_write_bytes", self._written_bytes)
-                _record_db_cost(write_span, backend)
                 with span(name="cache.backend.activate_generation") as activate_span:
                     backend.write_meta(
                         version=self._CACHE_VERSION,
@@ -937,14 +924,16 @@ class Cache:
             backend = self._lane_reader()
             if backend is None:
                 return None
-            with span(name="cache.backend.load_generation") as lane_span:
+            with (
+                span(name="cache.backend.load_generation") as lane_span,
+                attribute_db_cost(lane_span, backend),
+            ):
                 neutral = backend.read_lane(TABLE_NEUTRAL, file_id)
                 dependent = backend.read_lane(TABLE_DEPENDENT, file_id)
                 lane_span.set_counter(
                     "cache_backend_read_bytes",
                     identity.neutral_bytes + identity.dependent_bytes,
                 )
-                _record_db_cost(lane_span, backend)
         except CacheBackendUnusable:
             self._identity.pop(runtime_path, None)
             return None

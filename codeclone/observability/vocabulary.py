@@ -284,10 +284,18 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "cache_content_decision_racy",
         "cache_content_decision_untracked",
         "cache_content_digest_verify_cost_us",
+        "cache_lane_dependent_content_miss",
+        "cache_lane_dependent_hit",
         "cache_lane_dependent_miss",
+        "cache_lane_dependent_profile_mismatch",
+        "cache_lane_neutral_binding_context_mismatch",
+        "cache_lane_neutral_clone_channels_mismatch",
+        "cache_lane_neutral_content_miss",
         "cache_lane_neutral_hit",
+        "cache_lane_neutral_profile_mismatch",
         "cache_profile_hit",
         "cache_profile_miss",
+        "cache_reuse_structural_findings_absent",
         "cache_stat_fast_reject",
         # The producer edge of the canonical backend (step 7): ONE span at
         # the ONE publication point, deliberately NOT in the
@@ -554,7 +562,14 @@ PARK_REASONS: Final[Mapping[str, str]] = {
         "reserved for the Phase 39K cache backend; that backend now exists and "
         "the names it emits have left this list, but the ones still here name "
         "a generation-recovery and contention design it does not implement, so "
-        "no code path produces them"
+        "no code path produces them. Contention itself is reachable and will "
+        "arrive with concurrent writers -- measured 2026-09-02, a second writer "
+        "blocks for the whole busy timeout (5.21s) and a writer that opens "
+        "against a held lock fails at schema setup -- but the backend never "
+        "observes it: both outcomes are raised as an unreadable or unusable "
+        "store, indistinguishable from corruption, and there is no point in "
+        "the code at which a contention counter could be incremented. The "
+        "name waits on that design, not on a wiring step"
     ),
     PARK_OUT_OF_PACKAGE_HARNESS: (
         "emitted by a release harness that lives outside the shipped package"
