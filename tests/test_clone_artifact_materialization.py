@@ -536,6 +536,7 @@ def test_put_file_entry_refuses_artifacts_the_witness_does_not_claim(
         entry.module_neutral,
         module_name="pkg.pairs",
         filepath=filepath,
+        analysed_filepath="pkg/pairs.py",
     )
     units = [unit for unit in rehydrated.units if unit.statement_sequence]
     assert units, "no cached unit carries a sequence; the guard is inert"

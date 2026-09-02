@@ -3548,10 +3548,16 @@ def test_cache_v3_neutral_qualnames_are_owned_by_current_registry() -> None:
     )
 
     flat = rehydrate_cache_neutral(
-        payload, module_name="pkg.mod", filepath="pkg/mod.py"
+        payload,
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        analysed_filepath="pkg/mod.py",
     )
     src = rehydrate_cache_neutral(
-        payload, module_name="src_pkg.mod", filepath="src/src_pkg/mod.py"
+        payload,
+        module_name="src_pkg.mod",
+        filepath="src/src_pkg/mod.py",
+        analysed_filepath="src/src_pkg/mod.py",
     )
 
     assert flat.units[0].qualname == "pkg.mod:f"

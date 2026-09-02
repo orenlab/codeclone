@@ -149,7 +149,28 @@ def rehydrate_cache_neutral(
     *,
     module_name: str,
     filepath: str,
+    analysed_filepath: str,
 ) -> RehydratedCacheNeutral:
+    """Serve one cached file's neutral families, each in ITS OWN domain.
+
+    ``filepath`` is the runtime path, and it is what a family stamped by a
+    module pass wants back: ``Unit``, ``BlockUnit`` and ``SegmentUnit`` all
+    carry it, and the report layer relativises them against the scan root.
+    ``analysed_filepath`` is the analysed spelling -- the repository-relative
+    path the identity index, the module registry and the wire key all use --
+    and the semantic facts are the family that wants THAT one.
+
+    The split is not stylistic.  Measured 2026-09-02: a warm run stamped
+    ``SemanticEvent.location[0]`` with the runtime path while a parsed run
+    stamped ``ResolvedSourceIdentity.file.path``, so the authority result's
+    violation locations changed spelling with cache warmth alone -- and
+    ``source_facts`` is the preimage of the ``analysis_facts`` integrity
+    tier, so the run identity changed with it.  The parameter is required
+    rather than defaulted for the same reason ``_decode_wire_file_entry``
+    takes two: a single path made the choice invisible, and the family that
+    got it wrong was found only after it had shipped.
+    """
+
     def qualify(local_name: str) -> str:
         return f"{module_name}:{local_name}"
 
@@ -211,7 +232,7 @@ def rehydrate_cache_neutral(
         semantic_facts=rehydrate_semantic_facts(
             payload.semantic_facts,
             module_name=module_name,
-            filepath=filepath,
+            filepath=analysed_filepath,
         ),
     )
 

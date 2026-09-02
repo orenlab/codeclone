@@ -413,6 +413,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                         cached.module_neutral,
                         module_name=module_name,
                         filepath=filepath,
+                        analysed_filepath=registry_entry.identity.file.path,
                     )
                     if not decision.dependent.hit:
                         files_to_process.append(filepath)
