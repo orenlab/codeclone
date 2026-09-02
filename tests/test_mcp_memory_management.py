@@ -1007,10 +1007,30 @@ def test_mcp_query_engineering_memory_envelope_claims_nothing_when_complete(
 _ROUTE_PATTERN = re.compile(r"^(?P<tool>[A-Za-z_][A-Za-z0-9_]*)\((?P<args>.*)\)$")
 
 
+def _published_call(value: object) -> re.Match[str] | None:
+    """Decide whether a published value IS a call, from its shape alone.
+
+    A key name is a convention, and a convention cannot carry a semantic
+    question. Selecting keys that end in ``route`` left a broken route
+    published as ``tail_lookup_path`` invisible to the rule -- the same hole
+    the table itself had, one level up: a name standing in for a meaning, and
+    blind by construction to anything named outside it.
+
+    The value decides instead. What parses as ``tool(args)`` is an instruction
+    to call something, whatever the key is called, and the status words, dotted
+    payload paths and prose identity recipes that share this table are left
+    alone because they are not calls.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return _ROUTE_PATTERN.match(value.strip())
+
+
 def _parse_published_route(route: str) -> tuple[str, frozenset[str]]:
     """Split a published route into the tool it names and the arguments it names."""
 
-    match = _ROUTE_PATTERN.match(route.strip())
+    match = _published_call(route)
     assert match is not None, route
     body = match.group("args").strip()
     named = {
@@ -1038,6 +1058,39 @@ def _dotted(payload: Mapping[str, object], path: str) -> object:
     return current
 
 
+@pytest.mark.parametrize(
+    ("value", "is_call"),
+    [
+        ("get_memory_projection_page(root=..., cursor=...)", True),
+        ("query_engineering_memory(root=..., mode='get', record_id=...)", True),
+        ("get_review_receipt(root=..., receipt_digest=..., format='structured')", True),
+        ("available", False),
+        ("blocked", False),
+        ("receipt.receipt", False),
+        ("patch_trail", False),
+        ("memory continuation cursor + lane identity digest + request digest", False),
+        ("blast_artifact_id + run_id + projection_digest", False),
+        ("   ", False),
+        (True, False),
+        (None, False),
+    ],
+)
+def test_published_value_is_a_call_only_when_it_parses_as_one(
+    value: object, is_call: bool
+) -> None:
+    """The mirror boundary: widening selection must stop at values that are not calls.
+
+    Selecting by shape decides what the schema rule is allowed to resolve. Erring
+    the other way is the mirror defect: a status word, a dotted payload path, a
+    bare lane name or a prose identity recipe swept in as a route would fail to
+    resolve to any tool and redden rows that are perfectly correct. The table
+    carries all four kinds beside its routes, so the classifier has to admit
+    calls and leave the rest alone.
+    """
+
+    assert (_published_call(value) is not None) is is_call
+
+
 def test_published_drill_down_routes_name_exactly_what_the_server_accepts() -> None:
     """Every published route MUST be complete AND callable against its tool.
 
@@ -1047,33 +1100,36 @@ def test_published_drill_down_routes_name_exactly_what_the_server_accepts() -> N
     surface just instructed -- and it must not name an argument the tool does
     not accept, which the server refuses for the opposite reason.
 
-    The rule reads every entry the table publishes, not a named subset. Naming
-    the rows kept the rule from noticing the rows nobody had fixed: four routes
-    omitted ``root`` while the three listed here were complete, and a rule that
-    checks three of seven rows is a rule with a hole.
+    The rule reads every value the table publishes, selected by shape rather
+    than by key name or by a named subset of rows. Both narrower selections had
+    the same hole: naming the rows hid four routes that omitted ``root``, and
+    keying on ``endswith("route")`` hid a broken route published under
+    ``tail_lookup_path``. Each row is verified individually -- every call-shaped
+    value reaches the schema comparison, and each one is measured against a tool
+    that actually demands and accepts arguments, so no row passes vacuously.
     """
     pytest.importorskip("mcp.server.fastmcp")
     server = build_mcp_server(history_limit=2)
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     reachability = passive_drill_down_reachability()
 
-    published = [
-        (f"{entry}.{key}", route)
+    published = {
+        f"{entry}.{key}": str(value)
         for entry, body in sorted(reachability.items())
-        for key, route in sorted(body.items())
-        if key.endswith("route") and isinstance(route, str) and route
-    ]
+        for key, value in sorted(body.items())
+        if _published_call(value) is not None
+    }
     assert published, reachability
 
     unserved: dict[str, dict[str, list[str]]] = {}
-    demanded: set[str] = set()
-    for label, route in published:
+    checked: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
+    for label, route in published.items():
         tool_name, named = _parse_published_route(route)
         assert tool_name in tools, route
         schema = tools[tool_name].inputSchema
         required = frozenset(cast("list[str]", schema["required"]))
         accepted = frozenset(cast("dict[str, object]", schema["properties"]))
-        demanded |= required
+        checked[label] = (required, accepted)
         defect = {
             "missing_required": sorted(required - named),
             "not_accepted": sorted(named - accepted),
@@ -1082,7 +1138,10 @@ def test_published_drill_down_routes_name_exactly_what_the_server_accepts() -> N
             unserved[label] = defect
 
     assert unserved == {}
-    assert demanded, published
+    assert set(checked) == set(published), sorted(set(published) - set(checked))
+    assert all(required and accepted for required, accepted in checked.values()), (
+        checked
+    )
 
 
 def test_published_memory_tail_route_is_callable_exactly_as_published(
