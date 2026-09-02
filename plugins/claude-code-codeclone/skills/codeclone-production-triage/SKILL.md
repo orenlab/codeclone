@@ -24,8 +24,9 @@ analyze_repository(root=<abs>) → get_production_triage
 Two calls. Stop unless asked for more.
 
 - Drill a hotspot: `get_finding(finding_id)` → `get_remediation(finding_id)`.
-- Changed-files context: `analyze_changed_paths(root=..., paths=[...]) → get_report_section(section="changed")`.
-- Which findings trip the gate: `evaluate_gates(run_id, …)` →
+- Changed-files context:
+  `analyze_changed_paths(root=…, changed_paths=[...]) → get_report_section(section="changed")`.
+- Which findings trip the gate: `evaluate_gates(run_id=…, …)` →
   `list_findings(novelty="new", source_kind="production", family=…)`.
 
 ## Reading the response

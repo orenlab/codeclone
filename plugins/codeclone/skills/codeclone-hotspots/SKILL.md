@@ -25,7 +25,8 @@ Cheapest useful path. Stop there unless asked for more.
   `analyze_repository → check_complexity | check_coupling | check_cohesion | check_dead_code | check_clones`
 - Adoption / API surface / coverage join: `get_report_section(section="metrics")` (coverage unclear →
   `help(topic="coverage")`)
-- Gate preview → its findings: `evaluate_gates(run_id, fail_on_new=, fail_complexity=, …)` → for the actual findings,
+- Gate preview → its findings: `evaluate_gates(run_id=…, fail_on_new=…, fail_complexity=…, …)` → for the actual
+  findings,
   `list_findings(novelty="new", family=…, source_kind="production")`.
 
 ## Reading the response

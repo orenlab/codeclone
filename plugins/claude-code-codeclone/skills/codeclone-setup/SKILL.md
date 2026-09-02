@@ -23,11 +23,15 @@ Do **not** use for governed code edits — use `codeclone-change-control`.
 codeclone setup status          # capability snapshot (default)
 codeclone setup doctor          # verbose probes
 codeclone setup plan [--json]   # read-only diff preview
-codeclone setup apply [--dry-run] [--json]
+codeclone setup apply [--dry-run] [-y] [--plan-id <id>] [--json]
 codeclone setup wizard          # interactive hub (no --json)
 ```
 
 All commands accept `--root <abs-or-rel-path>`.
+
+`apply` without `--dry-run` prompts for confirmation and **refuses without a TTY** —
+pass `-y` / `--yes` in any subprocess. `--plan-id` proceeds only if the recomputed
+plan still matches.
 
 ## What apply changes (bounded)
 
@@ -43,7 +47,7 @@ Never writes `codeclone.baseline.json`, `.codeclone/cache`, or report artifacts.
 | JSON `status`                  | Exit |
 |--------------------------------|------|
 | `applied`, `preview`, `noop`   | 0    |
-| `blocked`                      | 2    |
+| `blocked`, `stale_plan`        | 2    |
 | `failed`, `partial`            | 5    |
 
 (`preview` when `--dry-run`; `plan` uses `status=empty`.)
@@ -53,4 +57,4 @@ Never writes `codeclone.baseline.json`, `.codeclone/cache`, or report artifacts.
 - Run in the user's terminal (or subprocess), not via MCP.
 - Mature repos may show **`plan` → empty** — expected.
 - After setup, continue with `codeclone .` and MCP skills as needed.
-- Full guide: docs site *Repository setup and readiness* (`docs/guide/setup/readiness-and-apply.md`).
+- Full command reference: <https://orenlab.github.io/codeclone/reference/setup/>

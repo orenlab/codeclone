@@ -18,10 +18,10 @@ After `start_controlled_change` returns `edit_allowed:true`:
 
 1. `get_relevant_memory(root=<abs>, intent_id=... or scope=...)`.
 2. Read contract, stale, risk, and conflict evidence in the response.
-3. `query_engineering_memory(mode=for_path | search | get)` only when drill-down
-   is needed.
+3. `query_engineering_memory(root=<abs>, mode="for_path" | "search" | "get")` only
+   when drill-down is needed.
 
-`root` is required (`intent_id` alone fails MCP validation).
+`root` is required on both (`intent_id` alone fails MCP validation).
 
 `get_implementation_context` may include a memory facet, but it does **not** replace
 this explicit retrieval step in the change-control cycle.
@@ -139,6 +139,7 @@ Why: prevents double entries per path casing.
 
 ```
 manage_engineering_memory(
+  root="<abs>",
   action="record_candidate",
   record_type="<appropriate-type>",
   statement="<one self-contained durable fact>",
@@ -188,10 +189,8 @@ is an exact continuation of that ranked lane. Use
 `get_memory_projection_page(root=<abs>, cursor=...)` to inspect omitted tail
 items disclosed by `context_governance.omitted`. If the memory projection
 changed, the page returns `snapshot_mismatch`; do not replace that with a fresh
-broad search while claiming it is the same evidence. Known object drill-downs remain:
-`query_engineering_memory(mode="get")`,
-`query_engineering_memory(mode="trajectory_get")`, and
-`query_engineering_memory(mode="experience_get")`.
+broad search while claiming it is the same evidence. Known object drill-downs remain
+`query_engineering_memory(root=<abs>, mode="get" | "trajectory_get" | "experience_get")`.
 
 Treat `draft`, `inferred`, `stale`, `historical`, `superseded`, and `rejected`
 records according to provenance and lifecycle status. Historical evidence may be

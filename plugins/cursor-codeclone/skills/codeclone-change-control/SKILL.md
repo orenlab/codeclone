@@ -42,7 +42,7 @@ analyze_repository(root=<abs>)
 → get_relevant_memory(root=<abs>, intent_id=...)
 → edit inside declared scope
 → analyze_repository(root=<abs>) when the derived profile requires it
-→ [manage_engineering_memory(action="record_candidate", ...)]
+→ [manage_engineering_memory(root=<abs>, action="record_candidate", ...)]
 → finish_controlled_change(
       intent_id=...,
       changed_files=[...] XOR diff_ref=...,
@@ -56,7 +56,7 @@ analyze_repository(root=<abs>)
 - `start_controlled_change` defaults to a slim blast-radius summary when a
   durable `blast_artifact` was stored. Treat `do_not_touch` as mandatory safety
   context; fetch omitted full blast evidence with
-  `get_blast_artifact(root, run_id, blast_artifact_id)`. Use
+  `get_blast_artifact(root=…, run_id=…, blast_artifact_id=…)`. Use
   `blast_radius_detail="full"` only when you truly need the compatibility
   projection inline. In this path `context_governance.mode` is
   `partial_enforce`; fallback, queued, and needs-analysis starts stay

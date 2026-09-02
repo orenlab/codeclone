@@ -16,7 +16,8 @@ analyze_repository(root=<abs>) → get_blast_radius(files=[...], depth="transiti
 
 `get_blast_radius` is current recomputation from the stored run. When
 `start_controlled_change` returns a slim `blast_radius` summary with
-`blast_artifact`, use `get_blast_artifact(root, run_id, blast_artifact_id)` for
+`blast_artifact`, use
+`get_blast_artifact(root=…, run_id=…, blast_artifact_id=…)` for
 the exact full evidence omitted from that start response. Do not substitute a
 fresh `get_blast_radius` call when exact historical start evidence is required.
 That slim start response is `context_governance.mode="partial_enforce"`; the

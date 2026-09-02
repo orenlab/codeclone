@@ -17,7 +17,8 @@ Structural / clone / changed-scope / gate review. Read-only; never mutates state
 
 ## Workflows
 
-- Full: `analyze_repository → get_production_triage → list_hotspots → get_finding → get_remediation`
+- Full: `analyze_repository → get_production_triage → list_hotspots(kind=…) → get_finding → get_remediation`
+  (`kind`: `most_actionable` · `highest_priority` · `highest_spread` · `production_hotspots` · `test_fixture_hotspots`)
 - PR:
   `analyze_changed_paths → get_report_section(section="changed") → list_findings(changed_paths=…, sort_by="priority") → generate_pr_summary`
 - Metrics / coverage: `get_report_section(section="metrics")` (coverage join → `help(topic="coverage")`)
@@ -25,10 +26,11 @@ Structural / clone / changed-scope / gate review. Read-only; never mutates state
 
 ## Gates → the findings that trip them
 
-- `evaluate_gates(run_id, fail_on_new=, fail_complexity=, fail_coupling=, fail_dead_code=, fail_health=, …)` → gate
-  decision.
+- `evaluate_gates(run_id=…, fail_on_new=…, fail_complexity=…, fail_coupling=…, fail_dead_code=…, fail_health=…, …)` →
+  gate decision.
 - See the findings behind a `reasons[]` token:
-  `list_findings(novelty="new", family="clones"|"complexity"|…, source_kind="production")`.
+  `list_findings(novelty="new", family="clone"|"structural"|"dead_code"|"design"|"authority", source_kind="production")`.
+  Complexity / coupling / cohesion are `category` values inside `family="design"`, not families.
 - Per-family, new vs known: `check_clones | check_complexity | check_coupling | check_cohesion | check_dead_code`.
 - Drill one: `get_finding(finding_id)` → `get_remediation(finding_id)`.
 - Review loop: `mark_finding_reviewed(finding_id) → list_reviewed_findings`; `exclude_reviewed=true` in long sessions.
@@ -42,7 +44,7 @@ Structural / clone / changed-scope / gate review. Read-only; never mutates state
 | `health.score`/`grade`                    | 0–100 / A–F; `dimensions` = per-family scores                                 |
 | `findings.new`/`known`                    | baseline-relative novelty — NOT patch-local proof (use change-control verify) |
 | `new_by_source_kind`                      | new split prod / tests / fixtures (the gate counts production)                |
-| `evaluate_gates.would_fail` + `reasons[]` | gate verdict + cause tokens (`clone:new`, `health`, …)                        |
+| `evaluate_gates.would_fail` + `reasons[]` | gate verdict + cause tokens (`clone:new`, `metric:…`)                        |
 | finding `severity` vs `priority`          | severity = impact class; priority = ranked action order                       |
 | finding `source_kind`                     | production / tests / fixtures — filter test noise                             |
 | `novelty="known"`                         | in baseline, NOT "safe" — a patch may reintroduce it                          |

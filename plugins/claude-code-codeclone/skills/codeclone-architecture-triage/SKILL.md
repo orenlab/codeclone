@@ -35,12 +35,12 @@ domain/application semantics leaking into surfaces.
 resolve/reuse run_id
 → analyze_repository(root=<abs>) only if no run exists,
   needs_analysis is returned, or fresh analysis is requested
-→ get_report_section(run_id, "module_map")
-→ get_report_section(run_id, "metrics")
+→ get_report_section(run_id=<run_id>, section="module_map")
+→ get_report_section(run_id=<run_id>, section="metrics")
 → build independent shortlists:
     structural ≤5: hubs / overloaded / unwind
     policy ≤3: surfaces / adapters / integration modules
-→ metrics_detail only for shortlisted structural candidates
+→ section="metrics_detail" (same tool, needs `family=`) only for shortlisted structural candidates
 → get_implementation_context(
     root=<abs>, run_id=<run_id>, paths=[single_subject],
     mode="impact", depth=1,

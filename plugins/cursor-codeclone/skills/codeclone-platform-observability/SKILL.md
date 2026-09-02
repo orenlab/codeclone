@@ -35,14 +35,17 @@ worker). A store appears only after one instrumented op completes:
 ```
 help(topic="observability")   # contract + anti-patterns (optional)
 → reproduce with CODECLONE_OBSERVABILITY_ENABLED=1
-→ query_platform_observability(section="summary", window="latest")
+→ query_platform_observability(root=<abs>, section="summary", window="latest")
 → follow recommended_next_sections, ONE section per call
 ```
 
-Sections:
-`summary | slow_operations | mcp_tool_matrix | db_cost | memory_pipeline_cost | correlated_chains | costly_noops | pipeline | agent_context`.
-Params: absolute `root`, `detail_level=compact|normal`, `limit` 1–50, `window=latest`
-or a correlation id.
+Aggregate sections: `summary | slow_operations | mcp_tool_matrix | db_cost |
+memory_pipeline_cost | correlated_chains | costly_noops | pipeline | agent_context |
+analysis_phase_cost`. Per-object detail: `operation_detail` (needs `operation_id=`),
+`span_detail` (needs `span_id=`).
+Params: absolute `root`, `detail_level=compact|normal` (`full` is honoured only by the
+two detail sections and downgrades to `normal` elsewhere), `limit` 1–100 (default 10,
+clamped with a warning), `window=latest` or a correlation id.
 
 Human cockpit (not MCP): `codeclone observability trace --root . --last 50 --html /tmp/x.html`.
 
@@ -52,7 +55,7 @@ Human cockpit (not MCP): `codeclone observability trace --root . --last 50 --htm
 
 | Field                                                | Meaning                                                                                 |
 |------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| `status`                                             | ok / disabled / no_store (stop → verify env + reproducer process; do not retry blindly) |
+| `status`                                             | ok / disabled (off) / no_store (on, nothing recorded yet) / invalid_section / invalid_selector / incompatible_schema — stop and fix the cause; do not retry blindly |
 | `recommended_next_sections`                          | follow these, one per call                                                              |
 | row `verdict`                                        | `query_chatty` / `context_heavy` / `ok` — perf signal, NOT a code-quality verdict       |
 | `costly_noops`                                       | redundant-work hints                                                                    |
