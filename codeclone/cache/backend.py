@@ -152,6 +152,12 @@ DIGEST_DOMAINS: Final[dict[str, str]] = {
 }
 DIGEST_ALGORITHM: Final = "sha256"
 
+#: SQLite's own encoding of the ``auto_vacuum`` mode a database file carries:
+#: 0 NONE, 1 FULL, 2 INCREMENTAL.  The mode belongs to the file and not to a
+#: connection, which is why :func:`_bind_incremental_vacuum` compares against
+#: this rather than trusting the statement that set it.
+_AUTO_VACUUM_INCREMENTAL: Final = 2
+
 #: How coarse a recency mark is. See :meth:`CacheBackend.touch`: marking every
 #: read entry on every run cost 33 MB of write volume per warm run on this
 #: repository, to re-record a fact that had not changed. A TTL measured in days
@@ -262,13 +268,48 @@ def _validate_schema(connection: sqlite3.Connection) -> None:
         raise CacheBackendForeign(msg)
 
 
+def _bind_incremental_vacuum(connection: sqlite3.Connection) -> None:
+    """Make the FILE's ``auto_vacuum`` mode incremental, migrating it if need be.
+
+    ``PRAGMA auto_vacuum=INCREMENTAL`` is accepted anywhere and *stored* only
+    while a database still has no pages of its own.  The shared connection
+    owner issues ``journal_mode=WAL`` before it calls schema setup, and that
+    writes the header, so by the time this store is created the assignment is
+    already a silent no-op.  Measured on a brand-new store: the mode read back
+    0, deleting 600 of 800 entries left 6051 pages on the freelist, and
+    ``reclaim`` returned none of them and not one byte of the 31.6 MB file.
+
+    So the mode is read back rather than assumed, because a pragma that was
+    executed and a pragma that took effect are different facts, and only the
+    second one is in the file.  The documented way past a header that already
+    says NONE is ``VACUUM``, which rewrites the database in the mode the
+    connection is holding.
+
+    That rewrite is a migration and deliberately not a recreation: measured, it
+    costs 77 ms on a 33 MB store against 13-17 s to re-analyse this repository
+    cold, and it keeps every entry, so the run after the upgrade is still warm.
+
+    Reading first is also what keeps it a migration.  A store whose header
+    already says INCREMENTAL is left exactly as it is: rewriting a 60 MB cache
+    on every open would cost far more than the sweeps it enables, and it would
+    hand back pages no sweep asked to hand back.
+    """
+
+    connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
+    stored = connection.execute("PRAGMA auto_vacuum").fetchone()
+    if stored is not None and int(stored[0]) == _AUTO_VACUUM_INCREMENTAL:
+        return
+    connection.commit()
+    connection.execute("VACUUM")
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     # ``auto_vacuum`` is storage management, not part of the durability trio
-    # the shared owner holds, and it only binds before the first table exists
-    # -- so it belongs here, at schema creation, and is set exactly once.
-    # Without it a GC sweep would free pages that never return to the
-    # filesystem.
-    connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
+    # the shared owner holds.  It is bound here, before the tables, because
+    # that is the cheapest moment for the migration below -- an empty database
+    # rewrites for nothing.  Without it a GC sweep frees pages that never
+    # return to the filesystem.
+    _bind_incremental_vacuum(connection)
     connection.execute("PRAGMA foreign_keys=ON")
     initialize_schema_v1(
         connection,
@@ -646,10 +687,23 @@ class CacheBackend:
         ]
 
     def reclaim(self) -> None:
-        """Return freed pages to the filesystem after a sweep."""
+        """Return freed pages to the filesystem after a sweep.
+
+        ``PRAGMA incremental_vacuum`` yields one result row per page it hands
+        back, so draining the cursor IS the work and not a reading of it: a
+        statement that is prepared and never stepped hands back nothing.
+        Measured on a store holding 3002 free pages, ``execute`` alone left all
+        3002 of them free and the file at 16.4 MB, while the drain emptied the
+        freelist and took the file to 4.1 MB in 37 ms.
+
+        This depends on the store's mode actually being incremental, which is
+        a property of the file and is established by
+        :func:`_bind_incremental_vacuum`; against a store still at NONE the
+        pragma is a legal no-op and this method is theatre.
+        """
 
         try:
-            self._connection.execute("PRAGMA incremental_vacuum")
+            self._connection.execute("PRAGMA incremental_vacuum").fetchall()
             self._connection.commit()
         except sqlite3.Error as exc:
             raise CacheBackendUnusable(str(exc)) from exc

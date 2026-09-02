@@ -35,6 +35,7 @@ from codeclone.cache.backend import (
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
 from codeclone.core._types import BootstrapResult
+from codeclone.models import EntryIdentity
 from tests._cache_store_fixtures import (
     META_KEY_VERSION,
     break_identity_checksum,
@@ -358,6 +359,204 @@ def test_a_rerun_inside_one_working_session_writes_no_marks(tmp_path: Path) -> N
         backend.touch(sorted(before), now_epoch=rerun)
 
     assert _epochs(cache_path) == before
+
+
+# -- physical reclamation ---------------------------------------------------
+#
+# The defect class these pin is "the instruction was issued and nothing
+# happened", so every assertion below reads the FILE: the mode SQLite recorded
+# in the header, the pages it is holding free, and the size on disk.  Asserting
+# that a pragma was executed would have passed throughout.
+
+#: SQLite's own encoding of the stored ``auto_vacuum`` mode: 0 NONE, 1 FULL,
+#: 2 INCREMENTAL.  Read off the file, so the number is the file's, not ours.
+_AUTO_VACUUM_INCREMENTAL = 2
+
+#: Enough payload that a sweep moves pages and bytes rather than rounding:
+#: 240 entries carrying two 8 KB lanes each, over the default 4 KB page.
+_BULK_ENTRIES = 240
+_BULK_PAYLOAD = b'{"lane":"' + b"p" * 8_000 + b'"}'
+
+#: Any version mark will do -- these tests never cross a generation boundary,
+#: and naming the real one would couple them to a constant they do not pin.
+_BULK_VERSION = "physical-reclamation-fixture"
+
+
+def _identity(index: int) -> EntryIdentity:
+    """One synthetic entry, distinct in every column the index touches."""
+
+    return EntryIdentity(
+        wire_path=f"pkg/mod_{index:04d}.py",
+        binding_version="bv1",
+        stat_mtime_ns=1_700_000_000_000_000_000 + index,
+        stat_size=1000 + index,
+        source_digest=bytes((index % 251,)) * 32,
+        git_blob_format=None,
+        git_blob_id=None,
+        neutral_profile=bytes(((index + 1) % 251,)) * 32,
+        dependent_profile=bytes(((index + 2) % 251,)) * 32,
+        binding_context=bytes(((index + 3) % 251,)) * 32,
+        clone_channels=(),
+        neutral_bytes=len(_BULK_PAYLOAD),
+        dependent_bytes=len(_BULK_PAYLOAD),
+    )
+
+
+def _storage(cache_path: Path) -> dict[str, int]:
+    """The physical state of the store, read back off the file."""
+
+    connection = sqlite3.connect(str(cache_path))
+    try:
+        state = {
+            name: int(connection.execute(f"PRAGMA {name}").fetchone()[0])
+            for name in ("auto_vacuum", "freelist_count", "page_count")
+        }
+    finally:
+        connection.close()
+    state["file_bytes"] = cache_path.stat().st_size
+    return state
+
+
+def _bulk_store(cache_path: Path) -> None:
+    """Fill a store with enough payload for its page count to mean something."""
+
+    with CacheBackend(cache_path) as backend:
+        backend.upsert_entries(
+            [
+                (_identity(index), _BULK_PAYLOAD, _BULK_PAYLOAD)
+                for index in range(_BULK_ENTRIES)
+            ],
+            version=_BULK_VERSION,
+            generation=1,
+            now_epoch=1_700_000_000,
+        )
+
+
+def _delete_oldest(cache_path: Path, count: int) -> None:
+    with CacheBackend(cache_path) as backend:
+        found = sorted(
+            file_id for file_id, _identity in backend.iter_identities(_BULK_VERSION)
+        )
+        assert len(found) == _BULK_ENTRIES
+        backend.delete_by_ids(found[:count])
+
+
+def _unbind_auto_vacuum(cache_path: Path) -> None:
+    """Return a store to the shape a build without the binding leaves on disk."""
+
+    connection = sqlite3.connect(str(cache_path))
+    try:
+        connection.execute("PRAGMA auto_vacuum=NONE")
+        connection.execute("VACUUM")
+    finally:
+        connection.close()
+
+
+def test_a_new_store_is_created_able_to_give_pages_back(tmp_path: Path) -> None:
+    """``auto_vacuum`` is a property of the file, and the file has to carry it.
+
+    The mode binds only while a database has no pages of its own, and the
+    shared connection owner issues ``journal_mode=WAL`` before schema setup
+    runs, which writes the header first.  Measured on this store before the
+    fix: a brand-new cache reported ``auto_vacuum = 0``.  The pragma was
+    executed on every open and recorded nothing, so ``reclaim`` had no
+    freelist to hand back and a swept store never shrank by a byte.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    with CacheBackend(cache_path):
+        pass
+
+    assert _storage(cache_path)["auto_vacuum"] == _AUTO_VACUUM_INCREMENTAL
+
+
+def test_a_sweep_gives_the_freed_pages_back_to_the_filesystem(
+    tmp_path: Path,
+) -> None:
+    """The effected state, not the instruction intending it.
+
+    ``PRAGMA incremental_vacuum`` yields one result row per page it hands
+    back, so a statement prepared and never stepped hands back nothing.
+    Measured on a store holding 3002 free pages: ``execute`` alone left all
+    3002 free and the file at 16.4 MB, while draining the cursor emptied the
+    freelist and took the file to 4.1 MB in 37 ms.
+
+    The assertion in the middle is the reachability proof for the sweep: it
+    fails if the deletion left nothing to reclaim, so a green run can never
+    mean the sweep was asked for nothing.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _bulk_store(cache_path)
+    _delete_oldest(cache_path, _BULK_ENTRIES * 3 // 4)
+
+    swept = _storage(cache_path)
+    assert swept["freelist_count"] > 0, "no pages were freed, so nothing is proved"
+
+    with CacheBackend(cache_path) as backend:
+        backend.reclaim()
+    reclaimed = _storage(cache_path)
+
+    assert reclaimed["freelist_count"] == 0
+    assert reclaimed["page_count"] < swept["page_count"]
+    assert reclaimed["file_bytes"] < swept["file_bytes"]
+
+
+def test_a_store_written_before_the_binding_is_migrated_not_rebuilt(
+    tmp_path: Path,
+) -> None:
+    """The 4.0 stores already on disk were written unbound, and they are kept.
+
+    Dropping the store would be the cheap repair and the wrong one: a cold
+    re-analysis of this repository measures 13-17 s against 77 ms for the
+    VACUUM that rewrites the file with the mode bound.  So every entry has to
+    survive the migration, which is what the last assertion holds.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _bulk_store(cache_path)
+    with CacheBackend(cache_path) as backend:
+        before = {
+            identity.wire_path
+            for _file_id, identity in backend.iter_identities(_BULK_VERSION)
+        }
+
+    _unbind_auto_vacuum(cache_path)
+    assert _storage(cache_path)["auto_vacuum"] == 0, "the fixture proves nothing"
+
+    with CacheBackend(cache_path) as backend:
+        after = {
+            identity.wire_path
+            for _file_id, identity in backend.iter_identities(_BULK_VERSION)
+        }
+
+    assert _storage(cache_path)["auto_vacuum"] == _AUTO_VACUUM_INCREMENTAL
+    assert after == before
+
+
+def test_a_bound_store_is_not_rewritten_on_every_open(tmp_path: Path) -> None:
+    """The opposite error: paying the migration again on a store already bound.
+
+    A VACUUM per open would rewrite the whole cache -- 60 MB on this
+    repository -- for a mode the header already carries, and it would reclaim
+    pages no sweep asked to reclaim.  So free pages left by a delete must
+    still be free after a plain re-open, and the store's own reclamation must
+    stay the only thing that returns them.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _bulk_store(cache_path)
+    _delete_oldest(cache_path, _BULK_ENTRIES // 2)
+
+    swept = _storage(cache_path)
+    assert swept["freelist_count"] > 0, "no pages were freed, so nothing is proved"
+
+    with CacheBackend(cache_path):
+        pass
+    reopened = _storage(cache_path)
+
+    assert reopened["freelist_count"] == swept["freelist_count"]
+    assert reopened["page_count"] == swept["page_count"]
 
 
 def test_the_cache_schema_is_not_in_the_run_stores_identity_salt() -> None:
