@@ -16,7 +16,6 @@ class CodeCloneSettings : PersistentStateComponent<CodeCloneSettings.State> {
         var analysisProfile: String = "defaults",
         var changedDiffRef: String = "HEAD",
         var showStatusBar: Boolean = true,
-        var cachePolicy: String = "reuse",
         var coverageXml: String = "",
         var autoDetectCoverageXml: Boolean = true,
         var minLoc: Int = 10,

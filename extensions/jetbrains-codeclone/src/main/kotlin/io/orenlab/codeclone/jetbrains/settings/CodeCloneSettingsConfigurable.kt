@@ -19,14 +19,6 @@ class CodeCloneSettingsConfigurable : BoundConfigurable("CodeClone") {
             }
         }
 
-    private var cachePolicy: String?
-        get() = settings.config.cachePolicy
-        set(value) {
-            if (value != null) {
-                settings.config.cachePolicy = value
-            }
-        }
-
     override fun createPanel(): DialogPanel = panel {
         row("MCP command:") {
             textField()
@@ -55,10 +47,6 @@ class CodeCloneSettingsConfigurable : BoundConfigurable("CodeClone") {
         row {
             checkBox("Auto-detect coverage.xml in workspace root")
                 .bindSelected(settings.config::autoDetectCoverageXml)
-        }
-        row("Cache policy:") {
-            comboBox(listOf("reuse", "off"))
-                .bindItem(::cachePolicy)
         }
         row {
             checkBox("Show status bar widget")

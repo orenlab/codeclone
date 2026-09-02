@@ -1158,16 +1158,6 @@
           "default": [],
           "description": "Additional command-line arguments passed to the CodeClone MCP launcher."
         },
-        "codeclone.analysis.cachePolicy": {
-          "type": "string",
-          "enum": [
-            "reuse",
-            "off"
-          ],
-          "scope": "resource",
-          "default": "reuse",
-          "description": "Default cache policy for workspace analysis requests."
-        },
         "codeclone.analysis.changedDiffRef": {
           "type": "string",
           "scope": "resource",

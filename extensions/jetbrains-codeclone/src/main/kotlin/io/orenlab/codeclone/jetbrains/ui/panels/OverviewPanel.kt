@@ -181,7 +181,6 @@ class OverviewPanel(
             AllIcons.General.Settings,
             listOf(
                 OverviewTreeNode.Detail(messages.getMessage("overview.field.analysis_profile"), analysis.label),
-                OverviewTreeNode.Detail(messages.getMessage("overview.field.cache_policy"), settings.cachePolicy),
                 OverviewTreeNode.Detail(messages.getMessage("overview.field.coverage"), coverageSummary),
                 OverviewTreeNode.ActionNode(
                     messages.getMessage("action.settings"),

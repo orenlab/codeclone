@@ -65,7 +65,6 @@ test("configuration settings declare explicit scopes that match their usage", ()
 
     assert.equal(properties["codeclone.mcp.command"].scope, "machine");
     assert.equal(properties["codeclone.mcp.args"].scope, "machine");
-    assert.equal(properties["codeclone.analysis.cachePolicy"].scope, "resource");
     assert.equal(properties["codeclone.analysis.changedDiffRef"].scope, "resource");
     assert.equal(properties["codeclone.analysis.coverageXml"].scope, "resource");
     assert.equal(
@@ -80,4 +79,31 @@ test("configuration settings declare explicit scopes that match their usage", ()
     assert.equal(properties["codeclone.analysis.segmentMinLoc"].scope, "resource");
     assert.equal(properties["codeclone.analysis.segmentMinStmt"].scope, "resource");
     assert.equal(properties["codeclone.ui.showStatusBar"].scope, "window");
+});
+
+// Ratchet: CodeClone 2.1.0a2 withdrew the per-call cache controls (cache_policy,
+// cache_path, max_cache_size_mb) -- managing the physical cache backend is operator
+// configuration, and the MCP server now refuses those arguments on every tool.
+//
+// The defect this forbids: a workspace setting the server refuses is worse than no
+// setting at all. Each tool's argument model is built from its handler signature and
+// pydantic ignores unknown keys, so to a client that still sends the value, "silently
+// dropped" is indistinguishable from "honoured" -- the call succeeds and the value goes
+// nowhere. Declaring one here puts that dead control in the VS Code settings UI, where
+// it is shown, persisted per-resource, and read by nothing.
+//
+// Re-wiring is not the fix. The control was withdrawn deliberately as a breaking change;
+// restoring a per-workspace cache policy would reverse it.
+test("no withdrawn cache control is offered as a workspace setting", () => {
+    const pkg = loadPackageJson();
+    const declared = Object.keys(pkg.contributes.configuration.properties);
+    const withdrawn = /(^|\.)(cachePolicy|cachePath|maxCacheSizeMb|cache_policy|cache_path|max_cache_size_mb)$/;
+
+    const offered = declared.filter((name) => withdrawn.test(name));
+
+    assert.deepEqual(
+        offered,
+        [],
+        `VS Code declares withdrawn cache control(s) the MCP server refuses: ${offered.join(", ")}`
+    );
 });

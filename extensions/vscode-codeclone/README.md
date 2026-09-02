@@ -183,7 +183,6 @@ Defaults and scopes match `package.json` → `contributes.configuration.properti
 | Setting | Default | Scope | Description |
 |---------|---------|-------|-------------|
 | `codeclone.analysis.profile` | `defaults` | Resource | `defaults`, `deeperReview`, or `custom`. |
-| `codeclone.analysis.cachePolicy` | `reuse` | Resource | `reuse` or `off` for analysis requests. |
 | `codeclone.analysis.changedDiffRef` | `HEAD` | Resource | Git ref for **Review Changes**. |
 | `codeclone.analysis.coverageXml` | `""` | Resource | Cobertura path for Coverage Join. |
 | `codeclone.analysis.autoDetectCoverageXml` | `true` | Resource | Use workspace-root `coverage.xml` when path is empty. |
