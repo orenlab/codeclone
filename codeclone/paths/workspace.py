@@ -123,6 +123,44 @@ def emit_legacy_workspace_warnings(
         )
 
 
+def service_directories(root: Path) -> tuple[Path, ...]:
+    """Every directory CodeClone may write its own service state into.
+
+    The boundary is a set of *directories*, not "inside the repository":
+    ``~/.cache/codeclone`` is outside every checkout and is CodeClone's own,
+    while a repository's own ``build/`` is inside one and is not.
+
+    Stated once here because the rule it replaces was an enumeration -- "never
+    mutates source, baseline, the analysis cache, reports" -- which was both
+    too wide and too narrow at once: it forbade a service write that should
+    always have been allowed, and said nothing about everything else outside
+    these directories. A surface asks whether a path is contained; it does not
+    keep its own list of the things it must not touch.
+    """
+
+    return tuple(
+        directory.resolve()
+        for directory in (
+            repo_workspace_dir(root),
+            legacy_repo_workspace_dir(root),
+            legacy_home_cache_path().parent,
+        )
+    )
+
+
+def is_service_path(path: Path, *, root: Path) -> bool:
+    """Whether *path* is CodeClone's own service state for *root*.
+
+    Both sides are resolved, so ``.codeclone/../../elsewhere`` is outside and a
+    sibling named ``.codeclone-not-ours`` is not admitted by prefix.
+    """
+
+    resolved = path.resolve()
+    return any(
+        resolved.is_relative_to(directory) for directory in service_directories(root)
+    )
+
+
 def workspace_glob_patterns() -> tuple[str, ...]:
     return FORBIDDEN_WORKSPACE_GLOBS
 
@@ -141,10 +179,12 @@ __all__ = [
     "WORKSPACE_DIR_NAME",
     "default_cache_path",
     "emit_legacy_workspace_warnings",
+    "is_service_path",
     "legacy_home_cache_path",
     "legacy_repo_workspace_dir",
     "legacy_repo_workspace_has_artifacts",
     "repo_workspace_dir",
+    "service_directories",
     "workspace_dir_for_cache_path",
     "workspace_glob_patterns",
 ]

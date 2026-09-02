@@ -54,8 +54,9 @@ Those platforms remain governed by their own applicable terms and policies.
 
 ## MCP and automation surfaces
 
-The MCP interface is read-only by contract with respect to source files,
-baselines, analysis cache, and canonical report artifacts.
+The MCP interface is contained by contract: it writes only CodeClone's own
+service data, and only inside CodeClone's service directories. It does not
+mutate source files, baselines, or canonical report artifacts.
 
 CodeClone MCP integrations are intended for deterministic structural analysis,
 review, and triage workflows. They expose canonical findings, metrics, and
@@ -64,14 +65,15 @@ review data, but do not mutate:
 - source files
 - git history
 - baselines
-- analysis cache or canonical report artifacts
+- canonical report artifacts
 - CI configuration
 
-Ephemeral controller coordination (workspace intent registry: file backend under
+CodeClone's own service state under `.codeclone/` is the only allowed repo-local
+write: the analysis cache a run produced (`.codeclone/db/cache.sqlite3`),
+ephemeral controller coordination (workspace intent registry: file backend under
 `.codeclone/intents/`, or SQLite under `.codeclone/db/intents.sqlite3`
-when configured) and optional audit trail
-(`.codeclone/db/audit.sqlite3` when `audit_enabled=true`) are the only
-allowed repo-local writes.
+when configured), and the optional audit trail
+(`.codeclone/db/audit.sqlite3` when `audit_enabled=true`).
 
 Remote, shared, or network-exposed MCP deployments are the responsibility of
 the operator securing and governing those environments.

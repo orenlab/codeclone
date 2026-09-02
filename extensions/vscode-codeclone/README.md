@@ -7,8 +7,8 @@ Native VS Code surface for [codeclone-mcp](https://orenlab.github.io/codeclone/c
 **Structural Change Controller for AI-assisted Python development**. Brings
 baseline-aware structural analysis into the editor — triage-first, repository
 read-only, and driven by the same canonical report as the CLI and HTML output. Session tools (`mark_finding_reviewed`, `clear_session_runs`) update
-ephemeral MCP state only; they never mutate source, baselines, cache, or report
-artifacts.
+ephemeral MCP state only. The server writes only CodeClone service data under
+`.codeclone/`; source, baselines and report artifacts are never mutated.
 
 > **Not a linter panel.** CodeClone for VS Code is designed for structural review and
 > refactoring flow, not diagnostics or Problems integration.

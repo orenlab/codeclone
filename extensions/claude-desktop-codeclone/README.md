@@ -5,7 +5,8 @@ bundle wrapper for `codeclone-mcp`. Installs as a `.mcpb` package instead of man
 
 Same canonical default agent MCP surface used by CLI, VS Code, Codex, and
 Claude Code.
-Repository read-only (source, baselines, cache, canonical reports); local stdio
+Writes only CodeClone service data under `.codeclone/`; source, baselines and
+canonical reports are never mutated. Local stdio
 only. The bundle proxies the full MCP server, including change-control, Engineering
 Memory, implementation context, and session tools — ephemeral coordination
 under `.codeclone/intents/` and optional audit records when enabled.

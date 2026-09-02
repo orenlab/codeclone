@@ -83,8 +83,10 @@ uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
-The MCP server is read-only by contract: it never mutates source files, baselines, cache, or repository state. The same
-canonical structural facts back every client — VS Code, Cursor, Claude Code, Codex, and Claude Desktop.
+The MCP server is contained by contract: it writes only CodeClone's own service data, and only inside CodeClone's
+service directories (`.codeclone/` and the per-user cache directory). Source files, baselines and generated reports are
+never mutated. The same canonical structural facts back every client — VS Code, Cursor, Claude Code, Codex, and Claude
+Desktop.
 
 ## Links
 

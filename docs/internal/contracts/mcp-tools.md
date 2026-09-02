@@ -16,7 +16,7 @@ The MCP tool surface (`codeclone.surfaces.mcp`) exposes CodeClone's deterministi
 - Failure modes and recovery paths
 - Verification boundaries and what is not checked
 
-MCP is read-only analysis and coordination. It does not mutate source files, baselines, caches, or canonical reports; only ephemeral workspace state under `.codeclone/intents/`.
+MCP is contained analysis and coordination: it writes only CodeClone's own service data, and only inside CodeClone's service directories — the analysis cache its own run produced, its run and audit records, and ephemeral workspace state under `.codeclone/intents/`. Source files, baselines and canonical reports are never mutated.
 
 ## Contracts
 

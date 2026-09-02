@@ -4,7 +4,8 @@ Native Codex plugin — **Structural Change Controller for AI-assisted Python
 development** — over `codeclone-mcp`.
 
 Same canonical MCP surface used by CLI, VS Code, Claude Desktop, and Claude Code.
-Repository read-only (source, baselines, cache, canonical reports); local stdio
+Writes only CodeClone service data under `.codeclone/`; source, baselines and
+canonical reports are never mutated. Local stdio
 only. The bundled launcher exposes the full default agent MCP surface, including
 change-control, Engineering Memory, Platform Observability, and session tools —
 ephemeral coordination under

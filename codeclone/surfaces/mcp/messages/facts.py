@@ -13,3 +13,11 @@ from typing import Final
 SECURITY_SURFACES_SUMMARY_NOTE: Final = (
     "report_only inventory; not a vulnerability scan"
 )
+
+CACHE_OUTSIDE_SERVICE_DIRECTORIES: Final = (
+    "Analysis cache {cache_path} is outside CodeClone's service directories; "
+    "MCP reads it and will not write it. Move it under .codeclone/ for MCP to "
+    "keep it warm."
+)
+
+CACHE_SAVE_FAILED: Final = "Analysis cache was not written: {error}"

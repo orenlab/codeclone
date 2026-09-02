@@ -303,7 +303,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "In CI and gating contexts, untrusted baseline states are "
                 "contract errors rather than soft warnings."
             ),
-            "MCP is read-only and does not update or rewrite baselines.",
+            "MCP does not update or rewrite baselines.",
         ),
         recommended_tools=("get_run_summary", "evaluate_gates", "compare_runs"),
         doc_links=(BASELINE_DOC_LINK,),
@@ -621,14 +621,23 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     ),
     "trust_boundaries": MCPHelpTopicSpec(
         summary=(
-            "Documented MCP trust limits: read-only analysis, advisory "
-            "workspace intents, strict artifact paths with opt-in external "
-            "resolution, and optional Bearer auth on streamable-http."
+            "Documented MCP trust limits: writes contained to CodeClone "
+            "service directories, advisory workspace intents, strict artifact "
+            "paths with opt-in external resolution, and optional Bearer auth "
+            "on streamable-http."
         ),
         key_points=(
             (
-                "MCP never mutates source, baseline, the analysis cache, "
-                "or canonical reports."
+                "MCP writes only CodeClone service data, and only inside "
+                "CodeClone service directories: .codeclone/ and the per-user "
+                "cache dir. Nothing outside them is mutated -- not source, "
+                "baselines, or canonical reports."
+            ),
+            (
+                "Inside that boundary MCP writes the analysis cache it "
+                "produced itself, so a root analysed only through MCP stays "
+                "warm. A cache configured outside the boundary is read, never "
+                "written."
             ),
             (
                 "baseline_path, coverage_xml, and the configured analysis "

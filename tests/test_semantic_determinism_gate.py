@@ -45,12 +45,21 @@ def _write_python_source(root: Path) -> None:
 def _deterministic_snapshot(
     service: CodeCloneMCPService, root: Path
 ) -> dict[str, object]:
-    summary = service.analyze_repository(
-        MCPAnalysisRequest(
-            root=str(root),
-            respect_pyproject=True,
-        )
+    """One snapshot, taken from a run whose cache state is already settled.
+
+    The measured run is the second, because the first warms the analysis cache
+    this surface writes. Cache state is a property of run order, not of the
+    semantic setting under test, and comparing a cold run against a warm one
+    would let that ordering answer for the setting. Both snapshots are taken
+    warm, so what remains between them is the configuration.
+    """
+
+    request = MCPAnalysisRequest(
+        root=str(root),
+        respect_pyproject=True,
     )
+    service.analyze_repository(request)
+    summary = service.analyze_repository(request)
     run_id = str(summary["run_id"])
     return {
         "run_id": run_id,

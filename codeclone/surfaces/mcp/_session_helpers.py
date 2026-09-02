@@ -10,8 +10,10 @@ import os
 from typing import Literal
 
 from ...api.comparison import foreign_interpreter_provenance
+from ...api.workspace import is_codeclone_service_path
 from ...cache.store import Cache
 from ...contracts import REPORT_RUN_IDENTITY_TIER, REPORT_SCHEMA_VERSION
+from ...contracts.errors import CacheError
 from ...domain.findings import (
     CLONE_NOVELTY_KNOWN,
     CLONE_NOVELTY_NEW,
@@ -71,6 +73,7 @@ from ._session_shared import (
     Sequence,
     _as_int,
     _base_short_finding_id_payload,
+    _BufferConsole,
     _disambiguated_clone_short_ids_payload,
     _disambiguated_short_finding_id_payload,
     _leaf_symbol_name_payload,
@@ -78,7 +81,11 @@ from ._session_shared import (
     _summarize_metrics_diff,
 )
 from .messages import remediation as remediation_msgs
-from .messages.facts import SECURITY_SURFACES_SUMMARY_NOTE
+from .messages.facts import (
+    CACHE_OUTSIDE_SERVICE_DIRECTORIES,
+    CACHE_SAVE_FAILED,
+    SECURITY_SURFACES_SUMMARY_NOTE,
+)
 from .payloads import short_id
 
 #: Where a loaded baseline was taken, relative to the interpreter running now.
@@ -733,16 +740,31 @@ def _build_cache(
     root_path: Path,
     args: Namespace,
     cache_path: Path,
+    console: _BufferConsole,
 ) -> Cache:
     """Open the analysis cache the way ``cli.analyze`` opens it.
 
-    There is no MCP-side policy to consult: the physical cache backend is
-    operator configuration, resolved once from the repository configuration and
-    the workspace default, never from a per-call argument. What stays MCP's own
-    is ``write_enabled=False`` -- this surface reads the cache the CLI wrote and
-    never writes it back.
+    There is no MCP-side policy about *which* store to open: the physical cache
+    backend is operator configuration, resolved once from the repository
+    configuration and the workspace default, never from a per-call argument.
+
+    What is MCP's own is the write boundary, and since 2026-09-02 that boundary
+    is containment rather than a list. This surface writes the service data its
+    own analysis produced, and mutates nothing outside CodeClone's service
+    directories. It used to pass ``write_enabled=False`` unconditionally, in
+    service of "MCP writes nothing" -- which left a repository analysed only
+    through MCP cold forever, paying a full analysis in RAM and CPU on every
+    call, while saying nothing about any other path on disk.
+
+    A repository may still point ``cache_path`` at its own ``build/``. The CLI
+    writes there; MCP does not, because that path is not CodeClone's to write.
+    That refusal is said out loud: a store this surface can never warm, silently,
+    is the exact defect the ruling ended.
     """
 
+    write_enabled = is_codeclone_service_path(cache_path, root=root_path)
+    if not write_enabled:
+        console.print(CACHE_OUTSIDE_SERVICE_DIRECTORIES.format(cache_path=cache_path))
     cache = Cache(
         cache_path,
         root=root_path,
@@ -754,10 +776,34 @@ def _build_cache(
         segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
         segment_min_stmt=_as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
         collect_api_surface=bool(getattr(args, "api_surface", False)),
-        write_enabled=False,
+        write_enabled=write_enabled,
     )
     cache.load()
     return cache
+
+
+def _persist_cache_service_data(cache: Cache, *, console: _BufferConsole) -> None:
+    """Write what this analysis produced, then let its lanes go.
+
+    The order is not interchangeable in either direction:
+    ``release_loaded_entries`` refuses a dirty store, so releasing first keeps
+    every lane of every analysed file in memory for the rest of the run, and
+    saving after a release would have nothing left to write.
+
+    Only what this run produced. The segment projection MCP does not compute is
+    the one its own ``load`` decoded, written back unchanged, so this surface
+    never fills in a row it merely found missing -- the line between serving and
+    production that F4 drew and this ruling did not move.
+
+    A store that cannot be written is a slow next run, never a failed analysis:
+    the failure is reported as a warning and the run keeps its results.
+    """
+
+    try:
+        cache.save()
+    except CacheError as exc:
+        console.print(CACHE_SAVE_FAILED.format(error=exc))
+    cache.release_loaded_entries()
 
 
 def _run_identity_digest(report_document: Mapping[str, object]) -> Mapping[str, object]:

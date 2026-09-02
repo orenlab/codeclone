@@ -299,13 +299,18 @@ class MCPSession(
                 metrics_baseline_exists,
             ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
         cache_path = _helpers._resolve_cache_path(root_path=root_path, args=args)
+        # Opened before the cache, because opening the cache can already have
+        # something to say: a store outside CodeClone's service directories is
+        # one this surface will read and never write, and that is a fact about
+        # the run, not a detail of the store.
+        console = _BufferConsole()
         with span(name="pipeline.cache_load"):
             cache = _helpers._build_cache(
                 root_path=root_path,
                 args=args,
                 cache_path=cache_path,
+                console=console,
             )
-        console = _BufferConsole()
 
         # Stage spans so mcp.analyze_repository carries the same discover/process/
         # analyze timing as cli.analyze (this path bypasses run_analysis_stages,
@@ -477,7 +482,7 @@ class MCPSession(
         clone_novelty_available = comparison.clone_novelty_available
         metrics_diff = comparison.metrics_diff
 
-        cache.release_loaded_entries()
+        _helpers._persist_cache_service_data(cache, console=console)
         with span(name="pipeline.report"):
             report_boot = replace(boot, output_paths=OutputPaths())
             report_artifacts = report(

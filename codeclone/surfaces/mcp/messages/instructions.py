@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Final
 
 SERVER_INSTRUCTIONS: Final = (
-    "CodeClone MCP is a deterministic, baseline-aware, read-only analysis server "
+    "CodeClone MCP is a deterministic, baseline-aware analysis server "
     "for Python repositories. Use analyze_repository first for full runs or "
     "analyze_changed_paths for PR-style review, then prefer get_run_summary or "
     "get_production_triage for the first pass. After analysis, use "
@@ -33,10 +33,15 @@ SERVER_INSTRUCTIONS: Final = (
     "operations. Atomic tools (get_blast_radius, check_patch_contract, "
     "validate_review_claims, create_review_receipt) remain available for "
     "advanced inspection and diagnostic use. "
-    "If concurrent intents overlap, narrow scope or coordinate. This server never "
-    "updates baselines and never mutates source files, analysis cache, or reports; "
-    "it may write ephemeral workspace coordination state under "
-    ".codeclone/intents/."
+    "If concurrent intents overlap, narrow scope or coordinate. Write boundary: "
+    "this server writes only CodeClone's own service data, and only inside "
+    "CodeClone's service directories -- .codeclone/ in the analysed repository "
+    "and the per-user CodeClone cache directory. That covers the analysis cache "
+    "this server itself produced, its run and audit records, and ephemeral "
+    "workspace coordination state under .codeclone/intents/. Nothing outside "
+    "those directories is mutated: not source files, not baselines, not "
+    "generated reports. An analysis cache configured outside them is read and "
+    "never written."
 )
 
 MCP_INSTALL_HINT: Final = (

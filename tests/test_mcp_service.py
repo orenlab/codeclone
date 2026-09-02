@@ -49,6 +49,7 @@ import codeclone.surfaces.mcp._session_workflow_mixin as workflow_mod
 import codeclone.surfaces.mcp._workspace_drift as mcp_workspace_drift_mod
 import codeclone.surfaces.mcp._workspace_hygiene as mcp_workspace_hygiene_mod
 import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
+import codeclone.surfaces.mcp.messages.facts as facts_msgs
 import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
@@ -62,10 +63,12 @@ from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import (
     BASELINE_SCHEMA_VERSION,
+    DEFAULT_CACHE_PATH,
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
-from codeclone.models import DigestObject, FileStat, LaneTrust, MetricsDiff
+from codeclone.models import FileStat, LaneTrust, MetricsDiff
+from codeclone.surfaces.mcp._session_shared import _BufferConsole
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     DetailLevel,
@@ -5334,8 +5337,8 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
     )
 
 
-def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
-    args = Namespace(
+def _cache_args() -> Namespace:
+    return Namespace(
         max_cache_size_mb=64,
         min_loc=10,
         min_stmt=6,
@@ -5346,27 +5349,44 @@ def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
         api_surface=False,
     )
 
-    cache = mcp_helpers_mod._build_cache(
-        root_path=tmp_path,
-        args=args,
-        cache_path=tmp_path / "cache.json",
-    )
-    cache.put_file_entry(
-        "x.py",
-        {"mtime_ns": 1, "size": 10},
-        [],
-        [],
-        [],
-        source_content_digest=DigestObject(
-            domain="codeclone.source-content.v1",
-            algorithm="sha256",
-            value="0" * 64,
-        ),
-    )
-    cache.save()
 
-    assert cache.get_file_entry("x.py") is None
-    assert not (tmp_path / "cache.json").exists()
+@pytest.mark.parametrize(
+    ("relative", "may_write"),
+    [(DEFAULT_CACHE_PATH, True), ("build/cache.sqlite3", False)],
+)
+def test_mcp_build_cache_takes_write_capability_from_containment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+    may_write: bool,
+) -> None:
+    """Two stores, one directory apart, opposite write capability.
+
+    Both verdicts on one builder, so a capability wired to a constant fails one
+    of them. What the capability then *does* to the filesystem is pinned
+    end-to-end in ``tests/test_mcp_cache_owner.py``; this is the decision.
+    """
+
+    store = tmp_path / relative
+    opened: list[dict[str, Any]] = []
+    real_cache: Any = Cache
+
+    def recording_cache(path: Path, **kwargs: Any) -> Any:
+        opened.append(dict(kwargs))
+        return real_cache(path, **kwargs)
+
+    monkeypatch.setattr(mcp_helpers_mod, "Cache", recording_cache)
+    console = _BufferConsole()
+    mcp_helpers_mod._build_cache(
+        root_path=tmp_path,
+        args=_cache_args(),
+        cache_path=store,
+        console=console,
+    )
+
+    assert [entry["write_enabled"] for entry in opened] == [may_write]
+    refusal = [facts_msgs.CACHE_OUTSIDE_SERVICE_DIRECTORIES.format(cache_path=store)]
+    assert console.messages == ([] if may_write else refusal)
 
 
 def test_mcp_analyze_releases_cache_before_report_without_json_roundtrip(
@@ -5474,7 +5494,8 @@ def test_mcp_service_root_cache_and_projection_helpers(
     mcp_helpers_mod._build_cache(
         root_path=tmp_path,
         args=args,
-        cache_path=tmp_path / "cache.json",
+        cache_path=tmp_path / DEFAULT_CACHE_PATH,
+        console=_BufferConsole(),
     )
     assert load_calls == ["loaded"]
 

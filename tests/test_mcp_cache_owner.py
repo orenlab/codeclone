@@ -3,18 +3,24 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
-"""The MCP surface owns no cache policy, and reads the cache the CLI writes.
+"""The MCP surface owns no cache policy, and writes its own cache service data.
 
-Three separate errors are pinned here, because they fail differently:
+Four separate errors are pinned here, because they fail differently:
 
 * a removed public cache control comes back onto the tool surface;
 * the MCP stops taking its cache location from the owner the CLI uses, and
   grows a second copy of the answer;
 * the MCP stops consulting the physical cache at all, and every run reports a
-  cold path while looking exactly as healthy as a warm one.
+  cold path while looking exactly as healthy as a warm one;
+* the MCP stops *writing* the cache it produced, so a root nobody analyses
+  through the CLI stays cold forever and pays a full analysis every call --
+  or writes it somewhere that is not CodeClone's to write.
 
-The last one is the reason the first is not allowed to stand in for a fix: a
-schema with no cache knob is silent about whether the cache is read.
+The third is the reason the first is not allowed to stand in for a fix: a
+schema with no cache knob is silent about whether the cache is read. The
+fourth is the reason ``cache.used`` is never the evidence here: that field was
+measured ``true`` on a run that reused nothing, so reuse is read from the run's
+own analysed/cached counts instead.
 """
 
 from __future__ import annotations
@@ -29,7 +35,10 @@ import pytest
 
 import codeclone.surfaces.cli.runtime as cli_runtime
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers
+import codeclone.surfaces.mcp.messages.facts as facts
+from codeclone.api.workspace import is_codeclone_service_path
 from codeclone.contracts import DEFAULT_CACHE_PATH, DEFAULT_MAX_CACHE_SIZE_MB
+from codeclone.contracts.errors import CacheError
 from codeclone.surfaces.mcp._session_shared import _BufferConsole
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
@@ -162,9 +171,11 @@ def test_mcp_opens_the_cache_the_cli_would_have_opened(
         assert mcp_path == _cli_cache_path(root, tmp_path)
         assert mcp_path == root / DEFAULT_CACHE_PATH
         assert mcp_kwargs["max_size_bytes"] == DEFAULT_MAX_CACHE_SIZE_MB * 1024 * 1024
-        # The MCP reads the cache and never writes it; that is the contract this
-        # removal must not quietly widen.
-        assert mcp_kwargs["write_enabled"] is False
+        # The default store is CodeClone's own service directory, so this
+        # surface writes what its analysis produced (RULING 2026-09-02). The
+        # boundary that replaces the old blanket refusal is asserted by
+        # ``test_an_mcp_analysis_writes_only_inside_service_directories``.
+        assert mcp_kwargs["write_enabled"] is True
 
 
 def _warm_the_store_with_the_cli(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -198,7 +209,7 @@ def test_mcp_analysis_reports_the_cache_it_was_given(
         MCPAnalysisRequest(root=str(root.resolve()), respect_pyproject=False)
     )
     assert cold["cache"] == {"used": False, "freshness": "fresh"}
-    assert not store.exists(), "an MCP analysis wrote the analysis cache"
+    assert store.exists(), "an MCP analysis left the store cold"
 
     _warm_the_store_with_the_cli(root, monkeypatch)
     assert store.exists() and store.stat().st_size > 0, "the CLI warmed no store"
@@ -323,3 +334,202 @@ def test_a_configured_out_of_repo_cache_path_is_still_refused(
         service.analyze_repository(
             MCPAnalysisRequest(root=str(root.resolve()), respect_pyproject=True)
         )
+
+
+def _reuse_counts(
+    service: CodeCloneMCPService, summary: dict[str, object], root: Path
+) -> dict[str, int]:
+    """How many files this run reused, taken from the run it registered.
+
+    Deliberately not ``cache.used``: that field reports that a physical store
+    was consulted, and was measured ``true`` on a run whose reuse was zero. The
+    analysed/cached pair is the count itself.
+    """
+
+    record = service._runs.get_for_root(str(summary["run_id"]), root=root)
+    files = cast("dict[str, object]", record.summary["inventory"])["files"]
+    counts = cast("dict[str, object]", files)
+    return {
+        "total_found": int(cast("int", counts["total_found"])),
+        "analyzed": int(cast("int", counts["analyzed"])),
+        "cached": int(cast("int", counts["cached"])),
+    }
+
+
+def test_a_root_only_mcp_has_analysed_is_warm_the_second_time(tmp_path: Path) -> None:
+    """The cold-forever defect: MCP read the cache and never wrote it.
+
+    Both runs are MCP; no CLI ever touches this root. The first must leave the
+    store behind, and the second must reuse every file it found. The cold run
+    is asserted first from the same counters, so a warm second run cannot be a
+    counter wired to a constant.
+    """
+
+    root = (tmp_path / "repo").resolve()
+    _write_repo(root)
+    store = root / DEFAULT_CACHE_PATH
+    service = CodeCloneMCPService(history_limit=4)
+
+    assert not store.exists()
+    first = service.analyze_repository(
+        MCPAnalysisRequest(root=str(root), respect_pyproject=False)
+    )
+    cold = _reuse_counts(service, first, root)
+    assert cold["total_found"] > 0, "the fixture repository analysed no files"
+    assert cold["cached"] == 0
+    assert cold["analyzed"] == cold["total_found"]
+    assert store.exists() and store.stat().st_size > 0, (
+        "an MCP analysis wrote no cache, so this root stays cold forever"
+    )
+
+    second = service.analyze_repository(
+        MCPAnalysisRequest(root=str(root), respect_pyproject=False)
+    )
+    warm = _reuse_counts(service, second, root)
+    assert warm["total_found"] == cold["total_found"]
+    assert warm["cached"] == cold["total_found"]
+    assert warm["analyzed"] == 0
+    assert second["cache"] == {"used": True, "freshness": "reused"}
+
+
+def _file_state(base: Path) -> dict[Path, tuple[int, int]]:
+    return {
+        path: (path.stat().st_size, path.stat().st_mtime_ns)
+        for path in base.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_an_mcp_analysis_writes_only_inside_service_directories(
+    tmp_path: Path,
+) -> None:
+    """The boundary itself, not the one flag that happens to sit on it.
+
+    Every file that appears or changes anywhere in the sandbox during one
+    analysis is held against the containment predicate. The population is
+    asserted first: a run that wrote nothing would satisfy an empty-set check
+    while proving nothing at all.
+    """
+
+    sandbox = (tmp_path / "sandbox").resolve()
+    root = sandbox / "repo"
+    _write_repo(root)
+    neighbour = sandbox / "outside"
+    neighbour.mkdir(parents=True)
+    (neighbour / "keep.txt").write_text("untouched", encoding="utf-8")
+    before = _file_state(sandbox)
+
+    CodeCloneMCPService(history_limit=2).analyze_repository(
+        MCPAnalysisRequest(root=str(root), respect_pyproject=False)
+    )
+
+    after = _file_state(sandbox)
+    touched = sorted(path for path in after if before.get(path) != after[path])
+    assert touched, "the analysis wrote nothing, so containment was not exercised"
+    escaped = [
+        str(path) for path in touched if not is_codeclone_service_path(path, root=root)
+    ]
+    assert escaped == [], f"MCP wrote outside its service directories: {escaped}"
+    assert (root / DEFAULT_CACHE_PATH) in touched, (
+        "the cache is the write this boundary exists to permit"
+    )
+
+
+def test_a_cache_configured_outside_the_service_directories_is_read_only(
+    tmp_path: Path,
+) -> None:
+    """The refusal side of the boundary, reached by repository configuration.
+
+    ``cache_path`` is delivered to this surface from ``pyproject.toml``, so a
+    repository can move the store out of ``.codeclone/``. The CLI may write it
+    there; MCP may not, and says so instead of going quiet.
+    """
+
+    root = (tmp_path / "repo").resolve()
+    _write_repo(root)
+    (root / "pyproject.toml").write_text(
+        '[tool.codeclone]\ncache_path = "build/cc-cache.sqlite3"\n',
+        encoding="utf-8",
+    )
+    relocated = root / "build" / "cc-cache.sqlite3"
+    service = CodeCloneMCPService(history_limit=2)
+
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(root=str(root), respect_pyproject=True)
+    )
+
+    assert not relocated.exists(), "MCP wrote a cache outside its service directories"
+    assert not (root / DEFAULT_CACHE_PATH).exists(), (
+        "MCP fell back to the default store instead of honouring the configured one"
+    )
+    assert facts.CACHE_OUTSIDE_SERVICE_DIRECTORIES.format(cache_path=relocated) in cast(
+        "list[str]", summary["warnings"]
+    )
+
+
+def test_the_analysis_releases_its_cache_entries_after_writing_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Written first, released second, and the order is a measured cost.
+
+    ``release_loaded_entries`` refuses a dirty store, so a surface that
+    released before saving would keep every analysed file's lanes in memory for
+    the rest of the run and still write nothing. Both halves are asserted, so
+    swapping the two statements fails here rather than quietly costing RAM.
+    """
+
+    root = (tmp_path / "repo").resolve()
+    _write_repo(root)
+    built: list[Any] = []
+    real_cache: Any = mcp_helpers.Cache  # type: ignore[attr-defined]
+
+    def recording_cache(path: Path, **kwargs: Any) -> Any:
+        cache = real_cache(path, **kwargs)
+        built.append(cache)
+        return cache
+
+    monkeypatch.setattr(mcp_helpers, "Cache", recording_cache)
+    CodeCloneMCPService(history_limit=2).analyze_repository(
+        MCPAnalysisRequest(root=str(root), respect_pyproject=False)
+    )
+
+    assert len(built) == 1, "the analysis opened no cache to release"
+    store = root / DEFAULT_CACHE_PATH
+    assert store.exists() and store.stat().st_size > 0
+    assert len(built[0].data["files"]) == 0, (
+        "the analysis kept its cache entries in memory after writing them"
+    )
+
+
+def test_a_cache_that_cannot_be_written_is_a_warning_not_a_failed_analysis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A store this surface cannot write costs the next run time, not this one.
+
+    Reachability for the failure branch: the input is a store whose save
+    raises, and the run still returns its results with the reason attached.
+    """
+
+    root = (tmp_path / "repo").resolve()
+    _write_repo(root)
+
+    def exploding_save(self: Any) -> None:
+        raise CacheError("cache store is read-only")
+
+    # Reached through the surface's own reference to the store class: this
+    # module is R4 and may not import the R2 cache package to name it.
+    monkeypatch.setattr(
+        mcp_helpers.Cache,  # type: ignore[attr-defined]
+        "save",
+        exploding_save,
+    )
+    summary = CodeCloneMCPService(history_limit=2).analyze_repository(
+        MCPAnalysisRequest(root=str(root), respect_pyproject=False)
+    )
+
+    assert summary["run_id"], "a cache write failure must not lose the analysis"
+    assert facts.CACHE_SAVE_FAILED.format(error="cache store is read-only") in cast(
+        "list[str]", summary["warnings"]
+    )

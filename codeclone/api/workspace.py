@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Minimal R3 workspace-status door over the canonical R2 Git owner."""
+"""Minimal R3 workspace door over the canonical R2 Git and layout owners."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..paths.git_snapshot import collect_git_workspace_snapshot
+from ..paths.workspace import is_service_path
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -70,10 +71,24 @@ def collect_workspace_dirty_snapshot(*, root: Path) -> WorkspaceDirtySnapshotDTO
     )
 
 
+def is_codeclone_service_path(path: Path, *, root: Path) -> bool:
+    """Whether *path* is CodeClone's own service state for *root*.
+
+    The answer belongs to the R2 layout module and is asked here because the
+    surfaces that must obey the write boundary live in R4, which may not read
+    R2. A question a boundary's enforcer cannot reach is a boundary nobody
+    enforces, so the door carries it rather than each surface keeping a private
+    idea of which directories are CodeClone's.
+    """
+
+    return is_service_path(path, root=root)
+
+
 __all__ = [
     "WorkspaceDirtyEntryDTO",
     "WorkspaceDirtyPathsDTO",
     "WorkspaceDirtySnapshotDTO",
     "collect_workspace_dirty_paths",
     "collect_workspace_dirty_snapshot",
+    "is_codeclone_service_path",
 ]

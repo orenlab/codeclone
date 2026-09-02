@@ -56,9 +56,10 @@ Claude Code namespaces plugin skills with the plugin name:
 | Platform Observability (maintainer-only) | `/codeclone:codeclone-platform-observability` |
 | Repository setup (CLI)                   | `/codeclone:codeclone-setup`                  |
 
-The MCP server remains read-only with respect to source, baselines, cache, and
-canonical reports. Change control, audit, and Engineering Memory write only
-their documented bounded local state.
+The MCP server writes only CodeClone's own service data, and only inside
+CodeClone's service directories: the analysis cache its run produced, plus
+change-control, audit and Engineering Memory state. Source, baselines and
+canonical reports are never mutated.
 
 ## Development
 

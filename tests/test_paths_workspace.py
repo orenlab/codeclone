@@ -13,10 +13,12 @@ import pytest
 from codeclone.paths.workspace import (
     default_cache_path,
     emit_legacy_workspace_warnings,
+    is_service_path,
     legacy_home_cache_path,
     legacy_repo_workspace_dir,
     legacy_repo_workspace_has_artifacts,
     repo_workspace_dir,
+    service_directories,
     workspace_glob_patterns,
 )
 from codeclone.surfaces.cli.console import PlainConsole
@@ -162,3 +164,60 @@ def test_emit_legacy_repo_workspace_warning(
     assert ".cache/codeclone/" in out
     assert str(legacy) in out
     assert str(repo_workspace_dir(root)) in out
+
+
+def test_service_directories_are_the_three_codeclone_owns(tmp_path: Path) -> None:
+    """The containment boundary is a set of directories, not "inside the repo".
+
+    ``~/.cache/codeclone`` is outside every repository and is still CodeClone's
+    own; the repository's ``build/`` is inside one and is not. Asserting the
+    membership rule rather than a literal list keeps the pin alive when a
+    fourth directory joins.
+    """
+
+    root = (tmp_path / "repo").resolve()
+    directories = service_directories(root)
+
+    assert repo_workspace_dir(root).resolve() in directories
+    assert legacy_repo_workspace_dir(root).resolve() in directories
+    assert legacy_home_cache_path().parent.resolve() in directories
+    assert root.resolve() not in directories
+
+
+@pytest.mark.parametrize(
+    ("relative", "contained"),
+    [
+        (".codeclone/db/cache.sqlite3", True),
+        (".codeclone/intents/agent.json", True),
+        (".cache/codeclone/cache.json", True),
+        ("build/cc-cache.sqlite3", False),
+        ("cache.sqlite3", False),
+        ("codeclone.baseline.json", False),
+        ("src/module.py", False),
+    ],
+)
+def test_is_service_path_admits_only_codeclone_service_state(
+    tmp_path: Path, relative: str, contained: bool
+) -> None:
+    """Both verdicts on one root, so a predicate wired to a constant fails."""
+
+    root = (tmp_path / "repo").resolve()
+    assert is_service_path(root / relative, root=root) is contained
+
+
+def test_is_service_path_admits_the_per_user_cache_dir(tmp_path: Path) -> None:
+    """Outside the repository and still CodeClone's own."""
+
+    root = (tmp_path / "repo").resolve()
+    assert is_service_path(legacy_home_cache_path(), root=root) is True
+
+
+def test_is_service_path_refuses_a_traversal_back_out_of_the_workspace(
+    tmp_path: Path,
+) -> None:
+    """``.codeclone`` as a prefix is not containment; the path is resolved."""
+
+    root = (tmp_path / "repo").resolve()
+    escape = root / ".codeclone" / ".." / ".." / "elsewhere" / "cache.sqlite3"
+    assert is_service_path(escape, root=root) is False
+    assert is_service_path(tmp_path / ".codeclone-not-ours", root=root) is False
