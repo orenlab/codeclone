@@ -14739,6 +14739,140 @@ def test_mcp_verify_refuses_recompute_taken_before_the_edit(tmp_path: Path) -> N
     assert verified["reason"] == "after_run_not_new"
 
 
+_FORGED_MODULE_CORE = (
+    "def widen(values):\n"
+    "    return sum(values)\n"
+    "\n"
+    "\n"
+    "def narrow(values):\n"
+    "    raise ValueError(values)\n"
+)
+
+
+def _structural_rewrite_padded_to(size: int) -> str:
+    """A different function set, padded with a comment to exactly *size* bytes.
+
+    The loop is gone and a second function is new, so the content-addressed
+    run id must move for an analysis that reads the bytes (measured: a body
+    that only swapped the loop for a ``raise`` projected to identical facts and
+    proved nothing); the padding keeps ``st_size`` where the run recorded it.
+    """
+    padding = size - len(_FORGED_MODULE_CORE.encode("utf-8"))
+    assert padding >= 3, "forged module must fit under the recorded size"
+    return _FORGED_MODULE_CORE + "# " + "." * (padding - 3) + "\n"
+
+
+def _forge_under_recorded_stat(path: Path) -> None:
+    """Rewrite *path* structurally while reproducing its ``(mtime_ns, size)``.
+
+    ``cp -p``, ``rsync -t``, ``tar -x``, ``install -p`` and any
+    restore-from-snapshot harness preserve exactly this pair, so the shape is
+    not only an attack. Both premises are asserted: the bytes moved and the
+    stat did not.
+    """
+    recorded = path.stat()
+    original = path.read_bytes()
+    _rewrite_with_stated_mtime(
+        path,
+        _structural_rewrite_padded_to(recorded.st_size),
+        mtime_ns=recorded.st_mtime_ns,
+    )
+    live = path.stat()
+    assert (live.st_mtime_ns, live.st_size) == (
+        recorded.st_mtime_ns,
+        recorded.st_size,
+    )
+    assert path.read_bytes() != original
+
+
+def _refusal_summary(finished: Mapping[str, object]) -> tuple[object, ...]:
+    """The three facts a false accept gets wrong, for the assertion message."""
+    verification = finished.get("verification")
+    verdict = verification.get("reason") if isinstance(verification, Mapping) else None
+    return (finished.get("status"), finished.get("reason"), verdict)
+
+
+def _edit_nothing(root: Path) -> None:
+    """Leave the tree alone: the recompute will predate the only edit."""
+    del root
+
+
+def _forged_finish_is_refused(root: Path, *, edit: Callable[[Path], None]) -> None:
+    """Recompute after *edit*, forge under the recorded stat, and finish.
+
+    Whatever the recompute read, it did not read the forged bytes, and every
+    recorded stat still matches disk. finish must refuse into the typed dead
+    end that re-analysis clears, and leave the intent active. The last line is
+    the witness: the next analysis sees the edit, so the receipt a false accept
+    would have minted was claiming something untrue.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        root, allowed=["pkg/a.py"], edit=edit
+    )
+    observed = _analyze_root(service, root)
+    assert observed == before_run
+
+    _forge_under_recorded_stat(root / "pkg" / "a.py")
+
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+        after_run_id=observed,
+    )
+    outcome = _refusal_summary(finished)
+    assert outcome[:2] == ("unverified", "after_run_not_new"), outcome
+    assert finished["intent_cleared"] is False
+    assert _analyze_root(service, root) != before_run
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "the manifest lane is stat-only: _manifest_matches_disk compares "
+        "(mtime_ns, size), which a same-size rewrite plus os.utime reproduces. "
+        "Closing it needs the content digest the run already computes carried "
+        "in the run manifest, produced outside "
+        "codeclone/surfaces/mcp/_analyzer_invariance.py. Remove this marker "
+        "when that lands; strict makes the fix fail loudly until it is removed."
+    ),
+)
+def test_mcp_finish_refuses_edit_forged_under_the_recorded_stat(
+    tmp_path: Path,
+) -> None:
+    """A matching stat says the file looks untouched, not that a run read it.
+
+    Recompute after start, then rewrite the file structurally, padded to the
+    recorded size with its mtime put back. Nothing analysed the new bytes, yet
+    every recorded stat still matches disk. ``cp -p``, ``rsync -t``,
+    ``tar -x`` and a restore-from-snapshot harness leave the same pair, so the
+    shape is not only an attack.
+    """
+    _forged_finish_is_refused(tmp_path, edit=_edit_nothing)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "same stat-only manifest lane as "
+        "test_mcp_finish_refuses_edit_forged_under_the_recorded_stat; this "
+        "case additionally shows that ordering evidence would not be enough, "
+        "because the recompute genuinely postdates an edit. Remove both "
+        "markers together when the content digest lands."
+    ),
+)
+def test_mcp_finish_refuses_recompute_that_read_earlier_bytes_than_disk(
+    tmp_path: Path,
+) -> None:
+    """Postdating some edit is not observing the final bytes.
+
+    The recompute genuinely follows an invariant comment edit, so it is fresh
+    and it did read a change -- just not the structural rewrite that then
+    lands under that edit's recorded stat. Only the exact bytes the run read
+    settle it; evidence of ordering alone would accept this.
+    """
+    _forged_finish_is_refused(tmp_path, edit=_edit_python_comment)
+
+
 def test_mcp_verify_refuses_superseded_run_as_invariance_evidence(
     tmp_path: Path,
 ) -> None:
