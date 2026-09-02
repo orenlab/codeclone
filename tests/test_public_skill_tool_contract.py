@@ -21,7 +21,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import re
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Final, NamedTuple, cast
 
@@ -98,12 +98,27 @@ _DECLARES_BASELINE_OPTIONAL = re.compile(
     r"\bno baseline\b|\bwithout a baseline\b", re.IGNORECASE
 )
 
+#: The fenced block under "## Loop" is the call chain a skill actually
+#: teaches. Its last arrow segment is the tool whose response the model is
+#: sent to read, which is the skill's real subject however the frontmatter
+#: describes it.
+_LOOP_FENCE = re.compile(
+    r"^## Loop\s*\n+```\n(?P<fence>.*?)\n```", re.MULTILINE | re.DOTALL
+)
+_PRIMARY_TOOL = re.compile(r"^([a-z][a-z0-9_]*)")
+
 # No whitespace before "(": prose such as "fixtures (the gate counts
 # production)" is a parenthetical, never a call, and admitting it would
 # bury the real findings under English.
 _CALL_START = re.compile(r"\b([a-z][a-z0-9_]*)\(")
 _KWARG = re.compile(r"\b([a-z][a-z0-9_]*)\s*=")
-_QUOTED_POSITIONAL = re.compile(r'(?:^|,)\s*(["\'][^"\']*["\'])\s*(?:,|$)')
+# A value in a positional slot, quoted or not. Restricting this to quoted
+# literals let `get_finding(finding_id)` ship in three skills: a bare name
+# reads to the server exactly like a quoted one -- as whichever parameter
+# comes first -- and is the shape a documented call is likelier to take.
+_POSITIONAL_VALUE = re.compile(
+    r"""(?:^|,)\s*((?:["'][^"']*["'])|(?:[a-z][a-z0-9_]*))\s*(?:,|$)"""
+)
 _NESTED_GROUP = re.compile(r"\[[^][]*\]|\{[^{}]*\}")
 _ASSIGNMENT = re.compile(r"\b([a-z][a-z0-9_]*)\s*=\s*([^,)]*)")
 _STRING_LITERAL = re.compile(r'"([^"]*)"')
@@ -264,17 +279,19 @@ def test_public_skill_calls_name_every_required_parameter() -> None:
 
 
 def test_public_skill_calls_pass_no_value_positionally() -> None:
-    """No literal sits in a positional slot.
+    """No value sits in a positional slot.
 
-    MCP takes one JSON object per call, so a quoted literal written where a
+    MCP takes one JSON object per call, so anything written where a
     positional argument would go is silently read as whichever parameter
-    happens to come first — and that parameter is usually ``root``.
+    happens to come first — and that parameter is usually ``root``. Unquoted
+    names count: `get_finding(finding_id)` is the same defect as
+    `get_finding("abc")`, and is the form a documented call tends to take.
     """
 
     positional = sorted(
-        f"{call.skill}: {call.name}(…, {literal})"
+        f"{call.skill}: {call.name}(…, {value})"
         for call in _tool_calls(_documented_calls())
-        for literal in _QUOTED_POSITIONAL.findall(_NESTED_GROUP.sub("_", call.body))
+        for value in _POSITIONAL_VALUE.findall(_NESTED_GROUP.sub("_", call.body))
     )
 
     assert not positional, (
@@ -310,51 +327,77 @@ def test_public_skill_calls_quote_only_values_the_vocabulary_admits() -> None:
 
 
 class RoutingStance(NamedTuple):
-    """One routable skill, its handler, and the two readings that must agree."""
+    """One routable skill and the three readings that must agree.
+
+    ``tool`` is what the skill is nominally about, ``primary_tool`` is what
+    its Loop actually teaches, and the declared flags are what its
+    description promises. A ratchet that reads only the first and the last
+    holds the symptom: a body can be re-pointed at the neighbouring tool
+    while both descriptions stay perfectly correct.
+    """
 
     skill: str
     tool: str
     handler_read: bool
     handler_publishes_baseline: bool
+    primary_tool: str
+    primary_handler_read: bool
+    primary_publishes_baseline: bool
     declares_required: bool
     declares_optional: bool
 
 
-@lru_cache(maxsize=1)
-def _handler_bodies() -> dict[str, str]:
-    """Source of every handler in the routing pair, keyed by tool name.
+@cache
+def _handler_bodies(names: frozenset[str]) -> dict[str, str]:
+    """Source of each named handler, keyed by tool name.
 
-    One traversal for all four lanes below, so no lane can end up reading a
+    One traversal for all five lanes below, so no lane can end up reading a
     different corpus than its neighbours. A name defined twice is refused
     rather than resolved, because picking one silently is how a lane starts
     measuring the wrong function.
     """
 
-    wanted = set(ROUTING_PAIR.values())
     bodies: dict[str, str] = {}
     for relative in HANDLER_SOURCES:
         source = (_repo_root() / relative).read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(source)):
-            if not isinstance(node, ast.FunctionDef) or node.name not in wanted:
+            if not isinstance(node, ast.FunctionDef) or node.name not in names:
                 continue
             assert node.name not in bodies, f"{node.name} is defined more than once"
             bodies[node.name] = ast.get_source_segment(source, node) or ""
     return bodies
 
 
-def _routing_stances() -> list[RoutingStance]:
-    """Both sides of the discriminator, each measured from its own owner.
+def _primary_tool(text: str) -> str:
+    """The tool a skill's Loop fence sends the model to read, or ``""``."""
 
-    The handler side comes from the shipped server source; the declared side
-    comes from the shipped skill frontmatter. Nothing here states which skill
-    ought to need a baseline — that is the comparison the lanes make.
+    fence = _LOOP_FENCE.search(text)
+    if fence is None:
+        return ""
+    terminal = fence.group("fence").split("→")[-1].strip()
+    named = _PRIMARY_TOOL.match(terminal)
+    return named.group(1) if named else ""
+
+
+def _routing_stances() -> list[RoutingStance]:
+    """Every side of the discriminator, each measured from its own owner.
+
+    The handler side comes from the shipped server source, the taught side
+    from the shipped Loop fence, and the declared side from the shipped
+    frontmatter. Nothing here states which skill ought to need a baseline —
+    that is the comparison the lanes make.
     """
 
     texts = _skill_texts()
-    bodies = _handler_bodies()
+    primaries = {skill: _primary_tool(texts[skill]) for skill in ROUTING_PAIR}
+    bodies = _handler_bodies(
+        frozenset(ROUTING_PAIR.values()) | (set(primaries.values()) - {""})
+    )
     stances: list[RoutingStance] = []
     for skill, tool in sorted(ROUTING_PAIR.items()):
         body = bodies.get(tool, "")
+        primary = primaries[skill]
+        primary_body = bodies.get(primary, "")
         description = parse_frontmatter(texts[skill])["description"]
         stances.append(
             RoutingStance(
@@ -362,11 +405,30 @@ def _routing_stances() -> list[RoutingStance]:
                 tool=tool,
                 handler_read=bool(body),
                 handler_publishes_baseline=bool(_PUBLISHES_BASELINE.search(body)),
+                primary_tool=primary,
+                primary_handler_read=bool(primary_body),
+                primary_publishes_baseline=bool(
+                    _PUBLISHES_BASELINE.search(primary_body)
+                ),
                 declares_required=bool(_DECLARES_BASELINE_REQUIRED.search(description)),
                 declares_optional=bool(_DECLARES_BASELINE_OPTIONAL.search(description)),
             )
         )
     return stances
+
+
+def _stance_conflict(
+    stance: RoutingStance, *, via: str, tool: str, publishes: bool
+) -> str:
+    """One sentence naming which reading disagrees with the description."""
+
+    return (
+        f"{stance.skill}: description says baseline "
+        f"{'required' if stance.declares_required else 'not required'}, "
+        f"but {via} {tool} "
+        f"{'publishes' if publishes else 'never publishes'} "
+        "the baseline comparison"
+    )
 
 
 def test_routing_pair_handlers_still_split_on_the_baseline() -> None:
@@ -426,11 +488,12 @@ def test_routing_pair_descriptions_declare_the_stance_their_handler_has() -> Non
     """
 
     wrong = sorted(
-        f"{stance.skill}: description says baseline "
-        f"{'required' if stance.declares_required else 'not required'}, "
-        f"but {stance.tool} "
-        f"{'publishes' if stance.handler_publishes_baseline else 'never publishes'} "
-        "the baseline comparison"
+        _stance_conflict(
+            stance,
+            via="its handler",
+            tool=stance.tool,
+            publishes=stance.handler_publishes_baseline,
+        )
         for stance in _routing_stances()
         if stance.declares_required != stance.handler_publishes_baseline
     )
@@ -453,4 +516,46 @@ def test_routing_pair_descriptions_declare_opposite_stances() -> None:
     assert len(requires) == 1 and len(optional) == 1, (
         f"the routing pair does not declare opposite baseline stances: "
         f"requires={requires} optional={optional}"
+    )
+
+
+def test_routing_pair_bodies_teach_a_tool_matching_their_declared_stance() -> None:
+    """The tool a skill's Loop teaches is on the side its description claims.
+
+    The description is a promise about which question gets answered; the Loop
+    fence is what the model will actually call. Two skills can describe
+    themselves as perfect opposites and still collide, because a body can be
+    re-pointed at the neighbouring tool without touching a word of either
+    description — which is exactly how these two skills shipped.
+    """
+
+    stances = _routing_stances()
+    unread = sorted(
+        f"{stance.skill}: {stance.primary_tool or '(no Loop fence)'}"
+        for stance in stances
+        if not stance.primary_handler_read
+    )
+    mismatched = sorted(
+        _stance_conflict(
+            stance,
+            via="its Loop teaches",
+            tool=stance.primary_tool,
+            publishes=stance.primary_publishes_baseline,
+        )
+        for stance in stances
+        if stance.declares_required != stance.primary_publishes_baseline
+    )
+    taught = sorted(stance.primary_tool for stance in stances)
+
+    assert not unread, (
+        f"a Loop fence names a tool this guard cannot read: {unread}. "
+        f"Add its module to HANDLER_SOURCES rather than leaving it unmeasured."
+    )
+    assert not mismatched, (
+        f"public skill bodies teach a tool their description contradicts: {mismatched}"
+    )
+    assert len(set(taught)) == len(taught), (
+        f"the routing pair teaches the same tool from both skills: {taught}. "
+        "No wording can route between two skills whose loops end at the same "
+        "call, however well their descriptions discriminate."
     )

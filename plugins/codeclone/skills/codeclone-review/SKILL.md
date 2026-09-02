@@ -32,8 +32,8 @@ Structural / clone / changed-scope / gate review. Read-only; never mutates state
   `list_findings(novelty="new", family="clone"|"structural"|"dead_code"|"design"|"authority", source_kind="production")`.
   Complexity / coupling / cohesion are `category` values inside `family="design"`, not families.
 - Per-family, new vs known: `check_clones | check_complexity | check_coupling | check_cohesion | check_dead_code`.
-- Drill one: `get_finding(finding_id)` → `get_remediation(finding_id)`.
-- Review loop: `mark_finding_reviewed(finding_id) → list_reviewed_findings`; `exclude_reviewed=true` in long sessions.
+- Drill one: `get_finding(finding_id=…)` → `get_remediation(finding_id=…)`.
+- Review loop: `mark_finding_reviewed(finding_id=…) → list_reviewed_findings`; `exclude_reviewed=true` in long sessions.
 
 ## Reading the response
 
