@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -729,6 +730,75 @@ def test_the_publication_has_exactly_one_production_call_site() -> None:
     assert _calls(reporting, "publish_run_snapshot") == 1
     assert _calls(reporting, "resolve_run_store_config") == 1
     assert _calls(reporting, "_publish_canonical_snapshot") == 1
+
+
+def _calls_to(tree: ast.AST, callee: str) -> Iterator[ast.Call]:
+    """Every direct call to ``callee`` in one tree."""
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == callee
+        ):
+            yield node
+
+
+def _bound_names(tree: ast.AST, callee: str) -> set[str]:
+    """Names an assignment binds from ``callee`` -- including tuple targets."""
+
+    calls = set(map(id, _calls_to(tree, callee)))
+    return {
+        element.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and id(node.value) in calls
+        for target in node.targets
+        for element in ast.walk(target)
+        if isinstance(element, ast.Name)
+    }
+
+
+def _keyword_argument(tree: ast.AST, callee: str, keyword: str) -> set[str]:
+    """The names passed as ``keyword=`` to ``callee``."""
+
+    return {
+        entry.value.id
+        for node in _calls_to(tree, callee)
+        for entry in node.keywords
+        if entry.arg == keyword and isinstance(entry.value, ast.Name)
+    }
+
+
+def test_the_publication_outcome_is_bound_and_carried_out_of_the_report() -> None:
+    """The publication witness may not be computed and dropped.
+
+    Every path through ``publish_run_snapshot`` returns a typed outcome --
+    ``disabled``, ``refused``, ``failed`` and the three stored ones -- and
+    the whole reason the flag-off path returns a witness at all is that a
+    skip nobody can observe is indistinguishable from a backend that was
+    never wired.  A call site that discards that witness puts the silence
+    back one level out, where it looks like wiring.
+
+    Pinned as an EDGE and not as a spelling: the assignment may be renamed,
+    the tuple may grow, the call may move within ``report`` -- what has to
+    hold is that the value the publisher produced reaches the bridge, and
+    that the bridge's own answer reaches the artifacts the caller receives.
+    Reverting either binding to a bare call turns this red.
+    """
+
+    reporting = _tree("codeclone/core/reporting.py")
+
+    published = _bound_names(reporting, "_publish_canonical_snapshot")
+    assert published, "the publication result is computed and dropped"
+    assert published & _keyword_argument(
+        reporting, "bridge_run_snapshot", "publication"
+    )
+
+    bridged = _bound_names(reporting, "bridge_run_snapshot")
+    assert bridged, "the bridge result is computed and dropped"
+    assert bridged & _keyword_argument(
+        reporting, "ReportArtifacts", "run_snapshot_link"
+    )
 
 
 def test_every_waterfall_reaches_the_single_publication_point() -> None:
