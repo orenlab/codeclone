@@ -87,7 +87,6 @@ from ._types import (
     DiscoveryResult,
     ProcessingResult,
     _segment_groups_digest,
-    _should_collect_structural_findings,
 )
 from .bootstrap import _resolve_optional_runtime_path
 from .entrypoints import (
@@ -391,11 +390,12 @@ def analyze(
     suggestions: tuple[Suggestion, ...] = ()
     suppressed_dead_items: tuple[DeadItem, ...] = ()
     coverage_join: CoverageJoinResult | None = None
-    cohort_structural_findings: tuple[StructuralFindingGroup, ...] = ()
-    if _should_collect_structural_findings(boot.output_paths):
-        cohort_structural_findings = build_clone_cohort_structural_findings(
-            func_groups=func_groups
-        )
+    # Part of the structural population, so it is derived on every run for the
+    # same reason the per-file half is: what an analysis produces is not the
+    # requested output files' to decide.
+    cohort_structural_findings = build_clone_cohort_structural_findings(
+        func_groups=func_groups
+    )
     combined_structural_findings = (
         *processing.structural_findings,
         *cohort_structural_findings,

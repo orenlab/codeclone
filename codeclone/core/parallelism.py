@@ -52,8 +52,8 @@ from ._types import (
     _group_item_sort_key,
     _module_dep_sort_key,
     _segment_to_group_item,
-    _should_collect_structural_findings,
     _unit_to_group_item,
+    structural_findings_required,
 )
 from .worker import _install_module_registry, _invoke_process_file
 
@@ -202,7 +202,7 @@ def process(
     )
     all_api_modules: list[ModuleApiSurface] = list(discovery.cached_api_modules)
 
-    collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
+    collect_structural_findings = structural_findings_required()
     collect_api_surface = not boot.args.skip_metrics and bool(
         getattr(boot.args, "api_surface", False)
     )
@@ -284,9 +284,6 @@ def process(
                 methods=result.methods,
                 classes=result.classes,
             )
-            structural_payload = (
-                result.structural_findings if collect_structural_findings else None
-            )
             cache.put_file_entry(
                 result.filepath,
                 result.stat,
@@ -296,7 +293,7 @@ def process(
                 source_content_digest=result.source_content_digest,
                 source_stats=source_stats_payload,
                 file_metrics=result.file_metrics,
-                structural_findings=structural_payload,
+                structural_findings=result.structural_findings,
                 materialized_clone_channels=materialized_clone_channels,
             )
             files_analyzed += 1

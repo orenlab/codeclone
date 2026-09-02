@@ -9,10 +9,10 @@ from __future__ import annotations
 import builtins
 from argparse import Namespace
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal, cast, get_args
 
 import pytest
 
@@ -37,6 +37,7 @@ from codeclone.core._types import (
     FileProcessResult,
     OutputPaths,
     ProcessingResult,
+    _unit_to_group_item,
 )
 from codeclone.core.discovery_cache import (
     CachedSourceStatsRefusal,
@@ -67,6 +68,7 @@ from codeclone.models import (
     RehydratedCacheNeutral,
     SemanticFileFacts,
     SourceStatsDict,
+    Unit,
 )
 from codeclone.observations.lanes import (
     build_observation_lanes,
@@ -236,7 +238,12 @@ def _stub_process_file(
             assert filepath == expected_filepath
         assert min_loc == 1
         assert min_stmt == 1
-        assert collect_structural_findings is False
+        # True for every run now, and asserted rather than defaulted: this is
+        # the structural edge from ``structural_findings_required`` to the
+        # extraction it governs. Flip the owner and these stubs go red, which
+        # is what proves the owner is wired to production and not merely
+        # declared.
+        assert collect_structural_findings is True
         assert collect_api_surface is False
         assert api_include_private_modules is False
         assert phase_ledger is INERT_PHASE_LEDGER
@@ -949,7 +956,7 @@ def test_invoke_process_file_passes_full_contract_without_introspection(
             NormalizationConfig(),
             1,
             1,
-            collect_structural_findings=False,
+            collect_structural_findings=True,
             collect_api_surface=False,
             api_include_private_modules=False,
             collect_near_miss=False,
@@ -1110,14 +1117,41 @@ def test_process_cache_put_file_entry_type_error_is_raised(
         )
 
 
+#: One function, two if-branches with the same shape: the smallest source that
+#: makes ``scan_function_structure`` emit a structural finding group, so a test
+#: can compare a warm run's structural population against a cold run's instead
+#: of comparing two empty tuples.
+_REPEATED_BRANCH_SOURCE = """def foo(x):
+    a = 1
+    b = 2
+    c = 3
+    d = 4
+    e = 5
+    if x == 1:
+        log("a")
+        value = x + 1
+        return value
+    elif x == 2:
+        log("b")
+        value = x + 2
+        return value
+    return a + b + c + d + e
+"""
+
+
 def _reason_boot(
     tmp_path: Path,
     *,
-    structural: bool,
+    report_output: bool,
     min_loc: int = 1,
     near_miss: bool = False,
 ) -> BootstrapResult:
-    """A boot whose knobs decide the lane profile, channels and sections."""
+    """A boot whose knobs decide the lane profile, channels and sections.
+
+    ``report_output`` says whether the operator asked for a report FILE. It is
+    presentation intent and nothing else: which facts the analysis materialises
+    is not its to decide.
+    """
 
     return BootstrapResult(
         root=tmp_path,
@@ -1134,7 +1168,9 @@ def _reason_boot(
             near_miss=near_miss,
             renamed_structure=False,
         ),
-        output_paths=OutputPaths(json=tmp_path / "report.json" if structural else None),
+        output_paths=OutputPaths(
+            json=tmp_path / "report.json" if report_output else None
+        ),
         cache_path=tmp_path / "cache.json",
     )
 
@@ -1176,7 +1212,7 @@ def test_cache_profile_reuse_names_which_reason_refused_each_lane(
 
     (tmp_path / "module.py").write_text("def example():\n    return 1\n", "utf-8")
     cache = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
-    cold = _reason_boot(tmp_path, structural=False)
+    cold = _reason_boot(tmp_path, report_output=False)
     discovery = core_discovery.discover(boot=cold, cache=cache)
     process(boot=cold, discovery=discovery, cache=cache)
     cache.save()
@@ -1196,7 +1232,7 @@ def test_cache_profile_reuse_names_which_reason_refused_each_lane(
         handle.load()
         return _profile_counters(
             monkeypatch,
-            boot=_reason_boot(tmp_path, structural=False, min_loc=min_loc),
+            boot=_reason_boot(tmp_path, report_output=False, min_loc=min_loc),
             cache=handle,
         )
 
@@ -1242,12 +1278,13 @@ def test_cache_reuse_refusal_after_the_lanes_is_named_not_silent(
 
     (tmp_path / "module.py").write_text("def example():\n    return 1\n", "utf-8")
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
-    without_structural = _reason_boot(tmp_path, structural=False)
-    discovery = core_discovery.discover(boot=without_structural, cache=cache)
-    process(boot=without_structural, discovery=discovery, cache=cache)
+    legacy = _reason_boot(tmp_path, report_output=False)
+    discovery = core_discovery.discover(boot=legacy, cache=cache)
+    with _legacy_writer():
+        process(boot=legacy, discovery=discovery, cache=cache)
 
-    wants_structural = _reason_boot(tmp_path, structural=True)
-    counters = _profile_counters(monkeypatch, boot=wants_structural, cache=cache)
+    current = _reason_boot(tmp_path, report_output=True)
+    counters = _profile_counters(monkeypatch, boot=current, cache=cache)
 
     # The lanes are unanimous -- nothing about the profile, the binding context
     # or the content rejected this row -- and it was processed anyway, now with
@@ -1296,6 +1333,29 @@ def _rewrite(path: Path, text: str) -> None:
     path.write_text(text, "utf-8")
 
 
+@contextmanager
+def _legacy_writer() -> Iterator[None]:
+    """Write rows the way every build before the owner landed wrote them.
+
+    The materialisation requirement now has one owner and one value, so NO run
+    configuration produces a row without structural findings -- lowering the
+    owner would only make the section empty, not absent, because the writer no
+    longer branches on it. A store an older build populated is the one input
+    that still carries the absent shape, and it is a real input: it is what an
+    upgrade meets on its first run. So the row is fabricated at the store
+    boundary, which is the only place the two shapes are still distinguishable.
+    """
+
+    original = cast("Callable[..., None]", Cache.put_file_entry)
+
+    def _legacy_put(*args: object, **kwargs: object) -> None:
+        original(*args, **{**kwargs, "structural_findings": None})
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Cache, "put_file_entry", _legacy_put)
+        yield
+
+
 def _warm_counters(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1303,13 +1363,17 @@ def _warm_counters(
     warm_boot: BootstrapResult,
     warm_cache: Cache | None = None,
     mutate: Callable[[], None] | None = None,
+    legacy_cold_rows: bool = False,
 ) -> dict[str, int]:
     """Write a cold generation, optionally disturb it, then read the warm one."""
 
-    cold = _reason_boot(tmp_path, structural=False)
+    cold = _reason_boot(tmp_path, report_output=False)
     cache = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
     discovery = core_discovery.discover(boot=cold, cache=cache)
-    process(boot=cold, discovery=discovery, cache=cache)
+    with ExitStack() as stack:
+        if legacy_cold_rows:
+            stack.enter_context(_legacy_writer())
+        process(boot=cold, discovery=discovery, cache=cache)
     cache.save()
     if mutate is not None:
         mutate()
@@ -1358,7 +1422,9 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
     unchanged = _seed("unchanged")
     _record(
         _warm_counters(
-            unchanged, monkeypatch, warm_boot=_reason_boot(unchanged, structural=False)
+            unchanged,
+            monkeypatch,
+            warm_boot=_reason_boot(unchanged, report_output=False),
         ),
         "cache_lane_neutral_hit",
     )
@@ -1369,7 +1435,7 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
         _warm_counters(
             changed,
             monkeypatch,
-            warm_boot=_reason_boot(changed, structural=False),
+            warm_boot=_reason_boot(changed, report_output=False),
             mutate=lambda: _rewrite(changed / "module.py", source + "VALUE = 1\n"),
         ),
         "cache_lane_neutral_content_miss",
@@ -1381,7 +1447,7 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
         _warm_counters(
             channels,
             monkeypatch,
-            warm_boot=_reason_boot(channels, structural=False, near_miss=True),
+            warm_boot=_reason_boot(channels, report_output=False, near_miss=True),
         ),
         "cache_lane_neutral_clone_channels_mismatch",
     )
@@ -1392,7 +1458,7 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
         _warm_counters(
             moved,
             monkeypatch,
-            warm_boot=_reason_boot(moved, structural=False, min_loc=2),
+            warm_boot=_reason_boot(moved, report_output=False, min_loc=2),
             warm_cache=Cache(moved / "cache.json", root=moved, min_loc=2, min_stmt=1),
         ),
         "cache_lane_neutral_profile_mismatch",
@@ -1402,7 +1468,10 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
     sections = _seed("sections")
     _record(
         _warm_counters(
-            sections, monkeypatch, warm_boot=_reason_boot(sections, structural=True)
+            sections,
+            monkeypatch,
+            warm_boot=_reason_boot(sections, report_output=True),
+            legacy_cold_rows=True,
         ),
         "cache_reuse_structural_findings_absent",
     )
@@ -2181,3 +2250,151 @@ def test_process_collects_unsupported_construct_witnesses(
             construct="unsupported fields on Import: is_lazy",
         ),
     )
+
+
+def _materialise(tmp_path: Path, cache: Cache, boot: BootstrapResult) -> None:
+    """Run one full discover/process pass, leaving its rows in ``cache``."""
+
+    discovery = core_discovery.discover(boot=boot, cache=cache)
+    process(boot=boot, discovery=discovery, cache=cache)
+
+
+def test_gate_only_run_writes_rows_a_report_run_can_serve(tmp_path: Path) -> None:
+    """A run that asked for no report file still materialises the full row.
+
+    Measured 2026-09-02 on this repository (1148 files): a CLI run with no
+    ``--json`` populated the store, and the next MCP analysis reused 0 of 1148
+    rows and rewrote every one -- 2296 row writes to converge instead of 1148.
+    Both cache lanes hit and content identity said the bytes were unchanged;
+    the rows were discarded downstream because they carried no structural
+    findings. The population an analysis materialises is not the operator's
+    output flags to decide, so the row a gate-only run writes has to serve the
+    run that consumes the report document.
+    """
+
+    (tmp_path / "module.py").write_text(_REPEATED_BRANCH_SOURCE, "utf-8")
+    cache = Cache(tmp_path / "cache.json", root=tmp_path, min_loc=1, min_stmt=1)
+    _materialise(tmp_path, cache, _reason_boot(tmp_path, report_output=False))
+
+    warm = core_discovery.discover(
+        boot=_reason_boot(tmp_path, report_output=True), cache=cache
+    )
+
+    assert (warm.cache_hits, warm.files_to_process) == (1, ())
+
+
+def test_warm_structural_findings_equal_the_cold_run_s(tmp_path: Path) -> None:
+    """The findings served off a gate-only row are the findings a cold run computes.
+
+    The reuse verdict alone would be satisfied by a row that is accepted and
+    then read as empty, which is the failure this whole class hides behind: a
+    warm run that is fast and quietly reports less than the cold run it claims
+    to replace. So the population is compared, not just the hit count.
+    """
+
+    (tmp_path / "module.py").write_text(_REPEATED_BRANCH_SOURCE, "utf-8")
+    reporting = _reason_boot(tmp_path, report_output=True)
+
+    cold_cache = Cache(tmp_path / "cold.json", root=tmp_path, min_loc=1, min_stmt=1)
+    cold_discovery = core_discovery.discover(boot=reporting, cache=cold_cache)
+    cold = process(boot=reporting, discovery=cold_discovery, cache=cold_cache)
+
+    warm_cache = Cache(tmp_path / "warm.json", root=tmp_path, min_loc=1, min_stmt=1)
+    _materialise(tmp_path, warm_cache, _reason_boot(tmp_path, report_output=False))
+    warm = core_discovery.discover(boot=reporting, cache=warm_cache)
+
+    assert cold.structural_findings, "fixture must produce a structural finding"
+    assert warm.cached_structural_findings == cold.structural_findings
+
+
+def _cohort_unit(name: str, *, divergent: bool) -> Unit:
+    """One member of a four-way clone cohort, uniform unless asked to diverge."""
+
+    return Unit(
+        qualname=f"pkg.{name}:handler",
+        filepath=f"pkg/{name}.py",
+        start_line=10,
+        end_line=40,
+        loc=30,
+        stmt_count=20,
+        # Same fingerprint and bucket for every member: that pair is what makes
+        # them one clone group, which is the input the cohort derivation reads.
+        # The fingerprint is a real 64-hex value because the clone id it forms
+        # is validated downstream as a canonical fp-v2 identifier.
+        fingerprint="c" * 64,
+        loc_bucket="20-49",
+        entry_guard_count=1 if divergent else 2,
+        entry_guard_terminal_profile="raise" if divergent else "return_const,raise",
+        entry_guard_has_side_effect_before=divergent,
+        terminal_kind="raise" if divergent else "return_const",
+        try_finally_profile="try_no_finally" if divergent else "none",
+        side_effect_order_profile=(
+            "effect_before_guard" if divergent else "guard_then_effect"
+        ),
+    )
+
+
+def test_clone_cohort_structural_findings_reach_the_analysis_result(
+    tmp_path: Path,
+) -> None:
+    """The whole-project half of the population is derived, not merely derivable.
+
+    Measured by mutation 2026-09-02: replacing this call site with an empty
+    tuple left the full suite -- 8251 tests -- green. The per-file half of the
+    structural population is pinned in several places; the cohort half, which
+    only the pipeline can produce because only it has the clone groups, was
+    pinned solely as a unit test of the emitter. So the call could be deleted
+    and nothing would say so, and the run that no longer needs a report flag to
+    materialise the rest would have kept silently dropping this part.
+    """
+
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(
+            processes=None,
+            skip_metrics=True,
+            skip_dead_code=True,
+            skip_dependencies=True,
+            min_loc=6,
+            min_stmt=4,
+        ),
+        output_paths=OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    units = (
+        _cohort_unit("a", divergent=False),
+        _cohort_unit("b", divergent=False),
+        _cohort_unit("c", divergent=False),
+        _cohort_unit("d", divergent=True),
+    )
+    processing = ProcessingResult(
+        units=tuple(_unit_to_group_item(unit) for unit in units),
+        blocks=(),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        referenced_qualnames=frozenset(),
+        structural_findings=(),
+        files_analyzed=len(units),
+        files_skipped=0,
+        analyzed_lines=0,
+        analyzed_functions=0,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+
+    result = analyze(
+        boot=boot,
+        discovery=_build_discovery((), root=tmp_path),
+        processing=processing,
+    )
+
+    assert {group.finding_kind for group in result.structural_findings} == {
+        "clone_cohort_drift",
+        "clone_guard_exit_divergence",
+    }

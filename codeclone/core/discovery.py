@@ -52,8 +52,8 @@ from ._types import (
     _group_item_sort_key,
     _module_dep_sort_key,
     _segment_to_group_item,
-    _should_collect_structural_findings,
     _unit_to_group_item,
+    structural_findings_required,
 )
 from .discovery_cache import CachedSourceStatsRefusal
 from .discovery_cache import (
@@ -246,7 +246,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     files_found = 0
     cache_hits = 0
     files_skipped = 0
-    collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
+    collect_structural_findings = structural_findings_required()
     cached_segment_projection = _coerce_segment_report_projection(
         getattr(cache, "segment_report_projection", None)
     )
@@ -474,16 +474,19 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                             cached_api_modules.append(api_surface)
                         cached_runtime_reachability.extend(runtime_reachability)
                         cached_security_surfaces.extend(security_surfaces)
-                    if collect_structural_findings:
-                        cached_sf.extend(
-                            _decode_cached_structural_finding_group(
-                                group_dict,
-                                filepath,
-                            )
-                            for group_dict in (
-                                cached.module_dependent.structural_findings or ()
-                            )
+                    # Unconditional: the row was admitted above only because
+                    # it carries this section, so a guard here would be one no
+                    # input can reach. The ``or ()`` stays for the legacy row
+                    # shape the admission rule refuses -- it never gets here.
+                    cached_sf.extend(
+                        _decode_cached_structural_finding_group(
+                            group_dict,
+                            filepath,
                         )
+                        for group_dict in (
+                            cached.module_dependent.structural_findings or ()
+                        )
+                    )
                     cached_relationship_facts.extend(
                         _decode_cached_function_relationship_facts(
                             cached.module_dependent.function_relationship_facts

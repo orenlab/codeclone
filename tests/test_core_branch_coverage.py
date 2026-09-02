@@ -1399,7 +1399,11 @@ def _discover_with_single_cached_entry(
             typing_coverage=None,
             docstring_coverage=None,
             api_surface=None,
-            structural_findings=None,
+            # A row this build would write: it holds the structural section,
+            # empty because this source has no repeated branch. ``None`` here
+            # would describe a row an older build wrote, which the admission
+            # rule refuses on purpose -- a different branch, tested elsewhere.
+            structural_findings=(),
         ),
     )
 

@@ -4755,10 +4755,22 @@ def test_structural_findings_do_not_affect_exit_code(
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
 
 
-def test_structural_findings_recomputed_when_cache_was_built_without_reports(
+def test_gate_only_cli_run_writes_rows_the_json_run_serves_warm(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The full causal chain, end to end on the shipped CLI surface.
+
+    A run with no report flag is the production shape: CI gates, pre-commit,
+    every ``codeclone <root>`` a user types. It used to write rows without the
+    structural section, so the next run that consumed a report document threw
+    all of them away and re-analysed the repository -- measured 2026-09-02 at
+    1148 of 1148 files, twice the row writes to converge. The population a run
+    materialises now has one owner and does not read the output flags, so the
+    gate-only row already carries the section, and the reporting run reads it
+    instead of recomputing it -- while still reporting the same groups.
+    """
+
     src = tmp_path / "dup.py"
     src.write_text(
         """\
@@ -4795,8 +4807,13 @@ def fn(x):
         ],
     )
     files_before = read_cache_rows(cache_path)
+    assert files_before, "the gate-only run must have written rows to judge"
+    # "sf" present means the writer collected the section; the wire keeps
+    # "collected and empty" (``[]``) apart from "never collected" (key absent),
+    # so this reads the witness itself rather than a count that both states
+    # would render as zero.
     assert all(
-        "sf" not in cast("dict[str, object]", cast("dict[str, object]", entry)["d"])
+        "sf" in cast("dict[str, object]", cast("dict[str, object]", entry)["d"])
         for entry in files_before.values()
     )
 
@@ -4814,11 +4831,13 @@ def fn(x):
     report_payload = json.loads(json_out.read_text("utf-8"))
     assert _report_structural_groups(report_payload)
 
-    files_after = read_cache_rows(cache_path)
-    assert any(
-        "sf" in cast("dict[str, object]", cast("dict[str, object]", entry)["d"])
-        for entry in files_after.values()
-    )
+    # Warm, and warm on the rows the gate-only run left: nothing re-analysed,
+    # and the report still carries the groups. Either half alone is passable
+    # by the wrong build -- a cold re-analysis also reports them, and an
+    # accepted-but-empty row also reports zero analysed files.
+    inventory = cast("dict[str, object]", report_payload["inventory"])
+    files = cast("dict[str, object]", inventory["files"])
+    assert (files["analyzed"], files["cached"]) == (0, len(files_before))
 
 
 @pytest.mark.parametrize(

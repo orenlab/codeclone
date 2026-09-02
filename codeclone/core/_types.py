@@ -425,11 +425,38 @@ def _segment_to_group_item(segment: SegmentUnit) -> GroupItem:
     }
 
 
-def _should_collect_structural_findings(output_paths: OutputPaths) -> bool:
-    return bool(
-        output_paths.html
-        or output_paths.json
-        or output_paths.md
-        or output_paths.text
-        or output_paths.sarif
-    )
+def structural_findings_required() -> bool:
+    """Sole owner of "must this analysis materialise structural findings".
+
+    Structural findings are an analysis fact, not a report artifact. Which
+    facts a run produces is a property of the analysis; which of them a run
+    renders is a different question with a different owner
+    (``report_document_required``). Conflating the two is what this function
+    replaces: the requirement used to be read off ``OutputPaths``, so the CLI
+    answered it from ``--json``/``--html`` (absent by default) and MCP from a
+    hardcoded dummy report path (present always). The two answers were not in
+    conflict, they were a subset and a superset -- and a row written under the
+    subset is refused by every run under the superset.
+
+    Measured 2026-09-02 on this repository (1148 files): after a CLI run with
+    no report flags populated the store, the next MCP analysis reused 0 of
+    1148 rows and rewrote every one, with both cache lanes hitting and content
+    identity unchanged. Converging the two surfaces cost 2296 row writes
+    instead of 1148.
+
+    One value for every run, so a stored row's fact population cannot vary
+    with the output files an operator happened to ask for. It is a function
+    rather than a literal at three call sites because the three sites must
+    never be able to disagree -- the defect one lane over (``api_surface``,
+    keyed at construction and materialised from a different expression in
+    ``parallelism``) is exactly what separate literals produce.
+
+    Cost of the requirement, measured on the same 1148 files with only this
+    value changed: dependent-lane payload 20 915 256 -> 20 934 304 bytes
+    (+0.09%), cache file 55 881 728 -> 55 894 016 bytes (+0.02%), and no CPU
+    difference outside run-to-run noise (median 30.2s vs 29.9s over four
+    alternating cold runs) -- the traversal that finds them runs either way;
+    only the accumulation of what it saw is new.
+    """
+
+    return True
