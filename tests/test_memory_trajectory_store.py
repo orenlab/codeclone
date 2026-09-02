@@ -270,20 +270,31 @@ def test_store_empty_inputs_invalid_patch_trails_and_stale_projection_cleanup(
             == {}
         )
 
+        class _EmptyRecordsAudit:
+            """Audit session whose workflow set is non-empty but whose rows
+            are not: the input that reaches the loop's ``not records`` guard."""
+
+            def __enter__(self) -> _EmptyRecordsAudit:
+                return self
+
+            def __exit__(self, *_exc: object) -> None:
+                return None
+
+            def workflow_ids_with_events_after(
+                self, **_kwargs: object
+            ) -> tuple[str, ...]:
+                return ("intent:empty",)
+
+            def event_core_gap_count(self, **_kwargs: object) -> int:
+                return 0
+
+            def event_core_records(self, **_kwargs: object) -> tuple[object, ...]:
+                return ()
+
         monkeypatch.setattr(
             trajectory_store,
-            "list_workflow_ids_with_events_after",
-            lambda **_kwargs: ["intent:empty"],
-        )
-        monkeypatch.setattr(
-            trajectory_store,
-            "read_audit_event_core_records",
-            lambda **_kwargs: [],
-        )
-        monkeypatch.setattr(
-            trajectory_store,
-            "count_audit_event_core_gaps",
-            lambda **_kwargs: 0,
+            "open_audit_event_core_reader",
+            lambda _db_path: _EmptyRecordsAudit(),
         )
         result = trajectory_store.rebuild_trajectories_incremental(
             conn=conn,

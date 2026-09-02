@@ -17,12 +17,8 @@ from typing import TypeVar
 import orjson
 
 from ...audit.events import repo_root_digest
-from ...audit.reader import (
-    AuditRecord,
-    count_audit_event_core_gaps,
-    list_workflow_ids_with_events_after,
-    read_audit_event_core_records,
-)
+from ...audit.reader import AuditRecord, open_audit_event_core_reader
+from ...audit.validation import AuditReadError
 from ...report.meta import current_report_timestamp_utc
 from ...utils.iterutils import chunked
 from ...utils.json_io import json_text
@@ -292,14 +288,11 @@ def rebuild_trajectories_from_audit(
 ) -> TrajectoryProjectionResult:
     root_digest = repo_root_digest(root_path.resolve())
     started = current_report_timestamp_utc()
-    events = read_audit_event_core_records(
-        db_path=audit_db_path,
-        repo_root_digest=root_digest,
-    )
-    legacy_event_count = count_audit_event_core_gaps(
-        db_path=audit_db_path,
-        repo_root_digest=root_digest,
-    )
+    with open_audit_event_core_reader(audit_db_path) as audit:
+        if audit is None:
+            raise AuditReadError("no audit data")
+        events = audit.event_core_records(repo_root_digest=root_digest)
+        legacy_event_count = audit.event_core_gap_count(repo_root_digest=root_digest)
     grouped = _group_by_workflow(events)
     actions: Counter[str] = Counter()
     trajectories: list[Trajectory] = []
@@ -346,36 +339,40 @@ def rebuild_trajectories_incremental(
     """
     root_digest = repo_root_digest(root_path.resolve())
     started = current_report_timestamp_utc()
-    workflow_ids = list_workflow_ids_with_events_after(
-        db_path=audit_db_path,
-        repo_root_digest=root_digest,
-        after_id=after_event_core_id,
-    )
-    legacy_event_count = count_audit_event_core_gaps(
-        db_path=audit_db_path,
-        repo_root_digest=root_digest,
-    )
     actions: Counter[str] = Counter()
     trajectories: list[Trajectory] = []
-    for workflow_id in workflow_ids:
-        records = read_audit_event_core_records(
-            db_path=audit_db_path,
-            repo_root_digest=root_digest,
-            workflow_id=workflow_id,
-        )
-        if not records:
-            continue
-        trajectory, action = _project_and_upsert_workflow(
-            conn,
-            project=project,
-            root_digest=root_digest,
-            workflow_id=workflow_id,
-            records=records,
-            projection_version=projection_version,
-            projected_at_utc=started,
-        )
-        actions[action] += 1
-        trajectories.append(trajectory)
+    workflow_ids: tuple[str, ...] = ()
+    legacy_event_count = 0
+    # One read-only audit connection for the whole rebuild: the per-workflow
+    # reads below would otherwise re-establish and re-validate a connection
+    # each, making setup linear in the number of changed workflows.
+    with open_audit_event_core_reader(audit_db_path) as audit:
+        if audit is not None:
+            workflow_ids = audit.workflow_ids_with_events_after(
+                repo_root_digest=root_digest,
+                after_id=after_event_core_id,
+            )
+            legacy_event_count = audit.event_core_gap_count(
+                repo_root_digest=root_digest
+            )
+            for workflow_id in workflow_ids:
+                records = audit.event_core_records(
+                    repo_root_digest=root_digest,
+                    workflow_id=workflow_id,
+                )
+                if not records:
+                    continue
+                trajectory, action = _project_and_upsert_workflow(
+                    conn,
+                    project=project,
+                    root_digest=root_digest,
+                    workflow_id=workflow_id,
+                    records=records,
+                    projection_version=projection_version,
+                    projected_at_utc=started,
+                )
+                actions[action] += 1
+                trajectories.append(trajectory)
     return _finalize_projection_run(
         conn,
         project=project,

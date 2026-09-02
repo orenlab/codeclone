@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
@@ -743,21 +744,29 @@ def read_intent_declared_records(
     return tuple(_record_from_row(row) for row in rows)
 
 
-def read_audit_event_core_records(
-    *,
-    db_path: Path,
-    repo_root_digest: str,
-    workflow_id: str | None = None,
-) -> tuple[AuditRecord, ...]:
-    """Return deterministic audit event-core rows for trajectory projection."""
+class AuditEventCoreReader:
+    """Event-core reads bound to one already-open read-only audit connection.
 
-    if not db_path.is_file():
-        raise AuditReadError("no audit data")
-    try:
-        conn = open_audit_db_readonly(db_path)
-    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
-        raise AuditReadError(f"cannot open audit database: {exc}") from exc
-    try:
+    Trajectory projection walks the audit trail one workflow at a time. Binding
+    those reads to a single connection keeps connection establishment -- two
+    PRAGMAs plus schema validation -- O(1) in the number of workflows instead
+    of re-running it per read, while every query keeps the filters and ordering
+    of its per-call twin below.
+    """
+
+    __slots__ = ("_conn",)
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def event_core_records(
+        self,
+        *,
+        repo_root_digest: str,
+        workflow_id: str | None = None,
+    ) -> tuple[AuditRecord, ...]:
+        """Deterministic event-core rows, optionally for one workflow."""
+
         where = [
             "repo_root_digest = ?",
             "workflow_id IS NOT NULL",
@@ -769,7 +778,7 @@ def read_audit_event_core_records(
         if workflow_id is not None:
             where.append("workflow_id = ?")
             params.append(workflow_id)
-        rows = conn.execute(
+        rows = self._query(
             "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
             "intent_id, report_digest, workflow_id, surface, tool_name, "
             "event_core_json, event_core_sha256, payload_sha256, "
@@ -779,12 +788,95 @@ def read_audit_event_core_records(
             f"WHERE {' AND '.join(where)} "
             "ORDER BY workflow_id ASC, id ASC",
             params,
-        ).fetchall()
-    except (sqlite3.Error, AuditSchemaError) as exc:
-        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+        )
+        return tuple(_record_from_row(row) for row in rows)
+
+    def workflow_ids_with_events_after(
+        self,
+        *,
+        repo_root_digest: str,
+        after_id: int,
+    ) -> tuple[str, ...]:
+        """Distinct projectable workflow ids newer than ``after_id``."""
+
+        rows = self._query(
+            "SELECT DISTINCT workflow_id FROM controller_events "
+            "WHERE repo_root_digest = ? AND id > ? "
+            "AND workflow_id IS NOT NULL AND workflow_id != '' "
+            "AND event_core_json IS NOT NULL AND event_core_sha256 IS NOT NULL "
+            "ORDER BY workflow_id ASC",
+            [repo_root_digest, after_id],
+        )
+        return tuple(str(row[0]) for row in rows)
+
+    def event_core_gap_count(self, *, repo_root_digest: str) -> int:
+        """Rows that cannot feed trajectory projection for this repository."""
+
+        rows = self._query(
+            "SELECT COUNT(*) FROM controller_events "
+            "WHERE repo_root_digest = ? "
+            "AND (workflow_id IS NULL OR workflow_id = '' "
+            "OR event_core_json IS NULL OR event_core_sha256 IS NULL)",
+            [repo_root_digest],
+        )
+        counted = rows[0][0] if rows else None
+        return counted if isinstance(counted, int) else 0
+
+    def _query(
+        self,
+        sql: str,
+        params: Sequence[object],
+    ) -> list[tuple[object, ...]]:
+        try:
+            return list(self._conn.execute(sql, params).fetchall())
+        except (sqlite3.Error, AuditSchemaError) as exc:
+            raise AuditReadError(f"cannot read audit database: {exc}") from exc
+
+
+@contextmanager
+def open_audit_event_core_reader(
+    db_path: Path,
+) -> Iterator[AuditEventCoreReader | None]:
+    """Yield one reader over ``db_path``, or ``None`` when the file is absent.
+
+    ``None`` rather than a raise, because the absent-database contract differs
+    per caller: a full rebuild has "no audit data", an incremental rebuild has
+    "nothing changed". Each call site keeps its own answer.
+    """
+
+    if not db_path.is_file():
+        yield None
+        return
+    try:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        yield AuditEventCoreReader(conn)
     finally:
         conn.close()
-    return tuple(_record_from_row(row) for row in rows)
+
+
+def read_audit_event_core_records(
+    *,
+    db_path: Path,
+    repo_root_digest: str,
+    workflow_id: str | None = None,
+) -> tuple[AuditRecord, ...]:
+    """Return deterministic audit event-core rows for trajectory projection.
+
+    One connection per call. Callers issuing many of these -- projection reads
+    a workflow at a time -- should hold one ``open_audit_event_core_reader``
+    session instead, which costs the same setup once rather than per read.
+    """
+
+    with open_audit_event_core_reader(db_path) as reader:
+        if reader is None:
+            raise AuditReadError("no audit data")
+        return reader.event_core_records(
+            repo_root_digest=repo_root_digest,
+            workflow_id=workflow_id,
+        )
 
 
 def list_workflow_ids_with_events_after(
@@ -797,29 +889,17 @@ def list_workflow_ids_with_events_after(
     ``after_id`` (same filters as read_audit_event_core_records), ascending.
 
     The audit trail is append-only with monotonic ids, so this yields exactly
-    the workflows changed since the watermark — the input to an incremental
+    the workflows changed since the watermark -- the input to an incremental
     trajectory rebuild. A missing audit DB yields ``()``.
     """
-    if not db_path.is_file():
-        return ()
-    try:
-        conn = open_audit_db_readonly(db_path)
-    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
-        raise AuditReadError(f"cannot open audit database: {exc}") from exc
-    try:
-        rows = conn.execute(
-            "SELECT DISTINCT workflow_id FROM controller_events "
-            "WHERE repo_root_digest = ? AND id > ? "
-            "AND workflow_id IS NOT NULL AND workflow_id != '' "
-            "AND event_core_json IS NOT NULL AND event_core_sha256 IS NOT NULL "
-            "ORDER BY workflow_id ASC",
-            (repo_root_digest, after_id),
-        ).fetchall()
-    except (sqlite3.Error, AuditSchemaError) as exc:
-        raise AuditReadError(f"cannot read audit database: {exc}") from exc
-    finally:
-        conn.close()
-    return tuple(str(row[0]) for row in rows)
+
+    with open_audit_event_core_reader(db_path) as reader:
+        if reader is None:
+            return ()
+        return reader.workflow_ids_with_events_after(
+            repo_root_digest=repo_root_digest,
+            after_id=after_id,
+        )
 
 
 def count_audit_event_core_gaps(
@@ -829,25 +909,10 @@ def count_audit_event_core_gaps(
 ) -> int:
     """Count rows that cannot feed trajectory projection for this repository."""
 
-    if not db_path.is_file():
-        return 0
-    try:
-        conn = open_audit_db_readonly(db_path)
-    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
-        raise AuditReadError(f"cannot open audit database: {exc}") from exc
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM controller_events "
-            "WHERE repo_root_digest = ? "
-            "AND (workflow_id IS NULL OR workflow_id = '' "
-            "OR event_core_json IS NULL OR event_core_sha256 IS NULL)",
-            (repo_root_digest,),
-        ).fetchone()
-    except (sqlite3.Error, AuditSchemaError) as exc:
-        raise AuditReadError(f"cannot read audit database: {exc}") from exc
-    finally:
-        conn.close()
-    return int(row[0]) if row is not None and isinstance(row[0], int) else 0
+    with open_audit_event_core_reader(db_path) as reader:
+        if reader is None:
+            return 0
+        return reader.event_core_gap_count(repo_root_digest=repo_root_digest)
 
 
 def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
@@ -1207,6 +1272,7 @@ def _short_run_id(run_id: str | None, payload: Mapping[str, object]) -> str | No
 
 __all__ = [
     "AnalysisRunSnapshot",
+    "AuditEventCoreReader",
     "AuditRecord",
     "AuditSummary",
     "BlastArtifactLookup",
@@ -1223,6 +1289,7 @@ __all__ = [
     "lookup_blast_artifact",
     "lookup_patch_trail",
     "lookup_review_receipt",
+    "open_audit_event_core_reader",
     "payload_footprint_to_dict",
     "read_audit_event_core_records",
     "read_audit_summary",

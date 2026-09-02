@@ -14,6 +14,7 @@ import pytest
 import codeclone.memory.jobs.staleness as staleness_mod
 from codeclone.audit.events import AuditEvent, repo_root_digest
 from codeclone.audit.reader import list_workflow_ids_with_events_after
+from codeclone.audit.validation import AuditReadError
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.memory.jobs.worker import _trajectory_incremental_watermark
 from codeclone.memory.trajectory.models import TRAJECTORY_PROJECTION_VERSION
@@ -154,6 +155,31 @@ def test_incremental_after_current_max_is_noop(tmp_path: Path) -> None:
         assert incremental.run.workflows_seen == 0
         assert incremental.run.trajectories_created == 0
         assert incremental.run.trajectories_updated == 0
+
+
+def test_rebuilds_diverge_when_the_audit_database_is_absent(tmp_path: Path) -> None:
+    """Absent trail: incremental projects nothing, full rebuild refuses.
+
+    The two rebuilds share one audit session but not this contract, so an
+    absent database is the input that reaches each path's own answer.
+    """
+    with memory_store(tmp_path) as (root, project, store, _db):
+        absent = tmp_path / "no-such-audit.sqlite3"
+
+        empty = store.rebuild_trajectories_incremental(
+            project=project,
+            root_path=root,
+            audit_db_path=absent,
+            after_event_core_id=0,
+        )
+        assert empty.run.workflows_seen == 0
+        assert empty.run.legacy_event_count == 0
+        assert empty.trajectories == ()
+
+        with pytest.raises(AuditReadError, match="no audit data"):
+            store.rebuild_trajectories_from_audit(
+                project=project, root_path=root, audit_db_path=absent
+            )
 
 
 def test_worker_watermark_decision(monkeypatch: pytest.MonkeyPatch) -> None:
