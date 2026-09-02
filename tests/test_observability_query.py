@@ -21,6 +21,7 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.observability.store.writer import write_operation
+from codeclone.observability.vocabulary import DB_COUNTER_VERSION
 
 
 def _rows(value: object) -> list[dict[str, object]]:
@@ -215,8 +216,8 @@ def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> Non
     assert {"db_cost", "agent_context", "costly_noops"} <= routed
     assert out["mixed_semantics"] is False
     assert out["counter_semantics"] == {
-        "stored_version": "2",
-        "current_version": 2,
+        "stored_version": str(DB_COUNTER_VERSION),
+        "current_version": DB_COUNTER_VERSION,
         "status": "current",
     }
 
@@ -237,7 +238,7 @@ def test_query_surfaces_mixed_counter_semantics_warning(tmp_path: Path) -> None:
     assert out["mixed_semantics"] is True
     assert out["counter_semantics"] == {
         "stored_version": "1",
-        "current_version": 2,
+        "current_version": DB_COUNTER_VERSION,
         "status": "mixed",
     }
     assert any("mixed_semantics" in warning for warning in _texts(out["warnings"]))

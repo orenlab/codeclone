@@ -13,7 +13,25 @@ from typing import Final
 
 from ..contracts import OBSERVER_VOCABULARY_VERSION
 
-DB_COUNTER_VERSION: Final = 2
+# Generation of what ``db_queries`` / ``db_writes`` / ``db_rows`` MEAN on a span.
+#
+# "2" published the cache backend's LIFETIME totals: ``_materialize`` shares one
+# lane reader across every entry, so consecutive spans read 2, 4, 6, 8 ... and
+# every aggregator that sums spans over-reported by construction - 157134
+# queries where 174 ran, "82 per call" for work that costs two, and ``db_rows``
+# reading zero because read statements never counted their parameter set.
+#
+# "3" is a per-span delta published at the end of the block that spends it, so
+# what a span reports and what a span covers are the same interval.
+#
+# Bump whenever the MEANING of a counter changes, not when a producer starts
+# populating a field it already declared. A store stamps this once at creation
+# and never revises it, so a stale stamp is the only thing that stops a reader
+# averaging two definitions into a number that is neither: measured before this
+# bump, a mixed store reported ``queries_per_call: 68`` under ``verdict: ok``
+# and ``mixed_semantics: false``. Values across generations are not comparable;
+# ``read_counter_semantics`` marks a store carrying any other generation mixed.
+DB_COUNTER_VERSION: Final = 3
 
 # Telemetry planes. An operation either belongs to the product runtime under
 # observation or to the observation instrument itself; the two are read through

@@ -95,6 +95,68 @@ def test_reader_marks_counter_version_mismatch_as_mixed(tmp_path: Path) -> None:
     assert semantics.mixed_semantics is True
 
 
+def test_the_cumulative_cache_counter_generation_is_retired(tmp_path: Path) -> None:
+    """Generation "2" published the cache backend's LIFETIME totals per span.
+
+    Consecutive spans read 2, 4, 6, 8 ..., so every aggregator that sums spans
+    over-reported by construction: 157134 queries where 174 ran, "82 per call"
+    for work costing two. The current build publishes a per-span delta instead.
+
+    Those two definitions are not comparable, and a store carries its
+    generation in one row stamped at creation and never revised. Unless this
+    generation is retired, a store written before the fix keeps reading
+    ``status: current`` and its rows are averaged with post-fix rows into a
+    number that is neither -- measured on the maintainer's own store as
+    ``queries_per_call: 68``, ``verdict: ok``.
+
+    Pinned as a fact about history, not as a copy of the current constant: the
+    generation that carried cumulative cache counters must never again be read
+    as this build's own.
+    """
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(conn, _op("A", correlation_id="A"))
+        conn.execute(
+            "UPDATE platform_meta SET value='2' WHERE key='db_counter_version'"
+        )
+        conn.commit()
+        semantics = read_counter_semantics(conn)
+    finally:
+        conn.close()
+    assert semantics.stored_version == "2"
+    assert semantics.mixed_semantics is True, (
+        "a store stamped with the cumulative-counter generation must read as "
+        "mixed; reading it as current averages two counter definitions"
+    )
+
+
+def test_a_stale_stamp_without_rows_is_not_mixed(tmp_path: Path) -> None:
+    """ "Mixed" describes ROWS, not the stamp above them.
+
+    A store whose operations have all aged out of retention carries a stale
+    generation stamp and nothing written under it. There is no second
+    definition left to average against, so the honest answer is ``current``.
+    Dropping the ``has_operations`` guard would call such a store mixed and
+    make the warning fire where nothing is wrong -- and a warning that fires
+    on an empty store is one readers learn to ignore on a full one.
+    """
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        conn.execute(
+            "UPDATE platform_meta SET value='2' WHERE key='db_counter_version'"
+        )
+        conn.commit()
+        semantics = read_counter_semantics(conn)
+    finally:
+        conn.close()
+    assert semantics.stored_version == "2"
+    assert semantics.mixed_semantics is False, (
+        "a stale stamp with no rows beneath it has nothing to be mixed with"
+    )
+
+
 def test_legacy_rows_without_counter_version_are_not_relabelled_current(
     tmp_path: Path,
 ) -> None:
