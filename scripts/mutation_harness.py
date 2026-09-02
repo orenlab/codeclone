@@ -37,10 +37,24 @@ construction rather than by discipline:
     between the mutation reaching the disk and somebody owing its removal.
 9.  "It is equivalent" buries a survivor.  Equivalence is a justified
     annotation on a survivor and never becomes a verdict of its own.
+10. A hand-rolled ``harness.pid`` outlives the battery that wrote it and an
+    observer polls a process that exited hours ago -- measured 2026-09-01,
+    and it cost one wave a live run reported dead.  A pid cannot express
+    liveness: it survives its process and the number is handed out again.
+    ``--liveness`` writes a file the battery HOLDS, and ``--check-liveness``
+    answers ``live`` / ``stale`` / ``absent`` / ``unreadable`` from that file
+    alone -- from the kernel's lock, which is dropped however the writer
+    died, never from the recorded pid.
 
 Usage::
 
     python scripts/mutation_harness.py --root <abs> --plan plan.json
+    python scripts/mutation_harness.py --root <abs> --plan plan.json \
+        --liveness /path/to/<wave>.liveness
+    python scripts/mutation_harness.py --check-liveness /path/to/<wave>.liveness
+
+Wait on the liveness file, never on ``pgrep -f`` and never on a bare pid: a
+name mask matches the neighbouring wave's harness and your own waiting shell.
 
 The plan is JSON on purpose: a shell list of paths in a variable does not word
 split under zsh, which is how the void runs of this week were produced.
@@ -57,13 +71,20 @@ import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn
 from xml.etree import ElementTree
+
+try:  # POSIX only, and the liveness answer is the lock -- see LIVENESS below.
+    import fcntl
+except ImportError:  # pragma: no cover - exercised only off POSIX
+    fcntl = None  # type: ignore[assignment]
 
 PROTOCOL_VERSION = "codeclone.mutation_protocol/1"
 DEFAULT_TIMEOUT_SECONDS = 1800.0
@@ -971,6 +992,154 @@ def _refused_battery(reason: str) -> Battery:
 
 
 # ---------------------------------------------------------------------------
+# LIVENESS.  A pid is a name, not a state; the lock is the state.
+# ---------------------------------------------------------------------------
+
+LIVENESS_LIVE = "live"
+LIVENESS_STALE = "stale"
+LIVENESS_ABSENT = "absent"
+LIVENESS_UNREADABLE = "unreadable"
+
+#: The query mode answers a different question from a battery, so it gets its
+#: own closed set of codes rather than borrowing the verdict's.  A shell that
+#: waits on a battery branches on these.
+LIVENESS_EXIT_CODE = {
+    LIVENESS_LIVE: 0,
+    LIVENESS_STALE: 1,
+    LIVENESS_ABSENT: 2,
+    LIVENESS_UNREADABLE: 3,
+}
+
+_LIVENESS_NEXT_STEP = {
+    LIVENESS_LIVE: "the battery is running; keep waiting on this file",
+    LIVENESS_STALE: (
+        "the battery that wrote this file is gone and did not clean up "
+        "(killed, or the host went down); read its report, then delete "
+        "the file"
+    ),
+    LIVENESS_ABSENT: (
+        "no battery has claimed this path; start one with --liveness "
+        "<path>, and do not infer 'finished' from an absent file you "
+        "never saw exist"
+    ),
+    LIVENESS_UNREADABLE: (
+        "this file was not written by --liveness (a bare pid file, most "
+        "likely); it cannot answer liveness -- delete it and use "
+        "--liveness"
+    ),
+}
+
+
+def _require_flock() -> None:
+    if fcntl is None:
+        raise MutationError("liveness_requires_posix_flock")
+
+
+@contextmanager
+def liveness_file(path: Path, *, root: str, plan: str) -> Iterator[Path]:
+    """Claim ``path`` for the lifetime of this process, and only that long.
+
+    Two mechanisms, because one of them is always wrong on its own.
+
+    Removal in ``finally`` covers every exit the process gets to run: normal
+    return, an exception, and the signals the harness already reshapes into
+    ``Interrupted``.  It does NOT cover ``SIGKILL`` or the host going down,
+    and that is precisely the case the measured incident was -- so the file
+    that survives must still be readable as dead.
+
+    The lock is what makes it so.  The kernel drops a ``flock`` when the
+    holder's last descriptor closes, however the holder died, so a reader
+    that can take the lock is looking at a file whose writer is gone.  The
+    recorded pid is reported for a human and is never the answer: pids
+    outlive their processes and get handed out again, which is exactly how
+    an observer came to poll a stranger and call a live run dead.
+
+    Claiming refuses rather than overwrites.  A liveness path already held
+    belongs to a battery that is still running -- on a shared scratchpad,
+    very possibly somebody else's -- and overwriting it is how one wave
+    comes to read another wave's process as its own.
+    """
+
+    _require_flock()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        # Refusing, and refusing WITHOUT the cleanup below: the file belongs
+        # to whoever holds the lock, and deleting a live neighbour's claim is
+        # the very confusion this refusal exists to prevent.
+        os.close(descriptor)
+        raise MutationError("liveness_path_held") from exc
+    try:
+        os.ftruncate(descriptor, 0)
+        os.write(
+            descriptor,
+            json.dumps(
+                {
+                    "protocol": PROTOCOL_VERSION,
+                    "pid": os.getpid(),
+                    "root": root,
+                    "plan": plan,
+                    "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "liveness": "flock",
+                },
+                indent=2,
+                sort_keys=True,
+            ).encode("utf-8")
+            + b"\n",
+        )
+        os.fsync(descriptor)
+        yield path
+    finally:
+        # Unlink BEFORE the descriptor closes: between the two the lock is
+        # still held, so no second battery can claim the name in the gap.
+        with suppress(OSError):
+            path.unlink()
+        os.close(descriptor)
+
+
+def check_liveness(path: Path) -> dict[str, object]:
+    """Answer, from the file alone, whether its battery is still running."""
+
+    _require_flock()
+    try:
+        descriptor = os.open(path, os.O_RDWR)
+    except FileNotFoundError:
+        return _liveness_answer(LIVENESS_ABSENT, {})
+    try:
+        try:
+            record = json.loads(os.read(descriptor, 65536).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            record = None
+        if not isinstance(record, dict) or record.get("liveness") != "flock":
+            return _liveness_answer(LIVENESS_UNREADABLE, {})
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return _liveness_answer(LIVENESS_LIVE, record)
+        # Taking the lock proved the writer is gone; drop it again at once so
+        # a reader never becomes an accidental holder.
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        return _liveness_answer(LIVENESS_STALE, record)
+    finally:
+        os.close(descriptor)
+
+
+def _liveness_answer(state: str, record: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "state": state,
+        "exit_code": LIVENESS_EXIT_CODE[state],
+        "next_step": _LIVENESS_NEXT_STEP[state],
+        "pid": record.get("pid"),
+        "root": record.get("root"),
+        "plan": record.get("plan"),
+        "started_at": record.get("started_at"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Entry point.
 # ---------------------------------------------------------------------------
 
@@ -1016,6 +1185,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=None, help="absolute worktree root")
     parser.add_argument("--plan", default=None, help="battery plan, JSON")
     parser.add_argument("--report", default=None, help="write the JSON report here")
+    parser.add_argument("--liveness", default=None, help="hold this path while running")
+    parser.add_argument("--check-liveness", default=None, help="read a liveness path")
     parser.add_argument(
         "--protocol",
         action="store_true",
@@ -1031,6 +1202,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.protocol:
         print(f"{__doc__}\n{PLAN_TEMPLATE}")
         return 0
+    if arguments.check_liveness is not None:
+        try:
+            answer = check_liveness(Path(arguments.check_liveness))
+        except MutationError as exc:
+            print(f"liveness unavailable: {exc.reason}", file=sys.stderr)
+            return _EXIT_CODE[Verdict.ERROR]
+        print(json.dumps(answer, indent=2, sort_keys=True))
+        return LIVENESS_EXIT_CODE[str(answer["state"])]
     missing = [name for name in ("root", "plan") if getattr(arguments, name) is None]
     if missing:
         print(
@@ -1044,6 +1223,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"plan rejected: {exc}", file=sys.stderr)
         return _EXIT_CODE[Verdict.ERROR]
     _install_interrupt_guard()
+    if arguments.liveness is None:
+        return _run_and_report(arguments, mutants)
+    try:
+        with liveness_file(
+            Path(arguments.liveness), root=arguments.root, plan=arguments.plan
+        ):
+            return _run_and_report(arguments, mutants)
+    except MutationError as exc:
+        print(f"liveness refused: {exc.reason}", file=sys.stderr)
+        return _EXIT_CODE[Verdict.ERROR]
+
+
+def _run_and_report(arguments: argparse.Namespace, mutants: Sequence[Mutant]) -> int:
     battery = run_battery(Path(arguments.root), mutants)
     serialized = json.dumps(battery.report, indent=2, sort_keys=True)
     print(serialized)

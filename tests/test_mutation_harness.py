@@ -805,3 +805,172 @@ def test_the_digest_is_stable_and_mutation_sensitive(sandbox: _Sandbox) -> None:
     assert _text(_only(first), "digest") == _text(_only(again), "digest")
     assert _text(_only(first), "digest") != _text(_only(other), "digest")
     assert _text(first, "digest") == _text(again, "digest")
+
+
+# ---------------------------------------------------------------------------
+# Liveness: a pid on its own cannot say whether the battery is still running
+# ---------------------------------------------------------------------------
+#
+# Measured 2026-09-01: a hand-rolled ``harness.pid`` held the pid of a battery
+# that had exited an hour and a half earlier, an external observer polled it,
+# and a live run was reported dead.  The producer was never in this repository
+# -- it was ``echo $! > harness.pid`` in an executor's shell, which is why the
+# grep for it found nothing -- so the fix is to give the harness a liveness
+# file of its own that cannot lie in either direction: it does not outlive its
+# writer, and if the writer is killed hard enough to skip that, a reader can
+# still tell from the file alone.
+
+_LIVENESS_HOLDER = """
+import sys, time
+from pathlib import Path
+sys.path.insert(0, {repo!r})
+from scripts.mutation_harness import liveness_file
+
+with liveness_file(Path({path!r}), root="/nowhere", plan="none.json"):
+    print("holding", flush=True)
+    time.sleep(120)
+"""
+
+
+def _hold_liveness(path: Path, repo: Path) -> subprocess.Popen[str]:
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _LIVENESS_HOLDER.format(repo=str(repo), path=str(path)),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout is not None
+    assert process.stdout.readline().strip() == "holding"
+    return process
+
+
+def _check_liveness(path: Path) -> tuple[int, dict[str, object]]:
+    completed = subprocess.run(
+        [sys.executable, str(_HARNESS), "--check-liveness", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode, json.loads(completed.stdout)
+
+
+def test_a_running_battery_reads_live(tmp_path: Path) -> None:
+    path = tmp_path / "battery.liveness"
+    holder = _hold_liveness(path, Path(_HARNESS).parents[1])
+    try:
+        code, answer = _check_liveness(path)
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+    assert answer["state"] == "live"
+    assert code == 0
+    assert answer["pid"] == holder.pid
+
+
+def test_a_battery_killed_hard_leaves_a_file_that_reads_stale(
+    tmp_path: Path,
+) -> None:
+    """The half that removal on exit cannot cover.
+
+    ``SIGKILL`` runs no ``finally``, so the file survives -- exactly the
+    shape of the measured incident.  What must not survive is the file
+    LOOKING alive: the answer comes from the writer's lock, which the
+    kernel drops however the writer died, and not from the pid, which
+    outlives its process and can be handed to somebody else.
+    """
+
+    path = tmp_path / "battery.liveness"
+    holder = _hold_liveness(path, Path(_HARNESS).parents[1])
+    holder.kill()
+    holder.wait(timeout=30)
+
+    assert path.exists(), "the probe is hollow if the file was cleaned up"
+    code, answer = _check_liveness(path)
+
+    assert answer["state"] == "stale"
+    assert code == 1
+    assert answer["next_step"]
+
+
+def test_a_battery_that_exits_normally_takes_its_liveness_file_with_it(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "battery.liveness"
+    with mutation_harness.liveness_file(path, root=str(tmp_path), plan="p.json"):
+        assert path.exists()
+    assert not path.exists()
+
+
+def test_a_battery_that_raises_still_takes_its_liveness_file_with_it(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "battery.liveness"
+    with (
+        pytest.raises(RuntimeError),
+        mutation_harness.liveness_file(path, root=str(tmp_path), plan="p.json"),
+    ):
+        raise RuntimeError("battery blew up")
+    assert not path.exists()
+
+
+def test_no_file_reads_absent(tmp_path: Path) -> None:
+    code, answer = _check_liveness(tmp_path / "never-written.liveness")
+
+    assert answer["state"] == "absent"
+    assert code == 2
+
+
+def test_a_file_that_is_not_ours_reads_unreadable(tmp_path: Path) -> None:
+    path = tmp_path / "battery.liveness"
+    path.write_text("12345\n", encoding="utf-8")
+
+    code, answer = _check_liveness(path)
+
+    assert answer["state"] == "unreadable"
+    assert code == 3
+
+
+def test_two_batteries_cannot_share_one_liveness_path(tmp_path: Path) -> None:
+    """The second half of what the bare pid file could not express.
+
+    A shared scratchpad is how the plan of one wave was executed by the
+    battery of another; a liveness path claimed by a live holder must
+    refuse rather than overwrite, because the overwrite is what makes one
+    wave read another wave's process as its own.
+    """
+
+    path = tmp_path / "battery.liveness"
+    holder = _hold_liveness(path, Path(_HARNESS).parents[1])
+    try:
+        with (
+            pytest.raises(mutation_harness.MutationError) as raised,
+            mutation_harness.liveness_file(path, root=str(tmp_path), plan="p.json"),
+        ):
+            pass
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+    assert raised.value.reason == "liveness_path_held"
+    assert path.exists(), "refusing must not delete the live holder's file"
+
+
+def test_the_battery_writes_and_clears_its_own_liveness_file(
+    sandbox: _Sandbox, tmp_path: Path
+) -> None:
+    """End to end: the flag the executor is meant to use instead of `echo $!`."""
+
+    plan = sandbox.plan([_mutant()])
+    liveness = tmp_path / "battery.liveness"
+
+    code = main(
+        ["--root", str(sandbox.root), "--plan", str(plan), "--liveness", str(liveness)]
+    )
+
+    assert code == 0
+    assert not liveness.exists()
