@@ -26,7 +26,6 @@ from codeclone.surfaces.mcp.messages.patch_contract import (
     next_step_hint,
 )
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
-from codeclone.surfaces.mcp.session import MCPServiceContractError
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests.memory_fixtures import (
     mcp_refusal_next_steps,
@@ -117,15 +116,6 @@ def _write_quality_fixture(root: Path) -> None:
             "    return 42\n"
         ),
     )
-
-
-def test_mcp_server_validated_cache_policy_accepts_known_values() -> None:
-    assert mcp_server._validated_cache_policy("reuse") == "reuse"
-    with pytest.raises(MCPServiceContractError, match="CLI-only"):
-        mcp_server._validated_cache_policy("refresh")
-    assert mcp_server._validated_cache_policy("off") == "off"
-    with pytest.raises(MCPServiceContractError, match="cache_policy"):
-        mcp_server._validated_cache_policy("broken")
 
 
 def test_mcp_server_exposes_expected_read_only_tools() -> None:
@@ -238,8 +228,11 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
             }
         )
         assert tool.annotations.idempotentHint is True
-    assert "reuse or off" in str(tools["analyze_repository"].description)
-    assert "reuse or off" in str(tools["analyze_changed_paths"].description)
+    # The cache controls left the surface in 2.1.0a2, so no analysis tool may
+    # describe a cache policy the caller could set.
+    for analysis_tool in ("analyze_repository", "analyze_changed_paths"):
+        assert "cache_policy" not in str(tools[analysis_tool].description)
+    assert "repository configuration" in str(tools["analyze_repository"].description)
     assert "absolute repository root" in str(tools["analyze_repository"].description)
     assert "Absolute root required" in str(tools["analyze_changed_paths"].description)
     assert "get_production_triage" in str(tools["analyze_repository"].description)
@@ -358,7 +351,6 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
                 {
                     "root": str(tmp_path),
                     "respect_pyproject": False,
-                    "cache_policy": "off",
                     "changed_paths": ["pkg/dup.py", "pkg/quality.py"],
                 },
             )
@@ -371,7 +363,6 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
                 {
                     "root": str(tmp_path),
                     "respect_pyproject": False,
-                    "cache_policy": "off",
                     "changed_paths": ["pkg/dup.py"],
                 },
             )

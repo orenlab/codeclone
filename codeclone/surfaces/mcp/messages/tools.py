@@ -15,14 +15,14 @@ from ....contracts import DEFAULT_JSON_REPORT_PATH
 ANALYZE_REPOSITORY: Final = (
     "Run a deterministic CodeClone analysis and register it as the "
     "latest MCP run. Pass an absolute repository root; relative roots "
-    "like '.' are rejected in MCP. MCP cache_policy accepts reuse or "
-    "off only. Start with get_production_triage."
+    "like '.' are rejected in MCP. The analysis cache is resolved from "
+    "repository configuration, not from this call. Start with "
+    "get_production_triage."
 )
 
 ANALYZE_CHANGED_PATHS: Final = (
     "Run changed-files analysis from explicit paths or git diff ref. "
-    "Absolute root required. MCP cache_policy: reuse or off. "
-    "Response includes next_tool hint."
+    "Absolute root required. Response includes next_tool hint."
 )
 
 GET_RUN_SUMMARY: Final = (

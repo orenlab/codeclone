@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from .messages import errors as err_msgs
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ContentBlock
@@ -123,13 +123,24 @@ def numeric_run_id_refusal(
     return err_msgs.run_id_must_be_quoted(tool, corrections, rejection)
 
 
-def diagnosing_server_class() -> type[FastMCP]:
+def diagnosing_server_class(
+    *,
+    refuse_arguments: Callable[[str, dict[str, Any]], None] | None = None,
+) -> type[FastMCP]:
     """FastMCP with the numeric-run-id refusal replaced by the executable one.
 
     The override sits on ``call_tool`` because that is the single seam every
     tool passes through: the schema rejection happens above all of the run-id
     handlers at once, so one boundary covers the whole population by
     construction rather than by a per-tool list somebody has to maintain.
+
+    ``refuse_arguments`` is called with the tool name and the raw arguments
+    before dispatch and may raise to refuse the call. It is offered here for
+    the same reason the diagnosis is: this is the last point at which the
+    arguments the caller actually sent still exist. FastMCP builds each tool's
+    model from its handler signature and pydantic drops unknown keys, so an
+    argument that is no longer declared is not refused below this seam -- it is
+    silently discarded, and the caller is told the call succeeded.
     """
 
     from mcp.server.fastmcp import FastMCP as _FastMCP
@@ -153,6 +164,8 @@ def diagnosing_server_class() -> type[FastMCP]:
             name: str,
             arguments: dict[str, Any],
         ) -> Sequence[ContentBlock] | dict[str, Any]:
+            if refuse_arguments is not None:
+                refuse_arguments(name, arguments)
             try:
                 return await super().call_tool(name, arguments)
             except ToolError as exc:

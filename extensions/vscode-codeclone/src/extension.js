@@ -1282,7 +1282,6 @@ class CodeCloneController {
         }
         const state = this.getWorkspaceState(folder);
         const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
-        const cachePolicy = config.get("analysis.cachePolicy", "reuse");
         const diffRef = config.get("analysis.changedDiffRef", "HEAD");
         const coverageXmlPath = await resolveCoverageXmlPath(
             folder.uri.fsPath,
@@ -1315,13 +1314,11 @@ class CodeCloneController {
                         ? await this.client.callTool("analyze_changed_paths", {
                             root: folder.uri.fsPath,
                             git_diff_ref: diffRef,
-                            cache_policy: cachePolicy,
                             ...coverageOverride,
                             ...analysisSettings.overrides,
                         })
                         : await this.client.callTool("analyze_repository", {
                             root: folder.uri.fsPath,
-                            cache_policy: cachePolicy,
                             ...coverageOverride,
                             ...analysisSettings.overrides,
                         });

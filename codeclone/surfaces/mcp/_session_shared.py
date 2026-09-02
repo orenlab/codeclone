@@ -127,7 +127,6 @@ if TYPE_CHECKING:
     from ._workspace_hygiene import DirtySnapshot
 
 AnalysisMode = Literal["full", "clones_only"]
-CachePolicy = Literal["reuse", "off"]
 FreshnessKind = Literal["fresh", "mixed", "reused"]
 HotlistKind = Literal[
     "most_actionable",
@@ -246,7 +245,6 @@ _CONFIDENCE_WEIGHT: Final[dict[str, float]] = {
 # Canonical report groups use FAMILY_CLONES ("clones"), while individual finding
 # payloads use FAMILY_CLONE ("clone").
 _VALID_ANALYSIS_MODES = frozenset({"full", "clones_only"})
-_VALID_CACHE_POLICIES = frozenset({"reuse", "off"})
 _VALID_FINDING_FAMILIES = frozenset(
     {
         "all",
@@ -651,9 +649,6 @@ class MCPAnalysisRequest:
     cohesion_threshold: int | None = None
     baseline_path: str | None = None
     max_baseline_size_mb: int | None = None
-    cache_policy: CachePolicy = "reuse"
-    cache_path: str | None = None
-    max_cache_size_mb: int | None = None
     allow_external_artifacts: bool = False
 
 
@@ -1074,7 +1069,6 @@ __all__ = [
     "_SOURCE_KIND_BREAKDOWN_ORDER",
     "_VALID_ANALYSIS_MODES",
     "_VALID_AUTHORITY_SECTIONS",
-    "_VALID_CACHE_POLICIES",
     "_VALID_COMPARISON_FOCUS",
     "_VALID_DETAIL_LEVELS",
     "_VALID_FINDING_FAMILIES",
@@ -1090,7 +1084,6 @@ __all__ = [
     "AnalysisMode",
     "Baseline",
     "Cache",
-    "CachePolicy",
     "CacheStatus",
     "ChoiceT",
     "CodeCloneMCPRunStore",

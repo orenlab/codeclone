@@ -16,7 +16,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Final, Literal, Protocol, TypeVar, cast
 
 from ... import __version__
 from ...config.observability import resolve_observability_config
@@ -59,7 +59,6 @@ from .messages.params import (
     BlastDepthParam,
     BlastRadiusDepthParam,
     BlastRadiusDetailParam,
-    CachePolicyParam,
     CategoryParam,
     ChangedFilesParam,
     ChangedPathsParam,
@@ -189,7 +188,6 @@ from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
     MAX_MCP_HISTORY_LIMIT,
     AnalysisMode,
-    CachePolicy,
     MCPAnalysisRequest,
     MCPGateRequest,
     MCPServiceContractError,
@@ -285,7 +283,9 @@ def _load_mcp_runtime() -> tuple[
 
         # The schema rejects a wrongly typed argument above every handler, so
         # the only seam that can diagnose one is the tool-call boundary itself.
-        runtime_fastmcp: type[FastMCP] = diagnosing_server_class()
+        runtime_fastmcp: type[FastMCP] = diagnosing_server_class(
+            refuse_arguments=_refuse_withdrawn_arguments,
+        )
     except ImportError as exc:
         raise MCPDependencyError(mcp_instructions.MCP_INSTALL_HINT) from exc
     return (
@@ -325,16 +325,37 @@ def _validated_analysis_mode(value: str) -> AnalysisMode:
     )
 
 
-def _validated_cache_policy(value: str) -> CachePolicy:
-    if value == "reuse":
-        return "reuse"
-    if value == "off":
-        return "off"
-    if value == "refresh":
-        raise MCPServiceContractError(err_msgs.CACHE_POLICY_CLI_ONLY)
-    raise MCPServiceContractError(
-        err_msgs.invalid_choice("cache_policy", value, ("off", "reuse"))
-    )
+# Public MCP tool parameters withdrawn in CodeClone 2.1.0a2. Managing the physical
+# cache backend is operator configuration, so no tool offers it as a per-call
+# argument any more. The refusal is deliberately not scoped to the two tools that
+# used to declare them: no published tool declares any of these names -- pinned by
+# tests/test_mcp_cache_owner.py -- so refusing them anywhere cannot refuse a
+# legitimate argument, and a stale client is told the same thing whichever tool it
+# calls.
+WITHDRAWN_CACHE_PARAMETERS: Final = (
+    "cache_policy",
+    "cache_path",
+    "max_cache_size_mb",
+)
+
+
+def _refuse_withdrawn_arguments(tool: str, arguments: Mapping[str, object]) -> None:
+    """Answer a withdrawn parameter, because FastMCP would only drop it.
+
+    Each tool's argument model is built from its handler signature and pydantic
+    ignores unknown keys, so removing a public parameter is, to a client that
+    still sends it, indistinguishable from a parameter that is still honoured:
+    the call succeeds and the value goes nowhere.
+    """
+
+    for parameter in WITHDRAWN_CACHE_PARAMETERS:
+        if parameter in arguments:
+            raise MCPServiceContractError(
+                err_msgs.WITHDRAWN_TOOL_PARAMETER.format(
+                    tool=tool,
+                    parameter=parameter,
+                )
+            )
 
 
 def build_mcp_server(
@@ -477,9 +498,6 @@ def build_mcp_server(
         cohesion_threshold: ThresholdIntParam = None,
         baseline_path: OptionalPathParam = None,
         max_baseline_size_mb: MaxSizeMbParam = None,
-        cache_policy: CachePolicyParam = "reuse",
-        cache_path: OptionalPathParam = None,
-        max_cache_size_mb: MaxSizeMbParam = None,
         allow_external_artifacts: AllowExternalArtifactsParam = False,
     ) -> dict[str, object]:
         return service.analyze_repository(
@@ -504,9 +522,6 @@ def build_mcp_server(
                 cohesion_threshold=cohesion_threshold,
                 baseline_path=baseline_path,
                 max_baseline_size_mb=max_baseline_size_mb,
-                cache_policy=_validated_cache_policy(cache_policy),
-                cache_path=cache_path,
-                max_cache_size_mb=max_cache_size_mb,
                 allow_external_artifacts=allow_external_artifacts,
             )
         )
@@ -538,9 +553,6 @@ def build_mcp_server(
         cohesion_threshold: ThresholdIntParam = None,
         baseline_path: OptionalPathParam = None,
         max_baseline_size_mb: MaxSizeMbParam = None,
-        cache_policy: CachePolicyParam = "reuse",
-        cache_path: OptionalPathParam = None,
-        max_cache_size_mb: MaxSizeMbParam = None,
         allow_external_artifacts: AllowExternalArtifactsParam = False,
     ) -> dict[str, object]:
         return service.analyze_changed_paths(
@@ -565,9 +577,6 @@ def build_mcp_server(
                 cohesion_threshold=cohesion_threshold,
                 baseline_path=baseline_path,
                 max_baseline_size_mb=max_baseline_size_mb,
-                cache_policy=_validated_cache_policy(cache_policy),
-                cache_path=cache_path,
-                max_cache_size_mb=max_cache_size_mb,
                 allow_external_artifacts=allow_external_artifacts,
             )
         )

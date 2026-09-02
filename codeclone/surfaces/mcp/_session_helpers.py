@@ -55,7 +55,6 @@ from ._session_shared import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
     AnalysisMode,
-    CachePolicy,
     ChoiceT,
     CodeCloneMCPRunStore,
     DetailLevel,
@@ -734,8 +733,16 @@ def _build_cache(
     root_path: Path,
     args: Namespace,
     cache_path: Path,
-    policy: CachePolicy,
 ) -> Cache:
+    """Open the analysis cache the way ``cli.analyze`` opens it.
+
+    There is no MCP-side policy to consult: the physical cache backend is
+    operator configuration, resolved once from the repository configuration and
+    the workspace default, never from a per-call argument. What stays MCP's own
+    is ``write_enabled=False`` -- this surface reads the cache the CLI wrote and
+    never writes it back.
+    """
+
     cache = Cache(
         cache_path,
         root=root_path,
@@ -749,8 +756,7 @@ def _build_cache(
         collect_api_surface=bool(getattr(args, "api_surface", False)),
         write_enabled=False,
     )
-    if policy != "off":
-        cache.load()
+    cache.load()
     return cache
 
 

@@ -397,7 +397,6 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             "api_surface": request.api_surface,
             "coverage_min": request.coverage_min,
             "max_baseline_size_mb": request.max_baseline_size_mb,
-            "max_cache_size_mb": request.max_cache_size_mb,
             "design_complexity_threshold": request.complexity_threshold,
             "design_coupling_threshold": request.coupling_threshold,
             "design_cohesion_threshold": request.cohesion_threshold,
@@ -412,15 +411,6 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                     request.baseline_path,
                     root_path,
                     kind="baseline",
-                    allow_external_artifacts=request.allow_external_artifacts,
-                )
-            )
-        if request.cache_path is not None:
-            args.cache_path = str(
-                _helpers._resolve_optional_path(
-                    request.cache_path,
-                    root_path,
-                    kind="cache",
                     allow_external_artifacts=request.allow_external_artifacts,
                 )
             )

@@ -705,7 +705,6 @@ def test_mcp_manage_memory_propose_scope_check_variants(tmp_path: Path) -> None:
             MCPAnalysisRequest(
                 root=str(root.resolve()),
                 respect_pyproject=False,
-                cache_policy="off",
             )
         )
         started = service.start_controlled_change(

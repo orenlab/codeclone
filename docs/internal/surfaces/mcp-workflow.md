@@ -64,8 +64,8 @@ graph TD
 
 | Tool | Purpose | Session State | Requirements |
 |------|---------|---------------|--------------|
-| `analyze_repository` | Full deterministic analysis from scratch or cached | Stores run in-memory | Absolute root, valid cache_policy (`reuse`, `off`) |
-| `analyze_changed_paths` | PR-style analysis on file subset | Stores run in-memory | Absolute root, paths or git ref, cache_policy |
+| `analyze_repository` | Full deterministic analysis from scratch or cached | Stores run in-memory | Absolute root |
+| `analyze_changed_paths` | PR-style analysis on file subset | Stores run in-memory | Absolute root, paths or git ref |
 | `get_run_summary` | Compact snapshot of latest or named run | Reads in-memory | Valid run_id (8-char short or full digest) |
 | `get_report_section` | One bounded report section (inventory, findings, metrics) | Reads in-memory | Section name, optional pagination filters |
 | `get_implementation_context` | Bounded structural evidence from one stored run | Projects and caches facet pages | Absolute root, target paths/symbols, valid run_id |

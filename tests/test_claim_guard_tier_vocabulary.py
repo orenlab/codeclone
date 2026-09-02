@@ -97,7 +97,6 @@ def _analyzed(root: Path) -> tuple[CodeCloneMCPService, MCPRunRecord]:
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     record = service._runs.resolve_any_root(str(summary["run_id"]))

@@ -7,7 +7,6 @@
 import os
 import tempfile
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +23,6 @@ from codeclone.report.renderers.sarif import render_sarif_report_document
 from codeclone.scanner import iter_py_files, resolved_path_under_root
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
-    CachePolicy,
     MCPAnalysisRequest,
     MCPServiceContractError,
 )
@@ -226,24 +224,6 @@ def test_scanner_excludes_symlinked_sources_outside_root(tmp_path: Path) -> None
     assert resolved_path_under_root(str(link), str(workspace)) is None
 
 
-def test_mcp_service_rejects_refresh_cache_policy(tmp_path: Path) -> None:
-    tmp_path.joinpath("pkg").mkdir()
-    tmp_path.joinpath("pkg", "__init__.py").write_text("", encoding="utf-8")
-    tmp_path.joinpath("pkg", "mod.py").write_text(
-        "def f():\n    return 1\n",
-        encoding="utf-8",
-    )
-    service = CodeCloneMCPService(history_limit=2)
-    with pytest.raises(MCPServiceContractError, match="cache_policy"):
-        service.analyze_repository(
-            MCPAnalysisRequest(
-                root=str(tmp_path.resolve()),
-                respect_pyproject=False,
-                cache_policy=cast("CachePolicy", "refresh"),
-            )
-        )
-
-
 def test_mcp_service_rejects_relative_repository_root(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=2)
     with pytest.raises(MCPServiceContractError, match="absolute repository root"):
@@ -251,7 +231,6 @@ def test_mcp_service_rejects_relative_repository_root(tmp_path: Path) -> None:
             MCPAnalysisRequest(
                 root=".",
                 respect_pyproject=False,
-                cache_policy="off",
             )
         )
 
@@ -266,7 +245,6 @@ def test_mcp_service_rejects_changed_paths_outside_repository(tmp_path: Path) ->
         MCPAnalysisRequest(
             root=str(tmp_path.resolve()),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     with pytest.raises(MCPServiceContractError, match="path traversal not allowed"):
@@ -274,7 +252,6 @@ def test_mcp_service_rejects_changed_paths_outside_repository(tmp_path: Path) ->
             MCPAnalysisRequest(
                 root=str(tmp_path.resolve()),
                 respect_pyproject=False,
-                cache_policy="off",
                 changed_paths=("../outside.py",),
             )
         )

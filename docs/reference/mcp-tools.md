@@ -43,10 +43,10 @@ graph LR
 
 ### Analysis Tools
 
-**`analyze_repository(root, cache_policy)`**
-Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns metrics, findings, and artifact locations. Use as the first step in any workflow. Cache policy accepts `reuse` (default, uses cache if fresh) or `off` (ignore cache).
+**`analyze_repository(root)`**
+Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns metrics, findings, and artifact locations. Use as the first step in any workflow. The analysis cache is not a per-call option: its location and size limit come from `[tool.codeclone]` in `pyproject.toml`, and the MCP reads that cache without ever writing it.
 
-**`analyze_changed_paths(root, changed_paths | git_diff_ref, cache_policy)`**
+**`analyze_changed_paths(root, changed_paths | git_diff_ref)`**
 Analyze only changed files from an explicit `changed_paths` list or a `git_diff_ref` revision (mutually exclusive). Faster than full analysis for PR-style review. Response includes a `next_tool` hint suggesting which inspection tool to use.
 
 ### Inspection Tools
@@ -194,7 +194,7 @@ If a step cannot proceed, the response includes `next_step` and/or `user_action_
 ### Analyze a repository
 
 ```python
-result = analyze_repository(root="/absolute/path/to/repo", cache_policy="reuse")
+result = analyze_repository(root="/absolute/path/to/repo")
 print(f"Run ID: {result['run_id']}")
 print(f"Health: {result['health_score']}")
 print(f"Report: {result['artifacts']['report_path']}")

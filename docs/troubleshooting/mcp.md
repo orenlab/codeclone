@@ -32,7 +32,7 @@ graph TD
     F -->|"status: accepted"| G["intent cleared"]
 ```
 
-Analysis caches within the MCP session. Calling `analyze_repository` again on the same root reuses the prior run unless `cache_policy='off'` is set.
+Analysis caches within the MCP session: calling `analyze_repository` again on the same root registers a new run. The on-disk analysis cache is separate and is operator configuration -- set `cache_path` and `max_cache_size_mb` under `[tool.codeclone]` in `pyproject.toml`. The MCP reads that cache and never writes it, so a root only ever analyzed through the MCP reports `cache.used: false` until the CLI warms it.
 
 ## Key commands
 

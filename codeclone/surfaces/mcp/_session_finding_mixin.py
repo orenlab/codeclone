@@ -34,7 +34,6 @@ from ._session_shared import (
     _SEVERITY_WEIGHT,
     _VALID_ANALYSIS_MODES,
     _VALID_AUTHORITY_SECTIONS,
-    _VALID_CACHE_POLICIES,
     _VALID_DETAIL_LEVELS,
     _VALID_FINDING_FAMILIES,
     _VALID_FINDING_NOVELTY,
@@ -133,11 +132,6 @@ class _MCPSessionFindingMixin:
             "analysis_mode",
             request.analysis_mode,
             _VALID_ANALYSIS_MODES,
-        )
-        _helpers._validate_choice(
-            "cache_policy",
-            request.cache_policy,
-            _VALID_CACHE_POLICIES,
         )
         if request.analysis_mode == "clones_only" and request.coverage_xml is not None:
             raise MCPServiceContractError(

@@ -49,7 +49,6 @@ def _deterministic_snapshot(
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=True,
-            cache_policy="off",
         )
     )
     run_id = str(summary["run_id"])

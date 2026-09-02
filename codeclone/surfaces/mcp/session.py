@@ -62,7 +62,6 @@ from ._session_shared import (
     DEFAULT_SEGMENT_MIN_STMT,
     MAX_MCP_HISTORY_LIMIT,
     AnalysisMode,
-    CachePolicy,
     CacheStatus,
     CodeCloneMCPRunStore,
     DetailLevel,
@@ -122,7 +121,6 @@ __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
     "MAX_MCP_HISTORY_LIMIT",
     "AnalysisMode",
-    "CachePolicy",
     "DetailLevel",
     "MCPAnalysisRequest",
     "MCPFindingNotFoundError",
@@ -306,7 +304,6 @@ class MCPSession(
                 root_path=root_path,
                 args=args,
                 cache_path=cache_path,
-                policy=request.cache_policy,
             )
         console = _BufferConsole()
 

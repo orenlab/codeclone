@@ -68,7 +68,6 @@ from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import DigestObject, FileStat, LaneTrust, MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
-    CachePolicy,
     DetailLevel,
     MCPAnalysisRequest,
     MCPFindingNotFoundError,
@@ -844,7 +843,6 @@ def _build_quality_service(root: Path) -> CodeCloneMCPService:
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     return service
@@ -1054,7 +1052,6 @@ def _analyze_quality_repository(
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     return service, summary
@@ -1073,7 +1070,6 @@ def _analyze_multi_clone_repository(root: Path) -> CodeCloneMCPService:
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     return service
@@ -1108,7 +1104,6 @@ def test_mcp_untrusted_baseline_reports_clone_novelty_as_unavailable(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -1138,7 +1133,6 @@ def test_mcp_trusted_baseline_still_counts_new_clone_groups(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -1156,7 +1150,6 @@ def test_mcp_baseline_path_moves_the_metrics_lane_too(tmp_path: Path) -> None:
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             baseline_path="custom.baseline.json",
         )
     )
@@ -1188,7 +1181,6 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -1255,7 +1247,6 @@ def test_mcp_service_run_summary_detects_workspace_drift(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     target = tmp_path / "pkg" / "dup.py"
@@ -1296,7 +1287,6 @@ def _analyze_context_run(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             min_loc=1,
             min_stmt=1,
             api_surface=api_surface,
@@ -1336,7 +1326,6 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             api_surface=True,
             min_loc=1,
             min_stmt=1,
@@ -1500,7 +1489,6 @@ def test_mcp_service_get_implementation_context_enforces_response_budget(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             api_surface=True,
             min_loc=1,
             min_stmt=1,
@@ -1969,7 +1957,6 @@ def test_mcp_service_get_implementation_context_status_and_errors(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     assert service.get_implementation_context(root=str(tmp_path))["status"] == (
@@ -2031,7 +2018,6 @@ def test_mcp_service_get_implementation_context_reports_full_freshness(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     target = tmp_path / "pkg" / "dup.py"
@@ -2076,7 +2062,6 @@ def test_mcp_service_get_implementation_context_intent_memory_and_impact(
             MCPAnalysisRequest(
                 root=str(root.resolve()),
                 respect_pyproject=False,
-                cache_policy="off",
                 api_surface=True,
                 min_loc=1,
                 min_stmt=1,
@@ -2944,7 +2929,6 @@ def test_mcp_service_implementation_context_intent_guardrails(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     started = service.start_controlled_change(
@@ -3027,7 +3011,6 @@ def test_mcp_service_implementation_context_rejects_stale_intent_run(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     started = service.start_controlled_change(
@@ -3311,7 +3294,6 @@ def test_mcp_analysis_completed_event_carries_the_run_summary_figures(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -3434,7 +3416,6 @@ def test_mcp_service_summary_reports_baseline_interpreter_as_provenance(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=True,
-            cache_policy="off",
         )
     )
 
@@ -4010,7 +3991,6 @@ def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_can
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             changed_paths=("pkg/dup.py",),
         )
     )
@@ -4058,7 +4038,6 @@ def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -4108,7 +4087,6 @@ def test_mcp_service_hotspot_resources_and_triage_are_production_first(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -4196,7 +4174,6 @@ def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) ->
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     _write_clone_fixture(tmp_path)
@@ -4204,7 +4181,6 @@ def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) ->
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             changed_paths=("pkg/dup.py",),
         )
     )
@@ -4279,7 +4255,6 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             changed_paths=("pkg/dup.py", "pkg/quality.py"),
             complexity_threshold=1,
         )
@@ -4452,7 +4427,6 @@ def test_mcp_service_granular_checks_reject_incompatible_run_modes(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             analysis_mode="clones_only",
         )
     )
@@ -4473,7 +4447,6 @@ def test_mcp_service_clones_only_health_is_marked_unavailable(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             analysis_mode="clones_only",
         )
     )
@@ -4521,7 +4494,6 @@ def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="reuse",
         )
     )
 
@@ -4726,7 +4698,6 @@ def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -4747,7 +4718,6 @@ def test_mcp_service_resources_expose_latest_summary(tmp_path: Path) -> None:
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -4852,7 +4822,6 @@ def test_mcp_service_hotspot_summary_preserves_fixtures_source_kind(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -5020,14 +4989,12 @@ def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
         MCPAnalysisRequest(
             root=str(first_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     second = service.analyze_repository(
         MCPAnalysisRequest(
             root=str(second_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -5045,7 +5012,6 @@ def test_mcp_service_reports_contract_errors_for_resources_and_findings(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     run_id = str(summary["run_id"])
@@ -5119,13 +5085,18 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
             request=MCPAnalysisRequest(respect_pyproject=True),
         )
 
+    # max_cache_size_mb left the request surface in 2.1.0a2, so the numeric
+    # guard is reachable only through repository configuration now. Delivering
+    # it that way proves the guard still has a live input.
+    monkeypatch.setattr(
+        mcp_state_mod,
+        "load_repository_config",
+        lambda _root: {"max_cache_size_mb": -1},
+    )
     with pytest.raises(MCPServiceContractError):
         service._build_args(
             root_path=tmp_path,
-            request=MCPAnalysisRequest(
-                respect_pyproject=False,
-                max_cache_size_mb=-1,
-            ),
+            request=MCPAnalysisRequest(respect_pyproject=True),
         )
 
 
@@ -5363,22 +5334,6 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
     )
 
 
-def test_mcp_service_rejects_refresh_cache_policy_in_read_only_mode(
-    tmp_path: Path,
-) -> None:
-    _write_clone_fixture(tmp_path)
-    service = CodeCloneMCPService(history_limit=4)
-
-    with pytest.raises(MCPServiceContractError, match="cache_policy"):
-        service.analyze_repository(
-            MCPAnalysisRequest(
-                root=str(tmp_path),
-                respect_pyproject=False,
-                cache_policy=cast("CachePolicy", "refresh"),
-            )
-        )
-
-
 def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
     args = Namespace(
         max_cache_size_mb=64,
@@ -5395,7 +5350,6 @@ def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
         root_path=tmp_path,
         args=args,
         cache_path=tmp_path / "cache.json",
-        policy="off",
     )
     cache.put_file_entry(
         "x.py",
@@ -5461,7 +5415,6 @@ def test_mcp_analyze_releases_cache_before_report_without_json_roundtrip(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -5480,7 +5433,6 @@ def test_mcp_service_meta_section_and_optional_path_overrides(tmp_path: Path) ->
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -5493,11 +5445,9 @@ def test_mcp_service_meta_section_and_optional_path_overrides(tmp_path: Path) ->
         request=MCPAnalysisRequest(
             respect_pyproject=False,
             baseline_path="custom-baseline.json",
-            cache_path="custom-cache.json",
         ),
     )
     assert str(args.baseline).endswith("custom-baseline.json")
-    assert str(args.cache_path).endswith("custom-cache.json")
 
     _, _, metrics_baseline_path, metrics_baseline_exists = (
         service._resolve_baseline_inputs(root_path=tmp_path, args=args)
@@ -5525,7 +5475,6 @@ def test_mcp_service_root_cache_and_projection_helpers(
         root_path=tmp_path,
         args=args,
         cache_path=tmp_path / "cache.json",
-        policy="reuse",
     )
     assert load_calls == ["loaded"]
 
@@ -5635,13 +5584,6 @@ def _mcp_request_with_artifact_path(
             allow_external_artifacts=allow_external_artifacts,
             baseline_path=value,
         )
-    if field == "cache_path":
-        return MCPAnalysisRequest(
-            root=root_text,
-            respect_pyproject=False,
-            allow_external_artifacts=allow_external_artifacts,
-            cache_path=value,
-        )
     if field == "coverage_xml":
         return MCPAnalysisRequest(
             root=root_text,
@@ -5656,7 +5598,6 @@ def _mcp_request_with_artifact_path(
     ("field", "value"),
     [
         ("baseline_path", "baseline.json"),
-        ("cache_path", "cache.json"),
         ("coverage_xml", "coverage.xml"),
     ],
 )
@@ -5706,7 +5647,6 @@ def test_mcp_analysis_request_coverage_xml_allows_in_repo_absolute_path(
     ("field", "value"),
     [
         ("baseline_path", "baseline.json"),
-        ("cache_path", "cache.json"),
         ("coverage_xml", "coverage.xml"),
     ],
 )
@@ -5733,7 +5673,6 @@ def test_mcp_analysis_request_allows_external_artifact_paths_with_opt_in(
     expected_attr = {
         "baseline_path": "baseline",
         "metrics_baseline_path": "metrics_baseline",
-        "cache_path": "cache_path",
         "coverage_xml": "coverage_xml",
     }[field]
     assert getattr(args, expected_attr) == str(external.resolve(strict=False))
@@ -5749,7 +5688,6 @@ def test_mcp_service_granular_checks_reject_relative_root_and_allow_omission(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -5769,7 +5707,6 @@ def test_mcp_service_short_finding_ids_remain_unique_for_overlapping_clones(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
 
@@ -5819,7 +5756,6 @@ def test_mcp_service_reports_missing_report_document(tmp_path: Path) -> None:
                 MCPAnalysisRequest(
                     root=str(tmp_path),
                     respect_pyproject=False,
-                    cache_policy="off",
                 )
             )
     finally:
@@ -6485,12 +6421,6 @@ def test_mcp_service_wrapper_and_server_validation_edges(
     assert mcp_server_mod._validated_analysis_mode("clones_only") == "clones_only"
     with pytest.raises(MCPServiceContractError, match="analysis_mode"):
         mcp_server_mod._validated_analysis_mode("bad")
-    assert mcp_server_mod._validated_cache_policy("reuse") == "reuse"
-    with pytest.raises(MCPServiceContractError, match="CLI-only"):
-        mcp_server_mod._validated_cache_policy("refresh")
-    assert mcp_server_mod._validated_cache_policy("off") == "off"
-    with pytest.raises(MCPServiceContractError, match="cache_policy"):
-        mcp_server_mod._validated_cache_policy("bad")
 
 
 def _paired_blast_services(
@@ -8712,7 +8642,6 @@ def _analyzed_clone_service(root: Path) -> CodeCloneMCPService:
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     return service
@@ -9639,7 +9568,6 @@ def test_mcp_service_branch_helpers_on_real_runs(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             changed_paths=("pkg/dup.py", "pkg/quality.py"),
             complexity_threshold=1,
             coupling_threshold=1,
@@ -9733,7 +9661,6 @@ def test_mcp_service_branch_helpers_on_real_runs(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     with pytest.raises(MCPServiceContractError):
@@ -9822,7 +9749,6 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     before_record = service._runs.resolve_any_root(str(before["run_id"]))
@@ -9972,14 +9898,12 @@ def test_mcp_service_compare_runs_marks_different_roots_incomparable(
         MCPAnalysisRequest(
             root=str(first_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     after = service.analyze_repository(
         MCPAnalysisRequest(
             root=str(second_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     after_record = service._runs.resolve_any_root(str(after["run_id"]))
@@ -10077,14 +10001,12 @@ def test_mcp_service_compare_runs_marks_different_settings_incomparable(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     after = service.analyze_repository(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             complexity_threshold=1,
         )
     )
@@ -10113,7 +10035,6 @@ def test_mcp_service_additional_projection_and_error_branches(
             MCPAnalysisRequest(
                 root=str(tmp_path),
                 respect_pyproject=False,
-                cache_policy="off",
             )
         )
 
@@ -10121,7 +10042,6 @@ def test_mcp_service_additional_projection_and_error_branches(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             changed_paths=("pkg/dup.py",),
             complexity_threshold=1,
             coupling_threshold=1,
@@ -10248,14 +10168,12 @@ def test_mcp_service_additional_projection_and_error_branches(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     second = service_other.analyze_repository(
         MCPAnalysisRequest(
             root=str(other_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     assert (
@@ -10277,7 +10195,6 @@ def test_mcp_service_additional_projection_and_error_branches(
         MCPAnalysisRequest(
             root=str(other_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     other_root.joinpath("pkg", "dup.py").write_text(
@@ -10288,7 +10205,6 @@ def test_mcp_service_additional_projection_and_error_branches(
         MCPAnalysisRequest(
             root=str(other_root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     previous_same_root = same_root_service._previous_run_for_root(
@@ -10778,7 +10694,6 @@ def test_mcp_service_metrics_diff_warning_and_projection_branches(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     diff = cast("dict[str, object]", summary["diff"])
@@ -15343,7 +15258,6 @@ def test_list_hotspots_reports_all_items_reviewed_empty_reason(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     hotspots_before = service.list_hotspots(
@@ -15867,7 +15781,6 @@ def _module_map_service(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             analysis_mode=analysis_mode,
         )
     )
@@ -16153,7 +16066,6 @@ def test_mcp_get_implementation_context_rejects_run_from_foreign_root(
         MCPAnalysisRequest(
             root=str(root_a),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     run_id = str(summary["run_id"])
@@ -17274,7 +17186,6 @@ def _dynamic_loading_context(
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="off",
             min_loc=1,
             min_stmt=1,
         )
@@ -17872,14 +17783,12 @@ def test_finish_resolves_a_collided_before_run_at_the_intents_own_root(
         MCPAnalysisRequest(
             root=str(root_a),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     before_b = service.analyze_repository(
         MCPAnalysisRequest(
             root=str(root_b),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     assert before_a["run_id"] == before_b["run_id"], (
@@ -17918,7 +17827,6 @@ def test_finish_resolves_a_collided_before_run_at_the_intents_own_root(
         MCPAnalysisRequest(
             root=str(root_a),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     assert str(after["run_id"]) != str(before_a["run_id"])
@@ -19519,7 +19427,6 @@ def _settlement_mcp_document(
             root=str(root),
             baseline_path=str(baseline),
             api_surface=True,
-            cache_policy="off",
             allow_external_artifacts=True,
         )
     )

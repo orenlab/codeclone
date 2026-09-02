@@ -29,7 +29,7 @@ The change-control workflow depends on three durable contracts:
 
 ```mermaid
 graph LR
-    A["analyze_repository<br/>(root, cache_policy)"] -->|run exists| B["start_controlled_change<br/>(root, scope, intent)"]
+    A["analyze_repository<br/>(root)"] -->|run exists| B["start_controlled_change<br/>(root, scope, intent)"]
     A -->|no run| B
     B -->|edit_allowed=true| C["Edit<br/>(within scope)"]
     B -->|status=queued| D["promote via<br/>manage_change_intent"]

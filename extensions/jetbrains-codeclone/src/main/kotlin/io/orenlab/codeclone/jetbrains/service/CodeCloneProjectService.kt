@@ -504,7 +504,6 @@ class CodeCloneProjectService(private val project: Project) : Disposable {
                         "analyze_repository",
                         buildJsonObject {
                             put("root", root)
-                            put("cache_policy", settings.config.cachePolicy)
                             for ((key, value) in analysis.overrides) {
                                 put(key, value)
                             }
@@ -517,7 +516,6 @@ class CodeCloneProjectService(private val project: Project) : Disposable {
                         buildJsonObject {
                             put("root", root)
                             put("git_diff_ref", settings.config.changedDiffRef)
-                            put("cache_policy", settings.config.cachePolicy)
                             for ((key, value) in analysis.overrides) {
                                 put(key, value)
                             }

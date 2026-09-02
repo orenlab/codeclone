@@ -197,18 +197,15 @@ AllowExternalArtifactsParam = Annotated[
     bool,
     Field(
         description=(
-            "Allow optional artifact paths (baseline_path, cache_path, "
-            "coverage_xml) to be absolute or outside the repository."
+            "Allow optional artifact paths (baseline_path, coverage_xml, "
+            "and the configured analysis cache path) to be absolute or "
+            "outside the repository."
         )
     ),
 ]
 MaxSizeMbParam = Annotated[
     int | None,
     Field(description="Max artifact size in megabytes."),
-]
-CachePolicyParam = Annotated[
-    str,
-    Field(description="reuse: read cache. off: skip cache. MCP read-only."),
 ]
 FilesParam = Annotated[
     list[str],

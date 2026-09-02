@@ -433,7 +433,6 @@ def _mcp_health(root: Path) -> dict[str, object]:
         MCPAnalysisRequest(
             root=str(root),
             respect_pyproject=False,
-            cache_policy="off",
         )
     )
     summary = service.get_run_summary()

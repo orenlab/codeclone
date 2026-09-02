@@ -23,10 +23,14 @@ ROOT_NOT_EXISTS: Final = "Repository root '{root}' does not exist."
 
 ROOT_NOT_DIRECTORY: Final = "Repository root '{root}' is not a directory."
 
-CACHE_POLICY_CLI_ONLY: Final = (
-    "cache_policy='refresh' is CLI-only. MCP accepts: reuse, off."
-)
 INVALID_RELATIVE_PATH: Final = "Invalid path '{value}' relative to '{root}': {error}"
+
+WITHDRAWN_TOOL_PARAMETER: Final = (
+    "{tool} no longer accepts {parameter}. Managing the analysis cache is operator "
+    "configuration, not a per-call policy: set cache_path and max_cache_size_mb "
+    "under [tool.codeclone] in pyproject.toml, or run the CLI. Withdrawn in CodeClone "
+    "2.1.0a2."
+)
 
 
 def invalid_choice(name: str, value: object, allowed: Collection[str]) -> str:

@@ -631,9 +631,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "or canonical reports."
             ),
             (
-                "baseline_path, cache_path, coverage_xml resolve under the scan "
-                "root by default; pass allow_external_artifacts=true for "
-                "absolute or out-of-repo paths (privileged)."
+                "baseline_path, coverage_xml, and the configured analysis "
+                "cache path resolve under the scan root by default; pass "
+                "allow_external_artifacts=true for absolute or out-of-repo "
+                "paths (privileged)."
             ),
             (
                 "Workspace intents under .codeclone/intents/ are "
