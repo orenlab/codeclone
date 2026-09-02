@@ -214,10 +214,13 @@ HEALTH_ALGORITHM_REVISION: Final = "1"
 # lane availability fold into an exit verdict.
 GATE_ALGORITHM_REVISION: Final = "1"
 OBSERVER_VOCABULARY_VERSION: Final = "3"
-# Version "2" adds two life proofs, and nothing else moves. (1) A PEP 484
-# explicit re-export - ``from x import y as y``, the ``as``-SAME-name
-# spelling - livens its resolved target on its own; static ``__all__``
-# membership remains the second, independent, stronger explicit contract.
+# Version "2" names three changes to what counts as LIVE and to what the
+# evidence lane may claim as the cause.
+#
+# (A) Two life proofs. (1) A PEP 484 explicit re-export -
+# ``from x import y as y``, the ``as``-SAME-name spelling - livens its
+# resolved target on its own; static ``__all__`` membership remains the
+# second, independent, stronger explicit contract.
 # The proof fires only at module scope in a runtime-reachable branch of a
 # production file: a renaming import is not a re-export, a
 # ``TYPE_CHECKING``-guarded import livens nothing, and a dynamically built
@@ -229,37 +232,42 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # ``pluggy.HookimplMarker`` identity through module-scope assignments and
 # import aliases; the decorator NAME alone is never evidence.
 #
-# Version "3" corrects what an evidence row MEANS, and in one arm what counts
-# as live. (1) The wildcard re-export arm now asks the TARGET module what
-# ``from <target> import *`` binds - its own ``__all__`` when it declares one -
-# carried per symbol as ``DeadCandidate.star_import_bound``. It previously
-# admitted any public class in a wildcard target that the project referenced,
-# with a leading-underscore naming convention standing in for the language
-# rule, so a class the target's ``__all__`` excludes was rooted through a
-# binding that does not exist at runtime. This is the arm that moves verdicts:
-# a member reachable only through its defining module is now dead. (2) An
-# ``@overload`` stub no longer roots the symbol it declares - every stub shares
-# the implementation's qualname, so admitting one let a symbol stand as its own
-# external-decorator evidence; a symbol whose ONLY root was its own stub
-# therefore moves to dead. (3) An export root is emitted only for a candidate
-# the liveness owner does not already hold live, measured from
-# ``classify_liveness`` before any export root exists. The old test compared
-# qualnames alone, which an attribute call never reaches, so it could not match
-# an attribute-called method in any configuration. (3) moves no verdict for the
-# candidate it withholds a root from: the evidence that made that candidate
-# already-live is the same evidence the classifier reads.
+# (B) An evidence row names its own cause. An export root is emitted only for
+# a candidate the liveness owner does not already hold live, measured from
+# ``classify_liveness`` before any export root exists. Comparing qualnames
+# alone could not match an attribute-called method in ANY configuration - an
+# ``obj.m()`` call reaches the decision as a bare name - so the lane recorded
+# "live because exported" over symbols a call site held live. An ``@overload``
+# stub no longer roots the symbol it declares either: every stub shares the
+# implementation's qualname, so admitting one let a symbol stand as its own
+# external-decorator evidence, and a symbol whose ONLY root was its own stub
+# is dead.
 #
-# What "3" does NOT move: the verdict vocabulary, the ``__all__``-plus-package
-# named export chain (Y2), the rule-3 abstention for an unresolved external
-# base, and the two life proofs version "2" added - both still hold.
+# (C) The wildcard re-export arm reads the language rule instead of a naming
+# convention. ``from <target> import *`` binds what the TARGET's own
+# ``__all__`` lists, carried per symbol as ``DeadCandidate.star_import_bound``.
+# A leading-underscore test previously stood in for that rule, so a class the
+# target's ``__all__`` excludes was rooted through a binding that does not
+# exist at runtime; a member reachable only through its defining module is
+# dead.
+#
+# Unchanged by all three: the verdict vocabulary, the ``__all__``-plus-package
+# named export chain (Y2), and the rule-3 abstention for an unresolved
+# external base.
 #
 # Bump this constant whenever what counts as LIVE changes; verdicts across
-# versions are not comparable. Cached liveness inputs move with it by
-# construction: the constant is an input of the module-dependent cache profile
+# versions are not comparable. A generation is SPENT WHEN IT SHIPS, not when
+# it is written: while a generation has never reached a release, no artifact
+# anywhere carries it, there is nothing for a later reading to be incomparable
+# against, and the definition is refined in place under the same number. The
+# number moves once the semantics it names have shipped.
+#
+# Cached liveness inputs move with a bump by construction: the constant is
+# an input of the module-dependent cache reuse profile
 # (codeclone/cache/reuse.py), so a bump misses exactly the lane that
 # carries ``referenced_qualnames``, dead candidates and live-root reasons,
 # and never touches the neutral fingerprint lane.
-LIVENESS_POLICY_VERSION: Final = "3"
+LIVENESS_POLICY_VERSION: Final = "2"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
 # Generation of the adoption-coverage policy: WHAT COUNTS as an annotated
 # parameter (the receiver of a non-static method is not one; ``*args`` and
