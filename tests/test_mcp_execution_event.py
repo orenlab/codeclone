@@ -41,6 +41,7 @@ from codeclone.surfaces.mcp._session_shared import (
     MCPAnalysisRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp._workspace_hygiene import DirtySnapshot, DirtySnapshotEntry
@@ -141,8 +142,8 @@ def test_two_executions_of_one_semantic_report_are_both_retained(
     _edit_comment(tmp_path)
     _run_b, record_b = _analyze(service, tmp_path)
     # 1. Premise: the edit was analysis-invariant.
-    assert _evaluation_digest(record_a.report_document) == _evaluation_digest(
-        record_b.report_document
+    assert _evaluation_digest(record_a.served_report) == _evaluation_digest(
+        record_b.served_report
     )
     # 2. One semantic identity, by design.
     assert record_a.run_id == record_b.run_id
@@ -271,8 +272,8 @@ def test_two_executions_of_one_unchanged_tree_share_the_report_and_the_witness(
         record_a.execution.execution_event_id != record_b.execution.execution_event_id
     )
     # The execution id is not part of the report's identity.
-    assert _evaluation_digest(record_a.report_document) == _evaluation_digest(
-        record_b.report_document
+    assert _evaluation_digest(record_a.served_report) == _evaluation_digest(
+        record_b.served_report
     )
 
 
@@ -315,13 +316,13 @@ def _record(
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document={},
+        served_report=build_served_projection({}),
         summary={"run_id": run_id},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

@@ -161,22 +161,28 @@ def _risk_note_report_document() -> dict[str, object]:
     Metric families live under ``metrics.families`` and locate themselves with
     ``relative_path``; there is no ``metrics.design`` family and no flat
     ``metrics.security_surfaces`` key.
+
+    The declared thresholds appear under BOTH spellings the builder emits, from
+    one value here as from one value there: ``meta.analysis_thresholds`` is the
+    producer and ``source_facts.analysis_contract`` is built from it. A fixture
+    carrying only one of them would let a reader of the other look correct
+    against a document no run produces.
     """
 
-    return {
-        "source_facts": {
-            "analysis_contract": {
-                "design_findings": {
-                    # Deliberately not the shipped default: a threshold that
-                    # matched the default would keep a hard-coded reader green.
-                    "complexity": {
-                        "metric": "cyclomatic_complexity",
-                        "operator": ">",
-                        "value": 7,
-                    }
-                }
+    thresholds = {
+        "design_findings": {
+            # Deliberately not the shipped default: a threshold that matched
+            # the default would keep a hard-coded reader green.
+            "complexity": {
+                "metric": "cyclomatic_complexity",
+                "operator": ">",
+                "value": 7,
             }
-        },
+        }
+    }
+    return {
+        "meta": {"analysis_thresholds": thresholds},
+        "source_facts": {"analysis_contract": thresholds},
         "metrics": {
             "families": {
                 "complexity": {

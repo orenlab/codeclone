@@ -10,6 +10,7 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from uuid import UUID
 
+from codeclone.api.served_projection import ServedReportProjection
 from codeclone.baseline.container import build_container
 from codeclone.metrics.health import HealthInputs, compute_health, health_report_fields
 from codeclone.models import (
@@ -35,6 +36,7 @@ from codeclone.report.gates.evaluator import (
     MetricGateConfig,
     evaluate_gates,
 )
+from codeclone.utils.coerce import as_mapping, as_sequence
 from codeclone.utils.mapping_paths import section
 
 from ._ast_metrics_helpers import module_registry_context
@@ -156,6 +158,20 @@ def _gate_policy_health_family() -> dict[str, object]:
     )
 
 
+def declared_enabled_lanes(document: Mapping[str, object]) -> tuple[str, ...]:
+    """The observation lanes one sealed document declares.
+
+    The gate evaluator takes its lanes from its caller now; a fixture that
+    built a document and then typed the lanes beside it would be asserting its
+    own opinion of what that document observed.
+    """
+
+    lanes = as_mapping(
+        as_mapping(document.get("source_facts")).get("observation_contract")
+    ).get("enabled_lanes")
+    return tuple(str(lane) for lane in as_sequence(lanes))
+
+
 def build_gate_policy_report_document(
     *,
     fail_health: int = -1,
@@ -207,7 +223,13 @@ def build_gate_policy_report_document(
         )
 
     unevaluated = _build(GateResult(exit_code=0, reasons=()))
-    return _build(evaluate_gates(report_document=unevaluated, config=gate_config))
+    return _build(
+        evaluate_gates(
+            report_document=unevaluated,
+            enabled_lanes=declared_enabled_lanes(unevaluated),
+            config=gate_config,
+        )
+    )
 
 
 def build_gate_policy_disagreement_pair() -> tuple[
@@ -459,4 +481,24 @@ def build_maximal_report_document() -> dict[str, object]:
                 suppression_source="project_config",
             ),
         ),
+    )
+
+
+def served_projection_over(
+    projection: ServedReportProjection,
+    sections: Mapping[str, object],
+) -> ServedReportProjection:
+    """The same index, over sections a test has rewritten.
+
+    ``build_served_projection`` indexes a PROOF and refuses to read the lanes
+    an index withholds, so a test that doctors a served run cannot round-trip
+    through it. It states the two facts the index carries -- the contract and
+    the proof it names -- explicitly instead, which is also the honest reading
+    of what such a test is doing: standing up a different run, not deriving one.
+    """
+
+    return ServedReportProjection(
+        sections,
+        contract=projection.contract,
+        indexed_report_id=projection.indexed_report_id,
     )

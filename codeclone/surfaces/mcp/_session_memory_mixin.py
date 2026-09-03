@@ -661,7 +661,7 @@ class _MCPSessionMemoryMixin:
         config = resolve_memory_config(root_path)
         sync_payload = execute_mcp_memory_sync(
             root_path=root_path,
-            report_document=record.report_document,
+            report_document=record.served_report,
             config=config,
             trigger="explicit",
             run_id=record.run_id,
@@ -684,7 +684,7 @@ class _MCPSessionMemoryMixin:
             return None
         sync_payload = execute_mcp_memory_sync(
             root_path=root_path,
-            report_document=record.report_document,
+            report_document=record.served_report,
             config=config,
             trigger="auto",
             run_id=record.run_id,

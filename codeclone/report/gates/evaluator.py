@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast, get_args
 
@@ -885,10 +885,22 @@ def evaluate_gates(
     *,
     report_document: Mapping[str, object],
     config: MetricGateConfig,
+    enabled_lanes: Sequence[str],
     metrics_diff: object | None = None,
     clone_new_count: int | None = None,
     clone_total: int | None = None,
 ) -> GateResult:
+    """Evaluate the gates over one report's evaluated sections.
+
+    ``enabled_lanes`` is stated by the caller, never dug out of the document.
+    The lanes live in ``source_facts`` -- part of the observation record that
+    the report carries as proof and that a served projection deliberately does
+    not -- and a document read would answer "no lanes enabled" for the
+    projection, publishing an unsupported verdict from a silent miss. Making
+    it a parameter leaves one spelling for both callers instead of a fallback
+    branch that only one of them ever takes.
+    """
+
     state = _gate_state_from_report_document(
         report_document=report_document,
         metrics_diff=metrics_diff,
@@ -903,16 +915,11 @@ def evaluate_gates(
         for row in (_as_mapping(item),)
         if str(row.get("name", "")).strip()
     }
-    source_facts = _as_mapping(report_document.get("source_facts"))
-    observation_contract = _as_mapping(source_facts.get("observation_contract"))
     return evaluate_gate_state(
         state=state,
         config=config,
         lane_trust=lane_trust,
-        enabled_lanes=tuple(
-            str(item)
-            for item in _as_sequence(observation_contract.get("enabled_lanes"))
-        ),
+        enabled_lanes=tuple(str(lane) for lane in enabled_lanes),
     )
 
 

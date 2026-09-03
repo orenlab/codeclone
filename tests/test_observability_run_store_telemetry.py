@@ -29,6 +29,7 @@ from codeclone.surfaces.mcp._session_shared import (
     MCPAnalysisRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
+    build_served_projection,
     mint_execution_event_id,
 )
 
@@ -57,13 +58,13 @@ def _record(root: Path, run_id: str) -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document={},
+        served_report=build_served_projection({}),
         summary={"run_id": run_id},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

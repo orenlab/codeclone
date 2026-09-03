@@ -572,9 +572,14 @@ def extract_risk_notes(
 ) -> RecordBatch:
     batch, now, metrics = _new_metrics_batch(report_document)
     families = as_mapping(metrics.get("families"))
+    # ``meta.analysis_thresholds`` and ``source_facts.analysis_contract`` are
+    # one value with two spellings: the builder writes the second FROM the
+    # first. Ingest reads the one a served projection also carries, so the note
+    # says the same number whether it was extracted from the whole proof (CLI)
+    # or from the index the session holds (MCP).
     threshold = section(
         report_document,
-        "source_facts.analysis_contract.design_findings.complexity",
+        "meta.analysis_thresholds.design_findings.complexity",
     ).get("value")
     for path, item in _worst_high_complexity_per_path(families):
         value = item.get("cyclomatic_complexity")

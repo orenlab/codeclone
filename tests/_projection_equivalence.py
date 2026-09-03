@@ -100,7 +100,11 @@ from codeclone.report.meta import (
 from codeclone.utils.coerce import as_mapping as _as_mapping
 from codeclone.utils.coerce import as_sequence as _as_sequence
 
-from .test_report_document_reads import report_document_reads
+from .test_report_document_reads import (
+    _ANCHORS,
+    _SERVED_ANCHORS,
+    report_document_reads,
+)
 
 #: One semantic assertion, canonicalized as a tuple of strings so that two
 #: readers can only agree by asserting the same thing, never by agreeing on
@@ -1592,11 +1596,18 @@ def consumer_reads(
     mapping with one of those names contributes paths that are not document
     reads at all -- filtering by real sections removes them without asking
     anyone to judge a name.
+
+    Both anchor families are scanned. A consumer reads the same key space
+    whether it holds the sealed proof or the served index the run store keeps,
+    and an inventory that knew only the first would have reported that the MCP
+    consumers read nothing at all the moment the store stopped holding the
+    proof -- an empty inventory that no assertion here can tell from a
+    consumer that genuinely reads no section.
     """
 
     paths = {
         path
-        for _line, path in report_document_reads(source)
+        for _line, path in report_document_reads(source, _ANCHORS | _SERVED_ANCHORS)
         if path.split(".", 1)[0] in sections
     }
     return ConsumerReads(

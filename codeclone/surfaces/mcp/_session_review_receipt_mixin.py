@@ -151,7 +151,7 @@ class _MCPSessionReviewReceiptMixin:
             "structural_delta": structural_delta,
             "human_decision_points": human_decisions,
             "claims_not_made": derive_claims_not_made(
-                record.report_document,
+                record.served_report,
                 unverified_paths=unverified_paths,
             ),
             "health": self._receipt_health(record),
@@ -298,7 +298,7 @@ class _MCPSessionReviewReceiptMixin:
         return {
             "report_digest": self._receipt_digest(record),
             "report_schema_version": REPORT_SCHEMA_VERSION,
-            "baseline_status": derive_baseline_status(record.report_document),
+            "baseline_status": derive_baseline_status(record.served_report),
             "run_id": _helpers._short_run_id(record.run_id),
             "root": str(record.root),
         }
@@ -315,8 +315,8 @@ class _MCPSessionReviewReceiptMixin:
         algorithm in use.
         """
 
-        value = _helpers._report_digest(record.report_document)
-        algorithm = _helpers._report_digest_algorithm(record.report_document)
+        value = _helpers._report_digest(record.served_report)
+        algorithm = _helpers._report_digest_algorithm(record.served_report)
         return f"{algorithm}:{value}"
 
     def _receipt_generated_at(self, record: MCPRunRecord) -> str:
@@ -328,7 +328,7 @@ class _MCPSessionReviewReceiptMixin:
         falling through it.
         """
 
-        runtime = section(record.report_document, "meta.runtime")
+        runtime = section(record.served_report, "meta.runtime")
         value = str(runtime.get("report_generated_at_utc", "")).strip()
         if value:
             return value
@@ -573,7 +573,7 @@ class _MCPSessionReviewReceiptMixin:
         regressions: int,
         changed_files: int,
     ) -> bool:
-        meta = _helpers._as_mapping(record.report_document.get("meta"))
+        meta = _helpers._as_mapping(record.served_report.get("meta"))
         baseline = _helpers._as_mapping(meta.get("baseline"))
         return str(baseline.get("status", "")).strip() == "updated" and (
             regressions > 0 or changed_files > 0

@@ -18,6 +18,7 @@ from codeclone.surfaces.mcp._session_runtime import (
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
     MCPRunRootMismatchError,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -36,13 +37,13 @@ def _run_record(root: Path, run_id: str = "security-run-1234") -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document={"findings": {"groups": {}}},
+        served_report=build_served_projection({"findings": {"groups": {}}}),
         summary={"run_id": run_id, "health": {"score": 100, "grade": "A"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

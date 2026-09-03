@@ -148,7 +148,7 @@ def _analyze_document(
     )
     run_id = str(payload["run_id"])
     record = service._runs.get_for_root(run_id, root=root)
-    return run_id, record.report_document
+    return run_id, record.served_report
 
 
 def _moved_families(

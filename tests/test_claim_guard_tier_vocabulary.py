@@ -48,8 +48,12 @@ import pytest
 
 import codeclone.surfaces.mcp._session_claim_guard_mixin as mcp_claim_session_mod
 from codeclone.contracts import TIER_STATE_COMPLETE, TIER_STATE_DISABLED
-from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
+from codeclone.surfaces.mcp._session_shared import (
+    MCPAnalysisRequest,
+    MCPRunRecord,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
+from tests._report_fixtures import served_projection_over
 
 _COMPLETE_RUN_ID = "claimguardtiercomplete0001"
 
@@ -105,7 +109,7 @@ def _analyzed(root: Path) -> tuple[CodeCloneMCPService, MCPRunRecord]:
 
 def _tier_states(record: MCPRunRecord) -> dict[str, str]:
     return dict(
-        mcp_claim_session_mod._tier_states_from_report_document(record.report_document)
+        mcp_claim_session_mod._tier_states_from_report_document(record.served_report)
     )
 
 
@@ -117,8 +121,8 @@ def _with_completed_tiers(record: MCPRunRecord) -> MCPRunRecord:
     must utter one.
     """
 
-    document = copy.deepcopy(record.report_document)
-    findings = cast("dict[str, object]", document["findings"])
+    sections = copy.deepcopy(dict(record.served_report))
+    findings = cast("dict[str, object]", sections["findings"])
     groups = cast("dict[str, object]", findings["groups"])
     for container in groups.values():
         if not isinstance(container, dict):
@@ -126,7 +130,11 @@ def _with_completed_tiers(record: MCPRunRecord) -> MCPRunRecord:
         if str(container.get("tier", "")).strip():
             container["state"] = TIER_STATE_COMPLETE
             container["count"] = 0
-    return replace(record, run_id=_COMPLETE_RUN_ID, report_document=document)
+    return replace(
+        record,
+        run_id=_COMPLETE_RUN_ID,
+        served_report=served_projection_over(record.served_report, sections),
+    )
 
 
 def _validate(

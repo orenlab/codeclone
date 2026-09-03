@@ -41,6 +41,7 @@ from codeclone.report.messages import gates as gate_msgs
 from codeclone.surfaces.cli.summary import build_metrics_snapshot
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -48,6 +49,7 @@ from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
     MCPGateRequest,
     MCPRunRecord,
+    _reachable_qualnames,
 )
 from codeclone.ui_messages import fmt_metrics_dead_code
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
@@ -638,6 +640,7 @@ def test_report_document_gate_reads_the_statement_lane_it_already_carries() -> N
 
     result = evaluate_gates(
         report_document=document,
+        enabled_lanes=("dead_code",),
         config=_dead_code_gate_config(
             fail_dead_code=True,
             fail_on_unresolved_dead_code=False,
@@ -941,13 +944,13 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document=report_document,
+        served_report=build_served_projection(report_document),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=1,
         block_clones_count=0,
-        project_metrics=project_metrics,
+        reachable_qualnames=_reachable_qualnames(project_metrics),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset({"clone:function:new"}),
@@ -972,6 +975,7 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
 
     evaluator_result = evaluate_gates(
         report_document=report_document,
+        enabled_lanes=TEST_OBSERVATION_BUNDLE.contract.enabled_lanes,
         config=config,
         metrics_diff=metrics_diff,
         clone_new_count=1,
@@ -1186,6 +1190,7 @@ def test_report_document_gate_reads_the_population_it_already_carries() -> None:
             },
         }
 
+    enabled_lanes = ("dependencies",)
     config = MetricGateConfig(
         fail_complexity=-1,
         fail_coupling=-1,
@@ -1198,6 +1203,7 @@ def test_report_document_gate_reads_the_population_it_already_carries() -> None:
 
     refused = evaluate_gates(
         report_document=_document("unmeasured"),
+        enabled_lanes=enabled_lanes,
         config=config,
     )
     _assert_gate(
@@ -1208,6 +1214,7 @@ def test_report_document_gate_reads_the_population_it_already_carries() -> None:
 
     measured = evaluate_gates(
         report_document=_document("complete_nonempty"),
+        enabled_lanes=enabled_lanes,
         config=config,
     )
     _assert_gate(measured, exit_code=0, reasons=())

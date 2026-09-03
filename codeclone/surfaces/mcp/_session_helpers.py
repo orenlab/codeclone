@@ -1034,7 +1034,7 @@ def _summary_diff_payload(summary: Mapping[str, object]) -> dict[str, object]:
 
 
 def _summary_coverage_join_payload(record: MCPRunRecord) -> dict[str, object]:
-    metrics = _as_mapping(record.report_document.get("metrics"))
+    metrics = _as_mapping(record.served_report.get("metrics"))
     families = _as_mapping(metrics.get("families"))
     coverage_join = _as_mapping(families.get("coverage_join"))
     summary = _as_mapping(coverage_join.get("summary"))
@@ -1066,7 +1066,7 @@ def _summary_coverage_join_payload(record: MCPRunRecord) -> dict[str, object]:
 def _summary_security_surfaces_payload(record: MCPRunRecord) -> dict[str, object]:
     if _metrics_skipped_for_summary(record.summary):
         return _metrics_skipped_payload()
-    metrics = _as_mapping(record.report_document.get("metrics"))
+    metrics = _as_mapping(record.served_report.get("metrics"))
     families = _as_mapping(metrics.get("families"))
     security_surfaces = _as_mapping(families.get("security_surfaces"))
     summary = _as_mapping(security_surfaces.get("summary"))

@@ -77,6 +77,7 @@ from codeclone.report.renderers.sarif import render_sarif_report_document
 from codeclone.report.renderers.text import render_text_report_document
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -215,25 +216,27 @@ def _service_with_tiers(tmp_path: Path, state: str) -> CodeCloneMCPService:
         root=tmp_path,
         request=MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False),
         comparison_settings=(),
-        report_document={
-            "findings": {
-                "summary": {"total": 0},
-                "groups": {
-                    "clones": {"functions": [], "blocks": [], "segments": []},
-                    "structural": {"groups": []},
-                    "dead_code": {"groups": []},
-                    "design": {"groups": []},
-                    "authority": {"groups": []},
-                    **_tier_containers(state=state),
-                },
+        served_report=build_served_projection(
+            {
+                "findings": {
+                    "summary": {"total": 0},
+                    "groups": {
+                        "clones": {"functions": [], "blocks": [], "segments": []},
+                        "structural": {"groups": []},
+                        "dead_code": {"groups": []},
+                        "design": {"groups": []},
+                        "authority": {"groups": []},
+                        **_tier_containers(state=state),
+                    },
+                }
             }
-        },
+        ),
         summary={"run_id": "tier", "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

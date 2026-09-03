@@ -55,6 +55,7 @@ import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
 from codeclone.api.comparison import foreign_interpreter_provenance
+from codeclone.api.served_projection import ServedReportProjection
 from codeclone.audit import DEFAULT_AUDIT_PATH, resolve_audit_path
 from codeclone.audit.events import AuditEvent
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
@@ -72,6 +73,7 @@ from codeclone.models import FileStat, LaneTrust, MetricsDiff
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
     _BufferConsole,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -90,6 +92,7 @@ from codeclone.utils import coerce as _coerce
 from tests import test_baseline_lane_degradation as lane_degradation
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests._report_access import _dict_at
+from tests._report_fixtures import served_projection_over
 from tests.memory_fixtures import cli_memory_repo, tool_calls_named_in
 from tests.test_cli_inprocess import _write_native_baseline
 
@@ -234,13 +237,13 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document={},
+        served_report=build_served_projection({}),
         summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -258,49 +261,51 @@ def test_check_authority_returns_active_canonical_findings(tmp_path: Path) -> No
     service = CodeCloneMCPService(history_limit=4)
     record = replace(
         _dummy_run_record(tmp_path, "authority1234567890"),
-        report_document={
-            "findings": {
-                "summary": {"total": 1},
-                "groups": {
-                    "clones": {"functions": [], "blocks": [], "segments": []},
-                    "structural": {"groups": []},
-                    "dead_code": {"groups": []},
-                    "design": {"groups": []},
-                    "authority": {
-                        "groups": [
-                            {
-                                "id": "authority:example.contract/v1:abc",
-                                "family": "authority",
-                                "category": "owner_bypass",
-                                "kind": "authority_violation",
-                                "severity": "warning",
-                                "confidence": "high",
-                                "priority": 2.0,
-                                "count": 1,
-                                "novelty": "unavailable",
-                                "source_scope": {
-                                    "dominant_kind": "production",
-                                    "impact_scope": "runtime",
-                                },
-                                "spread": {"files": 1, "functions": 1},
-                                "items": [
-                                    {
-                                        "relative_path": "pkg/mod.py",
-                                        "qualname": "pkg.mod:shadow",
-                                        "start_line": 10,
-                                        "end_line": 12,
-                                    }
-                                ],
-                                "facts": {
-                                    "contract_id": "example.contract/v1",
-                                    "canonical_owner": "pkg.mod:owner",
-                                },
-                            }
-                        ]
+        served_report=build_served_projection(
+            {
+                "findings": {
+                    "summary": {"total": 1},
+                    "groups": {
+                        "clones": {"functions": [], "blocks": [], "segments": []},
+                        "structural": {"groups": []},
+                        "dead_code": {"groups": []},
+                        "design": {"groups": []},
+                        "authority": {
+                            "groups": [
+                                {
+                                    "id": "authority:example.contract/v1:abc",
+                                    "family": "authority",
+                                    "category": "owner_bypass",
+                                    "kind": "authority_violation",
+                                    "severity": "warning",
+                                    "confidence": "high",
+                                    "priority": 2.0,
+                                    "count": 1,
+                                    "novelty": "unavailable",
+                                    "source_scope": {
+                                        "dominant_kind": "production",
+                                        "impact_scope": "runtime",
+                                    },
+                                    "spread": {"files": 1, "functions": 1},
+                                    "items": [
+                                        {
+                                            "relative_path": "pkg/mod.py",
+                                            "qualname": "pkg.mod:shadow",
+                                            "start_line": 10,
+                                            "end_line": 12,
+                                        }
+                                    ],
+                                    "facts": {
+                                        "contract_id": "example.contract/v1",
+                                        "canonical_owner": "pkg.mod:owner",
+                                    },
+                                }
+                            ]
+                        },
                     },
-                },
+                }
             }
-        },
+        ),
     )
     service._runs.register(record)
 
@@ -497,7 +502,7 @@ def _blast_radius_run_record(
 ) -> MCPRunRecord:
     return replace(
         _dummy_run_record(root, run_id),
-        report_document=_blast_radius_report_document(digest),
+        served_report=build_served_projection(_blast_radius_report_document(digest)),
     )
 
 
@@ -613,13 +618,15 @@ def _patch_contract_run_record(
     return replace(
         _dummy_run_record(root, run_id),
         request=request or MCPAnalysisRequest(root=str(root), respect_pyproject=False),
-        report_document=_patch_contract_report_document(
-            digest=digest,
-            include_regression=include_regression,
-            complexity=complexity,
-            baseline_status=baseline_status,
-            regression_path=regression_path,
-            complexity_path=complexity_path,
+        served_report=build_served_projection(
+            _patch_contract_report_document(
+                digest=digest,
+                include_regression=include_regression,
+                complexity=complexity,
+                baseline_status=baseline_status,
+                regression_path=regression_path,
+                complexity_path=complexity_path,
+            )
         ),
         summary={"run_id": run_id, "health": {"score": health, "grade": "B"}},
         func_clones_count=2 if include_regression else 1,
@@ -1107,8 +1114,8 @@ def _mapping_child(
     return cast("dict[str, object]", payload[key])
 
 
-def _latest_report_document(service: CodeCloneMCPService) -> Mapping[str, object]:
-    return service._runs.records()[-1].report_document
+def _latest_served_report(service: CodeCloneMCPService) -> Mapping[str, object]:
+    return service._runs.records()[-1].served_report
 
 
 def test_mcp_untrusted_baseline_reports_clone_novelty_as_unavailable(
@@ -1127,7 +1134,7 @@ def test_mcp_untrusted_baseline_reports_clone_novelty_as_unavailable(
         )
     )
 
-    findings = _mapping_child(_latest_report_document(service), "findings")
+    findings = _mapping_child(_latest_served_report(service), "findings")
     document_clones = _mapping_child(_mapping_child(findings, "summary"), "clones")
 
     assert _mapping_child(summary, "baseline")["trusted"] is False
@@ -3781,7 +3788,7 @@ def _memory_sync_service_with_run(
     service = CodeCloneMCPService(history_limit=2)
     record = replace(
         _dummy_run_record(root, run_id),
-        report_document=report_document,
+        served_report=build_served_projection(report_document),
     )
     service._runs.register(record)
     return service, root
@@ -4307,7 +4314,7 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
     record = service._runs.resolve_any_root(run_id)
     finding_groups = cast(
         "dict[str, object]",
-        cast("dict[str, object]", record.report_document["findings"])["groups"],
+        cast("dict[str, object]", record.served_report["findings"])["groups"],
     )
     design_groups = cast(
         "list[dict[str, object]]",
@@ -4631,7 +4638,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
     assert security_surfaces_page["family"] == "security_surfaces"
     report_record = service._runs.resolve_any_root(run_id)
     assert report_record is not None
-    report_document = report_record.report_document
+    report_document = report_record.served_report
     metrics_map = cast("dict[str, object]", report_document["metrics"])
     families_map = cast("dict[str, object]", metrics_map["families"])
     overloaded_modules_family = cast(
@@ -4758,7 +4765,7 @@ def test_withdrawn_report_resource_answers_with_a_typed_in_band_refusal(
 ) -> None:
     """The whole-report resource is withdrawn, and the withdrawal is a typed answer.
 
-    ``report.json`` returned ``record.report_document`` verbatim — the same
+    ``report.json`` returned ``record.served_report`` verbatim — the same
     unbounded document the ``all`` section was withdrawn for, reaching tens of
     millions of tokens on a large repository. A caller that still asks for it
     has asked for something that existed and was retracted, so the answer has
@@ -6234,7 +6241,7 @@ def _rekeyed_suppressed_bucket_run_record(root: Path, bucket: str) -> MCPRunReco
     suppressed = cast("dict[str, object]", clones["suppressed"])
     clones["suppressed"] = {bucket: suppressed["functions"]}
     record = _dummy_run_record(root, "abcdef1234567890")
-    return replace(record, report_document=document)
+    return replace(record, served_report=build_served_projection(document))
 
 
 def test_blast_radius_reads_the_suppressed_container_through_one_law(
@@ -7973,7 +7980,7 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
     )
     path_record = replace(
         before,
-        report_document=report_document,
+        served_report=build_served_projection(report_document),
     )
     path_index = service._finding_path_index(path_record)
     assert "" not in path_index
@@ -8595,19 +8602,21 @@ def test_mcp_session_helper_private_edges(
     assert mcp_helpers_mod._normal_location_payload({}) == {}
     record = replace(
         _dummy_run_record(tmp_path, "helper1234567890"),
-        report_document={
-            "metrics": {
-                "families": {
-                    "coverage_join": {
-                        "summary": {
-                            "status": "ok",
-                            "source": " coverage.xml ",
-                            "invalid_reason": " ",
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "coverage_join": {
+                            "summary": {
+                                "status": "ok",
+                                "source": " coverage.xml ",
+                                "invalid_reason": " ",
+                            }
                         }
                     }
                 }
             }
-        },
+        ),
     )
     assert mcp_helpers_mod._summary_coverage_join_payload(record)["source"] == (
         "coverage.xml"
@@ -8846,7 +8855,7 @@ def test_mcp_service_validate_review_claims_contract(tmp_path: Path) -> None:
     record = _blast_radius_run_record(tmp_path, run_id="claimguard1234567890")
     service._runs.register(record)
     before_state_keys = set(service.__dict__)
-    before_report = copy.deepcopy(record.report_document)
+    before_report = copy.deepcopy(record.served_report)
 
     text = (
         "clone:function:g2 is a new regression. "
@@ -8861,7 +8870,7 @@ def test_mcp_service_validate_review_claims_contract(tmp_path: Path) -> None:
     assert first["valid"] is False
     violations = cast("list[dict[str, object]]", first["violations"])
     assert {str(item["pattern"]) for item in violations} == {"P-1", "P-2", "P-3"}
-    assert record.report_document == before_report
+    assert record.served_report == before_report
     assert set(service.__dict__) == before_state_keys
 
 
@@ -9094,7 +9103,7 @@ def test_mcp_service_create_review_receipt_minimal_and_deterministic(
         "items": [],
     }
     assert first["verdict"] == "incomplete"
-    assert copy.deepcopy(record.report_document) == record.report_document
+    assert copy.deepcopy(record.served_report) == record.served_report
 
     compact = service.create_review_receipt(
         run_id="receipt12",
@@ -9285,11 +9294,13 @@ def test_mcp_service_review_receipt_edge_helpers(tmp_path: Path) -> None:
     # document has answered since the digest-hierarchy document landed.
     runtime_generated = replace(
         record,
-        report_document={"meta": {"runtime": {"report_generated_at_utc": "2026-top"}}},
+        served_report=build_served_projection(
+            {"meta": {"runtime": {"report_generated_at_utc": "2026-top"}}}
+        ),
     )
     fallback_generated = replace(
         record,
-        report_document={},
+        served_report=build_served_projection({}),
         summary={**record.summary, "analysis_started_at_utc": "2026-fallback"},
     )
     assert service._receipt_generated_at(runtime_generated) == "2026-top"
@@ -9350,16 +9361,16 @@ def _receipt_run_without_gate_relevant_findings(
         complexity=6,
         health=health,
     )
-    report_document = copy.deepcopy(record.report_document)
-    findings = cast("dict[str, object]", report_document["findings"])
+    sections = copy.deepcopy(dict(record.served_report))
+    findings = cast("dict[str, object]", sections["findings"])
     groups = cast("dict[str, object]", findings["groups"])
     clones = cast("dict[str, object]", groups["clones"])
     clones["functions"] = []
-    meta = cast("dict[str, object]", report_document["meta"])
+    meta = cast("dict[str, object]", sections["meta"])
     meta["runtime"] = {"report_generated_at_utc": generated_at}
     return replace(
         record,
-        report_document=report_document,
+        served_report=served_projection_over(record.served_report, sections),
         func_clones_count=0,
     )
 
@@ -10271,66 +10282,68 @@ def test_mcp_service_additional_projection_and_error_branches(
             cohesion_threshold=4,
         ),
         comparison_settings=(),
-        report_document={
-            "metrics": {
-                "families": {
-                    "complexity": {
-                        "items": [
-                            {
-                                "qualname": "pkg.quality:hot",
-                                "relative_path": "pkg/quality.py",
-                                "start_line": 1,
-                                "end_line": 5,
-                                "cyclomatic_complexity": 3,
-                                "nesting_depth": 1,
-                                "risk": "medium",
-                            }
-                        ]
-                    },
-                    "coupling": {
-                        "items": [
-                            {
-                                "qualname": "pkg.quality:coupled",
-                                "relative_path": "pkg/quality.py",
-                                "start_line": 1,
-                                "end_line": 5,
-                                "cbo": 2,
-                                "risk": "medium",
-                                "coupled_classes": ["A"],
-                            }
-                        ]
-                    },
-                    "cohesion": {
-                        "items": [
-                            {
-                                "qualname": "pkg.quality:cohesive",
-                                "relative_path": "pkg/quality.py",
-                                "start_line": 1,
-                                "end_line": 5,
-                                "lcom4": 2,
-                                "risk": "medium",
-                                "method_count": 2,
-                                "instance_var_count": 2,
-                            }
-                        ]
-                    },
-                }
-            },
-            "findings": {
-                "groups": {
-                    "design": {"groups": []},
-                    "clones": {"functions": [], "blocks": [], "segments": []},
-                    "structural": {"groups": []},
-                    "dead_code": {"groups": []},
-                }
-            },
-        },
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "complexity": {
+                            "items": [
+                                {
+                                    "qualname": "pkg.quality:hot",
+                                    "relative_path": "pkg/quality.py",
+                                    "start_line": 1,
+                                    "end_line": 5,
+                                    "cyclomatic_complexity": 3,
+                                    "nesting_depth": 1,
+                                    "risk": "medium",
+                                }
+                            ]
+                        },
+                        "coupling": {
+                            "items": [
+                                {
+                                    "qualname": "pkg.quality:coupled",
+                                    "relative_path": "pkg/quality.py",
+                                    "start_line": 1,
+                                    "end_line": 5,
+                                    "cbo": 2,
+                                    "risk": "medium",
+                                    "coupled_classes": ["A"],
+                                }
+                            ]
+                        },
+                        "cohesion": {
+                            "items": [
+                                {
+                                    "qualname": "pkg.quality:cohesive",
+                                    "relative_path": "pkg/quality.py",
+                                    "start_line": 1,
+                                    "end_line": 5,
+                                    "lcom4": 2,
+                                    "risk": "medium",
+                                    "method_count": 2,
+                                    "instance_var_count": 2,
+                                }
+                            ]
+                        },
+                    }
+                },
+                "findings": {
+                    "groups": {
+                        "design": {"groups": []},
+                        "clones": {"functions": [], "blocks": [], "segments": []},
+                        "structural": {"groups": []},
+                        "dead_code": {"groups": []},
+                    }
+                },
+            }
+        ),
         summary={"run_id": "design", "health": {"score": 80, "grade": "B"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -10422,7 +10435,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     # also where the document builder reads them. This fixture used to invent a
     # findings.thresholds block that no report emits, so the assertion below
     # passed on the request echo rather than on the threshold it claimed.
-    thresholded_report_document = dict(fake_design_record.report_document)
+    thresholded_report_document = dict(fake_design_record.served_report)
     thresholded_meta = dict(
         cast("dict[str, object]", thresholded_report_document.get("meta", {}))
     )
@@ -10438,7 +10451,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     thresholded_report_document["meta"] = thresholded_meta
     thresholded_record = replace(
         fake_design_record,
-        report_document=thresholded_report_document,
+        served_report=build_served_projection(thresholded_report_document),
     )
     assert (
         service._design_finding_threshold(
@@ -10447,7 +10460,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
         == 6
     )
-    no_below_report_document = dict(fake_design_record.report_document)
+    no_below_report_document = dict(fake_design_record.served_report)
     no_below_metrics = dict(
         cast("dict[str, object]", no_below_report_document["metrics"])
     )
@@ -10469,7 +10482,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     no_below_report_document["metrics"] = no_below_metrics
     no_below_record = replace(
         fake_design_record,
-        report_document=no_below_report_document,
+        served_report=build_served_projection(no_below_report_document),
     )
     assert service._design_threshold_context(
         record=no_below_record,
@@ -10580,16 +10593,18 @@ def test_mcp_service_additional_projection_and_error_branches(
         root=record.root,
         request=record.request,
         comparison_settings=record.comparison_settings,
-        report_document={
-            **record.report_document,
-            "derived": {"hotlists": {"highest_spread_ids": ["missing-id"]}},
-        },
+        served_report=build_served_projection(
+            {
+                **record.served_report,
+                "derived": {"hotlists": {"highest_spread_ids": ["missing-id"]}},
+            }
+        ),
         summary=record.summary,
         changed_paths=record.changed_paths,
         changed_projection=record.changed_projection,
         func_clones_count=record.func_clones_count,
         block_clones_count=record.block_clones_count,
-        project_metrics=record.project_metrics,
+        reachable_qualnames=record.reachable_qualnames,
         coverage_join=record.coverage_join,
         suggestions=record.suggestions,
         new_func=record.new_func,
@@ -10762,13 +10777,13 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={**_trusted_gate_facts(), "metrics": {}},
+        served_report=build_served_projection({**_trusted_gate_facts(), "metrics": {}}),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -10794,13 +10809,13 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={**_trusted_gate_facts(), "meta": {}},
+        served_report=build_served_projection({**_trusted_gate_facts(), "meta": {}}),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset({"clone:new"}),
@@ -10861,13 +10876,13 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={"meta": {}},
+        served_report=build_served_projection({"meta": {}}),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -10886,13 +10901,13 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={"meta": {}},
+        served_report=build_served_projection({"meta": {}}),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -10926,7 +10941,7 @@ def _assert_optional_summary_metric(
     assert key in service.get_production_triage(run_id=record.run_id)
     empty_report_record = replace(
         record,
-        report_document={"metrics": {"families": {}}},
+        served_report=build_served_projection({"metrics": {"families": {}}}),
     )
     assert key not in service._summary_payload(
         empty_report_record.summary,
@@ -10986,7 +11001,7 @@ def test_get_run_summary_surfaces_dead_code_unresolved_external_override(
     # The canonical block the gate authority reads is the source of truth.
     record = service._runs.resolve_any_root()
     report_block = _dict_at(
-        record.report_document,
+        record.served_report,
         "metrics",
         "families",
         "dead_code",
@@ -11043,7 +11058,7 @@ def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
     # The report DOES carry an all-zero dead_code block in clones-only mode ...
     record = service._runs.resolve_any_root()
     assert _dict_at(
-        record.report_document, "metrics", "families", "dead_code", "summary"
+        record.served_report, "metrics", "families", "dead_code", "summary"
     ) == {
         "baseline_diff_available": False,
         "high_confidence": 0,
@@ -11079,23 +11094,25 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={
-            "metrics": {
-                "families": {
-                    "coverage_join": {
-                        "summary": {
-                            "status": "ok",
-                            "source": "coverage.xml",
-                            "overall_permille": 700,
-                            "coverage_hotspots": 1,
-                            "scope_gap_hotspots": 0,
-                            "hotspot_threshold_percent": 50,
-                        },
-                        "items": [],
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "coverage_join": {
+                            "summary": {
+                                "status": "ok",
+                                "source": "coverage.xml",
+                                "overall_permille": 700,
+                                "coverage_hotspots": 1,
+                                "scope_gap_hotspots": 0,
+                                "hotspot_threshold_percent": 50,
+                            },
+                            "items": [],
+                        }
                     }
                 }
             }
-        },
+        ),
         summary={
             "run_id": "coverage",
             "health": {"score": 80, "grade": "B"},
@@ -11113,7 +11130,7 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -11148,13 +11165,13 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document=record.report_document,
+        served_report=record.served_report,
         summary=record.summary,
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=cast(
             Any,
             SimpleNamespace(status="invalid", invalid_reason="broken xml"),
@@ -11176,23 +11193,25 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         )
     invalid_summary_record = replace(
         record,
-        report_document={
-            "metrics": {
-                "families": {
-                    "coverage_join": {
-                        "summary": {
-                            "status": "invalid",
-                            "source": "coverage.xml",
-                            "overall_permille": 0,
-                            "coverage_hotspots": 0,
-                            "scope_gap_hotspots": 0,
-                            "hotspot_threshold_percent": 50,
-                            "invalid_reason": "broken xml",
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "coverage_join": {
+                            "summary": {
+                                "status": "invalid",
+                                "source": "coverage.xml",
+                                "overall_permille": 0,
+                                "coverage_hotspots": 0,
+                                "scope_gap_hotspots": 0,
+                                "hotspot_threshold_percent": 50,
+                                "invalid_reason": "broken xml",
+                            }
                         }
                     }
                 }
             }
-        },
+        ),
     )
     invalid_payload = service._summary_payload(
         invalid_summary_record.summary,
@@ -11222,22 +11241,24 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={
-            "metrics": {
-                "families": {
-                    "security_surfaces": {
-                        "summary": {
-                            "items": 5,
-                            "category_count": 3,
-                            "production": 4,
-                            "tests": 1,
-                            "report_only": True,
-                        },
-                        "items": [],
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "security_surfaces": {
+                            "summary": {
+                                "items": 5,
+                                "category_count": 3,
+                                "production": 4,
+                                "tests": 1,
+                                "report_only": True,
+                            },
+                            "items": [],
+                        }
                     }
                 }
             }
-        },
+        ),
         summary={
             "run_id": "security",
             "health": {"score": 80, "grade": "B"},
@@ -11255,7 +11276,7 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -11335,29 +11356,31 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         root=tmp_path,
         request=MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False),
         comparison_settings=(),
-        report_document={
-            "findings": {
-                "groups": {
-                    "clones": {
-                        "functions": [],
-                        "blocks": [
-                            {"id": canonical_one},
-                            {"id": canonical_two},
-                        ],
-                        "segments": [],
-                    },
-                    "structural": {"groups": []},
-                    "dead_code": {"groups": []},
-                    "design": {"groups": []},
+        served_report=build_served_projection(
+            {
+                "findings": {
+                    "groups": {
+                        "clones": {
+                            "functions": [],
+                            "blocks": [
+                                {"id": canonical_one},
+                                {"id": canonical_two},
+                            ],
+                            "segments": [],
+                        },
+                        "structural": {"groups": []},
+                        "dead_code": {"groups": []},
+                        "design": {"groups": []},
+                    }
                 }
             }
-        },
+        ),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=2,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -11493,13 +11516,13 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
             respect_pyproject=False,
         ),
         comparison_settings=("full", 20),
-        report_document={},
+        served_report=build_served_projection({}),
         summary={"run_id": "different-scope", "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -11689,32 +11712,37 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         root=tmp_path,
         request=MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False),
         comparison_settings=(),
-        report_document={
-            "findings": {
-                "groups": {
-                    "clones": {"functions": [], "blocks": [], "segments": []},
-                    "structural": {"groups": []},
-                    "dead_code": {"groups": []},
-                    "design": {"groups": []},
-                }
-            },
-            "derived": {
-                "suggestions": [
-                    {
-                        "finding_id": canonical_finding_id,
-                        "title": "Reduce complexity",
-                        "summary": "Extract a helper.",
-                        "action": {"effort": "easy", "steps": ["Extract a helper."]},
+        served_report=build_served_projection(
+            {
+                "findings": {
+                    "groups": {
+                        "clones": {"functions": [], "blocks": [], "segments": []},
+                        "structural": {"groups": []},
+                        "dead_code": {"groups": []},
+                        "design": {"groups": []},
                     }
-                ]
-            },
-        },
+                },
+                "derived": {
+                    "suggestions": [
+                        {
+                            "finding_id": canonical_finding_id,
+                            "title": "Reduce complexity",
+                            "summary": "Extract a helper.",
+                            "action": {
+                                "effort": "easy",
+                                "steps": ["Extract a helper."],
+                            },
+                        }
+                    ]
+                },
+            }
+        ),
         summary={},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=cast(Any, (suggestion,)),
         new_func=frozenset(),
@@ -11844,54 +11872,56 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
             respect_pyproject=False,
             analysis_mode="clones_only",
         ),
-        report_document={
-            "findings": {
-                "groups": {
-                    "clones": {
-                        "functions": [
-                            {
-                                "id": "clone:function:g1",
-                                "family": "clone",
-                                "novelty": "new",
-                                "source_scope": {"dominant_kind": "production"},
-                            }
-                        ],
-                        "blocks": [],
-                        "segments": [],
-                    },
-                    "structural": {
-                        "groups": [
-                            {
-                                "id": "structural:duplicated-branches",
-                                "family": "structural",
-                                "novelty": "new",
-                                "source_scope": {"dominant_kind": "production"},
-                            }
-                        ]
-                    },
-                    "dead_code": {
-                        "groups": [
-                            {
-                                "id": "dead_code:pkg:unused",
-                                "family": "dead_code",
-                                "novelty": "new",
-                                "source_scope": {"dominant_kind": "production"},
-                            }
-                        ]
-                    },
-                    "design": {
-                        "groups": [
-                            {
-                                "id": "design:pkg:cohesion",
-                                "family": "design",
-                                "novelty": "new",
-                                "source_scope": {"dominant_kind": "production"},
-                            }
-                        ]
-                    },
+        served_report=build_served_projection(
+            {
+                "findings": {
+                    "groups": {
+                        "clones": {
+                            "functions": [
+                                {
+                                    "id": "clone:function:g1",
+                                    "family": "clone",
+                                    "novelty": "new",
+                                    "source_scope": {"dominant_kind": "production"},
+                                }
+                            ],
+                            "blocks": [],
+                            "segments": [],
+                        },
+                        "structural": {
+                            "groups": [
+                                {
+                                    "id": "structural:duplicated-branches",
+                                    "family": "structural",
+                                    "novelty": "new",
+                                    "source_scope": {"dominant_kind": "production"},
+                                }
+                            ]
+                        },
+                        "dead_code": {
+                            "groups": [
+                                {
+                                    "id": "dead_code:pkg:unused",
+                                    "family": "dead_code",
+                                    "novelty": "new",
+                                    "source_scope": {"dominant_kind": "production"},
+                                }
+                            ]
+                        },
+                        "design": {
+                            "groups": [
+                                {
+                                    "id": "design:pkg:cohesion",
+                                    "family": "design",
+                                    "novelty": "new",
+                                    "source_scope": {"dominant_kind": "production"},
+                                }
+                            ]
+                        },
+                    }
                 }
             }
-        },
+        ),
     )
     service._runs.register(clones_only)
     listed = service.list_findings(run_id="clones-only-mixed")
@@ -15580,7 +15610,7 @@ def test_hotspot_empty_reason_reports_kind_specific_paths(tmp_path: Path) -> Non
     }
     record = replace(
         _dummy_run_record(tmp_path, "hotspot-empty-reasons"),
-        report_document=base_document,
+        served_report=build_served_projection(base_document),
     )
     service._runs.register(record)
 
@@ -15617,14 +15647,16 @@ def test_hotspot_empty_reason_reports_kind_specific_paths(tmp_path: Path) -> Non
 
     filtered_record = replace(
         record,
-        report_document={
-            **base_document,
-            "derived": {
-                "hotlists": {
-                    "highest_spread_ids": ["clone:function:missing"],
-                }
-            },
-        },
+        served_report=build_served_projection(
+            {
+                **base_document,
+                "derived": {
+                    "hotlists": {
+                        "highest_spread_ids": ["clone:function:missing"],
+                    }
+                },
+            }
+        ),
     )
     assert (
         service._hotspot_empty_reason(
@@ -15900,44 +15932,46 @@ def test_implementation_context_baseline_sensitive_and_contract_role(
     )
     record = replace(
         _dummy_run_record(tmp_path, "ctx-findings"),
-        report_document={
-            "findings": {
-                "groups": {
-                    # The family is "clones" and the bucket is "functions", as
-                    # the producer publishes them; the group carries its own
-                    # category. The fixture used to name the family "clone" and
-                    # the bucket "function" -- spellings that made a projection
-                    # reporting the container key as the finding's category
-                    # look right, because there the two happened to agree.
-                    "clones": {
-                        "functions": [
-                            {
-                                "id": "clone-1",
-                                "family": "clone",
-                                "category": "function",
-                                "kind": "clone_group",
-                                "severity": "medium",
-                                "novelty": "new",
-                                "items": [{"relative_path": "pkg/mod.py"}],
-                            }
-                        ]
+        served_report=build_served_projection(
+            {
+                "findings": {
+                    "groups": {
+                        # The family is "clones" and the bucket is "functions", as
+                        # the producer publishes them; the group carries its own
+                        # category. The fixture used to name the family "clone" and
+                        # the bucket "function" -- spellings that made a projection
+                        # reporting the container key as the finding's category
+                        # look right, because there the two happened to agree.
+                        "clones": {
+                            "functions": [
+                                {
+                                    "id": "clone-1",
+                                    "family": "clone",
+                                    "category": "function",
+                                    "kind": "clone_group",
+                                    "severity": "medium",
+                                    "novelty": "new",
+                                    "items": [{"relative_path": "pkg/mod.py"}],
+                                }
+                            ]
+                        }
                     }
-                }
-            },
-            "metrics": {
-                "families": {
-                    "api_surface": {
-                        "items": [
-                            {
-                                "qualname": "",
-                                "relative_path": "pkg/mod.py",
-                                "start_line": 0,
-                            }
-                        ]
+                },
+                "metrics": {
+                    "families": {
+                        "api_surface": {
+                            "items": [
+                                {
+                                    "qualname": "",
+                                    "relative_path": "pkg/mod.py",
+                                    "start_line": 0,
+                                }
+                            ]
+                        }
                     }
-                }
-            },
-        },
+                },
+            }
+        ),
         relationship_facts=(
             FunctionRelationshipFacts(
                 source_qualname="pkg.consumer:run",
@@ -16019,28 +16053,30 @@ def test_implementation_context_public_surface_full_detail(
     mod = mcp_context_projection_mod
     record = replace(
         _dummy_run_record(tmp_path, "ctx-surface-full"),
-        report_document={
-            "metrics": {
-                "families": {
-                    "api_surface": {
-                        "items": [
-                            {
-                                "qualname": "pkg.mod.fn",
-                                "relative_path": "pkg/mod.py",
-                                "start_line": 1,
-                                "end_line": 5,
-                                "symbol_kind": "function",
-                                "params": [{"name": "value"}],
-                                "returns_annotated": True,
-                                "exported_via": "__all__",
-                                "record_kind": "symbol",
-                                "module": "pkg.mod",
-                            }
-                        ]
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "api_surface": {
+                            "items": [
+                                {
+                                    "qualname": "pkg.mod.fn",
+                                    "relative_path": "pkg/mod.py",
+                                    "start_line": 1,
+                                    "end_line": 5,
+                                    "symbol_kind": "function",
+                                    "params": [{"name": "value"}],
+                                    "returns_annotated": True,
+                                    "exported_via": "__all__",
+                                    "record_kind": "symbol",
+                                    "module": "pkg.mod",
+                                }
+                            ]
+                        }
                     }
                 }
             }
-        },
+        ),
     )
     rows = mod._public_surface_rows(
         record,
@@ -16090,7 +16126,9 @@ def test_get_report_section_module_map_paginates_graph_lanes(tmp_path: Path) -> 
     service._runs.register(
         replace(
             _dummy_run_record(tmp_path, "module-map-run"),
-            report_document={"derived": {"module_map": canonical}},
+            served_report=build_served_projection(
+                {"derived": {"module_map": canonical}}
+            ),
         )
     )
     module_map = service.get_report_section(
@@ -16136,7 +16174,7 @@ def test_get_report_section_module_map_requires_derived_payload(
     service._runs.register(
         replace(
             _dummy_run_record(tmp_path, "empty-derived-run"),
-            report_document={"derived": {}},
+            served_report=build_served_projection({"derived": {}}),
         )
     )
     with pytest.raises(MCPServiceContractError, match=r"module_map.*not available"):
@@ -17636,7 +17674,7 @@ def _authority_candidate_service(tmp_path: Path, *, count: int) -> CodeCloneMCPS
     service = CodeCloneMCPService(history_limit=4)
     record = replace(
         _dummy_run_record(tmp_path, "authoritycandidates01"),
-        report_document=_authority_candidate_document(count),
+        served_report=build_served_projection(_authority_candidate_document(count)),
     )
     service._runs.register(record)
     return service
@@ -17699,7 +17737,7 @@ def test_check_authority_candidate_cursor_fails_closed_on_a_changed_run(
 
     moved = replace(
         _dummy_run_record(tmp_path, "authoritycandidates01"),
-        report_document=_authority_candidate_document(7),
+        served_report=build_served_projection(_authority_candidate_document(7)),
     )
     service._runs.register(moved)
 
@@ -19546,7 +19584,7 @@ def _mixed_novelty_groups() -> dict[str, object]:
 def _novelty_record(root: Path, run_id: str, groups: dict[str, object]) -> MCPRunRecord:
     return replace(
         _dummy_run_record(root, run_id),
-        report_document={"findings": {"groups": groups}},
+        served_report=build_served_projection({"findings": {"groups": groups}}),
         summary={"run_id": run_id, "health": {"score": 80, "grade": "B"}},
     )
 
@@ -19707,7 +19745,7 @@ def _settlement_mcp_document(
     root: Path,
     *,
     baseline: Path,
-) -> tuple[dict[str, object], Mapping[str, object]]:
+) -> tuple[Mapping[str, object], Mapping[str, object]]:
     session = mcp_session_mod.MCPSession(history_limit=4)
     summary = session.analyze_repository(
         MCPAnalysisRequest(
@@ -19718,9 +19756,9 @@ def _settlement_mcp_document(
         )
     )
     record = session._runs.get_for_root(str(summary["run_id"]), root=root)
-    document = record.report_document
-    assert isinstance(document, dict)
-    return document, summary
+    served = record.served_report
+    assert isinstance(served, ServedReportProjection)
+    return served, summary
 
 
 def _sole_mcp_function_clone(document: Mapping[str, object]) -> Mapping[str, object]:

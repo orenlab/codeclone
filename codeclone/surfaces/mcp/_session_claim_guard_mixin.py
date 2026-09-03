@@ -171,17 +171,8 @@ class _MCPSessionClaimGuardMixin:
             metric_families=frozenset(sorted(METRIC_FAMILIES)),
             verification_profile=profile_value,
             patch_health_delta=patch_health_delta,
-            tier_states=_tier_states_from_report_document(record.report_document),
+            tier_states=_tier_states_from_report_document(record.served_report),
         )
 
     def _reachable_qualnames(self, record: MCPRunRecord) -> frozenset[str]:
-        project_metrics = record.project_metrics
-        if project_metrics is None:
-            return frozenset()
-        return frozenset(
-            sorted(
-                str(getattr(fact, "target_qualname", "")).strip()
-                for fact in getattr(project_metrics, "runtime_reachability", ())
-                if str(getattr(fact, "target_qualname", "")).strip()
-            )
-        )
+        return record.reachable_qualnames

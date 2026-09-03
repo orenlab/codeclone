@@ -70,6 +70,7 @@ from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
     MCPAnalysisRequest,
     MCPRunRecord,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.utils import suppressed_clone_groups as law_mod
@@ -241,13 +242,13 @@ def _run_record(root: Path, document: dict[str, object]) -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document=document,
+        served_report=build_served_projection(document),
         summary={"run_id": "findinggroups01"},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

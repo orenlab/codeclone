@@ -144,7 +144,7 @@ class _MCPSessionBlastRadiusMixin:
             return cached
         result = compute_blast_radius(
             run_id=_helpers._short_run_id(record.run_id),
-            report_document=record.report_document,
+            report_document=record.served_report,
             files=normalized_files,
             depth=depth,
             forbidden_patterns=normalized_forbidden,

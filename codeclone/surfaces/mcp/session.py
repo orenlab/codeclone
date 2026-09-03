@@ -83,6 +83,7 @@ from ._session_shared import (
     _validated_history_limit,
     analyze,
     bootstrap,
+    build_served_projection,
     discover,
     mint_execution_event_id,
     process,
@@ -117,6 +118,23 @@ class _RuntimeStateLock:
 
 def _new_state_lock() -> _StateLock:
     return _RuntimeStateLock()
+
+
+def _reachable_qualnames(project_metrics: object) -> frozenset[str]:
+    """The runtime-reachable qualnames one run observed, deduplicated.
+
+    Taken here rather than on every read: this is the only fact the served
+    surface takes from the run's project metrics, and deriving it at record
+    time is what lets the metrics object -- and the authority IR it carries --
+    go out of scope with the analysis frame.
+    """
+
+    facts = getattr(project_metrics, "runtime_reachability", ())
+    return frozenset(
+        qualname
+        for fact in facts
+        if (qualname := str(getattr(fact, "target_qualname", "")).strip())
+    )
 
 
 __all__ = [
@@ -527,6 +545,14 @@ class MCPSession(
                     "CodeClone MCP expected a canonical report document."
                 )
             run_id = _helpers._report_digest(report_document)
+            # The proof is sealed and written; from here the session holds its
+            # INDEX. Both references to the whole document are dropped in this
+            # frame -- the local and the artifact bundle that produced it --
+            # because a projection that shares a frame with a live reference to
+            # the proof frees nothing at all.
+            served_report = build_served_projection(report_document)
+            run_snapshot_link = report_artifacts.run_snapshot_link
+            del report_document, report_artifacts
 
         warning_items = set(console.messages)
         baseline_warning = getattr(clone_baseline_state, "warning_message", None)
@@ -563,14 +589,18 @@ class MCPSession(
             analysis_started_at_utc=analysis_started_at_utc,
             report_generated_at_utc=report_generated_at_utc,
             code_digest=str(process_code_provenance().get("code_digest", "")),
-            run_snapshot_link=report_artifacts.run_snapshot_link,
+            run_snapshot_link=run_snapshot_link,
         )
 
+        # Derived once, where the metrics object is still in hand: the record
+        # keeps the qualname set the claim guard serves, and the metrics object
+        # -- with the authority IR inside it -- ends with this frame.
+        reachable_qualnames = _reachable_qualnames(analysis_result.project_metrics)
         base_summary = self._build_run_summary_payload(
             run_id=run_id,
             root_path=root_path,
             request=request,
-            report_document=report_document,
+            served_report=served_report,
             baseline_state=clone_baseline_state,
             metrics_baseline_state=metrics_baseline_state,
             cache_status=cache_status,
@@ -589,13 +619,13 @@ class MCPSession(
                 args=args,
                 request=request,
             ),
-            report_document=report_document,
+            served_report=served_report,
             summary=base_summary,
             changed_paths=changed_paths,
             changed_projection=None,
             func_clones_count=analysis_result.func_clones_count,
             block_clones_count=analysis_result.block_clones_count,
-            project_metrics=analysis_result.project_metrics,
+            reachable_qualnames=reachable_qualnames,
             coverage_join=analysis_result.coverage_join,
             suggestions=analysis_result.suggestions,
             new_func=frozenset(new_func or ()),
@@ -620,13 +650,13 @@ class MCPSession(
                 args=args,
                 request=request,
             ),
-            report_document=report_document,
+            served_report=served_report,
             summary=summary,
             changed_paths=changed_paths,
             changed_projection=changed_projection,
             func_clones_count=analysis_result.func_clones_count,
             block_clones_count=analysis_result.block_clones_count,
-            project_metrics=analysis_result.project_metrics,
+            reachable_qualnames=reachable_qualnames,
             coverage_join=analysis_result.coverage_join,
             suggestions=analysis_result.suggestions,
             new_func=frozenset(new_func or ()),

@@ -875,7 +875,7 @@ class _MCPSessionIntentMixin:
         return intent.report_digest != self._report_digest_value(record)
 
     def _report_digest_value(self, record: MCPRunRecord) -> str:
-        return _helpers._report_digest(record.report_document)
+        return _helpers._report_digest(record.served_report)
 
     def _workspace_record_from_intent(
         self,

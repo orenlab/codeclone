@@ -36,6 +36,7 @@ from codeclone.surfaces.mcp._session_shared import (
     MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.server import build_mcp_server
@@ -52,13 +53,13 @@ def _memory_test_run_record(root: Path, run_id: str) -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document={},
+        served_report=build_served_projection({}),
         summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

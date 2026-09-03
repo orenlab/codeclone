@@ -583,29 +583,27 @@ class _MCPSessionPatchContractMixin:
         }
 
     def _current_state(self, record: MCPRunRecord) -> dict[str, object]:
-        report_document = record.report_document
+        served_report = record.served_report
         return {
             "health_score": _helpers._summary_health_score(record.summary),
             "complexity_max": self._family_max(
-                report_document,
+                served_report,
                 family="complexity",
                 keys=("cyclomatic_complexity", "complexity", "value"),
             ),
             "coupling_max": self._family_max(
-                report_document,
+                served_report,
                 family="coupling",
                 keys=("cbo", "coupling", "value"),
             ),
             "cohesion_max": self._family_max(
-                report_document,
+                served_report,
                 family="cohesion",
                 keys=("lcom4", "cohesion", "value"),
             ),
-            "dependency_cycles": len(self._dependency_cycles(report_document)),
+            "dependency_cycles": len(self._dependency_cycles(served_report)),
             "clone_groups": record.func_clones_count + record.block_clones_count,
-            "dead_code_high_confidence": self._dead_code_high_confidence(
-                report_document
-            ),
+            "dead_code_high_confidence": self._dead_code_high_confidence(served_report),
         }
 
     def _headroom(
@@ -1197,7 +1195,7 @@ class _MCPSessionPatchContractMixin:
         baseline_abuse = detect_baseline_abuse(
             before_gate_would_fail=before_gate_fails,
             after_gate_would_fail=after_gate_fails,
-            after_baseline_status=baseline_status(after.report_document),
+            after_baseline_status=baseline_status(after.served_report),
             regressions=len(regressions),
             changed_files=len(actual_changed_files),
             intent_available=intent is not None,
@@ -1477,12 +1475,12 @@ class _MCPSessionPatchContractMixin:
             ("cohesion", ("lcom4", "cohesion", "value")),
         ):
             before_items = self._metric_item_index(
-                before.report_document,
+                before.served_report,
                 family=family,
                 value_keys=value_keys,
             )
             after_items = self._metric_item_index(
-                after.report_document,
+                after.served_report,
                 family=family,
                 value_keys=value_keys,
             )
@@ -1512,13 +1510,13 @@ class _MCPSessionPatchContractMixin:
 
     def _metric_item_index(
         self,
-        report_document: Mapping[str, object],
+        document: Mapping[str, object],
         *,
         family: str,
         value_keys: Sequence[str],
     ) -> dict[tuple[str, str], int]:
         result: dict[tuple[str, str], int] = {}
-        for item in self._metric_family_items(report_document, family=family):
+        for item in self._metric_family_items(document, family=family):
             path = self._item_path(item)
             symbol = self._item_symbol(item)
             value = self._first_int(item, keys=value_keys)
@@ -1528,11 +1526,11 @@ class _MCPSessionPatchContractMixin:
 
     def _metric_family_items(
         self,
-        report_document: Mapping[str, object],
+        document: Mapping[str, object],
         *,
         family: str,
     ) -> tuple[Mapping[str, object], ...]:
-        metrics = _as_mapping(report_document.get("metrics"))
+        metrics = _as_mapping(document.get("metrics"))
         families = _as_mapping(metrics.get("families"))
         family_payload = _as_mapping(families.get(family))
         return tuple(
@@ -1541,29 +1539,29 @@ class _MCPSessionPatchContractMixin:
 
     def _family_max(
         self,
-        report_document: Mapping[str, object],
+        document: Mapping[str, object],
         *,
         family: str,
         keys: Sequence[str],
     ) -> int:
         values = [
             self._first_int(item, keys=keys)
-            for item in self._metric_family_items(report_document, family=family)
+            for item in self._metric_family_items(document, family=family)
         ]
         return max(values, default=0)
 
-    def _dead_code_high_confidence(self, report_document: Mapping[str, object]) -> int:
+    def _dead_code_high_confidence(self, document: Mapping[str, object]) -> int:
         return sum(
             1
-            for item in self._metric_family_items(report_document, family="dead_code")
+            for item in self._metric_family_items(document, family="dead_code")
             if str(item.get("confidence", "")).strip().lower() == "high"
         )
 
     def _dependency_cycles(
         self,
-        report_document: Mapping[str, object],
+        document: Mapping[str, object],
     ) -> tuple[object, ...]:
-        metrics = _as_mapping(report_document.get("metrics"))
+        metrics = _as_mapping(document.get("metrics"))
         families = _as_mapping(metrics.get("families"))
         dependencies = _as_mapping(families.get("dependencies"))
         return tuple(_as_sequence(dependencies.get("cycles")))

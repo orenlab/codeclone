@@ -423,6 +423,7 @@ def test_the_mcp_finding_universe_follows_the_owner(
 ) -> None:
     from codeclone.surfaces.mcp._session_shared import (
         ExecutionEvent,
+        build_served_projection,
         mint_execution_event_id,
     )
     from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -434,13 +435,13 @@ def test_the_mcp_finding_universe_follows_the_owner(
         root=Path("."),
         request=MCPAnalysisRequest(root=".", respect_pyproject=False),
         comparison_settings=(),
-        report_document=_document(),
+        served_report=build_served_projection(_document()),
         summary={"run_id": "owner", "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),

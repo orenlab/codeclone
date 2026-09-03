@@ -1217,7 +1217,7 @@ def _baseline_sensitive_findings(
     # groups under a "groups" key, so taking the category from the container
     # key labelled every design and structural finding "groups". A group's
     # category is a fact the group carries (`G2`).
-    for ref in iter_finding_groups(record.report_document):
+    for ref in iter_finding_groups(record.served_report):
         group = ref.group
         paths = _finding_paths(group)
         novelty = str(group.get("novelty", "")).strip()
@@ -1591,7 +1591,7 @@ def _cache_mode(record: MCPRunRecord) -> str:
 
 
 def _report_families(record: MCPRunRecord) -> Mapping[str, object]:
-    metrics = _as_mapping(record.report_document.get("metrics"))
+    metrics = _as_mapping(record.served_report.get("metrics"))
     return _as_mapping(metrics.get("families"))
 
 

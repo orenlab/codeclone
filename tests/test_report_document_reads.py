@@ -38,6 +38,7 @@ from pathlib import Path
 from codeclone.surfaces.mcp._review_receipt import derive_baseline_status
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
+    build_served_projection,
     mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -59,6 +60,14 @@ _ACCESSORS = frozenset({"section", "sections"})
 #: report-document read when it starts at one of these; anything else is some
 #: other mapping that happens to share a key name.
 _ANCHORS = frozenset({"report_document", "document", "payload"})
+
+#: Identifiers that name the SERVED PROJECTION of a report -- the index the
+#: MCP session retains in place of the proof. A read rooted here addresses the
+#: same key space, but must resolve against what the projection carries: the
+#: projection deliberately withholds ``source_facts``, so a consumer that
+#: starts reading a withheld lane off a record turns this test red at the line
+#: it is written, rather than at the runtime that would have refused it.
+_SERVED_ANCHORS = frozenset({"served_report"})
 
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -117,11 +126,11 @@ def _strip_coercions(node: ast.expr) -> ast.expr:
     return node
 
 
-def _names_the_document(node: ast.expr) -> bool:
+def _names_the_document(node: ast.expr, anchors: frozenset[str]) -> bool:
     if isinstance(node, ast.Name):
-        return node.id in _ANCHORS
+        return node.id in anchors
     if isinstance(node, ast.Attribute):
-        return node.attr in _ANCHORS
+        return node.attr in anchors
     return False
 
 
@@ -129,6 +138,7 @@ def _section_path(
     node: ast.Call,
     aliases: Mapping[str, str],
     handouts: Mapping[str, Mapping[int | None, str]],
+    anchors: frozenset[str] = _ANCHORS,
 ) -> str | None:
     """Reconstruct the path a single ``section(x, "a.b")`` call addresses."""
 
@@ -141,9 +151,9 @@ def _section_path(
         return None
     path = node.args[1].value
     source = _strip_coercions(node.args[0])
-    if _names_the_document(source):
+    if _names_the_document(source, anchors):
         return path
-    parent = _read_path(source, aliases, handouts)
+    parent = _read_path(source, aliases, handouts, anchors)
     return None if parent is None else f"{parent}.{path}"
 
 
@@ -151,6 +161,7 @@ def _read_path(
     node: ast.expr,
     aliases: Mapping[str, str],
     handouts: Mapping[str, Mapping[int | None, str]],
+    anchors: frozenset[str] = _ANCHORS,
 ) -> str | None:
     """Reconstruct the dotted key path one read addresses, or None.
 
@@ -169,7 +180,7 @@ def _read_path(
     if isinstance(node, ast.Name):
         return aliases.get(node.id)
     if isinstance(node, ast.Call) and _callee_name(node.func) == "section":
-        return _section_path(node, aliases, handouts)
+        return _section_path(node, aliases, handouts, anchors)
     if isinstance(node, ast.Call):
         handed_out = handouts.get(_callee_name(node.func))
         if handed_out is not None and None in handed_out:
@@ -185,9 +196,9 @@ def _read_path(
         return None
     key = node.args[0].value
     receiver = _strip_coercions(node.func.value)
-    if _names_the_document(receiver):
+    if _names_the_document(receiver, anchors):
         return key
-    parent = _read_path(receiver, aliases, handouts)
+    parent = _read_path(receiver, aliases, handouts, anchors)
     return None if parent is None else f"{parent}.{key}"
 
 
@@ -201,7 +212,10 @@ def _scope_nodes(node: ast.AST) -> Iterator[ast.AST]:
         yield from _scope_nodes(child)
 
 
-def _section_handouts(tree: ast.AST) -> dict[str, dict[int | None, str]]:
+def _section_handouts(
+    tree: ast.AST,
+    anchors: frozenset[str] = _ANCHORS,
+) -> dict[str, dict[int | None, str]]:
     """Which section each module-local function hands back to its callers.
 
     Keyed by function name, then by tuple index -- or by ``None`` when the
@@ -227,7 +241,7 @@ def _section_handouts(tree: ast.AST) -> dict[str, dict[int | None, str]]:
                 and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
             ):
-                path = _read_path(node.value, aliases, {})
+                path = _read_path(node.value, aliases, {}, anchors)
                 if path is None:
                     aliases.pop(node.targets[0].id, None)
                 else:
@@ -241,7 +255,7 @@ def _section_handouts(tree: ast.AST) -> dict[str, dict[int | None, str]]:
                 else ((None, returned),)
             )
             for index, element in elements:
-                path = _read_path(element, aliases, {})
+                path = _read_path(element, aliases, {}, anchors)
                 if path is not None:
                     handed_out[index] = path
         if handed_out:
@@ -292,6 +306,7 @@ def _bind_assignment(
     target: ast.expr,
     value: ast.expr,
     handouts: Mapping[str, Mapping[int | None, str]],
+    anchors: frozenset[str] = _ANCHORS,
 ) -> None:
     """Update the alias table for one assignment, whatever its target shape.
 
@@ -311,14 +326,23 @@ def _bind_assignment(
         for index, element in enumerate(target.elts):
             _rebind(aliases, element, by_index.get(index))
         return
-    _rebind(aliases, target, _read_path(value, aliases, handouts))
+    _rebind(aliases, target, _read_path(value, aliases, handouts, anchors))
 
 
-def report_document_reads(source: str) -> list[tuple[int, str]]:
-    """Every report-document key path one module reads, with its line."""
+def report_document_reads(
+    source: str,
+    anchors: frozenset[str] = _ANCHORS,
+) -> list[tuple[int, str]]:
+    """Every report-document key path one module reads, with its line.
+
+    ``anchors`` names which identifiers the scan treats as the document. The
+    default is the report itself; :data:`_SERVED_ANCHORS` scans the reads that
+    address a served projection instead, which is the same key space resolved
+    against a different carrier.
+    """
 
     tree = ast.parse(source)
-    handouts = _section_handouts(tree)
+    handouts = _section_handouts(tree, anchors)
     scopes: list[ast.AST] = [tree]
     scopes.extend(node for node in ast.walk(tree) if isinstance(node, _SCOPES))
     reads: list[tuple[int, str]] = []
@@ -337,7 +361,7 @@ def report_document_reads(source: str) -> list[tuple[int, str]]:
                         and isinstance(argument.value, str)
                     )
                     continue
-                path = _read_path(node, aliases, handouts)
+                path = _read_path(node, aliases, handouts, anchors)
                 if path is not None:
                     reads.append((node.lineno, path))
             if isinstance(node, ast.Assign) and len(node.targets) == 1:
@@ -346,6 +370,7 @@ def report_document_reads(source: str) -> list[tuple[int, str]]:
                     target=node.targets[0],
                     value=node.value,
                     handouts=handouts,
+                    anchors=anchors,
                 )
     return reads
 
@@ -353,28 +378,60 @@ def report_document_reads(source: str) -> list[tuple[int, str]]:
 def _document_carries(document: object, path: str) -> bool:
     current = document
     for key in path.split("."):
-        if not isinstance(current, dict) or key not in current:
+        if not isinstance(current, Mapping) or key not in current:
             return False
         current = current[key]
     return True
 
 
+def _uncarried_reads(
+    source: str,
+    carrier: Mapping[str, object],
+    anchors: frozenset[str],
+    top_level: frozenset[str],
+) -> set[str]:
+    """Report-document reads in ``source`` that ``carrier`` does not carry."""
+
+    return {
+        path
+        for _line, path in report_document_reads(source, anchors)
+        if path.split(".")[0] in top_level and not _document_carries(carrier, path)
+    }
+
+
 def _absent_reads() -> dict[str, tuple[str, ...]]:
+    """Absent reads of both carriers, resolved against the right one each.
+
+    The key space is one -- a served projection indexes a report -- so whether
+    a path addresses the report is decided by the report's own top level in
+    both scans. What differs is who has to carry it: a read rooted at the
+    record resolves against the projection, which withholds ``source_facts``,
+    so reaching for a withheld lane off a record is reported here as a read of
+    a key its carrier does not have.
+    """
+
     document = build_maximal_report_document()
+    carriers = (
+        (document, _ANCHORS),
+        (build_served_projection(document), _SERVED_ANCHORS),
+    )
     top_level = frozenset(document)
     absent: dict[str, set[str]] = {}
     for module in sorted(_PACKAGE_ROOT.rglob("*.py")):
         relative = module.relative_to(_REPO_ROOT).as_posix()
-        for _line, path in report_document_reads(module.read_text("utf-8")):
-            addresses_the_report = path.split(".")[0] in top_level
-            if not addresses_the_report or _document_carries(document, path):
-                continue
-            absent.setdefault(relative, set()).add(path)
+        source = module.read_text("utf-8")
+        paths = {
+            path
+            for carrier, anchors in carriers
+            for path in _uncarried_reads(source, carrier, anchors, top_level)
+        }
+        if paths:
+            absent[relative] = paths
     return {module: tuple(sorted(paths)) for module, paths in sorted(absent.items())}
 
 
 def test_report_document_reads_address_keys_the_document_carries() -> None:
-    """No consumer reads a report-document key the document does not carry."""
+    """No consumer reads a report-document key its carrier does not carry."""
 
     absent = _absent_reads()
     unexpected = {
@@ -406,13 +463,18 @@ def test_report_document_read_scanner_reconstructs_every_chain_shape() -> None:
     Without this the class pin could quietly go blind: a scanner that
     reconstructs nothing reports no absent reads and stays green forever. Each
     shape below is one a real consumer in this tree uses.
+
+    Scanned under both anchor families at once: the served record is where the
+    aliased shape is written in this tree now, and a scan that resolved only
+    the report anchors would have gone blind on it the moment the run store
+    stopped holding the proof.
     """
 
     source = (
         "def direct(report_document):\n"
         "    return as_mapping(report_document.get('integrity')).get('ghost')\n"
         "def aliased(record):\n"
-        "    integrity = as_mapping(record.report_document.get('integrity'))\n"
+        "    integrity = as_mapping(record.served_report.get('integrity'))\n"
         "    return as_mapping(integrity.get('ghost'))\n"
         "def dotted(document):\n"
         "    return section(document, 'integrity.ghost')\n"
@@ -423,7 +485,8 @@ def test_report_document_read_scanner_reconstructs_every_chain_shape() -> None:
         "    return as_mapping(row.get('integrity')).get('ghost')\n"
     )
 
-    assert sorted(path for _line, path in report_document_reads(source)) == [
+    both = _ANCHORS | _SERVED_ANCHORS
+    assert sorted(path for _line, path in report_document_reads(source, both)) == [
         "integrity",
         "integrity",
         "integrity",
@@ -432,6 +495,34 @@ def test_report_document_read_scanner_reconstructs_every_chain_shape() -> None:
         "integrity.ghost",
         "integrity.ghost",
     ]
+
+
+def test_a_withheld_lane_read_off_a_served_record_is_reported() -> None:
+    """The served anchor is scanned, and the projection decides what is carried.
+
+    Both halves are required and each fails on its own. A scan that did not
+    know ``served_report`` names a document would reconstruct nothing here and
+    report no read at all; a scan that resolved this read against the whole
+    proof would find ``source_facts`` carried and report nothing either. The
+    read below is the one this projection exists to make impossible, so it has
+    to arrive as an absent read of the carrier that does not have it.
+    """
+
+    source = (
+        "def consumer(record):\n"
+        "    lanes = as_mapping(record.served_report.get('source_facts'))\n"
+        "    return lanes.get('semantic')\n"
+    )
+    served_reads = sorted(
+        path for _line, path in report_document_reads(source, _SERVED_ANCHORS)
+    )
+    assert served_reads == ["source_facts", "source_facts.semantic"]
+    served = build_served_projection(build_maximal_report_document())
+    assert not any(_document_carries(served, path) for path in served_reads)
+    assert all(
+        _document_carries(build_maximal_report_document(), path)
+        for path in served_reads
+    )
 
 
 def test_report_document_read_scanner_follows_a_helper_return_through_unpacking() -> (
@@ -537,13 +628,13 @@ def _run_record(document: Mapping[str, object]) -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         comparison_settings=(),
-        report_document=dict(document),
+        served_report=build_served_projection(dict(document)),
         summary={"run_id": "i19receipt000001"},
         changed_paths=(),
         changed_projection=None,
         func_clones_count=0,
         block_clones_count=0,
-        project_metrics=None,
+        reachable_qualnames=frozenset(),
         coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
@@ -588,7 +679,9 @@ def test_receipt_digest_names_the_algorithm_the_document_declares() -> None:
 
     other = deepcopy(document)
     other["integrity"]["digests"]["evaluation"]["algorithm"] = "blake2b"  # type: ignore[index]
-    other_digest = service._receipt_digest(replace(record, report_document=other))
+    other_digest = service._receipt_digest(
+        replace(record, served_report=build_served_projection(other))
+    )
 
     assert other_digest.split(":", 1)[0] == "blake2b"
 

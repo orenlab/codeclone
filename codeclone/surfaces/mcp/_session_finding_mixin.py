@@ -372,7 +372,7 @@ class _MCPSessionFindingMixin:
         return [
             dict(group)
             for group in flatten_finding_groups(
-                groups_root_of_document(record.report_document),
+                groups_root_of_document(record.served_report),
                 families=families,
             )
         ]
@@ -1007,7 +1007,7 @@ class _MCPSessionFindingMixin:
             self._spread_max_cache[record.run_id] = max_spread_value
         remediation_map: dict[str, dict[str, object] | None] = {}
         priority_map: dict[str, Mapping[str, object]] = {}
-        derived = _helpers._as_mapping(record.report_document.get("derived"))
+        derived = _helpers._as_mapping(record.served_report.get("derived"))
         hotlists = _helpers._as_mapping(derived.get("hotlists"))
         if kind == "highest_priority":
             for finding in findings:
@@ -1137,7 +1137,7 @@ class _MCPSessionFindingMixin:
         hotlist_key = _HOTLIST_REPORT_KEYS.get(kind)
         if hotlist_key is None:
             return "unsupported_hotlist_kind"
-        derived = _helpers._as_mapping(record.report_document.get("derived"))
+        derived = _helpers._as_mapping(record.served_report.get("derived"))
         hotlists = _helpers._as_mapping(derived.get("hotlists"))
         hotlist_ids = [
             str(item)
@@ -1209,7 +1209,7 @@ class _MCPSessionFindingMixin:
         metric = str(spec["metric"])
         operator = str(spec["operator"])
         normalized_path = _helpers._normalize_relative_path(path or "")
-        metrics = _helpers._as_mapping(record.report_document.get("metrics"))
+        metrics = _helpers._as_mapping(record.served_report.get("metrics"))
         families = _helpers._as_mapping(metrics.get("families"))
         family = _helpers._as_mapping(families.get(category))
         metric_items = [
@@ -1264,7 +1264,7 @@ class _MCPSessionFindingMixin:
         # This asked findings.thresholds, which the findings block does not
         # carry, so the request echo below answered every call.
         thresholds = section(
-            record.report_document,
+            record.served_report,
             "meta.analysis_thresholds.design_findings",
         )
         threshold_payload = _helpers._as_mapping(thresholds.get(category))
@@ -1278,7 +1278,7 @@ class _MCPSessionFindingMixin:
         return _as_int(request_value, default_threshold)
 
     def _triage_suggestion_rows(self, record: MCPRunRecord) -> list[dict[str, object]]:
-        derived = _helpers._as_mapping(record.report_document.get("derived"))
+        derived = _helpers._as_mapping(record.served_report.get("derived"))
         canonical_rows = _helpers._dict_list(derived.get("suggestions"))
         suggestion_source_kinds = {
             _helpers._suggestion_finding_id(
@@ -1350,9 +1350,7 @@ class _MCPSessionFindingMixin:
         records_key = ADVISORY_TIER_RECORD_KEYS[tier]
         container = _helpers._as_mapping(
             _helpers._as_mapping(
-                _helpers._as_mapping(record.report_document.get("findings")).get(
-                    "groups"
-                )
+                _helpers._as_mapping(record.served_report.get("findings")).get("groups")
             ).get(tier)
         )
         payload: dict[str, object] = {
@@ -2068,7 +2066,7 @@ class _MCPSessionFindingMixin:
             # the population is reachable only through digest-bound pages.
             try:
                 page = authority_candidate_page(
-                    report_document=record.report_document,
+                    report_document=record.served_report,
                     run_id=record.run_id,
                     cursor=cursor,
                     page_size=page_size,

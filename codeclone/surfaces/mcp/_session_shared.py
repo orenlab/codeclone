@@ -28,6 +28,13 @@ from ...api.config_delivery import (
     load_repository_config,
 )
 from ...api.execution_event import ExecutionEvent
+from ...api.served_projection import (
+    WITHHELD_PROOF_SECTIONS,
+    ServedProjectionError,
+    ServedReportProjection,
+    ServingAnalysisContract,
+    build_served_projection,
+)
 from ...baseline import Baseline
 from ...cache.store import Cache
 from ...cache.versioning import CacheStatus
@@ -110,7 +117,6 @@ from ...models import (
     FunctionRelationshipFacts,
     MetricsDiff,
     ModuleDep,
-    ProjectMetrics,
     Suggestion,
 )
 from ...observability import record_counter, span
@@ -702,29 +708,34 @@ def mint_execution_event_id() -> str:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MCPRunRecord:
-    """One served run: the semantic report plus the execution that produced it.
+    """One served run: the index of a sealed report, and the execution behind it.
 
     ``run_id`` is the report's semantic identity; ``execution`` is the event
-    and carries every per-execution fact.  This is step 3 of RFC 2026-09-02
-    §III.8 -- the two identity laws separated in RAM, before the served
-    projection exists: the report body still rides on this record, and
-    ``comparison_settings`` / ``changed_paths`` / ``changed_projection`` /
-    ``coverage_join`` / ``summary`` stay here until that projection lands.
-    Keyword-only, because the field set changed shape and no positional caller
-    exists.
+    and carries every per-execution fact.  This is step 4 of RFC 2026-09-02
+    §III.8: the record no longer holds the report itself.  ``served_report``
+    is the projection -- the sections this surface answers from, plus the
+    typed analysis contract lifted out of the observation lanes -- and the
+    proof it indexes lives on disk, whole, where its identity still matches
+    its payload.  Keyword-only, because the field set changed shape and no
+    positional caller exists.
+
+    ``reachable_qualnames`` is the one fact the claim guard reads out of the
+    run's project metrics, already in the shape it is read in; the metrics
+    object itself, and above all the authority IR inside it, has no reader
+    here and is not retained.
     """
 
     run_id: str
     root: Path
     request: MCPAnalysisRequest
     comparison_settings: tuple[object, ...]
-    report_document: dict[str, object]
+    served_report: ServedReportProjection
     summary: dict[str, object]
     changed_paths: tuple[str, ...]
     changed_projection: dict[str, object] | None
     func_clones_count: int
     block_clones_count: int
-    project_metrics: ProjectMetrics | None
+    reachable_qualnames: frozenset[str]
     coverage_join: CoverageJoinResult | None
     suggestions: tuple[Suggestion, ...]
     new_func: frozenset[str]
@@ -1181,6 +1192,7 @@ __all__ = [
     "SOURCE_KIND_ORDER",
     "SOURCE_KIND_OTHER",
     "SOURCE_KIND_PRODUCTION",
+    "WITHHELD_PROOF_SECTIONS",
     "_CHECK_TO_DIMENSION",
     "_COMPACT_ITEM_EMPTY_VALUES",
     "_COMPACT_ITEM_PATH_KEYS",
@@ -1256,6 +1268,9 @@ __all__ = [
     "RLock",
     "ReportSection",
     "Sequence",
+    "ServedProjectionError",
+    "ServedReportProjection",
+    "ServingAnalysisContract",
     "_BufferConsole",
     "__version__",
     "_as_float",
@@ -1273,6 +1288,7 @@ __all__ = [
     "analyze",
     "apply_repository_config",
     "bootstrap",
+    "build_served_projection",
     "delivered_config_values",
     "discover",
     "load_repository_config",

@@ -518,7 +518,7 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         run_id: str,
         root_path: Path,
         request: MCPAnalysisRequest,
-        report_document: Mapping[str, object],
+        served_report: Mapping[str, object],
         baseline_state: CloneBaselineState,
         metrics_baseline_state: MetricsBaselineState,
         cache_status: CacheStatus,
@@ -535,13 +535,13 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         warnings: Sequence[str],
         failures: Sequence[str],
     ) -> dict[str, object]:
-        meta = _helpers._as_mapping(report_document.get("meta"))
+        meta = _helpers._as_mapping(served_report.get("meta"))
         meta_baseline = _helpers._as_mapping(meta.get("baseline"))
         meta_metrics_baseline = _helpers._as_mapping(meta.get("metrics_baseline"))
         meta_cache = _helpers._as_mapping(meta.get("cache"))
-        inventory = _helpers._as_mapping(report_document.get("inventory"))
-        findings = _helpers._as_mapping(report_document.get("findings"))
-        metrics = _helpers._as_mapping(report_document.get("metrics"))
+        inventory = _helpers._as_mapping(served_report.get("inventory"))
+        findings = _helpers._as_mapping(served_report.get("findings"))
+        metrics = _helpers._as_mapping(served_report.get("metrics"))
         metrics_summary = _helpers._as_mapping(metrics.get("summary"))
         metrics_families = _helpers._as_mapping(metrics.get("families"))
         dead_code_summary = _helpers._as_mapping(
@@ -555,7 +555,7 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "analysis_mode": request.analysis_mode,
             "codeclone_version": meta.get("codeclone_version", __version__),
             "python_tag": str(meta.get("python_tag", "")),
-            "report_schema_version": report_document.get(
+            "report_schema_version": served_report.get(
                 "report_schema_version",
                 REPORT_SCHEMA_VERSION,
             ),
@@ -888,7 +888,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
         }
 
     def _derived_section_payload(self, record: MCPRunRecord) -> dict[str, object]:
-        derived = _helpers._as_mapping(record.report_document.get("derived"))
+        derived = _helpers._as_mapping(record.served_report.get("derived"))
         if not derived:
             raise MCPServiceContractError(
                 "Report section 'derived' is not available in this run."
@@ -1103,7 +1103,8 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                     f"Reason: {detail}"
                 )
         return _evaluate_report_gates(
-            report_document=record.report_document,
+            report_document=record.served_report,
+            enabled_lanes=record.served_report.contract.enabled_lanes,
             config=MetricGateConfig(
                 fail_complexity=request.fail_complexity,
                 fail_coupling=request.fail_coupling,
@@ -1150,7 +1151,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             _VALID_REPORT_SECTIONS,
         )
         record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
-        report_document = record.report_document
+        served_report = record.served_report
         if validated_section == "changed":
             if record.changed_projection is None:
                 raise MCPServiceContractError(
@@ -1158,23 +1159,23 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 )
             return dict(record.changed_projection)
         if validated_section == "metrics":
-            metrics = _helpers._as_mapping(report_document.get("metrics"))
+            metrics = _helpers._as_mapping(served_report.get("metrics"))
             return {"summary": dict(_helpers._as_mapping(metrics.get("summary")))}
         if validated_section == "inventory":
             return inventory_section_payload(
-                require_mapping_section(report_document, section="inventory"),
+                require_mapping_section(served_report, section="inventory"),
                 offset=offset,
                 limit=limit,
             )
         if validated_section == "findings":
             return findings_section_payload(
-                require_mapping_section(report_document, section="findings"),
+                require_mapping_section(served_report, section="findings"),
                 family=str(family) if family is not None else None,
                 offset=offset,
                 limit=limit,
             )
         if validated_section == "metrics_detail":
-            metrics = _helpers._as_mapping(report_document.get("metrics"))
+            metrics = _helpers._as_mapping(served_report.get("metrics"))
             if not metrics:
                 raise MCPServiceContractError(
                     "Report section 'metrics_detail' is not available in this run."
@@ -1204,7 +1205,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if validated_section == "derived":
             return self._derived_section_payload(record)
         if validated_section == "module_map":
-            derived = _helpers._as_mapping(report_document.get("derived"))
+            derived = _helpers._as_mapping(served_report.get("derived"))
             if not derived:
                 raise MCPServiceContractError(
                     "Report section 'module_map' is not available in this run."
@@ -1214,7 +1215,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 offset=offset,
                 limit=limit,
             )
-        return dict(require_mapping_section(report_document, section=validated_section))
+        return dict(require_mapping_section(served_report, section=validated_section))
 
     def get_production_triage(
         self,
