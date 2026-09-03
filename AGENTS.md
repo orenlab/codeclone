@@ -881,6 +881,34 @@ chain.
 
 ---
 
+### Probe Validity Law
+
+A negative result proves nothing until the experiment is shown capable of seeing the effect.
+
+```
+No-effect ≠ no-mechanism.
+
+Before accepting a negative result, prove:
+1. the probe reached the mechanism under test;
+2. a positive control makes the probe diverge;
+3. the measured population actually contains the distinguishing cases.
+
+If any of these is missing, the result is INCONCLUSIVE, not PASS.
+```
+
+**The positive control must perturb the SAME causal path the experiment claims to measure.**
+A control that reddens through a neighbouring mechanism is theatre.
+
+Report the accounting, not the conclusion. Not `6/6 identical`, but: queries that reached the
+lane under test, population on each side, the distinguishing cases found or missing, and only
+then the verdict.
+
+This is the second layer above the mutation law: mutation evidence proves a test dies when the
+pinned behaviour breaks; probe validity proves the experiment could have seen the effect at all
+before its absence is interpreted. Measured violations of it in this repository: a query that
+stopped at an earlier non-empty tier, dialect-keyed identifiers that produced a false match, a
+battery reading a stale `.pyc`, and a complementary probe refuting half a draft finding.
+
 ## 18) Language and typing rules
 
 **L1** — Repository policy; an agent MUST justify any violation in the pull request.
