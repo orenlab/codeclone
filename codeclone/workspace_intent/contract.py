@@ -24,10 +24,20 @@ from dataclasses import dataclass
 from typing import Final
 
 from ..cache.integrity import canonical_json
+from ..models import BeforeExecutionWitness
 from ..utils.coerce import as_mapping as _as_mapping
 
+# The first generation: no lease, no report digest.  Its name is load-bearing
+# in :mod:`.models`, where it still selects the lease-defaulting read.
 LEGACY_REGISTRY_VERSION: Final = "1"
-REGISTRY_VERSION: Final = "2"
+# The second: lease and report digest, and nothing about the reading of the
+# source that produced the report.  ``run_id`` names a report, and several
+# executions may have stated it, so a record of this generation cannot say
+# WHICH execution its intent was declared on.  Kept as a name because that
+# inability is now a typed outcome rather than a silent default.
+WITNESSLESS_REGISTRY_VERSION: Final = "2"
+# The third: the before-execution witness, content-bound (RULING-2026-09-02).
+REGISTRY_VERSION: Final = "3"
 DEFAULT_TTL_SECONDS: Final = 3600
 MIN_TTL_SECONDS: Final = 60
 MAX_TTL_SECONDS: Final = 86400
@@ -57,10 +67,30 @@ class WorkspaceIntentRecord:
     lease_seconds: int
     report_digest: str
     dirty_snapshot: dict[str, object] | None = None
+    before_execution: BeforeExecutionWitness | None = None
+
+    @property
+    def written_registry_version(self) -> str:
+        """The generation this record serialises as, derived from its witness.
+
+        Provenance, never authority: it says what the reader will find on the
+        wire, and a record read back from an older generation reports the
+        generation it has become in memory, not the one it was born in.
+        """
+
+        return (
+            REGISTRY_VERSION
+            if self.before_execution is not None
+            else WITNESSLESS_REGISTRY_VERSION
+        )
 
     def unsigned_payload(self) -> dict[str, object]:
+        # The version is the wire fact that a witness is there to be read, so
+        # it is derived from the witness rather than stamped beside it. A
+        # record with nothing to bind is honestly of the older generation --
+        # and is refused as such on the recovery path.
         payload: dict[str, object] = {
-            "registry_version": REGISTRY_VERSION,
+            "registry_version": self.written_registry_version,
             "intent_id": self.intent_id,
             "agent_pid": self.agent_pid,
             "agent_start_epoch": self.agent_start_epoch,
@@ -80,6 +110,8 @@ class WorkspaceIntentRecord:
         }
         if self.dirty_snapshot is not None:
             payload["dirty_snapshot"] = self.dirty_snapshot
+        if self.before_execution is not None:
+            payload["before_execution"] = self.before_execution.to_payload()
         return payload
 
 
@@ -116,6 +148,8 @@ __all__ = [
     "MIN_LEASE_SECONDS",
     "MIN_TTL_SECONDS",
     "REGISTRY_VERSION",
+    "WITNESSLESS_REGISTRY_VERSION",
+    "BeforeExecutionWitness",
     "WorkspaceIntentRecord",
     "compute_intent_digest",
     "compute_scope_digest",

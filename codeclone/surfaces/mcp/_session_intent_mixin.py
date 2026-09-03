@@ -62,6 +62,8 @@ from ._workspace_intents import (
     DEFAULT_LEASE_SECONDS,
     MAX_LEASE_SECONDS,
     MIN_LEASE_SECONDS,
+    REGISTRY_VERSION,
+    BeforeExecutionWitness,
     IntentOwnership,
     WorkspaceIntentRecord,
     WorkspaceIntentStatus,
@@ -906,6 +908,15 @@ class _MCPSessionIntentMixin:
                 env_value=os.environ.get("CODECLONE_INTENT_LEASE_SECONDS"),
             ),
             report_digest=intent.report_digest,
+            # What the before-run IS, made durable. Derived from the execution
+            # here and only here: the event owns its own digests, so no caller
+            # can persist a witness that disagrees with the bytes it describes.
+            before_execution=BeforeExecutionWitness(
+                execution_event_id=record.execution.execution_event_id,
+                report_semantic_id=record.run_id,
+                source_state_digest=record.execution.source_state_digest,
+                workspace_witness=record.execution.workspace_witness,
+            ),
         )
 
     def _sync_workspace_intent_status(
@@ -1177,6 +1188,22 @@ class _MCPSessionIntentMixin:
                 message=self._recovery_rejection_message(ownership),
                 details={"ownership": ownership.value},
             )
+        # Before the scope is read, before any run is offered: a record from a
+        # generation that recorded no execution cannot say which execution it
+        # was declared on, and binding it to today's newest is the substitution
+        # the witness exists to refuse. Placed first so a legacy record answers
+        # by generation rather than by whatever its older scope grammar trips.
+        if workspace_record.before_execution is None:
+            return self._recovery_rejected(
+                intent_id=intent_id,
+                reason="registry_record_predates_execution_binding",
+                message=intent_msgs.RECOVERY_LEGACY_RECORD,
+                details={
+                    "registry_version": workspace_record.written_registry_version,
+                    "required_registry_version": REGISTRY_VERSION,
+                },
+                next_step=intent_msgs.RECOVERY_LEGACY_NEXT_STEP,
+            )
         return _RecoveryTarget(
             root_path=root_path,
             workspace_record=workspace_record,
@@ -1224,7 +1251,74 @@ class _MCPSessionIntentMixin:
                 reason="scope_digest_mismatch",
                 message="Workspace intent scope digest does not match.",
             )
+        witness_rejection = self._before_execution_rejection(
+            workspace_record=workspace_record,
+            offered=record,
+        )
+        if witness_rejection is not None:
+            return witness_rejection
         return _RecoveryRun(record=record, report_digest=report_digest)
+
+    def _before_execution_rejection(
+        self,
+        *,
+        workspace_record: WorkspaceIntentRecord,
+        offered: MCPRunRecord,
+    ) -> dict[str, object] | None:
+        """Refuse an offered execution that is not the declared source state.
+
+        The digest check above is blind here BY CONSTRUCTION: two executions
+        share one report digest exactly when the edit was analysis-invariant,
+        which is the whole class of edit that can hide inside a before-run.
+        Identity first -- the same event needs no proof -- then content, never
+        the shared name.  Absence is handled symmetrically: two executions that
+        both recorded nothing are equally blind and keep the transitional
+        ordinal law, while a witness that recorded nothing is never promoted by
+        an offered run that did.
+        """
+
+        witness = workspace_record.before_execution
+        if witness is None:  # pragma: no cover - refused in _recovery_target
+            return None
+        execution = offered.execution
+        if execution.execution_event_id == witness.execution_event_id:
+            return None
+        if witness.source_state_digest is None:
+            if execution.source_state_digest is None:
+                # Neither side recorded what it read, so neither a match nor a
+                # mismatch is provable, and manufacturing a verdict in either
+                # direction is the fabrication this binding exists to remove.
+                # Unreachable from production -- every analysis builds a
+                # content manifest -- and pinned as such by
+                # ``test_every_production_execution_carries_a_content_witness``.
+                return None
+            # Asymmetric: the offered run recorded its read and the witness did
+            # not. They are of different generations, and the older one cannot
+            # be promoted by the younger one's evidence.
+            return self._recovery_rejected(
+                intent_id=workspace_record.intent_id,
+                reason="before_execution_has_no_content_witness",
+                message=intent_msgs.RECOVERY_NO_CONTENT_WITNESS,
+                details={
+                    "before_execution_event_id": witness.execution_event_id,
+                    "offered_execution_event_id": execution.execution_event_id,
+                },
+                next_step=intent_msgs.RECOVERY_LEGACY_NEXT_STEP,
+            )
+        if execution.source_state_digest == witness.source_state_digest:
+            return None
+        return self._recovery_rejected(
+            intent_id=workspace_record.intent_id,
+            reason="before_execution_superseded",
+            message=intent_msgs.RECOVERY_EXECUTION_SUPERSEDED,
+            details={
+                "before_execution_event_id": witness.execution_event_id,
+                "before_source_state_digest": witness.source_state_digest,
+                "offered_execution_event_id": execution.execution_event_id,
+                "offered_source_state_digest": execution.source_state_digest,
+            },
+            next_step=intent_msgs.RECOVERY_EXECUTION_SUPERSEDED_NEXT_STEP,
+        )
 
     def _activate_recovered_intent(
         self,
@@ -1499,14 +1593,18 @@ class _MCPSessionIntentMixin:
         reason: str,
         message: str,
         details: Mapping[str, object] | None = None,
+        next_step: str | None = None,
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "intent_id": intent_id,
             "action_taken": "recovery_rejected",
             "reason": reason,
             "message": message,
             "details": dict(details or {}),
         }
+        if next_step is not None:
+            payload["next_step"] = next_step
+        return payload
 
     def _recovery_rejection_message(self, ownership: IntentOwnership) -> str:
         if ownership == IntentOwnership.FOREIGN_ACTIVE:

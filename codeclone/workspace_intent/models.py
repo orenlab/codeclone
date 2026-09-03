@@ -23,11 +23,13 @@ from pydantic import (
 )
 from typing_extensions import Self
 
+from ..models import BeforeExecutionWitness
 from .contract import (
     DEFAULT_LEASE_SECONDS,
     LEGACY_REGISTRY_VERSION,
     MAX_LEASE_SECONDS,
     MIN_LEASE_SECONDS,
+    REGISTRY_VERSION,
     WorkspaceIntentRecord,
     compute_intent_digest,
     compute_scope_digest,
@@ -122,6 +124,46 @@ def _is_hex_digest(value: str) -> bool:
     return all(char in "0123456789abcdef" for char in value.lower())
 
 
+_BEFORE_EXECUTION_KEYS = frozenset(
+    {
+        "execution_event_id",
+        "report_semantic_id",
+        "source_state_digest",
+        "workspace_witness",
+    }
+)
+
+
+def _validate_before_execution_payload(
+    value: dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Validate the persisted before-execution witness.
+
+    Typed here rather than by a nested model for the same reason
+    ``dirty_snapshot`` is: this module is not a model store, and the boundary
+    ratchet admits no new structure definition on it.  An unknown key is a
+    reader disagreeing with the writer about what was signed, so the record is
+    refused rather than partly understood.
+    """
+
+    if value is None:
+        return None
+    unknown = sorted(set(value) - _BEFORE_EXECUTION_KEYS)
+    if unknown:
+        raise ValueError(f"before_execution has unknown keys: {unknown}")
+    for name in ("execution_event_id", "report_semantic_id"):
+        text = value.get(name)
+        if not isinstance(text, str) or not text.strip() or len(text) > 128:
+            raise ValueError(f"before_execution.{name} must be a non-empty id")
+    for name in ("source_state_digest", "workspace_witness"):
+        digest = value.get(name)
+        if digest is not None and (
+            not isinstance(digest, str) or not _is_hex_digest(digest)
+        ):
+            raise ValueError(f"before_execution.{name} must be null or 64-char hex")
+    return value
+
+
 def _validate_dirty_snapshot_payload(
     value: dict[str, object] | None,
 ) -> dict[str, object] | None:
@@ -205,7 +247,7 @@ class WorkspaceIntentDocument(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    registry_version: Literal["1", "2"]
+    registry_version: Literal["1", "2", "3"]
     intent_id: Annotated[str, Field(min_length=1, max_length=128)]
     agent_pid: PositiveInt
     agent_start_epoch: PositiveInt
@@ -223,7 +265,16 @@ class WorkspaceIntentDocument(BaseModel):
     lease_seconds: PositiveInt | None = None
     report_digest: str | None = None
     dirty_snapshot: dict[str, object] | None = None
+    before_execution: dict[str, object] | None = None
     integrity: IntentIntegrityModel
+
+    @field_validator("before_execution")
+    @classmethod
+    def validate_before_execution(
+        cls,
+        value: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        return _validate_before_execution_payload(value)
 
     @field_validator("dirty_snapshot")
     @classmethod
@@ -241,6 +292,20 @@ class WorkspaceIntentDocument(BaseModel):
             violations.append("scope_digest must be a 64-char hex digest")
         if self.status not in _VALID_STATUSES:
             violations.append(f"invalid workspace intent status: {self.status}")
+        if (self.registry_version == REGISTRY_VERSION) != (
+            self.before_execution is not None
+        ):
+            violations.append(
+                "the before-execution witness and registry version "
+                f"{REGISTRY_VERSION} imply each other"
+            )
+        if (
+            self.before_execution is not None
+            and self.before_execution.get("report_semantic_id") != self.run_id
+        ):
+            violations.append(
+                "before_execution.report_semantic_id must be the record's run_id"
+            )
         if self.registry_version != LEGACY_REGISTRY_VERSION and (
             self.lease_renewed_at_utc is None
             or self.lease_seconds is None
@@ -374,6 +439,8 @@ def unsigned_document_payload(document: WorkspaceIntentDocument) -> dict[str, ob
         payload["report_digest"] = report_digest
     if document.dirty_snapshot is not None:
         payload["dirty_snapshot"] = document.dirty_snapshot
+    if document.before_execution is not None:
+        payload["before_execution"] = document.before_execution
     return payload
 
 
@@ -417,6 +484,7 @@ def document_to_record_fields(document: WorkspaceIntentDocument) -> dict[str, ob
         "lease_seconds": lease_seconds,
         "report_digest": report_digest,
         "dirty_snapshot": document.dirty_snapshot,
+        "before_execution": _witness_from_document(document),
     }
 
 
@@ -443,6 +511,25 @@ def record_from_document(document: WorkspaceIntentDocument) -> WorkspaceIntentRe
         lease_seconds=lease_seconds,
         report_digest=report_digest,
         dirty_snapshot=document.dirty_snapshot,
+        before_execution=_witness_from_document(document),
+    )
+
+
+def _witness_from_document(
+    document: WorkspaceIntentDocument,
+) -> BeforeExecutionWitness | None:
+    """Carry the witness out of the wire model without re-deriving it."""
+
+    witness = document.before_execution
+    if witness is None:
+        return None
+    source_state = witness.get("source_state_digest")
+    workspace = witness.get("workspace_witness")
+    return BeforeExecutionWitness(
+        execution_event_id=str(witness["execution_event_id"]),
+        report_semantic_id=str(witness["report_semantic_id"]),
+        source_state_digest=None if source_state is None else str(source_state),
+        workspace_witness=None if workspace is None else str(workspace),
     )
 
 

@@ -61,6 +61,35 @@ RECOVERY_FOREIGN_STALE: Final = (
 
 RECOVERY_EXPIRED: Final = "Intent has expired (TTL). Declare a new intent instead."
 
+# The three outcomes of the durable before-execution binding. Each names what
+# happened AND what the caller does next: an outcome without a runnable step
+# is a dead end wearing a type name.
+RECOVERY_LEGACY_RECORD: Final = (
+    "This intent was declared by a server that recorded no execution witness, "
+    "so which analysis it was declared against cannot be proven. It is not "
+    "upgraded by binding it to whatever run answers to its run_id now."
+)
+RECOVERY_LEGACY_NEXT_STEP: Final = (
+    "Clear it with manage_change_intent(action='clear', intent_id=...), then "
+    "analyze_repository and start_controlled_change to declare again."
+)
+RECOVERY_EXECUTION_SUPERSEDED: Final = (
+    "The offered run read different source bytes than the execution this "
+    "intent was declared on. Two executions share one run_id when the report "
+    "is unchanged, so the name matching proves nothing; the content witness "
+    "does, and it disagrees. The before-run cannot be re-established from it."
+)
+RECOVERY_EXECUTION_SUPERSEDED_NEXT_STEP: Final = (
+    "Restore the declared source state and analyze_repository again to "
+    "re-establish the binding, or clear the intent with "
+    "manage_change_intent(action='clear', intent_id=...) and declare again "
+    "against the current tree."
+)
+RECOVERY_NO_CONTENT_WITNESS: Final = (
+    "The execution this intent was declared on recorded no content witness, "
+    "so no later run can be proven to have read the same source state."
+)
+
 DECLARE_FOREIGN_ACTIVE_OVERLAP: Final = (
     "Foreign active intent overlaps your scope. Ask the user, narrow scope, "
     'or restart with on_conflict="queue".'

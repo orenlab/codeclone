@@ -4832,3 +4832,41 @@ class GcRunReceipt:
     """
 
     reports: tuple[GcJobReport, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BeforeExecutionWitness:
+    """The execution a change intent was declared against, made durable.
+
+    ``run_id`` names a REPORT, and two executions that state the same thing
+    share it by design (RULING-2026-08-31), so a persisted intent that keeps
+    only the report's name cannot say which reading of the source it was
+    declared on.  Across a process death that gap is filled by whatever
+    execution answers to the name today -- which is how a post-edit run comes
+    to serve as its own before-run.
+
+    ``report_semantic_id`` is the report the execution stated, restated inside
+    the witness so a signature over the record binds the pair and neither half
+    can be edited toward the other.  ``execution_event_id`` is what the
+    before-run IS: the event that read one particular source state.
+
+    ``source_state_digest`` is that state, derived from the bytes the analysis
+    consumed and never from a stat -- a same-size rewrite keeps ``(mtime_ns,
+    size)`` intact, so a stat-bound witness is blind to the very edit this
+    binding exists to catch.  ``None`` on either digest is a recorded absence,
+    not an empty value: it makes an unprovable binding refusable instead of
+    guessable.
+    """
+
+    execution_event_id: str
+    report_semantic_id: str
+    source_state_digest: str | None = None
+    workspace_witness: str | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "execution_event_id": self.execution_event_id,
+            "report_semantic_id": self.report_semantic_id,
+            "source_state_digest": self.source_state_digest,
+            "workspace_witness": self.workspace_witness,
+        }
