@@ -125,6 +125,9 @@ class DiscoveryResult:
     # is granted only once its bytes are proven, so this is the digest the
     # reused facts describe.
     cached_source_digest_by_file: tuple[tuple[str, str], ...] = ()
+    # The declaration fact of every cache hit (liveness policy v4), unioned
+    # like the reference sets above; the exposure owner reads it per run.
+    cached_declared_exports: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +192,11 @@ class ProcessingResult:
     # parsed, proven cache digests for what was reused. A consumer that must
     # know whether the run observed an edit compares against this, never a stat.
     source_digest_by_file: tuple[tuple[str, str], ...] = ()
+    # ``<module>:<name>`` for every name a module's static ``__all__``
+    # declares, over the whole run (cache hits and fresh walks alike). A
+    # declaration, never a reference: the exposure owner's input, not the
+    # evaluator's.
+    declared_exports: frozenset[str] = frozenset()
     phase_snapshot: PhaseSnapshot | None = field(
         default=None,
         compare=False,

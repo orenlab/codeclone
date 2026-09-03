@@ -64,6 +64,9 @@ from .discovery_cache import (
     decode_cached_structural_finding_group as _decode_cached_structural_finding_group,
 )
 from .discovery_cache import (
+    load_cached_declared_exports as _load_cached_declared_exports,
+)
+from .discovery_cache import (
     # Explicit re-export: discovery is the public-ring seam for the cached
     # metrics loader, so callers reach it here instead of importing the
     # internal discovery_cache module directly.
@@ -271,6 +274,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     ) = _new_discovery_buffers()
     cached_sf: list[StructuralFindingGroup] = []
     cached_relationship_facts: list[FunctionRelationshipFacts] = []
+    cached_declared_exports: set[str] = set()
     cached_source_stats_by_file: list[tuple[str, int, int, int, int]] = []
     cached_source_digest_by_file: list[tuple[str, str]] = []
     cached_semantic_events: list[SemanticEvent] = []
@@ -480,6 +484,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                         cached_dead_candidates.extend(dead_candidates)
                         cached_referenced_names.update(referenced_names)
                         cached_referenced_qualnames.update(referenced_qualnames)
+                        cached_declared_exports.update(
+                            _load_cached_declared_exports(cached)
+                        )
                         if typing_coverage is not None:
                             cached_typing_modules.append(typing_coverage)
                         if docstring_coverage is not None:
@@ -588,6 +595,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             )
         ),
         cached_referenced_qualnames=frozenset(cached_referenced_qualnames),
+        cached_declared_exports=frozenset(cached_declared_exports),
         cached_typing_modules=tuple(
             sorted(cached_typing_modules, key=lambda item: (item.filepath, item.module))
         ),

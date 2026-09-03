@@ -2758,6 +2758,51 @@ def test_wire_round_trip_keeps_the_star_import_binding_fact() -> None:
     } == {"pkg.impl:StarBound": True, "pkg.impl:Omitted": False}
 
 
+def test_wire_round_trip_keeps_the_declared_exports_fact() -> None:
+    """The dependent lane carries the module's declared exports (``dx``,
+    liveness policy v4) in both of its states: a sorted, deduplicated list
+    when the module declares names, and no key at all when it declares none,
+    which decodes to the empty tuple. A malformed value rejects the entry
+    like the other name lists do - a wire the reader does not understand is
+    never read as "declares nothing"."""
+
+    declaring = replace(
+        _empty_v3_entry().module_dependent,
+        declared_exports=("pkg.api:Widget", "pkg.api:helper", "pkg.api:Widget"),
+    )
+    entry = replace(_empty_v3_entry(), module_dependent=declaring)
+
+    wire = _encode_wire_file_entry(entry)
+    dependent_wire = wire["d"]
+    assert isinstance(dependent_wire, dict)
+    assert dependent_wire["dx"] == ["pkg.api:Widget", "pkg.api:helper"]
+    decoded = _decode_wire_file_entry(
+        wire, "pkg/api.py", analysed_filepath="pkg/api.py"
+    )
+    assert decoded is not None
+    assert decoded.module_dependent.declared_exports == (
+        "pkg.api:Widget",
+        "pkg.api:helper",
+    )
+
+    silent = _encode_wire_file_entry(_empty_v3_entry())
+    silent_dependent = silent["d"]
+    assert isinstance(silent_dependent, dict)
+    assert "dx" not in silent_dependent
+    decoded = _decode_wire_file_entry(
+        silent, "pkg/api.py", analysed_filepath="pkg/api.py"
+    )
+    assert decoded is not None
+    assert decoded.module_dependent.declared_exports == ()
+
+    malformed = dict(wire)
+    malformed["d"] = {**dependent_wire, "dx": ["pkg.api:Widget", 7]}
+    assert (
+        _decode_wire_file_entry(malformed, "pkg/api.py", analysed_filepath="pkg/api.py")
+        is None
+    )
+
+
 def test_decode_wire_file_entry_rejects_malformed_v3_lanes() -> None:
     wire = _encode_wire_file_entry(_empty_v3_entry())
     malformed_neutral = dict(wire)

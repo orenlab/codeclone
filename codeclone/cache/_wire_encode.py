@@ -434,6 +434,16 @@ def _encode_name_lists(entry: CacheFactsDict, wire: dict[str, object]) -> None:
         wire["in"] = sorted(set(entry["import_names"]))
     if entry["class_names"]:
         wire["cn"] = sorted(set(entry["class_names"]))
+    # The declaration fact of liveness policy v4, beside the binding fact
+    # ``sb``: absent when the module declares no static ``__all__`` name,
+    # which is the one legal meaning of absence under the policy that
+    # introduced the key (a pre-v4 row misses the dependent lane instead).
+    # ``dx``, not ``de``: ``de`` is the class-metrics decorator-evidence
+    # sidecar above, whose fail-closed decoder rejects any other shape -
+    # measured 2026-09-03 as a warm miss on every row that declared an
+    # ``__all__`` (``cached 1 / analyzed 1`` on a two-file tree).
+    if entry.get("declared_exports"):
+        wire["dx"] = sorted(set(entry["declared_exports"]))
 
 
 def _encode_security_surfaces(entry: CacheFactsDict, wire: dict[str, object]) -> None:
@@ -719,6 +729,8 @@ def _dependent_facts(entry: CacheEntryV3) -> CacheFactsDict:
         security_surfaces=list(dependent.security_surfaces),
         function_relationship_facts=list(dependent.function_relationship_facts),
     )
+    if dependent.declared_exports:
+        facts["declared_exports"] = list(dependent.declared_exports)
     if dependent.typing_coverage is not None:
         facts["typing_coverage"] = dependent.typing_coverage
     if dependent.docstring_coverage is not None:

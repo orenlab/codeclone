@@ -251,9 +251,24 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # exist at runtime; a member reachable only through its defining module is
 # dead.
 #
-# Unchanged by all three: the verdict vocabulary, the ``__all__``-plus-package
-# named export chain (Y2), and the rule-3 abstention for an unresolved
-# external base.
+# Unchanged by all three: the verdict vocabulary, and the rule-3 abstention
+# for an unresolved external base.
+#
+# (D) "4" retires the ``__all__``-plus-package named export chain (Y2) as a
+# LIFE proof (RULING 2026-09-01, corrected 2026-09-03: an ``__all__``
+# declaration is not internal use). The walk folded every static ``__all__``
+# member into ``referenced_qualnames``, where it was indistinguishable from a
+# call site; measured on this repository, that one arm held 104 symbols live
+# under the closed world that nothing inside the product binds, 30 of them in
+# private modules whose ``__all__`` exports to nobody. The declaration now
+# does exactly its two jobs: the star-binding fact (C), and - new on the
+# dependent cache lane - ``declared_exports``, the names a module's static
+# ``__all__`` lists, which the external-reachability owner reads so that a
+# public plain module's declared import is exposure (``declared_reexport``)
+# and a name a module-level ``__getattr__`` serves is unresolved, never dead.
+# The distinguishing witness for the bump: a cold run under this policy and a
+# warm run over a generation-3 dependent lane disagree on every symbol the
+# arm held, so a "3" row expresses the old policy and must miss.
 #
 # Bump this constant whenever what counts as LIVE changes; verdicts across
 # versions are not comparable.
@@ -277,7 +292,7 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # and never touches the neutral fingerprint lane. That miss is what this
 # bump buys, and it is pinned by
 # ``test_liveness_policy_version_misses_only_dependent_lane``.
-LIVENESS_POLICY_VERSION: Final = "3"
+LIVENESS_POLICY_VERSION: Final = "4"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
 # Generation of the adoption-coverage policy: WHAT COUNTS as an annotated
 # parameter (the receiver of a non-static method is not one; ``*args`` and
@@ -517,6 +532,15 @@ TIER_STATE_COMPLETE: Final = "complete"
 # reader served its rows as "collected, empty" (measured: ``public_symbols``
 # 9 cold, 2 warm). The dependent profile carries ``api_collection_policy`` so
 # such a row misses; the number does not move for a build that never shipped.
+#
+# The same generation also carries the liveness-policy-v4 declaration fact on
+# the dependent lane: ``dx``, the names a module's static ``__all__`` lists,
+# beside the binding fact ``sb``. It joins 4.1 rather than opening 4.2 because
+# one generation boundary was already open for every known incompatible row
+# change of this wave; absence is the legal reading of a module that declares
+# nothing, and a 4.1 row written before the key existed misses the dependent
+# lane on LIVENESS_POLICY_VERSION ("3" -> "4") rather than decoding as
+# "declares nothing".
 #
 # It is disposable acceleration state and never truth, so this constant reaches
 # no report, no baseline and no content address: nothing downstream of a run

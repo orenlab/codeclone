@@ -304,9 +304,10 @@ class _ModuleWalkState:
     attr_nodes: list[ast.Attribute] = field(default_factory=list)
     # Resolved ``module:symbol`` targets of PEP 484 explicit re-exports
     # (``from x import y as y``) found at module scope in a runtime-reachable
-    # branch of a production file. One of the two independent life proofs for
-    # an imported symbol under liveness policy v2; static ``__all__``
-    # membership remains the other, stronger explicit contract.
+    # branch of a production file. The one declaration-shaped life proof left
+    # under liveness policy v4: an ``__all__`` entry is no longer one (it
+    # binds a name for ``import *`` and declares an export; it uses nothing),
+    # and this spelling stays a life proof only until its own ruling.
     explicit_reexport_qualnames: set[str] = field(default_factory=set)
     # Module-scope ``name = <call>`` / ``name = other_name`` assignments,
     # recorded raw during the walk and resolved after it, so a marker bound
@@ -314,9 +315,13 @@ class _ModuleWalkState:
     hook_marker_assignments: list[tuple[str, _MarkerAssignmentKind, str]] = field(
         default_factory=list
     )
+    # The names this module's static ``__all__`` lists. A declaration, read
+    # twice and never as a reference: the star-binding rule narrows what
+    # ``from <this module> import *`` carries to these, and the exposure owner
+    # reads them off the wire as ``declared_exports`` to tell a public plain
+    # module's re-export (an import it lists) from an implementation detail,
+    # and to name what a module-level ``__getattr__`` serves.
     exported_names: set[str] = field(default_factory=set)
-    lazy_export_bindings: dict[str, set[str]] = field(default_factory=dict)
-    has_module_getattr: bool = False
     protocol_symbol_aliases: set[str] = field(default_factory=lambda: {"Protocol"})
     protocol_module_aliases: set[str] = field(
         default_factory=lambda: set(_PROTOCOL_MODULE_NAMES)
@@ -503,21 +508,6 @@ def _string_literals_from_export_value(value: ast.AST) -> tuple[str, ...]:
             return ()
 
 
-def _string_mapping_from_literal_dict(value: ast.AST) -> dict[str, str]:
-    if not isinstance(value, ast.Dict):
-        return {}
-    mapping: dict[str, str] = {}
-    for key, val in zip(value.keys, value.values, strict=True):
-        if (
-            isinstance(key, ast.Constant)
-            and isinstance(key.value, str)
-            and isinstance(val, ast.Constant)
-            and isinstance(val.value, str)
-        ):
-            mapping[key.value] = val.value
-    return mapping
-
-
 def _collect_all_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
     match node:
         case ast.Assign(targets=targets, value=value):
@@ -549,32 +539,11 @@ def _collect_all_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
             pass
 
 
-def _collect_lazy_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
-    match node:
-        case ast.Assign(targets=targets, value=value):
-            names = {target.id for target in targets if isinstance(target, ast.Name)}
-        case ast.AnnAssign(target=ast.Name(id=name), value=value):
-            names = {name}
-        case (
-            ast.FunctionDef(name="__getattr__")
-            | ast.AsyncFunctionDef(name="__getattr__")
-        ):
-            state.has_module_getattr = True
-            return
-        case _:
-            return
-    if "_EXPORTS" not in names or value is None:
-        return
-    for exported_name, module_path in _string_mapping_from_literal_dict(value).items():
-        state.lazy_export_bindings.setdefault(exported_name, set()).add(module_path)
-
-
 def _collect_module_all_exports(tree: ast.AST, state: _ModuleWalkState) -> None:
     if not isinstance(tree, ast.Module):
         return
     for statement in tree.body:
         _collect_all_export_node(statement, state)
-        _collect_lazy_export_node(statement, state)
 
 
 def _literal_getattr_name(value: ast.AST | None) -> str | None:
@@ -656,21 +625,6 @@ def _collect_dynamic_getattr_names(tree: ast.AST) -> set[str]:
     for scope in _iter_runtime_callable_scopes(tree):
         names.update(_dynamic_getattr_names_from_scope(scope))
     return names
-
-
-def _local_export_qualname(
-    *,
-    module_name: str,
-    exported_name: str,
-    functions_by_name: dict[str, str],
-    classes_by_name: dict[str, str],
-) -> str | None:
-    local_qualname = functions_by_name.get(exported_name)
-    if local_qualname is None:
-        local_qualname = classes_by_name.get(exported_name)
-    if local_qualname is None:
-        return None
-    return f"{module_name}:{local_qualname}"
 
 
 def _collect_import_from_node(
@@ -1548,35 +1502,18 @@ def _resolve_referenced_qualnames(
                     if local_method_qualname in local_method_qualnames:
                         resolved.add(local_method_qualname)
 
-    for exported_name in state.exported_names:
-        # The wildcard edge names the module, ``__all__`` names the symbol:
-        # together they are a statically resolvable export binding, which is
-        # what ``from x import *`` otherwise throws away. Resolution is a
-        # plain product because the walk cannot know which of several
-        # wildcards bound the name; a product with no matching declaration is
-        # inert, since no candidate anywhere carries that qualname. Kept
-        # unconditional rather than a fallback: a wildcard genuinely can
-        # shadow an earlier named import, and over-resolving costs a missed
-        # finding while under-resolving asserts that live API is dead.
-        for wildcard_target in state.wildcard_import_targets:
-            resolved.add(f"{wildcard_target}:{exported_name}")
-        local_export_qualname = _local_export_qualname(
-            module_name=module_name,
-            exported_name=exported_name,
-            functions_by_name=top_level_function_by_name,
-            classes_by_name=top_level_class_by_name,
-        )
-        if local_export_qualname is not None:
-            resolved.add(local_export_qualname)
-            continue
-        resolved.update(state.imported_symbol_bindings.get(exported_name, ()))
-        if state.has_module_getattr:
-            for module_path in state.lazy_export_bindings.get(exported_name, ()):
-                resolved.add(f"{module_path}:{exported_name}")
+    # No ``__all__`` arm here, by liveness policy v4 (RULING 2026-09-01,
+    # corrected 2026-09-03): a static ``__all__`` member used to be folded in
+    # at this point, where it was indistinguishable from a call site, and it
+    # held 104 symbols of this repository live that nothing inside the product
+    # binds. Listing a name declares what ``import *`` carries and what the
+    # module exports; it references nothing. The declaration keeps its two
+    # honest jobs elsewhere: ``star_import_bound_qualnames`` below, and the
+    # ``declared_exports`` fact the external-reachability owner reads.
 
     # Liveness policy v2: the PEP 484 explicit re-export proof, independent
     # of ``__all__``. Targets were resolved to exact identity at collection
-    # time, so this is a plain union like the export chain above.
+    # time, so this is a plain union.
     resolved.update(state.explicit_reexport_qualnames)
 
     local_top_level_names = frozenset(
@@ -1816,6 +1753,14 @@ class _ModuleWalkResult(NamedTuple):
     #: the name: the wildcard re-export rule needs to know what an edge CARRIES
     #: before it can ask what the project holds live.
     star_import_bound_qualnames: frozenset[str]
+    #: The names this module's static ``__all__`` declares, as
+    #: ``<module>:<name>`` - the declaring module's namespace path, whether or
+    #: not anything defines that name here. A declaration fact beside the
+    #: binding fact above: the exposure owner reads it to tell a public plain
+    #: module's re-export (an import it lists) from an implementation detail
+    #: (an import it does not), and to name what a module-level
+    #: ``__getattr__`` serves. Never a reference.
+    declared_exports: frozenset[str]
     # Rule-3 facts, keyed by module-LOCAL qualname; units.py adds the module
     # prefix when it attaches them to the owning ClassMetrics.
     class_base_names: tuple[tuple[str, tuple[str, ...]], ...]
@@ -2076,6 +2021,9 @@ def _collect_module_walk_data(
             module_name=module_name,
             collector=collector,
             state=state,
+        ),
+        declared_exports=frozenset(
+            f"{module_name}:{name}" for name in state.exported_names
         ),
         class_base_names=class_base_names,
         unresolved_external_base_classes=unresolved_external_base_classes,

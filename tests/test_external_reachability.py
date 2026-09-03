@@ -31,7 +31,12 @@ from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
 from tests._ast_metrics_helpers import build_test_module_registry, extract_file_metrics
 
 if TYPE_CHECKING:
-    from codeclone.models import ExternalReachability
+    from codeclone.models import (
+        ExternalReachability,
+        FileMetrics,
+        LivenessClassification,
+        ModuleRegistryHandle,
+    )
 
 
 def _row(qualname: str, state: str, witness: str) -> ExternalReachability:
@@ -117,6 +122,7 @@ def _reachability(
     module_deps: tuple[ModuleDep, ...] = (),
     class_metrics: tuple[ClassMetrics, ...] = (),
     package_modules: frozenset[str] = frozenset(),
+    declared_exports: frozenset[str] = frozenset(),
 ) -> dict[str, ExternalReachability]:
     from codeclone.metrics.external_reachability import collect_external_reachability
 
@@ -125,6 +131,7 @@ def _reachability(
         module_deps=module_deps,
         class_metrics=class_metrics,
         package_modules=package_modules,
+        declared_exports=declared_exports,
     )
     # One row per candidate, in one deterministic order: a consumer that
     # zips rows against candidates must never see a gap or a shuffle.
@@ -277,7 +284,9 @@ def test_a_named_reexport_chain_is_followed_hop_by_hop() -> None:
 
 
 def test_a_plain_public_module_does_not_reexport_its_named_imports() -> None:
-    """PEP 8: an imported name is an implementation detail outside ``__init__``."""
+    """PEP 8: an imported name is an implementation detail outside ``__init__``
+    unless the module documents it as API - and with no ``__all__`` it does
+    not. The boundary of E2' below: the same import, undeclared."""
 
     rows = _reachability(
         candidates=(
@@ -290,6 +299,189 @@ def test_a_plain_public_module_does_not_reexport_its_named_imports() -> None:
 
     assert rows["pkg._impl:Client"].state == "not_reachable"
     assert rows["pkg._impl:Client.post"].state == "not_reachable"
+
+
+# ---------------------------------------------------------------------------
+# E2': a plain module's import is a re-export where its own ``__all__`` says
+# so (liveness policy v4). PEP 8 calls an imported name API exactly where the
+# module documents it as such, and ``__all__`` is that documentation.
+# ---------------------------------------------------------------------------
+
+
+def test_a_plain_public_module_reexports_the_named_import_its_all_declares() -> None:
+    """The maintainer's construction (2026-09-03), five lines: a public flat
+    module imports a private module's class and lists it in ``__all__``.
+    ``pkg.util.Client`` is a documented public path, so the class and its
+    public method are reachable through the declaration; the undeclared
+    sibling import stays implementation detail."""
+
+    rows = _reachability(
+        candidates=(
+            _candidate("pkg._impl:Client", kind="class"),
+            _candidate("pkg._impl:Client.post", kind="method"),
+            _candidate("pkg._impl:Client._render", kind="method"),
+            _candidate("pkg._impl:Orphan", kind="class"),
+            _candidate("pkg._impl:Orphan.never_called", kind="method"),
+        ),
+        module_deps=(_dep("pkg.util", "pkg._impl", "Client", "Orphan"),),
+        package_modules=frozenset({"pkg"}),
+        declared_exports=frozenset({"pkg.util:Client"}),
+    )
+
+    _assert_rows(
+        rows,
+        {
+            "pkg._impl:Client": ("reachable", "declared_reexport:pkg.util"),
+            "pkg._impl:Client.post": ("reachable", "declared_reexport:pkg.util"),
+            "pkg._impl:Client._render": ("not_reachable", ""),
+            # Imported and not declared: implementation detail (PEP 8).
+            "pkg._impl:Orphan": ("not_reachable", ""),
+            "pkg._impl:Orphan.never_called": ("not_reachable", ""),
+        },
+    )
+
+
+def test_a_declaration_reexports_exactly_the_import_it_names() -> None:
+    """The opposite error, three ways: a declared name that is not the import
+    binds nothing; a private plain module's declaration is a declaration to
+    nobody; and a package re-exports what it imports with or without one,
+    through the package witness - E2 stands."""
+
+    candidates = (
+        _candidate("pkg._impl:Client", kind="class"),
+        _candidate("pkg._impl:Client.post", kind="method"),
+    )
+
+    rows = _reachability(
+        candidates=candidates,
+        module_deps=(_dep("pkg.util", "pkg._impl", "Client"),),
+        package_modules=frozenset({"pkg"}),
+        declared_exports=frozenset({"pkg.util:Other"}),
+    )
+    assert rows["pkg._impl:Client"].state == "not_reachable"
+    assert rows["pkg._impl:Client.post"].state == "not_reachable"
+
+    rows = _reachability(
+        candidates=candidates,
+        module_deps=(_dep("pkg._util", "pkg._impl", "Client"),),
+        package_modules=frozenset({"pkg"}),
+        declared_exports=frozenset({"pkg._util:Client"}),
+    )
+    assert rows["pkg._impl:Client"].state == "not_reachable"
+    assert rows["pkg._impl:Client.post"].state == "not_reachable"
+
+    for declared in (frozenset(), frozenset({"pkg:Client"})):
+        rows = _reachability(
+            candidates=candidates,
+            module_deps=(_dep("pkg", "pkg._impl", "Client"),),
+            package_modules=frozenset({"pkg"}),
+            declared_exports=declared,
+        )
+        assert rows["pkg._impl:Client.post"] == _row(
+            "pkg._impl:Client.post", "reachable", "package_reexport:pkg"
+        )
+
+
+# ---------------------------------------------------------------------------
+# E4 and the dynamic hop: a plain module's ``__getattr__`` binds unreadably.
+# ---------------------------------------------------------------------------
+
+
+def test_a_plain_module_getattr_serves_its_declared_names_as_unresolved() -> None:
+    """``pkg.api`` declares ``Widget`` and binds it neither by definition, by
+    import nor by wildcard; its module-level ``__getattr__`` is what serves
+    the name. Which definition it serves cannot be read, so every top-level
+    definition of that name is unresolved through that construct, a served
+    class carries its public methods, and a name nothing declares is not
+    served at all."""
+
+    rows = _reachability(
+        candidates=(
+            _candidate("pkg.api:__getattr__", kind="function"),
+            _candidate("pkg._impl:Widget", kind="class"),
+            _candidate("pkg._impl:Widget.render", kind="method"),
+            _candidate("pkg._other:Widget", kind="class"),
+            _candidate("pkg._impl:Gadget", kind="class"),
+        ),
+        module_deps=(_dep("pkg.api", "pkg._impl"),),
+        package_modules=frozenset({"pkg"}),
+        declared_exports=frozenset({"pkg.api:Widget"}),
+    )
+
+    _assert_rows(
+        rows,
+        {
+            "pkg._impl:Widget": ("unresolved", "module_getattr:pkg.api"),
+            "pkg._impl:Widget.render": ("unresolved", "module_getattr:pkg.api"),
+            "pkg._other:Widget": ("unresolved", "module_getattr:pkg.api"),
+            "pkg._impl:Gadget": ("not_reachable", ""),
+        },
+    )
+
+
+def test_a_declared_name_is_served_only_by_a_reached_dynamic_module() -> None:
+    """Both boundaries of E4. Without the ``__getattr__`` a declared name that
+    nothing binds is a declaration of nothing; with it, in a private module
+    nothing reaches, the served names travel to nobody."""
+
+    candidates = (
+        _candidate("pkg._impl:Widget", kind="class"),
+        _candidate("pkg._impl:Widget.render", kind="method"),
+    )
+
+    rows = _reachability(
+        candidates=candidates,
+        module_deps=(_dep("pkg.api", "pkg._impl"),),
+        package_modules=frozenset({"pkg"}),
+        declared_exports=frozenset({"pkg.api:Widget"}),
+    )
+    assert rows["pkg._impl:Widget"].state == "not_reachable"
+    assert rows["pkg._impl:Widget.render"].state == "not_reachable"
+
+    rows = _reachability(
+        candidates=(_candidate("pkg._lazy:__getattr__", kind="function"), *candidates),
+        module_deps=(_dep("pkg._lazy", "pkg._impl"),),
+        package_modules=frozenset({"pkg"}),
+        declared_exports=frozenset({"pkg._lazy:Widget"}),
+    )
+    assert rows["pkg._impl:Widget"].state == "not_reachable"
+    assert rows["pkg._impl:Widget.render"].state == "not_reachable"
+
+
+def test_a_name_imported_through_a_plain_module_getattr_is_unresolved() -> None:
+    """The dynamic hop of the binding walk: the package imports ``Widget`` from
+    ``pkg._lazy`` by name, and ``_lazy`` binds it only through its
+    ``__getattr__``. ``pkg.Widget`` exists at runtime and its definition
+    cannot be read, so every top-level ``Widget`` is unresolved through the
+    construct - never dead. Without the ``__getattr__`` the import binds
+    nothing static and exposes nothing."""
+
+    candidates = (
+        _candidate("pkg._impl:Widget", kind="class"),
+        _candidate("pkg._impl:Widget.render", kind="method"),
+    )
+    deps = (_dep("pkg", "pkg._lazy", "Widget"),)
+
+    rows = _reachability(
+        candidates=(_candidate("pkg._lazy:__getattr__", kind="function"), *candidates),
+        module_deps=deps,
+        package_modules=frozenset({"pkg"}),
+    )
+    _assert_rows(
+        rows,
+        {
+            "pkg._impl:Widget": ("unresolved", "module_getattr:pkg._lazy"),
+            "pkg._impl:Widget.render": ("unresolved", "module_getattr:pkg._lazy"),
+        },
+    )
+
+    rows = _reachability(
+        candidates=candidates,
+        module_deps=deps,
+        package_modules=frozenset({"pkg"}),
+    )
+    assert rows["pkg._impl:Widget"].state == "not_reachable"
+    assert rows["pkg._impl:Widget.render"].state == "not_reachable"
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +1079,184 @@ def test_reachability_on_the_real_fixture_reads_the_named_export_chain() -> None
             symbol: expected["witness_kind"]
             for symbol, expected in method_cases.items()
         }
+
+
+def _golden_case_tree(
+    fixture_root: Path,
+    case_path: str,
+) -> tuple[Path, tuple[str, ...], str, tuple[str, ...]]:
+    """Fixture tree, source roots, api path and files for one ground-truth case."""
+    tree, _, rest = case_path.partition("/")
+    if tree.startswith("liveprobe"):
+        root, source_roots, api_path = fixture_root / tree, ("src",), rest
+        sources = (root / "src").rglob("*.py")
+    else:
+        root, source_roots, api_path = fixture_root, (".",), case_path
+        sources = (root / tree).glob("*.py")
+    return (
+        root,
+        source_roots,
+        api_path,
+        tuple(sorted(path.relative_to(root).as_posix() for path in sources)),
+    )
+
+
+def _golden_case_metrics(
+    root: Path,
+    files: tuple[str, ...],
+    registry: ModuleRegistryHandle,
+) -> dict[str, FileMetrics]:
+    """Real per-file walk facts for the fixture files of one case."""
+    return {
+        filepath: extract_file_metrics(
+            source=(root / filepath).read_text(),
+            filepath=filepath,
+            module_registry=registry,
+        )
+        for filepath in files
+    }
+
+
+def _golden_case_population(
+    metrics: dict[str, FileMetrics],
+) -> tuple[tuple[DeadCandidate, ...], frozenset[str], frozenset[str], frozenset[str]]:
+    """Candidates and the three name populations the owners read, unioned."""
+    walked = tuple(metrics.values())
+    candidates = tuple(
+        candidate
+        for file_metrics in walked
+        for candidate in file_metrics.dead_candidates
+    )
+    referenced_qualnames = frozenset[str]().union(
+        *(file_metrics.referenced_qualnames for file_metrics in walked)
+    )
+    referenced_names = frozenset[str]().union(
+        *(file_metrics.referenced_names for file_metrics in walked)
+    )
+    declared_exports = frozenset[str]().union(
+        *(file_metrics.declared_exports for file_metrics in walked)
+    )
+    return candidates, referenced_qualnames, referenced_names, declared_exports
+
+
+def _golden_case_rows(
+    metrics: dict[str, FileMetrics],
+    registry: ModuleRegistryHandle,
+    candidates: tuple[DeadCandidate, ...],
+    declared_exports: frozenset[str],
+) -> dict[str, ExternalReachability]:
+    """Reachability rows the real owner produces for one case's population."""
+    from codeclone.metrics.external_reachability import (
+        collect_external_reachability,
+        package_modules_from_registry,
+    )
+
+    walked = tuple(metrics.values())
+    return {
+        row.qualname: row
+        for row in collect_external_reachability(
+            definitions=candidates,
+            module_deps=tuple(
+                dep for file_metrics in walked for dep in file_metrics.module_deps
+            ),
+            class_metrics=tuple(
+                metric
+                for file_metrics in walked
+                for metric in file_metrics.class_metrics
+            ),
+            package_modules=package_modules_from_registry(registry),
+            declared_exports=declared_exports,
+        )
+    }
+
+
+def _golden_case_verdicts(
+    *,
+    candidates: tuple[DeadCandidate, ...],
+    referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str],
+    rows: dict[str, ExternalReachability],
+) -> dict[str, LivenessClassification]:
+    """The evaluator's verdict for one case under both world contracts."""
+    return {
+        world: classify_liveness(
+            definitions=candidates,
+            referenced_names=referenced_names,
+            referenced_qualnames=referenced_qualnames,
+            external_reachability=tuple(rows.values()),
+            world_contract=world,
+        )
+        for world in ("open", "closed")
+    }
+
+
+def test_the_golden_export_cases_are_exposure_without_internal_use() -> None:
+    """The four ground-truth cases that read ``live / export_root`` until
+    liveness policy v4 (LP-EXPORT, LP-R-EXPORT, ROOT-EXPORT, R-ROOT-EXPORT),
+    through the real walk and the real owner, pinned on their EVIDENCE:
+    nothing inside the package binds the symbol (absent from
+    ``referenced_qualnames``), the declaration is on the wire, a public path
+    exists (``reachable`` through the witness kind the truth names), so the
+    open world abstains as ``externally_reachable`` and the closed world calls
+    it dead as ``unreferenced``. A verdict-only pin would pass again if some
+    other mechanism produced the same verdict for the wrong reason."""
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    ground_truth = orjson.loads((fixture_root / "ground_truth.json").read_bytes())
+    cases = [
+        case
+        for case in ground_truth["cases"]
+        if case["expected"].get("status") == "unresolved" and "." not in case["symbol"]
+    ]
+    assert {case["id"] for case in cases} == {
+        "LP-EXPORT",
+        "LP-R-EXPORT",
+        "ROOT-EXPORT",
+        "R-ROOT-EXPORT",
+    }
+
+    for case in cases:
+        root, source_roots, api_path, files = _golden_case_tree(
+            fixture_root, case["path"]
+        )
+        registry = build_test_module_registry(root=root, source_roots=source_roots)
+        metrics = _golden_case_metrics(root, files, registry)
+        python_module = registry.entries_by_path[api_path].identity.python_module
+        assert python_module is not None
+        qualname = f"{python_module.module}:{case['symbol']}"
+        expected = case["expected"]
+        (
+            candidates,
+            referenced_qualnames,
+            referenced_names,
+            declared_exports,
+        ) = _golden_case_population(metrics)
+        rows = _golden_case_rows(metrics, registry, candidates, declared_exports)
+
+        # Evidence: no internal use, a declaration, a public path.
+        assert qualname not in referenced_qualnames, case["id"]
+        assert f"{python_module.package}:{case['symbol']}" in declared_exports, case[
+            "id"
+        ]
+        assert (rows[qualname].state, rows[qualname].witness.partition(":")[0]) == (
+            expected["reachability"],
+            expected["witness_kind"],
+        ), case["id"]
+        # Verdicts, both worlds, from that evidence alone.
+        verdicts = _golden_case_verdicts(
+            candidates=candidates,
+            referenced_names=referenced_names,
+            referenced_qualnames=referenced_qualnames,
+            rows=rows,
+        )
+        assert {
+            item.qualname: item.reason
+            for item in verdicts["open"].unresolved_reachability
+        }[qualname] == "externally_reachable", case["id"]
+        assert qualname not in {item.qualname for item in verdicts["open"].dead_items}
+        assert {item.qualname: item.reason for item in verdicts["closed"].dead_items}[
+            qualname
+        ] == expected["reason"], case["id"]
+        assert expected["live"] is False, case["id"]
 
 
 # ---------------------------------------------------------------------------

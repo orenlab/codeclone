@@ -15,9 +15,12 @@ that already ride the cache wire, so a warm run answers exactly as a cold one:
 * a name is **publicly bound** in a module when the module defines it, when a
   wildcard import binds it there (``from x import *`` binds what the target's
   ``__all__`` rule says - the ``star_import_bound`` fact on the candidate),
-  or when a package ``__init__`` imports it by name (PEP 8: the package
-  re-exports what it imports; a plain module's imports are implementation
-  detail);
+  when a package ``__init__`` imports it by name (PEP 8: the package
+  re-exports what it imports), or when a plain module imports it by name AND
+  lists it in its own static ``__all__`` (PEP 8: an imported name is API
+  exactly where the module documents it as such, and ``__all__`` is that
+  documentation - the ``declared_exports`` fact on the wire, liveness policy
+  v4); a plain module's undeclared import stays implementation detail;
 * a module is **public** when no segment of its dotted name starts with an
   underscore, and a symbol is **public** when no segment of its local path
   does - the one privacy statement Python has;
@@ -30,9 +33,12 @@ that already ride the cache wire, so a warm run answers exactly as a cold one:
 * the state is ``unresolved`` when the construct that decides exposure cannot
   be read statically: a reachable package with a module-level ``__getattr__``
   (PEP 562 can serve any name below it), a reachable package whose namespace
-  ``lazy_loader`` builds from a stub the walk never reads, or a class whose
-  base no edge binds - and whatever such a namespace carries outward is
-  unresolved too.
+  ``lazy_loader`` builds from a stub the walk never reads, a reached plain
+  module whose ``__getattr__`` serves a name its ``__all__`` declares or a
+  name some namespace imports from it by name (nothing static binds it, so
+  every top-level definition of that name is what it might serve), or a
+  class whose base no edge binds - and whatever such a namespace carries
+  outward is unresolved too.
 
 The order is the algorithm, and it is forced (RULING 2026-09-02): the raw
 binding graph carries no verdict; the seeds are the namespaces provably
@@ -64,9 +70,10 @@ of the test track is a Python module and not a place the project promises a
 name at.
 
 What is deliberately NOT decided here: ``__all__`` as a language beyond the
-binding fact the walk already resolved (dynamic ``__all__``, concatenation,
-imported ``__all__``), the liveness question itself, and what counts as a
-namespace. Reachability is evidence; the evaluator in
+two facts the walk already resolved - the star binding and the declared
+names - so a dynamic, concatenated or imported ``__all__`` reads as the
+literal part it has and an absent one as nothing; the liveness question
+itself; and what counts as a namespace. Reachability is evidence; the evaluator in
 :mod:`codeclone.metrics.dead_code` combines it with liveness evidence and the
 world contract, and :mod:`codeclone.metrics.api_population` combines it with
 the surface kind.
@@ -210,8 +217,15 @@ def _index_edges(
 def _index_definitions(
     definitions_in: Sequence[_Definition],
     class_metrics: Sequence[ClassMetrics],
-) -> tuple[set[str], set[str], dict[str, set[str]], dict[str, set[str]]]:
-    """Project classes and module-level definitions, by module and by leaf."""
+) -> tuple[
+    set[str],
+    set[str],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, set[str]],
+]:
+    """Project classes and module-level definitions, by module, by class leaf
+    and - top-level definitions only - by local name."""
 
     classes = {metric.qualname for metric in class_metrics} | {
         definition.qualname
@@ -232,7 +246,21 @@ def _index_definitions(
     for qualname in classes:
         leaf = qualname.partition(":")[2].rpartition(".")[2]
         classes_by_leaf.setdefault(leaf, set()).add(qualname)
-    return classes, definitions, definitions_by_module, classes_by_leaf
+    # What a name served through a module-level ``__getattr__`` might be: a
+    # top-level definition of that name, anywhere. Nested definitions are
+    # reached through their root and are not what ``<module>.<name>`` serves.
+    definitions_by_name: dict[str, set[str]] = {}
+    for qualname in definitions:
+        local = qualname.partition(":")[2]
+        if "." not in local:
+            definitions_by_name.setdefault(local, set()).add(qualname)
+    return (
+        classes,
+        definitions,
+        definitions_by_module,
+        classes_by_leaf,
+        definitions_by_name,
+    )
 
 
 def _dynamic_packages(
@@ -270,6 +298,33 @@ def _dynamic_packages(
     return dynamic
 
 
+def _dynamic_modules(
+    definitions: Sequence[_Definition],
+    *,
+    package_modules: frozenset[str],
+) -> dict[str, str]:
+    """Plain modules whose namespace a module-level ``__getattr__`` extends.
+
+    The package rule above marks a whole subtree, because that is what a
+    package's ``__getattr__`` characteristically serves. A plain module has
+    no subtree, so its handle is the NAMES: what its ``__all__`` declares
+    (the declared-dynamic rule) and what a namespace imports from it by name
+    (the binding walk's dynamic hop). Neither binding can be read, and both
+    are exposed as unresolved - never as dead.
+    """
+
+    dynamic: dict[str, str] = {}
+    for definition in definitions:
+        module, _, local = definition.qualname.partition(":")
+        if (
+            definition.kind == "function"
+            and local == "__getattr__"
+            and module not in package_modules
+        ):
+            dynamic[module] = f"module_getattr:{module}"
+    return dynamic
+
+
 class _Population:
     """The wired facts, indexed once; every rule below reads only these."""
 
@@ -282,6 +337,7 @@ class _Population:
         package_modules: frozenset[str],
         public_modules: frozenset[str] | None,
         public_leaves: frozenset[str],
+        declared_exports: Iterable[str],
     ) -> None:
         self.public_leaves = public_leaves
         # Two populations may name one definition (a class is both a walk
@@ -304,6 +360,7 @@ class _Population:
             self.definitions,
             self.definitions_by_module,
             self.classes_by_leaf,
+            self.definitions_by_name,
         ) = _index_definitions(definitions, class_metrics)
         modules |= set(package_modules)
         modules.update(
@@ -330,16 +387,45 @@ class _Population:
             package_modules=package_modules,
             import_targets=self.import_targets,
         )
+        self.dynamic_modules = _dynamic_modules(
+            definitions,
+            package_modules=package_modules,
+        )
+        # The declaration fact by declaring module (liveness policy v4): the
+        # names a static ``__all__`` lists, read for a plain module's
+        # re-exports and for what a dynamic plain module serves. A package
+        # needs no declaration to re-export (E2), so it is never read here.
+        declared: dict[str, set[str]] = {}
+        for entry in declared_exports:
+            module, separator, name = entry.partition(":")
+            if separator and module and name:
+                declared.setdefault(module, set()).add(name)
+        self.declared_exports: dict[str, frozenset[str]] = {
+            module: frozenset(names) for module, names in declared.items()
+        }
 
     def star_bound(self, qualname: str) -> bool:
         return qualname in self.star_bound_qualnames
 
-    def resolve_binding(self, module: str, name: str) -> frozenset[str]:
+    def resolve_binding(
+        self,
+        module: str,
+        name: str,
+        *,
+        dynamic: list[str] | None = None,
+    ) -> frozenset[str]:
         """The definitions ``<module>.<name>`` binds, by CPython's rules.
 
         A local definition wins; otherwise the name was imported - by name
         from one module, which is followed, or by a wildcard, which binds the
         target's definition only when the target's ``__all__`` rule says so.
+
+        A hop that lands on a plain module with a module-level ``__getattr__``
+        and finds nothing static to follow is a binding the walk cannot read:
+        the module serves the name at runtime (PEP 562) or not at all. That
+        construct's witness is appended to ``dynamic`` when the caller offers
+        one, so the caller can expose what the name might be as unresolved;
+        the walk never guesses a definition on the caller's behalf.
         """
 
         found: set[str] = set()
@@ -354,16 +440,24 @@ class _Population:
             if qualname in self.definitions:
                 found.add(qualname)
                 continue
+            followed = False
             for target, imported in sorted(self.named_imports.get(current, ())):
                 if imported == local:
                     stack.append((target, local, depth + 1))
+                    followed = True
             for target in sorted(self.star_edges.get(current, ())):
                 star_qualname = f"{target}:{local}"
                 if star_qualname in self.definitions:
                     if self.star_bound(star_qualname):
                         found.add(star_qualname)
+                        followed = True
                 else:
                     stack.append((target, local, depth + 1))
+                    followed = True
+            if not followed and dynamic is not None:
+                served_by = self.dynamic_modules.get(current)
+                if served_by is not None:
+                    dynamic.append(served_by)
         return frozenset(found)
 
     def resolve_base(self, module: str, spelling: str) -> frozenset[str]:
@@ -490,6 +584,31 @@ class _Namespaces:
         return self.dynamic.get(module)
 
 
+def _expose_binding(
+    population: _Population,
+    *,
+    target: str,
+    name: str,
+    rank: int,
+    witness: str,
+    expose: _Expose,
+) -> None:
+    """Expose what ``<target>.<name>`` binds, at ``rank`` through ``witness``.
+
+    A hop through a plain module's ``__getattr__`` binds unreadably: every
+    top-level definition of that name is what it might serve, so each is
+    exposed as unresolved with that module as the witness - the direction
+    that never asserts a served symbol dead, and never proves one reachable.
+    """
+
+    served: list[str] = []
+    for qualname in sorted(population.resolve_binding(target, name, dynamic=served)):
+        expose(qualname, rank, witness)
+    for construct in sorted(set(served)):
+        for qualname in sorted(population.definitions_by_name.get(name, ())):
+            expose(qualname, _UNRESOLVED, construct)
+
+
 def _expose_definitions(
     population: _Population, namespaces: _Namespaces, expose: _Expose
 ) -> None:
@@ -518,8 +637,51 @@ def _expose_package_reexports(
         for target, name in sorted(population.named_imports.get(package, ())):
             if name.startswith("_"):
                 continue
-            for qualname in sorted(population.resolve_binding(target, name)):
-                expose(qualname, rank, witness)
+            _expose_binding(
+                population,
+                target=target,
+                name=name,
+                rank=rank,
+                witness=witness,
+                expose=expose,
+            )
+
+
+def _expose_declared_reexports(
+    population: _Population, namespaces: _Namespaces, expose: _Expose
+) -> None:
+    """E2': imported by name into a plain module whose own static ``__all__``
+    lists the name (liveness policy v4).
+
+    PEP 8 makes an imported name API exactly where the module documents it
+    as such, and ``__all__`` is that documentation - the one construct that
+    turns a plain module's import from implementation detail into a public
+    re-export. Rank as E2: a public path, or a module a dynamic package could
+    serve. A package needs no declaration (E2), and a plain module a wildcard
+    reached is carried by E3 whatever it declares.
+    """
+
+    for module in sorted(population.declared_exports):
+        if module in population.package_modules:
+            continue
+        if module in population.public_modules:
+            rank, witness = _REACHABLE, f"declared_reexport:{module}"
+        elif module in namespaces.dynamic:
+            rank, witness = _UNRESOLVED, namespaces.dynamic[module]
+        else:
+            continue
+        declared = population.declared_exports[module]
+        for target, name in sorted(population.named_imports.get(module, ())):
+            if name.startswith("_") or name not in declared:
+                continue
+            _expose_binding(
+                population,
+                target=target,
+                name=name,
+                rank=rank,
+                witness=witness,
+                expose=expose,
+            )
 
 
 def _expose_star_chain(
@@ -542,8 +704,41 @@ def _expose_star_chain(
         for dep_target, name in sorted(population.named_imports.get(target, ())):
             if name.startswith("_"):
                 continue
-            for qualname in sorted(population.resolve_binding(dep_target, name)):
-                expose(qualname, rank, carried)
+            _expose_binding(
+                population,
+                target=dep_target,
+                name=name,
+                rank=rank,
+                witness=carried,
+                expose=expose,
+            )
+
+
+def _expose_declared_dynamic(
+    population: _Population, namespaces: _Namespaces, expose: _Expose
+) -> None:
+    """E4: declared by a reached plain module and served by its ``__getattr__``.
+
+    The module lists the name in its static ``__all__`` and binds it neither
+    by definition, by import nor by wildcard, so its module-level
+    ``__getattr__`` is what ``from <module> import *`` and ``<module>.<name>``
+    reach. Which definition it serves cannot be read, so every top-level
+    definition of that name is unresolved through that construct - at that
+    rank whatever the module's own, because a proven path to an unreadable
+    binding is unresolved, never proven. An unreached module serves nobody,
+    and an undeclared name is not a handle this layer has: the declaration
+    is what bounds the served set.
+    """
+
+    for module in sorted(population.dynamic_modules):
+        if namespaces.rank.get(module, _NOT_REACHED) == _NOT_REACHED:
+            continue
+        witness = population.dynamic_modules[module]
+        for name in sorted(population.declared_exports.get(module, ())):
+            if name.startswith("_") or population.resolve_binding(module, name):
+                continue
+            for qualname in sorted(population.definitions_by_name.get(name, ())):
+                expose(qualname, _UNRESOLVED, witness)
 
 
 def _expose_nested(
@@ -570,8 +765,10 @@ def _exposure(
 
     Read only after the fixed point, in a fixed order so the witness is
     deterministic: the direct public path, then the package re-export, then
-    the wildcard chain, then the roots of nested definitions. A higher rank
-    replaces a lower one; at equal rank the first construct stands.
+    the declared re-export of a plain module, then the wildcard chain, then
+    the declared names a plain module's ``__getattr__`` serves, then the
+    roots of nested definitions. A higher rank replaces a lower one; at
+    equal rank the first construct stands.
     """
 
     exposed: dict[str, tuple[int, str]] = {}
@@ -584,7 +781,9 @@ def _exposure(
 
     _expose_definitions(population, namespaces, expose)
     _expose_package_reexports(population, namespaces, expose)
+    _expose_declared_reexports(population, namespaces, expose)
     _expose_star_chain(population, namespaces, expose)
+    _expose_declared_dynamic(population, namespaces, expose)
     _expose_nested(population, exposed, expose)
     return exposed
 
@@ -635,6 +834,7 @@ def collect_external_reachability(
     package_modules: frozenset[str],
     public_modules: frozenset[str] | None = None,
     public_leaves: frozenset[str] = frozenset(),
+    declared_exports: Iterable[str] = (),
 ) -> tuple[ExternalReachability, ...]:
     """One reachability row per definition, sorted by qualname.
 
@@ -647,7 +847,10 @@ def collect_external_reachability(
     refuse exposure as a basis for liveness, it never empties them.
     ``public_leaves`` names the underscore leaves the caller's population
     calls public - the protocol dunder methods an api collector admits - and
-    is empty under the plain rule.
+    is empty under the plain rule. ``declared_exports`` is the walk's
+    declaration fact, ``<module>:<name>`` for every name a module's static
+    ``__all__`` lists (liveness policy v4); a caller with none passes none,
+    and no plain module then re-exports or serves anything by declaration.
     """
 
     population = _Population(
@@ -657,6 +860,7 @@ def collect_external_reachability(
         package_modules=package_modules,
         public_modules=public_modules,
         public_leaves=public_leaves,
+        declared_exports=declared_exports,
     )
     namespaces = _Namespaces(population)
     exposed = _exposure(population, namespaces)

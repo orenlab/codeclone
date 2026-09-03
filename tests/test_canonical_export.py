@@ -68,6 +68,10 @@ from codeclone.canonical.store import (
     _payload_bytes,
     _run_id,
 )
+from codeclone.contracts import (
+    LIVENESS_POLICY_VERSION,
+    STATEMENT_REACHABILITY_POLICY_VERSION,
+)
 from tests.test_canonical_roundtrip import analysis_facts, fixture_model
 
 _NS = "lineage-alpha"
@@ -189,9 +193,21 @@ _TARGET = "worktree-a"
 # the generation in its content-address namespace (canonical/store.py), so a
 # generation bump is a run-identity change by construction. Retiring "2" moved
 # this from f4bd11bd... ; the artifact digest below did not move, which is the
-# point - identity changed, the exported artifact did not.
-_FIXTURE_RUN_ID = "ade126a30a203ba4012736c1365730ee445b3b85e13a3d86d5ba75903dd153cd"
+# point - identity changed, the exported artifact did not.  Retiring "3" for
+# policy v4 - an ``__all__`` entry is exposure, never internal use - moved it
+# again, from ade126a3... , and the artifact digest again did not move.  The
+# RULE those moves follow is pinned executably by
+# ``test_liveness_policy_generation_is_an_input_of_run_identity`` below, so the
+# literal is the known answer of an algorithm rather than a number whose
+# justification lives only in this comment.
+_FIXTURE_RUN_ID = "a506377d2b567c7bee30f090faedd39e65105e20bce2154865ccdb39e92e47f5"
 _FIXTURE_ARTIFACT = "86eea25dc5e94d0788d7ea3abeb4df94f0757a10c6549f07a784b86e3fe4be3f"
+# The generation this fixture answered under before policy v4, and the identity
+# it answered with: the previous line of the history above, kept executable.
+_RETIRED_LIVENESS_GENERATION = "3"
+_RETIRED_GENERATION_RUN_ID = (
+    "ade126a30a203ba4012736c1365730ee445b3b85e13a3d86d5ba75903dd153cd"
+)
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:
@@ -308,6 +324,53 @@ def test_known_answer_run_and_artifact_identity(tmp_path: Path) -> None:
         == hashlib.sha256(b"cc-canonical-artifact:0\x00" + data).hexdigest()
     )
     assert envelope.artifact_digest != envelope.run_id
+
+
+def test_liveness_policy_generation_is_an_input_of_run_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Why the known answer above moved, stated as a rule and not a comment.
+
+    The dead-code observation family content-addresses its rows under the
+    liveness generation, so the SAME semantic artifacts are two different runs
+    under policy v3 and under policy v4 - while the exported bytes, which the
+    generation never reaches, stay identical. Reverting the generation here
+    reproduces the retired identity exactly, which is what makes the literal
+    above a known answer rather than a magic constant.
+    """
+    live_namespace = store_module._FAMILY_NAMESPACE["dead_code_observation"]
+    # The generation is spelled INTO the namespace, not merely correlated with
+    # it: a formula that stopped reading the constant reds here first.
+    assert live_namespace == (
+        f"liveness:{LIVENESS_POLICY_VERSION}"
+        f":statement_reachability:{STATEMENT_REACHABILITY_POLICY_VERSION}"
+    )
+    assert LIVENESS_POLICY_VERSION != _RETIRED_LIVENESS_GENERATION
+
+    with _store(tmp_path, "policy_live.sqlite") as store:
+        run_id = _publish(store, fixture_model())
+        data, envelope = _export(store, run_id)
+
+    monkeypatch.setitem(
+        store_module._FAMILY_NAMESPACE,
+        "dead_code_observation",
+        live_namespace.replace(
+            f"liveness:{LIVENESS_POLICY_VERSION}",
+            f"liveness:{_RETIRED_LIVENESS_GENERATION}",
+        ),
+    )
+    with _store(tmp_path, "policy_retired.sqlite") as store:
+        retired_run_id = _publish(store, fixture_model())
+        retired_data, retired_envelope = _export(store, retired_run_id)
+
+    assert run_id == _FIXTURE_RUN_ID
+    assert retired_run_id == _RETIRED_GENERATION_RUN_ID
+    assert retired_run_id != run_id
+    # Identity moved; the projection did not - the same asymmetry the wire
+    # revision shows from the other side in the test below.
+    assert retired_data == data
+    assert retired_envelope.artifact_digest == envelope.artifact_digest
+    assert envelope.artifact_digest == _FIXTURE_ARTIFACT
 
 
 def test_projection_layer_stays_out_of_run_identity(

@@ -1039,6 +1039,7 @@ class Cache:
             docstring_coverage,
             api_surface,
         ) = _new_optional_metrics_payload()
+        declared_exports: list[str] = []
         if file_metrics is not None:
             class_metrics_rows = [
                 _class_metrics_dict_from_model(metric, runtime_path)
@@ -1055,6 +1056,7 @@ class Cache:
             referenced_qualnames = sorted(set(file_metrics.referenced_qualnames))
             import_names = sorted(set(file_metrics.import_names))
             class_names = sorted(set(file_metrics.class_names))
+            declared_exports = sorted(set(file_metrics.declared_exports))
             runtime_reachability = [
                 _runtime_reachability_dict_from_model(fact, runtime_path)
                 for fact in file_metrics.runtime_reachability
@@ -1191,6 +1193,7 @@ class Cache:
                 referenced_qualnames=tuple(referenced_qualnames),
                 import_names=tuple(import_names),
                 class_names=tuple(class_names),
+                declared_exports=tuple(declared_exports),
                 runtime_reachability=tuple(runtime_reachability),
                 security_surfaces=tuple(security_surfaces),
                 function_relationship_facts=tuple(function_relationship_fact_rows),

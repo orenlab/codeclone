@@ -76,7 +76,7 @@ from .external_reachability import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from ..models import (
         ClassMetrics,
@@ -216,6 +216,7 @@ def classify_api_exposure(
     module_deps: Sequence[ModuleDep],
     class_metrics: Sequence[ClassMetrics],
     package_modules: frozenset[str],
+    declared_exports: Iterable[str] = (),
 ) -> tuple[ModuleApiSurface, ...]:
     """Stamp every collected symbol with whether a public namespace binds it.
 
@@ -249,6 +250,7 @@ def classify_api_exposure(
             module_deps=module_deps,
             class_metrics=class_metrics,
             package_modules=package_modules,
+            declared_exports=declared_exports,
             public_modules=population.public_namespaces(),
             # The collector already called these methods public; the oracle's
             # plain underscore rule would call ``Beta.__init__`` private and

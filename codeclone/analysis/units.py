@@ -728,6 +728,7 @@ def extract_units_and_stats_from_source(
                 ),
             ),
             referenced_qualnames=referenced_qualnames,
+            declared_exports=_walk.declared_exports,
             typing_coverage=typing_coverage,
             docstring_coverage=docstring_coverage,
             api_surface=api_surface,

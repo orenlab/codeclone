@@ -123,7 +123,7 @@ than through the import-time gate.
 |--------|-------------|
 | `--skip-metrics` | Run clone-only mode, skip full metrics |
 | `--skip-dead-code` | Skip dead code detection |
-| `--dead-code-world {open,closed}` | World contract for dead-code verdicts. Under `open`, a symbol that consumers outside the repository could reach is never asserted dead on internal evidence alone and is reported in the `unresolved` lane instead; `closed` treats every consumer as inside the repository. Default: `open` |
+| `--dead-code-world {open,closed}` | World contract for dead-code verdicts. Under `open`, a symbol that consumers outside the repository could reach is never asserted dead on internal evidence alone and is reported in the `unresolved` lane instead; `closed` treats every consumer as inside the repository. An `__all__` entry is exposure evidence for this decision, never internal use: a symbol held only by its module's `__all__` and its tests is `unresolved` under `open` and dead under `closed`, with its test-only consumers named. Default: `open` |
 | `--skip-dependencies` | Skip dependency graph analysis |
 
 ### Workspace and audit

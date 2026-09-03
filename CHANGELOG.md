@@ -5,6 +5,19 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **An `__all__` entry is exposure, never internal use.** The module walk folded every static
+  `__all__` member into the internal-reference set, where it was indistinguishable from a call site,
+  so a symbol nothing in the product binds read as live for being exported — measured on this
+  repository, 104 symbols under the closed world, 30 of them in private modules whose `__all__`
+  exports to nobody. The declaration now does its two real jobs and nothing else: it decides what
+  `from <module> import *` binds, and it rides the analysis cache as the module's declared exports so
+  the external-reachability owner can read a public plain module's declared import as a public path
+  (`declared_reexport:<module>` in the `unresolved` lane under `open`) and a name a module-level
+  `__getattr__` serves as `unresolved` (`module_getattr:<module>`), never as dead. Verdicts move:
+  under `closed` a symbol held only by its `__all__` and its tests is dead with its test-only
+  consumers named; under `open` it is `unresolved` with the public path as witness.
+  `LIVENESS_POLICY_VERSION` moves to `4`, so a warm cache written under the previous policy is
+  re-analysed instead of serving the old reading; no report schema or baseline contract changed.
 - **The public API surface stops carrying the repository's own test code.** The `api_surface`
   lane, and the `api_breaking_changes` metric computed from it, collected a row for every public
   symbol of the repository's own tests — so deleting a test printed as `removed | Removed from the

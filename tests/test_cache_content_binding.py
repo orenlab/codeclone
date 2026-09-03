@@ -229,6 +229,25 @@ def test_liveness_policy_version_misses_only_dependent_lane(
     )
 
 
+def test_liveness_policy_generation_three_misses_the_dependent_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The distinguishing witness of "3" -> "4" (2026-09-03).
+
+    A generation-3 dependent lane carries ``referenced_qualnames`` with every
+    static ``__all__`` member folded in, so a warm run over it would hold a
+    symbol live for being exported where a cold run under "4" calls it dead
+    or unresolved - 104 symbols on this repository. The lane must miss, and
+    only that lane.
+    """
+    _assert_profile_input_misses_only_dependent_lane(
+        monkeypatch,
+        profile_input="LIVENESS_POLICY_VERSION",
+        legacy_value="3",
+        current_value=LIVENESS_POLICY_VERSION,
+    )
+
+
 def _write_source_with_stat(root: Path, raw_source: bytes) -> tuple[Path, FileStat]:
     source = root / "module.py"
     source.write_bytes(raw_source)

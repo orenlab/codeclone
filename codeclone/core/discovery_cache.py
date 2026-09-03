@@ -795,3 +795,16 @@ def load_cached_metrics_extended(
         tuple(reachability_items),
         tuple(security_surface_items),
     )
+
+
+def load_cached_declared_exports(entry: CacheEntryV3) -> frozenset[str]:
+    """The declaration fact of one cached row (liveness policy v4).
+
+    Its own loader rather than an eleventh member of the metrics tuple
+    above: that tuple is unpacked by position in several places, and a
+    declaration is not a metric. Rehydrated for test files too - exposure
+    reads every module's ``__all__``; the reference lanes are what the
+    test-file rule empties.
+    """
+
+    return frozenset(entry.module_dependent.declared_exports)

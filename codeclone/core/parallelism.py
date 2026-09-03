@@ -161,6 +161,7 @@ def process(
             function_contract_summaries=(discovery.cached_function_contract_summaries),
             semantic_authority=semantic_authority,
             referenced_qualnames=discovery.cached_referenced_qualnames,
+            declared_exports=discovery.cached_declared_exports,
             typing_modules=discovery.cached_typing_modules,
             docstring_modules=discovery.cached_docstring_modules,
             api_modules=discovery.cached_api_modules,
@@ -186,6 +187,7 @@ def process(
     all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
     all_referenced_names: set[str] = set(discovery.cached_referenced_names)
     all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
+    all_declared_exports: set[str] = set(discovery.cached_declared_exports)
     all_runtime_reachability: list[RuntimeReachabilityFact] = list(
         discovery.cached_runtime_reachability
     )
@@ -332,6 +334,7 @@ def process(
                 all_referenced_qualnames.update(
                     result.file_metrics.referenced_qualnames
                 )
+                all_declared_exports.update(result.file_metrics.declared_exports)
                 all_runtime_reachability.extend(
                     result.file_metrics.runtime_reachability
                 )
@@ -618,6 +621,7 @@ def process(
         ),
         semantic_authority=semantic_authority,
         referenced_qualnames=frozenset(all_referenced_qualnames),
+        declared_exports=frozenset(all_declared_exports),
         typing_modules=tuple(
             sorted(all_typing_modules, key=lambda item: (item.filepath, item.module))
         ),

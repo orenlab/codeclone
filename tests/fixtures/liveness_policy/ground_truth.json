@@ -53,8 +53,11 @@
       "path": "liveprobe/src/liveprobe/api.py",
       "symbol": "public_api",
       "expected": {
-        "live": true,
-        "reason": "export_root"
+        "live": false,
+        "reason": "unreferenced",
+        "status": "unresolved",
+        "reachability": "reachable",
+        "witness_kind": "public_module"
       }
     },
     {
@@ -116,8 +119,11 @@
       "path": "liveprobe_renamed/src/renamedprobe/api.py",
       "symbol": "published_entry",
       "expected": {
-        "live": true,
-        "reason": "export_root"
+        "live": false,
+        "reason": "unreferenced",
+        "status": "unresolved",
+        "reachability": "reachable",
+        "witness_kind": "public_module"
       }
     },
     {
@@ -143,8 +149,11 @@
       "path": "distillations/api.py",
       "symbol": "exported_function",
       "expected": {
-        "live": true,
-        "reason": "export_root"
+        "live": false,
+        "reason": "unreferenced",
+        "status": "unresolved",
+        "reachability": "reachable",
+        "witness_kind": "public_module"
       }
     },
     {
@@ -230,8 +239,11 @@
       "path": "distillations_renamed/api.py",
       "symbol": "shared_command",
       "expected": {
-        "live": true,
-        "reason": "export_root"
+        "live": false,
+        "reason": "unreferenced",
+        "status": "unresolved",
+        "reachability": "reachable",
+        "witness_kind": "public_module"
       }
     },
     {

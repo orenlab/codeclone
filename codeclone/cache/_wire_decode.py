@@ -652,6 +652,11 @@ def _decode_wire_file_entry(
         import_names,
         class_names,
     ) = name_sections
+    # Liveness policy v4 declaration fact. Absent is the legal "declares no
+    # static __all__ name"; a malformed value rejects the entry like ``rq``.
+    declared_exports = _decode_optional_wire_names(obj=dependent_obj, key="dx")
+    if declared_exports is None:
+        return None
     typing_coverage = _decode_optional_wire_typing_coverage(
         obj=dependent_obj, filepath=filepath
     )
@@ -715,6 +720,7 @@ def _decode_wire_file_entry(
             referenced_qualnames=tuple(referenced_qualnames),
             import_names=tuple(import_names),
             class_names=tuple(class_names),
+            declared_exports=tuple(declared_exports),
             runtime_reachability=tuple(runtime_reachability),
             security_surfaces=tuple(security_surfaces),
             function_relationship_facts=tuple(function_relationship_facts),

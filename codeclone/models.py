@@ -1515,6 +1515,13 @@ class CacheDependentPayload:
     #: question than the workers did, so a metrics-skipping run stamped rows
     #: claiming a lane it never filled. The reuse gate reads THIS.
     materialized_api_surface: bool = False
+    #: The declaration fact the exposure owner reads (liveness policy v4):
+    #: ``<module>:<name>`` for every name the module's static ``__all__``
+    #: lists. Empty is the legal reading of a module that declares none, and
+    #: a row written before the fact existed is never read as that: the
+    #: dependent reuse profile carries LIVENESS_POLICY_VERSION, so such a row
+    #: misses the lane instead of decoding as "declares nothing".
+    declared_exports: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -3200,6 +3207,11 @@ class FileMetrics:
     security_surfaces: tuple[SecuritySurface, ...] = ()
     semantic_facts: SemanticFileFacts = field(default_factory=SemanticFileFacts)
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
+    # ``<module>:<name>`` for every name the module's static ``__all__``
+    # declares. A declaration, never a reference: it rides the dependent
+    # cache lane as ``declared_exports`` so the exposure owner answers a warm
+    # run exactly as a cold one (liveness policy v4).
+    declared_exports: frozenset[str] = field(default_factory=frozenset)
     typing_coverage: ModuleTypingCoverage | None = None
     docstring_coverage: ModuleDocstringCoverage | None = None
     api_surface: ModuleApiSurface | None = None
@@ -4611,6 +4623,9 @@ class CacheFactsDict(CacheFactsDictBase, total=False):
     docstring_coverage: ModuleDocstringCoverageDict
     api_surface: ModuleApiSurfaceDict
     structural_findings: list[StructuralFindingGroupDict]
+    # Liveness policy v4 declaration fact (``dx`` on the wire); absent when
+    # the module declares no static ``__all__`` name.
+    declared_exports: list[str]
 
 
 GroupMap = dict[str, list[GroupItem]]

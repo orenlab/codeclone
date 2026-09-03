@@ -18,8 +18,9 @@ own public names by construction, so a wildcard into it would prove nothing;
 only a private target lets the wildcard edge be the sole construct that
 decides, which is what makes every pin below a statement about the binding:
 
-* a name the target's ``__all__`` rule binds is carried, and its public
-  methods are unresolved, not dead;
+* a name the target's ``__all__`` rule binds is carried, and it and its
+  public methods are unresolved, not dead - the re-exporter's ``__all__``
+  declares, it does not use (liveness policy v4);
 * a name the target's ``__all__`` omits is not carried, and stays dead;
 * an underscore name is never carried, whoever imports it;
 * the chain continues through wildcard edges and through what a reached
@@ -109,9 +110,9 @@ __all__ = ["StarBoundWidget"]
     "pkg/_impl.py": '__all__ = ["StarBoundWidget"]\n' + _IMPL_SOURCE,
 }
 
-#: No wildcard anywhere and nothing re-exports the private module: the class
-#: is held live by its own ``__all__`` (the walk's binding), and its public
-#: method has no public path at all.
+#: No wildcard anywhere and nothing re-exports the private module: its own
+#: ``__all__`` declares exports to nobody, so the class and its public method
+#: are dead under any world - a declaration is not a use.
 _NO_WILDCARD_TREE = {
     "pkg/__init__.py": "",
     "pkg/_impl.py": """
@@ -371,18 +372,25 @@ def _lanes(
     }
 
 
-def test_wildcard_reexport_carries_the_public_methods_as_unresolved(
+def test_wildcard_reexport_carries_the_bound_names_as_unresolved(
     tmp_path: Path,
 ) -> None:
+    """The re-exporter's ``__all__`` declares; it does not use. Every name the
+    wildcard carries to ``pkg`` - the class, the helper and the class's public
+    method alike - has a public path and no internal evidence, so all of them
+    are unresolved rows through the same witness, and none is dead."""
+
     dead, unresolved = _lanes(tmp_path, _STAR_TREE, "star")
 
-    # The bound names themselves are live through the re-exporter's __all__.
-    assert "pkg._impl:StarBoundWidget" not in dead
-    assert "pkg._impl:StarBoundWidget" not in unresolved
-    assert "pkg._impl:star_bound_helper" not in dead
-    # Their public methods have no internal evidence and a public path.
-    assert "pkg._impl:StarBoundWidget.render_panel" not in dead
-    assert unresolved["pkg._impl:StarBoundWidget.render_panel"] == "star_reexport:pkg"
+    carried = {
+        "pkg._impl:StarBoundWidget",
+        "pkg._impl:StarBoundWidget.render_panel",
+        "pkg._impl:star_bound_helper",
+    }
+    assert carried.isdisjoint(dead)
+    assert {
+        qualname: unresolved.get(qualname) for qualname in carried
+    } == dict.fromkeys(carried, "star_reexport:pkg")
 
 
 def test_a_wildcard_with_no_target_all_binds_what_the_reexporter_omits(
@@ -442,13 +450,19 @@ def test_wildcard_reexport_never_binds_a_private_target_class(tmp_path: Path) ->
     assert "pkg._impl:_HiddenWidget.render_secret" not in unresolved
 
 
-def test_a_private_module_nothing_reexports_keeps_its_dead_public_method(
+def test_a_private_module_nothing_reexports_is_dead_with_its_own_all(
     tmp_path: Path,
 ) -> None:
+    """The 30-of-104 class: a private module's ``__all__`` binds names for a
+    wildcard nobody writes. It declares to nobody and uses nothing, so the
+    class and its public method are dead, and nothing is unresolved."""
+
     dead, unresolved = _lanes(tmp_path, _NO_WILDCARD_TREE, "no-wildcard")
 
-    assert "pkg._impl:LocalOnlyWidget" not in dead
-    assert "pkg._impl:LocalOnlyWidget.render_local" in dead
+    assert dead == {
+        "pkg._impl:LocalOnlyWidget",
+        "pkg._impl:LocalOnlyWidget.render_local",
+    }
     assert unresolved == {}
 
 
@@ -480,11 +494,19 @@ def test_chained_reexport_still_reports_what_no_hop_carries(tmp_path: Path) -> N
 
 
 def test_reexport_chain_is_anchored_at_the_public_frontier(tmp_path: Path) -> None:
+    """``_api`` stars ``_impl`` and lists two names, but nothing public carries
+    ``_api`` outward: the wildcard binds into a namespace no caller can spell
+    and the listing declares to nobody. Dead, all of it, under the open world
+    too - the binding and the declaration are facts about ``_api``'s
+    namespace, and neither is a use."""
+
     dead, unresolved = _lanes(tmp_path, _UNANCHORED_CHAIN_TREE, "unanchored")
 
-    # Bound into _api by the walk's own __all__ binding, but no public path.
-    assert "pkg._impl:StarBoundWidget" not in dead
-    assert "pkg._impl:StarBoundWidget.render_panel" in dead
+    assert {
+        "pkg._impl:StarBoundWidget",
+        "pkg._impl:StarBoundWidget.render_panel",
+        "pkg._impl:star_bound_helper",
+    } <= dead
     assert unresolved == {}
 
 

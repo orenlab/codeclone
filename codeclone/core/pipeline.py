@@ -399,10 +399,13 @@ def analyze(
     class_metrics = resolve_project_class_coupling(processing.class_metrics)
     # External reachability is a whole-project fact read from the facts the
     # per-file walk already produced (and therefore the cache): candidates
-    # with their star-binding, dependency edges, class bases. It is evidence
-    # for the evaluator, never a live root - the export chain used to be
-    # folded onto the candidates as ``export_root``, which recorded "live
-    # because exported" for symbols nothing had proven live.
+    # with their star-binding, dependency edges, class bases, and each
+    # module's declared exports. It is evidence for the evaluator, never a
+    # live root - the export chain used to be folded onto the candidates as
+    # ``export_root``, which recorded "live because exported" for symbols
+    # nothing had proven live, and until liveness policy v4 an ``__all__``
+    # entry was folded into ``referenced_qualnames`` itself, where it read as
+    # internal use.
     # Read as the other optional args are read (``api_surface`` below): a
     # caller that built its Namespace by hand answers under the product
     # default, and a value that is present is checked by the vocabulary's one
@@ -416,6 +419,7 @@ def analyze(
         module_deps=processing.module_deps,
         class_metrics=class_metrics,
         package_modules=package_modules,
+        declared_exports=processing.declared_exports,
     )
     dead_candidates = processing.dead_candidates
     # The api-surface track is decided once, here, and both consumers below
@@ -455,6 +459,7 @@ def analyze(
         module_deps=processing.module_deps,
         class_metrics=class_metrics,
         package_modules=package_modules,
+        declared_exports=processing.declared_exports,
     )
     if not boot.args.skip_metrics:
         referenced_qualnames = frozenset(

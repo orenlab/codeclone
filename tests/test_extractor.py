@@ -1925,12 +1925,42 @@ def test_dead_code_distinguishes_test_only_reference_from_unreferenced() -> None
     )
     assert dead_by_symbol["unused_private"].test_reference_sources == ()
     assert dead_by_symbol["run"].test_reference_sources == ()
+
+    # Evidence, not only verdict (liveness policy v4): the reason names what
+    # holds the symbol, and the walk's own facts must agree with it. A symbol
+    # the ground truth calls unreferenced or test-only is bound by nothing
+    # inside the package - absent from ``referenced_qualnames`` - and one it
+    # calls production-referenced is present. The defect this pins against
+    # was a false ``referenced_qualnames``: an ``__all__`` declaration recorded
+    # as a use, which held ``public_api`` live for being exported.
+    referenced_qualnames = frozenset().union(
+        *(metrics.referenced_qualnames for metrics in metrics_by_module.values())
+    )
+    qualname_by_symbol = {
+        candidate.qualname.rsplit(":", 1)[-1]: candidate.qualname
+        for metrics in metrics_by_module.values()
+        for candidate in metrics.dead_candidates
+    }
+    for symbol, expected in expected_by_symbol.items():
+        if expected["reason"] in {"unreferenced", "test_only_reference"}:
+            assert qualname_by_symbol[symbol] not in referenced_qualnames, symbol
+        elif expected["reason"] == "production_reference":
+            assert qualname_by_symbol[symbol] in referenced_qualnames, symbol
+    assert "liveprobe.api:public_api" not in referenced_qualnames
+    # The declaration itself is on the wire, keyed by the declaring module.
+    assert metrics_by_module["liveprobe"].declared_exports == frozenset(
+        {"liveprobe:public_api"}
+    )
     # Declared generation of the liveness policy, kept as a literal so a bump
     # cannot pass unnoticed. It moved 2 -> 3 when measurement showed an
     # unreleased generation still reaches users: "2" and "3" share
     # CACHE_VERSION, so a lane written under "2" was accepted by a "3" reader
-    # and its missing ``star_import_bound`` decoded as "not bound".
-    assert contracts.LIVENESS_POLICY_VERSION == "3"
+    # and its missing ``star_import_bound`` decoded as "not bound". It moved
+    # 3 -> 4 when an ``__all__`` entry stopped counting as internal use: a
+    # "3" dependent lane still carries the declaration folded into
+    # ``referenced_qualnames``, and a warm run over it would call
+    # ``public_api`` live where this cold run calls it dead.
+    assert contracts.LIVENESS_POLICY_VERSION == "4"
 
 
 def test_extraction_uses_module_identity_for_test_named_package_trees() -> None:
@@ -1971,14 +2001,83 @@ result = helper()
     assert test_metrics.referenced_names == frozenset()
 
 
-def test_package_export_chain_roots_only_exported_symbols() -> None:
-    """The __all__ / package re-export chain is owned by the module walk.
+def _export_chain_walk_facts(
+    *,
+    fixture_root: Path,
+    registry: ModuleRegistryHandle,
+    package_module: str,
+    api_path: str,
+    api_module: str,
+) -> tuple[set[str], set[str], set[str], list[DeadCandidate]]:
+    """Walk facts unioned over the package ``__init__`` and its api module."""
+    referenced_names: set[str] = set()
+    referenced_qualnames: set[str] = set()
+    declared_exports: set[str] = set()
+    dead_candidates: list[DeadCandidate] = []
+    for relative_path, module_name in (
+        (f"{package_module}/__init__.py", package_module),
+        (api_path, api_module),
+    ):
+        _, _, _, _, metrics, _ = _extract_source(
+            source=(fixture_root / relative_path).read_text(),
+            filepath=relative_path,
+            module_name=module_name,
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            module_registry=registry,
+        )
+        referenced_names |= set(metrics.referenced_names)
+        referenced_qualnames |= set(metrics.referenced_qualnames)
+        declared_exports |= set(metrics.declared_exports)
+        dead_candidates.extend(metrics.dead_candidates)
+    return referenced_names, referenced_qualnames, declared_exports, dead_candidates
 
-    A symbol exported only through the package ``__init__`` chain, with no
-    other reference anywhere, must come out live; its non-exported sibling in
-    the same module must stay dead. Public methods of an exported class are
-    deliberately NOT rooted here - that extension is owned by
-    ``codeclone.core.entrypoints`` and pinned by its own contract test.
+
+def _export_chain_exported_function(
+    expected_by_symbol: dict[str, dict[str, object]],
+) -> str:
+    """The plain symbol the ground truth marks exported but unresolved."""
+    return next(
+        symbol
+        for symbol, expected in expected_by_symbol.items()
+        if expected.get("status") == "unresolved" and "." not in symbol
+    )
+
+
+def _export_chain_non_exported_sibling(
+    expected_by_symbol: dict[str, dict[str, object]],
+) -> str:
+    """The plain symbol in the same module the chain never exports."""
+    return next(
+        symbol
+        for symbol, expected in expected_by_symbol.items()
+        if expected.get("status") is None and not expected["live"] and "." not in symbol
+    )
+
+
+def _export_chain_exported_method(
+    expected_by_symbol: dict[str, dict[str, object]],
+) -> str:
+    """The dotted symbol the ground truth marks exported but unresolved."""
+    return next(
+        symbol
+        for symbol, expected in expected_by_symbol.items()
+        if expected.get("status") == "unresolved" and "." in symbol
+    )
+
+
+def test_package_export_chain_is_exposure_evidence_not_internal_use() -> None:
+    """The __all__ / package re-export chain is a declaration, not a reference.
+
+    Liveness policy v4 (RULING 2026-09-01, corrected 2026-09-03): a symbol
+    exported only through the package ``__init__`` chain, with no other
+    reference anywhere, is bound by nothing inside the package. The walk must
+    therefore leave it out of ``referenced_qualnames`` - the evidence - and
+    the evidence-only verdict must call it dead exactly like its non-exported
+    sibling. That the chain puts the symbol on a public path is the exposure
+    owner's finding, pinned on this same fixture in
+    ``tests/test_external_reachability.py``.
     """
     fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
     ground_truth = json.loads((fixture_root / "ground_truth.json").read_text())
@@ -1997,25 +2096,18 @@ def test_package_export_chain_roots_only_exported_symbols() -> None:
             for case in ground_truth["cases"]
             if case["path"] == api_path
         }
-        referenced_names: set[str] = set()
-        referenced_qualnames: set[str] = set()
-        dead_candidates: list[DeadCandidate] = []
-        for relative_path, module_name in (
-            (f"{package_module}/__init__.py", package_module),
-            (api_path, api_module),
-        ):
-            _, _, _, _, metrics, _ = _extract_source(
-                source=(fixture_root / relative_path).read_text(),
-                filepath=relative_path,
-                module_name=module_name,
-                cfg=NormalizationConfig(),
-                min_loc=1,
-                min_stmt=1,
-                module_registry=registry,
-            )
-            referenced_names |= set(metrics.referenced_names)
-            referenced_qualnames |= set(metrics.referenced_qualnames)
-            dead_candidates.extend(metrics.dead_candidates)
+        (
+            referenced_names,
+            referenced_qualnames,
+            declared_exports,
+            dead_candidates,
+        ) = _export_chain_walk_facts(
+            fixture_root=fixture_root,
+            registry=registry,
+            package_module=package_module,
+            api_path=api_path,
+            api_module=api_module,
+        )
 
         dead = {
             item.qualname
@@ -2026,30 +2118,25 @@ def test_package_export_chain_roots_only_exported_symbols() -> None:
             )
         }
 
-        exported_function = next(
-            symbol
-            for symbol, expected in expected_by_symbol.items()
-            if expected["live"] and "." not in symbol
-        )
-        # Exported only through the package __init__ re-export + __all__.
-        assert f"{api_module}:{exported_function}" in referenced_qualnames
-        assert f"{api_module}:{exported_function}" not in dead
-        # The non-exported sibling in the same module stays dead.
-        non_exported = next(
-            symbol
-            for symbol, expected in expected_by_symbol.items()
-            if not expected["live"] and "." not in symbol
-        )
+        exported_function = _export_chain_exported_function(expected_by_symbol)
+        # Exported only through the package __init__ re-export + __all__: a
+        # declaration, so not a reference, and dead on internal evidence.
+        assert f"{api_module}:{exported_function}" not in referenced_qualnames
+        assert f"{api_module}:{exported_function}" in dead
+        assert expected_by_symbol[exported_function]["reason"] == "unreferenced"
+        # The declaration is on the wire, keyed by the declaring module, and it
+        # names the export exactly.
+        assert f"{package_module}:{exported_function}" in declared_exports
+        # The non-exported sibling in the same module: the same evidence, the
+        # same verdict - the chain no longer tells them apart here.
+        non_exported = _export_chain_non_exported_sibling(expected_by_symbol)
         assert f"{api_module}:{non_exported}" not in referenced_qualnames
         assert f"{api_module}:{non_exported}" in dead
-        # Methods are not rooted by the walk; external reachability owns that
-        # question, and under the open world an uncalled reachable method is
-        # unresolved rather than live.
-        exported_method = next(
-            symbol
-            for symbol, expected in expected_by_symbol.items()
-            if expected.get("status") == "unresolved" and "." in symbol
-        )
+        assert f"{package_module}:{non_exported}" not in declared_exports
+        # Methods were never rooted by the walk; external reachability owns
+        # that question, and under the open world an uncalled reachable method
+        # is unresolved rather than live.
+        exported_method = _export_chain_exported_method(expected_by_symbol)
         assert f"{api_module}:{exported_method}" not in referenced_qualnames
 
 
@@ -3908,7 +3995,16 @@ def test_it():
     )
 
 
-def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:
+def test_module_all_spellings_bind_for_import_star_and_reference_nothing() -> None:
+    """Every static ``__all__`` spelling is a binding declaration, never a use.
+
+    Under liveness policy v4 the walk reads the spellings for two facts: what
+    ``from pkg.mod import *`` binds (the candidate's ``star_import_bound``)
+    and what the module declares (``declared_exports``). Neither is a
+    reference, so on internal evidence alone every definition here is dead,
+    the listed ones exactly like the unlisted ones. A nested ``__all__`` and
+    a non-literal element declare nothing.
+    """
     source = """
 __all__ = ["PublicClass"] + ("public_func",)
 __all__: list[str] = ["TypedPublic"]
@@ -3952,6 +4048,9 @@ def NestedInvalid():
     return 6
 """
     dead = set(_dead_qualnames_from_source(source))
+    metrics = _file_metrics_from_source(
+        source=source, filepath="pkg/mod.py", module_name="pkg.mod"
+    )
 
     exported = {
         "pkg.mod:PublicClass",
@@ -3968,7 +4067,17 @@ def NestedInvalid():
         "pkg.mod:NestedOnly",
         "pkg.mod:NestedInvalid",
     }
-    assert dead.isdisjoint(exported)
+    # The binding fact: exactly the listed names, whatever the spelling.
+    assert {
+        candidate.qualname
+        for candidate in metrics.dead_candidates
+        if candidate.star_import_bound
+    } == exported
+    # The declaration fact: the same names, keyed by the declaring module.
+    assert metrics.declared_exports == frozenset(exported)
+    # Neither is a reference: nothing here references anything.
+    assert exported.isdisjoint(metrics.referenced_qualnames)
+    assert exported <= dead
     assert still_dead <= dead
 
     state = module_walk_mod._ModuleWalkState()
@@ -3976,17 +4085,7 @@ def NestedInvalid():
     assert state.exported_names == set()
 
 
-def test_module_walk_export_and_dynamic_getattr_helpers_cover_safe_edges() -> None:
-    invalid_exports = cast(
-        ast.Assign,
-        ast.parse('_EXPORTS = {"Good": "pkg.good", 42: "bad", "Bad": object()}').body[
-            0
-        ],
-    )
-    assert module_walk_mod._string_mapping_from_literal_dict(ast.Pass()) == {}
-    assert module_walk_mod._string_mapping_from_literal_dict(invalid_exports.value) == {
-        "Good": "pkg.good"
-    }
+def test_module_walk_dynamic_getattr_helpers_cover_safe_edges() -> None:
     assert module_walk_mod._literal_getattr_name(ast.Pass()) is None
     assert (
         module_walk_mod._literal_getattr_name(
@@ -4034,7 +4133,17 @@ class Runtime:
     }
 
 
-def test_extract_resolves_public_reexports_to_source_symbols() -> None:
+def test_public_reexports_are_declarations_not_references() -> None:
+    """A named re-export and a lazy ``__getattr__`` export both DECLARE.
+
+    The package binds ``MetricValueDTO`` by import and lists it; it serves
+    ``ListContainersHandler`` through a module-level ``__getattr__`` and lists
+    that too. Under liveness policy v4 neither listing is internal use: on
+    internal evidence both origins are dead, and what the walk records is the
+    declaration, keyed by the declaring module. That the declarations put the
+    origins on a public path is the exposure owner's finding, pinned in
+    ``tests/test_external_reachability.py``.
+    """
     sources = {
         "common": (
             "pkg/common.py",
@@ -4099,8 +4208,17 @@ def __getattr__(name: str):
         metrics["handlers"],
         metrics["lazy_exports"],
     )
-    assert "pkg.common:MetricValueDTO" not in dead_reexports
-    assert "pkg.handlers:ListContainersHandler" not in dead_lazy
+    assert "pkg.common:MetricValueDTO" in dead_reexports
+    assert "pkg.handlers:ListContainersHandler" in dead_lazy
+    assert "pkg.common:MetricValueDTO" not in metrics["reexport"].referenced_qualnames
+    assert (
+        "pkg.handlers:ListContainersHandler"
+        not in metrics["lazy_exports"].referenced_qualnames
+    )
+    assert metrics["reexport"].declared_exports == frozenset({"pkg:MetricValueDTO"})
+    assert metrics["lazy_exports"].declared_exports == frozenset(
+        {"pkg:ListContainersHandler"}
+    )
 
 
 def test_extract_treats_guarded_dynamic_getattr_call_as_runtime_reference() -> None:
