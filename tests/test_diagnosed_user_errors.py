@@ -26,6 +26,9 @@ configuration families is pinned in their own rings
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 import codeclone.surfaces.cli.workflow as cli
@@ -198,3 +201,154 @@ def test_an_empty_step_never_becomes_an_empty_bullet() -> None:
     assert [line for line in rendered.splitlines() if line.startswith("- ")] == [
         "- real"
     ]
+
+
+# ---------------------------------------------------------------------------
+# The steps are read on one terminal and nowhere else
+# ---------------------------------------------------------------------------
+#
+# The interpreter path is deliberately carried in ``remediation`` rather than
+# in the message, *because* the message travels: into MCP responses, into
+# logs, into a pasted bug report. That reasoning is only sound while
+# ``remediation`` stays where it is read on the terminal of the person who
+# owns that path, and until now nothing enforced it -- a second reader added
+# in the internal envelope was measured passing all 305 tests of this ring
+# untouched. A boundary that holds only because nobody has written the second
+# reader yet is a report sentence, not a guarantee.
+#
+# Two guards, because neither sees what the other does. The first reads the
+# source and catches a reader that does not print anything (the measured
+# case); it cannot see an access through a computed attribute name. The
+# second reads the rendered bytes and catches a leak however it was spelled;
+# it cannot see a reader that holds the value without emitting it.
+
+_REMEDIATION_FIELD = "remediation"
+
+#: Named, not counted. ``len(readers) == 1`` would move the magic number into
+#: the test, and a second legitimate reader would then be "fixed" by bumping
+#: it. These are identities: an unexpected reader fails by name, and adding
+#: one is a reviewed edit to this line rather than to an integer.
+_REMEDIATION_OWNER = "codeclone/contracts/errors.py:DiagnosedUserError.__init__"
+_REMEDIATION_RENDERER = "codeclone/ui_messages/formatters.py:fmt_diagnosed_user_error"
+
+
+class _RemediationSites(ast.NodeVisitor):
+    """Every place production source touches the field, by qualified name.
+
+    Attribute syntax and the ``getattr`` family both count. The measured
+    second reader used ``getattr(error, "remediation", ())``, which a grep
+    for the dotted attribute does not match -- for this defect a textual
+    search is blind by construction, so the inventory is built from the AST.
+    """
+
+    def __init__(self) -> None:
+        self.scope: list[str] = []
+        self.sites: set[str] = set()
+
+    def _where(self) -> str:
+        return ".".join(self.scope) or "<module>"
+
+    def _in_scope(self, name: str, node: ast.AST) -> None:
+        self.scope.append(name)
+        self.generic_visit(node)
+        self.scope.pop()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._in_scope(node.name, node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._in_scope(node.name, node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._in_scope(node.name, node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr == _REMEDIATION_FIELD:
+            self.sites.add(self._where())
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in {
+            "getattr",
+            "setattr",
+            "hasattr",
+            "delattr",
+        }:
+            second = node.args[1] if len(node.args) > 1 else None
+            if isinstance(second, ast.Constant) and second.value == _REMEDIATION_FIELD:
+                self.sites.add(self._where())
+        self.generic_visit(node)
+
+
+def _remediation_sites() -> set[str]:
+    root = Path(__file__).resolve().parents[1]
+    found: set[str] = set()
+    for path in sorted((root / "codeclone").rglob("*.py")):
+        visitor = _RemediationSites()
+        visitor.visit(ast.parse(path.read_text("utf-8")))
+        relative = path.relative_to(root).as_posix()
+        found.update(f"{relative}:{where}" for where in visitor.sites)
+    return found
+
+
+def test_no_production_code_reads_the_steps_outside_the_diagnosed_renderer() -> None:
+    """A second reader anywhere in ``codeclone/`` fails here, by name.
+
+    Subtraction and not equality on purpose: this guard owns one direction
+    only. Losing the legitimate reader is the opposite defect and reds in
+    ``test_the_diagnosed_renderer_still_carries_the_steps_it_is_trusted_with``,
+    so neither failure can be mistaken for the other.
+    """
+
+    unexpected = _remediation_sites() - {_REMEDIATION_OWNER, _REMEDIATION_RENDERER}
+
+    assert unexpected == set(), (
+        "DiagnosedUserError.remediation carries a local interpreter path and is "
+        "read on the user's terminal only. New reader(s): "
+        f"{sorted(unexpected)}. If one of these is genuinely allowed to see it, "
+        "say so by name here and re-check that it cannot reach a public surface."
+    )
+
+
+def test_the_internal_envelope_renders_no_part_of_a_remediation() -> None:
+    """However it was spelled, the step must not reach the bug-report envelope.
+
+    ``fmt_internal_error`` frames a fault whose text a user is invited to
+    paste into a public issue. The steps are the one field allowed to name a
+    local filesystem path, so no part of them may appear here -- including
+    when the clauses in ``main`` are reordered and a diagnosed error arrives
+    at this renderer.
+    """
+
+    interpreter = "/opt/uv-tool/bin/python3"
+    step = f'"{interpreter}" -m pip install "codeclone[perf]"'
+
+    rendered = ui.strip_markup(
+        ui.fmt_internal_error(
+            _AFamilyOfDiagnosedErrors(_MEASURED_DIAGNOSIS, remediation=(step,))
+        )
+    )
+
+    assert interpreter not in rendered
+    assert step not in rendered
+
+
+def test_the_diagnosed_renderer_still_carries_the_steps_it_is_trusted_with() -> None:
+    """The opposite defect: a boundary satisfied by nobody reading the field.
+
+    A guard that only forbids readers is passed most easily by deleting the
+    legitimate one, which would silence the step the user needs. This is the
+    control that makes that a failure instead of a fix.
+    """
+
+    interpreter = "/opt/uv-tool/bin/python3"
+    step = f'"{interpreter}" -m pip install "codeclone[perf]"'
+
+    rendered = ui.strip_markup(
+        ui.fmt_diagnosed_user_error(
+            _AFamilyOfDiagnosedErrors(_MEASURED_DIAGNOSIS, remediation=(step,))
+        )
+    )
+
+    assert f"- {step}" in rendered

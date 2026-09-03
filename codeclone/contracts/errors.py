@@ -58,6 +58,11 @@ class DiagnosedUserError(CodeCloneError):
     reader, and ``main`` its one caller. That is what makes it the place for
     a local detail like an interpreter path: ``args`` travels into MCP
     responses, logs, and pasted bug reports, and this does not.
+
+    That last sentence is enforced, not merely asserted: a second reader
+    anywhere under ``codeclone/`` fails
+    ``test_no_production_code_reads_the_steps_outside_the_diagnosed_renderer``
+    by name. Before adding one, check it cannot reach a public surface.
     """
 
     __slots__ = ("remediation",)
