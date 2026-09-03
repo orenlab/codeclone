@@ -299,7 +299,15 @@ def _build_catalog() -> dict[str, str]:
             DiagnosedUserError(
                 "observability profile=true requires the codeclone[perf] "
                 "extra (psutil).",
-                remediation='Run: pip install "codeclone[perf]"',
+                # A pinned interpreter, not the running one: the real step
+                # carries sys.executable, and a catalog rendered from it would
+                # bake a developer's home directory into test output.
+                remediation=(
+                    "Install the extra into the interpreter running CodeClone: "
+                    '"/opt/codeclone/bin/python3" -m pip install "codeclone[perf]"',
+                    "Or unset CODECLONE_OBSERVABILITY_PROFILE to run without "
+                    "profiling.",
+                ),
             )
         ),
         "fmt_internal_error": ui.fmt_internal_error(ValueError("boom")),
@@ -571,6 +579,35 @@ def test_errno_brackets_survive_the_runtime_warning_pipeline() -> None:
     rendered = _render_rich(warning, no_color=True)
     assert "[Errno 2]" in rendered, (
         f"the [Errno 2] detail was eaten by markup handling: {rendered!r}"
+    )
+
+
+def test_interpreter_paths_survive_the_diagnosed_error_pipeline() -> None:
+    """A step that names which Python is worthless if the path arrives edited.
+
+    Interpreter paths carry brackets in the wild -- a versioned prefix, a
+    bracketed build tag -- and a bracket is what Rich reads as a style tag and
+    drops. The step whose whole job is to say *where* to install may not be the
+    step that loses part of the answer.
+
+    Asserted on the bytes a real console emits, not on ``strip_markup``: an
+    unescaped ``[3.14]`` survives stripping untouched, so a round-trip through
+    the stripper cannot tell escaped from unescaped and pins nothing.
+    """
+
+    step = '"/opt/py[3.14]/bin/python3" -m pip install "codeclone[perf]"'
+    rendered = _render_rich(
+        ui.fmt_diagnosed_user_error(
+            DiagnosedUserError(
+                "observability profile=true requires the codeclone[perf] "
+                "extra (psutil).",
+                remediation=(step,),
+            )
+        ),
+        no_color=True,
+    )
+    assert step in rendered, (
+        f"the interpreter path was eaten by markup handling: {rendered!r}"
     )
 
 

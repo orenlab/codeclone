@@ -250,6 +250,7 @@ def test_the_missing_perf_extra_carries_the_command_that_installs_it(
     """
 
     monkeypatch.setattr("codeclone.config.observability.find_spec", lambda name: None)
+    monkeypatch.setattr(sys, "executable", "/fake/uv-tool/bin/python3")
 
     with pytest.raises(ObservabilityConfigError) as raised:
         _resolve(
@@ -260,10 +261,117 @@ def test_the_missing_perf_extra_carries_the_command_that_installs_it(
     assert str(raised.value) == (
         "observability profile=true requires the codeclone[perf] extra (psutil)."
     )
-    assert raised.value.remediation == 'Run: pip install "codeclone[perf]"'
+    assert raised.value.remediation == (
+        "Install the extra into the interpreter running CodeClone: "
+        '"/fake/uv-tool/bin/python3" -m pip install "codeclone[perf]"',
+        "Or unset CODECLONE_OBSERVABILITY_PROFILE to run without profiling.",
+    )
 
 
 def test_a_family_that_has_nothing_to_add_carries_no_step() -> None:
-    """A next step is attached where one exists, never invented."""
+    """A next step is attached where one exists, never invented.
 
-    assert ConfigValidationError("bad key").remediation == ""
+    Empty is empty however it is spelled: a family that passes nothing and a
+    family that passes an empty string both print the diagnosis alone, rather
+    than a "Next steps:" heading over a blank bullet.
+    """
+
+    assert ConfigValidationError("bad key").remediation == ()
+    assert ConfigValidationError("bad key", remediation="").remediation == ()
+    assert ConfigValidationError("bad key", remediation=()).remediation == ()
+
+
+# ---------------------------------------------------------------------------
+# The step must name the environment it is talking about
+# ---------------------------------------------------------------------------
+
+
+def test_the_missing_perf_extra_names_the_interpreter_it_is_missing_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Measured 2026-09-02: the same sentence, twice, about a different Python.
+
+    The maintainer installed the extra with ``uv sync --upgrade --all-extras``
+    and got this diagnosis back word for word, because the ``codeclone`` on
+    PATH was a shim into the uv-tool environment that ``uv sync`` never fills.
+    The message was true about an interpreter it declined to name.
+
+    "Install codeclone[perf]" is not an executable step until it says *where*:
+    repeated without a subject to a user who has already installed it, it is a
+    loop.
+    """
+
+    monkeypatch.setattr("codeclone.config.observability.find_spec", lambda name: None)
+    monkeypatch.setattr(sys, "executable", "/fake/uv-tool/bin/python3")
+
+    with pytest.raises(ObservabilityConfigError) as raised:
+        _resolve(
+            CODECLONE_OBSERVABILITY_ENABLED="1",
+            CODECLONE_OBSERVABILITY_PROFILE="1",
+        )
+
+    assert any("/fake/uv-tool/bin/python3" in step for step in raised.value.remediation)
+
+
+def test_the_flag_the_user_set_is_named_as_the_other_way_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two ways out of a hard failure, and the user owns both.
+
+    Installing is one. Not asking for profiling is the other, and it is the
+    one the user can take without touching an environment they may not own.
+    """
+
+    monkeypatch.setattr("codeclone.config.observability.find_spec", lambda name: None)
+
+    with pytest.raises(ObservabilityConfigError) as raised:
+        _resolve(
+            CODECLONE_OBSERVABILITY_ENABLED="1",
+            CODECLONE_OBSERVABILITY_PROFILE="1",
+        )
+
+    steps = "\n".join(raised.value.remediation)
+    assert "CODECLONE_OBSERVABILITY_PROFILE" in steps
+
+
+def test_the_diagnosis_that_travels_carries_no_local_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The path belongs to the step, never to the sentence.
+
+    ``str(error)`` is what travels: it is what an MCP client renders, what a
+    log keeps, and what lands in a pasted bug report. The interpreter path is
+    the user's own filesystem, and the remediation -- read by exactly one
+    renderer, on that user's terminal -- is the only place for it.
+    """
+
+    monkeypatch.setattr("codeclone.config.observability.find_spec", lambda name: None)
+    monkeypatch.setattr(sys, "executable", "/fake/uv-tool/bin/python3")
+
+    with pytest.raises(ObservabilityConfigError) as raised:
+        _resolve(
+            CODECLONE_OBSERVABILITY_ENABLED="1",
+            CODECLONE_OBSERVABILITY_PROFILE="1",
+        )
+
+    assert "/fake/uv-tool/bin/python3" not in str(raised.value)
+
+
+def test_a_nameless_interpreter_still_produces_a_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``sys.executable`` is documented as possibly empty; a step still ships."""
+
+    monkeypatch.setattr("codeclone.config.observability.find_spec", lambda name: None)
+    monkeypatch.setattr(sys, "executable", "")
+
+    with pytest.raises(ObservabilityConfigError) as raised:
+        _resolve(
+            CODECLONE_OBSERVABILITY_ENABLED="1",
+            CODECLONE_OBSERVABILITY_PROFILE="1",
+        )
+
+    steps = raised.value.remediation
+    assert steps
+    assert all(step.strip() for step in steps)
+    assert any("codeclone[perf]" in step for step in steps)

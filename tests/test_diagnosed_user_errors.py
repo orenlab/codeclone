@@ -152,3 +152,49 @@ def test_the_formatter_refuses_an_undiagnosed_error() -> None:
 
     with pytest.raises(TypeError):
         ui.fmt_diagnosed_user_error(RuntimeError("boom"))  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Steps are a list, and one of them carries a filesystem path
+# ---------------------------------------------------------------------------
+#
+# This ring pins the envelope, not any one family: the observability family's
+# steps -- and the interpreter path in them -- are pinned at their own raise
+# site in ``test_observability_config``, which is where an r2 module may be
+# imported from. What has to hold *here* is that whatever steps a family
+# hands over arrive intact and separate.
+
+
+def test_every_step_is_rendered_as_its_own_bullet() -> None:
+    """Two ways out are two lines; a heading that reads "steps" must list them.
+
+    The alternatives are not interchangeable -- installing into an environment
+    the user may not own, versus not asking for the feature -- so folding them
+    into one bullet would hide the one some users can actually take.
+    """
+
+    rendered = ui.strip_markup(
+        ui.fmt_diagnosed_user_error(
+            _AFamilyOfDiagnosedErrors(
+                _MEASURED_DIAGNOSIS,
+                remediation=("install the extra", "or unset the flag"),
+            )
+        )
+    )
+
+    bullets = [line for line in rendered.splitlines() if line.startswith("- ")]
+    assert bullets == ["- install the extra", "- or unset the flag"]
+
+
+def test_an_empty_step_never_becomes_an_empty_bullet() -> None:
+    """A blank step is no step: the heading must not stand over a bare dash."""
+
+    rendered = ui.strip_markup(
+        ui.fmt_diagnosed_user_error(
+            _AFamilyOfDiagnosedErrors(_MEASURED_DIAGNOSIS, remediation=("", "real"))
+        )
+    )
+
+    assert [line for line in rendered.splitlines() if line.startswith("- ")] == [
+        "- real"
+    ]

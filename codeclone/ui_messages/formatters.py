@@ -910,9 +910,14 @@ def fmt_diagnosed_user_error(error: DiagnosedUserError) -> str:
 
     The remediation block appears only when there is a step; an error with
     nothing to add prints the diagnosis alone rather than a heading over
-    nothing. Refusing an undiagnosed error is deliberate: this frame asserts
-    "not our bug, and here is yours to fix", and it may not be put around a
-    fault nobody classified.
+    nothing. Each step gets its own bullet: the heading says "steps", and a
+    diagnosis with two ways out has two of them -- installing into an
+    environment the user may not own, and simply not asking for the feature
+    -- which are alternatives, not one sentence.
+
+    Refusing an undiagnosed error is deliberate: this frame asserts "not our
+    bug, and here is yours to fix", and it may not be put around a fault
+    nobody classified.
     """
 
     if not isinstance(error, DiagnosedUserError):
@@ -928,9 +933,8 @@ def fmt_diagnosed_user_error(error: DiagnosedUserError) -> str:
     message = esc(str(error).strip()) or "<no message>"
     if not error.remediation:
         return fmt_contract_error(message)
-    return fmt_contract_error(
-        "\n".join((message, "", "Next steps:", f"- {esc(error.remediation)}"))
-    )
+    steps = tuple(f"- {esc(step)}" for step in error.remediation)
+    return fmt_contract_error("\n".join((message, "", "Next steps:", *steps)))
 
 
 def fmt_internal_error(

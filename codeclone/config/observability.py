@@ -16,6 +16,7 @@ every knob is an environment override.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from importlib.util import find_spec
 
@@ -96,6 +97,51 @@ def _resolve_token_estimator(environ: Mapping[str, str]) -> tuple[str, bool]:
     return raw, False
 
 
+_PERF_UNSET_STEP = "Or unset CODECLONE_OBSERVABILITY_PROFILE to run without profiling."
+
+
+def _perf_extra_steps() -> tuple[str, ...]:
+    """The two ways out of a missing ``perf`` extra, and where the first applies.
+
+    Measured 2026-09-02: the extra was installed with
+    ``uv sync --upgrade --all-extras`` and the refusal came back word for
+    word, because the ``codeclone`` on PATH was a shim into a uv-tool
+    environment that ``uv sync`` never fills. The sentence was true about an
+    interpreter it declined to name, so the step it offered had already been
+    performed -- somewhere else -- and the user had nowhere left to go. A
+    remediation that does not identify its own subject is a loop.
+
+    ``sys.executable`` is the answer because it is the environment that
+    actually lacks psutil, whatever installed it and whatever the shim on
+    PATH is called. It is documented as possibly empty, and an unnamed
+    interpreter still gets the step without the subject rather than a step
+    with a hole in it.
+
+    The second way out is not a footnote. The first asks the user to write to
+    an environment they may not own -- a uv-tool install, a system Python, a
+    container image built elsewhere -- and the flag that asked for profiling
+    is theirs in every one of those cases.
+
+    The path is put in the remediation and never in the message: this is a
+    local diagnostic for the terminal of the person who owns that filesystem,
+    and ``remediation`` is read only there, while the message travels into
+    MCP responses, logs, and pasted bug reports.
+    """
+
+    interpreter = sys.executable
+    if not interpreter:
+        return (
+            "Install the extra into the environment running CodeClone: "
+            'pip install "codeclone[perf]"',
+            _PERF_UNSET_STEP,
+        )
+    return (
+        "Install the extra into the interpreter running CodeClone: "
+        f'"{interpreter}" -m pip install "codeclone[perf]"',
+        _PERF_UNSET_STEP,
+    )
+
+
 def resolve_observability_config(
     *, environ: Mapping[str, str] | None = None
 ) -> ObservabilityConfig:
@@ -122,7 +168,7 @@ def resolve_observability_config(
     if profile and find_spec("psutil") is None:
         raise ObservabilityConfigError(
             "observability profile=true requires the codeclone[perf] extra (psutil).",
-            remediation='Run: pip install "codeclone[perf]"',
+            remediation=_perf_extra_steps(),
         )
     token_estimator, token_estimator_downgraded = _resolve_token_estimator(env)
     return ObservabilityConfig(
