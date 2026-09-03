@@ -36,6 +36,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from codeclone.surfaces.mcp._review_receipt import derive_baseline_status
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    mint_execution_event_id,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPRunRecord
 
@@ -537,8 +541,6 @@ def _run_record(document: Mapping[str, object]) -> MCPRunRecord:
         summary={"run_id": "i19receipt000001"},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -547,6 +549,11 @@ def _run_record(document: Mapping[str, object]) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=root,
+            semantic_report_id="i19receipt000001",
+        ),
     )
 
 

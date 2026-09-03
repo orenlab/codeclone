@@ -63,10 +63,33 @@ from ._verification_profile import (
 MAX_WORSENED_ITEMS = 20
 
 
+def _names_run(candidate: str, run_id: str) -> bool:
+    """Does ``candidate`` (full or short) name ``run_id``?  The store's rule."""
+
+    return bool(candidate) and (run_id == candidate or run_id.startswith(candidate))
+
+
+def _witnessable(path: str, *records: MCPRunRecord) -> bool:
+    """Can the executions' witnesses see this path at all?
+
+    A path in either content manifest or in either git snapshot is one the
+    workspace witness answers for; a path outside all of them is outside what
+    the witness can see, and equality of witnesses says nothing about it.
+    """
+
+    normalized = path.replace("\\", "/").strip().removeprefix("./").rstrip("/")
+    for record in records:
+        if normalized in (record.execution.content_manifest or {}):
+            return True
+        if normalized in _run_dirty_paths(record):
+            return True
+    return False
+
+
 def _run_dirty_paths(record: MCPRunRecord) -> frozenset[str]:
     """Paths git reported as modified when *record* was analysed."""
 
-    snapshot = record.dirty_snapshot
+    snapshot = record.execution.dirty_snapshot
     if snapshot is None or not snapshot.git_available:
         return frozenset()
     return frozenset(entry.path for entry in snapshot.entries)
@@ -226,9 +249,10 @@ class _MCPSessionPatchContractMixin:
         if resolved_before_run_id is None:
             return self._unverified_patch_contract(reason="no_before_run")
         try:
-            before = self._run_bound_to_root(
+            before = self._before_run_for(
                 resolved_before_run_id,
-                root=root if binding_intent is None else binding_intent.root,
+                binding_intent=binding_intent,
+                root=root,
             )
         except MCPRunRootMismatchError:
             return self._unverified_patch_contract(reason="before_run_root_mismatch")
@@ -377,6 +401,43 @@ class _MCPSessionPatchContractMixin:
             return None
         with self._state_lock:
             return self._active_intents.get(intent_id)
+
+    def _before_run_for(
+        self,
+        before_run_id: str,
+        *,
+        binding_intent: IntentRecord | None,
+        root: Path | None,
+    ) -> MCPRunRecord:
+        """The before-run: the intent's own execution when the id names it.
+
+        A run id names a report; the intent names the execution that produced
+        the report it was declared against.  When the caller's before_run_id
+        is that report, the execution is the answer -- not whichever execution
+        of the same report registered last, which after an analysis-invariant
+        edit is the after-run wearing the before-run's name.  When that
+        execution is gone, the key-addressed lookup may still say WHERE the
+        report lives (a typed root mismatch when only a sibling checkout holds
+        it); what it never does is hand back a different execution as this
+        intent's before-run.
+        """
+
+        if binding_intent is not None and _names_run(
+            before_run_id, binding_intent.run_id
+        ):
+            try:
+                return _intent_session(self)._intent_bound_run(binding_intent)
+            except MCPRunNotFoundError as missing:
+                # Asked only whether the report lives elsewhere: a sibling
+                # checkout holding it is a typed root mismatch.  Whatever it
+                # finds under this root is not this intent's execution --
+                # the binding is gone -- so the refusal stands.
+                self._run_bound_to_root(before_run_id, root=binding_intent.root)
+                raise missing
+        return self._run_bound_to_root(
+            before_run_id,
+            root=root if binding_intent is None else binding_intent.root,
+        )
 
     def _run_bound_to_root(
         self,
@@ -771,29 +832,44 @@ class _MCPSessionPatchContractMixin:
         intent: IntentRecord | None,
         after: MCPRunRecord,
     ) -> bool:
-        """Was this exact run recomputed after the intent went active?
+        """Is the offered after-run a later execution than the intent's own?
 
         Requires a declared change window. Without an intent there is no
         "since when" to measure against, so identical ids stay ambiguous and
-        the typed dead end remains the honest answer. The mark is compared on
-        the intent's own ``(root, run_id)``: a recompute under a sibling
-        checkout, or of some other run, proves nothing about this one. A run a
-        later analysis superseded is stale however fresh it once was.
+        the typed dead end remains the honest answer.  Freshness is a fact
+        about EXECUTIONS, never about the shared run id: the after-run must be
+        a different event from the one the intent was declared against,
+        registered after it, under the intent's own root, and not itself
+        superseded by a later analysis.  An intent that predates the execution
+        binding keeps the key-addressed ordinal law -- the prototype the
+        ruling keeps until the durable witness passes its reboot test.
         """
 
         if intent is None:
-            return False
-        mark = intent.before_run_registration_ordinal
-        if mark is None:
             return False
         if intent.run_id != after.run_id:
             return False
         if intent.root.resolve() != after.root.resolve():
             return False
-        current = self._runs.registration_ordinal(after.run_id, root=intent.root)
-        if current is None or current <= mark:
+        binding = intent.before_execution_id
+        if binding is None:
+            mark = intent.before_run_registration_ordinal
+            if mark is None:
+                return False
+            current = self._runs.registration_ordinal(after.run_id, root=intent.root)
+            if current is None or current <= mark:
+                return False
+            return self._runs.is_latest_registration(after.run_id, root=intent.root)
+        after_id = after.execution.execution_event_id
+        before_ordinal = self._runs.execution_ordinal(binding)
+        after_ordinal = self._runs.execution_ordinal(after_id)
+        if before_ordinal is None or after_ordinal is None:
             return False
-        return self._runs.is_latest_registration(after.run_id, root=intent.root)
+        # Later, strictly: the before execution offered as its own after-run
+        # has an equal ordinal and is refused here, by the same comparison.
+        if after_ordinal <= before_ordinal:
+            return False
+        return self._runs.is_latest_execution(after_id, root=intent.root)
 
     def _analyzer_invariance_evidence(
         self,
@@ -805,19 +881,40 @@ class _MCPSessionPatchContractMixin:
         """Unobserved changed paths, or ``None`` when invariance is refused.
 
         Freshness cannot see ordering, so a fresh run must also have observed
-        the edit. A recorded content digest that no longer matches disk proves
-        the run did not read these bytes and is refused outright. An empty tuple is the
+        the edit.  The witness is compared between the two EXECUTIONS: an
+        after-run whose workspace witness equals the before-run's read exactly
+        the state the intent was declared on and observed no edit at all --
+        the typed dead end, however fresh the execution is -- provided at
+        least one claimed path is a path the witness can see.  Paths outside
+        both content manifests and outside git's view are the witness's
+        stated blind spot (RFC 2026-09-02 III.9 item 4, undetermined) and keep
+        the accepted-with-limitation answer.  Per path, a recorded content
+        digest that no longer matches disk proves the run did not read these
+        bytes and is refused outright; a digest the before-run also recorded
+        proves the pair witnessed no change there.  An empty tuple is the
         strongest result, not a falsy failure — test against ``None``.
         """
 
         if not self._invariance_run_is_fresh(intent=intent, after=after):
             return None
+        before: MCPRunRecord | None = None
+        if intent is not None and intent.before_execution_id is not None:
+            before = _intent_session(self)._optional_intent_bound_run(intent)
+            if before is None:
+                return None
+            if before.execution.workspace_witness == (
+                after.execution.workspace_witness
+            ) and any(_witnessable(path, before, after) for path in changed_files):
+                return None
         contradicted, unobserved = observation_evidence(
             root=after.root,
             changed_files=changed_files,
-            manifest=after.manifest,
-            content_manifest=after.content_manifest,
+            manifest=after.execution.manifest,
+            content_manifest=after.execution.content_manifest,
             dirty_paths=_run_dirty_paths(after),
+            before_content_manifest=(
+                None if before is None else before.execution.content_manifest
+            ),
         )
         return None if contradicted else unobserved
 

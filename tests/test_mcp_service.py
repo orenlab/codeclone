@@ -69,7 +69,11 @@ from codeclone.contracts import (
 )
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import FileStat, LaneTrust, MetricsDiff
-from codeclone.surfaces.mcp._session_shared import _BufferConsole
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    _BufferConsole,
+    mint_execution_event_id,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     DetailLevel,
@@ -110,6 +114,12 @@ def _default_alive_workspace_pids(
 ) -> None:
     """Lazy close treats dead PIDs as orphaned; default tests use synthetic PIDs."""
     monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+
+
+def _with_execution(record: MCPRunRecord, **changes: Any) -> MCPRunRecord:
+    """Replace execution facts on a record: they live on its event, not on it."""
+
+    return replace(record, execution=replace(record.execution, **changes))
 
 
 def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
@@ -228,8 +238,6 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -238,6 +246,11 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=root,
+            semantic_report_id=run_id,
+        ),
     )
 
 
@@ -1218,9 +1231,9 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
         )["new_by_source_kind"]
     )
     record = service._runs.resolve_any_root(str(summary["run_id"]))
-    assert record.manifest is not None
-    assert set(record.manifest) == {"pkg/__init__.py", "pkg/dup.py"}
-    assert record.dirty_snapshot is not None
+    assert record.execution.manifest is not None
+    assert set(record.execution.manifest) == {"pkg/__init__.py", "pkg/dup.py"}
+    assert record.execution.dirty_snapshot is not None
     assert summary["drifted_files"] == []
     assert latest["drifted_files"] == []
 
@@ -2326,7 +2339,7 @@ def test_workspace_drift_detects_added_deleted_and_mtime_changes(
         captured_at_utc="2026-06-14T00:00:00Z",
         entries=(),
     )
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(tmp_path, "drift-topology"),
         manifest=manifest,
         dirty_snapshot=snapshot,
@@ -2387,7 +2400,7 @@ def _single_file_drift_record(
         "collect_dirty_snapshot",
         lambda _root: snapshot,
     )
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(tmp_path, run_id),
         manifest=manifest,
         dirty_snapshot=snapshot,
@@ -2495,7 +2508,7 @@ def _drift_witness_case(
     module.write_text("A = 1\n", encoding="utf-8")
     if track:
         _git_commit_all(root, "add module")
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(root, run_id),
         manifest=mcp_workspace_drift_mod.build_run_manifest(
             root=root,
@@ -2503,7 +2516,7 @@ def _drift_witness_case(
         ),
         dirty_snapshot=mcp_workspace_hygiene_mod.collect_dirty_snapshot(root),
     )
-    assert set(record.manifest or {}) == {relative_path}
+    assert set(record.execution.manifest or {}) == {relative_path}
     return module, record
 
 
@@ -2515,8 +2528,8 @@ def _answered_git_snapshot(
     Every case below needs git to be *available* -- a blind run would reach
     ``mtime_size`` for the trivial reason and prove nothing about the witness.
     """
-    snapshot = record.dirty_snapshot
-    assert snapshot is not None
+    snapshot = record.execution.dirty_snapshot
+    assert isinstance(snapshot, mcp_workspace_hygiene_mod.DirtySnapshot)
     assert snapshot.git_available is True
     return snapshot
 
@@ -2647,7 +2660,7 @@ def test_workspace_drift_strength_cannot_claim_git_once_the_witness_is_removed(
             "collect_dirty_snapshot",
             lambda _root: after,
         )
-        record = replace(
+        record = _with_execution(
             _dummy_run_record(tmp_path, "drift-causal"),
             manifest=manifest,
             dirty_snapshot=before,
@@ -2716,7 +2729,7 @@ def test_workspace_drift_strength_downgrades_when_one_compared_path_is_blind(
             "collect_dirty_snapshot",
             lambda _root: snapshot,
         )
-        record = replace(
+        record = _with_execution(
             _dummy_run_record(tmp_path, "drift-weakest"),
             manifest=manifest,
             dirty_snapshot=snapshot,
@@ -2743,7 +2756,7 @@ def test_workspace_drift_strength_claims_nothing_when_nothing_was_compared(
         "collect_dirty_snapshot",
         lambda _root: witness,
     )
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(tmp_path, "drift-empty"),
         manifest={},
         dirty_snapshot=witness,
@@ -2758,7 +2771,7 @@ def test_workspace_drift_path_selection_limits_comparison(tmp_path: Path) -> Non
         (("first.py", "A = 1\n"), ("second.py", "B = 2\n")),
     )
     second = pkg / "second.py"
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(tmp_path, "drift-filter"),
         manifest=manifest,
     )
@@ -2793,7 +2806,7 @@ def test_workspace_drift_marks_missing_files_when_topology_unknown(
 ) -> None:
     from codeclone.models import FileStat
 
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(tmp_path, "drift-oserror"),
         manifest={"pkg/missing.py": FileStat(mtime_ns=1, size=2)},
     )
@@ -2852,7 +2865,7 @@ def test_workspace_drift_reports_fresh_when_manifest_matches(
         captured_at_utc="2026-06-14T00:00:00Z",
         entries=(),
     )
-    record = replace(
+    record = _with_execution(
         _dummy_run_record(tmp_path, "drift-fresh"),
         manifest=manifest,
         dirty_snapshot=snapshot,
@@ -3027,14 +3040,14 @@ def test_mcp_service_implementation_context_rejects_stale_intent_run(
     )
     intent_id = str(started["intent_id"])
     intent = service._active_intents[intent_id]
-    original_get = service._runs.get_for_root
+    original_get = service._runs.get_execution
 
-    def _missing_intent_run(run_id: str, *, root: Path) -> MCPRunRecord:
-        if run_id == intent.run_id:
-            raise MCPRunNotFoundError(run_id)
-        return original_get(run_id, root=root)
+    def _missing_intent_run(execution_event_id: str) -> MCPRunRecord:
+        if execution_event_id == intent.before_execution_id:
+            raise MCPRunNotFoundError(execution_event_id)
+        return original_get(execution_event_id)
 
-    monkeypatch.setattr(service._runs, "get_for_root", _missing_intent_run)
+    monkeypatch.setattr(service._runs, "get_execution", _missing_intent_run)
     with pytest.raises(MCPServiceContractError, match="no longer available"):
         service.get_implementation_context(
             root=str(tmp_path),
@@ -5833,7 +5846,7 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
 
     pinned_store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
     pinned_store.register(first)
-    pinned_store.pin("first", root=tmp_path)
+    pinned_store.pin_execution(first.execution.execution_event_id)
     pinned_store.register(second)
     assert tuple(record.run_id for record in pinned_store.records()) == (
         "first",
@@ -6974,9 +6987,12 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
     service._runs.register(_blast_radius_run_record(tmp_path))
     assert service._runs.resolve_any_root("abcdef12").run_id == "abcdef1234567890"
 
+    # A later execution registered under the intent's run id is a different
+    # event: the intent keeps answering with the execution it was declared
+    # against, so the report it was declared for has not changed under it.
     service._runs.register(_blast_radius_run_record(tmp_path, digest="digest-b"))
-    expired = service.manage_change_intent(action="get", intent_id=intent_id)
-    assert expired["status"] == "expired"
+    still_bound = service.manage_change_intent(action="get", intent_id=intent_id)
+    assert still_bound["status"] == "active"
 
     service._runs.register(
         _blast_radius_run_record(tmp_path, run_id="fedcba9876543210")
@@ -7034,13 +7050,15 @@ def test_mcp_service_manage_change_intent_additional_edges(
     ] == ("active")
     service.get_blast_radius(files=("pkg/a.py",), run_id="abcdef12")
 
+    # A later execution under the same run id is not the intent's execution;
+    # the check reads the one the intent was declared against.
     service._runs.register(_blast_radius_run_record(tmp_path, digest="changed"))
-    expired = service.manage_change_intent(
+    checked = service.manage_change_intent(
         action="check",
         intent_id=second_id,
         changed_files=["pkg/a.py"],
     )
-    assert expired["status"] == "expired"
+    assert checked["status"] == "clean"
 
     cleared = service.manage_change_intent(action="clear")
     assert cleared["cleared_intent_ids"] == [second_id]
@@ -10310,8 +10328,6 @@ def test_mcp_service_additional_projection_and_error_branches(
         summary={"run_id": "design", "health": {"score": 80, "grade": "B"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -10320,6 +10336,11 @@ def test_mcp_service_additional_projection_and_error_branches(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="design",
+        ),
     )
     design_findings = [
         finding
@@ -10566,8 +10587,6 @@ def test_mcp_service_additional_projection_and_error_branches(
         summary=record.summary,
         changed_paths=record.changed_paths,
         changed_projection=record.changed_projection,
-        warnings=record.warnings,
-        failures=record.failures,
         func_clones_count=record.func_clones_count,
         block_clones_count=record.block_clones_count,
         project_metrics=record.project_metrics,
@@ -10576,6 +10595,13 @@ def test_mcp_service_additional_projection_and_error_branches(
         new_func=record.new_func,
         new_block=record.new_block,
         metrics_diff=record.metrics_diff,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=record.root,
+            semantic_report_id="hotspot",
+            warnings=record.execution.warnings,
+            failures=record.execution.failures,
+        ),
     )
     assert (
         service._hotspot_rows(
@@ -10740,8 +10766,6 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -10750,6 +10774,11 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="helpers",
+        ),
     )
     service._runs.register(record)
 
@@ -10769,8 +10798,6 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -10779,6 +10806,11 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         new_func=frozenset({"clone:new"}),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="helpers-new",
+        ),
     )
     clone_gate = service._evaluate_gate_snapshot(
         record=clone_gate_record,
@@ -10833,8 +10865,6 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -10843,6 +10873,11 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="lookup",
+        ),
     )
     service._runs.register(record)
 
@@ -10855,8 +10890,6 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -10865,6 +10898,11 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="foreign",
+        ),
     )
     assert service._previous_run_for_root(foreign_record) is None
     assert (
@@ -11073,8 +11111,6 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         },
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -11083,6 +11119,11 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="coverage",
+        ),
     )
     assert _assert_optional_summary_metric(
         service,
@@ -11111,8 +11152,6 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         summary=record.summary,
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -11124,6 +11163,11 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="coverage-invalid",
+        ),
     )
     with pytest.raises(MCPServiceContractError, match="broken xml"):
         service._evaluate_gate_snapshot(
@@ -11209,8 +11253,6 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         },
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -11219,6 +11261,11 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="security",
+        ),
     )
     assert _assert_optional_summary_metric(
         service,
@@ -11308,8 +11355,6 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=2,
         project_metrics=None,
@@ -11318,6 +11363,11 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="helper-ids",
+        ),
     )
     canonical_to_short, short_to_canonical = service._finding_id_maps(record)
     assert len(set(canonical_to_short.values())) == 2
@@ -11447,8 +11497,6 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         summary={"run_id": "different-scope", "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -11457,6 +11505,11 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path / "other",
+            semantic_report_id="different-scope",
+        ),
     )
     scope = mcp_helpers_mod._comparison_scope(before=same_root, after=different_scope)
     assert scope["comparable"] is False
@@ -11659,8 +11712,6 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -11669,6 +11720,11 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="triage",
+        ),
     )
     monkeypatch.setattr(
         service.session,
@@ -13960,7 +14016,7 @@ def test_mcp_redeclaring_same_run_replaces_previous_intent(tmp_path: Path) -> No
 def test_mcp_run_store_pin_and_pruning_edges(tmp_path: Path) -> None:
     store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
     with pytest.raises(MCPRunNotFoundError):
-        store.pin("missing", root=tmp_path)
+        store.pin_execution("missing")
 
     records = [
         _patch_contract_run_record(
@@ -13974,9 +14030,8 @@ def test_mcp_run_store_pin_and_pruning_edges(tmp_path: Path) -> None:
     ]
     for record in records:
         store.register(record)
-    store.pin(records[0].run_id, root=tmp_path)
+    store.pin_execution(records[0].execution.execution_event_id)
     store._history_limit = 1
-    store._latest_run_id = (tmp_path.resolve(), records[1].run_id)
     store._prune_unpinned_locked()
     assert records[0].run_id in {item.run_id for item in store.records()}
     assert records[1].run_id not in {item.run_id for item in store.records()}
@@ -17761,8 +17816,8 @@ def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
     pinned: list[str] = []
     for index in range(mcp_shared_mod.MAX_PINNED_MCP_RUNS + 3):
         run_id = f"run-{index:03d}"
-        store.register(_dummy_run_record(tmp_path, run_id))
-        store.pin(run_id, root=tmp_path)
+        registered = store.register(_dummy_run_record(tmp_path, run_id))
+        store.pin_execution(registered.execution.execution_event_id)
         pinned.append(run_id)
 
     retained = tuple(record.run_id for record in store.records())
@@ -17778,8 +17833,8 @@ def test_pinning_keeps_the_most_recent_pins_protected(tmp_path: Path) -> None:
     """Bounding pins must not evict a live intent's run under the LRU."""
 
     store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
-    store.register(_dummy_run_record(tmp_path, "active"))
-    store.pin("active", root=tmp_path)
+    active = store.register(_dummy_run_record(tmp_path, "active"))
+    store.pin_execution(active.execution.execution_event_id)
     for index in range(6):
         store.register(_dummy_run_record(tmp_path, f"noise-{index}"))
 
@@ -17864,10 +17919,9 @@ def _drop_records_for_root(service: CodeCloneMCPService, root: Path) -> None:
 
     store = service._runs
     with store._lock:
-        for key, record in tuple(store._records.items()):
+        for event_id, record in tuple(store._executions.items()):
             if record.root == root:
-                store._records.pop(key, None)
-        store._latest_run_id = None
+                store._forget_locked(event_id)
 
 
 def test_run_store_keeps_a_record_per_root_for_a_shared_run_id(
@@ -17985,7 +18039,9 @@ def test_declaring_in_one_worktree_keeps_the_other_worktrees_intent(
     service.manage_change_intent(action="clear", intent_id=intent_b)
 
     assert intent_a in service._active_intents
-    assert (root_a.resolve(), shared_run_id) in service._runs._pinned_run_ids
+    assert (
+        service._active_intents[intent_a].before_execution_id in service._runs._pinned
+    )
     assert service._runs.get_for_root(shared_run_id, root=root_a).root == root_a
 
 
@@ -18637,13 +18693,13 @@ def test_mcp_run_store_dangling_pins_self_heal(tmp_path: Path) -> None:
 
     store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
     record = store.register(_dummy_run_record(tmp_path, "pinnedrun1234567"))
-    store.pin(record.run_id, root=tmp_path)
+    store.pin_execution(record.execution.execution_event_id)
 
-    ghost_key = mcp_shared_mod.run_store_key(tmp_path / "gone", "ghostrun12345678")
-    store._pinned_run_ids[ghost_key] = 1
+    ghost_execution = mcp_shared_mod.mint_execution_event_id()
+    store._pinned[ghost_execution] = 1
 
     store.unpin(record.run_id, root=tmp_path)
-    assert ghost_key not in store._pinned_run_ids
+    assert ghost_execution not in store._pinned
     assert tuple(item.run_id for item in store.records()) == ("pinnedrun1234567",)
 
 
@@ -19023,8 +19079,13 @@ def test_invariance_freshness_guard_cascade(tmp_path: Path) -> None:
         )
         is False
     )
-    # A genuine recompute of the same run under the same root is fresh.
-    service._runs.register(
+    # The before execution offered as its own after-run is never fresh, and
+    # an intent that lost its binding cannot prove freshness by ordinal alone
+    # when nothing was recomputed.
+    assert service._invariance_run_is_fresh(intent=intent, after=record) is False
+    # A genuine recompute of the same run under the same root is a later
+    # execution: that one is fresh -- and only that one.
+    recomputed = service._runs.register(
         _patch_contract_run_record(
             tmp_path,
             run_id=record.run_id,
@@ -19034,7 +19095,8 @@ def test_invariance_freshness_guard_cascade(tmp_path: Path) -> None:
             health=90,
         )
     )
-    assert service._invariance_run_is_fresh(intent=intent, after=record) is True
+    assert service._invariance_run_is_fresh(intent=intent, after=recomputed) is True
+    assert service._invariance_run_is_fresh(intent=intent, after=record) is False
 
 
 def test_matching_run_ids_outcome_skips_lightweight_profiles(

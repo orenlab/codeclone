@@ -13,12 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from ...api.execution_event import DirtyEntryWitness, DirtySnapshotWitness
 from ...cache.store import file_stat_signature
 from ...contracts.errors import ValidationError
 from ...models import FileStat
 from ...scanner import iter_py_files
 from ._session_shared import MCPRunRecord
-from ._workspace_hygiene import DirtySnapshot, collect_dirty_snapshot
+from ._workspace_hygiene import collect_dirty_snapshot
 
 WorkspaceDriftStatus = Literal["fresh", "drifted", "unknown"]
 WorkspaceDriftStrength = Literal["mtime_size", "mtime_size_plus_git"]
@@ -84,7 +85,7 @@ def compute_drift(
     paths: Sequence[str] | None = None,
 ) -> WorkspaceDrift:
     """Compare a run's source snapshot with current stat, topology, and git state."""
-    manifest = record.manifest
+    manifest = record.execution.manifest
     if manifest is None:
         return WorkspaceDrift(
             status="unknown",
@@ -94,7 +95,9 @@ def compute_drift(
             topology_drift=False,
             strength=_drift_strength(
                 compared_paths=frozenset(),
-                witnessed_paths=_git_witnessed_paths(record.dirty_snapshot, None),
+                witnessed_paths=_git_witnessed_paths(
+                    record.execution.dirty_snapshot, None
+                ),
             ),
         )
 
@@ -145,7 +148,7 @@ def compute_drift(
 
     current_dirty_snapshot = collect_dirty_snapshot(record.root)
     git_drifted = _dirty_snapshot_delta(
-        before=record.dirty_snapshot,
+        before=record.execution.dirty_snapshot,
         after=current_dirty_snapshot,
     )
     source_universe = manifest_paths | current_source_paths
@@ -174,7 +177,7 @@ def compute_drift(
         strength=_drift_strength(
             compared_paths=compared_paths,
             witnessed_paths=_git_witnessed_paths(
-                record.dirty_snapshot,
+                record.execution.dirty_snapshot,
                 current_dirty_snapshot,
             ),
         ),
@@ -224,15 +227,21 @@ def _path_selected(path: str, selected_paths: frozenset[str] | None) -> bool:
     )
 
 
+def _entry_map(snapshot: DirtySnapshotWitness) -> dict[str, DirtyEntryWitness]:
+    """The snapshot's entries by path, read through the execution witness type."""
+
+    return {entry.path: entry for entry in snapshot.entries}
+
+
 def _dirty_snapshot_delta(
     *,
-    before: DirtySnapshot | None,
-    after: DirtySnapshot,
+    before: DirtySnapshotWitness | None,
+    after: DirtySnapshotWitness,
 ) -> frozenset[str]:
     if before is None or not before.git_available or not after.git_available:
         return frozenset()
-    before_entries = before.entry_map()
-    after_entries = after.entry_map()
+    before_entries = _entry_map(before)
+    after_entries = _entry_map(after)
     return frozenset(
         path
         for path in before_entries.keys() | after_entries.keys()
@@ -241,8 +250,8 @@ def _dirty_snapshot_delta(
 
 
 def _git_witnessed_paths(
-    before: DirtySnapshot | None,
-    after: DirtySnapshot | None,
+    before: DirtySnapshotWitness | None,
+    after: DirtySnapshotWitness | None,
 ) -> frozenset[str]:
     """Paths git reported individually, under a digest that moves on content.
 
@@ -268,7 +277,7 @@ def _git_witnessed_paths(
     return frozenset(
         path
         for snapshot in (before, after)
-        for path, entry in snapshot.entry_map().items()
+        for path, entry in _entry_map(snapshot).items()
         if entry.digest is not None
     )
 

@@ -383,6 +383,8 @@ class _ContextSessionDependencies(Protocol):
 
     def _latest_run_for_root(self, root_path: Path) -> MCPRunRecord | None: ...
 
+    def _intent_bound_run(self, intent: IntentRecord) -> MCPRunRecord: ...
+
     def get_relevant_memory(self, **params: object) -> dict[str, object]: ...
 
 
@@ -656,7 +658,9 @@ class _MCPSessionContextMixin:
                     "Selected run_id does not match the active intent run."
                 )
             try:
-                record = self._runs.get_for_root(intent.run_id, root=intent.root)
+                record = cast("_ContextSessionDependencies", self)._intent_bound_run(
+                    intent
+                )
             except MCPRunNotFoundError as exc:
                 raise MCPServiceContractError(
                     "The active intent's analysis run is no longer available. "

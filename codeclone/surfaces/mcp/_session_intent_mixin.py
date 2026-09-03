@@ -345,9 +345,10 @@ class _MCPSessionIntentMixin:
                     record.run_id,
                     root=record.root,
                 ),
+                before_execution_id=record.execution.execution_event_id,
             )
             self._active_intents[intent_id] = record_payload
-            self._runs.pin(record.run_id, root=record.root)
+            self._runs.pin_execution(record.execution.execution_event_id)
         workspace_record = self._workspace_record_from_intent(
             record=record,
             intent=record_payload,
@@ -462,7 +463,7 @@ class _MCPSessionIntentMixin:
         queued_intent = replace(intent, status=IntentStatus.QUEUED)
         with self._state_lock:
             self._active_intents[intent.intent_id] = queued_intent
-            self._runs.unpin(record.run_id, root=record.root)
+            self._unpin_intent_run(queued_intent)
         update_workspace_intent_status(
             root=record.root,
             pid=self._agent_pid,
@@ -532,10 +533,7 @@ class _MCPSessionIntentMixin:
             )
         # Resolve the before-run — may have been evicted (not pinned).
         try:
-            record = self._runs.get_for_root(
-                queued_intent.run_id,
-                root=queued_intent.root,
-            )
+            record = self._intent_bound_run(queued_intent)
         except (MCPRunNotFoundError, MCPRunRootMismatchError):
             return {
                 "intent_id": intent_id,
@@ -588,7 +586,7 @@ class _MCPSessionIntentMixin:
         promoted = replace(queued_intent, status=IntentStatus.ACTIVE)
         with self._state_lock:
             self._active_intents[intent_id] = promoted
-            self._runs.pin(record.run_id, root=record.root)
+            self._runs.pin_execution(record.execution.execution_event_id)
         update_workspace_intent_status(
             root=record.root,
             pid=self._agent_pid,
@@ -784,15 +782,10 @@ class _MCPSessionIntentMixin:
                     else removed_intent.report_digest,
                 )
                 for removed_intent in removed_intents
-                for record in (
-                    self._optional_run_record(
-                        removed_intent.run_id,
-                        root=removed_intent.root,
-                    ),
-                )
+                for record in (self._optional_intent_bound_run(removed_intent),)
             )
             for removed_intent in removed_intents:
-                self._runs.unpin(removed_intent.run_id, root=removed_intent.root)
+                self._unpin_intent_run(removed_intent)
         workspace_cleared = True
         for root_path, removed_intent, _report_digest in workspace_targets:
             workspace_cleared = (
@@ -834,13 +827,7 @@ class _MCPSessionIntentMixin:
                 active_intent = self._active_intents.get(intent_id)
             if active_intent is None:
                 raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
-            return (
-                self._runs.get_for_root(
-                    active_intent.run_id,
-                    root=active_intent.root,
-                ),
-                active_intent,
-            )
+            return self._intent_bound_run(active_intent), active_intent
         # A caller-supplied root binds the lookup; without one, resolution
         # still fails closed if the id is held under several checkouts.
         record = (
@@ -1284,12 +1271,10 @@ class _MCPSessionIntentMixin:
                     recovery_run.record.run_id,
                     root=recovery_run.record.root,
                 ),
+                before_execution_id=recovery_run.record.execution.execution_event_id,
             )
             self._active_intents[workspace_record.intent_id] = recovered
-            self._runs.pin(
-                recovery_run.record.run_id,
-                root=recovery_run.record.root,
-            )
+            self._runs.pin_execution(recovery_run.record.execution.execution_event_id)
         return recovered
 
     def _rewrite_recovered_workspace_record(
@@ -1334,7 +1319,7 @@ class _MCPSessionIntentMixin:
     def _rollback_recovered_intent(self, recovered: IntentRecord) -> None:
         with self._state_lock:
             self._active_intents.pop(recovered.intent_id, None)
-            self._runs.unpin(recovered.run_id, root=recovered.root)
+            self._unpin_intent_run(recovered)
 
     def _recovered_payload(
         self,
@@ -1565,6 +1550,31 @@ class _MCPSessionIntentMixin:
             return self._runs.get_for_root(run_id, root=root)
         except (MCPRunNotFoundError, MCPRunRootMismatchError):
             return None
+
+    def _intent_bound_run(self, intent: IntentRecord) -> MCPRunRecord:
+        """The execution an intent was declared against.
+
+        The binding names the event, not the report: a later execution that
+        shares the intent's run id is a different before-run and is never
+        substituted for this one.  An intent without a binding (it predates
+        the binding) resolves by key, at its own root.
+        """
+
+        if intent.before_execution_id is not None:
+            return self._runs.get_execution(intent.before_execution_id)
+        return self._runs.get_for_root(intent.run_id, root=intent.root)
+
+    def _optional_intent_bound_run(self, intent: IntentRecord) -> MCPRunRecord | None:
+        try:
+            return self._intent_bound_run(intent)
+        except (MCPRunNotFoundError, MCPRunRootMismatchError):
+            return None
+
+    def _unpin_intent_run(self, intent: IntentRecord) -> None:
+        if intent.before_execution_id is not None:
+            self._runs.unpin_execution(intent.before_execution_id)
+        else:
+            self._runs.unpin(intent.run_id, root=intent.root)
 
     def _blast_radius_summary(
         self,

@@ -31,10 +31,12 @@ from codeclone.surfaces.mcp._context_governance import (
     passive_drill_down_reachability,
 )
 from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
     MCPAnalysisRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
+    mint_execution_event_id,
 )
 from codeclone.surfaces.mcp.server import build_mcp_server
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -54,8 +56,6 @@ def _memory_test_run_record(root: Path, run_id: str) -> MCPRunRecord:
         summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -64,6 +64,11 @@ def _memory_test_run_record(root: Path, run_id: str) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=root,
+            semantic_report_id=run_id,
+        ),
     )
 
 

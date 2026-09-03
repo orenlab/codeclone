@@ -256,8 +256,8 @@ class _MCPSessionReviewReceiptMixin:
                 intent_id=None,
             )
         if intent is not None and intent.run_id != record.run_id:
-            intent_record = intent_record or self._runs.get_for_root(
-                intent.run_id, root=intent.root
+            intent_record = intent_record or _intent_session(self)._intent_bound_run(
+                intent
             )
             if intent_record.root != record.root:
                 raise MCPServiceContractError(
@@ -446,7 +446,7 @@ class _MCPSessionReviewReceiptMixin:
         """
         if intent is None or intent.run_id == record.run_id:
             return None
-        return self._runs.get_for_root(intent.run_id, root=intent.root)
+        return _intent_session(self)._intent_bound_run(intent)
 
     def _receipt_structural_delta(
         self,

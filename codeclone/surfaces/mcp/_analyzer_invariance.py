@@ -55,6 +55,7 @@ def observation_evidence(
     manifest: Mapping[str, object] | None,
     content_manifest: Mapping[str, object] | None,
     dirty_paths: frozenset[str],
+    before_content_manifest: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Classify each changed path by what the after-run recorded about it.
 
@@ -62,10 +63,17 @@ def observation_evidence(
     the run demonstrably did not read the bytes now on disk and must be
     refused. *unobserved* is missing evidence, not counter-evidence, and
     belongs in the caller's stated limitations.
+
+    With the before-run's content witness, a path both executions recorded
+    under the same digest is *unobserved* as well: the after-run read the
+    bytes on disk, but so did the before-run, so the pair witnessed no change
+    there -- the edit either never reached this file or predates the
+    before-run, and neither is evidence about this patch.
     """
 
     scanned = manifest or {}
     recorded = content_manifest or {}
+    recorded_before = before_content_manifest or {}
     contradicted: list[str] = []
     unobserved: list[str] = []
     for path in sorted({_normalize(item) for item in changed_files if item}):
@@ -73,6 +81,8 @@ def observation_evidence(
         if digest is not None or path in scanned:
             if not _recorded_content_matches_disk(root=root, path=path, digest=digest):
                 contradicted.append(path)
+            elif digest is not None and recorded_before.get(path) == digest:
+                unobserved.append(path)
             continue
         if path not in dirty_paths:
             unobserved.append(path)

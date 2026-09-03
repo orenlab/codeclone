@@ -16,6 +16,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Final, Literal, TypeVar
+from uuid import uuid4
 
 import orjson
 
@@ -26,6 +27,7 @@ from ...api.config_delivery import (
     delivered_config_values,
     load_repository_config,
 )
+from ...api.execution_event import ExecutionEvent
 from ...baseline import Baseline
 from ...cache.store import Cache
 from ...cache.versioning import CacheStatus
@@ -105,7 +107,6 @@ from ...findings.ids import (
 )
 from ...models import (
     CoverageJoinResult,
-    FileStat,
     FunctionRelationshipFacts,
     MetricsDiff,
     ModuleDep,
@@ -124,7 +125,7 @@ from .messages.help_topics import HELP_TOPIC_SPECS as _HELP_TOPIC_SPECS
 from .payloads import paginate, resolve_finding_id, short_id
 
 if TYPE_CHECKING:
-    from ._workspace_hygiene import DirtySnapshot
+    pass
 
 AnalysisMode = Literal["full", "clones_only"]
 FreshnessKind = Literal["fresh", "mixed", "reused"]
@@ -686,8 +687,33 @@ class MCPUnitLocation:
     end_line: int
 
 
-@dataclass(frozen=True, slots=True)
+def mint_execution_event_id() -> str:
+    """Mint the identity of one execution.
+
+    An execution is an event, not a content address: two executions of one
+    byte-identical tree are two events and must never share a name, across
+    processes and across restarts (RFC 2026-09-02 §III.1: a random UUID, not a
+    session ordinal -- accepted by the maintainer, 2026-09-03).  The value
+    never enters ``run_id``, which names the report the execution produced.
+    """
+
+    return uuid4().hex
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class MCPRunRecord:
+    """One served run: the semantic report plus the execution that produced it.
+
+    ``run_id`` is the report's semantic identity; ``execution`` is the event
+    and carries every per-execution fact.  This is step 3 of RFC 2026-09-02
+    §III.8 -- the two identity laws separated in RAM, before the served
+    projection exists: the report body still rides on this record, and
+    ``comparison_settings`` / ``changed_paths`` / ``changed_projection`` /
+    ``coverage_join`` / ``summary`` stay here until that projection lands.
+    Keyword-only, because the field set changed shape and no positional caller
+    exists.
+    """
+
     run_id: str
     root: Path
     request: MCPAnalysisRequest
@@ -696,8 +722,6 @@ class MCPRunRecord:
     summary: dict[str, object]
     changed_paths: tuple[str, ...]
     changed_projection: dict[str, object] | None
-    warnings: tuple[str, ...]
-    failures: tuple[str, ...]
     func_clones_count: int
     block_clones_count: int
     project_metrics: ProjectMetrics | None
@@ -706,84 +730,108 @@ class MCPRunRecord:
     new_func: frozenset[str]
     new_block: frozenset[str]
     metrics_diff: MetricsDiff | None
-    manifest: Mapping[str, FileStat] | None = None
-    content_manifest: Mapping[str, str] | None = None
-    dirty_snapshot: DirtySnapshot | None = None
+    execution: ExecutionEvent
     unit_inventory: tuple[MCPUnitLocation, ...] = ()
     relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
     module_imports: tuple[ModuleDep, ...] = ()
 
 
-# Store identity for one run: the checkout it describes, plus the
-# content-addressed id. Neither half identifies a record on its own.
+# The index of one semantic report under one checkout.  Content-addressed
+# run ids collide between same-commit worktrees; the root is what tells those
+# apart, and it belongs in the index -- never in the id itself.
 MCPRunKey = tuple[Path, str]
 
 
 def run_store_key(root: Path, run_id: str) -> MCPRunKey:
-    """Build the identity under which a run record is stored.
-
-    Run ids are content-addressed, so two worktrees at the same commit produce
-    the same id. Root is what tells those runs apart, and it belongs in the
-    store key — never in the id itself.
-    """
+    """Build the index under which a report's executions are found."""
 
     return (root.resolve(), run_id)
 
 
 class CodeCloneMCPRunStore:
-    """Session-local run records, identified by ``(root, run_id)``.
+    """Session-local executions, identified by ``execution_event_id``.
 
-    There is deliberately no ``get(run_id)``. Every resolution either names the
-    root it requires (:meth:`get_for_root`) or states that it genuinely does not
-    constrain one (:meth:`resolve_any_root`, which fails closed when the id
-    spans roots). A lookup that cannot say which checkout it means is the bug
-    this store is shaped to prevent.
+    The store holds EXECUTIONS.  ``(root, run_id)`` is an index onto the
+    newest execution that produced that report under that checkout -- what a
+    caller holding only a semantic id can name -- and never the address of an
+    execution.  One report may have been produced by several executions, and
+    an intent declared against one of them keeps resolving to that one after
+    a later execution shares its name (RULING-2026-09-02).  Before this, the
+    store held one record per key and replaced it on re-registration, so the
+    before-run an intent pinned was silently overwritten by the after-run that
+    shared its id -- measured live on 2026-09-03.
+
+    There is deliberately no ``get(run_id)``.  Every resolution either names
+    the root it requires (:meth:`get_for_root`), states that it genuinely does
+    not constrain one (:meth:`resolve_any_root`, which fails closed when the
+    id spans roots), or names the execution itself (:meth:`get_execution`).
+
+    Bound: pinned executions (an intent's before-run) and the newest execution
+    per report.  An unpinned execution that a newer execution of the same
+    report supersedes is released at once -- nothing can name it any more --
+    and the rest are pruned oldest-first past ``history_limit``.
     """
 
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._history_limit = _validated_history_limit(history_limit)
         self._lock = RLock()
-        self._records: OrderedDict[MCPRunKey, MCPRunRecord] = OrderedDict()
-        self._latest_run_id: MCPRunKey | None = None
-        # Monotonic registration ordinals. Run ids are content-addressed, so
-        # re-registering the *same* key can only mean one thing: a fresh
-        # recompute observed the tree and produced byte-identical analysis
-        # facts. That advance is the only in-session evidence distinguishing
-        # "recomputed and unchanged" from "never recomputed", and identity
-        # alone cannot carry it — the record it replaces is indistinguishable.
-        self._registrations: dict[MCPRunKey, int] = {}
+        # Registration order, oldest first.
+        self._executions: OrderedDict[str, MCPRunRecord] = OrderedDict()
+        self._key_of: dict[str, MCPRunKey] = {}
+        # The newest execution per (root, run_id): the index, not the address.
+        self._latest_by_key: dict[MCPRunKey, str] = {}
+        self._latest_execution_id: str | None = None
+        # Monotonic registration ordinals, one per execution.  An execution is
+        # registered once, so its ordinal never moves; the order between two
+        # executions is the store's own evidence of which came later.
+        self._registrations: dict[str, int] = {}
         self._registration_seq: int = 0
         # Insertion-ordered so the oldest pin is identifiable: the record
-        # itself carries no timestamp, and pin order is the only evidence of
-        # which pin has been held longest. The value is a reference count —
-        # several live intents may hold the same run, and the last one to let
-        # go is the one that releases it.
-        self._pinned_run_ids: OrderedDict[MCPRunKey, int] = OrderedDict()
+        # carries no timestamp, and pin order is the only evidence of which
+        # pin has been held longest.  The value is a reference count -- several
+        # live intents may hold one execution.
+        self._pinned: OrderedDict[str, int] = OrderedDict()
 
     def register(self, record: MCPRunRecord) -> MCPRunRecord:
+        event_id = record.execution.execution_event_id
         key = run_store_key(record.root, record.run_id)
-        # This LRU is where one agent's run silently disappears while another
+        # This is where one agent's run silently disappears while another
         # agent is still holding its id. The span makes that a measured number
         # instead of an inference from a later "no run available" error.
         with span(name="mcp.run_store.register") as register_span, self._lock:
-            self._records.pop(key, None)
-            held_without_this_run = len(self._records)
-            self._records[key] = record
-            self._records.move_to_end(key)
-            self._latest_run_id = key
-            self._registration_seq += 1
-            self._registrations[key] = self._registration_seq
+            held_before = frozenset(self._executions)
+            if event_id in self._executions:
+                # The same event again is the same event: the record it
+                # carries is refreshed; its place, ordinal and pins are kept.
+                # A record that moved to another report name releases the old
+                # index entry, so no key keeps pointing at a record that no
+                # longer answers to it.
+                previous_key = self._key_of[event_id]
+                if (
+                    previous_key != key
+                    and self._latest_by_key.get(previous_key) == event_id
+                ):
+                    self._latest_by_key.pop(previous_key, None)
+                self._executions[event_id] = record
+                self._key_of[event_id] = key
+            else:
+                self._executions[event_id] = record
+                self._key_of[event_id] = key
+                self._registration_seq += 1
+                self._registrations[event_id] = self._registration_seq
+            self._latest_by_key[key] = event_id
+            self._latest_execution_id = event_id
             self._prune_unpinned_locked()
-            retained = len(self._records)
+            retained = len(self._executions)
             register_span.set_counter("run_store_runs_retained", retained)
             register_span.set_counter(
                 "run_store_runs_evicted",
-                max(0, held_without_this_run + 1 - retained),
+                len(held_before - frozenset(self._executions)),
             )
         return record
 
     def is_latest_registration(self, run_id: str, *, root: Path) -> bool:
-        """Is this the newest registration held for ``root``?
+        """Is this report's newest execution the newest one held for ``root``?
 
         A run that a later analysis superseded is stale evidence even when it
         was itself registered fresh, so invariance never rests on one.
@@ -802,11 +850,14 @@ class CodeCloneMCPRunStore:
         *,
         root: Path,
     ) -> int | None:
-        """Return when this exact ``(root, run_id)`` was last registered.
+        """The ordinal of the NEWEST execution of ``(root, run_id)``.
 
-        Ordinals are comparable only against other ordinals from this store.
-        ``None`` means the run is not held under *root* at all, which is a
-        refusal to answer rather than a claim about freshness.
+        Transitional, key-addressed: the execution-addressed answer is
+        :meth:`execution_ordinal`.  This one stays until the durable event
+        witness has passed its reboot test (RULING-2026-08-31 §I2b), for
+        intents that carry no execution binding.  ``None`` means the report
+        is not held under *root* at all, which is a refusal to answer rather
+        than a claim about freshness.
         """
 
         resolved_root = root.resolve()
@@ -814,7 +865,51 @@ class CodeCloneMCPRunStore:
             key = self._resolve_key_locked(run_id, root=resolved_root)
             if key is None:
                 return None
-            return self._registrations.get(key)
+            return self._registrations.get(self._latest_by_key[key])
+
+    def execution_ordinal(self, execution_event_id: str) -> int | None:
+        """When this execution was registered; ``None`` when it is not held."""
+
+        with self._lock:
+            return self._registrations.get(execution_event_id)
+
+    def is_latest_execution(self, execution_event_id: str, *, root: Path) -> bool:
+        """Is this execution the newest one registered under ``root``?"""
+
+        resolved_root = root.resolve()
+        with self._lock:
+            if execution_event_id not in self._executions:
+                return False
+            newest: str | None = None
+            for event_id, key in self._key_of.items():
+                if key[0] == resolved_root:
+                    newest = event_id
+            return newest == execution_event_id
+
+    def holds_execution(self, execution_event_id: str | None) -> bool:
+        with self._lock:
+            return (
+                execution_event_id is not None
+                and execution_event_id in self._executions
+            )
+
+    def get_execution(self, execution_event_id: str) -> MCPRunRecord:
+        """Resolve one execution by its own identity.
+
+        This is the resolution an intent uses: the event it was declared
+        against, whatever executions of the same report registered since.
+        """
+
+        with self._lock:
+            record = self._executions.get(execution_event_id)
+            if record is None:
+                record_counter("run_store_selector_misses")
+                raise MCPRunNotFoundError(
+                    "No MCP analysis execution "
+                    f"{execution_event_id!r} is available in this session."
+                )
+            record_counter("run_store_selector_hits")
+            return record
 
     def get_for_root(
         self,
@@ -822,7 +917,7 @@ class CodeCloneMCPRunStore:
         *,
         root: Path,
     ) -> MCPRunRecord:
-        """Resolve a run that must belong to ``root``.
+        """Resolve a report's newest execution, which must belong to ``root``.
 
         Raises :class:`MCPRunRootMismatchError` when the id is only known under
         a different root, so callers can tell "wrong checkout" from "no run".
@@ -832,7 +927,7 @@ class CodeCloneMCPRunStore:
         with self._lock:
             key = self._resolve_key_locked(run_id, root=resolved_root)
             if key is not None:
-                return self._records[key]
+                return self._executions[self._latest_by_key[key]]
             if run_id is not None and self._roots_holding_locked(run_id):
                 raise MCPRunRootMismatchError(
                     f"Run id '{run_id}' belongs to a different repository root "
@@ -858,13 +953,13 @@ class CodeCloneMCPRunStore:
             # they have to report their own outcome — an unconstrained lookup
             # that quietly finds nothing is precisely the case worth counting.
             if run_id is None:
-                if self._latest_run_id is None:
+                if self._latest_execution_id is None:
                     record_counter("run_store_selector_misses")
                     raise MCPRunNotFoundError(
                         "No matching MCP analysis run is available."
                     )
                 record_counter("run_store_selector_hits")
-                return self._records[self._latest_run_id]
+                return self._executions[self._latest_execution_id]
             roots = self._roots_holding_locked(run_id)
             if len(roots) > 1:
                 rendered = ", ".join(str(item) for item in sorted(roots))
@@ -878,7 +973,7 @@ class CodeCloneMCPRunStore:
             key = self._resolve_key_locked(run_id, root=next(iter(roots)))
             if key is None:
                 raise MCPRunNotFoundError("No matching MCP analysis run is available.")
-            return self._records[key]
+            return self._executions[self._latest_by_key[key]]
 
     def _resolve_key_locked(
         self,
@@ -886,9 +981,10 @@ class CodeCloneMCPRunStore:
         *,
         root: Path,
     ) -> MCPRunKey | None:
-        # The single funnel every lookup goes through, so hit/miss telemetry is
-        # counted once per resolution and cannot drift between call sites. The
-        # counters land on the enclosing tool span; outside one they are inert.
+        # The single funnel every key lookup goes through, so hit/miss
+        # telemetry is counted once per resolution and cannot drift between
+        # call sites. The counters land on the enclosing tool span; outside
+        # one they are inert.
         key = self._resolve_key_uncounted_locked(run_id, root=root)
         record_counter(
             "run_store_selector_hits"
@@ -905,15 +1001,17 @@ class CodeCloneMCPRunStore:
     ) -> MCPRunKey | None:
         if run_id is None:
             latest: MCPRunKey | None = None
-            for key in self._records:
+            for key in self._key_of.values():
                 if key[0] == root:
                     latest = key
             return latest
         exact = (root, run_id)
-        if exact in self._records:
+        if exact in self._latest_by_key:
             return exact
         matches = [
-            key for key in self._records if key[0] == root and key[1].startswith(run_id)
+            key
+            for key in self._latest_by_key
+            if key[0] == root and key[1].startswith(run_id)
         ]
         if len(matches) == 1:
             return matches[0]
@@ -926,83 +1024,117 @@ class CodeCloneMCPRunStore:
     def _roots_holding_locked(self, run_id: str) -> set[Path]:
         return {
             key[0]
-            for key in self._records
+            for key in self._latest_by_key
             if key[1] == run_id or key[1].startswith(run_id)
         }
 
     def records(self) -> tuple[MCPRunRecord, ...]:
         with self._lock:
-            return tuple(self._records.values())
+            return tuple(self._executions.values())
 
-    def pin(self, run_id: str, *, root: Path) -> str:
-        """Take a reference on a run so history pruning cannot drop it."""
+    def pin_execution(self, execution_event_id: str) -> str:
+        """Take a reference on one execution so pruning cannot drop it."""
+
+        with self._lock:
+            if execution_event_id not in self._executions:
+                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+            held = self._pinned.pop(execution_event_id, 0)
+            self._pinned[execution_event_id] = held + 1
+            self._release_pins_over_cap_locked()
+            return execution_event_id
+
+    def unpin_execution(self, execution_event_id: str) -> None:
+        """Release one reference; the execution stays pinned while others hold it."""
+
+        with self._lock:
+            held = self._pinned.get(execution_event_id, 0) - 1
+            if held > 0:
+                self._pinned[execution_event_id] = held
+            else:
+                self._pinned.pop(execution_event_id, None)
+            self._prune_unpinned_locked()
+
+    def unpin(self, run_id: str, *, root: Path) -> None:
+        """Release one reference on the newest execution of ``(root, run_id)``.
+
+        Transitional, key-addressed: only an intent without an execution
+        binding releases through here (one rebuilt from a persisted registry
+        row, once that lane exists); every intent this session declares
+        releases the execution it pinned, by :meth:`unpin_execution`.
+        """
 
         resolved_root = root.resolve()
         with self._lock:
             key = self._resolve_key_locked(run_id, root=resolved_root)
-            if key is None:
-                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
-            held = self._pinned_run_ids.pop(key, 0)
-            self._pinned_run_ids[key] = held + 1
-            self._release_pins_over_cap_locked()
-            return key[1]
-
-    def unpin(self, run_id: str, *, root: Path) -> None:
-        """Release one reference; the run stays pinned while others hold it."""
-
-        resolved_root = root.resolve()
-        with self._lock:
-            key = self._resolve_key_locked(run_id, root=resolved_root) or (
-                resolved_root,
-                run_id,
-            )
-            held = self._pinned_run_ids.get(key, 0) - 1
-            if held > 0:
-                self._pinned_run_ids[key] = held
+            if key is not None:
+                self.unpin_execution(self._latest_by_key[key])
             else:
-                self._pinned_run_ids.pop(key, None)
-            self._prune_unpinned_locked()
+                self._prune_unpinned_locked()
 
     def clear(self) -> tuple[str, ...]:
         with self._lock:
-            removed_run_ids = tuple(key[1] for key in self._records)
-            self._records.clear()
-            self._pinned_run_ids.clear()
+            removed_run_ids = tuple(
+                record.run_id for record in self._executions.values()
+            )
+            self._executions.clear()
+            self._key_of.clear()
+            self._latest_by_key.clear()
+            self._pinned.clear()
             self._registrations.clear()
-            self._latest_run_id = None
+            self._latest_execution_id = None
             return removed_run_ids
 
+    def _forget_locked(self, execution_event_id: str) -> None:
+        self._executions.pop(execution_event_id, None)
+        self._registrations.pop(execution_event_id, None)
+        self._pinned.pop(execution_event_id, None)
+        key = self._key_of.pop(execution_event_id, None)
+        if key is not None and self._latest_by_key.get(key) == execution_event_id:
+            remaining = [
+                event_id for event_id, held in self._key_of.items() if held == key
+            ]
+            if remaining:
+                self._latest_by_key[key] = remaining[-1]
+            else:
+                self._latest_by_key.pop(key, None)
+        if self._latest_execution_id == execution_event_id:
+            self._latest_execution_id = next(reversed(self._executions), None)
+
     def _prune_unpinned_locked(self) -> None:
+        # An unpinned execution that is no longer the newest of its report is
+        # unreachable by name: nothing resolves to it, so it holds memory for
+        # nobody.  Released first, before the history bound is applied.
+        for event_id in tuple(self._executions):
+            if event_id in self._pinned:
+                continue
+            if self._latest_by_key.get(self._key_of[event_id]) != event_id:
+                self._forget_locked(event_id)
         while self._unpinned_count_locked() > self._history_limit:
-            for key in tuple(self._records):
-                if key in self._pinned_run_ids:
+            for event_id in tuple(self._executions):
+                if event_id in self._pinned:
                     continue
-                self._records.pop(key, None)
-                self._registrations.pop(key, None)
-                if self._latest_run_id == key:
-                    self._latest_run_id = next(reversed(self._records), None)
+                self._forget_locked(event_id)
                 break
             else:
                 break
-        for key in tuple(self._pinned_run_ids):
-            if key not in self._records:
-                self._pinned_run_ids.pop(key, None)
+        for event_id in tuple(self._pinned):
+            if event_id not in self._executions:
+                self._pinned.pop(event_id, None)
 
     def _release_pins_over_cap_locked(self) -> None:
         """Release the longest-held pins once the ceiling is exceeded.
 
         Oldest-first: a pin held across many later intents is the one most
-        likely to belong to an abandoned intent. Released runs become ordinary
-        history and the existing LRU decides whether they survive.
+        likely to belong to an abandoned intent. Released executions become
+        ordinary history and the existing bound decides whether they survive.
         """
 
-        while len(self._pinned_run_ids) > MAX_PINNED_MCP_RUNS:
-            oldest_key, _ = self._pinned_run_ids.popitem(last=False)
-            del oldest_key
+        while len(self._pinned) > MAX_PINNED_MCP_RUNS:
+            self._pinned.popitem(last=False)
         self._prune_unpinned_locked()
 
     def _unpinned_count_locked(self) -> int:
-        return sum(1 for key in self._records if key not in self._pinned_run_ids)
+        return sum(1 for event_id in self._executions if event_id not in self._pinned)
 
 
 __all__ = [
@@ -1092,6 +1224,7 @@ __all__ = [
     "ConfigValidationError",
     "DeliverySurface",
     "DetailLevel",
+    "ExecutionEvent",
     "FindingFamilyFilter",
     "FindingNoveltyFilter",
     "FindingSort",
@@ -1143,6 +1276,7 @@ __all__ = [
     "delivered_config_values",
     "discover",
     "load_repository_config",
+    "mint_execution_event_id",
     "paginate",
     "process",
     "report",

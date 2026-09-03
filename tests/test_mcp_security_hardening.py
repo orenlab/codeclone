@@ -15,7 +15,11 @@ from codeclone.surfaces.mcp._session_runtime import (
     _external_artifact_roots,
     resolve_artifact_path,
 )
-from codeclone.surfaces.mcp._session_shared import MCPRunRootMismatchError
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    MCPRunRootMismatchError,
+    mint_execution_event_id,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
@@ -36,8 +40,6 @@ def _run_record(root: Path, run_id: str = "security-run-1234") -> MCPRunRecord:
         summary={"run_id": run_id, "health": {"score": 100, "grade": "A"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -46,6 +48,11 @@ def _run_record(root: Path, run_id: str = "security-run-1234") -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=root,
+            semantic_report_id=run_id,
+        ),
     )
 
 

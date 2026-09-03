@@ -109,6 +109,13 @@ class IntentRecord:
     # window opened. ``None`` (intent rebuilt from the persisted registry, or a
     # run the store no longer holds) fails closed — no mark, no proof.
     before_run_registration_ordinal: int | None = None
+    # The execution this intent was declared against (RULING-2026-09-02).  A
+    # run id names a report, and several executions may have produced it; the
+    # event is what the before-run IS.  Verification resolves the before-run
+    # through this binding, so a later execution that shares the run id can
+    # never take its place.  ``None`` only for an intent that predates the
+    # binding: it falls back to the key-addressed lookup and the ordinal above.
+    before_execution_id: str | None = None
 
     def to_payload(self, *, short_run_id: str | None = None) -> dict[str, object]:
         payload: dict[str, object] = {

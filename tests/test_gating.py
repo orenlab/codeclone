@@ -39,6 +39,10 @@ from codeclone.report.gates.evaluator import (
 )
 from codeclone.report.messages import gates as gate_msgs
 from codeclone.surfaces.cli.summary import build_metrics_snapshot
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    mint_execution_event_id,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
@@ -941,8 +945,6 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         summary={},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=1,
         block_clones_count=0,
         project_metrics=project_metrics,
@@ -951,6 +953,11 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         new_func=frozenset({"clone:function:new"}),
         new_block=frozenset(),
         metrics_diff=metrics_diff,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="gate-parity",
+        ),
     )
     mcp_result = service._evaluate_gate_snapshot(
         record=record,

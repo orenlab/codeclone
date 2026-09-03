@@ -25,9 +25,11 @@ import pytest
 from codeclone.observability import bootstrap, operation, shutdown
 from codeclone.surfaces.mcp._session_shared import (
     CodeCloneMCPRunStore,
+    ExecutionEvent,
     MCPAnalysisRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
+    mint_execution_event_id,
 )
 
 # The subject here is the MCP session run store (ring r4), so this module may
@@ -59,8 +61,6 @@ def _record(root: Path, run_id: str) -> MCPRunRecord:
         summary={"run_id": run_id},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -69,6 +69,11 @@ def _record(root: Path, run_id: str) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=root,
+            semantic_report_id=run_id,
+        ),
     )
 
 

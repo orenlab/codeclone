@@ -66,7 +66,12 @@ from codeclone.report.renderers.markdown import render_markdown_report_document
 from codeclone.report.renderers.text import render_text_report_document
 from codeclone.surfaces.mcp import _implementation_context as impl_context_mod
 from codeclone.surfaces.mcp import _review_receipt as receipt_mod
-from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    MCPAnalysisRequest,
+    MCPRunRecord,
+    mint_execution_event_id,
+)
 from codeclone.utils import suppressed_clone_groups as law_mod
 
 from ._report_fixtures import build_maximal_report_document
@@ -240,8 +245,6 @@ def _run_record(root: Path, document: dict[str, object]) -> MCPRunRecord:
         summary={"run_id": "findinggroups01"},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -250,6 +253,11 @@ def _run_record(root: Path, document: dict[str, object]) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=root,
+            semantic_report_id="findinggroups01",
+        ),
     )
 
 

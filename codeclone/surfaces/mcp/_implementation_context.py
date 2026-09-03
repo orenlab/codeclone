@@ -318,7 +318,9 @@ def _subject_qualnames(
 
 
 def _call_graph_status(record: MCPRunRecord) -> tuple[str, list[str]]:
-    failed = sorted({failure.split(": ", 1)[0] for failure in record.failures})
+    failed = sorted(
+        {failure.split(": ", 1)[0] for failure in record.execution.failures}
+    )
     return ("partial" if failed else "complete"), failed
 
 
@@ -1504,11 +1506,11 @@ def _attach_bounded(
 
 
 def _module_path_index(record: MCPRunRecord) -> dict[str, str]:
-    if record.manifest is None:
+    if record.execution.manifest is None:
         return {}
     return {
         module: path
-        for path in sorted(record.manifest)
+        for path in sorted(record.execution.manifest)
         if (module := _path_to_module(path))
     }
 
@@ -1519,7 +1521,7 @@ def _context_artifact_digest(
     dependency_rows: Sequence[Mapping[str, object]],
 ) -> str:
     del dependency_rows
-    manifest = record.manifest or {}
+    manifest = record.execution.manifest or {}
     call_graph_status, failed_files = _call_graph_status(record)
     return _digest(
         {

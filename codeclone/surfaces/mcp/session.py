@@ -65,6 +65,7 @@ from ._session_shared import (
     CacheStatus,
     CodeCloneMCPRunStore,
     DetailLevel,
+    ExecutionEvent,
     MCPAnalysisRequest,
     MCPFindingNotFoundError,
     MCPGateRequest,
@@ -83,6 +84,7 @@ from ._session_shared import (
     analyze,
     bootstrap,
     discover,
+    mint_execution_event_id,
     process,
     report,
 )
@@ -283,6 +285,10 @@ class MCPSession(
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)
         root_path = _helpers._resolve_root(request.root)
+        # The execution is named before anything is read: the event exists
+        # from the moment the analysis starts, and the record it produces is
+        # registered under that name -- never under the report's.
+        execution_event_id = mint_execution_event_id()
         run_dirty_snapshot = collect_dirty_snapshot(root_path)
         analysis_started_at_utc = _current_report_timestamp_utc()
         changed_paths = self._resolve_request_changed_paths(
@@ -389,6 +395,7 @@ class MCPSession(
         )
 
         cache_status, cache_schema_version = resolve_cache_status(cache)
+        report_generated_at_utc = _current_report_timestamp_utc()
         report_meta = _build_report_meta(
             codeclone_version=__version__,
             scan_root=root_path,
@@ -451,7 +458,7 @@ class MCPSession(
                 DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
             ),
             analysis_started_at_utc=analysis_started_at_utc,
-            report_generated_at_utc=_current_report_timestamp_utc(),
+            report_generated_at_utc=report_generated_at_utc,
         )
 
         # The trust vector is resolved here, before the comparison, rather than
@@ -540,6 +547,24 @@ class MCPSession(
                 }
             )
         )
+        # One producer of every per-execution fact.  The content witness is
+        # the analysis's own read (``source_digest_by_file``), carried here
+        # rather than re-derived; the publication outcome rides here because it
+        # is a physical outcome of this execution, not a fact of the report.
+        execution = ExecutionEvent(
+            execution_event_id=execution_event_id,
+            root=root_path,
+            semantic_report_id=run_id,
+            manifest=run_manifest,
+            content_manifest=run_content_manifest,
+            dirty_snapshot=run_dirty_snapshot,
+            warnings=warnings,
+            failures=failures,
+            analysis_started_at_utc=analysis_started_at_utc,
+            report_generated_at_utc=report_generated_at_utc,
+            code_digest=str(process_code_provenance().get("code_digest", "")),
+            run_snapshot_link=report_artifacts.run_snapshot_link,
+        )
 
         base_summary = self._build_run_summary_payload(
             run_id=run_id,
@@ -568,8 +593,6 @@ class MCPSession(
             summary=base_summary,
             changed_paths=changed_paths,
             changed_projection=None,
-            warnings=warnings,
-            failures=failures,
             func_clones_count=analysis_result.func_clones_count,
             block_clones_count=analysis_result.block_clones_count,
             project_metrics=analysis_result.project_metrics,
@@ -578,9 +601,7 @@ class MCPSession(
             new_func=frozenset(new_func or ()),
             new_block=frozenset(new_block or ()),
             metrics_diff=metrics_diff,
-            manifest=run_manifest,
-            content_manifest=run_content_manifest,
-            dirty_snapshot=run_dirty_snapshot,
+            execution=execution,
             unit_inventory=unit_inventory,
             relationship_facts=processing_result.function_relationship_facts,
             module_imports=processing_result.module_deps,
@@ -603,8 +624,6 @@ class MCPSession(
             summary=summary,
             changed_paths=changed_paths,
             changed_projection=changed_projection,
-            warnings=warnings,
-            failures=failures,
             func_clones_count=analysis_result.func_clones_count,
             block_clones_count=analysis_result.block_clones_count,
             project_metrics=analysis_result.project_metrics,
@@ -613,9 +632,7 @@ class MCPSession(
             new_func=frozenset(new_func or ()),
             new_block=frozenset(new_block or ()),
             metrics_diff=metrics_diff,
-            manifest=run_manifest,
-            content_manifest=run_content_manifest,
-            dirty_snapshot=run_dirty_snapshot,
+            execution=execution,
             unit_inventory=unit_inventory,
             relationship_facts=processing_result.function_relationship_facts,
             module_imports=processing_result.module_deps,

@@ -26,7 +26,12 @@ from codeclone.surfaces.mcp._code_provenance import (
     compute_code_provenance,
     process_code_provenance,
 )
-from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    MCPAnalysisRequest,
+    MCPRunRecord,
+    mint_execution_event_id,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
 
@@ -65,8 +70,6 @@ def _record(tmp_path: Path) -> MCPRunRecord:
         summary={"run_id": "x01run"},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -75,6 +78,11 @@ def _record(tmp_path: Path) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id="x01run",
+        ),
     )
 
 

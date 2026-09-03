@@ -421,6 +421,10 @@ def test_the_derived_document_consumers_follow_the_owner(
 def test_the_mcp_finding_universe_follows_the_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from codeclone.surfaces.mcp._session_shared import (
+        ExecutionEvent,
+        mint_execution_event_id,
+    )
     from codeclone.surfaces.mcp.service import CodeCloneMCPService
     from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPRunRecord
 
@@ -434,8 +438,6 @@ def test_the_mcp_finding_universe_follows_the_owner(
         summary={"run_id": "owner", "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -444,6 +446,11 @@ def test_the_mcp_finding_universe_follows_the_owner(
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=Path("."),
+            semantic_report_id="ownercheck00000000",
+        ),
     )
     service._runs.register(record)
 
@@ -462,7 +469,9 @@ def test_the_mcp_report_section_family_vocabulary_follows_the_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from codeclone.surfaces.mcp import _report_section
-    from codeclone.surfaces.mcp._session_shared import MCPServiceContractError
+    from codeclone.surfaces.mcp._session_shared import (
+        MCPServiceContractError,
+    )
 
     findings = _findings_payload()
     payload = _report_section.findings_section_payload(

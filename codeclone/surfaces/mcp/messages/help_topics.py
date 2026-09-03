@@ -979,8 +979,11 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "Matching before/after run ids resolve two ways: "
-                "analyzer_invariant when the after-run is a fresh recompute of "
-                "this same (root, run_id), after_run_not_new when it is not."
+                "analyzer_invariant when the after-run is a later execution "
+                "under the intent's root that observed the edit, "
+                "after_run_not_new when it is not. A run id names a report; "
+                "the intent binds the execution that produced it, so a later "
+                "execution sharing the id never replaces the before-run."
             ),
             (
                 "analyzer_invariant is an accepted outcome. Run ids are "

@@ -75,6 +75,10 @@ from codeclone.report.messages.overview import (
 from codeclone.report.renderers.markdown import render_markdown_report_document
 from codeclone.report.renderers.sarif import render_sarif_report_document
 from codeclone.report.renderers.text import render_text_report_document
+from codeclone.surfaces.mcp._session_shared import (
+    ExecutionEvent,
+    mint_execution_event_id,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
@@ -227,8 +231,6 @@ def _service_with_tiers(tmp_path: Path, state: str) -> CodeCloneMCPService:
         summary={"run_id": "tier", "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
-        warnings=(),
-        failures=(),
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
@@ -237,6 +239,11 @@ def _service_with_tiers(tmp_path: Path, state: str) -> CodeCloneMCPService:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+        execution=ExecutionEvent(
+            execution_event_id=mint_execution_event_id(),
+            root=tmp_path,
+            semantic_report_id=f"tier{state}0000000000",
+        ),
     )
     service._runs.register(record)
     return service
