@@ -2748,6 +2748,25 @@ class UnresolvedReachabilityItem:
     world_contract: WorldContract
     reason: UnresolvedReason
 
+    def __post_init__(self) -> None:
+        """No abstention without an explanation a consumer can interrogate.
+
+        The producer has always written a witness here; nothing held it to
+        that, so the one thing this lane exists to say could have gone
+        missing without a test noticing.  The reason is checked against the
+        state rather than merely typed, because the two are one fact - the
+        state is the measurement, the reason is its name on the wire - and a
+        row that carried a reason its own state contradicts would put that
+        disagreement in front of the user as a verdict.
+        """
+        expected = abstention_reason_for_state(self.reachability)
+        if self.reason != expected:
+            raise LivenessVocabularyError(
+                f"unresolved reason {self.reason!r} contradicts reachability "
+                f"state {self.reachability!r}, whose reason is {expected!r}"
+            )
+        validate_abstention_witness(self.reachability, self.witness)
+
 
 @dataclass(frozen=True, slots=True)
 class UnreachableStatementFinding:
@@ -5458,6 +5477,68 @@ EXPOSURE_EXPOSED_SUBCLASS: Final = "exposed_subclass"
 EXPOSURE_EXPOSED_ANCESTOR: Final = "exposed_ancestor"
 EXPOSURE_UNRESOLVED_BASE: Final = "unresolved_base"
 
+#: Which reachability states each mechanism is able to witness.
+#:
+#: An ADMISSIBILITY RELATION over ``(mechanism, state)``, not a function from
+#: mechanism to state.  The earlier shape was the function, and it was false:
+#: ``collect_external_reachability`` chooses the two on INDEPENDENT axes - the
+#: state comes from the RANK of the chain that was found, the witness from the
+#: construct that found it - so a mechanism able to name a chain at either rank
+#: witnesses at either state.  A row the producer had always been entitled to
+#: emit (``unresolved`` + ``exposed_subclass``) was refused by the function
+#: shape; a guard that fails a correct program is worse than no guard.
+#:
+#: A witness is not a decoration on a verdict, it is the verdict's reason, so
+#: the relation still refuses a witness that explains the OTHER state.  What
+#: each entry claims, and why:
+#:
+#: * ``public_module``, ``package_reexport``, ``declared_reexport`` -
+#:   ``{reachable}``.  Each is stamped at exactly ONE site, in the same
+#:   expression as the literal ``_REACHABLE`` rank
+#:   (``_expose_definitions``, ``_expose_package_reexports``,
+#:   ``_expose_declared_reexports``); the unresolved arm of the latter two
+#:   passes the DYNAMIC witness on instead of their own.
+#: * ``star_reexport`` - ``{reachable}``.  Two sites
+#:   (``_Namespaces._carry_witness``, ``_expose_star_chain``), both guarded by
+#:   ``rank == _REACHABLE``; an unreadable carrier passes its own witness on.
+#: * ``lazy_namespace``, ``module_getattr`` - ``{unresolved}``.  Both are built
+#:   into ``dynamic_packages`` / ``dynamic_modules``, and every consumer pairs
+#:   them with the literal ``_UNRESOLVED`` rank or with ``rank != _REACHABLE``.
+#: * ``unresolved_base`` - ``{unresolved}``.  One site, in the same expression
+#:   as the literal ``"unresolved"`` state.
+#: * ``exposed_subclass``, ``exposed_ancestor`` - ``{reachable, unresolved}``.
+#:   ``type_witness`` / ``ancestor_witness`` manufacture the witness and take
+#:   the rank from the related class's own exposure, which is either.  BOTH
+#:   halves are observed from the producer by
+#:   ``test_the_relation_admits_every_pair_the_producer_emits``.
+#:
+#: Every single-state entry above is a CONSTRUCTION argument - the producer
+#: cannot build the pair - never a census.  A pair absent from a corpus is a
+#: pair that did not occur, which is not the same fact, and no entry here
+#: rests on one.  A mechanism whose construction did not settle the question
+#: would belong in neither half rather than in the tidier one.
+EXPOSURE_MECHANISM_STATES: Final[Mapping[str, frozenset[ReachabilityState]]] = {
+    EXPOSURE_PUBLIC_MODULE: frozenset({"reachable"}),
+    EXPOSURE_PACKAGE_REEXPORT: frozenset({"reachable"}),
+    EXPOSURE_DECLARED_REEXPORT: frozenset({"reachable"}),
+    EXPOSURE_STAR_REEXPORT: frozenset({"reachable"}),
+    EXPOSURE_EXPOSED_SUBCLASS: frozenset({"reachable", "unresolved"}),
+    EXPOSURE_EXPOSED_ANCESTOR: frozenset({"reachable", "unresolved"}),
+    EXPOSURE_LAZY_NAMESPACE: frozenset({"unresolved"}),
+    EXPOSURE_MODULE_GETATTR: frozenset({"unresolved"}),
+    EXPOSURE_UNRESOLVED_BASE: frozenset({"unresolved"}),
+}
+
+#: The typed reason each abstained state carries on the wire.  One spelling,
+#: read by the producer and enforced by the row, so the reason a consumer
+#: switches on and the state it was derived from cannot drift apart.
+#: ``not_reachable`` is absent by construction: a symbol nothing outside can
+#: reach is a verdict, and this lane is where CodeClone declines to give one.
+ABSTENTION_REASON_OF_STATE: Final[Mapping[str, UnresolvedReason]] = {
+    "reachable": "externally_reachable",
+    "unresolved": "reachability_unresolved",
+}
+
 
 def _exposure(identifier: str, producer: str, summary: str) -> MechanismSpec:
     return MechanismSpec(
@@ -5778,3 +5859,59 @@ def witness_mechanism(witness: str) -> str | None:
     """The declared mechanism a witness names, or ``None`` if it names none."""
     mechanism = witness.partition(":")[0]
     return mechanism if mechanism in _EXPOSURE_MECHANISMS else None
+
+
+def abstention_reason_for_state(state: ReachabilityState) -> UnresolvedReason:
+    """The typed reason an abstained ``state`` carries, from its one owner.
+
+    The producer of the row and the row itself both come through here, which
+    is what keeps "why the evaluator declined" from having two spellings that
+    are free to disagree.
+    """
+    reason = ABSTENTION_REASON_OF_STATE.get(state)
+    if reason is None:
+        raise LivenessVocabularyError(
+            f"reachability state {state!r} is a verdict, not an abstention; "
+            f"only {sorted(ABSTENTION_REASON_OF_STATE)} reach the unresolved lane"
+        )
+    return reason
+
+
+def validate_abstention_witness(state: ReachabilityState, witness: str) -> str:
+    """The door every abstention's witness passes: present, declared, apt.
+
+    An abstention says CodeClone declined to decide.  A row that then
+    declines to say why is strictly worse than a finding, so the witness is
+    refused empty; refused when it names no mechanism the vocabulary
+    declares, because a free-form string is not evidence; and refused when
+    the relation does not admit its mechanism at this state, because a
+    ``public_module`` witness under an unresolved row answers "here is the
+    public path" where the row says no path could be read.  The third is the
+    one a careless "always fill in the witness" fix produces, and the only
+    one a presence check cannot see.
+
+    Admissibility, not equality: a mechanism that can name a chain at either
+    rank witnesses at either state, and asking equality of a mechanism able
+    to do both refused rows the producer is entitled to emit.  What the door
+    still catches is the witness that explains the OTHER state - the failure
+    it was built for - and it catches it for every mechanism whose
+    construction settles the question.
+    """
+    if not witness:
+        raise LivenessVocabularyError(
+            f"an abstention at state {state!r} carries no witness; the lane "
+            f"exists to say what prevents the proof"
+        )
+    mechanism = witness_mechanism(witness)
+    if mechanism is None:
+        raise LivenessVocabularyError(
+            f"unknown external exposure mechanism in witness {witness!r}; "
+            f"declared mechanisms are {EXTERNAL_EXPOSURE_MECHANISMS}"
+        )
+    witnessed = EXPOSURE_MECHANISM_STATES[mechanism]
+    if state not in witnessed:
+        raise LivenessVocabularyError(
+            f"mechanism {mechanism!r} cannot witness state {state!r}; it "
+            f"witnesses {sorted(witnessed)}"
+        )
+    return witness

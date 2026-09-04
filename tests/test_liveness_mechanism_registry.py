@@ -45,7 +45,7 @@ import importlib
 import textwrap
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 import pytest
 
@@ -54,6 +54,8 @@ from codeclone.metrics.external_reachability import collect_external_reachabilit
 from codeclone.models import (
     ACTIVE_LIVE_ROOT_REASONS,
     ACTIVE_MECHANISMS,
+    EXPOSURE_MECHANISM_STATES,
+    EXTERNAL_EXPOSURE_MECHANISMS,
     LIVE_ROOT_REASONS,
     MECHANISMS,
     PARK_REASONS,
@@ -65,6 +67,9 @@ from codeclone.models import (
     LivenessVocabularyError,
     MechanismSpec,
     ModuleDep,
+    ReachabilityState,
+    UnresolvedReachabilityItem,
+    abstention_reason_for_state,
     emit_live_root_reason,
     exposure_witness,
     validate_live_root_reason,
@@ -171,6 +176,33 @@ def _exposure_mechanisms(
     )
     return frozenset(
         mechanism
+        for row in rows
+        if (mechanism := witness_mechanism(row.witness)) is not None
+    )
+
+
+def _exposure_pairs(
+    *,
+    candidates: tuple[DeadCandidate, ...],
+    module_deps: tuple[ModuleDep, ...] = (),
+    **kwargs: object,
+) -> frozenset[tuple[str, str]]:
+    """Every ``(mechanism, state)`` pair one producer run actually emits.
+
+    The sibling above reads the mechanism alone, which is what rule 1 needs.
+    The witness door needs the PAIR, because the producer chooses the two on
+    independent axes and a mechanism-only reading cannot see that.
+    """
+
+    rows: tuple[ExternalReachability, ...] = tuple(
+        collect_external_reachability(
+            definitions=candidates,
+            module_deps=module_deps,
+            **kwargs,  # type: ignore[arg-type]
+        )
+    )
+    return frozenset(
+        (mechanism, row.state)
         for row in rows
         if (mechanism := witness_mechanism(row.witness)) is not None
     )
@@ -818,13 +850,33 @@ def _abstains_as(reason: str) -> Callable[[Inputs], bool]:
     return observe
 
 
+#: The witness this fixture rides with, per state.  One witness for every
+#: state was one witness too few: a ``public_module`` witness names a proven
+#: public path, so pairing it with ``unresolved`` builds a row saying "here
+#: is the import path" under a verdict saying no path could be read.  The
+#: producer cannot write that pair BY CONSTRUCTION - ``public_module`` is
+#: stamped at exactly one site (``_expose_definitions``) in the same
+#: expression as the literal ``_REACHABLE`` rank, and the ``expose`` seam
+#: stores rank and witness as the one tuple it was handed - so the
+#: state-blind fixture was building an input the analyser cannot produce.
+#: (A census would not have licensed this: a pair absent from 17157 rows is a
+#: pair that did not occur, not one that cannot.)  ``not_reachable`` carries
+#: no witness because that is what the producer writes for it, and because
+#: that state never enters the abstention lane at all.
+_REACHABILITY_WITNESS: Mapping[str, str] = {
+    "reachable": "public_module:pkg.m",
+    "not_reachable": "",
+    "unresolved": "module_getattr:pkg",
+}
+
+
 def _reachability_inputs(state: str) -> Inputs:
     return {
         "definitions": (_candidate("pkg.m:helper", kind="function"),),
         "referenced_names": frozenset(),
         "world_contract": "open",
         "external_reachability": (
-            ExternalReachability("pkg.m:helper", state, "public_module:pkg.m"),  # type: ignore[arg-type]
+            ExternalReachability("pkg.m:helper", state, _REACHABILITY_WITNESS[state]),  # type: ignore[arg-type]
         ),
     }
 
@@ -1049,6 +1101,245 @@ def test_the_doors_refuse_a_mechanism_no_vocabulary_declares() -> None:
     for rule in MECHANISMS:
         if MECHANISMS[rule].witness_type == "resolution_rule":
             assert validate_resolution_rule(rule) == rule
+
+
+def test_the_reachability_fixture_witness_belongs_to_its_state() -> None:
+    """Rule 1, applied to this file's own fixture.
+
+    The witness above is not three literals to be kept in step by hand; it is
+    derived from the vocabulary the abstention row itself consults, and this
+    re-derives it.  Pinning the literals would only move the magic constant
+    into a test, and a comment explaining the choice is an unexecuted claim
+    that rots the moment somebody swaps a mechanism.  Swap them and this reds
+    before the causal fixtures do, naming the half that moved.
+    """
+
+    for state, witness in _REACHABILITY_WITNESS.items():
+        if state == "not_reachable":
+            # The producer writes no witness here, and the abstention lane
+            # never sees this state: `classify_liveness` skips it outright.
+            assert witness == "", state
+            continue
+        mechanism = witness_mechanism(witness)
+        assert mechanism is not None, f"{state}: {witness!r} names no mechanism"
+        assert state in EXPOSURE_MECHANISM_STATES[mechanism], (
+            f"{state}: {mechanism!r} witnesses "
+            f"{sorted(EXPOSURE_MECHANISM_STATES[mechanism])}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("state", "witness", "rejected_mechanism"),
+    [
+        # Admitted: single-state mechanisms, at the one state they name.
+        ("reachable", "public_module:pkg.m", None),
+        ("unresolved", "module_getattr:pkg", None),
+        # Admitted: the two mechanisms the producer emits at BOTH states.
+        # `type_witness` / `ancestor_witness` manufacture these and take the
+        # rank from the related class's own exposure, so the state is chosen
+        # on an axis the witness knows nothing about.  Refusing the second row
+        # of each pair made a correct program raise.
+        ("reachable", "exposed_subclass:pkg.api:Child", None),
+        ("unresolved", "exposed_subclass:pkg._dyn:Child", None),
+        ("reachable", "exposed_ancestor:pkg.api:Base", None),
+        ("unresolved", "exposed_ancestor:pkg._dyn:Base", None),
+        # Refused, each by a CONSTRUCTION argument, never by a census.
+        ("unresolved", "public_module:pkg.m", "public_module"),
+        ("reachable", "module_getattr:pkg", "module_getattr"),
+    ],
+)
+def test_an_abstention_row_is_constructible_where_the_producer_emits_it(
+    state: ReachabilityState, witness: str, rejected_mechanism: str | None
+) -> None:
+    """Both boundaries of the witness door, against the producer's SHAPE.
+
+    The door is an admissibility relation over ``(mechanism, state)``, not a
+    function from mechanism to state, because the producer picks the two on
+    independent axes: the state is the RANK of the chain it found, the
+    witness is the CONSTRUCT that found it.  ``exposed_subclass`` and
+    ``exposed_ancestor`` name a related class whose own exposure may sit at
+    either rank, so both rows of each pair are legal and both are admitted
+    here; the sibling test below observes them coming out of the producer.
+
+    The two refusals are refusals BY CONSTRUCTION, and that is the whole
+    standard: ``public_module`` is stamped at exactly one site in the same
+    expression as the literal ``_REACHABLE`` rank, and the dynamic witnesses
+    are built into ``dynamic_packages`` / ``dynamic_modules`` whose every
+    consumer pairs them with ``_UNRESOLVED``.  A pair merely ABSENT from a
+    corpus would not be pinned here at all: absence is a fact about the
+    corpus, and pinning it would pin a coincidence.
+
+    Both directions are pinned on purpose.  A door that refused everything
+    would satisfy the rejection rows alone, and a door that refused nothing
+    would satisfy the acceptance rows alone; only the pair can tell them
+    apart.  The reason is always the one its state owns, so a rejection here
+    is provably about the WITNESS and never about a mismatched reason.
+    """
+
+    def build() -> UnresolvedReachabilityItem:
+        return UnresolvedReachabilityItem(
+            qualname="pkg.m:helper",
+            filepath="pkg/m.py",
+            start_line=1,
+            end_line=2,
+            kind="function",
+            reachability=state,
+            witness=witness,
+            world_contract="open",
+            reason=abstention_reason_for_state(state),
+        )
+
+    if rejected_mechanism is None:
+        item = build()
+        assert item.reachability == state
+        assert item.witness == witness
+        assert item.reason == abstention_reason_for_state(state)
+        return
+    with pytest.raises(LivenessVocabularyError) as raised:
+        build()
+    message = str(raised.value)
+    assert rejected_mechanism in message, message
+    assert f"cannot witness state {state!r}" in message, message
+
+
+#: The two arms that make ``exposed_subclass`` and ``exposed_ancestor`` come
+#: out of ONE producer run at BOTH states.  Each arm is a private class whose
+#: related class is exposed - once through a public module (proven rank),
+#: once through a plain module's ``__getattr__`` serving a declared name
+#: (unresolved rank).  Nothing about the arm changes but the RANK of the
+#: related class, which is the axis the earlier mechanism-to-state function
+#: could not express.
+_BOTH_STATES_CANDIDATES: Final = (
+    # exposed_subclass @ reachable: the descendant lives in a public module.
+    _candidate("psub._impl:SubBase.render"),
+    _candidate("psub.api:SubChild", kind="class"),
+    # exposed_subclass @ unresolved: the descendant is only ever served by a
+    # plain module's __getattr__, so its own exposure sits at the unresolved
+    # rank and the subclass witness inherits it.
+    _candidate("dsub._impl:SubBase.render"),
+    _candidate("dsub._impl:SubChild", kind="class"),
+    _candidate("dsub.mod:__getattr__", kind="function", local_name="__getattr__"),
+    # exposed_ancestor @ reachable / @ unresolved: the same two shapes, read
+    # up the hierarchy instead of down.
+    _candidate("panc._api:AncChild.render"),
+    _candidate("panc.api:AncBase", kind="class"),
+    _candidate("danc._api:AncChild.render"),
+    _candidate("danc._impl:AncBase", kind="class"),
+    _candidate("danc.mod:__getattr__", kind="function", local_name="__getattr__"),
+)
+_BOTH_STATES_DEPS: Final = (
+    _dep("psub.api", "psub._impl", requested_names=("SubBase",)),
+    _dep("panc._api", "panc.api", requested_names=("AncBase",)),
+    _dep("danc._api", "danc._impl", requested_names=("AncBase",)),
+)
+_BOTH_STATES_CLASSES: Final = (
+    _class("psub._impl:SubBase"),
+    _class("psub.api:SubChild", base_names=("SubBase",)),
+    _class("dsub._impl:SubBase"),
+    _class("dsub._impl:SubChild", base_names=("SubBase",)),
+    _class("panc._api:AncChild", base_names=("AncBase",)),
+    _class("panc.api:AncBase"),
+    _class("danc._api:AncChild", base_names=("AncBase",)),
+    _class("danc._impl:AncBase"),
+)
+_BOTH_STATES_EXPORTS: Final = ("dsub.mod:SubChild", "danc.mod:AncBase")
+
+#: The mechanisms whose construction admits ONE state, and the state it is.
+#: Not a restatement of the owner: the owner is the door's data, and this is
+#: the CONSTRUCTION each single-state entry claims, so a widening that is not
+#: matched by a producer change reds here instead of passing quietly.
+_SINGLE_STATE_BY_CONSTRUCTION: Final[Mapping[str, str]] = {
+    "public_module": "reachable",
+    "package_reexport": "reachable",
+    "declared_reexport": "reachable",
+    "star_reexport": "reachable",
+    "lazy_namespace": "unresolved",
+    "module_getattr": "unresolved",
+    "unresolved_base": "unresolved",
+}
+
+
+def test_the_relation_admits_every_pair_the_producer_emits() -> None:
+    """The causal half: run the producer, read back the PAIRS it wrote.
+
+    This is the pin the earlier shape failed.  ``EXPOSURE_MECHANISM_STATE``
+    mapped one state to each mechanism and every test around it re-read that
+    map, so the map agreed with itself for any content; the producer was
+    never asked.  Here it is asked, and its answer is the standard.
+
+    The population is reported, not assumed (probe validity): the corpus must
+    reach every declared exposure mechanism, and it must reach BOTH states
+    for the two class mechanisms - otherwise a narrowing of the relation
+    would pass here for want of a distinguishing row rather than for being
+    right.
+    """
+
+    observed = _exposure_pairs(
+        candidates=(
+            _PUBLIC_SERVICE,
+            _PRIVATE_SERVICE,
+            _BASE_METHOD,
+            _WIDGET_METHOD,
+            _MODULE_GETATTR,
+            _FACADE_TARGET,
+            _STAR_CARRIED,
+            _candidate("pkg._anc:Leaf.render"),
+            _candidate("pkg._dyn:Thing", kind="class"),
+            _candidate("lazypkg._sub:Lazy", kind="class"),
+            *_BOTH_STATES_CANDIDATES,
+        ),
+        module_deps=(
+            _dep("pkg", "pkg._api", requested_names=("Service",)),
+            _dep("pkg.api", "pkg._api", requested_names=("Base",)),
+            _dep("pkg.facade", "pkg._impl", requested_names=("Helper",)),
+            _dep("pkg", "pkg._star", requested_names=("*",)),
+            _dep("pkg._anc", "pkg.anc", requested_names=("Root",)),
+            _dep("lazypkg", "lazy_loader", import_type="import"),
+            *_BOTH_STATES_DEPS,
+        ),
+        class_metrics=(
+            _BASE_CLASS,
+            _PUBLIC_CHILD,
+            _class("pkg._anc:Leaf", base_names=("Root",)),
+            _class("pkg.anc:Root"),
+            _class("pkg._api:Widget", base_names=("VendorBase",)),
+            *_BOTH_STATES_CLASSES,
+        ),
+        package_modules=frozenset({"pkg", "lazypkg"}),
+        declared_exports=("pkg.facade:Helper", *_BOTH_STATES_EXPORTS),
+    )
+
+    # Population witness 1: nothing declared went unmeasured.
+    reached = {mechanism for mechanism, _ in observed}
+    assert reached == set(EXTERNAL_EXPOSURE_MECHANISMS), sorted(
+        set(EXTERNAL_EXPOSURE_MECHANISMS) ^ reached
+    )
+    # Population witness 2: the distinguishing rows exist.  Without these two
+    # assertions the pin below would pass on a corpus that never built the
+    # case the whole change is about.
+    for mechanism in ("exposed_subclass", "exposed_ancestor"):
+        states = {state for name, state in observed if name == mechanism}
+        assert states == {"reachable", "unresolved"}, (mechanism, sorted(states))
+
+    # The pin: the door must admit every pair the producer wrote.
+    for mechanism, state in sorted(observed):
+        assert state in EXPOSURE_MECHANISM_STATES[mechanism], (
+            f"the producer emits {mechanism!r} at {state!r}, which the "
+            f"relation refuses; it admits "
+            f"{sorted(EXPOSURE_MECHANISM_STATES[mechanism])}"
+        )
+
+    # The other direction is NOT asserted from this corpus.  A pair this run
+    # did not produce is a pair that did not occur here, which is not a pair
+    # the producer cannot write; only the construction argument below settles
+    # that, and it is stated per mechanism rather than counted.
+    for mechanism, state in sorted(_SINGLE_STATE_BY_CONSTRUCTION.items()):
+        assert EXPOSURE_MECHANISM_STATES[mechanism] == frozenset({state}), (
+            f"{mechanism!r} is admitted at "
+            f"{sorted(EXPOSURE_MECHANISM_STATES[mechanism])}, but its producer "
+            f"stamps it only at {state!r}; widen it only with a producer "
+            f"change that makes the other pair constructible"
+        )
 
 
 def test_a_parked_reason_is_decodable_and_not_emittable() -> None:

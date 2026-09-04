@@ -26,6 +26,7 @@ from ..models import (
     UnresolvedOverrideItem,
     UnresolvedReachabilityItem,
     WorldContract,
+    abstention_reason_for_state,
 )
 from ..paths import is_test_filepath
 
@@ -212,11 +213,11 @@ def classify_liveness(
                     reachability=reachability.state,
                     witness=reachability.witness,
                     world_contract=world_contract,
-                    reason=(
-                        "externally_reachable"
-                        if reachability.state == "reachable"
-                        else "reachability_unresolved"
-                    ),
+                    # Read from the vocabulary owner, never re-spelled here:
+                    # the state is the measurement and the reason is its name
+                    # on the wire, so a second spelling would be a second
+                    # place for them to drift.
+                    reason=abstention_reason_for_state(reachability.state),
                 )
             )
             continue

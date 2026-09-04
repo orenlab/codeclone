@@ -237,16 +237,17 @@ def live_root_reason_by_qualname(family: dict[str, object]) -> dict[str, str]:
     return {str(row["qualname"]): str(row["reason"]) for row in rows}
 
 
-def unresolved_by_qualname(family: dict[str, object]) -> dict[str, dict[str, object]]:
-    """The sibling lane: symbols the run could call neither dead nor live.
+def _rows_by_qualname(
+    family: dict[str, object],
+    lane: str,
+) -> dict[str, dict[str, object]]:
+    """One lane of the family, keyed by qualname, rows returned whole.
 
-    Keyed by qualname so a pin reads the row it names; the row itself is
-    returned whole because the ruling fixes its minimal content (reason code,
-    reachability state, world contract, location) and a pin on one field
-    would leave the others free to vanish.
+    Whole rows because the ruling fixes each lane's minimal content and a
+    projection onto one field would leave the others free to vanish.
     """
 
-    rows = family["unresolved"]
+    rows = family[lane]
     assert isinstance(rows, list)
     by_qualname: dict[str, dict[str, object]] = {}
     for row in rows:
@@ -255,13 +256,81 @@ def unresolved_by_qualname(family: dict[str, object]) -> dict[str, dict[str, obj
     return by_qualname
 
 
-def dead_code_family_of(payload: dict[str, object]) -> dict[str, object]:
-    """The dead-code family of an already-witnessed report document."""
+def unresolved_by_qualname(family: dict[str, object]) -> dict[str, dict[str, object]]:
+    """The reachability abstention: neither dead nor live under this world."""
+
+    return _rows_by_qualname(family, "unresolved")
+
+
+def metric_family_of(payload: dict[str, object], name: str) -> dict[str, object]:
+    """One metric family of an already-witnessed report document."""
 
     metrics = payload["metrics"]
     assert isinstance(metrics, dict)
     families = metrics["families"]
     assert isinstance(families, dict)
-    family = families["dead_code"]
+    family = families[name]
     assert isinstance(family, dict)
     return family
+
+
+def dead_code_family_of(payload: dict[str, object]) -> dict[str, object]:
+    """The dead-code family of an already-witnessed report document."""
+
+    return metric_family_of(payload, "dead_code")
+
+
+def unresolved_override_by_qualname(
+    family: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    """The rule-3 abstention: a method under an opaque external base."""
+
+    return _rows_by_qualname(family, "unresolved_overrides")
+
+
+def measured_qualnames(payload: dict[str, object]) -> frozenset[str]:
+    """Every function the run actually measured, from the complexity family.
+
+    The liveness verdict LIVE is an ABSENCE - the symbol is in none of the
+    three lanes - and an absence is what a mistyped qualname, an unanalyzed
+    file and a truncated list all look like. This is the presence witness
+    that tells them apart, and the truncation flag is asserted because a
+    truncated list would restore exactly the hole it closes.
+    """
+
+    complexity = metric_family_of(payload, "complexity")
+    assert complexity["items_truncated"] is False, complexity["items_truncated"]
+    items = complexity["items"]
+    assert isinstance(items, list)
+    return frozenset(str(item["qualname"]) for item in items)
+
+
+#: The four verdicts a symbol can carry once a run has seen it.
+VERDICT_LIVE = "live"
+VERDICT_DEAD = "dead"
+VERDICT_UNRESOLVED = "unresolved"
+VERDICT_UNRESOLVED_OVERRIDE = "unresolved_override"
+
+
+def liveness_verdict(payload: dict[str, object], qualname: str) -> str:
+    """What the run concluded about ``qualname``, behind the presence witness.
+
+    Raises rather than returning ``live`` when the run never measured the
+    symbol: a pin that reads a typo as a passing LIVE assertion is the one
+    failure this projection exists to make impossible.
+    """
+
+    measured = measured_qualnames(payload)
+    if qualname not in measured:
+        raise AssertionError(
+            f"{qualname!r} was never measured by this run, so it has no "
+            f"liveness verdict; measured: {sorted(measured)}"
+        )
+    family = dead_code_family_of(payload)
+    if qualname in dead_qualnames(family):
+        return VERDICT_DEAD
+    if qualname in unresolved_by_qualname(family):
+        return VERDICT_UNRESOLVED
+    if qualname in unresolved_override_by_qualname(family):
+        return VERDICT_UNRESOLVED_OVERRIDE
+    return VERDICT_LIVE
