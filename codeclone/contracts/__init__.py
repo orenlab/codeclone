@@ -330,7 +330,26 @@ ADOPTION_COVERAGE_POLICY_VERSION: Final = "1"
 # constant is an input of that lane's reuse profile (codeclone/cache/reuse.py),
 # on the same footing as LIVENESS_POLICY_VERSION above and for the same reason.
 # Bump whenever what becomes a record, or what a record resolves to, changes.
-FUNCTION_RELATIONSHIP_ALGORITHM_REVISION: Final = "1"
+#
+# "2": two import dialects the resolver used to lose now resolve, so records
+# that resolved to nothing under "1" carry a target under "2" —
+# ``from <pkg> import <submodule> as <alias>`` binds a MODULE, and a
+# function-local ``from <module> import <name>`` binds a symbol the walk
+# already saw but the relationship index, which stopped at every function,
+# did not. Both are properties of the binding, so one resolver answers them
+# once for every consumer. This constant, and not LIVENESS_POLICY_VERSION,
+# is the one that moves: what a record resolves to changed; how already
+# obtained evidence is read in open/closed world did not.
+#
+# The distinguishing witness, measured on this repository 2026-09-04: a cache
+# written by the pre-fix walk and read by the fixed one served 6 dead symbols
+# as ``reason=unreferenced`` with an EMPTY witness list — the defect verbatim,
+# ``cached 1184 / analyzed 0`` — while the same source cold reported all 30 as
+# ``test_only_reference``. Under "2" that row misses the dependent lane, the
+# file is re-walked and warm equals cold. Reverting this literal to "1" alone
+# brings all 6 back, which is what makes the bump load-bearing rather than
+# adjacent to the fix.
+FUNCTION_RELATIONSHIP_ALGORITHM_REVISION: Final = "2"
 # Closed detector catalogs that ride the module-dependent cache-reuse lane.
 # Each is a mutable enumeration whose EXPANSION changes an emitted dependent
 # fact for unchanged source, so a warm cache hit would otherwise serve the

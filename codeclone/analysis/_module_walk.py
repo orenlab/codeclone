@@ -165,6 +165,46 @@ def _classify_import_target(
     return "external"
 
 
+def _from_import_module_bindings(
+    *,
+    node: ast.ImportFrom,
+    resolved_target: str,
+    registry: ModuleRegistryHandle,
+) -> tuple[tuple[str, str], ...]:
+    """The names one ``from`` import binds to a MODULE, resolved once for all.
+
+    ``from pkg import _mod as alias`` and ``import pkg._mod as alias`` are the
+    same binding written two ways: ``alias`` denotes the module, and
+    ``alias.name`` reads a member of it. Only the second spelling says so
+    syntactically, so the module reading of a ``from`` import is admitted
+    exactly when the registry knows ``<target>.<name>`` as a module. Without
+    that gate ``from pkg import helper`` would manufacture a member of a
+    module named ``pkg.helper`` that does not exist, and a resolver that
+    INVENTS a reference is worse than one that loses it: it revives symbols
+    nothing binds, silently and without a name to blame.
+
+    Every reference-resolving consumer calls this and gets the same answer, so
+    the dialect is a property of the binding and never of the consumer's role.
+    The symbol reading of the same import is untouched: ``pkg`` really does
+    bind the name ``_mod``, and both readings are recorded, exactly as
+    ``_collect_import_from_node`` already does for the coupling lane.
+    """
+
+    bindings: list[tuple[str, str]] = []
+    for alias in node.names:
+        submodule = f"{resolved_target}.{alias.name}"
+        # A wildcard binds no name at all, and a target the registry does not
+        # know as a module is an ordinary imported symbol - one refusal, two
+        # ways of not being a module reading.
+        if (
+            alias.name == "*"
+            or _classify_import_target(submodule, registry) == "external"
+        ):
+            continue
+        bindings.append((alias.asname or alias.name, submodule))
+    return tuple(bindings)
+
+
 def resolve_import_observation(
     source: ResolvedSourceIdentity,
     node: ast.ImportFrom,
@@ -693,6 +733,17 @@ def _collect_import_from_node(
     if not collect_referenced_names or not primary_target:
         return
 
+    # The module reading of this import, from the one owner. ``import a.b as
+    # c`` has always written this map; the ``from`` spelling of the same
+    # binding wrote only the symbol reading, so ``c.name`` resolved to nothing
+    # and the use was lost - in this lane and in the relationship lane alike.
+    for alias_name, submodule in _from_import_module_bindings(
+        node=node,
+        resolved_target=primary_target,
+        registry=registry,
+    ):
+        state.imported_module_aliases[alias_name] = submodule
+
     for alias in node.names:
         if alias.name == "*":
             # The one binding fact a wildcard carries: the module it reads
@@ -819,6 +870,9 @@ class _RelationshipImportIndex:
     module_shadowed_names: frozenset[str]
 
 
+_EMPTY_RELATIONSHIP_IMPORTS = _RelationshipImportIndex({}, {}, frozenset())
+
+
 def _iter_relationship_scope_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
     stack: list[ast.AST] = list(reversed(body))
     while stack:
@@ -860,7 +914,7 @@ def _collect_relationship_import_index(
     module_bindings: dict[str, set[str]] = {}
     shadowed_names: set[str] = set()
     if not isinstance(tree, ast.Module):
-        return _RelationshipImportIndex({}, {}, frozenset())
+        return _EMPTY_RELATIONSHIP_IMPORTS
 
     for node in _iter_relationship_scope_nodes(tree.body):
         if isinstance(node, ast.Import):
@@ -877,6 +931,12 @@ def _collect_relationship_import_index(
                         symbol_bindings.setdefault(alias_name, set()).add(
                             f"{target}:{alias.name}"
                         )
+                for alias_name, submodule in _from_import_module_bindings(
+                    node=node,
+                    resolved_target=target,
+                    registry=registry,
+                ):
+                    module_bindings.setdefault(alias_name, set()).add(submodule)
             continue
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
             shadowed_names.add(node.id)
@@ -962,6 +1022,79 @@ def _walk_relationship_function_scope(
     return frozenset(sorted(bound_names)), tuple(scope_nodes)
 
 
+def _local_import_shadow(scope_node: ast.AST) -> str | None:
+    """A name this scope node binds by something OTHER than an import.
+
+    A body that imports a name and then assigns it again does not reach the
+    imported symbol at the call, so the local import reading is withdrawn for
+    exactly those names - the same conservative rule the module-scope index
+    applies through ``module_shadowed_names``.
+    """
+    if isinstance(scope_node, ast.Name) and isinstance(
+        scope_node.ctx, ast.Store | ast.Del
+    ):
+        return scope_node.id
+    return _scope_declaration_binding_name(scope_node)
+
+
+def _local_relationship_imports(
+    scope_nodes: tuple[ast.AST, ...],
+    *,
+    parameter_names: frozenset[str],
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
+) -> _RelationshipImportIndex:
+    """The imports a function body performs, resolved by the module-scope rule.
+
+    ``_collect_relationship_import_index`` stops at every function, so before
+    this an import written INSIDE a body reached the resolver as an opaque
+    caller binding and every use of it resolved to nothing - while the module
+    walk, which does descend, recorded the very same binding. That is why the
+    witness lane alone lost the reference. Resolution here is the module-scope
+    rule verbatim, module reading included, so the dialect is answered the
+    same way at whatever scope it is written and for whichever lane the file
+    belongs to.
+    """
+    symbol_bindings: dict[str, set[str]] = {}
+    module_bindings: dict[str, set[str]] = {}
+    shadowed_names: set[str] = set(parameter_names)
+    for scope_node in scope_nodes:
+        if isinstance(scope_node, ast.Import):
+            for alias in scope_node.names:
+                alias_name = alias.asname or alias.name.split(".", 1)[0]
+                module_bindings.setdefault(alias_name, set()).add(alias.name)
+            continue
+        if isinstance(scope_node, ast.ImportFrom):
+            target = resolve_import_observation(
+                source, scope_node, registry
+            ).resolved_target
+            if target:
+                for alias in scope_node.names:
+                    if alias.name != "*":
+                        alias_name = alias.asname or alias.name
+                        symbol_bindings.setdefault(alias_name, set()).add(
+                            f"{target}:{alias.name}"
+                        )
+                for alias_name, submodule in _from_import_module_bindings(
+                    node=scope_node,
+                    resolved_target=target,
+                    registry=registry,
+                ):
+                    module_bindings.setdefault(alias_name, set()).add(submodule)
+            continue
+        if isinstance(scope_node, ast.Global | ast.Nonlocal):
+            shadowed_names.update(scope_node.names)
+            continue
+        shadow = _local_import_shadow(scope_node)
+        if shadow is not None:
+            shadowed_names.add(shadow)
+    return _RelationshipImportIndex(
+        symbol_bindings=_freeze_relationship_bindings(symbol_bindings),
+        module_bindings=_freeze_relationship_bindings(module_bindings),
+        module_shadowed_names=frozenset(sorted(shadowed_names)),
+    )
+
+
 def _first_parameter_name(node: _qualnames.FunctionNode) -> str | None:
     positional = [*node.args.posonlyargs, *node.args.args]
     return positional[0].arg if positional else None
@@ -998,6 +1131,39 @@ def _single_relationship_target(
     return next(iter(targets)), resolved_rule
 
 
+def _module_attribute_target(
+    targets: frozenset[str],
+    *,
+    attr: str,
+) -> tuple[str | None, str]:
+    """``<module binding>.<attr>`` as one qualname, or why it is not one."""
+    target_module, rule = _single_relationship_target(
+        targets,
+        resolved_rule="imported_module_attribute",
+    )
+    if target_module is None:
+        return None, rule
+    return f"{target_module}:{attr}", rule
+
+
+def _local_import_targets(
+    name: str,
+    *,
+    bindings: dict[str, frozenset[str]],
+    local_imports: _RelationshipImportIndex,
+) -> frozenset[str] | None:
+    """What the function's OWN import bound this name to, if it still holds.
+
+    ``None`` means the body imported no such name, or imported it and then
+    rebound it - in which case the call does not reach the imported symbol and
+    naming it would invent a consumer.
+    """
+    targets = bindings.get(name)
+    if not targets or name in local_imports.module_shadowed_names:
+        return None
+    return targets
+
+
 def _resolve_relationship_expression(
     node: ast.expr,
     *,
@@ -1009,8 +1175,26 @@ def _resolve_relationship_expression(
     local_method_qualnames: frozenset[str],
     enclosing_class_local: str | None,
     receiver_name: str | None,
+    # The imports the CALLING body performs. Defaulted to the empty index -
+    # the honest neutral element for a scope that imports nothing - so this
+    # resolver stays callable with the module-scope facts alone.
+    local_imports: _RelationshipImportIndex = _EMPTY_RELATIONSHIP_IMPORTS,
 ) -> tuple[str | None, str]:
     if isinstance(node, ast.Name):
+        # The nearest binding wins, and a function-local import is nearer than
+        # anything at module scope. It is also the ONLY reading under which
+        # the name is not an opaque caller binding, which is what the guard
+        # below would otherwise make of it.
+        local_targets = _local_import_targets(
+            node.id,
+            bindings=local_imports.symbol_bindings,
+            local_imports=local_imports,
+        )
+        if local_targets is not None:
+            return _single_relationship_target(
+                local_targets,
+                resolved_rule="imported_symbol",
+            )
         import_targets = imports.symbol_bindings.get(node.id)
         if import_targets and (
             node.id in caller_bindings or node.id in imports.module_shadowed_names
@@ -1031,19 +1215,20 @@ def _resolve_relationship_expression(
 
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
         base_name = node.value.id
+        local_targets = _local_import_targets(
+            base_name,
+            bindings=local_imports.module_bindings,
+            local_imports=local_imports,
+        )
+        if local_targets is not None:
+            return _module_attribute_target(local_targets, attr=node.attr)
         import_targets = imports.module_bindings.get(base_name)
         if import_targets and (
             base_name in caller_bindings or base_name in imports.module_shadowed_names
         ):
             return None, "local_shadowing"
         if import_targets:
-            target_module, rule = _single_relationship_target(
-                import_targets,
-                resolved_rule="imported_module_attribute",
-            )
-            if target_module is not None:
-                return f"{target_module}:{node.attr}", rule
-            return None, rule
+            return _module_attribute_target(import_targets, attr=node.attr)
         # The receiver parameter (self/cls) is itself a caller binding, so the
         # self/cls case must precede the generic caller-shadow guard below.
         if (
@@ -1144,6 +1329,12 @@ def _collect_function_relationship_facts(
     for local_name, function_node in collector.units:
         source_qualname = f"{module_name}:{local_name}"
         caller_bindings, scope_nodes = _walk_relationship_function_scope(function_node)
+        local_imports = _local_relationship_imports(
+            scope_nodes,
+            parameter_names=frozenset(_function_parameter_names(function_node)),
+            source=source,
+            registry=registry,
+        )
         # The enclosing class of a method is the qualname segment before its own
         # name; top-level functions have none. The receiver (self/cls) is the
         # first parameter, but only for non-static methods — a staticmethod's
@@ -1167,6 +1358,7 @@ def _collect_function_relationship_facts(
                 call.func,
                 module_name=module_name,
                 imports=imports,
+                local_imports=local_imports,
                 caller_bindings=caller_bindings,
                 top_level_function_names=top_level_function_names,
                 top_level_class_names=top_level_class_names,
@@ -1195,6 +1387,7 @@ def _collect_function_relationship_facts(
                 node,
                 module_name=module_name,
                 imports=imports,
+                local_imports=local_imports,
                 caller_bindings=caller_bindings,
                 top_level_function_names=top_level_function_names,
                 top_level_class_names=top_level_class_names,

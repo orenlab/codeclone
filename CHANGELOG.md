@@ -5,6 +5,28 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **Two import dialects the binding resolver lost, taught to one owner.** A dead symbol reported
+  `unreferenced` with an empty witness list reads as "nothing in the known world needs this" and
+  practically invites deletion; the same symbol reported `test_only_reference` with its tests named
+  asks a completely different question of the reader. Both carry the same production verdict, and
+  two binding spellings used to decide which one you got. `from <pkg> import <submodule> as <alias>`
+  bound only the symbol reading, so `alias.name` — the exact use `import pkg.submodule as alias`
+  has always resolved — reached no qualname in either the reference lane or the relationship lane.
+  A `from <module> import <name>` written INSIDE a function body was recorded by the module walk but
+  not by the relationship index, which stops at every function, so the alias arrived at the resolver
+  as an opaque local binding and the witness was lost. Both are now answered by one owner and one
+  rule, consulted identically wherever they are written and whichever lane the consuming file belongs
+  to: the consumer's role is read after resolution, never during it. The module reading of a `from`
+  import is admitted only when the module registry knows the target — reading every such import as a
+  submodule would manufacture references to modules that do not exist — and a body that imports a
+  name and then rebinds it keeps the conservative unresolved answer. Measured on this repository:
+  no verdict moves (30 dead under `open`, 108 under `closed`, both unchanged, health 81 either way,
+  the unresolved lane and the live-root lane identical), and `unreferenced` with an empty witness
+  list falls from 6 to 0 under `open` and from 44 to 24 under `closed`. Across nine frozen external
+  repositories under both world contracts, all eighteen cells keep every count they had — dead,
+  unresolved, live roots, health, the dead-code health dimension and the gate exit status — while
+  twenty-six rows on three of the nine gain the tests that reach them and none loses a witness it
+  had. No version constant, threshold, floor, baseline or suppression changed.
 - **An `__all__` entry is exposure, never internal use.** The module walk folded every static
   `__all__` member into the internal-reference set, where it was indistinguishable from a call site,
   so a symbol nothing in the product binds read as live for being exported — measured on this

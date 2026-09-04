@@ -2001,72 +2001,6 @@ result = helper()
     assert test_metrics.referenced_names == frozenset()
 
 
-def _export_chain_walk_facts(
-    *,
-    fixture_root: Path,
-    registry: ModuleRegistryHandle,
-    package_module: str,
-    api_path: str,
-    api_module: str,
-) -> tuple[set[str], set[str], set[str], list[DeadCandidate]]:
-    """Walk facts unioned over the package ``__init__`` and its api module."""
-    referenced_names: set[str] = set()
-    referenced_qualnames: set[str] = set()
-    declared_exports: set[str] = set()
-    dead_candidates: list[DeadCandidate] = []
-    for relative_path, module_name in (
-        (f"{package_module}/__init__.py", package_module),
-        (api_path, api_module),
-    ):
-        _, _, _, _, metrics, _ = _extract_source(
-            source=(fixture_root / relative_path).read_text(),
-            filepath=relative_path,
-            module_name=module_name,
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            module_registry=registry,
-        )
-        referenced_names |= set(metrics.referenced_names)
-        referenced_qualnames |= set(metrics.referenced_qualnames)
-        declared_exports |= set(metrics.declared_exports)
-        dead_candidates.extend(metrics.dead_candidates)
-    return referenced_names, referenced_qualnames, declared_exports, dead_candidates
-
-
-def _export_chain_exported_function(
-    expected_by_symbol: dict[str, dict[str, object]],
-) -> str:
-    """The plain symbol the ground truth marks exported but unresolved."""
-    return next(
-        symbol
-        for symbol, expected in expected_by_symbol.items()
-        if expected.get("status") == "unresolved" and "." not in symbol
-    )
-
-
-def _export_chain_non_exported_sibling(
-    expected_by_symbol: dict[str, dict[str, object]],
-) -> str:
-    """The plain symbol in the same module the chain never exports."""
-    return next(
-        symbol
-        for symbol, expected in expected_by_symbol.items()
-        if expected.get("status") is None and not expected["live"] and "." not in symbol
-    )
-
-
-def _export_chain_exported_method(
-    expected_by_symbol: dict[str, dict[str, object]],
-) -> str:
-    """The dotted symbol the ground truth marks exported but unresolved."""
-    return next(
-        symbol
-        for symbol, expected in expected_by_symbol.items()
-        if expected.get("status") == "unresolved" and "." in symbol
-    )
-
-
 def test_package_export_chain_is_exposure_evidence_not_internal_use() -> None:
     """The __all__ / package re-export chain is a declaration, not a reference.
 
@@ -2096,18 +2030,27 @@ def test_package_export_chain_is_exposure_evidence_not_internal_use() -> None:
             for case in ground_truth["cases"]
             if case["path"] == api_path
         }
-        (
-            referenced_names,
-            referenced_qualnames,
-            declared_exports,
-            dead_candidates,
-        ) = _export_chain_walk_facts(
-            fixture_root=fixture_root,
-            registry=registry,
-            package_module=package_module,
-            api_path=api_path,
-            api_module=api_module,
-        )
+        referenced_names: set[str] = set()
+        referenced_qualnames: set[str] = set()
+        declared_exports: set[str] = set()
+        dead_candidates: list[DeadCandidate] = []
+        for relative_path, module_name in (
+            (f"{package_module}/__init__.py", package_module),
+            (api_path, api_module),
+        ):
+            _, _, _, _, metrics, _ = _extract_source(
+                source=(fixture_root / relative_path).read_text(),
+                filepath=relative_path,
+                module_name=module_name,
+                cfg=NormalizationConfig(),
+                min_loc=1,
+                min_stmt=1,
+                module_registry=registry,
+            )
+            referenced_names |= set(metrics.referenced_names)
+            referenced_qualnames |= set(metrics.referenced_qualnames)
+            declared_exports |= set(metrics.declared_exports)
+            dead_candidates.extend(metrics.dead_candidates)
 
         dead = {
             item.qualname
@@ -2118,7 +2061,11 @@ def test_package_export_chain_is_exposure_evidence_not_internal_use() -> None:
             )
         }
 
-        exported_function = _export_chain_exported_function(expected_by_symbol)
+        exported_function = next(
+            symbol
+            for symbol, expected in expected_by_symbol.items()
+            if expected.get("status") == "unresolved" and "." not in symbol
+        )
         # Exported only through the package __init__ re-export + __all__: a
         # declaration, so not a reference, and dead on internal evidence.
         assert f"{api_module}:{exported_function}" not in referenced_qualnames
@@ -2129,14 +2076,24 @@ def test_package_export_chain_is_exposure_evidence_not_internal_use() -> None:
         assert f"{package_module}:{exported_function}" in declared_exports
         # The non-exported sibling in the same module: the same evidence, the
         # same verdict - the chain no longer tells them apart here.
-        non_exported = _export_chain_non_exported_sibling(expected_by_symbol)
+        non_exported = next(
+            symbol
+            for symbol, expected in expected_by_symbol.items()
+            if expected.get("status") is None
+            and not expected["live"]
+            and "." not in symbol
+        )
         assert f"{api_module}:{non_exported}" not in referenced_qualnames
         assert f"{api_module}:{non_exported}" in dead
         assert f"{package_module}:{non_exported}" not in declared_exports
         # Methods were never rooted by the walk; external reachability owns
         # that question, and under the open world an uncalled reachable method
         # is unresolved rather than live.
-        exported_method = _export_chain_exported_method(expected_by_symbol)
+        exported_method = next(
+            symbol
+            for symbol, expected in expected_by_symbol.items()
+            if expected.get("status") == "unresolved" and "." in symbol
+        )
         assert f"{api_module}:{exported_method}" not in referenced_qualnames
 
 
@@ -3581,6 +3538,16 @@ def source(value):
 
 
 def test_relationship_resolution_guards_caller_local_shadowing() -> None:
+    """Three ways a body can take a module-scope name away from its import.
+
+    A parameter, an assignment and a nested definition each REBIND the name,
+    so the call reaches something the import does not name and the record
+    stays unresolved. A function-local import is not one of these: it binds
+    the name to a module the analysis can resolve, and it is pinned as such
+    below - measured 2026-09-03, that misclassification was the cause of three
+    of this repository's dead symbols being reported with no consumer at all.
+    """
+
     source = """
 from pkg.runtime import run
 
@@ -3594,10 +3561,6 @@ def by_assignment():
 def by_nested_definition():
     def run():
         return 1
-    return run()
-
-def by_local_import():
-    from pkg.other import run
     return run()
 """
     _, _, _, _, file_metrics, _ = _extract_source(
@@ -3615,11 +3578,57 @@ def by_local_import():
         for record in facts.relationships
         if record.expression == "run"
     ]
-    assert len(records) == 4
+    assert len(records) == 3
     assert all(record.relation_kind == "call" for record in records)
     assert all(record.resolution_status == "unresolved" for record in records)
     assert all(record.target_qualname is None for record in records)
     assert all(record.resolution_rule == "local_shadowing" for record in records)
+
+
+def test_a_function_local_import_binds_rather_than_shadows() -> None:
+    """The other side of the same boundary, on the same construction.
+
+    ``by_local_import`` resolves to what it imported; ``by_import_then_rebind``
+    imports the same name and then assigns it, so the call no longer reaches
+    the imported symbol and the record must stay unresolved. Both cases live
+    here, next to the three genuine shadows, because the difference between
+    them is the whole content of the rule.
+    """
+
+    source = """
+def by_local_import():
+    from pkg.other import run
+    return run()
+
+def by_import_then_rebind(flag):
+    from pkg.other import run
+    if flag:
+        run = len
+    return run()
+"""
+    _, _, _, _, file_metrics, _ = _extract_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    by_source = {
+        facts.source_qualname: [
+            (record.resolution_status, record.target_qualname, record.resolution_rule)
+            for record in facts.relationships
+            if record.expression == "run"
+        ]
+        for facts in file_metrics.function_relationship_facts
+    }
+    assert by_source["pkg.module:by_local_import"] == [
+        ("resolved", "pkg.other:run", "imported_symbol")
+    ]
+    assert by_source["pkg.module:by_import_then_rebind"] == [
+        ("unresolved", None, "unresolved_name")
+    ]
 
 
 def test_relationship_import_index_is_module_scoped_and_conservative() -> None:

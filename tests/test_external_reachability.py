@@ -31,12 +31,7 @@ from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
 from tests._ast_metrics_helpers import build_test_module_registry, extract_file_metrics
 
 if TYPE_CHECKING:
-    from codeclone.models import (
-        ExternalReachability,
-        FileMetrics,
-        LivenessClassification,
-        ModuleRegistryHandle,
-    )
+    from codeclone.models import ExternalReachability
 
 
 def _row(qualname: str, state: str, witness: str) -> ExternalReachability:
@@ -1081,115 +1076,6 @@ def test_reachability_on_the_real_fixture_reads_the_named_export_chain() -> None
         }
 
 
-def _golden_case_tree(
-    fixture_root: Path,
-    case_path: str,
-) -> tuple[Path, tuple[str, ...], str, tuple[str, ...]]:
-    """Fixture tree, source roots, api path and files for one ground-truth case."""
-    tree, _, rest = case_path.partition("/")
-    if tree.startswith("liveprobe"):
-        root, source_roots, api_path = fixture_root / tree, ("src",), rest
-        sources = (root / "src").rglob("*.py")
-    else:
-        root, source_roots, api_path = fixture_root, (".",), case_path
-        sources = (root / tree).glob("*.py")
-    return (
-        root,
-        source_roots,
-        api_path,
-        tuple(sorted(path.relative_to(root).as_posix() for path in sources)),
-    )
-
-
-def _golden_case_metrics(
-    root: Path,
-    files: tuple[str, ...],
-    registry: ModuleRegistryHandle,
-) -> dict[str, FileMetrics]:
-    """Real per-file walk facts for the fixture files of one case."""
-    return {
-        filepath: extract_file_metrics(
-            source=(root / filepath).read_text(),
-            filepath=filepath,
-            module_registry=registry,
-        )
-        for filepath in files
-    }
-
-
-def _golden_case_population(
-    metrics: dict[str, FileMetrics],
-) -> tuple[tuple[DeadCandidate, ...], frozenset[str], frozenset[str], frozenset[str]]:
-    """Candidates and the three name populations the owners read, unioned."""
-    walked = tuple(metrics.values())
-    candidates = tuple(
-        candidate
-        for file_metrics in walked
-        for candidate in file_metrics.dead_candidates
-    )
-    referenced_qualnames = frozenset[str]().union(
-        *(file_metrics.referenced_qualnames for file_metrics in walked)
-    )
-    referenced_names = frozenset[str]().union(
-        *(file_metrics.referenced_names for file_metrics in walked)
-    )
-    declared_exports = frozenset[str]().union(
-        *(file_metrics.declared_exports for file_metrics in walked)
-    )
-    return candidates, referenced_qualnames, referenced_names, declared_exports
-
-
-def _golden_case_rows(
-    metrics: dict[str, FileMetrics],
-    registry: ModuleRegistryHandle,
-    candidates: tuple[DeadCandidate, ...],
-    declared_exports: frozenset[str],
-) -> dict[str, ExternalReachability]:
-    """Reachability rows the real owner produces for one case's population."""
-    from codeclone.metrics.external_reachability import (
-        collect_external_reachability,
-        package_modules_from_registry,
-    )
-
-    walked = tuple(metrics.values())
-    return {
-        row.qualname: row
-        for row in collect_external_reachability(
-            definitions=candidates,
-            module_deps=tuple(
-                dep for file_metrics in walked for dep in file_metrics.module_deps
-            ),
-            class_metrics=tuple(
-                metric
-                for file_metrics in walked
-                for metric in file_metrics.class_metrics
-            ),
-            package_modules=package_modules_from_registry(registry),
-            declared_exports=declared_exports,
-        )
-    }
-
-
-def _golden_case_verdicts(
-    *,
-    candidates: tuple[DeadCandidate, ...],
-    referenced_names: frozenset[str],
-    referenced_qualnames: frozenset[str],
-    rows: dict[str, ExternalReachability],
-) -> dict[str, LivenessClassification]:
-    """The evaluator's verdict for one case under both world contracts."""
-    return {
-        world: classify_liveness(
-            definitions=candidates,
-            referenced_names=referenced_names,
-            referenced_qualnames=referenced_qualnames,
-            external_reachability=tuple(rows.values()),
-            world_contract=world,
-        )
-        for world in ("open", "closed")
-    }
-
-
 def test_the_golden_export_cases_are_exposure_without_internal_use() -> None:
     """The four ground-truth cases that read ``live / export_root`` until
     liveness policy v4 (LP-EXPORT, LP-R-EXPORT, ROOT-EXPORT, R-ROOT-EXPORT),
@@ -1200,6 +1086,11 @@ def test_the_golden_export_cases_are_exposure_without_internal_use() -> None:
     open world abstains as ``externally_reachable`` and the closed world calls
     it dead as ``unreferenced``. A verdict-only pin would pass again if some
     other mechanism produced the same verdict for the wrong reason."""
+    from codeclone.metrics.external_reachability import (
+        collect_external_reachability,
+        package_modules_from_registry,
+    )
+
     fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
     ground_truth = orjson.loads((fixture_root / "ground_truth.json").read_bytes())
     cases = [
@@ -1215,22 +1106,60 @@ def test_the_golden_export_cases_are_exposure_without_internal_use() -> None:
     }
 
     for case in cases:
-        root, source_roots, api_path, files = _golden_case_tree(
-            fixture_root, case["path"]
-        )
+        tree, _, rest = case["path"].partition("/")
+        if tree.startswith("liveprobe"):
+            root, source_roots, api_path = fixture_root / tree, ("src",), rest
+            files = sorted(
+                path.relative_to(root).as_posix()
+                for path in (root / "src").rglob("*.py")
+            )
+        else:
+            root, source_roots, api_path = fixture_root, (".",), case["path"]
+            files = sorted(
+                path.relative_to(root).as_posix() for path in (root / tree).glob("*.py")
+            )
         registry = build_test_module_registry(root=root, source_roots=source_roots)
-        metrics = _golden_case_metrics(root, files, registry)
+        metrics = {
+            filepath: extract_file_metrics(
+                source=(root / filepath).read_text(),
+                filepath=filepath,
+                module_registry=registry,
+            )
+            for filepath in files
+        }
         python_module = registry.entries_by_path[api_path].identity.python_module
         assert python_module is not None
         qualname = f"{python_module.module}:{case['symbol']}"
         expected = case["expected"]
-        (
-            candidates,
-            referenced_qualnames,
-            referenced_names,
-            declared_exports,
-        ) = _golden_case_population(metrics)
-        rows = _golden_case_rows(metrics, registry, candidates, declared_exports)
+        candidates = tuple(
+            candidate
+            for file_metrics in metrics.values()
+            for candidate in file_metrics.dead_candidates
+        )
+        referenced_qualnames = frozenset().union(
+            *(file_metrics.referenced_qualnames for file_metrics in metrics.values())
+        )
+        declared_exports = frozenset().union(
+            *(file_metrics.declared_exports for file_metrics in metrics.values())
+        )
+        rows = {
+            row.qualname: row
+            for row in collect_external_reachability(
+                definitions=candidates,
+                module_deps=tuple(
+                    dep
+                    for file_metrics in metrics.values()
+                    for dep in file_metrics.module_deps
+                ),
+                class_metrics=tuple(
+                    metric
+                    for file_metrics in metrics.values()
+                    for metric in file_metrics.class_metrics
+                ),
+                package_modules=package_modules_from_registry(registry),
+                declared_exports=declared_exports,
+            )
+        }
 
         # Evidence: no internal use, a declaration, a public path.
         assert qualname not in referenced_qualnames, case["id"]
@@ -1242,12 +1171,21 @@ def test_the_golden_export_cases_are_exposure_without_internal_use() -> None:
             expected["witness_kind"],
         ), case["id"]
         # Verdicts, both worlds, from that evidence alone.
-        verdicts = _golden_case_verdicts(
-            candidates=candidates,
-            referenced_names=referenced_names,
-            referenced_qualnames=referenced_qualnames,
-            rows=rows,
-        )
+        verdicts = {
+            world: classify_liveness(
+                definitions=candidates,
+                referenced_names=frozenset().union(
+                    *(
+                        file_metrics.referenced_names
+                        for file_metrics in metrics.values()
+                    )
+                ),
+                referenced_qualnames=referenced_qualnames,
+                external_reachability=tuple(rows.values()),
+                world_contract=world,
+            )
+            for world in ("open", "closed")
+        }
         assert {
             item.qualname: item.reason
             for item in verdicts["open"].unresolved_reachability
