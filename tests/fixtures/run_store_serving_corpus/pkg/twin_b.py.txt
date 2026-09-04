@@ -1,0 +1,21 @@
+"""Twin B: the other half of the function clone pair."""
+
+
+def gather(values: list, ceiling: int) -> int:
+    """Gather."""
+    total = 0
+    seen = 0
+    highest = 0
+    lowest = 0
+    for value in values:
+        seen += 1
+        total += value
+        if total > ceiling:
+            total -= ceiling
+            highest += 1
+        else:
+            total += seen
+            lowest += 1
+    total += highest
+    total -= lowest
+    return total

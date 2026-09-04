@@ -1,0 +1,25 @@
+"""Utility helpers.
+
+Imports one EXTERNAL module (``os``): the canonical dependency lane
+ingests only internal source-bearing edges, so this row exists on the
+served slice and cannot exist in the store.
+"""
+
+import os
+
+
+def clamp(value: int, ceiling: int) -> int:
+    """Clamp a value, with enough branching to carry a complexity row."""
+    total = 0
+    for index in range(value):
+        total += index
+        if total > ceiling:
+            total -= 1
+        else:
+            total += 2
+    return total
+
+
+def separator_width() -> int:
+    """Read a module attribute of an external module."""
+    return len(os.sep)

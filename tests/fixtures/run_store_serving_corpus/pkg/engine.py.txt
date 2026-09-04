@@ -1,0 +1,33 @@
+"""Engine: two EXTERNAL imports and two INTERNAL ones."""
+
+import json
+from pathlib import Path
+
+from pkg.util import clamp
+from pkg.wheel import Wheel
+
+
+class Engine:
+    """Engine."""
+
+    def __init__(self, ceiling: int) -> None:
+        self.wheel = Wheel(ceiling)
+        self.ceiling = ceiling
+
+    def spin(self, value: int) -> int:
+        """Spin."""
+        total = 0
+        for index in range(value):
+            total += clamp(index, self.ceiling)
+            if total > 10:
+                total -= 1
+            else:
+                total += 2
+        return total
+
+
+def render(payload: dict, target: Path) -> str:
+    """Render a payload through an external module attribute."""
+    text = json.dumps(payload)
+    target.write_text(text)
+    return text

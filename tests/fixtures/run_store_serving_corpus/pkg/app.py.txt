@@ -1,0 +1,16 @@
+"""App: two INTERNAL imports and no external one."""
+
+from pkg.engine import Engine
+from pkg.wheel import Wheel
+
+
+def build(ceiling: int) -> int:
+    """Build."""
+    engine = Engine(ceiling)
+    wheel = Wheel(ceiling)
+    total = engine.spin(ceiling)
+    if total > 3:
+        total -= wheel.ceiling
+    else:
+        total += wheel.ceiling
+    return total

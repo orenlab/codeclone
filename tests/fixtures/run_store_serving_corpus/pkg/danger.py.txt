@@ -1,0 +1,15 @@
+"""Danger: one EXTERNAL import and one security surface.
+
+The surface is deliberately NOT the closing statement: its span is the
+``eval`` site, and a canonical family that states that span is stating a
+different object's closing line, not the unit's.
+"""
+
+import base64
+
+
+def decode(source: str) -> object:
+    """Decode, then evaluate."""
+    payload = base64.b64decode(source)
+    result = eval(payload)
+    return result

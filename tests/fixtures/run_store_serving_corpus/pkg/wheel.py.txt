@@ -1,0 +1,26 @@
+"""Wheel: one INTERNAL import, one internal call, one dynamic call."""
+
+from pkg.util import clamp
+
+
+class Wheel:
+    """Wheel."""
+
+    def __init__(self, ceiling: int) -> None:
+        self.ceiling = ceiling
+
+    def turn(self, value: int) -> int:
+        """Turn."""
+        return clamp(value, self.ceiling)
+
+
+def spin_all(count: int) -> int:
+    """Spin every wheel; the ``Wheel().turn`` call is dynamic."""
+    total = 0
+    for index in range(count):
+        total += Wheel(index).turn(index)
+        if total > 4:
+            total -= 1
+        else:
+            total += 3
+    return total

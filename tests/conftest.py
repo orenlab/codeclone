@@ -16,6 +16,11 @@ import pytest
 
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
+from codeclone.models import RUN_SNAPSHOT_PUBLICATION_PUBLISHED
+from tests._served_run import (
+    ServedRunStoreProjection,
+    ServedUnitLocation,
+)
 from tests._sqlite_cleanup import (
     close_tracked_sqlite_connections,
     make_tracking_connect,
@@ -211,6 +216,86 @@ def corpus_f5_report(
     _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F5, root)
     _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
     return _corpus_document(report_path)
+
+
+# ---------------------------------------------------------------------------
+# The run-store serving corpus: what an MCP execution serves from RAM beside
+# the canonical run the same execution published.
+#
+# The tree is built to CARRY the distinguishing cases the three equivalence
+# pins need (Probe Validity Law, AGENTS.md §17.3), because a corpus without
+# them cannot tell "no canonical family owns this fact" from "the family
+# that owns it carried no rows on this input":
+#
+#   * a function clone pair — the one canonical population whose ``end_line``
+#     IS the hosting unit's own;
+#   * a security surface whose span is a statement inside a unit and NOT the
+#     unit's own closing line;
+#   * imports with external targets, which the canonical dependency lane
+#     omits by design;
+#   * relationships in both resolution states, resolved and unresolved.
+# ---------------------------------------------------------------------------
+
+_RUN_STORE_SERVING_CORPUS = (
+    Path(__file__).parent / "fixtures" / "run_store_serving_corpus"
+)
+
+
+@pytest.fixture(scope="session")
+def served_run_store_projection(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> ServedRunStoreProjection:
+    """One MCP analysis of the serving corpus, with the run store enabled.
+
+    The ``r4`` surface is driven HERE and not in the consuming module: the
+    consumer compares against the ``r2`` canonical model and has to stay an
+    ``r2`` subject (the Phase 39S test-import law), which is the same reason
+    ``run_store_cli`` lives in this file.
+    """
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    root = tmp_path_factory.mktemp("run_store_serving").resolve()
+    store_path = root.parent / "run_store_serving.sqlite3"
+    _materialize_corpus_tree(_RUN_STORE_SERVING_CORPUS, root)
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
+        # The rollout is CI-neutral by design and the suite may run under
+        # CI; the fixture says so rather than depending on the host.
+        monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
+        monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store_path))
+        service = CodeCloneMCPService(history_limit=4)
+        service.analyze_repository(
+            MCPAnalysisRequest(root=str(root), analysis_mode="full")
+        )
+        record = service._runs.resolve_any_root()
+    finally:
+        monkeypatch.undo()
+    # The instrument is proven on before anything is counted: an execution
+    # that published nothing leaves the store empty, and every comparison
+    # downstream would then be measuring an ABSENT run rather than an
+    # inexpressible one.
+    link = record.execution.run_snapshot_link
+    assert link is not None, "the execution carries no run-snapshot link"
+    assert link.outcome == RUN_SNAPSHOT_PUBLICATION_PUBLISHED, link
+    assert link.store_run_id
+    return ServedRunStoreProjection(
+        root=root,
+        store_path=store_path,
+        store_run_id=str(link.store_run_id),
+        unit_inventory=tuple(
+            ServedUnitLocation(
+                qualname=unit.qualname,
+                path=unit.path,
+                start_line=unit.start_line,
+                end_line=unit.end_line,
+            )
+            for unit in record.unit_inventory
+        ),
+        relationship_facts=record.relationship_facts,
+        module_imports=record.module_imports,
+    )
 
 
 @pytest.fixture(autouse=True)

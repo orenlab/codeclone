@@ -1,0 +1,26 @@
+"""Twin A: one half of a function clone pair.
+
+A clone member is the ONE canonical population whose ``end_line`` is the
+hosting unit's own, so a corpus without one cannot tell "no family owns
+this fact" from "the family that owns it carried no rows".
+"""
+
+
+def accumulate(values: list, ceiling: int) -> int:
+    """Accumulate."""
+    total = 0
+    seen = 0
+    highest = 0
+    lowest = 0
+    for value in values:
+        seen += 1
+        total += value
+        if total > ceiling:
+            total -= ceiling
+            highest += 1
+        else:
+            total += seen
+            lowest += 1
+    total += highest
+    total -= lowest
+    return total

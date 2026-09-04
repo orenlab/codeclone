@@ -1,0 +1,2 @@
+[tool.codeclone]
+semantic_authority = true
