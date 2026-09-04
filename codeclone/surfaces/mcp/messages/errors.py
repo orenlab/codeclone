@@ -63,3 +63,62 @@ def run_id_must_be_quoted(
         "is unchanged; this is a caller encoding fix, not a different run."
         f"\n\nSchema rejection as received: {rejection}"
     )
+
+
+def stale_engine(
+    operation: str,
+    *,
+    loaded: str,
+    on_disk: str,
+    package_root: str,
+) -> str:
+    """Refusal for a request this process cannot answer with the code on disk.
+
+    Executable rather than descriptive: the only fix is a restarted server
+    process, so the message says that instead of describing a digest mismatch
+    and leaving the caller to infer it. Both generations are shown because the
+    pair is the evidence -- a single digest cannot be checked by the reader.
+    """
+
+    return (
+        f"STALE_ENGINE: {operation} was refused and did not execute. This "
+        "server process is running CodeClone code that the disk no longer "
+        "holds, so any answer it produced would describe a version of the "
+        "engine that no longer exists.\n"
+        f"  loaded by this process: {loaded}\n"
+        f"  on disk now:            {on_disk}\n"
+        f"  loaded package root:    {package_root}\n"
+        "Restart the CodeClone MCP server process and resend the request. "
+        "A long-lived server keeps the modules it imported at startup; only a "
+        "new process picks up the current checkout."
+    )
+
+
+def engine_changed_during_operation(
+    operation: str,
+    *,
+    at_entry: str,
+    at_exit: str,
+    package_root: str,
+) -> str:
+    """Refusal for a result produced across an engine change.
+
+    The operation ran, so this is not a stale-engine refusal: part of the work
+    was done by the code loaded at entry and part of it may have been done by
+    modules imported after the checkout moved. The result exists and is
+    withheld rather than published, because nothing can say which half of it
+    came from which engine.
+    """
+
+    return (
+        f"ENGINE_CHANGED_DURING_OPERATION: {operation} completed, but the "
+        "CodeClone sources on disk changed while it was running, so its "
+        "result is withheld instead of returned as a normal success.\n"
+        f"  at operation entry: {at_entry}\n"
+        f"  at operation exit:  {at_exit}\n"
+        f"  loaded package root: {package_root}\n"
+        "Restart the CodeClone MCP server process and resend the request. "
+        "Modules imported late in an operation come from the tree as it is "
+        "then, so a result spanning a change cannot be attributed to one "
+        "engine."
+    )

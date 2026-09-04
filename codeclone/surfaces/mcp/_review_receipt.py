@@ -215,8 +215,21 @@ def derive_verification_profile_section(
     }
 
 
+def _engine_field(engine: Mapping[str, object], key: str) -> str:
+    """Render one engine-provenance field, naming an unrecorded one.
+
+    An execution that recorded no provenance carries an empty string, and empty
+    backticks in a receipt read as a value rather than as its absence. The
+    typed receipt keeps the raw value; only this rendering names it.
+    """
+
+    value = str(engine.get(key, "")).strip()
+    return value or receipt_msgs.RECEIPT_MD_UNKNOWN
+
+
 def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     provenance = _as_mapping(receipt.get("provenance"))
+    engine = _as_mapping(provenance.get("engine"))
     vp_section = _optional_mapping(receipt.get("verification_profile"))
     scope = _optional_mapping(receipt.get("scope"))
     blast_radius = _optional_mapping(receipt.get("blast_radius"))
@@ -241,6 +254,14 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
         (
             f"**Baseline:** "
             f"{provenance.get('baseline_status', receipt_msgs.RECEIPT_MD_UNKNOWN)}"
+        ),
+        # Read, never re-derived: the engine block is produced once, where the
+        # process identity is known, and this line only spends it. A renderer
+        # that recomputed provenance would be a second owner of the fact.
+        (
+            f"**Engine:** `{_engine_field(engine, 'generation')}` "
+            f"loaded from `{_engine_field(engine, 'loaded_package_root')}` "
+            f"(execution `{_engine_field(engine, 'execution_event_id')}`)"
         ),
         receipt_msgs.RECEIPT_MD_REVIEW_CONTRACT,
         "",

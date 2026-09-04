@@ -30,6 +30,7 @@ from ...observability import (
     shutdown,
     span,
 )
+from ._engine_fence import fenced_server_class
 from ._protocol_diagnostics import diagnosing_server_class
 from .auth import (
     MCP_AUTH_TOKEN_ENV,
@@ -283,8 +284,14 @@ def _load_mcp_runtime() -> tuple[
 
         # The schema rejects a wrongly typed argument above every handler, so
         # the only seam that can diagnose one is the tool-call boundary itself.
-        runtime_fastmcp: type[FastMCP] = diagnosing_server_class(
-            refuse_arguments=_refuse_withdrawn_arguments,
+        # The engine fence wraps that seam from OUTSIDE: a process running code
+        # the disk no longer holds must refuse before it executes anything, and
+        # its reading of the caller's arguments is worth no more than its
+        # analysis would have been.
+        runtime_fastmcp: type[FastMCP] = fenced_server_class(
+            diagnosing_server_class(
+                refuse_arguments=_refuse_withdrawn_arguments,
+            )
         )
     except ImportError as exc:
         raise MCPDependencyError(mcp_instructions.MCP_INSTALL_HINT) from exc

@@ -32,8 +32,18 @@ The provenance travels as the response block it will be serialized into: there
 is no intermediate record type, so the fact has exactly one representation and
 the model store stays the home of models.
 
-This marker is descriptive only.  It gates nothing, authorizes nothing, and
-never enters analysis truth.
+The digest never enters analysis truth: no report, ``run_id``, execution
+witness or baseline is derived from it, and it authorizes nothing.
+
+It is no longer descriptive only.  :mod:`._engine_fence` reads the value
+captured here as the *loaded* generation and re-derives the same digest from
+:func:`package_source_root` as the *disk* generation, and refuses the operation
+when the two disagree -- the one thing the captured value alone can never
+report, since a stale process honestly reports the digest it was launched with
+and shows no drift by construction.  Two consequences bind this module:
+``compute_code_provenance`` must stay free of any cache keyed by anything
+cheaper than content, and ``package_source_root`` must keep naming the tree the
+interpreter imported rather than any root a caller supplied.
 """
 
 from __future__ import annotations

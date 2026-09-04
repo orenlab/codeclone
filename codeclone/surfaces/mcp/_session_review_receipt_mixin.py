@@ -20,6 +20,7 @@ from . import _session_helpers as _helpers
 from ._context_governance import (
     context_governance_digest,
 )
+from ._engine_fence import loaded_package_root
 from ._intent import IntentRecord
 from ._review_receipt import (
     RECEIPT_VERSION,
@@ -295,12 +296,35 @@ class _MCPSessionReviewReceiptMixin:
         ]
 
     def _receipt_provenance(self, record: MCPRunRecord) -> dict[str, object]:
+        """Who produced this receipt, and with which engine.
+
+        ``engine`` is additive and answers the question a receipt could not
+        answer before: *which build of CodeClone read this repository, running
+        out of which directory, in which execution*. A long-lived server keeps
+        the modules it imported at startup, so "version 2.1.0a2" names a
+        release and not a build, and the loaded package root is routinely a
+        different tree from ``root`` -- an editable finder in a worktree
+        ``.venv`` can point at the main checkout.
+
+        Provenance only. The generation and the package root are reported
+        beside the analysis facts and enter none of them: not ``run_id``, not
+        ``report_digest``, and not the execution witnesses, each of which is
+        derived from what the run read rather than from what read it. The
+        section is additive in the receipt's existing idiom, so
+        ``RECEIPT_VERSION`` stays "1".
+        """
+
         return {
             "report_digest": self._receipt_digest(record),
             "report_schema_version": REPORT_SCHEMA_VERSION,
             "baseline_status": derive_baseline_status(record.served_report),
             "run_id": _helpers._short_run_id(record.run_id),
             "root": str(record.root),
+            "engine": {
+                "generation": record.execution.code_digest,
+                "loaded_package_root": loaded_package_root(),
+                "execution_event_id": record.execution.execution_event_id,
+            },
         }
 
     def _receipt_digest(self, record: MCPRunRecord) -> str:
