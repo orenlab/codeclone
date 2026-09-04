@@ -141,13 +141,13 @@ Validate cited review text against canonical report semantics: catches Security 
 ### Navigation Tools
 
 **`generate_pr_summary(run_id, changed_paths, format)`**
-Generate a PR-friendly CodeClone summary. Format `markdown` (default) produces LLM-facing compact output; `json` is for machine post-processing.
+Generate a PR-friendly CodeClone summary. `format` defaults to `markdown`, which produces LLM-facing compact output; `format="json"` is for machine post-processing.
 
 **`compare_runs(before_run_id, after_run_id, ...)`**
 Compare two runs by finding groups and health deltas. Returns incomparable when repository roots or settings differ.
 
-**`help(topic)`**
-Bounded workflow and contract guidance with doc links. `topic=overview` returns a compact topic index. Complexity level `compact` adds anti-patterns; `normal` (default) includes warnings.
+**`help(topic, detail)`**
+Bounded workflow and contract guidance with doc links. `topic=overview` returns a compact topic index. `detail` defaults to `compact`, and `detail="normal"` additionally returns `warnings`. Anti-patterns are returned for every topic that defines them, at either detail level.
 
 **`clear_session_runs()`**
 Clear all in-memory analysis runs and ephemeral session state for the MCP server process.

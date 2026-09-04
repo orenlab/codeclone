@@ -36,7 +36,7 @@ An MCP session holds exactly one active change-control intent. Calling `start_co
 
 ### Help contract
 
-`help` with `topic=overview` returns a compact topic index. Requests with `compact=true` include anti-patterns; normal (default) requests add warnings. Topics must correspond to enforced context-governance response contracts (e.g., `change-control` describes partial_enforce start responses, `engineering_memory` describes get_memory_projection_page continuation).
+`help(topic)` returns bounded guidance for one topic; `topic=overview` returns a compact topic index. `detail` defaults to `compact`, and `help(topic, detail)` with `detail="normal"` additionally returns `warnings`. Anti-patterns are returned for every topic that defines them, at either detail level. Topics must correspond to enforced context-governance response contracts (e.g., `change_control` describes partial_enforce start responses, `engineering_memory` describes get_memory_projection_page continuation).
 
 ### Memory synchronization
 
@@ -92,19 +92,19 @@ Memory-aware tools require `get_relevant_memory` after `start_controlled_change`
 
 - **Condition**: Out-of-scope files modified and not accounted for in dirty snapshot.
 - **Response**: `status: violated`, `finish_block_reason: own_unscoped_dirty` (only if `CODECLONE_STRICT_FINISH` truthy). Without it the outcome accepts and names the unchecked Python in `unverified_paths` instead.
-- **Recovery**: Remove out-of-scope changes, or widen scope via `start_controlled_change(root=..., scope=...)` and retry `finish` on new intent.
+- **Recovery**: Remove out-of-scope changes, or widen scope via `start_controlled_change(root=..., scope=..., intent=...)` and retry `finish` on a new intent.
 
 ### Missing evidence
 
 - **Condition**: In-scope files edited during start snapshot but not reported in finish `changed_files` (under-reported in-scope dirty).
 - **Response**: `status: unverified`, `reason: workspace_hygiene`, `finish_block_reason: missing_evidence`. (The intent stays active — this is a hygiene block, not a scope `violated`.)
-- **Recovery**: Re-run `analyze_repository`, list all in-scope changed files, and call `finish_controlled_change(changed_files=[...])` with complete evidence.
+- **Recovery**: Re-run `analyze_repository`, list all in-scope changed files, and call `finish_controlled_change(intent_id=..., changed_files=[...])` with complete evidence.
 
 ### Context page mismatch
 
 - **Condition**: `get_implementation_context_page` requested with facet key or projection digest not in saved session artifact.
 - **Response**: `not_found` or `mismatch` status, no fresh recomputation.
-- **Recovery**: Call `get_implementation_context(root=..., scope=...)` to regenerate and save a new projection artifact, then retry the facet page request.
+- **Recovery**: Call `get_implementation_context(root=..., paths=...)` to regenerate and save a new projection artifact, then retry the facet page request.
 
 ## Verification
 
