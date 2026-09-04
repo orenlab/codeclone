@@ -30,9 +30,12 @@ from .contract import (
     MAX_LEASE_SECONDS,
     MIN_LEASE_SECONDS,
     REGISTRY_VERSION,
+    WorkspaceDocumentRead,
+    WorkspaceDocumentReadKind,
     WorkspaceIntentRecord,
     compute_intent_digest,
     compute_scope_digest,
+    verify_intent_integrity,
 )
 
 _HEX_DIGEST_LENGTH = 64
@@ -453,6 +456,52 @@ def parse_workspace_document(data: object) -> WorkspaceIntentDocument | None:
         return None
 
 
+def read_workspace_payload(payload: object) -> WorkspaceDocumentRead:
+    """Read one stored payload, distinguishing damage from unfamiliarity.
+
+    The discriminator is the persisted ``integrity.payload_sha256`` and
+    nothing else.  It is the writer's own digest over the canonical JSON of
+    the document minus that key, and :func:`verify_intent_integrity`
+    recomputes it from the raw mapping WITHOUT consulting this build's model —
+    which is the whole reason it can answer for a document this build cannot
+    model.  So:
+
+    * digest verifies, model refuses → some writer produced exactly these
+      bytes and they arrived intact.  The record is unreadable HERE, and it is
+      live coordination state everywhere else.  Refusing to understand it is
+      honest; destroying it is not.
+    * digest does not verify → the bytes are attributable to no writer: not
+      JSON, not an object, no digest, or a value edited under a stale one.
+      Removing them is hygiene.
+
+    The check is deliberately not "does the version look newer".  A generation
+    is one of several ways a writer can outrun a reader — an added field, an
+    unknown status token — and a rule keyed on the version number would be
+    blind to the others while looking like it covered them.
+
+    Never answers :attr:`WorkspaceDocumentReadKind.ABSENT`: this function is
+    handed bytes, and the storage layer cannot tell a vanished file from an
+    unparseable one.  Absence is decided by the lookup that went looking for a
+    particular id, which is the only caller that knows it found nothing.
+    """
+
+    if isinstance(payload, str):
+        try:
+            data: object = json.loads(payload)
+        except json.JSONDecodeError:
+            return WorkspaceDocumentRead(WorkspaceDocumentReadKind.CORRUPT)
+    else:
+        data = payload
+    if not isinstance(data, dict):
+        return WorkspaceDocumentRead(WorkspaceDocumentReadKind.CORRUPT)
+    document = parse_workspace_document(data)
+    if document is not None:
+        return WorkspaceDocumentRead.of_record(record_from_document(document))
+    if verify_intent_integrity(data):
+        return WorkspaceDocumentRead(WorkspaceDocumentReadKind.INCOMPATIBLE)
+    return WorkspaceDocumentRead(WorkspaceDocumentReadKind.CORRUPT)
+
+
 def parse_workspace_document_json(payload_json: str) -> WorkspaceIntentDocument | None:
     try:
         payload = json.loads(payload_json)
@@ -565,11 +614,14 @@ def signed_payload_json_from_record(record: object) -> str:
 __all__ = [
     "IntentIntegrityModel",
     "IntentScopeModel",
+    "WorkspaceDocumentRead",
+    "WorkspaceDocumentReadKind",
     "WorkspaceIntentDocument",
     "WorkspaceIntentRowModel",
     "document_to_record_fields",
     "parse_workspace_document",
     "parse_workspace_document_json",
+    "read_workspace_payload",
     "record_from_document",
     "signed_payload_dict_from_record",
     "signed_payload_json_from_record",

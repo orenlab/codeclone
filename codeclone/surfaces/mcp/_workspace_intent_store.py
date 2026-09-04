@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from ...config.intent_registry import (
     IntentRegistryConfig,
@@ -20,7 +21,11 @@ from ...config.intent_registry import (
 )
 from ...report.meta import current_report_timestamp_utc
 from ...utils.json_io import write_json_document_atomically
-from ...workspace_intent.contract import WorkspaceIntentRecord
+from ...workspace_intent.contract import (
+    WorkspaceDocumentRead,
+    WorkspaceDocumentReadKind,
+    WorkspaceIntentRecord,
+)
 from ...workspace_intent.lifecycle import (
     WorkspaceIntentStatus,
     gc_status_for_reason,
@@ -28,13 +33,12 @@ from ...workspace_intent.lifecycle import (
 )
 from ...workspace_intent.models import (
     WorkspaceIntentRowModel,
-    parse_workspace_document,
-    parse_workspace_document_json,
-    record_from_document,
+    read_workspace_payload,
     signed_payload_dict_from_record,
     signed_payload_json_from_record,
 )
 from ...workspace_intent.paths import (
+    intent_id_from_filename,
     intent_path,
     is_safe_intent_id,
     read_payload,
@@ -525,15 +529,15 @@ def _build_store(
 
 
 def _record_from_json(payload: object) -> WorkspaceIntentRecord | None:
-    if isinstance(payload, str):
-        document = parse_workspace_document_json(payload)
-    elif isinstance(payload, dict):
-        document = parse_workspace_document(payload)
-    else:
-        return None
-    if document is None:
-        return None
-    return record_from_document(document)
+    """The record, or nothing — for readers that only project live rows.
+
+    Callers that DELETE on a miss must use :func:`read_workspace_payload`
+    instead: this signature cannot say why the record is absent, and acting on
+    an answer that cannot distinguish damaged bytes from a document written by
+    a newer build is what destroyed live coordination state.
+    """
+
+    return read_workspace_payload(payload).record
 
 
 def _sqlite_storage_key(*, pid: int, start_epoch: int, intent_id: str) -> str:
@@ -545,6 +549,12 @@ class LazyCloseResult:
     closed_ids: tuple[str, ...]
     closed_reasons: dict[str, str]
     corrupted_removed: tuple[str, ...]
+    #: Rows left exactly as found because a writer signed them and this build
+    #: cannot model them.  Reported, never silent: an operator whose intent
+    #: stops answering is owed the difference between "removed" and "kept but
+    #: not understood here".
+    unreadable_retained: tuple[str, ...] = ()
+    unreadable_retained_intent_ids: tuple[str, ...] = ()
 
     def to_gc_fragment(self) -> dict[str, object]:
         return {
@@ -553,6 +563,9 @@ class LazyCloseResult:
             "removed_reasons": dict(self.closed_reasons),
             "corrupted_removed": len(self.corrupted_removed),
             "corrupted_filenames": list(self.corrupted_removed),
+            "unreadable_retained": len(self.unreadable_retained),
+            "unreadable_retained_filenames": list(self.unreadable_retained),
+            "unreadable_retained_intent_ids": list(self.unreadable_retained_intent_ids),
         }
 
 
@@ -594,20 +607,67 @@ def lazy_close_eligible_records_unlocked(
     return _lazy_close_eligible_records_unlocked(store)
 
 
+class ScannedRegistryRow(NamedTuple):
+    """One row a registry scan produced, named rather than positional.
+
+    Owned here because it is produced and consumed here and crosses no ring
+    boundary: this module is both the scanner and the only reader of a scan.
+    The read outcome it carries is the opposite case -- that concept has
+    consumers in two rings, so it is owned in
+    :mod:`codeclone.workspace_intent.contract` and merely passes through.
+
+    ``keyed_intent_id`` comes from the storage key and never from the
+    document, because the key is the only identification available for a row
+    this build cannot parse -- and naming the intent is how a refusal stops
+    sounding like "no such intent".
+    """
+
+    storage_key: str
+    keyed_intent_id: str | None
+    read: WorkspaceDocumentRead
+
+
 def _lazy_close_from_entries(
-    entries: Iterable[tuple[str, WorkspaceIntentRecord | None]],
+    entries: Iterable[ScannedRegistryRow],
     *,
     for_lazy_close: bool,
     remove_corrupted: Callable[[str], bool],
     close_active: Callable[[WorkspaceIntentRecord, str], bool],
 ) -> LazyCloseResult:
+    """The one owner of removal on the read path, for both backends.
+
+    A row this build cannot read is NOT removed unless its own integrity
+    witness fails.  ``read.record is None`` used to be the whole condition,
+    and it is true of two unrelated situations: bytes no writer produced, and
+    a document a newer writer produced and signed.  Deleting on the second
+    turned every forward-compatibility mistake in this subsystem into silent,
+    unrecoverable loss of live coordination state.
+    """
+
     closed_ids: list[str] = []
     closed_reasons: dict[str, str] = {}
     corrupted: list[str] = []
-    for storage_key, record in entries:
+    retained: list[str] = []
+    retained_ids: list[str] = []
+    for storage_key, keyed_intent_id, read in entries:
+        record = read.record
         if record is None:
-            if remove_corrupted(storage_key):
-                corrupted.append(storage_key)
+            match read.kind:
+                case WorkspaceDocumentReadKind.INCOMPATIBLE:
+                    retained.append(storage_key)
+                    if keyed_intent_id is not None:
+                        retained_ids.append(keyed_intent_id)
+                case WorkspaceDocumentReadKind.CORRUPT:
+                    if remove_corrupted(storage_key):
+                        corrupted.append(storage_key)
+                case _:
+                    # A scan cannot produce ABSENT, and a kind added later has
+                    # no removal rule here. Either way the honest answer is to
+                    # stop: falling through would silently pick one of the two
+                    # opposite actions for a state nobody decided about.
+                    raise ValueError(
+                        f"Unhandled workspace document read kind: {read.kind.value!r}"
+                    )
             continue
         reason = (
             None
@@ -621,6 +681,24 @@ def _lazy_close_from_entries(
         closed_ids=tuple(closed_ids),
         closed_reasons=closed_reasons,
         corrupted_removed=tuple(corrupted),
+        unreadable_retained=tuple(retained),
+        unreadable_retained_intent_ids=tuple(retained_ids),
+    )
+
+
+def _file_entries(
+    store: FileWorkspaceIntentStore,
+) -> tuple[tuple[Path, ScannedRegistryRow], ...]:
+    return tuple(
+        (
+            path,
+            ScannedRegistryRow(
+                storage_key=path.name,
+                keyed_intent_id=intent_id_from_filename(path.name),
+                read=read_workspace_payload(read_payload(path)),
+            ),
+        )
+        for path in registry_files(store.root)
     )
 
 
@@ -629,21 +707,38 @@ def _close_file_store(
     *,
     for_lazy_close: bool,
 ) -> LazyCloseResult:
-    path_by_name: dict[str, Path] = {}
-    path_by_intent: dict[str, Path] = {}
-    entries: list[tuple[str, WorkspaceIntentRecord | None]] = []
-    for path in registry_files(store.root):
-        payload = read_payload(path)
-        record = _record_from_json(payload) if payload is not None else None
-        path_by_name[path.name] = path
-        if record is not None:
-            path_by_intent[record.intent_id] = path
-        entries.append((path.name, record))
+    scanned = _file_entries(store)
+    path_by_name = {row.storage_key: path for path, row in scanned}
+    path_by_intent = {
+        row.read.record.intent_id: path
+        for path, row in scanned
+        if row.read.record is not None
+    }
     return _lazy_close_from_entries(
-        entries,
+        (row for _path, row in scanned),
         for_lazy_close=for_lazy_close,
         remove_corrupted=lambda key: unlink(path_by_name[key]),
         close_active=lambda record, _reason: unlink(path_by_intent[record.intent_id]),
+    )
+
+
+def _sqlite_entries(
+    store: SqliteWorkspaceIntentStore,
+) -> tuple[tuple[tuple[int, int, str], ScannedRegistryRow], ...]:
+    return tuple(
+        (
+            (int(agent_pid), int(agent_start_epoch), str(intent_id)),
+            ScannedRegistryRow(
+                storage_key=_sqlite_storage_key(
+                    pid=int(agent_pid),
+                    start_epoch=int(agent_start_epoch),
+                    intent_id=str(intent_id),
+                ),
+                keyed_intent_id=str(intent_id),
+                read=read_workspace_payload(payload_json),
+            ),
+        )
+        for agent_pid, agent_start_epoch, intent_id, payload_json in store.iter_rows()
     )
 
 
@@ -652,19 +747,10 @@ def _close_sqlite_store(
     *,
     for_lazy_close: bool,
 ) -> LazyCloseResult:
-    entries: list[tuple[str, WorkspaceIntentRecord | None]] = []
-    row_keys: dict[str, tuple[int, int, str]] = {}
-    for agent_pid, agent_start_epoch, intent_id, payload_json in store.iter_rows():
-        storage_key = _sqlite_storage_key(
-            pid=int(agent_pid),
-            start_epoch=int(agent_start_epoch),
-            intent_id=str(intent_id),
-        )
-        record = _record_from_json(payload_json)
-        entries.append((storage_key, record))
-        row_keys[storage_key] = (int(agent_pid), int(agent_start_epoch), str(intent_id))
+    scanned = _sqlite_entries(store)
+    row_keys = {row.storage_key: key for key, row in scanned}
     return _lazy_close_from_entries(
-        entries,
+        (row for _key, row in scanned),
         for_lazy_close=for_lazy_close,
         remove_corrupted=lambda key: store.delete_row_unlocked(
             pid=row_keys[key][0],
@@ -677,9 +763,32 @@ def _close_sqlite_store(
     )
 
 
+def unreadable_intent_ids(store: WorkspaceIntentStore) -> frozenset[str]:
+    """Intent ids whose stored row this build cannot read but must not lose.
+
+    Reads nothing and closes nothing, so a caller asking "is it gone, or is it
+    merely beyond me?" can ask without the question having side effects. That
+    matters for the recovery path, which deliberately runs without lazy close.
+    """
+
+    if isinstance(store, FileWorkspaceIntentStore):
+        rows = tuple(row for _path, row in _file_entries(store))
+    elif isinstance(store, SqliteWorkspaceIntentStore):
+        rows = tuple(row for _key, row in _sqlite_entries(store))
+    else:  # pragma: no cover - the union is closed
+        raise TypeError(f"Unsupported workspace intent store: {type(store)!r}")
+    return frozenset(
+        row.keyed_intent_id
+        for row in rows
+        if row.keyed_intent_id is not None
+        and row.read.kind is WorkspaceDocumentReadKind.INCOMPATIBLE
+    )
+
+
 __all__ = [
     "FileWorkspaceIntentStore",
     "LazyCloseResult",
+    "ScannedRegistryRow",
     "SqliteWorkspaceIntentStore",
     "WorkspaceIntentStore",
     "clear_workspace_intent_store_cache",
@@ -687,5 +796,6 @@ __all__ = [
     "lazy_close_eligible_records",
     "lazy_close_eligible_records_unlocked",
     "registry_transaction",
+    "unreadable_intent_ids",
     "write_workspace_intent_with_existing",
 ]

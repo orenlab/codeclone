@@ -65,6 +65,7 @@ from ._workspace_intents import (
     REGISTRY_VERSION,
     BeforeExecutionWitness,
     IntentOwnership,
+    WorkspaceDocumentReadKind,
     WorkspaceIntentRecord,
     WorkspaceIntentStatus,
     classify_intent_ownership,
@@ -76,12 +77,14 @@ from ._workspace_intents import (
     format_utc,
     gc_workspace,
     list_workspace_intents,
+    read_workspace_intent,
     remove_workspace_intent,
     remove_workspace_record,
     renew_workspace_intent_lease,
     resolved_lease_seconds,
     resolved_ttl_seconds,
     stale_reason,
+    unreadable_workspace_intent_ids,
     update_workspace_intent_status,
     utc_now,
     workspace_intent_to_payload,
@@ -279,6 +282,11 @@ class _MCPSessionIntentMixin:
         dirty_snapshot: DirtySnapshot | None = None,
     ) -> dict[str, object]:
         record = self._run_for_declared_root(run_id=run_id, root=root)
+        # Asked before the scope is normalised and long before anything is
+        # written: a refusal must leave the registry exactly as it found it.
+        refusal = workspace_admission_refusal(root=record.root, operation="declare")
+        if refusal is not None:
+            return refusal
         try:
             normalized_scope = normalize_intent_scope(scope)
             normalized_expected_effects = normalize_expected_effects(expected_effects)
@@ -544,6 +552,11 @@ class _MCPSessionIntentMixin:
                 "next_step": intent_msgs.PROMOTE_BEFORE_RUN_EVICTED_NEXT,
                 "message": intent_msgs.PROMOTE_BEFORE_RUN_EVICTED,
             }
+        # Promotion grants edit authority just as declaration does, so it
+        # asks the same question before re-checking conflicts it can read.
+        refusal = workspace_admission_refusal(root=record.root, operation="promote")
+        if refusal is not None:
+            return {**refusal, "intent_id": intent_id}
         # Re-check workspace conflicts.
         workspace_existing = list_workspace_intents(root=record.root)
         conflicts = detect_conflicts(
@@ -1057,6 +1070,13 @@ class _MCPSessionIntentMixin:
             "total_agents": len({item.agent_pid for item in records}),
             "own_pid": self._agent_pid,
             "own_start_epoch": self._agent_start_epoch,
+            # Named, never merely counted: an operator whose intent stopped
+            # answering is owed the difference between "removed" and "kept but
+            # not understood here", and the id is the only handle on a row no
+            # projection of this build can describe.
+            "unreadable_workspace_intent_ids": sorted(
+                unreadable_workspace_intent_ids(root=root_path)
+            ),
             **intent_registry_summary(root_path),
         }
         if include_dirty_summary:
@@ -1162,18 +1182,25 @@ class _MCPSessionIntentMixin:
         intent_id: str,
     ) -> _RecoveryTarget | dict[str, object]:
         root_path = self._resolve_workspace_root(root)
-        found = find_workspace_intent(
-            root=root_path,
-            intent_id=intent_id,
-            apply_lazy_close=False,
-        )
-        if found is None:
+        read = read_workspace_intent(root=root_path, intent_id=intent_id)
+        if read.record is None:
+            # Absent and unreadable are different answers. The registry keeps
+            # rows this build cannot model, so "no intent found" would blame
+            # the operator for a record that is sitting right there.
+            if read.kind is WorkspaceDocumentReadKind.INCOMPATIBLE:
+                reason = WorkspaceDocumentReadKind.INCOMPATIBLE.value
+                return self._recovery_rejected(
+                    intent_id=intent_id,
+                    reason=reason,
+                    message=intent_msgs.unreadable_registry_record_message(reason),
+                    next_step=intent_msgs.unreadable_registry_record_next_step(reason),
+                )
             return self._recovery_rejected(
                 intent_id=intent_id,
                 reason="not_found",
                 message=f"No workspace intent found for intent_id: {intent_id}.",
             )
-        workspace_record = found
+        workspace_record = read.record
         now = utc_now()
         ownership = classify_intent_ownership(
             workspace_record,
@@ -1793,6 +1820,50 @@ class _MCPSessionIntentMixin:
             required_action=required_action,
             message=message,
         )
+
+
+def workspace_admission_refusal(
+    *,
+    root: Path,
+    operation: str,
+) -> dict[str, object] | None:
+    """Refuse to grant or widen write authority this build cannot account for.
+
+    **An integrity-valid persisted intent that this build cannot interpret
+    must never become indistinguishable from no intent.**
+
+    The row's own witness proves a writer produced it whole, so its presence
+    is positive evidence that another agent holds coordination state in this
+    registry. What it declares cannot be read here, and unknown scope is not
+    absent conflict — the same shape as "unknown external consumer is not no
+    external consumer", except that this one hands out write authority.
+
+    The refusal states only what is known: that such a row exists, and which
+    ids it is stored under. It never invents scope semantics for a document it
+    cannot read — no empty scope, no universal scope — because either would be
+    a claim about a declaration nobody here has read.
+
+    Returns ``None`` when there is nothing unreadable, which is the ordinary
+    case; the caller then proceeds under normal conflict semantics. Only the
+    two grant paths ask: reading the registry, listing it, and finishing or
+    releasing authority already held stay available, so a registry with one
+    unreadable row does not become a brick.
+    """
+
+    unreadable = sorted(unreadable_workspace_intent_ids(root=root))
+    if not unreadable:
+        return None
+    reason = intent_msgs.WORKSPACE_INTENT_INCOMPATIBLE
+    return {
+        "status": "blocked",
+        "operation": operation,
+        "reason": reason,
+        "edit_allowed": False,
+        "user_action_required": True,
+        "unreadable_workspace_intent_ids": unreadable,
+        "message": intent_msgs.workspace_admission_message(reason),
+        "next_step": intent_msgs.workspace_admission_next_step(reason),
+    }
 
 
 def _dirty_snapshot_for_declare(

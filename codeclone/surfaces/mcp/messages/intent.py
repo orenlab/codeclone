@@ -103,3 +103,89 @@ DECLARE_FOREIGN_STALE_OVERLAP: Final = (
 DECLARE_FOREIGN_OVERLAP: Final = (
     "Foreign intent overlaps your scope. Ask the user before editing."
 )
+
+
+# ── a registry row this build cannot read ───────────────────────────────────
+# The row is present, signed by its writer, and beyond this build's model.
+# Saying "not found" about it is the second half of the same defect that used
+# to delete it: the operator is told the intent never existed, when what
+# actually happened is that this server does not understand it.
+#
+# Read by SUBSCRIPT, never ``.get``. A permissive lookup lets a raise site
+# invent a reason and ship a null next_step to the operator; the subscript
+# makes that a failure at the raise, where it is still a programming error.
+UNREADABLE_REGISTRY_RECORD_MESSAGES: Final[dict[str, str]] = {
+    "registry_record_unreadable_by_this_build": (
+        "A workspace intent is stored under this id, and this server cannot "
+        "read it. Its integrity digest verifies, so the record was written "
+        "whole by another build — a newer generation, an unknown field, or a "
+        "status token this one does not define. It has been left exactly as "
+        "found: it is another agent's live coordination state, and this "
+        "server refusing to understand it is not a reason to destroy it."
+    ),
+}
+
+UNREADABLE_REGISTRY_RECORD_NEXT_STEPS: Final[dict[str, str]] = {
+    "registry_record_unreadable_by_this_build": (
+        "Do not edit under this intent from this server. Inspect the record "
+        "with manage_change_intent(action='list_workspace', root=...) from "
+        "the build that wrote it and finish or clear it there. If that build "
+        "is gone and the user confirms the scope is abandoned, remove the "
+        "row from .codeclone/intents/ by hand, then analyze_repository and "
+        "start_controlled_change to declare again."
+    ),
+}
+
+
+def unreadable_registry_record_message(reason: str) -> str:
+    return UNREADABLE_REGISTRY_RECORD_MESSAGES[reason]
+
+
+def unreadable_registry_record_next_step(reason: str) -> str:
+    return UNREADABLE_REGISTRY_RECORD_NEXT_STEPS[reason]
+
+
+# ── refusing to speak for a registry this build cannot fully read ───────────
+# The other half of the same law. A row whose integrity witness verifies is
+# positive evidence that another writer holds coordination state here; its
+# scope is unknown, and unknown scope is not absent conflict. Granting or
+# widening write authority over it is refused, in the operator's words, with
+# the ids named so the refusal can be acted on.
+#
+# The reason is this surface's own token, not the read-outcome kind: what the
+# registry answered and what this tool refuses to do about it are two facts,
+# and one of them belongs to the ring that owns the protocol.
+WORKSPACE_INTENT_INCOMPATIBLE: Final = "workspace_intent_incompatible"
+
+# Read by SUBSCRIPT, never ``.get``. A permissive lookup lets a refusal site
+# invent a reason and ship a null next_step to the operator; the subscript
+# makes that a failure at the refusal, where it is still a programming error.
+WORKSPACE_ADMISSION_MESSAGES: Final[dict[str, str]] = {
+    WORKSPACE_INTENT_INCOMPATIBLE: (
+        "This workspace registry holds an intent this server cannot read. Its "
+        "integrity digest verifies, so another build wrote it whole and may "
+        "still be holding the scope it declares — a scope this server cannot "
+        "determine. Refusing: an intent that cannot be interpreted must not "
+        "become indistinguishable from no intent, because that would hand out "
+        "edit authority over scope somebody else may hold."
+    ),
+}
+
+WORKSPACE_ADMISSION_NEXT_STEPS: Final[dict[str, str]] = {
+    WORKSPACE_INTENT_INCOMPATIBLE: (
+        "Inspect the registry with manage_change_intent(action='list_workspace', "
+        "root=...) — the unreadable ids are listed there. Finish or clear each "
+        "one from the build that wrote it. If that build is gone and the user "
+        "confirms the scope is abandoned, remove the row from .codeclone/intents/ "
+        "by hand, then start_controlled_change again. Read-only analysis, "
+        "listing, and finishing an intent you already hold stay available."
+    ),
+}
+
+
+def workspace_admission_message(reason: str) -> str:
+    return WORKSPACE_ADMISSION_MESSAGES[reason]
+
+
+def workspace_admission_next_step(reason: str) -> str:
+    return WORKSPACE_ADMISSION_NEXT_STEPS[reason]

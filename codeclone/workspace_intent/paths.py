@@ -26,6 +26,28 @@ def intent_filename(*, pid: int, start_epoch: int, intent_id: str) -> str:
     return f"{pid}-{start_epoch}-{intent_id}.json"
 
 
+def intent_id_from_filename(name: str) -> str | None:
+    """The inverse of :func:`intent_filename`, kept beside it.
+
+    The storage key is the one place a registry row states its intent id
+    WITHOUT being parsed as a document, which is what makes it the only
+    answer available for a row this build cannot read. Both directions live
+    here so the two halves of the key law cannot drift apart; a reader that
+    re-derived the split for itself would be a second owner of the same rule.
+
+    ``pid`` and ``start_epoch`` are positive integers, so the first two
+    separators are unambiguous and the remainder is the id verbatim, hyphens
+    and all.
+    """
+
+    if not name.endswith(".json"):
+        return None
+    parts = name.removesuffix(".json").split("-", 2)
+    if len(parts) != 3 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    return parts[2] if is_safe_intent_id(parts[2]) else None
+
+
 def intent_path(
     *,
     root: Path,
@@ -161,6 +183,7 @@ def safe_remove_own_intent(
 __all__ = [
     "REGISTRY_DIR_PARTS",
     "intent_filename",
+    "intent_id_from_filename",
     "intent_path",
     "is_safe_intent_id",
     "is_safe_intent_path",

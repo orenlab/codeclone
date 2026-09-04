@@ -49,6 +49,8 @@ from ...workspace_intent.contract import (
     MIN_TTL_SECONDS,
     REGISTRY_VERSION,
     BeforeExecutionWitness,
+    WorkspaceDocumentRead,
+    WorkspaceDocumentReadKind,
     WorkspaceIntentRecord,
     compute_intent_digest,
     compute_scope_digest,
@@ -73,6 +75,7 @@ from ...workspace_intent.ownership import (
 )
 from ...workspace_intent.paths import (
     intent_filename,
+    intent_id_from_filename,
     intent_path,
     registry_dir,
 )
@@ -413,6 +416,47 @@ def find_workspace_intent(
     if apply_lazy_close:
         return store.find(intent_id)
     return store.find_raw(intent_id)
+
+
+def unreadable_workspace_intent_ids(*, root: Path) -> frozenset[str]:
+    """Ids of stored rows this build cannot read and did not remove.
+
+    The complement of :func:`find_workspace_intent` returning ``None``: absent
+    and unreadable are different answers, and only this one distinguishes them.
+    """
+
+    from ._workspace_intent_store import (
+        registry_transaction,
+        unreadable_intent_ids,
+    )
+
+    store = _intent_store(root)
+    with registry_transaction(store):
+        return unreadable_intent_ids(store)
+
+
+def read_workspace_intent(*, root: Path, intent_id: str) -> WorkspaceDocumentRead:
+    """What is stored under this id: the record, nothing, or bytes beyond us.
+
+    One typed answer where callers used to ask twice — ``find`` for the
+    record, then a separate scan to decide whether ``None`` meant absent.  Two
+    lookups holding one fact between them is how "not found" came to be said
+    about a row that was sitting right there.
+
+    Lazy close is deliberately not applied: a caller asking "is it gone, or is
+    it merely beyond me?" should not have the act of asking change the answer.
+    """
+
+    found = find_workspace_intent(
+        root=root,
+        intent_id=intent_id,
+        apply_lazy_close=False,
+    )
+    if found is not None:
+        return WorkspaceDocumentRead.of_record(found)
+    if intent_id in unreadable_workspace_intent_ids(root=root):
+        return WorkspaceDocumentRead(WorkspaceDocumentReadKind.INCOMPATIBLE)
+    return WorkspaceDocumentRead(WorkspaceDocumentReadKind.ABSENT)
 
 
 def workspace_status_counts(*, root: Path) -> dict[str, int]:
@@ -780,6 +824,8 @@ __all__ = [
     "ScopeGeneration",
     "ScopeInterpretation",
     "ScopeRelation",
+    "WorkspaceDocumentRead",
+    "WorkspaceDocumentReadKind",
     "WorkspaceIntentRecord",
     "WorkspaceIntentStatus",
     "_is_pid_alive",
@@ -804,6 +850,7 @@ __all__ = [
     "format_utc",
     "gc_workspace",
     "intent_filename",
+    "intent_id_from_filename",
     "intent_path",
     "is_orphaned",
     "is_stale",
@@ -813,6 +860,7 @@ __all__ = [
     "read_audit_scope",
     "read_audit_scope_entry",
     "read_stored_scope_entry",
+    "read_workspace_intent",
     "registry_dir",
     "remove_workspace_intent",
     "remove_workspace_record",
@@ -823,6 +871,7 @@ __all__ = [
     "scope_interpreter_from_record",
     "signed_payload",
     "stale_reason",
+    "unreadable_workspace_intent_ids",
     "update_workspace_intent_status",
     "utc_now",
     "validate_workspace_record",
