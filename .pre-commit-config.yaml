@@ -77,8 +77,15 @@ repos:
         files: ^AGENTS\.md$
         stages: [ pre-commit ]
 
+      # This gate is handed three roots, not the repository. Measured
+      # 2026-09-04: 592 of 1183 tracked Python files, so a type error under
+      # tests/, scripts/ or plugins/ leaves it green -- the name says which
+      # population the green is about, because the id and the output did not.
+      # mypy (above) is what covers tests/; nothing covers scripts/ or
+      # plugins/. tests/test_type_check_population.py reconciles both `ty`
+      # declarations against git and reds when either side drifts.
       - id: ty-prod-scope
-        name: Ty check production scope
+        name: Ty (production scope only; not tests/, scripts/, plugins/)
         entry: bash -c 'uv run ty check codeclone .github/actions benchmarks'
         language: system
         pass_filenames: false

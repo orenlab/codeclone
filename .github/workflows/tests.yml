@@ -45,7 +45,14 @@ jobs:
       # positional `schema`, which the real create_table binds to `data` -- was
       # caught on 3.10 and 3.11 and passed silently on 3.12, 3.13 and 3.14. A
       # single 3.14 run would be a gate blind to the defect class it exists for.
-      - name: Ty check production scope
+      #
+      # The three roots are not the repository's Python population. Measured
+      # 2026-09-04: 592 of 1183 tracked files, so this step is silent about
+      # any change confined to tests/, scripts/ or plugins/. The Mypy step in
+      # the lint job is what covers tests/. This name and the pre-commit hook
+      # name state that scope, and tests/test_type_check_population.py reds if
+      # the two declarations drift apart or if a root leaves either gate.
+      - name: Ty (production scope only; not tests/, scripts/, plugins/)
         run: uv run ty check codeclone .github/actions benchmarks
 
       # Smoke CLI tests intentionally disable subprocess coverage collection
