@@ -66,9 +66,9 @@ obliged to send anything before a call.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Concatenate, Final, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from ._code_provenance import (
     compute_code_provenance,
@@ -81,6 +81,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Awaitable, Callable
 
     from mcp.server.fastmcp import FastMCP
+
+    #: One executing entry point of the protocol, in the only shape the fence
+    #: needs of it: awaitable, and taking whatever the protocol handed it.
+    #: The wrapper never names the protocol's argument types -- naming the
+    #: resource URI type would mean importing ``pydantic`` here, and pydantic
+    #: is a dependency only CodeClone's sanctioned model store may carry.
+    Delegate = Callable[..., Awaitable[object]]
 
 #: Refusal code: the loaded engine is not the engine on disk.
 STALE_ENGINE: Final = "STALE_ENGINE"
@@ -180,59 +187,140 @@ def engine_fence(operation: str) -> Iterator[str]:
         )
 
 
-_ServerT = TypeVar("_ServerT")
-_ResultT = TypeVar("_ResultT")
-_Args = ParamSpec("_Args")
+#: One class of registered handler, and how the framework executes it, as
+#: pure data -- the repo's constants-table idiom
+#: (``REPORT_SEMANTIC_PRODUCERS``), and deliberately not a dataclass: runtime
+#: model shapes belong to the model store (the phase-39S boundary), while this
+#: is a constants table.
+#:
+#: Not a framework method name written down somewhere.  A surface is *a
+#: population somebody registered* plus the single entry point through which
+#: that population runs, and the two are declared together so neither can be
+#: read without the other.
+#:
+#: Keys:
+#: ``kind``         the framework's own word for this class of handler
+#: ``registry``     instance attribute holding the registered population
+#: ``listers``      methods on that registry returning what was registered --
+#:                  plural because a resource is registered either concretely
+#:                  or as a template, and a templated resource is an entry
+#:                  point a client can invoke
+#: ``entry_point``  the framework method through which one of those handlers
+#:                  executes
+#: ``describe``     renders the operation name for a refusal from the
+#:                  protocol's own arguments; deliberately untyped in its
+#:                  parameters, because it renders whatever the protocol
+#:                  handed the delegate and giving it a signature would name
+#:                  those types a second time
+ExecutableSurface = Mapping[str, object]
+
+#: Every class of handler this framework can execute on our behalf.
+#:
+#: ``registry``/``listers`` are what let a ratchet ask how many are registered
+#: TODAY instead of trusting a literal written once and outlived by the
+#: framework: measured 2026-09-04, an equality against
+#: ``{"call_tool", "read_resource"}`` was green while ``get_prompt`` executed
+#: registered handlers outside the fence.  The fence covers every surface in
+#: this table and the ratchet over the registered population reads the same
+#: table, so a surface cannot be fenced in one place and forgotten in the
+#: other.
+#:
+#: ``get_prompt`` is here although zero prompts are registered today: a fence
+#: that waits for the first registration has to be added by whoever adds the
+#: prompt, and the measured shape of that hole is that nobody does.  Fencing
+#: an unregistered surface costs exactly zero -- an entry point nothing
+#: reaches takes no reading.
+#:
+#: Catalogue reads (``list_tools`` / ``list_resources`` / ``list_prompts``)
+#: are absent on purpose and must stay absent: they execute no registered
+#: handler, and the diagnosing layer calls ``list_tools`` from INSIDE a fenced
+#: ``call_tool`` to build a refusal.  A stale catalogue is a separate fact
+#: from a stale answer.
+EXECUTABLE_SURFACES: Final[tuple[ExecutableSurface, ...]] = (
+    {
+        "kind": "tool",
+        "registry": "_tool_manager",
+        "listers": ("list_tools",),
+        "entry_point": "call_tool",
+        "describe": lambda name, _arguments: f"tool {name}",
+    },
+    {
+        "kind": "resource",
+        "registry": "_resource_manager",
+        "listers": ("list_resources", "list_templates"),
+        "entry_point": "read_resource",
+        "describe": lambda uri: f"resource {uri}",
+    },
+    {
+        "kind": "prompt",
+        "registry": "_prompt_manager",
+        "listers": ("list_prompts",),
+        "entry_point": "get_prompt",
+        "describe": lambda name, _arguments=None: f"prompt {name}",
+    },
+)
 
 
-def _fenced(
-    delegate: Callable[Concatenate[_ServerT, _Args], Awaitable[_ResultT]],
-    describe: Callable[..., str],
-) -> Callable[Concatenate[_ServerT, _Args], Awaitable[_ResultT]]:
+def surface_entry_point(surface: ExecutableSurface) -> str:
+    """The framework method through which ``surface``'s handlers execute."""
+
+    return str(surface["entry_point"])
+
+
+def surface_describe(surface: ExecutableSurface) -> Callable[..., str]:
+    """``surface``'s refusal renderer, narrowed out of the constants table."""
+
+    return cast("Callable[..., str]", surface["describe"])
+
+
+def _fenced(delegate: Delegate, describe: Callable[..., str]) -> Delegate:
     """One fenced override, built from the method it wraps.
 
-    Written once for both entry points so the two cannot drift into different
-    gates, and parameterised on the delegate so the wrapper never has to name
-    the protocol's own argument types.  That is not only tidiness: naming the
-    resource URI type would mean importing ``pydantic`` here, and pydantic is
-    a dependency only CodeClone's sanctioned model store is allowed to carry.
-
-    ``describe`` is deliberately untyped in its parameters for the same
-    reason -- it renders whatever the protocol handed the delegate, and giving
-    it a signature would name those types a second time.
+    Written once for every surface so they cannot drift into different gates,
+    and parameterised on the delegate so the wrapper never has to name the
+    protocol's own argument types.
     """
 
     async def fenced_method(
-        server: _ServerT,
+        server: object,
         /,
-        *args: _Args.args,
-        **kwargs: _Args.kwargs,
-    ) -> _ResultT:
+        *args: object,
+        **kwargs: object,
+    ) -> object:
         with engine_fence(describe(*args, **kwargs)):
             return await delegate(server, *args, **kwargs)
 
     return fenced_method
 
 
+def _delegate(base: type[FastMCP], entry_point: str) -> Delegate:
+    """The unbound method the fence composes over, read off the runtime base.
+
+    ``getattr`` rather than ``base.call_tool``, because the entry point is
+    named by :data:`EXECUTABLE_SURFACES` and not written here; the result is
+    narrowed immediately to the one shape a fenced override needs, so nothing
+    downstream degrades to ``Any``.  Read off ``base`` and not off ``FastMCP``:
+    the base is chosen at runtime and already carries the diagnosing layer,
+    which a lookup on the protocol class would skip.
+    """
+
+    return cast("Delegate", getattr(base, entry_point))
+
+
 def fenced_server_class(base: type[FastMCP]) -> type[FastMCP]:
     """``base`` with every executing entry point behind the fence.
 
-    The override sits on ``call_tool`` and ``read_resource`` because those two
-    are the whole population of request kinds that *execute* something: every
-    registered tool and every registered resource reaches its handler through
-    one of them, so the gate covers them by construction rather than through a
-    per-tool list somebody has to keep in step.  A guard wired at one call site,
-    or keyed by a handler's name, is blind by construction -- measured twice in
-    this repository.
+    The overridden set is DERIVED from :data:`EXECUTABLE_SURFACES` -- the
+    classes of handler the framework can execute -- rather than listed here.
+    Every registered tool, resource and prompt reaches its handler through one
+    of those entry points, so the gate covers them by construction rather than
+    through a per-handler list somebody has to keep in step.  A guard wired at
+    one call site, or keyed by a handler's name, is blind by construction --
+    measured twice in this repository.
 
     The fence is deliberately the outermost layer, above the argument
     diagnosis: when the engine is stale, its reading of the caller's arguments
     is no more trustworthy than its analysis would have been.
-
-    ``list_tools`` / ``list_resources`` are catalogue reads that execute no
-    operation, and they stay outside the fence on purpose -- the diagnosing
-    layer calls ``list_tools`` from inside a fenced ``call_tool`` to build a
-    refusal, and a stale catalogue is a separate fact from a stale answer.
     """
 
     # Built with ``type`` rather than a ``class`` statement, and delegating
@@ -240,22 +328,17 @@ def fenced_server_class(base: type[FastMCP]) -> type[FastMCP]:
     # ``super()``: the base is chosen at runtime (this fence composes over
     # whatever server class the runtime loader assembled), and a ``class``
     # statement over a runtime base is one neither type checker can resolve.
-    # Reading the delegate off the declared ``type[FastMCP]`` keeps both
-    # overrides fully typed instead of degrading them to ``Any``.
     return cast(
         "type[FastMCP]",
         type(
             "_EngineFencedFastMCP",
             (base,),
             {
-                "call_tool": _fenced(
-                    base.call_tool,
-                    lambda name, _arguments: f"tool {name}",
-                ),
-                "read_resource": _fenced(
-                    base.read_resource,
-                    lambda uri: f"resource {uri}",
-                ),
+                surface_entry_point(surface): _fenced(
+                    _delegate(base, surface_entry_point(surface)),
+                    surface_describe(surface),
+                )
+                for surface in EXECUTABLE_SURFACES
             },
         ),
     )
@@ -263,13 +346,17 @@ def fenced_server_class(base: type[FastMCP]) -> type[FastMCP]:
 
 __all__ = [
     "ENGINE_CHANGED_DURING_OPERATION",
+    "EXECUTABLE_SURFACES",
     "STALE_ENGINE",
     "EngineChangedDuringOperationError",
     "EngineFenceError",
+    "ExecutableSurface",
     "StaleEngineError",
     "disk_engine_generation",
     "engine_fence",
     "fenced_server_class",
     "loaded_engine_generation",
     "loaded_package_root",
+    "surface_describe",
+    "surface_entry_point",
 ]

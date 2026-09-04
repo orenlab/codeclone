@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -30,14 +32,20 @@ from codeclone.surfaces.mcp import _engine_fence
 from codeclone.surfaces.mcp._code_provenance import compute_code_provenance
 from codeclone.surfaces.mcp._engine_fence import (
     ENGINE_CHANGED_DURING_OPERATION,
+    EXECUTABLE_SURFACES,
     STALE_ENGINE,
     EngineChangedDuringOperationError,
+    ExecutableSurface,
     StaleEngineError,
     disk_engine_generation,
     engine_fence,
     fenced_server_class,
+    surface_entry_point,
 )
 from codeclone.surfaces.mcp.server import build_mcp_server
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from mcp.server.fastmcp import FastMCP
 
 # ---------------------------------------------------------------------------
 # Fixtures: a real, tiny package tree whose content digest is real.
@@ -419,22 +427,235 @@ def test_the_fence_is_the_outermost_layer_of_the_served_class() -> None:
     assert type(mcp).call_tool is not base_call_tool(mcp)
 
 
-def test_fencing_covers_both_executing_methods_and_only_those() -> None:
-    """The two request kinds that execute are overridden; catalogue reads are not.
+def fence_owned_members(served: type) -> set[str]:
+    """Which members of ``served`` this fence module owns.
 
-    ``list_tools`` stays unfenced on purpose: the diagnosing layer calls it
-    from *inside* a fenced ``call_tool`` to build a refusal.
+    Ownership by module rather than by name: whatever the wrapper factory is
+    called, an override that came from :mod:`._engine_fence` is a fence.
+    """
+
+    return {
+        name
+        for name, member in vars(served).items()
+        if getattr(member, "__module__", None) == _engine_fence.__name__
+    }
+
+
+def registered_population(server: object, surface: ExecutableSurface) -> list[object]:
+    """What is registered TODAY for one surface, read off the framework.
+
+    Read through the registry the surface declares, not through a count
+    written into a test: the whole defect this replaces was a literal that
+    stayed true about the code it was written against and false about the
+    framework.
+    """
+
+    registry = getattr(server, str(surface["registry"]))
+    listers = cast("tuple[str, ...]", surface["listers"])
+    return [item for lister in listers for item in getattr(registry, lister)()]
+
+
+def unfenced_registered_surfaces(server: object) -> set[str]:
+    """The ratchet predicate: registered populations whose entry point is open.
+
+    Derived on both sides.  The demand comes from what is registered, so a
+    surface with an empty population asks for nothing and a framework method
+    that executes no registered handler is never even considered; the supply
+    comes from what the fence module actually overrode on the served class.
+    """
+
+    fenced = fence_owned_members(type(server))
+    return {
+        str(surface["kind"])
+        for surface in EXECUTABLE_SURFACES
+        if registered_population(server, surface)
+        and surface_entry_point(surface) not in fenced
+    }
+
+
+def test_every_registered_executable_surface_is_fenced() -> None:
+    """The ratchet: what somebody registered is what must be behind the gate.
+
+    Reported as an accounting rather than as a verdict, because the
+    triggering population of this ratchet can be empty and an empty
+    population is not an indulgence: the assertion below is worth exactly the
+    populations it ran over.
+    """
+
+    mcp = build_mcp_server(ide_governance_channel=True)
+    populations = {
+        str(surface["kind"]): len(registered_population(mcp, surface))
+        for surface in EXECUTABLE_SURFACES
+    }
+    # Probe validity: the ratchet must have had a non-empty population to
+    # measure.  ``prompt`` is deliberately NOT pinned to zero -- the first
+    # registered prompt must not redden this test, only an unfenced one.
+    assert populations["tool"] > 0, populations
+    assert populations["resource"] > 0, populations
+
+    assert unfenced_registered_surfaces(mcp) == set(), populations
+
+
+def test_the_surface_table_names_every_registration_manager_the_framework_has() -> None:
+    """The table is not allowed to be a hand-list one storey up.
+
+    A surface the framework can register but the table does not name would be
+    invisible to the ratchet above -- it iterates the table.  So the table is
+    reconciled against the framework's own registries: every registration
+    manager a live server holds must be named by exactly one surface.
+    """
+
+    mcp = build_mcp_server()
+    framework_registries = {
+        name
+        for name, value in vars(mcp).items()
+        if type(value).__name__.endswith("Manager")
+        and type(value).__module__.startswith("mcp.server.fastmcp.")
+    }
+    assert framework_registries, "no registration manager found; the probe is blind"
+    assert framework_registries == {
+        str(surface["registry"]) for surface in EXECUTABLE_SURFACES
+    }
+
+
+def _synthetic_prompt_server(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    surfaces: tuple[ExecutableSurface, ...],
+) -> tuple[FastMCP, list[str]]:
+    """A real server with one registered prompt, fenced over ``surfaces``.
+
+    The prompt is registered through the framework's own ``add_prompt``, so
+    what follows measures the same path a released prompt would take.
+    """
+
+    from mcp.server.fastmcp.prompts import Prompt
+
+    entered: list[str] = []
+
+    def synthetic(topic: str) -> str:
+        entered.append(topic)
+        return f"synthetic prompt body for {topic}"
+
+    monkeypatch.setattr(_engine_fence, "EXECUTABLE_SURFACES", surfaces)
+    mcp = build_mcp_server()
+    mcp.add_prompt(Prompt.from_function(synthetic, name="synthetic_probe"))
+    return mcp, entered
+
+
+def test_a_registered_prompt_without_a_prompt_fence_reddens_the_ratchet(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_tree: Path,
+) -> None:
+    """The witness the empty population cannot provide.
+
+    Zero prompts are registered today, so ``registered <= fenced`` is green
+    whatever it says about prompts.  This registers one and shows the
+    unfenced configuration failing -- and failing for the right reason: the
+    handler is demonstrably ENTERED while the loaded generation is not the
+    generation on disk, which is exactly the answer the fence exists to
+    withhold.
+    """
+
+    without_prompts = tuple(
+        surface for surface in EXECUTABLE_SURFACES if surface["kind"] != "prompt"
+    )
+    assert len(without_prompts) == len(EXECUTABLE_SURFACES) - 1
+
+    mcp, entered = _synthetic_prompt_server(monkeypatch, surfaces=without_prompts)
+    assert [prompt.name for prompt in asyncio.run(mcp.list_prompts())] == [
+        "synthetic_probe"
+    ]
+
+    assert unfenced_registered_surfaces(mcp) == {"prompt"}
+
+    _pin_engine(
+        monkeypatch,
+        package_root=engine_tree,
+        loaded_generation="sha256:a-generation-this-tree-never-had",
+    )
+    asyncio.run(mcp.get_prompt("synthetic_probe", {"topic": "engine"}))
+    assert entered == ["engine"], "the causal path was never exercised"
+
+
+def test_the_same_prompt_behind_its_fence_cannot_execute_on_a_stale_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_tree: Path,
+) -> None:
+    """The other direction of the same witness, on the shipped table."""
+
+    mcp, entered = _synthetic_prompt_server(monkeypatch, surfaces=EXECUTABLE_SURFACES)
+    assert unfenced_registered_surfaces(mcp) == set()
+
+    _pin_engine(
+        monkeypatch,
+        package_root=engine_tree,
+        loaded_generation="sha256:a-generation-this-tree-never-had",
+    )
+    with pytest.raises(StaleEngineError):
+        asyncio.run(mcp.get_prompt("synthetic_probe", {"topic": "engine"}))
+    assert entered == []
+
+
+def test_a_method_that_executes_no_registered_handler_does_not_widen_the_fence() -> (
+    None
+):
+    """The converse: existence is not registration.
+
+    ``list_tools`` stays unfenced on purpose -- the diagnosing layer calls it
+    from *inside* a fenced ``call_tool`` to build a refusal -- and so does any
+    other method that runs nothing a caller registered.
     """
 
     class _Base:
         async def call_tool(self) -> None: ...
         async def read_resource(self) -> None: ...
+        async def get_prompt(self) -> None: ...
         async def list_tools(self) -> None: ...
         async def list_resources(self) -> None: ...
+        async def ping(self) -> None: ...
 
     fenced = fenced_server_class(_Base)  # type: ignore[arg-type]
     overridden = {name for name in vars(fenced) if not name.startswith("__")}
-    assert overridden == {"call_tool", "read_resource"}
+    assert overridden == {
+        surface_entry_point(surface) for surface in EXECUTABLE_SURFACES
+    }
+    assert not overridden & {"list_tools", "list_resources", "ping"}
+
+
+def _stub_registry(**populations: list[object]) -> SimpleNamespace:
+    """A registry stub whose listers return exactly what they were handed.
+
+    Built rather than declared: a class carrying four unrelated listers and no
+    state is a low-cohesion class by construction, and this has nothing to
+    cohere.
+    """
+
+    return SimpleNamespace(
+        **{name: partial(list, items) for name, items in populations.items()}
+    )
+
+
+def test_the_demand_follows_the_population_and_not_the_method_list() -> None:
+    """A registry with nothing in it asks for no fence, however many methods exist.
+
+    The stub below has every entry point unfenced and every registry empty but
+    one, so the demand can only come from the population.
+    """
+
+    class _Server:
+        _tool_manager = _stub_registry(list_tools=[object()])
+        _resource_manager = _stub_registry(list_resources=[], list_templates=[])
+        _prompt_manager = _stub_registry(list_prompts=[])
+
+        async def call_tool(self) -> None: ...
+        async def read_resource(self) -> None: ...
+        async def get_prompt(self) -> None: ...
+        async def ping(self) -> None: ...
+
+    server = _Server()
+    assert fence_owned_members(type(server)) == set()
+    assert unfenced_registered_surfaces(server) == {"tool"}
 
 
 # ---------------------------------------------------------------------------

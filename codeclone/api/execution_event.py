@@ -30,7 +30,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Final, Protocol
 
 from ..models import FileStat, RunSnapshotLink
 
@@ -42,6 +42,61 @@ from ..models import FileStat, RunSnapshotLink
 # them, in the persistence step -- not before.
 EXECUTION_SOURCE_STATE_DIGEST_DOMAIN = "codeclone.execution.source_state.v1\0"
 EXECUTION_WORKSPACE_WITNESS_DOMAIN = "codeclone.execution.workspace_witness.v1\0"
+
+#: The one key under which a response carries the facts of the EXECUTION that
+#: produced it, rather than the facts the run stated.  Written by the producer
+#: and read by :func:`semantic_projection`, so the block has exactly one name
+#: and a renamed producer cannot quietly leave the projection measuring
+#: nothing.  It is a container, not a field: every per-execution witness --
+#: today the generation, the loaded package root and the execution event id --
+#: is a key INSIDE it.
+EXECUTION_PROVENANCE_KEY: Final = "engine"
+
+
+def semantic_projection(payload: object) -> object:
+    """``payload`` reduced to what the run STATED, this domain removed.
+
+    Two identity laws meet inside one response.  The report is
+    content-addressed: two executions that state the same thing share a
+    ``run_id`` by design.  The execution is an EVENT, and
+    ``execution_event_id`` MUST differ between two executions -- that
+    difference is the whole of what makes it an event rather than a second
+    name for the report.  So a comparison asking *did this configuration
+    change what the run states* can only be taken over the semantic half.
+    Measured 2026-09-04: the semantic determinism gate compared the two halves
+    together and reddened on exactly one leaf,
+    ``receipt.provenance.engine.execution_event_id`` -- a witness whose
+    contract is to differ, answering a question about semantics.
+
+    The split is one declared CONTAINER, never a list of witness names.  A
+    denylist (``execution_event_id``, then ``generation``, then
+    ``loaded_package_root``, then whatever is added next) is correct only
+    until the next witness exists, and it puts the field names of this domain
+    inside a comparator that does not own them -- the same shape as the
+    name-keyed rules measured blind twice in this repository.  Here a
+    comparator holds one symbol, this function; a new execution witness is a
+    key inside :data:`EXECUTION_PROVENANCE_KEY` and needs no knowledge of it
+    anywhere downstream.
+
+    The prune is recursive because the block sits wherever its producer puts
+    it (the review receipt carries it under ``provenance``), and it is keyed
+    on the container rather than on a path so a second surface reporting the
+    same block needs no second rule.  Container types are preserved rather
+    than normalised: a list that became a tuple is a difference a determinism
+    comparison should still see.
+    """
+
+    if isinstance(payload, Mapping):
+        return {
+            key: semantic_projection(value)
+            for key, value in payload.items()
+            if key != EXECUTION_PROVENANCE_KEY
+        }
+    if isinstance(payload, tuple):
+        return tuple(semantic_projection(item) for item in payload)
+    if isinstance(payload, list):
+        return [semantic_projection(item) for item in payload]
+    return payload
 
 
 class DirtyEntryWitness(Protocol):
@@ -179,9 +234,11 @@ class ExecutionEvent:
 
 
 __all__ = [
+    "EXECUTION_PROVENANCE_KEY",
     "DirtyEntryWitness",
     "DirtySnapshotWitness",
     "ExecutionEvent",
     "digest_source_state",
     "digest_workspace",
+    "semantic_projection",
 ]

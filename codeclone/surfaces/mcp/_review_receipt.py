@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import Final, Literal
 
+from ...api.execution_event import EXECUTION_PROVENANCE_KEY
 from ...api.finding_groups import suppressed_clone_groups
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
@@ -229,7 +230,7 @@ def _engine_field(engine: Mapping[str, object], key: str) -> str:
 
 def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     provenance = _as_mapping(receipt.get("provenance"))
-    engine = _as_mapping(provenance.get("engine"))
+    engine = _as_mapping(provenance.get(EXECUTION_PROVENANCE_KEY))
     vp_section = _optional_mapping(receipt.get("verification_profile"))
     scope = _optional_mapping(receipt.get("scope"))
     blast_radius = _optional_mapping(receipt.get("blast_radius"))

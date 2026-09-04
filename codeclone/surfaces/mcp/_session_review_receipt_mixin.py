@@ -10,6 +10,7 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from ...api.execution_event import EXECUTION_PROVENANCE_KEY
 from ...audit import (
     EVENT_RECEIPT_CREATED,
 )
@@ -312,6 +313,13 @@ class _MCPSessionReviewReceiptMixin:
         derived from what the run read rather than from what read it. The
         section is additive in the receipt's existing idiom, so
         ``RECEIPT_VERSION`` stays "1".
+
+        The block is keyed by :data:`EXECUTION_PROVENANCE_KEY` rather than by
+        a literal here, because the same name is what
+        :func:`~codeclone.api.execution_event.semantic_projection` removes
+        before a determinism comparison. Producer and projection read one
+        constant, so a rename cannot leave the projection measuring a block
+        that is no longer there.
         """
 
         return {
@@ -320,7 +328,7 @@ class _MCPSessionReviewReceiptMixin:
             "baseline_status": derive_baseline_status(record.served_report),
             "run_id": _helpers._short_run_id(record.run_id),
             "root": str(record.root),
-            "engine": {
+            EXECUTION_PROVENANCE_KEY: {
                 "generation": record.execution.code_digest,
                 "loaded_package_root": loaded_package_root(),
                 "execution_event_id": record.execution.execution_event_id,
