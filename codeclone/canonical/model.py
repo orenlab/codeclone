@@ -613,6 +613,23 @@ class RiskObservationRow:
     maintainer's fork (b).  ``numerator`` is payload and strictly positive:
     the producer drops zero rows, so absence already means zero.  No
     FUNCTION-role requirement: these symbols name any measured unit.
+
+    Entity consistency: this family declares NOTHING to
+    ``_prove_entity_consistency``, and the emptiness is measured rather
+    than forgotten.  The record key ``(SYMBOL, dimension, start_line)`` IS
+    ``(declaration, dimension)``, so the only field left outside it is
+    ``numerator`` — per-dimension by construction and therefore never
+    entity-invariant.  6 682 of 15 949 declarations carry two rows @
+    eec81fdb (9 267 carry one: the producer drops a zero ``nesting_depth``)
+    and nothing those pairs carry can contradict, so a rule here would be a
+    guard no input can trip.  The day a source span, or any other
+    declaration-wide fact, becomes a COLUMN on this row, that statement
+    stops holding and the field must be declared: two rows of ONE
+    declaration differing only in ``dimension`` do not share a key, so
+    ``_unique_by_key`` would never compare their spans — it would accept
+    ``end_line`` 42 and 999 for one declaration in silence.
+    ``test_canonical_roundtrip`` executes the field list so the day cannot
+    pass unnoticed.
     """
 
     symbol: SymbolId
@@ -761,6 +778,35 @@ class SecuritySurfaceRow:
     The legacy row's ``module`` field is the registry's FILE-MODULE
     projection — verified at ingest, re-derivable from ``file_modules``,
     never stored (the F7 ``member_paths`` precedent).
+
+    Entity consistency — the family law this row owns: the logical key
+    names the RECORD, but ``source_kind`` names the FILE.
+    ``paths.classify_source_kind`` reads the path and nothing else, so
+    every row of one file carries the same verdict; the key cannot prove
+    it, because two rows of one file differ on ``start_line`` or
+    ``evidence_symbol`` and are therefore two legitimate records that
+    ``_unique_by_key`` never compares.  ``_prove_entity_consistency``
+    proves it instead — 112 of 220 files carry more than one row (342 of
+    450 rows @ eec81fdb), none disagreeing.
+
+    Left FREE, each for a measured reason, because refusing a legitimate
+    record set would be the worse defect:
+
+    * ``end_line`` — the span of the OBSERVED node, not of the entity:
+      ``semantics/events.py:_emit_security`` takes it from
+      ``ast_node_end_line(node)``, so the s5 ``eval(compile(...))`` datum
+      can legitimately end two rows of one start line on two different
+      lines.  The maintainer's example field is exactly the one that must
+      NOT be constrained here.
+    * ``qualname`` and ``location_scope`` — the hosting unit, taken from
+      the visitor's scope at the observed node.  Site-invariant only if one
+      start line cannot host two scopes, and this repository carries no
+      proof of that (a lambda body opens one on its own line), so they wait
+      for a measurement rather than ride on 4 agreeing sites.
+    * ``category``, ``capability``, ``evidence_kind``,
+      ``classification_mode`` — verdicts about the EVIDENCE, which is what
+      the key's third component distinguishes; ``eval`` and ``compile`` on
+      one line legitimately carry two capabilities.
     """
 
     file: FileId
@@ -1078,6 +1124,58 @@ def _unique_by_key(
         seen[key] = row
 
 
+def _prove_entity_invariants(
+    rows: Iterable[_RowT],
+    entity_name: str,
+    entity_of: Callable[[_RowT], object],
+    invariants: tuple[tuple[str, Callable[[_RowT], str | int]], ...],
+) -> None:
+    """Refuse two records of ONE entity that disagree ABOUT that entity.
+
+    ``_unique_by_key`` proves RECORD identity: one logical key names at
+    most one fact.  It is blind BY CONSTRUCTION to a contradiction that
+    crosses a key component — two rows whose keys differ are two
+    legitimate records, so the prover never compares them, however
+    impossible their contents are together.  Measured @ eec81fdb on this
+    repository: 112 of 220 files carry more than one ``security_surfaces``
+    row (342 of 450 rows), and every one of those rows repeats a verdict
+    that belongs to the FILE and not to the row.
+
+    So a second, weaker identity is proved here: records sharing an ENTITY
+    must agree about the fields that describe that entity.  WHICH fields
+    those are is a family law, decided by the family's semantic owner and
+    stated on its row class — never a generic rule that teaches the key
+    prover to ignore part of a key, because a component ignored for one
+    family would stop naming the record on every other.
+
+    A field that legitimately varies between the records of one entity is
+    NOT entity-invariant and must stay off the list: refusing a legitimate
+    record set is a worse defect than the hole it closes.  Each family's
+    row class states what it left free, and why.
+    """
+    observed: dict[object, dict[str, set[str | int]]] = {}
+    for row in rows:
+        entity = entity_of(row)
+        fields = observed.get(entity)
+        if fields is None:
+            fields = {name: set() for name, _ in invariants}
+            observed[entity] = fields
+        for name, read in invariants:
+            fields[name].add(read(row))
+    # Sorted: every family reaching this prover is a frozenset, so an
+    # unsorted walk would make WHICH contradiction is reported depend on
+    # hash order — a refusal naming a different row per process is not a
+    # reproducible receipt.
+    for entity, fields in sorted(observed.items(), key=lambda item: repr(item[0])):
+        for name, _ in invariants:
+            values = fields[name]
+            if len(values) > 1:
+                raise CanonicalModelError(
+                    f"two facts of one {entity_name}={entity!r} disagree on "
+                    f"the entity-invariant field {name!r}: {sorted(values)!r}"
+                )
+
+
 def _candidate_natural_key(row: CandidateRow) -> tuple[object, ...]:
     return (
         row.level,
@@ -1322,6 +1420,26 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
     )
 
 
+def _prove_entity_consistency(facts: AnalysisFacts) -> None:
+    """Stage 2-ter: records of one entity agree ABOUT that entity (S5.B).
+
+    One declaration per family, and the declaration is the family's own
+    law — see each row class for the reasoning and for the fields it
+    deliberately leaves free.  A family ABSENT from this table carries no
+    entity-invariant field outside its logical key, and that is a measured
+    statement rather than an omission: ``RiskObservationRow`` is the family
+    whose key already IS ``(declaration, dimension)``, so nothing its two
+    rows carry can contradict, and ``test_canonical_roundtrip`` executes
+    that emptiness so it cannot rot into an unguarded span column.
+    """
+    _prove_entity_invariants(
+        facts.security_surfaces,
+        "security_surfaces.file",
+        lambda row: canonical_key(row.file),
+        (("source_kind", lambda row: row.source_kind),),
+    )
+
+
 def _prove_occurrence_relations(facts: AnalysisFacts) -> None:
     """Stage 2-bis: every occurrence is BOUND to a carried relation.
 
@@ -1363,6 +1481,7 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     projection concern)."""
     closure = _close_domains(model)
     _prove_logical_keys(model.facts.analysis)
+    _prove_entity_consistency(model.facts.analysis)
     _prove_occurrence_relations(model.facts.analysis)
     _prove_function_roles(model.facts.analysis)
     return replace(

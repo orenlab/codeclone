@@ -2073,6 +2073,250 @@ def test_every_family_the_uniqueness_prover_reads_is_a_frozenset() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Entity consistency: records of one ENTITY agree about that entity.
+#
+# ``_unique_by_key`` proves RECORD identity and is blind by construction to
+# a contradiction that crosses a key component — two rows whose keys differ
+# are two legitimate records and never meet.  ``_prove_entity_consistency``
+# proves the weaker identity the key cannot: the family's own
+# entity-invariant fields.
+# ---------------------------------------------------------------------------
+
+
+def _surfaces_model(*rows: SecuritySurfaceRow) -> CanonicalModel:
+    return CanonicalModel(facts=analysis_facts(security_surfaces=frozenset(rows)))
+
+
+def _surface_record_key(row: SecuritySurfaceRow) -> tuple[object, ...]:
+    """The family's logical key, verbatim from ``_prove_logical_keys``."""
+    return (row.file.path.encode("utf-8"), row.start_line, row.evidence_symbol)
+
+
+def _contradicting_surfaces() -> tuple[SecuritySurfaceRow, SecuritySurfaceRow]:
+    """One FILE, two legitimate records, two impossible verdicts about it."""
+    return (
+        _surface(source_kind="production"),
+        _surface(
+            start_line=99,
+            end_line=99,
+            evidence_symbol="compile",
+            source_kind="tests",
+        ),
+    )
+
+
+def test_entity_consistency_refuses_a_file_invariant_contradiction() -> None:
+    """The defect, and the positive control that proves the probe reaches it.
+
+    ``source_kind`` is a verdict about the FILE
+    (``paths.classify_source_kind`` reads the path and nothing else), so one
+    file cannot be production and tests at once.  The two rows below are
+    nonetheless two LEGITIMATE records: their keys differ on both
+    ``start_line`` and ``evidence_symbol``, and the key prover accepts them
+    without a murmur — that acceptance is executed here, not asserted in
+    prose, so the refusal below cannot be mistaken for the key prover
+    doing the work.
+    """
+    honest, contradicting = _contradicting_surfaces()
+
+    _unique_by_key(
+        [honest, contradicting], "security_surfaces.key", _surface_record_key
+    )
+
+    with pytest.raises(
+        CanonicalModelError, match=r"entity-invariant field 'source_kind'"
+    ):
+        _surfaces_model(honest, contradicting).normalize()
+
+
+def test_entity_consistency_admits_the_legitimate_multi_record_file() -> None:
+    """The other boundary: an invariant that rejects legitimate records is
+    worse than the hole.
+
+    One file carries four records — two evidence symbols on ONE line with
+    DIFFERENT end spans (the s5 ``eval(compile(...))`` shape: ``end_line``
+    is the observed node's span, deliberately not entity-invariant), one
+    symbol repeated on a later line in another scope — and a second file
+    carries the opposite ``source_kind``.  All of it must pass untouched.
+    """
+    rows = (
+        _surface(evidence_symbol="eval", end_line=12),
+        _surface(evidence_symbol="compile", end_line=5),
+        _surface(
+            start_line=44,
+            end_line=45,
+            evidence_symbol="pickle.loads",
+            qualname="Helper",
+            location_scope="class",
+            category="deserialization",
+            capability="pickle_loads",
+        ),
+        _surface(file=FileId("tests/probe_test.py"), source_kind="tests"),
+    )
+    model = _surfaces_model(*rows).normalize()
+    assert model.facts.analysis.security_surfaces == frozenset(rows)
+
+
+def test_the_shipped_fixture_reaches_the_entity_prover() -> None:
+    """Reachability: a guard no input can trip is theatre.
+
+    The distinguishing fixture the whole round-trip suite encodes already
+    carries a file with several surface records, so every green run of this
+    module executes the comparison rather than an empty loop — and it
+    carries two files with DIFFERENT verdicts, so the prover is also shown
+    not to be comparing across files.
+    """
+    surfaces = fixture_model().facts.analysis.security_surfaces
+    per_file: dict[FileId, int] = {}
+    for row in surfaces:
+        per_file[row.file] = per_file.get(row.file, 0) + 1
+    assert max(per_file.values()) > 1, (
+        "no fixture file carries two surface records: the entity prover "
+        "compares nothing and this suite proves nothing about it"
+    )
+    assert len({row.source_kind for row in surfaces}) > 1, (
+        "every fixture surface shares one source_kind: the prover cannot be "
+        "shown to scope its comparison to one file"
+    )
+
+
+def _model_function(name: str) -> ast.FunctionDef:
+    """One named function of ``canonical.model``, as source."""
+    source = Path(inspect.getsourcefile(canonical_model) or "").read_text("utf-8")
+    return next(
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _calls_by_name(owner: ast.AST) -> set[str]:
+    return {
+        node.func.id
+        for node in ast.walk(owner)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+
+def _model_lifecycle_sites() -> tuple[set[str], set[str]]:
+    """``module::function`` inventories: who BUILDS a model, and who GATES one."""
+    package = Path(inspect.getsourcefile(canonical_model) or "").parent
+    paths = [*package.glob("*.py"), package.parent / "core" / "canonical_snapshot.py"]
+    builders: set[str] = set()
+    gates: set[str] = set()
+    for path in sorted(paths):
+        for owner in ast.walk(ast.parse(path.read_text("utf-8"))):
+            if not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            site = f"{path.name}::{owner.name}"
+            if "CanonicalModel" in _calls_by_name(owner):
+                builders.add(site)
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "normalize"
+                for node in ast.walk(owner)
+            ):
+                gates.add(site)
+    return builders, gates
+
+
+def test_entity_consistency_gates_every_canonical_model_construction() -> None:
+    """Coverage: the prover is consulted on every path that admits a row.
+
+    ``CanonicalModel`` is a plain frozen dataclass — constructing one runs
+    no law.  ``normalize`` is the single gate, so this pin states two
+    inventories and both are executed: which functions BUILD a model, and
+    which functions GATE one.  A per-module "somebody here normalizes"
+    check is not enough and was measured hollow: ``store.py`` gates on two
+    independent paths (read and publish), so dropping either one leaves the
+    module's other call site to keep such a check green — the
+    masked-by-a-sibling class.  The inventory is therefore keyed by
+    FUNCTION, so each gate is isolated and dies alone.
+    """
+    assert "_prove_entity_consistency" in _calls_by_name(
+        _model_function("_normalized")
+    ), "the one normalization gate no longer proves entity consistency"
+
+    builders, gates = _model_lifecycle_sites()
+    assert builders == {
+        "canonical_snapshot.py::canonical_snapshot_from_producers",
+        "codec.py::decode_canonical_json",
+        "ingest.py::canonical_model_from_legacy_document",
+        "store.py::_collected_model",
+    }, f"the set of CanonicalModel builders moved: {sorted(builders)}"
+    assert gates == {
+        # Chained onto the construction itself.
+        "canonical_snapshot.py::canonical_snapshot_from_producers",
+        "ingest.py::canonical_model_from_legacy_document",
+        # The decoder gates by re-encoding what it built, and the encoder
+        # normalizes: bytes that are not the canonical encoding of a PROVEN
+        # model are refused.
+        "codec.py::encode_canonical_json",
+        # Two independent store paths, pinned apart so neither can stand in
+        # for the other: reading a run back, and publishing one.
+        "store.py::_reconstruct_run",
+        "store.py::_publish_full_run",
+    }, (
+        f"the set of normalization gates moved: {sorted(gates)} — a builder "
+        "whose gate disappeared admits rows the entity prover never sees"
+    )
+
+
+def test_the_wire_encoder_refuses_an_entity_contradiction() -> None:
+    """The gate is not only ``normalize()`` spelled by hand.
+
+    ``encode_canonical_json`` normalizes what it is handed, so a
+    contradicting model cannot be projected to canonical bytes and then
+    read back as a valid document by a decoder that trusts its input.
+    """
+    contradicting = _surfaces_model(*_contradicting_surfaces())
+    with pytest.raises(
+        CanonicalModelError, match=r"entity-invariant field 'source_kind'"
+    ):
+        encode_canonical_json(contradicting)
+
+
+def test_the_dimension_keyed_families_have_no_entity_invariant_field() -> None:
+    """The measured emptiness, executed — the maintainer's named mutation.
+
+    A risk row's key ``(SYMBOL, dimension, start_line)`` IS
+    ``(declaration, dimension)``: nothing is left outside it but
+    ``numerator``, which is per-dimension by construction.  That is why the
+    family declares nothing to ``_prove_entity_consistency`` — not an
+    oversight.  Give either row a span, or any other declaration-wide
+    column, and this reds: two rows of ONE declaration differing only in
+    ``dimension`` do not share a key, so ``_unique_by_key`` would accept
+    ``end_line`` 42 next to 999 in silence, and the new field must be
+    declared entity-invariant before it may land.
+    """
+    assert set(RiskObservationRow.__dataclass_fields__) == {
+        "symbol",
+        "dimension",
+        "start_line",
+        "numerator",
+    }, "the risk row grew a field: decide whether it is entity-invariant"
+    assert set(CouplingCohesionRow.__dataclass_fields__) == {
+        "symbol",
+        "dimension",
+        "numerator",
+    }, "the coupling/cohesion row grew a field: decide whether it is invariant"
+
+    # And the key really is the declaration plus the dimension: rows that
+    # differ only in payload collide, rows at another declaration site do
+    # not.  Without this the field pin above would be arithmetic about a
+    # key it never read.
+    def key(row: RiskObservationRow) -> tuple[object, ...]:
+        return (row.symbol, row.dimension, row.start_line)
+
+    site = _risk_probe_row(3)
+    with pytest.raises(CanonicalModelError, match=r"probe\.key"):
+        _unique_by_key([site, _risk_probe_row(4)], "probe.key", key)
+    elsewhere = RiskObservationRow(site.symbol, site.dimension, site.numerator, 999)
+    _unique_by_key([site, elsewhere], "probe.key", key)
+
+
+# ---------------------------------------------------------------------------
 # AnalysisPopulation record laws (RULING-2026-08-31 §3).
 # ---------------------------------------------------------------------------
 
