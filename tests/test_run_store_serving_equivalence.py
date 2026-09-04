@@ -11,14 +11,19 @@ memory — the unit index, the module imports and the per-function
 relationship records.  Migrating a consumer off that memory and onto the
 canonical run store is only an engineering decision if something can say
 *no* and name what disagreed.  These are the three answers, measured
-2026-09-03 at ``4512acf0``, each written as the equivalence it will one day
-satisfy and marked ``xfail(strict=True)``:
+2026-09-03 at ``4512acf0``; each is written as the equivalence it has to
+satisfy, and the two still unsatisfied are marked ``xfail(strict=True)``:
 
 ``unit_inventory``
-    ``qualname``, ``path`` and ``start_line`` all have a canonical owner and
-    agree row for row.  ``end_line`` does not.  Of the canonical row types
-    reachable from ``AnalysisFacts`` exactly two declare an ``end_line`` at
-    all, and neither covers the unit population.
+    SATISFIED 2026-09-04, by the owner this pin named in advance.
+    ``qualname``, ``path`` and ``start_line`` always had a canonical owner
+    and agreed row for row; ``end_line`` had none, because of the row types
+    reachable from ``AnalysisFacts`` exactly two declared an ``end_line`` at
+    all and neither covered the unit population.  The ``unit_spans`` family
+    (``UnitSpanRow``) is the third, and it is the declaration itself: on the
+    serving corpus the reader answered 2 of 12 units before it was taught
+    and 12 of 12 after, with no declaration stated twice differently.  The
+    equivalence below carries no expected failure any more.
 
 ``module_imports``
     Every served field is expressible and every stored row reproduces a
@@ -53,7 +58,7 @@ from __future__ import annotations
 
 import dataclasses
 import typing
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,13 +67,16 @@ import pytest
 from codeclone.canonical import (
     AnalysisFacts,
     CanonicalModel,
+    CloneItemRow,
     DependencyEndpoint,
     DependencyOccurrenceRow,
     DependencyRelationRow,
     FileId,
     ModuleId,
     RunStore,
+    SecuritySurfaceRow,
     SymbolId,
+    UnitSpanRow,
 )
 from tests._served_run import ServedRunStoreProjection
 
@@ -212,36 +220,76 @@ def _declarations_the_canonical_run_states(
     )
 
 
+#: How one taught family spells a declaration key and the closing line it
+#: states, given the analysis fact house.
+_ClosingLineReader = Callable[[AnalysisFacts], Iterable[tuple[UnitKey, int]]]
+
+#: Every canonical family the closing-line reader consults, paired with the
+#: row type it is made of.  The reader below iterates THIS table and nothing
+#: else, and the completeness ratchet holds the table equal — in BOTH
+#: directions — to the row types the MODEL declares an ``end_line`` on.  A
+#: hand-written expected set could only say one of those two things: it stays
+#: green for a reader that was widened on paper and never taught, and green
+#: again for one that quietly stopped reading a family it already had.
+_CLOSING_LINE_FAMILIES: tuple[tuple[type, _ClosingLineReader], ...] = (
+    (
+        SecuritySurfaceRow,
+        lambda analysis: (
+            ((row.file.path, row.qualname, row.start_line), row.end_line)
+            for row in analysis.security_surfaces
+            if row.qualname is not None
+        ),
+    ),
+    (
+        CloneItemRow,
+        lambda analysis: (
+            (
+                (item.symbol.file.path, item.symbol.qualname, item.start_line),
+                item.end_line,
+            )
+            for group in analysis.clone_groups
+            for item in group.items
+        ),
+    ),
+    (
+        UnitSpanRow,
+        lambda analysis: (
+            ((row.symbol.file.path, row.symbol.qualname, row.start_line), row.end_line)
+            for row in analysis.unit_spans
+        ),
+    ),
+)
+
+
 def _closing_lines_the_canonical_run_states(
     model: CanonicalModel,
 ) -> dict[UnitKey, int]:
     """Every closing line ANY canonical family states, by declaration.
 
-    Both families that declare an ``end_line`` are read, and
-    ``test_the_canonical_model_declares_a_closing_line_on_two_row_types``
-    enumerates them from the model definitions so this reader cannot quietly
-    miss a third.  The ``unit_spans`` family (``UnitSpanRow``) is the third
-    that is coming, and that enumeration is what will say so.
+    All three families that declare an ``end_line`` are read, through
+    ``_CLOSING_LINE_FAMILIES``, and the completeness ratchet below proves
+    that table is neither short of the model nor ahead of it — so this
+    reader can neither quietly miss a fourth family nor keep a third in an
+    expected set it no longer consults.
 
     The key carries the first line, so a family answers about a unit only
     when it states that unit's whole span.  That is what makes the join a
     measurement rather than a guess: a security surface is a statement
     *inside* a unit and its span starts elsewhere, so it does not answer —
-    while a function clone member IS the unit and does.
+    while a function clone member IS the unit and does, and a ``unit_spans``
+    row IS the declaration, so it answers for every one.
 
     A key two families answer differently is dropped: one declaration with
-    two closing lines is a disagreement, not a stated fact.
+    two closing lines is a disagreement, not a stated fact.  That rule is
+    populated rather than hypothetical — measured on the serving corpus
+    2026-09-04, the clone lane and the span lane both state the corpus's
+    clone pair, and state it identically.
     """
     stated: dict[UnitKey, set[int]] = {}
     analysis = model.facts.analysis
-    for surface in analysis.security_surfaces:
-        if surface.qualname is not None:
-            key = (surface.file.path, surface.qualname, surface.start_line)
-            stated.setdefault(key, set()).add(surface.end_line)
-    for group in analysis.clone_groups:
-        for item in group.items:
-            key = (item.symbol.file.path, item.symbol.qualname, item.start_line)
-            stated.setdefault(key, set()).add(item.end_line)
+    for _row_type, read in _CLOSING_LINE_FAMILIES:
+        for key, end_line in read(analysis):
+            stated.setdefault(key, set()).add(end_line)
     return {key: next(iter(lines)) for key, lines in stated.items() if len(lines) == 1}
 
 
@@ -274,8 +322,8 @@ def _served_units(served: ServedRunStoreProjection) -> dict[UnitKey, int]:
     }
 
 
-def test_the_canonical_model_declares_a_closing_line_on_two_row_types() -> None:
-    """The reachability witness for the pin below (Probe Validity Law §1).
+def test_the_closing_line_reader_is_taught_every_row_type_that_declares_one() -> None:
+    """The reachability witness for the equivalence below (Probe Validity §1).
 
     Read from the model DEFINITIONS, not from one run's populated families.
     A reader that asked ``SecuritySurfaceRow`` for a ``symbol`` attribute it
@@ -283,10 +331,16 @@ def test_the_canonical_model_declares_a_closing_line_on_two_row_types() -> None:
     from "no family owns this" — that exact hollow reader is what produced an
     earlier "0 of 15 884" reading of this gap.
 
-    This is a ratchet on the reader's completeness: a new row type carrying a
-    closing line turns it red, and the fix is to teach
-    ``_closing_lines_the_canonical_run_states`` about it, never to widen the
-    expected set.
+    Two assertions, and the second is the one with teeth.  The first
+    enumerates the row types the model declares an ``end_line`` on, so a
+    fourth turns this red and a human decides; the prescribed fix is to teach
+    ``_CLOSING_LINE_FAMILIES``, never to widen the expected set alone.  The
+    second is what makes "alone" impossible: it holds the taught table equal
+    to that enumeration in both directions, so widening the literal without
+    teaching the reader fails here, and dropping a family from the reader
+    while the literal still names it fails here too.  ``UnitSpanRow`` entered
+    both lines together on 2026-09-04; before that day the enumeration was
+    two names long and this file said so.
     """
     row_types = _canonical_row_types()
     assert len(row_types) > 20, row_types.keys()
@@ -295,23 +349,93 @@ def test_the_canonical_model_declares_a_closing_line_on_two_row_types() -> None:
         for name, row_type in row_types.items()
         if "end_line" in {field.name for field in dataclasses.fields(row_type)}
     }
-    assert declaring == {"CloneItemRow", "SecuritySurfaceRow"}
+    assert declaring == {"CloneItemRow", "SecuritySurfaceRow", "UnitSpanRow"}
+    assert declaring == {row_type.__name__ for row_type, _ in _CLOSING_LINE_FAMILIES}
 
 
-def test_the_closing_line_reader_reaches_both_families_that_declare_one(
+def _closing_lines_by_family(
+    model: CanonicalModel,
+) -> dict[str, frozenset[tuple[UnitKey, int]]]:
+    """What each taught family states, kept APART instead of merged.
+
+    The reader merges; these two tests need the families separated, because a
+    merged answer cannot say which family produced which part of it.
+    """
+    analysis = model.facts.analysis
+    return {
+        row_type.__name__: frozenset(read(analysis))
+        for row_type, read in _CLOSING_LINE_FAMILIES
+    }
+
+
+def test_the_two_families_that_state_one_declaration_state_it_identically(
+    canonical_run: CanonicalModel,
+) -> None:
+    """The disagreement rule's own witness: reachable, and currently silent.
+
+    A clone member and a ``unit_spans`` row can both be the same declaration,
+    and on this corpus both state the clone pair — so the rule that drops a
+    key two families answer differently has a populated overlap to police
+    rather than a hypothetical one.  Every overlapping declaration survives
+    into the reader's answer, which is true only while the two lanes agree.
+
+    Corrupt one span end and the key is dropped rather than asserted wrong;
+    measured 2026-09-04 by mutating the producer, this test named the exact
+    declaration and the unit projected a closing line of ``None`` instead of
+    the corrupted number.  That is the whole point of dropping: the reader
+    would rather say nothing than pick a winner between two stated facts.
+    """
+    per_family = _closing_lines_by_family(canonical_run)
+    overlap = {key for key, _ in per_family["CloneItemRow"]} & {
+        key for key, _ in per_family["UnitSpanRow"]
+    }
+    assert overlap, (
+        "no declaration is stated by two families; the disagreement rule the "
+        "reader applies would be unreachable on this corpus"
+    )
+    stated = _closing_lines_the_canonical_run_states(canonical_run)
+    assert overlap <= set(stated), (
+        f"two families state a different closing line for the same "
+        f"declaration and the reader dropped it: "
+        f"{sorted(overlap - set(stated))}"
+    )
+
+
+def test_every_taught_closing_line_family_answers_on_this_corpus(
     served_run_store_projection: ServedRunStoreProjection,
     canonical_run: CanonicalModel,
 ) -> None:
-    """Both families answer, and only one of them answers about a unit.
+    """Each taught family is populated here, and each plays a part of its own.
 
-    This is what "no owner" means here, measured rather than assumed.  A
-    clone member IS the hosting unit: it states that unit's whole span and
-    the closing line agrees.  A security surface is a statement INSIDE a
-    unit: it names the same file and the same qualname, its span starts
-    somewhere else, and the closing line it states is its own.  A corpus
-    carrying only one of the two cannot tell a dead reader from an honest
-    absence, so this one carries both.
+    Taught is not reached.  The ratchet above reads DEFINITIONS, so a family
+    whose rows are empty on this input would leave the reader's answer
+    identical with and without it and that ratchet could not tell — the
+    aggregate would be green because a sibling family did all the work.  So
+    every family in the table is driven ALONE and required to carry rows.
+
+    Then each is required to do its own job, measured rather than assumed.  A
+    security surface is a statement INSIDE a unit: it names the same file and
+    the same qualname, its span starts somewhere else, and the closing line
+    it states is its own — so it answers no declaration, which is the rule
+    that keeps the join a measurement.  A clone member IS the hosting unit
+    and states that unit's whole span.  A ``unit_spans`` row IS the
+    declaration, and it is what carries the population: 2 of 12 served units
+    were answered before that family was taught, 12 of 12 after (2026-09-04,
+    this corpus).
+
+    The disagreement rule has a test of its own next door, and separate is
+    the point: every declaration two families state is also a served unit, so
+    an assertion about it placed AFTER the population statement here could
+    never be the one to fire — it would be a guard unreachable in every
+    configuration, which is the hollow shape this project's mutation law
+    names.  Two tests, two reds, neither shadowing the other.
     """
+    per_family = _closing_lines_by_family(canonical_run)
+    unpopulated = sorted(name for name, rows in per_family.items() if not rows)
+    assert not unpopulated, (
+        f"taught families carrying no row on this corpus: {unpopulated}; the "
+        f"reader's answer cannot distinguish them from families it never read"
+    )
     stated = _closing_lines_the_canonical_run_states(canonical_run)
     served = _served_units(served_run_store_projection)
     assert stated, "no canonical family stated a closing line; the reader is dead"
@@ -324,40 +448,34 @@ def test_the_closing_line_reader_reaches_both_families_that_declare_one(
             for unit in served
         )
     }
-    answering = {key for key in stated if key in served}
-    assert answering, "the clone lane stated no unit span"
     assert inside_a_unit, "the surface lane stated no span inside a unit"
-    assert all(served[key] == stated[key] for key in answering)
-    assert len(answering) < len(served), (
-        "every served unit now has a stated closing line; the pin below "
-        "should XPASS and its expected failure should be removed"
+    answering = {key for key in stated if key in served}
+    assert answering == set(served), (
+        "a served unit has no stated closing line; the span family is the "
+        "owner of that fact and every served unit is one of its rows"
     )
+    assert all(served[key] == stated[key] for key in answering)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "unit_inventory: the canonical model has no owner for a unit's "
-        "closing line. Of the row types reachable from AnalysisFacts only "
-        "CloneItemRow and SecuritySurfaceRow declare an end_line, and neither "
-        "covers the unit population: on this corpus they answer for 2 of 12 "
-        "units (the clone pair) and the remaining 10 project a closing line "
-        "of None; measured on the self-repository at 4512acf0, 0 of 15 934, "
-        "because that tree carries no emitted clone group at all. qualname, "
-        "path and start_line already agree row for row. "
-        "EXIT CONDITION: the unit_spans family -- UnitSpanRow(symbol, "
-        "start_line, end_line), key (SYMBOL, start_line), namespace "
-        "canonical_model: and deliberately not under the complexity metric "
-        "-- is the work that flips this pin. When it lands, teach "
-        "_closing_lines_the_canonical_run_states to read it, DELETE this "
-        "marker and ratify the new capability. Never restore the gap to keep "
-        "the suite green."
-    ),
-)
 def test_unit_inventory_is_reconstructible_from_the_canonical_run(
     served_run_store_projection: ServedRunStoreProjection,
     canonical_run: CanonicalModel,
 ) -> None:
+    """RATIFIED 2026-09-04: the served unit index IS expressible from the run.
+
+    This carried ``xfail(strict=True)`` from 2026-09-03 until the
+    ``unit_spans`` family landed, because the closing line had no canonical
+    owner: the two families that declared one answered 2 of 12 units on this
+    corpus and 0 of 15 934 on the self-repository at ``4512acf0``.  The
+    marker's own exit condition named ``UnitSpanRow`` as the work that would
+    flip it, and this is that flip — the expected failure is removed, not the
+    comparison weakened.
+
+    A red here is now a REGRESSION and never a gap to restore: some canonical
+    fact the served slice needs stopped being stated, or stopped agreeing.
+    The test beside it isolates every field but the closing line, so the two
+    reds say different things.
+    """
     projected = _project_unit_inventory(
         modules_by_path=_modules_by_path(canonical_run),
         analyzed_paths=_analyzed_paths(canonical_run),
@@ -366,17 +484,21 @@ def test_unit_inventory_is_reconstructible_from_the_canonical_run(
     assert projected == _served_unit_rows(served_run_store_projection)
 
 
-def test_unit_inventory_reconstructs_once_a_closing_line_owner_is_supplied(
+def test_the_unit_projection_agrees_on_every_field_but_the_closing_line(
     served_run_store_projection: ServedRunStoreProjection,
     canonical_run: CanonicalModel,
 ) -> None:
-    """Positive control: the same projection, handed the one missing fact.
+    """The same projection, with the closing line taken out of the question.
 
-    It perturbs the one input the pin measures and nothing else, so it
-    proves three things at once — the pin's body reaches the comparison,
-    every other served field already agrees exactly (the declaration set,
-    the glued head, the path and the first line), and the pin will XPASS the
-    day a real owner lands.
+    This was the positive control while the pin above was an expected
+    failure: it drove the identical projection with the closing line supplied
+    by hand, so a scaffolding fault turned it RED instead of leaving the pin
+    quietly xfailing forever.  The day a real owner landed the pin stopped
+    needing a control, and what the test still measures is worth keeping on
+    its own — it isolates the OTHER fields.  The declaration set, the glued
+    head, the path and the first line are compared here with the closing line
+    fabricated, so a red here is never about the span, and a red on the pin
+    above while this stays green is about the span alone.
     """
     served = _served_unit_rows(served_run_store_projection)
     assert served, "the served slice is empty; the comparison would be hollow"
