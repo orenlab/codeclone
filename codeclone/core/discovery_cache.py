@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from typing import Literal
 
 from ..models import (
+    LIVE_ROOT_REASONS,
     ApiParamSpec,
     CacheEntryV3,
     ClassMetrics,
@@ -654,11 +655,20 @@ def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate
 
 
 def _live_root_reason(value: object) -> LiveRootReason | None:
-    """Narrow the cached reason back onto its closed set."""
-    if value == "external_decorator":
-        return "external_decorator"
-    if value == "export_root":
-        return "export_root"
+    """Narrow the cached reason back onto its closed set.
+
+    Iterating the vocabulary is what makes this a narrower rather than a sixth
+    authority over it. The arm-per-value ladder this replaces was type-checked
+    in one direction only: inventing a member the vocabulary does not carry is
+    a type error, but FAILING to mention one is not, so a vocabulary that grew
+    would have been silently narrowed here -- every unlisted reason decoding as
+    "no reason at all" -- with nothing red to say so. ``reason`` is already a
+    :data:`~codeclone.contracts.LiveRootReason`, so the return needs no cast.
+    """
+
+    for reason in LIVE_ROOT_REASONS:
+        if value == reason:
+            return reason
     return None
 
 

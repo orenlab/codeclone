@@ -14,6 +14,7 @@ from pathlib import Path
 from codeclone.api import config_delivery as delivery
 from codeclone.config import resolver as config_resolver
 from codeclone.contracts import REPORT_RUN_IDENTITY_TIER
+from codeclone.models import LIVE_ROOT_REASONS
 from tests._import_graph import (
     _iter_import_edges,
     _iter_local_imports,
@@ -785,6 +786,64 @@ _RUN_IDENTITY_TIER_LITERAL_OWNERS = (
     "codeclone/models.py",
     "codeclone/report/document/integrity.py",
 )
+
+
+#: The one module allowed to spell the live-root vocabulary. Not a mirror
+#: list: every other ring reaches it by import.
+_LIVE_ROOT_VOCABULARY_OWNERS = ("codeclone/models.py",)
+
+
+def test_the_live_root_vocabulary_is_spelled_in_exactly_one_module() -> None:
+    """A module that restates the whole closed set is a second authority.
+
+    Five modules carried these two strings: the shared models, the canonical
+    fact-family registry, the cache wire decoder, the discovery-cache narrower
+    and the metrics registry — four as a set literal and one as an if/elif
+    ladder, which is why no search shaped like a set ever found the fifth. A
+    registry a consumer can reproduce by hand is not an authority, so the
+    vocabulary moved to the mechanism registry in ``codeclone.models``, which
+    every ring that decides on it already imports, so naming one owner cost no
+    new package edge at all.
+
+    The rule is stated over the SET, not over the words. A producer that emits
+    one specific reason is not restating the vocabulary — ``analysis``
+    ``_module_walk`` spells ``"external_decorator"`` because that is the only
+    root it can find, and narrowing what a producer emits is a different fact
+    from narrowing what the wire admits. Restating every member is the thing
+    that makes a module a rival owner, so co-occurrence is the predicate.
+
+    The mentioning set is asserted non-empty and named: a detector that
+    matched nothing would pass over an empty scan, and this one has to keep
+    seeing the producer it deliberately allows.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    members = LIVE_ROOT_REASONS
+    assert len(members) > 1, (
+        "the co-occurrence predicate is vacuous for a one-member vocabulary"
+    )
+
+    mentioning: list[str] = []
+    restating: list[str] = []
+    for module_name, path in _iter_codeclone_modules(root):
+        assert module_name  # every production module is ring-registered
+        relative = str(path.relative_to(root))
+        tokens = _module_address_tokens(path)
+        spelled = [member for member in members if member in tokens]
+        if not spelled:
+            continue
+        mentioning.append(relative)
+        if len(spelled) == len(members) and relative not in (
+            _LIVE_ROOT_VOCABULARY_OWNERS
+        ):
+            restating.append(relative)
+
+    assert restating == [], (
+        "these modules restate the whole live-root vocabulary instead of "
+        f"importing LIVE_ROOT_REASONS from codeclone.models: {restating}"
+    )
+    assert "codeclone/models.py" in mentioning
+    assert "codeclone/analysis/_module_walk.py" in mentioning
 
 
 def _module_address_tokens(path: Path) -> frozenset[str]:

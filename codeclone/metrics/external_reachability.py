@@ -85,7 +85,20 @@ import builtins
 from collections import deque
 from typing import TYPE_CHECKING, Final
 
-from ..models import ExternalReachability, ReachabilityState
+from ..models import (
+    EXPOSURE_DECLARED_REEXPORT,
+    EXPOSURE_EXPOSED_ANCESTOR,
+    EXPOSURE_EXPOSED_SUBCLASS,
+    EXPOSURE_LAZY_NAMESPACE,
+    EXPOSURE_MODULE_GETATTR,
+    EXPOSURE_PACKAGE_REEXPORT,
+    EXPOSURE_PUBLIC_MODULE,
+    EXPOSURE_STAR_REEXPORT,
+    EXPOSURE_UNRESOLVED_BASE,
+    ExternalReachability,
+    ReachabilityState,
+    exposure_witness,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -286,7 +299,7 @@ def _dynamic_packages(
     dynamic: dict[str, str] = {}
     for package in sorted(package_modules):
         if "lazy_loader" in import_targets.get(package, set()):
-            dynamic[package] = f"lazy_namespace:{package}"
+            dynamic[package] = exposure_witness(EXPOSURE_LAZY_NAMESPACE, package)
     for definition in definitions:
         package = definition.qualname.partition(":")[0]
         if (
@@ -294,7 +307,7 @@ def _dynamic_packages(
             and definition.local_name == "__getattr__"
             and package in package_modules
         ):
-            dynamic[package] = f"module_getattr:{package}"
+            dynamic[package] = exposure_witness(EXPOSURE_MODULE_GETATTR, package)
     return dynamic
 
 
@@ -321,7 +334,7 @@ def _dynamic_modules(
             and local == "__getattr__"
             and module not in package_modules
         ):
-            dynamic[module] = f"module_getattr:{module}"
+            dynamic[module] = exposure_witness(EXPOSURE_MODULE_GETATTR, module)
     return dynamic
 
 
@@ -562,7 +575,7 @@ class _Namespaces:
         its own dynamic package, or the unreadable carrier that reached it."""
 
         if rank == _REACHABLE:
-            return f"star_reexport:{module}"
+            return exposure_witness(EXPOSURE_STAR_REEXPORT, module)
         dynamic = self.dynamic.get(module)
         if dynamic is not None:
             return dynamic
@@ -617,7 +630,9 @@ def _expose_definitions(
     for qualname in sorted(population.definitions):
         module = qualname.partition(":")[0]
         if module in population.public_modules:
-            expose(qualname, _REACHABLE, f"public_module:{module}")
+            expose(
+                qualname, _REACHABLE, exposure_witness(EXPOSURE_PUBLIC_MODULE, module)
+            )
 
 
 def _expose_package_reexports(
@@ -629,7 +644,10 @@ def _expose_package_reexports(
 
     for package in sorted(population.package_modules):
         if package in population.public_modules:
-            rank, witness = _REACHABLE, f"package_reexport:{package}"
+            rank, witness = (
+                _REACHABLE,
+                exposure_witness(EXPOSURE_PACKAGE_REEXPORT, package),
+            )
         elif package in namespaces.dynamic:
             rank, witness = _UNRESOLVED, namespaces.dynamic[package]
         else:
@@ -665,7 +683,10 @@ def _expose_declared_reexports(
         if module in population.package_modules:
             continue
         if module in population.public_modules:
-            rank, witness = _REACHABLE, f"declared_reexport:{module}"
+            rank, witness = (
+                _REACHABLE,
+                exposure_witness(EXPOSURE_DECLARED_REEXPORT, module),
+            )
         elif module in namespaces.dynamic:
             rank, witness = _UNRESOLVED, namespaces.dynamic[module]
         else:
@@ -700,7 +721,11 @@ def _expose_star_chain(
         # A module the wildcard reached re-exports what it imports by name on
         # the same terms; whether its own ``__all__`` narrows that is not on
         # the wire, so the name is carried (the over-approximating direction).
-        carried = f"star_reexport:{target}" if rank == _REACHABLE else witness
+        carried = (
+            exposure_witness(EXPOSURE_STAR_REEXPORT, target)
+            if rank == _REACHABLE
+            else witness
+        )
         for dep_target, name in sorted(population.named_imports.get(target, ())):
             if name.startswith("_"):
                 continue
@@ -871,7 +896,7 @@ def collect_external_reachability(
         if own is not None and own[0] == _REACHABLE:
             return own
         through_subclass = _best(
-            (rank, f"exposed_subclass:{descendant}")
+            (rank, exposure_witness(EXPOSURE_EXPOSED_SUBCLASS, descendant))
             for descendant in _closure(class_qualname, children)
             if (rank := exposed.get(descendant, (_NOT_REACHED, ""))[0])
         )
@@ -879,7 +904,7 @@ def collect_external_reachability(
 
     def ancestor_witness(class_qualname: str) -> tuple[int, str] | None:
         return _best(
-            (rank, f"exposed_ancestor:{ancestor}")
+            (rank, exposure_witness(EXPOSURE_EXPOSED_ANCESTOR, ancestor))
             for ancestor in _closure(class_qualname, parents)
             if (rank := exposed.get(ancestor, (_NOT_REACHED, ""))[0])
         )
@@ -902,7 +927,7 @@ def collect_external_reachability(
         if found is not None and found[0] == _REACHABLE:
             return ExternalReachability(qualname, "reachable", found[1])
         if owner is not None and owner in unresolved_base:
-            witness = f"unresolved_base:{unresolved_base[owner]}"
+            witness = exposure_witness(EXPOSURE_UNRESOLVED_BASE, unresolved_base[owner])
             return ExternalReachability(qualname, "unresolved", witness)
         if found is not None:
             return ExternalReachability(qualname, _STATE_OF_RANK[found[0]], found[1])

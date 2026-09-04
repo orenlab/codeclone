@@ -14,7 +14,18 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, TypeGuard
 
 from .. import qualnames as _qualnames
 from ..models import (
+    LIVENESS_EXTERNAL_DECORATOR,
     METHOD_DECORATOR_EVIDENCE_MARKERS,
+    RESOLUTION_AMBIGUOUS_IMPORT,
+    RESOLUTION_IMPORTED_MODULE_ATTRIBUTE,
+    RESOLUTION_IMPORTED_SYMBOL,
+    RESOLUTION_LOCAL_SHADOWING,
+    RESOLUTION_SAME_MODULE_CLASS,
+    RESOLUTION_SAME_MODULE_CLASS_METHOD,
+    RESOLUTION_SAME_MODULE_FUNCTION,
+    RESOLUTION_SELF_OR_CLS_METHOD,
+    RESOLUTION_UNRESOLVED_DYNAMIC,
+    RESOLUTION_UNRESOLVED_NAME,
     DeadCandidate,
     DependencyBinding,
     FunctionRelationshipFacts,
@@ -25,6 +36,8 @@ from ..models import (
     RelationshipRecord,
     ResolvedSourceIdentity,
     SemanticEvent,
+    emit_live_root_reason,
+    validate_resolution_rule,
 )
 from ..semantics.events import SemanticEventCollector
 from .ast_helpers import is_type_checking_guard
@@ -1125,9 +1138,9 @@ def _single_relationship_target(
     resolved_rule: str,
 ) -> tuple[str | None, str]:
     if not targets:
-        return None, "unresolved_name"
+        return None, RESOLUTION_UNRESOLVED_NAME
     if len(targets) != 1:
-        return None, "ambiguous_import"
+        return None, RESOLUTION_AMBIGUOUS_IMPORT
     return next(iter(targets)), resolved_rule
 
 
@@ -1139,7 +1152,7 @@ def _module_attribute_target(
     """``<module binding>.<attr>`` as one qualname, or why it is not one."""
     target_module, rule = _single_relationship_target(
         targets,
-        resolved_rule="imported_module_attribute",
+        resolved_rule=RESOLUTION_IMPORTED_MODULE_ATTRIBUTE,
     )
     if target_module is None:
         return None, rule
@@ -1199,19 +1212,19 @@ def _resolve_relationship_expression(
         if import_targets and (
             node.id in caller_bindings or node.id in imports.module_shadowed_names
         ):
-            return None, "local_shadowing"
+            return None, RESOLUTION_LOCAL_SHADOWING
         if import_targets:
             return _single_relationship_target(
                 import_targets,
-                resolved_rule="imported_symbol",
+                resolved_rule=RESOLUTION_IMPORTED_SYMBOL,
             )
         if node.id in caller_bindings:
-            return None, "unresolved_name"
+            return None, RESOLUTION_UNRESOLVED_NAME
         if node.id in top_level_function_names:
-            return f"{module_name}:{node.id}", "same_module_function"
+            return f"{module_name}:{node.id}", RESOLUTION_SAME_MODULE_FUNCTION
         if node.id in top_level_class_names:
-            return f"{module_name}:{node.id}", "same_module_class"
-        return None, "unresolved_name"
+            return f"{module_name}:{node.id}", RESOLUTION_SAME_MODULE_CLASS
+        return None, RESOLUTION_UNRESOLVED_NAME
 
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
         base_name = node.value.id
@@ -1226,7 +1239,7 @@ def _resolve_relationship_expression(
         if import_targets and (
             base_name in caller_bindings or base_name in imports.module_shadowed_names
         ):
-            return None, "local_shadowing"
+            return None, RESOLUTION_LOCAL_SHADOWING
         if import_targets:
             return _module_attribute_target(import_targets, attr=node.attr)
         # The receiver parameter (self/cls) is itself a caller binding, so the
@@ -1238,14 +1251,14 @@ def _resolve_relationship_expression(
         ):
             candidate = f"{module_name}:{enclosing_class_local}.{node.attr}"
             if candidate in local_method_qualnames:
-                return candidate, "self_or_cls_method"
-            return None, "unresolved_dynamic"
+                return candidate, RESOLUTION_SELF_OR_CLS_METHOD
+            return None, RESOLUTION_UNRESOLVED_DYNAMIC
         if base_name in top_level_class_names and base_name not in caller_bindings:
             candidate = f"{module_name}:{base_name}.{node.attr}"
             if candidate in local_method_qualnames:
-                return candidate, "same_module_class_method"
-            return None, "unresolved_dynamic"
-    return None, "unresolved_dynamic"
+                return candidate, RESOLUTION_SAME_MODULE_CLASS_METHOD
+            return None, RESOLUTION_UNRESOLVED_DYNAMIC
+    return None, RESOLUTION_UNRESOLVED_DYNAMIC
 
 
 def _relationship_record(
@@ -1267,7 +1280,7 @@ def _relationship_record(
         path=filepath,
         line=max(1, int(getattr(node, "lineno", 1))),
         expression=_relationship_expression(node),
-        resolution_rule=resolution_rule,
+        resolution_rule=validate_resolution_rule(resolution_rule),
     )
 
 
@@ -1779,8 +1792,11 @@ def _collect_external_decorator_root_reasons(
 ) -> dict[str, _LocalLivenessRootReason]:
     hook_marker_aliases = _resolve_hook_marker_aliases(state)
     overload_aliases = frozenset(state.non_runtime_decorator_aliases)
+    # The producer's door, not the decoder's: a reason this build has retired
+    # is still decodable from a stored row and must never be minted here.
+    emit_live_root_reason(LIVENESS_EXTERNAL_DECORATOR)
     return {
-        f"{module_name}:{local_name}": "external_decorator"
+        f"{module_name}:{local_name}": LIVENESS_EXTERNAL_DECORATOR
         # An ``@overload`` stub is a DECLARATION of this symbol, not a use of
         # it: every stub shares the implementation's qualname, so admitting one
         # lets a symbol stand as its own external evidence. ``typing.overload``

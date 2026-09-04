@@ -10,7 +10,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Final, Literal, Protocol, TypedDict, TypeVar
+from typing import Final, Literal, Protocol, TypedDict, TypeVar, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_validator
@@ -87,6 +87,14 @@ DeadCodeObservationKind = Literal["symbol", "unreachable_statement"]
 # is registered and no longer produced: the export chain became reachability
 # evidence (below) when RULING 2026-09-01 landed, and a wire that once carried
 # the value keeps reading it.
+#
+# The vocabulary's owner is ``codeclone.domain.liveness_mechanisms``, which
+# also names the producer of each reason and splits ACCEPTANCE (this alias,
+# what a stored row may carry) from PRODUCTION (what this build can still
+# conclude). A ``Literal`` cannot be built from a runtime tuple, so this stays
+# spelled out and ``tests/test_liveness_mechanism_registry.py`` pins the two
+# together in both directions -- which is how "registered and no longer
+# produced" stops being a comment nothing executes.
 LiveRootReason = Literal["external_decorator", "export_root"]
 # The world contract a dead-code verdict is derived under (RULING 2026-09-01).
 # ``open``: consumers outside the analysis root may exist, so a symbol they
@@ -4932,3 +4940,841 @@ class BeforeExecutionWitness:
             "source_state_digest": self.source_state_digest,
             "workspace_witness": self.workspace_witness,
         }
+
+
+# ==========================================================================
+# Liveness, exposure, resolution and suppression mechanisms.
+#
+# Placed in the model store rather than in ``codeclone.domain`` because the
+# architecture decides it, not taste: a ``codeclone.domain`` submodule may
+# import NO local module (tests/test_architecture.py) and a ``@dataclass``
+# may be defined only in the ratified model stores, so a typed MechanismSpec
+# cannot live beside the other closed vocabularies.  Here it costs no new
+# import edge at all: every consumer -- the walk, the reachability owner,
+# the wire decoder, the metrics registry -- already imports this module, and
+# ``LiveRootReason`` above is the type this vocabulary owns.
+# ==========================================================================
+#
+# One owner for the mechanisms that decide liveness, exposure and resolution.
+#
+# CodeClone can compute that a symbol is not dead and often cannot name which
+# mechanism made it live.  A qualname lands in ``referenced_qualnames``, the
+# symbol disappears from the dead findings, and the cause is gone: eight
+# different constructs -- an ``__all__`` entry, a PEP 484 re-export, an
+# attribute load through an import alias -- reach the verdict through one
+# anonymous set membership test.  This module is the vocabulary that makes the
+# cause addressable.  It does not change any verdict, any cached row or any
+# wire format; it names what already happens.
+#
+# What went wrong without it is measured: ``export_root`` sat in the live-root
+# vocabulary for months with ZERO producers.  Five hand-written copies of the
+# same two-value set (``models.py``, ``canonical/identity.py``,
+# ``cache/_wire_decode.py``, ``metrics/registry.py``, and an if/elif ladder in
+# ``core/discovery_cache.py`` that no set-shaped search finds) each kept
+# accepting the value as decodable, and nothing anywhere asked whether a
+# producer still existed.  A vocabulary that only ever grows by acceptance
+# cannot notice that one of its words has stopped meaning anything.
+#
+# Four vocabularies, not one registry of everything
+# -------------------------------------------------
+# They are separate because they answer different questions for different
+# consumers, and a single table would put them on one footing:
+#
+# ``liveness``
+#     "What holds this symbol live?"  Consumed by the dead-code verdict.  Its
+#     members are CAUSES of a live outcome.
+# ``external_exposure``
+#     "What construct puts a public import path to this symbol?"  Consumed by
+#     ``ExternalReachability.witness``, which feeds the dead-code lane as
+#     evidence AND the api-surface lane as a binding oracle.  It is evidence
+#     about the world, never a verdict, and it is shared by two evaluators.
+# ``resolution``
+#     "How did this reference resolve to a target, or why did it not?"
+#     Consumed by ``RelationshipRecord.resolution_rule``.  Upstream of
+#     liveness and not a liveness cause: ``unresolved_dynamic`` is a fact
+#     about name binding and holds nothing live.
+# ``suppression``
+#     "What local policy excluded this from the lane?"  Policy, not evidence:
+#     it says nothing about whether the code runs (``SUP1``).  Scoped here to
+#     the liveness family only -- suppression of other finding families is a
+#     vocabulary this module deliberately does not open.
+#
+# Acceptance is not production
+# ----------------------------
+# The defect that hid ``export_root`` is that one set answered both "may a
+# decoder accept this value" and "may a producer emit it".  They are split
+# here: ``LIVE_ROOT_REASONS`` is the wire's ACCEPTANCE vocabulary and keeps
+# every value an artifact may still carry, parked ones included, because a
+# cache or baseline written before a mechanism was retired is still readable.
+# ``ACTIVE_LIVE_ROOT_REASONS`` is the PRODUCTION vocabulary and holds only
+# what some producer can still emit.  ``emit_live_root_reason`` is the
+# producer's door and refuses a parked value; ``validate_live_root_reason``
+# is the decoder's door and admits it.
+#
+# The ratchet
+# -----------
+# ``tests/test_liveness_mechanism_registry.py`` enforces four rules:
+#
+# 1. an emitted mechanism MUST exist in the registry (the ``emit_*`` and
+#    ``validate_*`` doors raise at runtime, and a test walks the producers);
+# 2. an active mechanism MUST name exactly one producer, and that producer
+#    MUST resolve;
+# 3. an active mechanism MUST have at least one CAUSAL FIXTURE -- a fixture
+#    that RUNS the producer and observes the mechanism actually fire.  This is
+#    the rule the ``export_root`` defect needed: a name whose fixture cannot
+#    produce it in any configuration is dead vocabulary, and it reds.  It is a
+#    statement about meaning, not about whether the string still appears in
+#    some source file;
+# 4. a declared mechanism that is intentionally off MUST be explicitly parked
+#    with a typed reason, and a parked mechanism that acquires a producer MUST
+#    leave the park or the ratchet reds.
+#
+# Not decided here
+# ----------------
+# Whether a mechanism's name reaches the report.  Today most of them carry
+# ``witness_type="none"``: they decide a user-visible verdict and record
+# nothing.  Making the producer carry its own name is a separate step that
+# changes what the dependent cache lane's rows contain, and therefore belongs
+# to ``LIVENESS_POLICY_VERSION``, not to this module.  The ``none`` entries
+# below are that work's inventory, written down rather than rediscovered.
+
+
+MechanismKind = Literal["liveness", "external_exposure", "resolution", "suppression"]
+MechanismStatus = Literal["active", "explicitly_parked"]
+
+#: Where a fired mechanism leaves a trace a consumer can read back.
+#:
+#: ``none`` is not "no evidence exists" -- it is "this mechanism decides a
+#: user-visible verdict and records nothing", which is the defect this
+#: registry exists to make countable.
+WitnessType = Literal[
+    "live_root_reason",
+    "suppressed_rule",
+    "exposure_witness",
+    "resolution_rule",
+    "abstention_record",
+    "none",
+]
+
+# --------------------------------------------------------------------------
+# Parking
+#
+# A declared mechanism with no producer is a claim the build cannot honour.
+# Deleting the name instead is not always available: a value that ever rode
+# the cache wire or a baseline must stay decodable, so the name has to
+# survive its own producer.  Parking is how it survives WITHOUT being
+# mistaken for something the analysis can still conclude.
+
+PARK_SUPERSEDED_BY_EVIDENCE_LANE: Final = "superseded_by_evidence_lane"
+PARK_PRODUCER_RETRACTED: Final = "producer_retracted"
+
+PARK_REASONS: Final[Mapping[str, str]] = {
+    PARK_SUPERSEDED_BY_EVIDENCE_LANE: (
+        "the construct still exists and no longer votes on liveness: it was "
+        "moved to the external-reachability evidence lane, which reports it "
+        "as exposure rather than folding it onto the symbol as a live root"
+    ),
+    PARK_PRODUCER_RETRACTED: (
+        "the rule that produced the mechanism was removed, not relocated: the "
+        "construct it read is a declaration, not a use, so the mechanism "
+        "answered the wrong question and nothing records it as liveness "
+        "evidence any more. Distinct from a relocation above, and the "
+        "distinction is the whole ruling: the fact may still be READ "
+        "elsewhere -- an __all__ entry now rides the wire as "
+        "``declared_exports`` -- but that is not the same fact under a new "
+        "name. It answers 'is this exposed', never 'is this used'"
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MechanismSpec:
+    """One named mechanism, with the site that produces it.
+
+    ``producer`` is ``"<module>:<qualname>"`` and is resolved by the ratchet,
+    so it is an executable reference and not a prose pointer that rots.  An
+    ``explicitly_parked`` mechanism has no producer and carries the empty
+    string instead, which is what makes "active with zero producers"
+    representable and therefore refusable.
+
+    ``semantic_owner`` names who decides what the mechanism MEANS: a contract
+    constant when the meaning is versioned, otherwise the module that owns
+    the rule.  The ratchet resolves both forms.
+    """
+
+    id: str
+    kind: MechanismKind
+    producer: str
+    witness_type: WitnessType
+    semantic_owner: str
+    summary: str
+    status: MechanismStatus = "active"
+    park_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "active":
+            if not self.producer:
+                raise LivenessVocabularyError(
+                    f"active mechanism {self.id!r} names no producer"
+                )
+            if self.park_reason is not None:
+                raise LivenessVocabularyError(
+                    f"active mechanism {self.id!r} carries a park reason"
+                )
+        else:
+            if self.producer:
+                raise LivenessVocabularyError(
+                    f"parked mechanism {self.id!r} still names a producer "
+                    f"{self.producer!r}; unpark it instead"
+                )
+            if self.park_reason not in PARK_REASONS:
+                raise LivenessVocabularyError(
+                    f"parked mechanism {self.id!r} carries an unknown park "
+                    f"reason {self.park_reason!r}"
+                )
+
+
+class LivenessVocabularyError(ValueError):
+    """A mechanism name or spec is outside the reviewed vocabulary."""
+
+
+_WALK = "codeclone.analysis._module_walk"
+_DEAD_CODE = "codeclone.metrics.dead_code"
+_REACHABILITY = "codeclone.metrics.external_reachability"
+_LIVENESS_POLICY = "LIVENESS_POLICY_VERSION"
+_RELATIONSHIP_POLICY = "FUNCTION_RELATIONSHIP_ALGORITHM_REVISION"
+
+# --------------------------------------------------------------------------
+# Liveness: what holds a symbol live.
+
+LIVENESS_EXTERNAL_DECORATOR: Final = "external_decorator"
+LIVENESS_EXPORT_ROOT: Final = "export_root"
+
+_LIVENESS: Final[tuple[MechanismSpec, ...]] = (
+    MechanismSpec(
+        id=LIVENESS_EXTERNAL_DECORATOR,
+        kind="liveness",
+        producer=f"{_WALK}:_collect_external_decorator_root_reasons",
+        witness_type="live_root_reason",
+        semantic_owner=_LIVENESS_POLICY,
+        summary=(
+            "a decorator whose root name resolves outside the project, or a "
+            "proven pluggy hook marker, registers the symbol with a framework "
+            "that calls it; typing.overload stubs are excluded"
+        ),
+    ),
+    MechanismSpec(
+        id=LIVENESS_EXPORT_ROOT,
+        kind="liveness",
+        producer="",
+        witness_type="live_root_reason",
+        semantic_owner=_LIVENESS_POLICY,
+        status="explicitly_parked",
+        park_reason=PARK_SUPERSEDED_BY_EVIDENCE_LANE,
+        summary=(
+            "the package export chain reached the symbol; retired by RULING "
+            "2026-09-01 because it recorded 'live because exported' for "
+            "symbols nothing had proven live"
+        ),
+    ),
+)
+
+# --------------------------------------------------------------------------
+# Liveness evidence: the constructs that hold a symbol live WITHOUT recording
+# that they did.
+#
+# Every one of these carries ``witness_type="none"``.  That is not an omission
+# in this table -- it is the measured state of the lane.  A symbol held live by
+# a PEP 484 re-export and a symbol held live by a pytest fixture name leave the
+# same trace, which is no trace: the qualname lands in ``referenced_qualnames``
+# or the predicate returns ``True``, the symbol drops out of the findings, and
+# nothing downstream can say which construct did it.  Naming them is what makes
+# the question answerable at all; making the producer CARRY its name changes
+# what the dependent cache lane's rows contain and belongs to
+# ``LIVENESS_POLICY_VERSION``, not here.
+#
+# Rule 2 is why the eight ``referenced_qualnames`` producers are eight entries
+# and not one: a mechanism has one owner, so "a qualname was referenced" -- which
+# has eight independent producers inside one function -- is not a mechanism, it
+# is the seam where eight of them become indistinguishable.
+
+LIVENESS_IMPORTED_SYMBOL_REFERENCE: Final = "imported_symbol_reference"
+LIVENESS_IMPORTED_MODULE_ATTRIBUTE_REFERENCE: Final = (
+    "imported_module_attribute_reference"
+)
+LIVENESS_SAME_MODULE_CLASS_ATTRIBUTE_REFERENCE: Final = (
+    "same_module_class_attribute_reference"
+)
+LIVENESS_ALL_ENTRY_WILDCARD_PRODUCT: Final = "all_entry_wildcard_product"
+LIVENESS_ALL_ENTRY_LOCAL_DEFINITION: Final = "all_entry_local_definition"
+LIVENESS_ALL_ENTRY_IMPORTED_BINDING: Final = "all_entry_imported_binding"
+LIVENESS_ALL_ENTRY_LAZY_EXPORT: Final = "all_entry_lazy_export"
+LIVENESS_EXPLICIT_REEXPORT_ALIAS: Final = "explicit_reexport_alias"
+LIVENESS_PROJECT_ENTRYPOINT: Final = "project_entrypoint"
+LIVENESS_BARE_NAME_REFERENCE: Final = "bare_name_reference"
+LIVENESS_SELF_DISPATCH: Final = "self_dispatch"
+LIVENESS_RUNTIME_REACHABILITY_EDGE: Final = "runtime_reachability_edge"
+LIVENESS_OVERRIDE_DECORATOR_EVIDENCE: Final = "override_decorator_evidence"
+LIVENESS_TEST_SOURCE_LANE: Final = "test_source_lane"
+LIVENESS_MODULE_RUNTIME_HOOK: Final = "module_runtime_hook"
+LIVENESS_DUNDER_METHOD: Final = "dunder_method"
+LIVENESS_VISITOR_PREFIX_METHOD: Final = "visitor_prefix_method"
+LIVENESS_XUNIT_HOOK_METHOD: Final = "xunit_hook_method"
+LIVENESS_PROTOCOL_MEMBER: Final = "protocol_member"
+LIVENESS_NON_RUNTIME_DECORATOR: Final = "non_runtime_decorator"
+LIVENESS_PYDANTIC_HOOK_DECORATOR: Final = "pydantic_hook_decorator"
+LIVENESS_UNRESOLVED_EXTERNAL_OVERRIDE: Final = "unresolved_external_override"
+LIVENESS_EXTERNALLY_REACHABLE: Final = "externally_reachable"
+LIVENESS_REACHABILITY_UNRESOLVED: Final = "reachability_unresolved"
+
+_ENTRYPOINTS = "codeclone.core.entrypoints"
+_CLASS_METRICS = "codeclone.analysis.class_metrics"
+_RUNTIME_REACHABILITY = "codeclone.analysis.reachability"
+
+
+def _liveness(
+    identifier: str,
+    producer: str,
+    summary: str,
+    *,
+    witness_type: WitnessType = "none",
+    park_reason: str | None = None,
+) -> MechanismSpec:
+    return MechanismSpec(
+        id=identifier,
+        kind="liveness",
+        producer="" if park_reason is not None else producer,
+        witness_type=witness_type,
+        semantic_owner=_LIVENESS_POLICY,
+        summary=summary,
+        status="explicitly_parked" if park_reason is not None else "active",
+        park_reason=park_reason,
+    )
+
+
+_REFERENCED_QUALNAMES = f"{_WALK}:_resolve_referenced_qualnames"
+
+_LIVENESS_EVIDENCE: Final[tuple[MechanismSpec, ...]] = (
+    _liveness(
+        LIVENESS_IMPORTED_SYMBOL_REFERENCE,
+        _REFERENCED_QUALNAMES,
+        "a bare name bound by 'from module import name' is loaded, so the "
+        "imported definition is referenced",
+    ),
+    _liveness(
+        LIVENESS_IMPORTED_MODULE_ATTRIBUTE_REFERENCE,
+        _REFERENCED_QUALNAMES,
+        "an attribute is loaded through a module alias bound by 'import "
+        "module'; over-approximating, the target need not define the name",
+    ),
+    _liveness(
+        LIVENESS_SAME_MODULE_CLASS_ATTRIBUTE_REFERENCE,
+        _REFERENCED_QUALNAMES,
+        "an attribute is loaded on a top-level class of this module and names "
+        "one of its declared methods",
+    ),
+    # The four __all__ arms, retracted by liveness policy v4 ("stop recording
+    # an __all__ declaration as internal use").  They are kept, not deleted,
+    # because the park entry is the record that CodeClone once read a
+    # declaration of export as a call site -- the reading that made every
+    # __all__ member look used, and the one a future change must not
+    # reintroduce by accident.  Their ids never rode any wire (witness_type
+    # "none"), so nothing decodes them; only the history needs them.
+    _liveness(
+        LIVENESS_ALL_ENTRY_WILDCARD_PRODUCT,
+        "",
+        "this module had both __all__ and a wildcard import, so every name it "
+        "exported was folded in as possibly coming from the wildcard target; "
+        "the arm was removed from _resolve_referenced_qualnames",
+        park_reason=PARK_PRODUCER_RETRACTED,
+    ),
+    _liveness(
+        LIVENESS_ALL_ENTRY_LOCAL_DEFINITION,
+        "",
+        "an __all__ entry naming a top-level function or class defined here "
+        "was folded in; the arm and its _local_export_qualname resolver were "
+        "removed",
+        park_reason=PARK_PRODUCER_RETRACTED,
+    ),
+    _liveness(
+        LIVENESS_ALL_ENTRY_IMPORTED_BINDING,
+        "",
+        "an __all__ entry naming something this module bound with a resolved "
+        "from-import was folded in; the arm was removed",
+        park_reason=PARK_PRODUCER_RETRACTED,
+    ),
+    _liveness(
+        LIVENESS_ALL_ENTRY_LAZY_EXPORT,
+        "",
+        "a module-scope __getattr__ serving an __all__ entry out of an "
+        "_EXPORTS literal was folded in; the whole reading went with the arm "
+        "-- _collect_lazy_export_node, _string_mapping_from_literal_dict and "
+        "the lazy_export_bindings state are gone",
+        park_reason=PARK_PRODUCER_RETRACTED,
+    ),
+    _liveness(
+        LIVENESS_EXPLICIT_REEXPORT_ALIAS,
+        _REFERENCED_QUALNAMES,
+        "'from module import name as name' at module scope in a "
+        "runtime-reachable branch is PEP 484's explicit re-export",
+    ),
+    _liveness(
+        LIVENESS_PROJECT_ENTRYPOINT,
+        f"{_ENTRYPOINTS}:collect_project_entrypoint_qualnames",
+        "a console script, gui script or entry-point group declared in "
+        "pyproject.toml resolves to the symbol",
+    ),
+    _liveness(
+        LIVENESS_BARE_NAME_REFERENCE,
+        f"{_WALK}:_collect_load_reference_node",
+        "the symbol's bare local name is loaded somewhere in the project; not "
+        "receiver-specific, and denied to methods under an opaque base",
+    ),
+    _liveness(
+        LIVENESS_SELF_DISPATCH,
+        f"{_CLASS_METRICS}:_self_dispatched_methods",
+        "'self.<name>()' inside the declaring class proves the receiver type, "
+        "so the reference is method-specific",
+    ),
+    _liveness(
+        LIVENESS_RUNTIME_REACHABILITY_EDGE,
+        f"{_RUNTIME_REACHABILITY}:collect_runtime_reachability",
+        "a recognised framework registration - a route, a handler, a task - "
+        "binds the symbol to a runtime entry point",
+    ),
+    _liveness(
+        LIVENESS_OVERRIDE_DECORATOR_EVIDENCE,
+        f"{_WALK}:_collect_decorator_evidenced_methods",
+        "an @override marker on a method of a class with an unresolved "
+        "external base proves the base dispatches into it",
+    ),
+    _liveness(
+        LIVENESS_TEST_SOURCE_LANE,
+        f"{_DEAD_CODE}:_is_non_actionable_candidate",
+        "the declaration lives in the test lane, so it is non-actionable "
+        "because of its source role and not because of its name",
+    ),
+    _liveness(
+        LIVENESS_MODULE_RUNTIME_HOOK,
+        f"{_DEAD_CODE}:_is_non_actionable_candidate",
+        "a module-level __getattr__ or __dir__ is invoked by import machinery "
+        "(PEP 562), never by a call site",
+    ),
+    _liveness(
+        LIVENESS_DUNDER_METHOD,
+        f"{_DEAD_CODE}:_is_non_actionable_candidate",
+        "a magic method is invoked by runtime dispatch on a syntactic form, "
+        "not by its name",
+    ),
+    _liveness(
+        LIVENESS_VISITOR_PREFIX_METHOD,
+        f"{_DEAD_CODE}:_is_non_actionable_candidate",
+        "a 'visit_' method is dispatched by a visitor that assembles the name",
+    ),
+    _liveness(
+        LIVENESS_XUNIT_HOOK_METHOD,
+        f"{_DEAD_CODE}:_is_non_actionable_candidate",
+        "an xUnit lifecycle hook is called by the test runner by convention",
+    ),
+    _liveness(
+        LIVENESS_PROTOCOL_MEMBER,
+        f"{_WALK}:_is_protocol_class",
+        "the owning class inherits typing.Protocol, so its members declare a "
+        "structural contract and never become candidates",
+    ),
+    _liveness(
+        LIVENESS_NON_RUNTIME_DECORATOR,
+        f"{_WALK}:_is_non_runtime_candidate",
+        "@overload or @abstractmethod declares a signature rather than a body "
+        "that runs, so the declaration never becomes a candidate",
+    ),
+    _liveness(
+        LIVENESS_PYDANTIC_HOOK_DECORATOR,
+        f"{_WALK}:_is_known_pydantic_decorator",
+        "a recognised pydantic validator or serializer decorator registers the "
+        "function with the model that calls it",
+    ),
+    _liveness(
+        LIVENESS_UNRESOLVED_EXTERNAL_OVERRIDE,
+        f"{_DEAD_CODE}:_governing_opaque_base",
+        "the owning class inherits a base no edge binds and nothing proves the "
+        "method is called, so the lane abstains rather than guessing",
+        witness_type="abstention_record",
+    ),
+    _liveness(
+        LIVENESS_EXTERNALLY_REACHABLE,
+        f"{_DEAD_CODE}:classify_liveness",
+        "under the open world a symbol with no live evidence that external "
+        "reachability calls reachable is unresolved, never dead",
+        witness_type="abstention_record",
+    ),
+    _liveness(
+        LIVENESS_REACHABILITY_UNRESOLVED,
+        f"{_DEAD_CODE}:classify_liveness",
+        "under the open world a symbol whose exposure no static read can "
+        "settle is unresolved, never dead",
+        witness_type="abstention_record",
+    ),
+)
+
+# --------------------------------------------------------------------------
+# Suppression: local policy that removes a symbol from the lane.
+#
+# Deliberately its own vocabulary and deliberately one member: a suppression
+# is a statement about what a reader wants reported, never about whether the
+# code runs, so it must not sit in the same table as evidence.  Suppression
+# of other finding families is a vocabulary this module does not open.
+
+SUPPRESSION_DEAD_CODE_DIRECTIVE: Final = "dead_code_directive"
+
+_SUPPRESSION: Final[tuple[MechanismSpec, ...]] = (
+    MechanismSpec(
+        id=SUPPRESSION_DEAD_CODE_DIRECTIVE,
+        kind="suppression",
+        producer="codeclone.analysis.suppressions:bind_suppressions_to_declarations",
+        witness_type="suppressed_rule",
+        semantic_owner="codeclone.analysis.suppressions",
+        summary=(
+            "an inline '# codeclone: ignore[dead-code]' directive bound to the "
+            "declaration excludes it from the lane"
+        ),
+    ),
+)
+
+# --------------------------------------------------------------------------
+# External exposure: the construct that puts a public import path to a symbol.
+#
+# These are the witness prefixes that already ride ExternalReachability.witness
+# as free-form f-strings.  Naming them closes the gap between "the witness is
+# a string a consumer parses" and "the witness is a value from a reviewed set".
+
+EXPOSURE_PUBLIC_MODULE: Final = "public_module"
+EXPOSURE_PACKAGE_REEXPORT: Final = "package_reexport"
+EXPOSURE_DECLARED_REEXPORT: Final = "declared_reexport"
+EXPOSURE_STAR_REEXPORT: Final = "star_reexport"
+EXPOSURE_LAZY_NAMESPACE: Final = "lazy_namespace"
+EXPOSURE_MODULE_GETATTR: Final = "module_getattr"
+EXPOSURE_EXPOSED_SUBCLASS: Final = "exposed_subclass"
+EXPOSURE_EXPOSED_ANCESTOR: Final = "exposed_ancestor"
+EXPOSURE_UNRESOLVED_BASE: Final = "unresolved_base"
+
+
+def _exposure(identifier: str, producer: str, summary: str) -> MechanismSpec:
+    return MechanismSpec(
+        id=identifier,
+        kind="external_exposure",
+        producer=f"{_REACHABILITY}:{producer}",
+        witness_type="exposure_witness",
+        semantic_owner=_LIVENESS_POLICY,
+        summary=summary,
+    )
+
+
+_EXTERNAL_EXPOSURE: Final[tuple[MechanismSpec, ...]] = (
+    _exposure(
+        EXPOSURE_PUBLIC_MODULE,
+        "_expose_definitions",
+        "E1: the symbol is defined in a module no segment of whose dotted "
+        "name starts with an underscore",
+    ),
+    _exposure(
+        EXPOSURE_PACKAGE_REEXPORT,
+        "_expose_package_reexports",
+        "E2: a package __init__ the fixed point reached imports the symbol by "
+        "name, and PEP 8 reads that as a re-export",
+    ),
+    _exposure(
+        EXPOSURE_DECLARED_REEXPORT,
+        "_expose_declared_reexports",
+        "a public plain module lists an imported name in its __all__, which "
+        "turns that import from an implementation detail into a re-export; "
+        "the E2 sibling for modules that are not packages",
+    ),
+    _exposure(
+        EXPOSURE_STAR_REEXPORT,
+        "_expose_star_chain",
+        "E3: a wildcard edge from a namespace the fixed point reached carries "
+        "the symbol outward at that namespace's rank",
+    ),
+    _exposure(
+        EXPOSURE_LAZY_NAMESPACE,
+        "_dynamic_packages",
+        "the package builds its namespace with lazy_loader from a stub the "
+        "walk never reads, so what it serves cannot be settled statically",
+    ),
+    # Two arms, partitioned on one predicate and emitting ONE witness string:
+    # ``_dynamic_packages`` marks a package's whole subtree, ``_dynamic_modules``
+    # bounds a plain module to its declared names.  A consumer cannot tell them
+    # apart, so they are one mechanism, and the entry point that runs both is
+    # its resolvable owner -- the same reading the three closure-built method
+    # witnesses below already take.  Splitting them into two ids would change
+    # an emitted witness string and is the maintainer's call, not this
+    # vocabulary's.
+    _exposure(
+        EXPOSURE_MODULE_GETATTR,
+        "collect_external_reachability",
+        "a module-level __getattr__ (PEP 562) can serve names here: any name "
+        "below a package, or the declared names of a plain module",
+    ),
+    # The three method rules below are built by closures inside the entry
+    # point (``type_witness`` / ``ancestor_witness`` / ``row``), so the entry
+    # point is the resolvable owner.  Rule 2 is what caught the first, prettier
+    # reference here naming a ``_method_exposure`` that does not exist.
+    _exposure(
+        EXPOSURE_EXPOSED_SUBCLASS,
+        "collect_external_reachability",
+        "a project subclass of the method's owner is exposed and inherits it",
+    ),
+    _exposure(
+        EXPOSURE_EXPOSED_ANCESTOR,
+        "collect_external_reachability",
+        "a project ancestor of the method's owner is exposed, so a caller "
+        "holding the ancestor's type dispatches into the override",
+    ),
+    _exposure(
+        EXPOSURE_UNRESOLVED_BASE,
+        "collect_external_reachability",
+        "the owning class has a base no edge binds, so whether the method is "
+        "exposed cannot be read statically",
+    ),
+)
+
+# --------------------------------------------------------------------------
+# Resolution: how a reference resolved to a target, or why it did not.
+#
+# RelationshipRecord.resolution_rule is a plain ``str | None`` that rides the
+# cache wire and is served to MCP consumers verbatim.  Nothing validated it
+# against a closed set, so a producer typo would travel all the way to a
+# reader as a new rule.
+
+RESOLUTION_IMPORTED_SYMBOL: Final = "imported_symbol"
+RESOLUTION_IMPORTED_MODULE_ATTRIBUTE: Final = "imported_module_attribute"
+RESOLUTION_SAME_MODULE_FUNCTION: Final = "same_module_function"
+RESOLUTION_SAME_MODULE_CLASS: Final = "same_module_class"
+RESOLUTION_SAME_MODULE_CLASS_METHOD: Final = "same_module_class_method"
+RESOLUTION_SELF_OR_CLS_METHOD: Final = "self_or_cls_method"
+RESOLUTION_LOCAL_SHADOWING: Final = "local_shadowing"
+RESOLUTION_AMBIGUOUS_IMPORT: Final = "ambiguous_import"
+RESOLUTION_UNRESOLVED_NAME: Final = "unresolved_name"
+RESOLUTION_UNRESOLVED_DYNAMIC: Final = "unresolved_dynamic"
+
+
+def _resolution(identifier: str, producer: str, summary: str) -> MechanismSpec:
+    return MechanismSpec(
+        id=identifier,
+        kind="resolution",
+        producer=f"{_WALK}:{producer}",
+        witness_type="resolution_rule",
+        semantic_owner=_RELATIONSHIP_POLICY,
+        summary=summary,
+    )
+
+
+_RESOLUTION: Final[tuple[MechanismSpec, ...]] = (
+    _resolution(
+        RESOLUTION_IMPORTED_SYMBOL,
+        "_resolve_relationship_expression",
+        "a bare name bound by 'from module import name' resolved to exactly one target",
+    ),
+    _resolution(
+        RESOLUTION_IMPORTED_MODULE_ATTRIBUTE,
+        "_resolve_relationship_expression",
+        "an attribute load through a module alias bound by 'import module' "
+        "resolved to exactly one target module",
+    ),
+    _resolution(
+        RESOLUTION_SAME_MODULE_FUNCTION,
+        "_resolve_relationship_expression",
+        "a bare name matched a top-level function of the calling module",
+    ),
+    _resolution(
+        RESOLUTION_SAME_MODULE_CLASS,
+        "_resolve_relationship_expression",
+        "a bare name matched a top-level class of the calling module",
+    ),
+    _resolution(
+        RESOLUTION_SAME_MODULE_CLASS_METHOD,
+        "_resolve_relationship_expression",
+        "an attribute load on a top-level class of the calling module matched "
+        "one of its declared methods",
+    ),
+    _resolution(
+        RESOLUTION_SELF_OR_CLS_METHOD,
+        "_resolve_relationship_expression",
+        "an attribute load on the receiver inside a method matched a declared "
+        "method of the enclosing class, so the receiver type is proven",
+    ),
+    _resolution(
+        RESOLUTION_LOCAL_SHADOWING,
+        "_resolve_relationship_expression",
+        "the name is bound by an import AND rebound locally or at module "
+        "scope, so the import is not what the call reaches",
+    ),
+    _resolution(
+        RESOLUTION_AMBIGUOUS_IMPORT,
+        "_single_relationship_target",
+        "the name is bound by more than one import target, so no single "
+        "target can be named",
+    ),
+    _resolution(
+        RESOLUTION_UNRESOLVED_NAME,
+        "_resolve_relationship_expression",
+        "a bare name matched no import, no top-level definition and no local "
+        "binding that could be followed",
+    ),
+    _resolution(
+        RESOLUTION_UNRESOLVED_DYNAMIC,
+        "_resolve_relationship_expression",
+        "the expression is an attribute load whose receiver no static rule "
+        "binds to a module or a project class",
+    ),
+)
+
+
+def _index(*groups: tuple[MechanismSpec, ...]) -> Mapping[str, MechanismSpec]:
+    index: dict[str, MechanismSpec] = {}
+    for group in groups:
+        for spec in group:
+            if spec.id in index:
+                raise LivenessVocabularyError(f"duplicate mechanism id {spec.id!r}")
+            index[spec.id] = spec
+    return index
+
+
+#: Every declared mechanism, keyed by id, in DECLARATION order.
+#:
+#: Declaration order and not sorted order, because the derived vocabularies
+#: below are published values that already exist elsewhere: ``LIVE_ROOT_REASONS``
+#: is pinned to ``get_args(LiveRootReason)`` by
+#: ``tests/test_canonical_registry.py``, and an owner that re-sorted what it
+#: took ownership of would change a contract while claiming to consolidate one.
+#: The order is authored and therefore deterministic; nothing here iterates a
+#: set.
+MECHANISMS: Final[Mapping[str, MechanismSpec]] = _index(
+    _LIVENESS,
+    _LIVENESS_EVIDENCE,
+    _SUPPRESSION,
+    _EXTERNAL_EXPOSURE,
+    _RESOLUTION,
+)
+
+
+def _ids(kind: MechanismKind, *, active_only: bool = False) -> tuple[str, ...]:
+    return tuple(
+        identifier
+        for identifier, spec in MECHANISMS.items()
+        if spec.kind == kind and (not active_only or spec.status == "active")
+    )
+
+
+def _ids_by_witness(
+    witness_type: WitnessType, *, active_only: bool = False
+) -> tuple[str, ...]:
+    return tuple(
+        identifier
+        for identifier, spec in MECHANISMS.items()
+        if spec.witness_type == witness_type
+        and (not active_only or spec.status == "active")
+    )
+
+
+LIVENESS_MECHANISMS: Final[tuple[str, ...]] = _ids("liveness")
+SUPPRESSION_MECHANISMS: Final[tuple[str, ...]] = _ids("suppression")
+EXTERNAL_EXPOSURE_MECHANISMS: Final[tuple[str, ...]] = _ids("external_exposure")
+RESOLUTION_MECHANISMS: Final[tuple[str, ...]] = _ids("resolution")
+
+ACTIVE_MECHANISMS: Final[tuple[str, ...]] = tuple(
+    identifier for identifier, spec in MECHANISMS.items() if spec.status == "active"
+)
+PARKED_MECHANISMS: Final[Mapping[str, str]] = {
+    identifier: spec.park_reason
+    for identifier, spec in MECHANISMS.items()
+    if spec.status == "explicitly_parked" and spec.park_reason is not None
+}
+
+#: The wire's ACCEPTANCE vocabulary for ``DeadCandidate.live_root_reason``.
+#: Parked names stay in it: a cache or baseline written by an older build may
+#: still carry one, and refusing it there would turn a readable artifact into
+#: an unreadable one.  This is the single owner the decoders mirror.
+#:
+#: Typed as the ``LiveRootReason`` tuple, and that annotation is the ONE cast in
+#: the vocabulary's whole path.  It sits here, at the owner, rather than in each
+#: narrower: ``core/discovery_cache`` decodes a cached reason back onto the
+#: closed set by iterating this tuple, and it can only return a
+#: ``LiveRootReason`` if the members it iterates are ones.  Putting the cast in
+#: the consumer would put a second unchecked claim in every consumer.  The claim
+#: is not unchecked here either -- ``test_f4_live_root_reasons_is_served_not
+#: _copied`` executes ``get_args(LiveRootReason) == LIVE_ROOT_REASONS``, so a
+#: mechanism carrying this witness whose id the Literal does not spell reds
+#: before the cast can lie.
+LIVE_ROOT_REASONS: Final[tuple[LiveRootReason, ...]] = cast(
+    "tuple[LiveRootReason, ...]", _ids_by_witness("live_root_reason")
+)
+
+#: The PRODUCTION vocabulary: what a producer in THIS build may still emit.
+#: ``export_root`` is absent, which is the whole point -- the two sets were
+#: one set, and that is how a value nothing produced stayed indistinguishable
+#: from a value something produced.
+ACTIVE_LIVE_ROOT_REASONS: Final[tuple[str, ...]] = _ids_by_witness(
+    "live_root_reason", active_only=True
+)
+
+_LIVE_ROOT_ACCEPTED: Final[frozenset[str]] = frozenset(LIVE_ROOT_REASONS)
+_LIVE_ROOT_EMITTABLE: Final[frozenset[str]] = frozenset(ACTIVE_LIVE_ROOT_REASONS)
+_RESOLUTION_RULES: Final[frozenset[str]] = frozenset(RESOLUTION_MECHANISMS)
+_EXPOSURE_MECHANISMS: Final[frozenset[str]] = frozenset(EXTERNAL_EXPOSURE_MECHANISMS)
+
+
+def validate_live_root_reason(value: str) -> str:
+    """The DECODER's door: every reason an artifact may still carry."""
+    if value not in _LIVE_ROOT_ACCEPTED:
+        raise LivenessVocabularyError(
+            f"unknown live root reason {value!r}; update the reviewed vocabulary"
+        )
+    return value
+
+
+def emit_live_root_reason(value: str) -> str:
+    """The PRODUCER's door: only what this build can still conclude.
+
+    A parked reason is refused here and admitted by the decoder, which is the
+    asymmetry that lets a retired mechanism stop being produced without
+    breaking a single artifact that already carries it.
+    """
+    if value not in _LIVE_ROOT_EMITTABLE:
+        raise LivenessVocabularyError(
+            f"live root reason {value!r} is not produced by this build; "
+            f"emittable reasons are {ACTIVE_LIVE_ROOT_REASONS}"
+        )
+    return value
+
+
+def validate_resolution_rule(value: str) -> str:
+    """The one door every ``RelationshipRecord.resolution_rule`` passes."""
+    if value not in _RESOLUTION_RULES:
+        raise LivenessVocabularyError(
+            f"unknown relationship resolution rule {value!r}; update the "
+            f"reviewed vocabulary"
+        )
+    return value
+
+
+def exposure_witness(mechanism: str, detail: str) -> str:
+    """Format one ``ExternalReachability.witness``, mechanism first.
+
+    The witness has always been ``"<mechanism>:<detail>"``; it was assembled
+    by eight separate f-strings and read back by prefix.  Building it here
+    means a mechanism no vocabulary declares cannot reach a consumer.
+    """
+    if mechanism not in _EXPOSURE_MECHANISMS:
+        raise LivenessVocabularyError(
+            f"unknown external exposure mechanism {mechanism!r}; update the "
+            f"reviewed vocabulary"
+        )
+    return f"{mechanism}:{detail}"
+
+
+def witness_mechanism(witness: str) -> str | None:
+    """The declared mechanism a witness names, or ``None`` if it names none."""
+    mechanism = witness.partition(":")[0]
+    return mechanism if mechanism in _EXPOSURE_MECHANISMS else None

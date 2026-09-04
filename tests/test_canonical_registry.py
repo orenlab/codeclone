@@ -226,24 +226,45 @@ def test_f8_clone_kind_vocabulary_mirrors_the_contract_constants() -> None:
 
 
 def test_f4_dead_code_vocabularies_mirror_the_producer() -> None:
-    """Executed cross-check: the three closed F4 vocabularies equal the
+    """Executed cross-check: the two mirrored F4 vocabularies equal the
     producer's Literal types — a drift on either side reds here."""
     from typing import get_args
 
     from codeclone.canonical.identity import (
         DEAD_CODE_CANDIDATE_KINDS,
         DEAD_CODE_OBSERVATION_KINDS,
-        LIVE_ROOT_REASONS,
     )
-    from codeclone.models import (
-        DeadCodeCandidateKind,
-        DeadCodeObservationKind,
-        LiveRootReason,
-    )
+    from codeclone.models import DeadCodeCandidateKind, DeadCodeObservationKind
 
     assert get_args(DeadCodeCandidateKind) == DEAD_CODE_CANDIDATE_KINDS
     assert get_args(DeadCodeObservationKind) == DEAD_CODE_OBSERVATION_KINDS
+
+
+def test_f4_live_root_reasons_is_served_not_copied() -> None:
+    """The registry serves the live-root vocabulary; it does not own it.
+
+    Five modules spelled these two strings by hand — this registry among
+    them — which made it the fifth copy rather than the authority. The tuple
+    it serves now resolves to the ONE object the mechanism registry derives
+    from its own specs, so a hand-written restatement here is what the
+    detector has to catch.
+
+    So the drift detector moves to where a detector can still fail. The
+    ``is`` assertion reds the moment anyone reintroduces a hand-written
+    tuple in ``canonical.identity`` (an equal copy passes ``==`` and fails
+    ``is``), and the literal freeze below is the wire contract itself:
+    the F4 wire refuses unknowns (W08), so a member added or removed at the
+    owner is a payload-schema decision and has to red here first.
+    """
+    from typing import get_args
+
+    from codeclone.canonical.identity import LIVE_ROOT_REASONS
+    from codeclone.models import LIVE_ROOT_REASONS as OWNED_REASONS
+    from codeclone.models import LiveRootReason
+
+    assert LIVE_ROOT_REASONS is OWNED_REASONS
     assert get_args(LiveRootReason) == LIVE_ROOT_REASONS
+    assert LIVE_ROOT_REASONS == ("external_decorator", "export_root")
 
 
 def test_f3_family_is_a_wire_family_with_the_ratified_columns() -> None:

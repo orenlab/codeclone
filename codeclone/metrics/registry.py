@@ -17,6 +17,7 @@ from ..findings.clones.golden_fixtures import (
 )
 from ..models import (
     DEFAULT_DEAD_CODE_WORLD,
+    LIVE_ROOT_REASONS,
     ApiSurfaceSnapshot,
     DeadItem,
     DependencyCycleDetail,
@@ -303,7 +304,11 @@ def _is_tuple_of_live_root_reasons(
         isinstance(item, tuple)
         and len(item) == 2
         and isinstance(item[0], str)
-        and item[1] in ("external_decorator", "export_root")
+        # The vocabulary comes from its owner, not from a copy: a guard that
+        # spells the members itself stops recognising the lane the moment the
+        # vocabulary grows, and this one discards the WHOLE tuple when a single
+        # item fails, so an unrecognised reason would erase every reason.
+        and item[1] in LIVE_ROOT_REASONS
         for item in value
     )
 

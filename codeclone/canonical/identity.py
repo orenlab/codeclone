@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from codeclone.canonical.errors import CanonicalModelError
+from codeclone.models import LIVE_ROOT_REASONS as _LIVE_ROOT_REASONS
 
 # Contract tag strings (F-3 §7.3). Codes are stable contract strings, never
 # integers and never Python enum order; renaming one is a
@@ -145,9 +146,27 @@ PRODUCER_EXECUTION_STATES: Final = (
 # mirror pin stays green because both sides restate it.  The population itself
 # is pinned by ``tests/test_pipeline_process.py`` against a real cold and warm
 # run, so the declared excess cannot move in either direction unannounced.
+#
+# LIVE_ROOT_REASONS is the exception, and deliberately so: it is TAKEN from
+# the mechanism registry rather than mirrored.  A mirror is an authority only
+# while it is the last copy; that vocabulary had five hand-written spellings,
+# so this registry was not its owner but the fifth restatement, and a registry
+# a consumer can reproduce by hand governs nothing.  The owner is
+# ``codeclone.models``, which every ring that decides on the vocabulary --
+# ``cache``, ``metrics``, ``core`` and this package -- already imports, so
+# serving the name here costs no new edge.
 DEAD_CODE_CANDIDATE_KINDS: Final = ("function", "class", "method", "import")
 DEAD_CODE_OBSERVATION_KINDS: Final = ("symbol", "unreachable_statement")
-LIVE_ROOT_REASONS: Final = ("external_decorator", "export_root")
+# Re-exported from the ONE owner rather than restated.  This value was
+# hand-written in five places -- here, ``models.LiveRootReason``,
+# ``cache/_wire_decode``, ``metrics/registry`` and an if/elif ladder in
+# ``core/discovery_cache`` -- and every copy kept accepting ``export_root``
+# as decodable for months after the last thing that produced it was retired.
+# The owner also splits acceptance from production, which is the distinction
+# that makes a producerless value visible: this tuple is the ACCEPTANCE
+# vocabulary and deliberately still carries the retired reason, because a
+# stored artifact may.
+LIVE_ROOT_REASONS: Final = _LIVE_ROOT_REASONS
 # F3 adoption_counts (wave 4): the closed feature vocabulary, mirrored
 # verbatim from the ONE producer (``observations/projection.py``
 # ``_adoption_counts``) and pinned against its source by test — no Literal

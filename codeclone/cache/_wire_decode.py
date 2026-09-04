@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Final, Literal, TypeGuard, cast
 
 from ..models import (
+    LIVE_ROOT_REASONS,
     ApiParamSpecDict,
     BlockGroupItem,
     CacheDependentPayload,
@@ -1817,7 +1818,12 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     return decoded
 
 
-_LIVE_ROOT_REASONS: Final = frozenset({"external_decorator", "export_root"})
+# The DECODER's vocabulary, and deliberately the acceptance one: a row
+# written by an older build may carry a reason this build no longer
+# produces, and refusing it here would turn a readable cache into an
+# unreadable one.  What a producer may still emit is the owner's
+# ``ACTIVE_LIVE_ROOT_REASONS``, which is a strictly smaller set.
+_LIVE_ROOT_REASONS: Final = frozenset(LIVE_ROOT_REASONS)
 
 
 def _decode_wire_dead_candidate(
