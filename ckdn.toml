@@ -1,0 +1,55 @@
+# ckdn configuration. Docs: https://github.com/orenlab/ckdn ("Configuration").
+# Tracked: the gate definitions agents and CI verify through must be readable
+# from every worktree. A local-only exclusion made this file invisible to every
+# worktree and to every test, so the knowledge that compensates for a gate's
+# scope lived where nothing could check it.
+
+[run]
+runs_dir = ".agent-runs"   # where run artifacts live (add to .gitignore)
+keep = 20                  # prune old run directories beyond this count
+top = 20                   # max findings / top entries in a digest
+max_snippet_lines = 12     # max detail lines per finding
+log_tail_lines = 40        # log tail size on error / parse_mismatch
+
+# --- checks ---------------------------------------------------------------
+# Each check is: a command (tokenized with shlex, no shell), a parser,
+# and optional parser-specific keys. `{run_dir}` is substituted in the
+# command and in parser artifact paths.
+
+[check.pytest]
+command = "uv run pytest -q --junitxml {run_dir}/junit.xml"
+parser = "pytest"
+
+[check.coverage]
+command = "uv run pytest -q --junitxml {run_dir}/junit.xml --cov=codeclone --cov-report=term-missing --cov-report=xml:{run_dir}/coverage.xml"
+parser = "coverage"
+fail_under = 99.0
+
+# `types` is an ALIAS over both type checkers, because neither is a superset:
+# ty covers .github/actions, mypy --strict covers tests, and mypy catches what
+# ty misses (measured: an unannotated Literal). A green `types` that ran only
+# ty promised more than it did.
+# Alias members must be run with run_group / `ckdn run types`, not run_check.
+[check.ty]
+# `uv run`, not `uvx`: uvx resolves ty outside the project and was measured
+# 2026-08-31 running 0.0.63 while pyproject pins ty>=0.0.66 and CI runs
+# 0.0.66 — the local gate was three releases behind its own minimum.
+command = "uv run ty check codeclone .github/actions benchmarks"
+parser = "ty"
+
+[check.mypy]
+command = "uv run mypy"
+parser = "mypy"
+
+[check.types]
+members = ["ty", "mypy"]
+fail_fast = false
+
+[check.lint]
+command = "uv run ruff check --output-format json --output-file {run_dir}/ruff.json ."
+parser = "ruff"
+
+# [check.build]
+# command = "uv build"
+# parser = "generic"
+# timeout = 300

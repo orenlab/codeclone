@@ -57,3 +57,6 @@ extensions/vscode-codeclone/node_modules
 codeclone.baseline.json.v2.*.json
 *.publish.lock
 *.publish.lock.recovery
+
+# ckdn run artifacts (runs_dir in ckdn.toml)
+.agent-runs/
