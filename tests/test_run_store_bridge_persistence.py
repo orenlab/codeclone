@@ -61,6 +61,7 @@ from codeclone.models import (
     RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
     RUN_SNAPSHOT_RESOLUTION_RESOLVED,
     RUN_SNAPSHOT_RESOLUTION_UNLINKED,
+    RunSnapshotLink,
     RunSnapshotPublication,
     RunStoreConfig,
 )
@@ -537,6 +538,130 @@ def test_link_refuses_a_run_the_store_does_not_hold(tmp_path: Path) -> None:
                 report_run_identity="e" * 64,
                 expected_scope_digest=report_scope_receipt(document),
             )
+
+
+# ---------------------------------------------------------------------------
+# Writing the edge presupposes the store; it never brings one about.
+# ---------------------------------------------------------------------------
+#
+# The edge is stated about an ALREADY published run, so a store at the named
+# path is this write's precondition and never its result.  Three inputs, three
+# answers, and the two refusals are told apart by their ``reason`` token:
+#
+#   store absent                          -> run_store_absent
+#   store present, run never published    -> run_not_published
+#   store present, run published          -> the edge is written
+#
+# Collapsing the first two rows is the measured defect this table exists for:
+# the creating default built the store, then reported ``run_not_published`` --
+# a true sentence about the store it had just written, and a false one about
+# the store the caller named.
+
+
+def _link_to_an_unheld_run(document: Mapping[str, object]) -> RunSnapshotLink:
+    """A ``linked`` bridge naming a run no store in these tests ever held.
+
+    ``linked`` is the only state that carries both halves of the relation, so
+    it is the only state that reaches the store at all; the two zero states
+    return ``False`` without opening anything and would measure nothing here.
+    """
+
+    return bridge_run_snapshot(
+        publication=RunSnapshotPublication(
+            outcome=RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
+            admissible=True,
+            target=_TARGET,
+            run_id="a" * 64,
+            generation=1,
+            analysis_scope_digest=report_scope_receipt(document),
+        ),
+        report_document=document,
+    )
+
+
+def test_persisting_into_an_absent_store_creates_no_store(tmp_path: Path) -> None:
+    """Row 1: no store here, and none after the refusal either.
+
+    Measured before this pin: the absent path was opened with the creating
+    default, which left 69632 bytes and eleven tables of empty schema behind
+    and then refused with ``run_not_published``.  The parent directory is
+    pinned with the file because the shared connection owner creates it
+    before it ever reaches sqlite, so a guard placed one statement later
+    would still leave a tree on disk.
+    """
+
+    store_path = tmp_path / "not-a-store" / "runs.sqlite"
+    document = _document(fixture_model(), "e" * 64)
+
+    with pytest.raises(UnknownRunError) as refusal:
+        persist_run_snapshot_link(
+            store_path=store_path, link=_link_to_an_unheld_run(document)
+        )
+
+    assert refusal.value.reason == "run_store_absent"
+    assert not store_path.exists(), "the refused write became the store it refused"
+    assert not store_path.parent.exists(), "the refused write created the store's dir"
+
+
+def test_persisting_a_run_the_store_never_published_says_exactly_that(
+    tmp_path: Path,
+) -> None:
+    """Row 2: the store is real, the run is not.
+
+    The distinction between this row and the one above exists only if BOTH
+    tokens can be observed: one reason for "nothing to link to" would leave
+    an absent store and an unpublished run indistinguishable to every caller
+    that branches on ``reason``, which is what the token is for.
+    """
+
+    store_path = tmp_path / "runs.sqlite"
+    with RunStore(store_path):
+        pass
+    document = _document(fixture_model(), "e" * 64)
+
+    with pytest.raises(UnknownRunError) as refusal:
+        persist_run_snapshot_link(
+            store_path=store_path, link=_link_to_an_unheld_run(document)
+        )
+
+    assert refusal.value.reason == "run_not_published"
+    assert store_path.exists(), "the refusal removed the store it was handed"
+
+
+def test_persisting_a_published_run_writes_the_edge(tmp_path: Path) -> None:
+    """Row 3: the precondition holds, so the write happens.
+
+    The positive row belongs to the same table as the two refusals.  Without
+    it a guard that refused every input would satisfy both rows above and
+    leave the owner unable to do the one thing it is for.
+    """
+
+    store_path = tmp_path / "runs.sqlite"
+    model = fixture_model()
+    document = _document(model, "e" * 64)
+    with RunStore(store_path) as store:
+        run_id = _publish(store, model)
+
+    persisted = persist_run_snapshot_link(
+        store_path=store_path,
+        link=bridge_run_snapshot(
+            publication=RunSnapshotPublication(
+                outcome=RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
+                admissible=True,
+                target=_TARGET,
+                run_id=run_id,
+                generation=1,
+                analysis_scope_digest=report_scope_receipt(document),
+            ),
+            report_document=document,
+        ),
+    )
+
+    assert persisted is True
+    with RunStore(store_path) as store:
+        edge = linked_run(store, report_run_identity="e" * 64)
+    assert edge is not None
+    assert edge.run_id == run_id
 
 
 # ---------------------------------------------------------------------------

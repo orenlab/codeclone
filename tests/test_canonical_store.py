@@ -1165,6 +1165,57 @@ def test_unknown_run_is_a_typed_refusal(tmp_path: Path) -> None:
         store.read_run("0" * 64)
 
 
+def test_reading_an_absent_store_writes_nothing_to_disk(tmp_path: Path) -> None:
+    """A read that finds no store refuses; it does not become the store.
+
+    Measured before this pin: opening a store over an absent path and asking
+    it for a run refused with the right class and left 69632 bytes of schema
+    -- eleven tables -- behind it.  A reader that materializes what it failed
+    to find turns "no analysis was published here" into "an empty analysis
+    was published here", and every later question is answered by the second
+    sentence.  The parent directory is pinned too: ``open_sqlite_db`` creates
+    it before it ever reaches sqlite, so a guard placed after the open would
+    still leave a tree behind.
+    """
+
+    path = tmp_path / "not-a-store" / "runs.sqlite"
+    with pytest.raises(UnknownRunError) as refusal:
+        RunStore(path, create=False)
+    assert refusal.value.reason == "run_store_absent"
+    assert not path.exists(), "the refused read wrote the store it refused to read"
+    assert not path.parent.exists(), "the refused read created the store's directory"
+
+
+def test_unknown_run_refusal_carries_an_executable_next_step(tmp_path: Path) -> None:
+    """A typed outcome ships with an executable next step, or it does not ship.
+
+    ``reason`` is a stable token a caller may branch on, so it is spelled
+    literally here on purpose: importing the constant would only prove the
+    module agrees with itself, and a rename would stay invisible to every
+    consumer that already branches on the token.  ``next_step`` is pinned by
+    its rule -- non-empty, and carried in the message a human reads -- not by
+    its prose, which is free to improve.
+    """
+
+    with _store(tmp_path) as store, pytest.raises(UnknownRunError) as refusal:
+        store.read_run("0" * 64)
+    assert refusal.value.reason == "run_not_published"
+    assert refusal.value.next_step, "a typed refusal shipped with no next step"
+    assert refusal.value.next_step in str(refusal.value)
+
+
+def test_an_unknown_run_reason_with_no_next_step_cannot_be_raised() -> None:
+    """The closed table is the authority, not a lookup with a default.
+
+    Reachability of the law from the other side: a raise site that invents a
+    reason nobody wrote a remediation for must fail loudly at the raise, not
+    ship a typed outcome with an empty next step.
+    """
+
+    with pytest.raises(KeyError):
+        UnknownRunError("a detail", reason="reason_nobody_wrote_a_next_step_for")
+
+
 # -- Scope receipt (brief §7.1, wave-2 minimal) -----------------------------
 
 

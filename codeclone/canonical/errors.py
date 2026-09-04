@@ -24,6 +24,8 @@ Distinct failure surfaces, never conflated:
 
 from __future__ import annotations
 
+from typing import Final
+
 
 class CanonicalModelError(ValueError):
     """A value violates a canonical-model law on the producer side."""
@@ -95,8 +97,61 @@ class StoreIntegrityError(RunStoreError):
     """
 
 
+#: Machine-readable reasons a run lookup cannot be answered.  Stable
+#: tokens: a caller may branch on them, so a rename is a contract change.
+UNKNOWN_RUN_STORE_ABSENT: Final = "run_store_absent"
+UNKNOWN_RUN_NOT_PUBLISHED: Final = "run_not_published"
+UNKNOWN_RUN_NOT_OF_STORE: Final = "run_not_of_store"
+UNKNOWN_RUN_HEAD_ABSENT: Final = "target_head_absent"
+
+#: One executable remediation per reason.  Closed on purpose: the lookup is
+#: a plain subscript, so a raise site that invents a reason fails at the
+#: raise instead of shipping a typed outcome with nothing to act on.
+_UNKNOWN_RUN_NEXT_STEP: Final[dict[str, str]] = {
+    UNKNOWN_RUN_STORE_ABSENT: (
+        "point the read at the store this workspace publishes to "
+        "(.codeclone/db/runs.sqlite3 under the repository root), or run an "
+        "analysis with the run store enabled so that a store exists to read"
+    ),
+    UNKNOWN_RUN_NOT_PUBLISHED: (
+        "resolve the run through head(namespace=..., target=...) and read the "
+        "run_id it names, or publish this model with write_full_run before "
+        "reading it back"
+    ),
+    UNKNOWN_RUN_NOT_OF_STORE: (
+        "address the store that holds this run, or publish the run into this "
+        "store with write_full_run before retaining or releasing it"
+    ),
+    UNKNOWN_RUN_HEAD_ABSENT: (
+        "publish a run for this target with write_full_run before exporting "
+        "its head, or export a known run directly with export_run(store, "
+        "run_id, sink)"
+    ),
+}
+
+
 class UnknownRunError(RunStoreError):
-    """The requested ``run_id`` is not a published run of this store."""
+    """A run lookup this store cannot answer.
+
+    Covers the absent store as well as the absent run: a path that holds no
+    store publishes no runs, and a reader must be told so without the store
+    being brought into existence to say it.
+
+    Carries the machine-readable ``reason`` and an executable ``next_step``,
+    the shape :class:`~codeclone.contracts.scope_grammar.ScopeGrammarError`
+    already set for a typed refusal an agent has to act on rather than parse.
+    ``reason`` is required and its remediation is a plain subscript of the
+    closed table: a refusal with nothing to do next is not shippable, so it
+    is not constructible either.
+    """
+
+    __slots__ = ("next_step", "reason")
+
+    def __init__(self, detail: str, *, reason: str) -> None:
+        next_step = _UNKNOWN_RUN_NEXT_STEP[reason]
+        super().__init__(f"{detail} (reason: {reason}). next_step: {next_step}.")
+        self.reason = reason
+        self.next_step = next_step
 
 
 class RunReportLinkError(RunStoreError):

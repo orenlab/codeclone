@@ -48,7 +48,7 @@ from typing import NamedTuple
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
 # ingest oracle, and importing the oracle from a production path would
 # make the test oracle a production dependency (ruling 2026-08-24 §6).
-from ..canonical.errors import RunReportLinkError
+from ..canonical.errors import RunReportLinkError, UnknownRunError
 from ..canonical.identity import FileId, ModuleId
 from ..canonical.model import (
     AdoptionCountRow,
@@ -1231,7 +1231,15 @@ def persist_run_snapshot_link(*, store_path: Path, link: RunSnapshotLink) -> boo
     # every run, and the store is reached only by runs that have one.
     from ..canonical.store import RunStore, link_run_report
 
-    with RunStore(store_path) as store:
+    # ``create=False`` because this writes about an ALREADY published run: a
+    # store at this path is the write's precondition, never its result.  With
+    # the creating default an absent path was built into an empty store and
+    # then refused ``run_not_published`` -- true of the store it had just
+    # written, false of the store the caller named, and 69632 bytes of empty
+    # schema left behind to make the lie durable.  The two refusals stay
+    # distinguishable by ``reason``: ``run_store_absent`` here, and
+    # ``run_not_published`` from the row lookup inside a store that exists.
+    with RunStore(store_path, create=False) as store:
         link_run_report(
             store,
             run_id=link.store_run_id,
@@ -1266,17 +1274,25 @@ def resolve_run_snapshot_link(
             "the run store is not enabled for this root, so nothing can be "
             "asked which analysis backs this document"
         )
-    if not config.path.exists():
-        raise RunSnapshotBridgeError(
-            f"there is no run store at {config.path}; an absent store is not "
-            "the statement that no analysis backs this document"
-        )
-    identity = _report_run_identity_or_refuse(report_document)
-    scope = report_scope_receipt(report_document)
 
     from ..canonical.store import RunStore, linked_run, runs_over_scope
 
-    with RunStore(config.path) as store:
+    # One owner for "is there a store at this path": the non-creating open
+    # answers it, and a second answer spelled here is how the two would
+    # drift.  It is also the answer that must not write -- a read that
+    # materialized an empty store would turn "no analysis was published
+    # here" into "an empty analysis was published here", and every later
+    # question would be answered by the second sentence.
+    try:
+        store = RunStore(config.path, create=False)
+    except UnknownRunError as absent:
+        raise RunSnapshotBridgeError(
+            f"there is no run store at {config.path}; an absent store is not "
+            "the statement that no analysis backs this document"
+        ) from absent
+    with store:
+        identity = _report_run_identity_or_refuse(report_document)
+        scope = report_scope_receipt(report_document)
         edge = linked_run(store, report_run_identity=identity)
         candidates = (
             () if edge is not None else runs_over_scope(store, scope_digest=scope)

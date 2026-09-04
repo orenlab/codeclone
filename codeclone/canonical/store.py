@@ -88,6 +88,10 @@ from codeclone.canonical.codec import (
     stream_canonical_wire,
 )
 from codeclone.canonical.errors import (
+    UNKNOWN_RUN_HEAD_ABSENT,
+    UNKNOWN_RUN_NOT_OF_STORE,
+    UNKNOWN_RUN_NOT_PUBLISHED,
+    UNKNOWN_RUN_STORE_ABSENT,
     CanonicalModelError,
     RunReportLinkError,
     RunStoreError,
@@ -1834,7 +1838,10 @@ def _published_run_row(
         (run_id,),
     ).fetchone()
     if row is None:
-        raise UnknownRunError(f"run {run_id!r} is not a published run")
+        raise UnknownRunError(
+            f"run {run_id!r} is not a published run",
+            reason=UNKNOWN_RUN_NOT_PUBLISHED,
+        )
     return (int(row[0]), str(row[1]), str(row[2]), str(row[3]))
 
 
@@ -2388,8 +2395,21 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
 class RunStore:
     """The wave-2 canonical run-store over one SQLite file."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, create: bool = True) -> None:
         self._path = str(path)
+        # A reader passes ``create=False`` and is refused before anything
+        # touches the filesystem.  The check cannot move any later: the
+        # shared connection owner creates the parent directory before it
+        # reaches sqlite, and sqlite creates the file before the first
+        # statement, so a store opened to be read and found missing was
+        # already written by the time any read verb could refuse.  Measured
+        # before this guard: 69632 bytes and eleven tables of schema left
+        # behind by a lookup that correctly answered "unknown run".
+        if not create and not Path(self._path).exists():
+            raise UnknownRunError(
+                f"there is no run store at {self._path}",
+                reason=UNKNOWN_RUN_STORE_ABSENT,
+            )
         # The ratified connection convention (ruling 2026-08-24 §5) arrives
         # through the ONE shared connection owner — WAL and busy_timeout
         # 5000 are the owner's, never restated here.  ``synchronous=FULL``
@@ -2834,7 +2854,10 @@ def release_retained_run(store: RunStore, run_id: str) -> bool:
             "SELECT run_pk FROM runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         if row is None:
-            raise UnknownRunError(f"run {run_id!r} is not a run of this store")
+            raise UnknownRunError(
+                f"run {run_id!r} is not a run of this store",
+                reason=UNKNOWN_RUN_NOT_OF_STORE,
+            )
         cursor.execute("DELETE FROM retained_runs WHERE run_pk = ?", (int(row[0]),))
         released = cursor.rowcount == 1
     return released
@@ -3098,7 +3121,8 @@ def export_head(
     head = store.head(namespace=namespace, target=target)
     if head is None:
         raise UnknownRunError(
-            f"target {target!r} has no published head in namespace {namespace!r}"
+            f"target {target!r} has no published head in namespace {namespace!r}",
+            reason=UNKNOWN_RUN_HEAD_ABSENT,
         )
     return export_run(store, head.run_id, sink)
 
