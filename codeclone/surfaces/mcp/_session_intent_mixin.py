@@ -66,8 +66,8 @@ from ._workspace_intents import (
     BeforeExecutionWitness,
     IntentOwnership,
     WorkspaceDocumentReadKind,
+    WorkspaceIntentLifecycle,
     WorkspaceIntentRecord,
-    WorkspaceIntentStatus,
     classify_intent_ownership,
     compute_scope_digest,
     detect_conflicts,
@@ -76,6 +76,7 @@ from ._workspace_intents import (
     find_workspace_intent,
     format_utc,
     gc_workspace,
+    lifecycle_for_verification_outcome,
     list_workspace_intents,
     read_workspace_intent,
     remove_workspace_intent,
@@ -479,7 +480,7 @@ class _MCPSessionIntentMixin:
             pid=self._agent_pid,
             start_epoch=self._agent_start_epoch,
             intent_id=intent.intent_id,
-            new_status=IntentStatus.QUEUED.value,
+            new_status=WorkspaceIntentLifecycle.QUEUED.value,
         )
         blocked_by = [
             {
@@ -607,7 +608,7 @@ class _MCPSessionIntentMixin:
             pid=self._agent_pid,
             start_epoch=self._agent_start_epoch,
             intent_id=intent_id,
-            new_status=IntentStatus.ACTIVE.value,
+            new_status=WorkspaceIntentLifecycle.ACTIVE.value,
         )
         renew_workspace_intent_lease(
             root=record.root,
@@ -911,7 +912,10 @@ class _MCPSessionIntentMixin:
                 ttl_seconds=ttl_seconds,
             ),
             ttl_seconds=ttl_seconds,
-            status=intent.status.value,
+            # The in-memory status is a verification verdict; the registry
+            # column is a fate.  Translate rather than copy: the two
+            # vocabularies overlap in spelling and nowhere else.
+            status=lifecycle_for_verification_outcome(intent.status.value).value,
             intent=intent.intent_description,
             scope=scope_payload,
             scope_digest=compute_scope_digest(scope_payload),
@@ -938,12 +942,22 @@ class _MCPSessionIntentMixin:
         record: MCPRunRecord,
         intent: IntentRecord,
     ) -> None:
+        """Persist the FATE this intent's verdict implies, not the verdict.
+
+        This is the site the incident ran through: the scope check sets the
+        in-memory status to its own verdict, and ``clean`` -- "the patch
+        stayed inside its scope" -- was written into a column where it means
+        "this row is finished".  ``find_workspace_intent`` filters terminal
+        rows, so a finish that went on to fail verification deleted the intent
+        its own ``next_step`` told the agent to recover.
+        """
+
         update_workspace_intent_status(
             root=record.root,
             pid=self._agent_pid,
             start_epoch=self._agent_start_epoch,
             intent_id=intent.intent_id,
-            new_status=intent.status.value,
+            new_status=lifecycle_for_verification_outcome(intent.status.value).value,
         )
 
     def _renew_lease_if_active(
@@ -1412,7 +1426,7 @@ class _MCPSessionIntentMixin:
             agent_pid=self._agent_pid,
             agent_start_epoch=self._agent_start_epoch,
             agent_label=self._agent_label,
-            status=WorkspaceIntentStatus.ACTIVE.value,
+            status=WorkspaceIntentLifecycle.ACTIVE.value,
             lease_renewed_at_utc=recovered_at,
             report_digest=recovery_run.report_digest,
         )
@@ -1552,7 +1566,7 @@ class _MCPSessionIntentMixin:
             pid=workspace_record.agent_pid,
             start_epoch=workspace_record.agent_start_epoch,
             intent_id=workspace_record.intent_id,
-            new_status=WorkspaceIntentStatus.ACTIVE.value,
+            new_status=WorkspaceIntentLifecycle.ACTIVE.value,
             ttl_seconds=ttl,
         )
         latest = find_workspace_intent(root=root_path, intent_id=intent_id)

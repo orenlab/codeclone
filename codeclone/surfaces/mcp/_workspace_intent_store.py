@@ -27,7 +27,7 @@ from ...workspace_intent.contract import (
     WorkspaceIntentRecord,
 )
 from ...workspace_intent.lifecycle import (
-    WorkspaceIntentStatus,
+    WorkspaceIntentLifecycle,
     gc_status_for_reason,
     is_terminal_workspace_intent_status,
 )
@@ -356,7 +356,7 @@ class SqliteWorkspaceIntentStore:
             if record is None or is_terminal_workspace_intent_status(record.status):
                 return False
             return self.write_unlocked(
-                replace(record, status=WorkspaceIntentStatus.CLEAN.value),
+                replace(record, status=WorkspaceIntentLifecycle.CLOSED.value),
             )
 
     def gc(self) -> dict[str, object]:

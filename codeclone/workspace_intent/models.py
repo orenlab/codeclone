@@ -37,9 +37,20 @@ from .contract import (
     compute_scope_digest,
     verify_intent_integrity,
 )
+from .lifecycle import (
+    WORKSPACE_INTENT_LIFECYCLE_VALUES,
+    is_workspace_intent_lifecycle,
+    lifecycle_for_status,
+)
 
 _HEX_DIGEST_LENGTH = 64
 _SAFE_INTENT_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+# The READ vocabulary: every token any build has ever persisted here.  It is
+# deliberately wider than what may be written -- 847 rows measured across 33
+# live registries on 2026-09-04 still carry the verification verdicts, and a
+# reader that rejected them would make those agents' own intents vanish.
+# The write door is :func:`signed_payload_dict_from_record`, and it admits
+# only the lifecycle vocabulary.
 _VALID_STATUSES = frozenset(
     {
         "active",
@@ -49,6 +60,7 @@ _VALID_STATUSES = frozenset(
         "violated",
         "expired",
         "orphaned",
+        "needs_recovery",
     }
 )
 _VALID_DIRTY_DIGEST_STATUSES = frozenset({"ok", "unavailable"})
@@ -538,6 +550,15 @@ def document_to_record_fields(document: WorkspaceIntentDocument) -> dict[str, ob
 
 
 def record_from_document(document: WorkspaceIntentDocument) -> WorkspaceIntentRecord:
+    """Rebuild the record, translating a legacy verdict into its fate.
+
+    A row written before the two axes were separated may carry ``expanded`` or
+    ``violated`` in the lifecycle column.  Normalising on read -- rather than
+    widening the write door -- means such a row keeps exactly the findability
+    it had (both were non-terminal, and both map to non-terminal fates) while
+    every write that follows it carries a lifecycle value.
+    """
+
     lease_renewed_at_utc, lease_seconds, report_digest = (
         document.normalized_lease_fields()
     )
@@ -551,7 +572,7 @@ def record_from_document(document: WorkspaceIntentDocument) -> WorkspaceIntentRe
         declared_at_utc=document.declared_at_utc,
         expires_at_utc=document.expires_at_utc,
         ttl_seconds=document.ttl_seconds,
-        status=document.status,
+        status=lifecycle_for_status(document.status).value,
         intent=document.intent,
         scope=scope_payload,
         scope_digest=document.scope_digest,
@@ -583,6 +604,15 @@ def _witness_from_document(
 
 
 def signed_payload_dict_from_record(record: object) -> dict[str, object]:
+    """The one door every persisted registry write passes through.
+
+    Both stores build their row here -- the sqlite one through
+    :func:`signed_payload_json_from_record`, the file one directly -- so the
+    lifecycle check below covers every writer of the ``status`` column at
+    once, including writers added after this was written.  A guard wired at a
+    call site would not: this repository has measured that blindness twice.
+    """
+
     if not isinstance(record, WorkspaceIntentRecord):
         raise TypeError("record must be a WorkspaceIntentRecord")
     raw_unsigned = record.unsigned_payload()
@@ -593,6 +623,15 @@ def signed_payload_dict_from_record(record: object) -> dict[str, object]:
     document = parse_workspace_document(provisional)
     if document is None:
         raise ValueError("record must contain a valid WorkspaceIntentRecord payload")
+    # After the shape check, never before it: a record that is malformed in
+    # some other way owes the caller its own diagnosis, and only a record the
+    # registry would otherwise accept can be refused for its axis.
+    if not is_workspace_intent_lifecycle(document.status):
+        raise ValueError(
+            "the workspace intent registry status is a lifecycle, not a "
+            f"verification verdict: {document.status!r} is not one of "
+            f"{sorted(WORKSPACE_INTENT_LIFECYCLE_VALUES)}"
+        )
     unsigned = unsigned_document_payload(document)
     return {
         **unsigned,

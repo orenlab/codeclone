@@ -32,6 +32,7 @@ from codeclone.config.intent_registry import (
 from codeclone.workspace_intent.contract import WorkspaceIntentRecord
 from codeclone.workspace_intent.lifecycle import (
     PidLiveness,
+    WorkspaceIntentLifecycle,
     WorkspaceIntentStatus,
     is_terminal_workspace_intent_status,
     utc_now,
@@ -288,10 +289,14 @@ def _decision_from_records(
             if record.status == WorkspaceIntentStatus.QUEUED.value:
                 queued = queued or record
                 continue
-            if (
-                record.status == WorkspaceIntentStatus.ACTIVE.value
-                and _ownership_authorizes_hook(ownership, liveness=liveness)
-            ):
+            # ``needs_recovery`` is a live row, not a closed one: the finish
+            # that set it told the agent to revert or re-scope, and both are
+            # edits.  Denying the hook here would leave the agent holding an
+            # intent it can neither satisfy nor abandon.
+            if record.status in {
+                WorkspaceIntentLifecycle.ACTIVE.value,
+                WorkspaceIntentLifecycle.NEEDS_RECOVERY.value,
+            } and _ownership_authorizes_hook(ownership, liveness=liveness):
                 return WorkspaceEditGateDecision(
                     allowed=True,
                     reason="active_intent",

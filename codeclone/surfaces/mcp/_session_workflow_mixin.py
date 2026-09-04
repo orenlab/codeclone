@@ -65,6 +65,10 @@ from ._session_shared import (
     MCPServiceContractError,
 )
 from ._workspace_hygiene import DirtySnapshot, WorkspaceHygieneResult
+from ._workspace_intents import (
+    WorkspaceIntentLifecycle,
+    update_workspace_intent_status,
+)
 from .messages import errors as err_msgs
 from .messages import workflow as workflow_msgs
 
@@ -729,6 +733,18 @@ class _MCPSessionWorkflowMixin:
 
         # 6. Non-accepted verification — return without receipt/clear
         if verify_status not in _ACCEPTED_STATUSES:
+            # The scope check ran first and moved the row to ``active``; the
+            # verdict that actually decides this finish arrives here, and the
+            # row must carry the fate the response is about to name.  Without
+            # this the registry would say "editing normally" while the
+            # payload says "recover me".
+            update_workspace_intent_status(
+                root=record.root,
+                pid=self._agent_pid,
+                start_epoch=self._agent_start_epoch,
+                intent_id=intent_id,
+                new_status=WorkspaceIntentLifecycle.NEEDS_RECOVERY.value,
+            )
             return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,

@@ -21,13 +21,22 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         " the new run_id as after_run_id."
     ),
     "after_run_not_new": (
-        "No analysis ran for this root since the intent went active, or the "
-        "run offered did not observe the edit. Call "
+        "No analysis of this root has run since the intent went active, or "
+        "the one offered is the intent's own before-run. Call "
         "analyze_repository(root=<intent root>) now, after the edit, and pass "
         "its run_id as after_run_id. A different run_id verifies structurally; "
         "an identical one is accepted as analyzer_invariant, because a fresh "
         "recompute landing on the same content-addressed id proves the change "
         "is invisible to analysis. Do not redeclare the intent."
+    ),
+    "change_predates_declaration": (
+        "The declared before-run already contained these changes, so this "
+        "intent has no BEFORE and re-analysing cannot create one: both runs "
+        "read the same bytes. Bind the intent to a run taken before the edit "
+        "-- manage_change_intent(action='declare', run_id=<pre-edit run_id>) "
+        "-- and finish against that intent_id. If no such run exists, commit "
+        "or stash the work in progress, run analyze_repository to record the "
+        "pre-change state, restore the work and analyse again."
     ),
     "after_run_required_for_governance": (
         "Governance config changes require a post-edit analysis."
@@ -141,6 +150,43 @@ ANALYZER_INVARIANT_LIMITATIONS: Final[tuple[str, ...]] = (
     "Invariance is evidence about analysis facts only. Behaviour, typing and "
     "runtime effects of the change are outside what CodeClone observed.",
 )
+
+
+# Freshness and observation are two questions, and one refusal used to answer
+# both. Under ``dirty_scope_policy="continue_own_wip"`` the edit precedes the
+# declaration, so the before-run already holds it: the after-run is genuinely
+# a later execution (freshness holds) and yet the pair witnessed no change
+# (observation fails, permanently). Contract B of RULING-2026-09-04 applies --
+# the pre-WIP state is not reconstructible for 55.8% of measured dirty starts,
+# so the controller states the absence instead of comparing the tree with
+# itself and calling the empty delta a pass.
+CHANGE_PREDATES_DECLARATION_REASON: Final = "change_predates_declaration"
+
+CHANGE_PREDATES_DECLARATION_MESSAGE: Final = (
+    "Patch contract unverified: every claimed change was already present in "
+    "the working tree when this intent was declared, so the before-run is not "
+    "a pre-change state and no structural comparison exists to perform. This "
+    "is not a stale after-run -- a later execution did take place; it read "
+    "the same bytes."
+)
+
+CHANGE_PREDATES_DECLARATION_LIMITATIONS: Final[tuple[str, ...]] = (
+    "The change predates the declaration, so this intent carries no before/"
+    "after pair; scope was proven, structure was not compared.",
+    "Do not report this as analyzer-invariance: nothing was shown to be "
+    "invisible to analysis, and nothing was measured either way.",
+)
+
+
+def change_predates_declaration_limitation(paths: Sequence[str]) -> str:
+    """Name the paths the start-time snapshot already held."""
+
+    rendered = ", ".join(sorted(paths))
+    return (
+        f"Already dirty when the intent was declared: {rendered}. The "
+        "before-run analysed these bytes, so a structural delta against it "
+        "would compare the post-change tree with itself."
+    )
 
 
 def analyzer_invariant_unobserved_limitation(paths: Sequence[str]) -> str:

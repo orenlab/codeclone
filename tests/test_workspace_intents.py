@@ -384,7 +384,10 @@ def test_workspace_intent_io_failure_paths(
             pid=record.agent_pid,
             start_epoch=record.agent_start_epoch,
             intent_id=record.intent_id,
-            new_status="violated",
+            # A lifecycle word, not a verdict: this case is about the I/O
+            # failure below it, and the door now refuses a verification
+            # verdict before any I/O is attempted.
+            new_status="needs_recovery",
         )
         is False
     )

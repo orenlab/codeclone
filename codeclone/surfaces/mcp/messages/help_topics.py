@@ -1031,10 +1031,29 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "after_run_not_new means no analyze_repository ran for this root "
-                "since the intent went active, or the run offered did not observe "
-                "the edit. Run it after editing and pass the resulting run_id: a "
-                "changed id verifies normally, an identical one is accepted as "
-                "analyzer_invariant."
+                "since the intent went active, or the run offered is the "
+                "intent's own before-run. Run it after editing and pass the "
+                "resulting run_id: a changed id verifies normally, an identical "
+                "one is accepted as analyzer_invariant."
+            ),
+            (
+                "change_predates_declaration means the declared before-run "
+                "already contained every claimed change — the shape "
+                "dirty_scope_policy=continue_own_wip produces, where the edit "
+                "precedes start. Freshness is not the problem: a later "
+                "execution did run, and it read the same bytes, so no further "
+                "analyze_repository can create a before/after pair. It is "
+                "unverified, never accepted: scope was proven, structure was "
+                "not compared, and verification.structural_comparison_available "
+                "is false."
+            ),
+            (
+                "To clear change_predates_declaration, bind the intent to a run "
+                "taken before the edit with manage_change_intent(action="
+                "'declare', run_id=<pre-edit run_id>) and finish against that "
+                "intent_id. With no such run, commit or stash the work in "
+                "progress, call analyze_repository to record the pre-change "
+                "state, restore the work and analyse again."
             ),
             (
                 "accepted means patch contract passed for scope — not unchanged "

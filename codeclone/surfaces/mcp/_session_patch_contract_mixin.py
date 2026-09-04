@@ -799,6 +799,25 @@ class _MCPSessionPatchContractMixin:
             changed_files=actual_changed_files,
         )
         if unobserved is None:
+            # Two questions, two answers.  Freshness asks whether a new
+            # execution happened after the control event; observation asks
+            # whether the pair witnessed a change.  Only the first has a
+            # remedy the agent can perform, so only the first may keep the
+            # refusal that names one.
+            predating = self._changes_predating_declaration(
+                intent=intent,
+                after=after,
+                changed_files=actual_changed_files,
+            )
+            if predating is not None:
+                return self._change_predates_declaration_outcome(
+                    before=before,
+                    after=after,
+                    intent=intent,
+                    classification=classification,
+                    scope_check=scope_check,
+                    predating=predating,
+                )
             return self._unverified_patch_contract(
                 reason="after_run_not_new",
                 before=before,
@@ -915,6 +934,122 @@ class _MCPSessionPatchContractMixin:
             ),
         )
         return None if contradicted else unobserved
+
+    def _changes_predating_declaration(
+        self,
+        *,
+        intent: IntentRecord | None,
+        after: MCPRunRecord,
+        changed_files: Sequence[str],
+    ) -> tuple[str, ...] | None:
+        """Paths already dirty when the intent was declared, or ``None``.
+
+        The discriminator between the two questions ``after_run_not_new`` used
+        to answer at once, and it is positive evidence rather than an absence:
+        ``start`` persists the working tree's dirty paths, so a claimed change
+        that was ALREADY in that snapshot cannot have happened inside the
+        change window.  Freshness must hold first -- without a later execution
+        the honest answer is still the freshness refusal, whose remedy (run
+        the analysis) is executable.  Every claimed path must predate: a patch
+        that also edited something new does have a before/after for that part
+        and belongs on the ordinary structural path.
+
+        Returns the paths, never a bare boolean, so the caller can name them.
+        An empty snapshot yields ``None``: nothing was dirty, nothing predates.
+        """
+
+        if intent is None or not changed_files:
+            return None
+        if not self._invariance_run_is_fresh(intent=intent, after=after):
+            return None
+        from ._workspace_hygiene import dirty_snapshot_from_payload
+        from ._workspace_intent_store import get_workspace_intent_store
+
+        workspace_record = get_workspace_intent_store(intent.root).find_raw(
+            intent.intent_id
+        )
+        if workspace_record is None:
+            return None
+        snapshot = dirty_snapshot_from_payload(workspace_record.dirty_snapshot)
+        if snapshot is None or not snapshot.git_available or not snapshot.entries:
+            return None
+        declared_dirty = frozenset(snapshot.paths)
+        claimed = sorted(
+            {
+                path.replace("\\", "/").strip().removeprefix("./").rstrip("/")
+                for path in changed_files
+                if path
+            }
+        )
+        if not claimed or not all(path in declared_dirty for path in claimed):
+            return None
+        return tuple(claimed)
+
+    def _change_predates_declaration_outcome(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        intent: IntentRecord | None,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+        predating: Sequence[str],
+    ) -> dict[str, object]:
+        """Contract B: say that no BEFORE exists, and how to obtain one.
+
+        Not accepted, and deliberately: the profile's comparative checks have
+        no evidence at all here -- not "satisfied by identity" as under
+        analyzer-invariance, simply absent -- and accepting would turn
+        ``continue_own_wip`` into a standing bypass of structural
+        verification.  Not ``after_run_not_new`` either: a later execution did
+        occur, and telling the agent to run another one is an instruction it
+        cannot carry out.
+        """
+
+        from .messages import patch_contract as patch_msgs
+
+        matrix = check_matrix(classification.profile)
+        payload: dict[str, object] = {
+            "mode": "verify",
+            "status": PatchContractStatus.UNVERIFIED.value,
+            "reason": patch_msgs.CHANGE_PREDATES_DECLARATION_REASON,
+            "before": self._run_ref_payload(before),
+            "after": self._run_ref_payload(after),
+            "intent_id": intent.intent_id if intent is not None else None,
+            "scope_check": scope_check,
+            "structural_delta": {},
+            "contract_violations": [],
+            "blocking_violations": [],
+            **classification.to_payload(),
+            "structural_comparison_available": False,
+            "checks_not_performed": [
+                check
+                for check in matrix.checks_performed
+                if check in _COMPARATIVE_CHECKS
+            ],
+            "changes_predating_declaration": list(predating),
+            "limitations": [
+                *patch_msgs.CHANGE_PREDATES_DECLARATION_LIMITATIONS,
+                patch_msgs.change_predates_declaration_limitation(predating),
+            ],
+            "next_step": self._next_step_hint(
+                patch_msgs.CHANGE_PREDATES_DECLARATION_REASON
+            ),
+            "claim_validation_recommended": False,
+            "message": patch_msgs.CHANGE_PREDATES_DECLARATION_MESSAGE,
+        }
+        intent_session = _intent_session(self)
+        intent_session._audit_emit(
+            root=after.root,
+            event_type=EVENT_PATCH_VERIFIED,
+            severity="warn",
+            run_id=_helpers._short_run_id(after.run_id),
+            intent_id=intent.intent_id if intent is not None else None,
+            report_digest=intent_session._report_digest_value(after),
+            status=PatchContractStatus.UNVERIFIED.value,
+            payload=payload,
+        )
+        return payload
 
     def _analyzer_invariance_proven(
         self,

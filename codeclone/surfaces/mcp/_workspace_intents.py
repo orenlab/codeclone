@@ -57,8 +57,12 @@ from ...workspace_intent.contract import (
     verify_intent_integrity,
 )
 from ...workspace_intent.lifecycle import (
+    WORKSPACE_INTENT_LIFECYCLE_VALUES,
     PidLiveness,
+    WorkspaceIntentLifecycle,
     WorkspaceIntentStatus,
+    is_workspace_intent_lifecycle,
+    lifecycle_for_verification_outcome,
     utc_now,
 )
 from ...workspace_intent.lifecycle import (
@@ -295,8 +299,26 @@ def update_workspace_intent_status(
     new_status: str,
     ttl_seconds: int | None = None,
 ) -> bool:
+    """Move a row along the LIFECYCLE axis.
+
+    The only writer that ever took a status word from its caller, and so the
+    only one through which a verification verdict could reach the column that
+    decides findability.  It now refuses one outright: callers holding a
+    verdict must translate it with
+    :func:`lifecycle_for_verification_outcome` and say what fate they mean.
+    The refusal is raised rather than returned as ``False`` -- every caller
+    here already ignores the boolean, and a lost write that looks like a lost
+    race is how the incident stayed invisible.
+    """
+
     from ._workspace_intent_store import registry_transaction
 
+    if not is_workspace_intent_lifecycle(new_status):
+        raise ValueError(
+            "workspace intent status is a lifecycle, not a verification "
+            f"verdict: {new_status!r} is not one of "
+            f"{sorted(WORKSPACE_INTENT_LIFECYCLE_VALUES)}"
+        )
     store = _intent_store(root)
     with registry_transaction(store):
         record = store.find_current_unlocked(intent_id)
@@ -826,6 +848,7 @@ __all__ = [
     "ScopeRelation",
     "WorkspaceDocumentRead",
     "WorkspaceDocumentReadKind",
+    "WorkspaceIntentLifecycle",
     "WorkspaceIntentRecord",
     "WorkspaceIntentStatus",
     "_is_pid_alive",
@@ -854,6 +877,7 @@ __all__ = [
     "intent_path",
     "is_orphaned",
     "is_stale",
+    "lifecycle_for_verification_outcome",
     "list_workspace_intent_records_for_recovery",
     "list_workspace_intent_records_raw",
     "list_workspace_intents",
