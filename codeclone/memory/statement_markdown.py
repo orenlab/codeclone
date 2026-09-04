@@ -7,12 +7,29 @@
 """Deterministic Markdown-subset validation for memory statements.
 
 Statements may carry a safe Markdown subset (one ``## `` title line, inline
-code spans, bold/italic, depth-1 lists, compact tables, blockquotes, bare
-URLs). The validator is hand-rolled line/regex rules — deterministic and
-total: every input classifies, no input crashes. It is not a CommonMark
-parser; security rules deliberately over-approximate what renderers treat
-as active markup (fail-closed), and backtick code spans are the sanctioned
-escape for literal markup fragments.
+code spans, ```lang fenced code blocks, bold/italic, depth-1 lists, compact
+tables, blockquotes, bare URLs). The validator is hand-rolled line/regex
+rules — deterministic and total: every input classifies, no input crashes.
+It is not a CommonMark parser; security rules deliberately over-approximate
+what renderers treat as active markup (fail-closed), and backtick code spans
+are the sanctioned escape for literal markup fragments.
+
+Multi-line code goes in a fenced code block opened with ``` and a language
+tag. The backtick fence is the one declared block form because it is the
+only one whose body is shielded: :func:`_mask_code_spans` pairs backtick
+runs the way CommonMark does, so a fence body never reaches the security
+rules. A ~~~ fence and a four-space indented block are not masked — their
+bodies are scanned as live prose, so a snippet holding a tag or a
+[text](target) link is refused inside them. They are not a second sanctioned
+form; they are undeclared ground that passes only while the payload happens
+to hold nothing the rules catch.
+
+Raw HTML stays rejected, <code> included, and that is not a gap for a later
+agent to close. The hole starts at the first tag admitted for looking
+harmless: once the subset carries HTML, the render surface is parsing
+author-supplied markup, and in a webview that is an execution mechanism, not
+a formatting one. A literal tag already has two sanctioned homes — a
+backtick code span and a fence — and ``memory_md_html`` names them in band.
 
 Records written through :func:`codeclone.memory.governance.record_candidate`
 are stamped ``statement_format="md-v1"`` in the record payload; the absence

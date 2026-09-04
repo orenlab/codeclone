@@ -118,9 +118,14 @@ MANAGE_ENGINEERING_MEMORY: Final = (
     "projection_rebuild_status, run_projection_jobs_once. "
     "promote_experience(experience_id) turns a distilled experience into a "
     "human-approvable draft. Statements accept a safe Markdown subset (one "
-    "leading '## ' title, `code spans`, bold/italic, depth-1 lists, compact "
-    "tables, blockquotes, bare URLs); images, raw HTML, and [text](url) links "
-    "are rejected with typed memory_md_* errors — see "
+    "leading '## ' title, `code spans`, ```lang fenced code blocks for "
+    "multi-line snippets, bold/italic, depth-1 lists, compact "
+    "tables, blockquotes, bare URLs); images, raw HTML — <code> included, "
+    "because one admitted tag makes the render surface parse author markup "
+    "— and [text](url) links are rejected with typed memory_md_* errors. A "
+    "fence takes backticks and a language tag: only that body is shielded, so "
+    "a ~~~ fence or an indented block refuses a snippet the backtick fence "
+    "accepts. See "
     'help(topic="engineering_memory") for the statement template. '
     "approve/reject/archive are not available to agents — use VS Code Memory view."
 )

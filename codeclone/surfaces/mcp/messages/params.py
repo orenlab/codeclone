@@ -785,9 +785,13 @@ MemoryStatementParam = Annotated[
         description=(
             "Candidate statement for record_candidate. Accepts a safe "
             "Markdown subset (one leading '## ' title, `code spans`, "
-            "bold/italic, depth-1 lists, compact tables, blockquotes, bare "
-            "URLs); images, raw HTML, and [text](url) links are rejected "
-            "with typed memory_md_* errors."
+            "```lang fenced code blocks, bold/italic, depth-1 lists, "
+            "compact tables, blockquotes, bare URLs); images, raw HTML "
+            "(<code> included), and [text](url) links are rejected with "
+            "typed memory_md_* errors. Multi-line code goes in a fenced "
+            "code block opened with ``` and a language tag: only the "
+            "backtick fence body is shielded from the security rules, so a "
+            "~~~ fence or an indented block refuses the same snippet."
         ),
     ),
 ]

@@ -13,8 +13,9 @@ before the rule existed, per the red-test-every-failure law.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
-from typing import cast
+from typing import Final, NamedTuple, cast
 
 import pytest
 
@@ -827,3 +828,260 @@ def test_single_line_preview_still_spends_the_whole_budget() -> None:
 
     preview = _statement_preview("z" * 400, max_chars=_PROBE_BUDGET)
     assert len(preview) == _PROBE_BUDGET
+
+
+# --- The declared vocabulary must equal what the validator accepts -----------
+#
+# Fenced blocks passed by omission, not by contract. ``_mask_code_spans``
+# pairs backtick runs the way CommonMark does, so a ``` run collapsed against
+# its closer as an ordinary span and nothing ever scanned the body -- while
+# every text a model or a renderer author reads listed the subset with no
+# fence in it. The maintainer's IDE did not render fences for exactly that
+# reason: it followed the declared vocabulary faithfully.
+#
+# Two drift directions, one pin. The validator can quietly stop accepting a
+# declared construct (anyone tightening the masking would have had no red
+# test), and a declared text can quietly stop naming an accepted one. A pin
+# asserting only "a fence is accepted" would stay green through the second
+# direction, which is the class this repository keeps paying for.
+#
+# The three MCP texts are read as SOURCE, never imported: this module's
+# subject ring is r2p and ``codeclone.surfaces`` is r4, so an import would be a
+# fresh r2p->r4 test edge that the Phase 39S ratchet refuses. Reading a file
+# adds no runtime coupling; it is the same inspection
+# tests/test_memory_statement_format_wire.py performs in the other direction.
+#
+# The tool-level description in tools.py is the fourth copy and the one no
+# other guard reaches: mcp_tool_schemas.json stores name and input_schema
+# only, so the per-tool description FastMCP publishes is snapshot-invisible.
+# Left out of this pin, one MCP tool would serve two descriptions of one
+# contract that disagree.
+
+_REPO_ROOT: Final = Path(__file__).resolve().parents[1]
+_MCP_MESSAGES: Final = _REPO_ROOT / "codeclone" / "surfaces" / "mcp" / "messages"
+
+
+class _Construct(NamedTuple):
+    """One vocabulary entry: samples, their shared verdict, its spelling."""
+
+    samples: tuple[str, ...]
+    accepted: bool
+    reject_code: str | None
+    declaration: tuple[str, ...]
+
+
+# ``declaration`` holds the literal spellings the vocabulary uses -- the
+# declared texts write constructs in the constructs themselves (`code spans`,
+# '## ' title, [text](url)), so a token check reads the declared spelling
+# rather than a paraphrase invented here.
+_VOCABULARY: Final[dict[str, _Construct]] = {
+    "fenced_code_block": _Construct(
+        # The second sample is the load-bearing one. A fence over inert text
+        # stays accepted even if the masking stops recognising ``` runs --
+        # there is nothing in it for the security rules to catch -- so a pin
+        # built only on it would survive the exact regression it exists to
+        # prevent. Real snippets carry markup; this one does, and it is
+        # accepted only because the fence body is masked.
+        samples=(
+            "## Fence\n```python\nvalue = 1\n```",
+            '## Fence\n```python\nrender("<b>x</b>")\n```',
+        ),
+        accepted=True,
+        reject_code=None,
+        declaration=("fenced code block", "```", "language tag"),
+    ),
+    "raw_html_tag": _Construct(
+        samples=("## Tag\n<code>value = 1</code>",),
+        accepted=False,
+        reject_code="memory_md_html",
+        declaration=("raw HTML", "<code>"),
+    ),
+}
+
+_DOCSTRING_SITE: Final = "codeclone/memory/statement_markdown.py::__doc__"
+_PARAM_SITE: Final = "codeclone/surfaces/mcp/messages/params.py::MemoryStatementParam"
+_HELP_SITE: Final = "codeclone/surfaces/mcp/messages/help_topics.py::engineering_memory"
+_TOOL_SITE: Final = (
+    "codeclone/surfaces/mcp/messages/tools.py::MANAGE_ENGINEERING_MEMORY"
+)
+
+# Present in every declared vocabulary today: proof the extractor reached the
+# vocabulary at all.
+_VOCABULARY_ANCHOR: Final = "compact tables"
+# One string per site that lives in the same FILE but outside the vocabulary
+# node. An extractor that silently widened to the whole file would pick it up.
+_OUTSIDE_THE_VOCABULARY: Final[dict[str, str]] = {
+    _DOCSTRING_SITE: "STATEMENT_MD_WARN_CODES",
+    _PARAM_SITE: "Telemetry section to project",
+    _HELP_SITE: "verification_profile",
+    _TOOL_SITE: "Mode-based engineering memory inspection router",
+}
+
+
+def _normalized(text: str) -> str:
+    """Fold a declared text to one comparable line: whitespace, then case.
+
+    Declared vocabulary is prose wrapped to fit a source line, so a spelling
+    is routinely split across a line break ("compact\ntables") and a term
+    opening a sentence is capitalised ("Raw HTML" against "raw HTML"). Both
+    caught this pin on its own first two runs. Matching the raw text would
+    make it depend on where a formatter wrapped and where a sentence began --
+    drift the pin must not invent. Case folding never widens a match across
+    constructs here: the spellings are distinct words, not case variants.
+    """
+    return " ".join(text.split()).casefold()
+
+
+def _string_constants(node: ast.AST) -> str:
+    return _normalized(
+        "\n".join(
+            child.value
+            for child in ast.walk(node)
+            if isinstance(child, ast.Constant) and isinstance(child.value, str)
+        )
+    )
+
+
+def _module_constant(module: str, name: str) -> str:
+    """Read one module-level binding's string constants out of SOURCE."""
+    source = (_MCP_MESSAGES / module).read_text(encoding="utf-8")
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.AnnAssign):
+            bound: list[ast.expr] = [node.target]
+        elif isinstance(node, ast.Assign):
+            bound = list(node.targets)
+        else:
+            continue
+        if any(isinstance(item, ast.Name) and item.id == name for item in bound):
+            return _string_constants(node)
+    raise AssertionError(f"{name} is no longer a module-level binding in {module}")
+
+
+def _help_topic_text(topic: str) -> str:
+    source = (_MCP_MESSAGES / "help_topics.py").read_text(encoding="utf-8")
+    specs = next(
+        (
+            node.value
+            for node in ast.parse(source).body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "HELP_TOPIC_SPECS"
+        ),
+        None,
+    )
+    assert isinstance(specs, ast.Dict), "HELP_TOPIC_SPECS is no longer a literal dict"
+    for key, value in zip(specs.keys, specs.values, strict=True):
+        if isinstance(key, ast.Constant) and key.value == topic:
+            return _string_constants(value)
+    raise AssertionError(f"help topic {topic!r} is not declared in help_topics.py")
+
+
+def _declared_texts() -> dict[str, str]:
+    from codeclone.memory import statement_markdown
+
+    validator_file = Path(statement_markdown.__file__).resolve()
+    assert validator_file.is_relative_to(_REPO_ROOT), (
+        f"validator imported from {validator_file}, outside {_REPO_ROOT}: the "
+        "declared texts and the behaviour would come from different trees"
+    )
+    return {
+        _DOCSTRING_SITE: _normalized(statement_markdown.__doc__ or ""),
+        _PARAM_SITE: _module_constant("params.py", "MemoryStatementParam"),
+        _HELP_SITE: _help_topic_text("engineering_memory"),
+        _TOOL_SITE: _module_constant("tools.py", "MANAGE_ENGINEERING_MEMORY"),
+    }
+
+
+def test_vocabulary_extractors_read_the_vocabulary_and_nothing_else() -> None:
+    """Probe validity for the pin below: a dead extractor would fake it.
+
+    An extractor returning "" fails the reconciliation closed, but one that
+    widened to the whole file would find every token somewhere and report
+    agreement it never measured. Both ends are bracketed: the anchor proves
+    the vocabulary was reached, the outside string proves nothing beyond it
+    was.
+    """
+    texts = _declared_texts()
+    assert set(texts) == set(_OUTSIDE_THE_VOCABULARY)
+    for site, text in sorted(texts.items()):
+        assert _normalized(_VOCABULARY_ANCHOR) in text, (
+            f"{site}: extractor missed the vocabulary"
+        )
+        outside = _OUTSIDE_THE_VOCABULARY[site]
+        assert _normalized(outside) not in text, (
+            f"{site}: extractor widened past the vocabulary node (found "
+            f"{outside!r}), so its token checks prove nothing"
+        )
+
+
+def test_declared_vocabulary_and_validator_agree_on_every_construct() -> None:
+    """Reconciliation: both halves derived, neither transcribed.
+
+    The behaviour half runs the live validator over a sample. The declaration
+    half reads the four texts a consumer actually gets -- the module contract
+    docstring, the ``statement`` parameter description the MCP schema
+    publishes, the ``help(topic="engineering_memory")`` topic body, and the
+    ``manage_engineering_memory`` tool-level description FastMCP registers. A
+    construct must be named by every one of them and classified by the
+    validator the way the vocabulary promises.
+
+    The token check proves the construct is *named*, never that the prose
+    around it says "allowed": the accepted/refused fact is carried by the
+    validator half, which is why the banned construct is registered here too.
+    """
+    from codeclone.memory.statement_markdown import validate_statement_markdown
+
+    texts = _declared_texts()
+    for name, construct in sorted(_VOCABULARY.items()):
+        for sample in construct.samples:
+            codes = sorted(
+                issue.code for issue in validate_statement_markdown(sample).rejects
+            )
+            if construct.accepted:
+                assert not codes, (
+                    f"{name}: every declared vocabulary carries it and the "
+                    f"validator now refuses {sample!r} ({codes})"
+                )
+            else:
+                assert construct.reject_code in codes, (
+                    f"{name}: declared as refused, validator returned {codes}"
+                )
+        for site, text in sorted(texts.items()):
+            missing = [
+                token
+                for token in construct.declaration
+                if _normalized(token) not in text
+            ]
+            assert not missing, (
+                f"{site} does not declare {name}: missing {missing}. What the "
+                "validator does and what a model reads have drifted apart."
+            )
+
+
+def test_only_the_backtick_fence_shields_its_body() -> None:
+    """The declared block form is the only one that is actually shielded.
+
+    The vocabulary names the backtick fence and no other block form. That is
+    a behavioural claim, not a style preference: ``_mask_code_spans`` blanks a
+    paired backtick run, so the fence body never reaches the security rules,
+    while a ``~~~`` fence and a four-space indented block are scanned as live
+    prose and refuse the very snippet the backtick fence accepts. Without this
+    the contract sentence would be an unexecuted engineering claim.
+    """
+    from codeclone.memory.statement_markdown import validate_statement_markdown
+
+    snippet = "print('<b>x</b>')"
+    accepted = f"## T\n```python\n{snippet}\n```"
+    assert not validate_statement_markdown(accepted).rejects, (
+        "the backtick fence no longer shields its body"
+    )
+    undeclared = {
+        "~~~ fence": f"## T\n~~~python\n{snippet}\n~~~",
+        "indented block": f"## T\nbody\n\n    {snippet}\n",
+    }
+    for form, sample in sorted(undeclared.items()):
+        codes = [issue.code for issue in validate_statement_markdown(sample).rejects]
+        assert "memory_md_html" in codes, (
+            f"{form} now accepts a tag in its body, so the contract's claim "
+            "that only the backtick fence body is shielded is false"
+        )
