@@ -189,11 +189,30 @@ _TARGET = "worktree-a"
 # the generation in its content-address namespace (canonical/store.py), so a
 # generation bump is a run-identity change by construction. Retiring "2" moved
 # this from f4bd11bd... ; the artifact digest below did not move, which is the
-# point - identity changed, the exported artifact did not. Retiring "3" for
-# the ratified LIVENESS_POLICY_VERSION 4 moved it again from ade126a3... ;
-# the artifact digest still did not move.
-_FIXTURE_RUN_ID = "a506377d2b567c7bee30f090faedd39e65105e20bce2154865ccdb39e92e47f5"
-_FIXTURE_ARTIFACT = "86eea25dc5e94d0788d7ea3abeb4df94f0757a10c6549f07a784b86e3fe4be3f"
+# point - identity changed, the exported artifact did not.  Retiring "3" for
+# policy v4 - an ``__all__`` entry is exposure, never internal use - moved it
+# again, from ade126a3... , and the artifact digest again did not move.  The
+# RULE those moves follow is pinned executably by
+# ``test_liveness_policy_generation_is_an_input_of_run_identity`` below, so the
+# literal is the known answer of an algorithm rather than a number whose
+# justification lives only in this comment.
+# The ``unit_spans`` family moved ALL THREE literals, and this time the
+# artifact digest moved WITH the identity - which is the honest signature of
+# a CONTENT change rather than a namespace one: the run gained a family, so
+# both the membership it is addressed by and the bytes it exports are new.
+# Run ids across this landing are therefore not comparable: a before-run and
+# an after-run of one unchanged tree take different identities because the
+# after-run carries facts the before-run did not.  That is correct behaviour
+# for a content address, and it is why the retired-generation literal below
+# moved too - it is the same fixture, re-answered.
+_FIXTURE_RUN_ID = "fe0628270187359d9933ecb784776d95db90f86f98e8132c9c9268bbe6466198"
+_FIXTURE_ARTIFACT = "bb45a956f4be26cf0d6ab311d7e3266a80ff7ac81582d5391941a3a1d96a1538"
+# The generation this fixture answered under before policy v4, and the identity
+# it answered with: the previous line of the history above, kept executable.
+_RETIRED_LIVENESS_GENERATION = "3"
+_RETIRED_GENERATION_RUN_ID = (
+    "e5d3722dce78df39e6ab9a387358174a8d33b4574cd4ca80c653f320e43ef8e2"
+)
 
 
 def _store(tmp_path: Path, name: str = "runs.sqlite") -> RunStore:

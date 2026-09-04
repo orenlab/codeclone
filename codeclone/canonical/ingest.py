@@ -83,6 +83,7 @@ from codeclone.canonical.model import (
     SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
+    UnitSpanRow,
     ViolationRow,
 )
 from codeclone.canonical.semantic_grammar import (
@@ -395,6 +396,27 @@ def canonical_model_from_legacy_document(
         for row in security_rows
     )
 
+    # The DECLARATION entity, read from the producer's own complexity item.
+    # That row is two objects glued together: the declaration (this family)
+    # and the risk observation about it; the lane container carries only the
+    # second, so the span is read where the producer publishes it -- the
+    # same metrics.families door the dependency, coupling and F10 families
+    # already use.
+    complexity_rows = _sequence(
+        _field(
+            _mapping(
+                _field(families, "complexity", "metrics.families"),
+                "metrics.families.complexity",
+            ),
+            "items",
+            "metrics.families.complexity",
+        ),
+        "complexity.items",
+    )
+    unit_spans = frozenset(
+        _unit_span(_mapping(row, "complexity item"), index) for row in complexity_rows
+    )
+
     run_scalars = _run_scalars(document)
     analysis_population = _analysis_population(document)
 
@@ -424,6 +446,7 @@ def canonical_model_from_legacy_document(
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
                 risk_observations=risk_observations,
+                unit_spans=unit_spans,
                 adoption_counts=adoption_counts,
                 security_surfaces=security_surfaces,
                 run_scalars=run_scalars,
@@ -809,6 +832,32 @@ def _risk_observation(
         dimension=_string(row, "dimension", "risk observation"),
         numerator=_lane_int(row, "numerator", "risk observation"),
         start_line=_lane_int(row, "start_line", "risk observation"),
+    )
+
+
+def _unit_span(row: Mapping[str, object], index: IdentityIndex) -> UnitSpanRow:
+    """One declaration extent from the producer's own complexity item.
+
+    The item names its unit with the producer's GLUED ``head:local``
+    spelling, so identity goes through the one owner that resolves that
+    spelling (:func:`parse_symbol`) and the resolved FILE must be the row's
+    own path -- refused on disagreement, never repaired.  That is verbatim
+    the F10 ``qualname`` law, and it is the reason this reading and the
+    producer-native one cannot drift: both resolve the same glued string
+    through the same registry.
+    """
+    where = "complexity item"
+    path = _string(row, "relative_path", where)
+    symbol = parse_symbol(index, _string(row, "qualname", where), f"{where}.qualname")
+    if symbol.file.path != path:
+        raise LegacyIngestError(
+            f"{where}: qualname {_string(row, 'qualname', where)!r} resolves "
+            f"to {symbol.file.path!r}, disagreeing with its own path {path!r}"
+        )
+    return UnitSpanRow(
+        symbol=symbol,
+        start_line=_lane_int(row, "start_line", where),
+        end_line=_lane_int(row, "end_line", where),
     )
 
 

@@ -59,6 +59,7 @@ from codeclone.canonical.model import (
     SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
+    UnitSpanRow,
     ViolationRow,
 )
 from codeclone.canonical.store import (
@@ -1458,6 +1459,7 @@ _EXPECTED_ROW_TYPES: dict[str, type[object]] = {
     "security_surface": SecuritySurfaceRow,
     "semantic_edge": SemanticEdge,
     "sink_role": SinkRoleRow,
+    "unit_span": UnitSpanRow,
     "violation": ViolationRow,
 }
 

@@ -69,6 +69,7 @@ from codeclone.canonical import (
     SemanticEdge,
     SinkRoleRow,
     SymbolId,
+    UnitSpanRow,
     UnresolvedLocation,
     UnresolvedRoot,
     ViolationRow,
@@ -363,6 +364,18 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         # numerator and the site both on the family floor boundary (1/1)
         RiskObservationRow(se, "nesting_depth", 1, 1),
     ]
+    unit_spans = [
+        # The DECLARATION entity behind the risk rows above: the same two
+        # @overload sites on one symbol, which is exactly what the family's
+        # (SYMBOL, start_line) key exists to keep apart, plus the two span
+        # boundaries that carry weight -- a real multi-line extent, and the
+        # DEGENERATE one-line span (end == start) that must be ADMITTED
+        # where end < start is refused.
+        UnitSpanRow(sa, 10, 24),
+        UnitSpanRow(sa, 40, 40),
+        # the module-less separator-collision file, on the site floor (1)
+        UnitSpanRow(se, 1, 1),
+    ]
     adoption_counts = [
         # F3 (wave 4): the ratified tagged ScopeRef — a MODULE scope tied
         # across all three features beside a FILE scope (the measured
@@ -503,6 +516,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         coupling_cohesion = list(reversed(coupling_cohesion))
         api_symbols = list(reversed(api_symbols))
         risk_observations = list(reversed(risk_observations))
+        unit_spans = list(reversed(unit_spans))
         adoption_counts = list(reversed(adoption_counts))
         security_surfaces = list(reversed(security_surfaces))
         coupled = list(reversed(coupled))
@@ -524,6 +538,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             coupling_cohesion_observations=frozenset(coupling_cohesion),
             api_symbols=frozenset(api_symbols),
             risk_observations=frozenset(risk_observations),
+            unit_spans=frozenset(unit_spans),
             adoption_counts=frozenset(adoption_counts),
             security_surfaces=frozenset(security_surfaces),
             run_scalars=run_scalars,
@@ -601,12 +616,26 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     cell would, and that tuple would then be non-increasing and refused by
     ``ViolationRow``.  The fixture therefore pins the mixed-variant ORDER,
     not only the mixed-variant encoding.
+
+    The ``unit_spans`` family then replaced that literal deliberately
+    (6677 bytes, sha256 dc86a3f5…): the draft gained the DECLARATION
+    entity — ``(SYMBOL, start_line)`` keyed, carrying ``end_line`` — the
+    half of the producer's glued complexity row the model had been
+    dropping.  It could not be a column of ``risk_observations`` because
+    ``dimension`` sits in that family's key, so one declaration owns one
+    row per measured dimension and the span would be stored twice, with
+    two copies free to contradict each other without ever sharing a key.
+    What entered these bytes is the family table over three rows — two
+    sites of ONE symbol (the @overload discriminator the key exists for)
+    plus a module-less file on the site floor — including one DEGENERATE
+    span (``end == start``), the boundary admitted where ``end < start``
+    is refused.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 6677
+    assert len(payload) == 6753
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "dc86a3f5dbba0ef9e3dcb587f0562fad5767a88edff18d66ac562c4d9ea4f808"
+        == "6023e72b3b0b8f287756b4c570d2ab8b54287161675658f9eaff240d6f6ed99f"
     )
 
 

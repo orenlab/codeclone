@@ -74,6 +74,7 @@ _EXPECTED_TIERS: dict[str, str] = {
     "security_surfaces": "analysis",
     "semantic_edges": "analysis",
     "sink_roles": "analysis",
+    "unit_spans": "analysis",
     "violations": "analysis",
 }
 
@@ -96,6 +97,7 @@ _EXPECTED_KINDS: dict[str, str] = {
     "security_surfaces": "normalized_fact",
     "semantic_edges": "normalized_fact",
     "sink_roles": "normalized_fact",
+    "unit_spans": "normalized_fact",
     "violations": "normalized_finding",
 }
 
@@ -424,16 +426,22 @@ def test_registry_source_executes_the_wire_gate_at_import() -> None:
 
 
 def test_the_real_wire_population_passes_the_gate() -> None:
-    """Witness that the instrument is on: 19 families, 94 fact fields.
+    """Witness that the instrument is on: 20 families, 97 fact fields.
 
     93 until the authority ``violations`` family gained ``locations``, the
     one published authority column measured NOT derivable from the stored
     subset and therefore canonicalized rather than projected. One family
     gained one wire column; no family was added or removed.
+
+    94 -> 97 with the ``unit_spans`` family: the DECLARATION entity
+    (``symbol``, ``start_line``, ``end_line``), the missing half of the
+    producer's glued complexity row.  A family was added here, deliberately
+    -- the span could not be a column of ``risk_observations`` because
+    ``dimension`` is in that family's key.
     """
     families = _wire_field_names()
-    assert len(families) == 19
-    assert sum(len(fields) for fields in families.values()) == 94
+    assert len(families) == 20
+    assert sum(len(fields) for fields in families.values()) == 97
     require_analysis_wire_families(families)
 
 

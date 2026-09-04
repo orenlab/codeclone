@@ -74,6 +74,7 @@ from ..canonical.model import (
     SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
+    UnitSpanRow,
     ViolationRow,
 )
 from ..canonical.semantic_grammar import (
@@ -675,6 +676,42 @@ def _security_surface_rows(
     return frozenset(rows)
 
 
+def _unit_span_rows(
+    payload: Mapping[str, object], index: IdentityIndex
+) -> frozenset[UnitSpanRow]:
+    """The DECLARATION entity from the producer's own complexity rows.
+
+    ``functions`` is the complexity producer's own name for this container;
+    the report document renames it to ``items`` on the way out -- the same
+    producer/document spelling split as ``classes``/``items``, and the
+    reason this builder reads the payload rather than the rendered shape.
+
+    Identity comes from the row's GLUED ``head:local`` qualname through the
+    one owner that resolves that spelling, exactly as the ingest oracle
+    reads the same fact.  The row's ``filepath`` is deliberately NOT
+    cross-checked here: it is ABSOLUTE in the payload and repository-
+    relative only after the report layer normalizes it, so relativizing it
+    here would be a second spelling of a rule the report layer owns -- and
+    the glued qualname already carries the identity the registry resolves.
+    """
+
+    return frozenset(
+        UnitSpanRow(
+            symbol=parse_symbol(
+                index, _as_str(row.get("qualname")), "complexity qualname"
+            ),
+            start_line=_as_int(row.get("start_line")),
+            end_line=_as_int(row.get("end_line")),
+        )
+        for row in (
+            _as_mapping(item)
+            for item in _as_sequence(
+                _family_payload(payload, "complexity").get("functions")
+            )
+        )
+    )
+
+
 def _coupled_sets(payload: Mapping[str, object]) -> frozenset[frozenset[str]]:
     """The standalone coupled-class value sets.
 
@@ -918,6 +955,7 @@ def canonical_snapshot_from_producers(
         ),
         api_symbols=_api_symbol_rows(structural.api_surface, index),
         risk_observations=_risk_rows(structural.risk_observations, index),
+        unit_spans=_unit_span_rows(payload, index),
         adoption_counts=_adoption_rows(structural.adoption_counts, index),
         security_surfaces=_security_surface_rows(payload, index),
         run_scalars=_run_scalars(discovery, processing),

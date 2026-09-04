@@ -621,6 +621,47 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # The DECLARATION entity: key (SYMBOL, start_line), measured total on
+    # the self-repo corpus (15 934/15 934 distinct @ 4512acf0, 2026-09-03 —
+    # a dated observation, not an invariant; the key's totality is what
+    # ``_unique_by_key`` proves on every run).  The span rides its OWN
+    # family rather than a column of ``risk_observations`` because
+    # ``dimension`` is in that family's key: 6 675 of 15 934 declarations
+    # carry two risk rows, so the span would be stored twice and two copies
+    # could contradict each other without ever sharing a key.  The producer
+    # is the unit extraction, not a metric: ``end_line`` is the parsed
+    # declaration's ``ast`` extent and does not move when a metric is
+    # recounted, which is why the store namespaces this family under
+    # ``canonical_model`` and not under the complexity revision.
+    "unit_spans": (
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "unit_extraction_producer",
+            "observed declaration extent; payload, never key (a range end, "
+            "refused below its own start)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "unit_extraction_producer",
+            "declaration-site discriminator; key component — different "
+            "declarations sharing one qualname (@overload families, "
+            "property/setter pairs) are different entities",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "unit_extraction_producer",
+            "SYMBOL key component",
+            stored=True,
+            wire=True,
+        ),
+    ),
     # F1 (ruling 2026-08-26, fork (b)): key (SYMBOL, dimension, start_line)
     # — the declaration site IS a key component here, the named exception
     # to the dependency rule that location is evidence (§2), resolved by

@@ -156,6 +156,7 @@ from codeclone.canonical.model import (
     SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
+    UnitSpanRow,
     ViolationRow,
 )
 from codeclone.contracts import (
@@ -772,6 +773,18 @@ def _observation_model_rows(
                 "symbol": _symbol_value(risk_observation.symbol),
             },
         )
+    for unit_span in sorted(
+        facts.unit_spans,
+        key=lambda row: (canonical_key(row.symbol), row.start_line),
+    ):
+        yield (
+            "unit_span",
+            {
+                "end_line": unit_span.end_line,
+                "start_line": unit_span.start_line,
+                "symbol": _symbol_value(unit_span.symbol),
+            },
+        )
     for adoption in sorted(
         facts.adoption_counts,
         key=lambda row: (_endpoint_value(row.scope), row.feature),
@@ -1115,6 +1128,18 @@ def _decode_risk_observation_row(
         dimension=_require_str(row, "dimension", where),
         numerator=_require_line(row, "numerator", where),
         start_line=_require_line(row, "start_line", where),
+    )
+
+
+def _decode_unit_span_row(row: Mapping[str, object], where: str) -> UnitSpanRow:
+    """Shape guards only: the site floor and the range law have exactly one
+    owner — the model law (``UnitSpanRow``), whose refusal ``_collect_row``
+    wraps into a typed integrity error.  A second spelling here would be
+    the G2 drift class."""
+    return UnitSpanRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
     )
 
 
@@ -1470,6 +1495,18 @@ _FAMILY_RISK_OBSERVATION: Final = _Family(
     decode=_decode_risk_observation_row,
     row_type=RiskObservationRow,
 )
+# The declaration extent is a STRUCTURAL fact of the parsed source, not a
+# metric result: it does not move when a metric is recounted.  Namespacing
+# it under the complexity revision would reset every span's content address
+# on a complexity bump without a single span changing -- the defect the
+# CANONICAL_OBJECT_IDENTITY_VERSION split exists to prevent -- so it takes
+# the canonical-model namespace, like the dependency families.
+_FAMILY_UNIT_SPAN: Final = _Family(
+    family="unit_span",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_unit_span_row,
+    row_type=UnitSpanRow,
+)
 _FAMILY_RUN_SCALAR: Final = _Family(
     family="run_scalar",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
@@ -1527,6 +1564,7 @@ _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     _FAMILY_GRAPH_NODE,
     _FAMILY_MODULE,
     _FAMILY_RISK_OBSERVATION,
+    _FAMILY_UNIT_SPAN,
     _FAMILY_RUN_SCALAR,
     _FAMILY_SECURITY_SURFACE,
     _FAMILY_SEMANTIC_EDGE,
@@ -1605,6 +1643,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 ),
                 api_symbols=frozenset(_FAMILY_API_SYMBOL.rows(collected)),
                 risk_observations=frozenset(_FAMILY_RISK_OBSERVATION.rows(collected)),
+                unit_spans=frozenset(_FAMILY_UNIT_SPAN.rows(collected)),
                 adoption_counts=frozenset(_FAMILY_ADOPTION_COUNT.rows(collected)),
                 security_surfaces=frozenset(_FAMILY_SECURITY_SURFACE.rows(collected)),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
@@ -1985,6 +2024,7 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "security_surfaces": "security_surface",
     "semantic_edges": "semantic_edge",
     "sink_roles": "sink_role",
+    "unit_spans": "unit_span",
     "violations": "violation",
 }
 

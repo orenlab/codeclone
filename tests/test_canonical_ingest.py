@@ -523,6 +523,29 @@ def legacy_document() -> dict[str, Any]:
                     "summary": {"items": len(security_items)},
                     "items": security_items,
                 },
+                "complexity": {
+                    "items_truncated": False,
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "qualname": "pkg.mod:make",
+                            "start_line": 10,
+                            "end_line": 24,
+                        },
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "qualname": "pkg.mod:make",
+                            "start_line": 40,
+                            "end_line": 40,
+                        },
+                        {
+                            "relative_path": "scripts/tool.py",
+                            "qualname": "scripts/tool.py:run",
+                            "start_line": 5,
+                            "end_line": 31,
+                        },
+                    ],
+                },
             }
         },
         # F8: the emitted clone population verbatim from the producer's
@@ -953,6 +976,40 @@ def test_ingest_refuses_a_dead_entity_with_a_second_colon() -> None:
         _dead_lane_row(document)["entity"] = "pkg.mod:make:extra"
 
     with pytest.raises(SemanticGrammarError, match="second ModuleKey colon"):
+        canonical_model_from_legacy_document(_mutated(swap))
+
+
+def test_ingest_reads_the_declaration_extent_from_the_complexity_witness() -> None:
+    """The oracle carries the SPAN, not merely the site.
+
+    Asserted as VALUES, not as a row count: a pin that only counted rows
+    would stay green if ``end_line`` were read off ``start_line``, which is
+    exactly the cheap wrong implementation.  The three fixture rows carry
+    ends that differ from their starts (24 vs 10, 31 vs 5) plus the
+    degenerate one-line case (40 vs 40), so a collapsed reading reds here.
+    """
+    model = canonical_model_from_legacy_document(legacy_document())
+    spans = {
+        (row.symbol.file.path, row.symbol.qualname, row.start_line): row.end_line
+        for row in model.facts.analysis.unit_spans
+    }
+    assert spans == {
+        ("pkg/mod.py", "make", 10): 24,
+        ("pkg/mod.py", "make", 40): 40,
+        ("scripts/tool.py", "run", 5): 31,
+    }
+
+
+def test_ingest_refuses_a_complexity_item_whose_qualname_disowns_its_path() -> None:
+    """The registry, not the string, decides identity -- and a producer at
+    war with the registry is refused, never repaired."""
+
+    def swap(document: dict[str, Any]) -> None:
+        document["metrics"]["families"]["complexity"]["items"][0]["qualname"] = (
+            "scripts/tool.py:make"
+        )
+
+    with pytest.raises(LegacyIngestError, match="disagreeing with its own path"):
         canonical_model_from_legacy_document(_mutated(swap))
 
 

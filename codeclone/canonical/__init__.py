@@ -162,6 +162,7 @@ from codeclone.canonical.model import (
     SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
+    UnitSpanRow,
     ViolationRow,
 )
 from codeclone.canonical.registry import (
@@ -306,6 +307,7 @@ __all__ = [
     "StoreFenceError",
     "StoreIntegrityError",
     "SymbolId",
+    "UnitSpanRow",
     "UnknownRunError",
     "UnresolvedLocation",
     "UnresolvedRoot",

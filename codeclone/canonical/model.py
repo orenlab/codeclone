@@ -64,7 +64,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields, replace
-from itertools import pairwise
+from itertools import chain, pairwise
 from typing import TypeVar
 
 from codeclone.canonical.api_identity import signature_variant
@@ -536,6 +536,64 @@ class CouplingCohesionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class UnitSpanRow:
+    """The DECLARATION entity: which unit exists, and what source range it
+    occupies.  Logical key: ``(SYMBOL, start_line)``.
+
+    This family is the missing half of a split this model already ratified
+    once for dependencies (ruling 2026-08-24 §2, relation vs occurrence).
+    The producer's ``complexity`` row is TWO objects glued together: the
+    declaration — ``(SYMBOL, start_line, end_line)``, an identity/extent
+    fact — and the risk OBSERVATION about it, ``(SYMBOL, dimension,
+    start_line) -> numerator``.  Only the second was carried, so the span
+    was dropped and the served ``unit_inventory`` slice could not be
+    expressed from the store.
+
+    Why the span is NOT a column of :class:`RiskObservationRow`, measured
+    rather than argued: ``dimension`` sits in that family's key, so one
+    declaration owns one row PER measured dimension — 6 675 of 15 934
+    declarations carry two (@ 4512acf0, 2026-09-03, a dated observation).
+    Storing the span there would put one fact in two places, and worse,
+    ``_unique_by_key`` could not police it: two rows of one declaration
+    differing only in ``dimension`` may carry CONTRADICTING spans and the
+    prover never meets them, because they do not share a key.  The pin for
+    exactly that is ``tests/test_unit_span_owner.py``, which drives the
+    real prover on both key spellings.
+
+    ``start_line`` is a key component for the same measured reason it is
+    one on the risk family: different declarations share one qualname
+    (``@overload`` families, property/setter pairs), so the bare SYMBOL is
+    not total.  ``end_line`` is payload and is refused below its start: a
+    span is a range, and a row that admitted ``end < start`` would let the
+    store answer with a value the source never had.  Both floors are
+    positive — a zero site would spell "no declaration" as a declaration,
+    and the producer never emits one (``analysis/units.py`` carries
+    ``ast`` positions, and a unit that cannot name its site is refused
+    upstream by the risk lane already).
+
+    Not to be confused with the :class:`~codeclone.canonical.identity.FileLine`
+    law: a semantic EVENT is one line and never a span, so a stored
+    ``end_line`` there would be the same fact twice.  A parsed declaration
+    genuinely has two ends (``ast.AST.end_lineno``), and that is the
+    difference between evidence and extent.
+    """
+
+    symbol: SymbolId
+    start_line: int
+    end_line: int
+
+    def __post_init__(self) -> None:
+        if isinstance(self.start_line, bool) or self.start_line < 1:
+            raise CanonicalModelError(
+                f"unit span start must be a positive int: {self.start_line!r}"
+            )
+        if isinstance(self.end_line, bool) or self.end_line < self.start_line:
+            raise CanonicalModelError(
+                f"unit span end must be an int not before its start: {self.end_line!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class RiskObservationRow:
     """F1 per-declaration risk observation (ruling 2026-08-26, fork (b)).
 
@@ -908,6 +966,7 @@ class AnalysisFacts:
     risk_observations: frozenset[RiskObservationRow] = field(default_factory=frozenset)
     adoption_counts: frozenset[AdoptionCountRow] = field(default_factory=frozenset)
     security_surfaces: frozenset[SecuritySurfaceRow] = field(default_factory=frozenset)
+    unit_spans: frozenset[UnitSpanRow] = field(default_factory=frozenset)
     # F9: one record per analysis snapshot; None is the absent record —
     # never an all-zero fake (zero is measured in this family).
     run_scalars: RunScalars | None = None
@@ -1133,6 +1192,15 @@ class _DomainClosure:
                 self.files.add(location.file)
 
 
+#: The families whose identity contribution is exactly ONE ``symbol`` column.
+#: Named as a union rather than left to inference: a chain over heterogeneous
+#: row types widens to ``object``, and reaching ``.symbol`` off ``object`` is
+#: the untyped hole this repository refuses.
+_SymbolCarrier = (
+    SinkRoleRow | CouplingCohesionRow | ApiSymbolRow | RiskObservationRow | UnitSpanRow
+)
+
+
 def _close_domains(model: CanonicalModel) -> _DomainClosure:
     """Stage 1: complete the identity domains to their referential closure."""
     closure = _DomainClosure(model)
@@ -1144,8 +1212,6 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_rooted_function(contract.function, contract.root_set)
     for node in facts.graph_nodes:
         closure.see_rooted_function(node.function, node.root_set)
-    for sink in facts.sink_roles:
-        closure.see_symbol(sink.symbol)
     for candidate in facts.candidates:
         for producer in candidate.producer_set:
             closure.see_symbol(producer)
@@ -1167,12 +1233,20 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_dead_code_entity(dead_observation.entity)
     for violation in facts.violations:
         closure.see_violation(violation)
-    for observation in facts.coupling_cohesion_observations:
-        closure.see_symbol(observation.symbol)
-    for api_symbol in facts.api_symbols:
-        closure.see_symbol(api_symbol.symbol)
-    for risk_observation in facts.risk_observations:
-        closure.see_symbol(risk_observation.symbol)
+    # Five families contribute identity through ONE ``symbol`` column and
+    # nothing else, so they share one loop.  Spelling them as five identical
+    # loops made this function's branch count grow with the family list --
+    # measured when ``unit_spans`` landed and pushed it over the complexity
+    # threshold -- while the closure it computes never differed.
+    symbol_rows: Iterable[_SymbolCarrier] = chain(
+        facts.sink_roles,
+        facts.coupling_cohesion_observations,
+        facts.api_symbols,
+        facts.risk_observations,
+        facts.unit_spans,
+    )
+    for symbol_row in symbol_rows:
+        closure.see_symbol(symbol_row.symbol)
     for adoption in facts.adoption_counts:
         closure.see_endpoint(adoption.scope)
     for surface in facts.security_surfaces:
@@ -1236,6 +1310,15 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         facts.security_surfaces,
         "security_surfaces.key",
         lambda row: (*canonical_key(row.file), row.start_line, row.evidence_symbol),
+    )
+    # The declaration key carries NO dimension: that is the whole point of
+    # the family.  Under the risk key two rows of one declaration differing
+    # only in ``dimension`` could carry contradicting spans and never meet
+    # this prover; under this key they collide and are refused.
+    _unique_by_key(
+        facts.unit_spans,
+        "unit_spans.key",
+        lambda row: (canonical_key(row.symbol), row.start_line),
     )
 
 

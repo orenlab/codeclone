@@ -185,6 +185,7 @@ FAMILY_SEMANTIC_GRAMMAR: Final[Mapping[str, FamilyGrammar]] = {
     "security_surfaces": FamilyGrammar("normalized_fact"),
     "semantic_edges": FamilyGrammar("normalized_fact"),
     "sink_roles": FamilyGrammar("normalized_fact"),
+    "unit_spans": FamilyGrammar("normalized_fact"),
     "violations": FamilyGrammar("normalized_finding"),
 }
 

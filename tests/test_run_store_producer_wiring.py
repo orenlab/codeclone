@@ -658,6 +658,7 @@ def test_the_producer_native_model_equals_the_legacy_oracle(
         "security_surfaces",
         "semantic_edges",
         "sink_roles",
+        "unit_spans",
     ):
         rows = getattr(produced, family)
         assert rows, f"{family} carries no rows; the comparison would be hollow"

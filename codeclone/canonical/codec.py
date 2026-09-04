@@ -149,6 +149,7 @@ from codeclone.canonical.model import (
     SecuritySurfaceRow,
     SemanticEdge,
     SinkRoleRow,
+    UnitSpanRow,
     ViolationRow,
 )
 from codeclone.canonical.registry import (
@@ -342,6 +343,7 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
     referenced.update(row.symbol for row in facts.coupling_cohesion_observations)
     referenced.update(row.symbol for row in facts.api_symbols)
     referenced.update(row.symbol for row in facts.risk_observations)
+    referenced.update(row.symbol for row in facts.unit_spans)
     return referenced
 
 
@@ -773,6 +775,24 @@ def _risk_observation_rows(
     ]
 
 
+def _unit_span_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
+    # Declaration key order: (symbol, start_line) — symbol ordinals are
+    # assigned in canonical-key order, so this spells (file, qualname,
+    # start_line).  No dimension: the span belongs to the declaration, not
+    # to any measurement of it.
+    return [
+        {
+            "end_line": row.end_line,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.unit_spans,
+            key=lambda row: (plan.symbol_ordinal[row.symbol], row.start_line),
+        )
+    ]
+
+
 def _api_parameter_cell(parameter: ApiParameterFact) -> list[object]:
     """One wire cell per parameter: ``[name, kind, default, annotation?]``.
 
@@ -990,6 +1010,7 @@ _FAMILY_ROW_BUILDERS: dict[
     "security_surfaces": _security_surface_rows,
     "semantic_edges": _semantic_edge_rows,
     "sink_roles": _sink_role_rows,
+    "unit_spans": _unit_span_rows,
     "violations": _violation_rows,
 }
 
@@ -2276,6 +2297,47 @@ def _decode_risk_observations(
     return frozenset(rows)
 
 
+def _decode_unit_spans(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[UnitSpanRow]:
+    columns, _flags, row_count = _decode_columns("unit_spans", facts["unit_spans"])
+    rows = []
+    keys = []
+    for index in range(row_count):
+        start_line = _expect_wire_int(
+            columns["start_line"][index],
+            f"facts.unit_spans.start_line[{index}]",
+        )
+        if start_line < 1:
+            raise _refuse(
+                "W07",
+                f"facts.unit_spans.start_line[{index}] is "
+                f"{start_line}, outside the declaration-site domain "
+                "[1, 2**31-1] (a zero site would spell no declaration "
+                "as a declaration)",
+            )
+        end_line = _expect_wire_int(
+            columns["end_line"][index],
+            f"facts.unit_spans.end_line[{index}]",
+        )
+        if end_line < start_line:
+            raise _refuse(
+                "W07",
+                f"facts.unit_spans.end_line[{index}] is {end_line}, before "
+                f"its own start {start_line} (a span is a range, and a "
+                "backwards one would answer with a value no source had)",
+            )
+        ordinal = _expect_ordinal(
+            columns["symbol"][index],
+            len(symbols),
+            f"facts.unit_spans.symbol[{index}]",
+        )
+        rows.append(UnitSpanRow(symbols[ordinal], start_line, end_line))
+        keys.append((ordinal, start_line))
+    _expect_strictly_increasing(keys, "facts.unit_spans")
+    return frozenset(rows)
+
+
 def _decode_api_parameter(value: object, where: str) -> ApiParameterFact:
     cell = _expect_list(value, where)
     if len(cell) not in (3, 4):
@@ -2874,6 +2936,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     coupling_cohesion = _decode_coupling_cohesion(facts_section, symbols)
     api_symbols = _decode_api_symbols(facts_section, symbols)
     risk_observations = _decode_risk_observations(facts_section, symbols)
+    unit_spans = _decode_unit_spans(facts_section, symbols)
     adoption_counts = _decode_adoption_counts(facts_section, files, modules)
     security_surfaces = _decode_security_surfaces(facts_section, files)
     run_scalars = _decode_run_scalars(facts_section)
@@ -2914,6 +2977,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 coupling_cohesion_observations=coupling_cohesion,
                 api_symbols=api_symbols,
                 risk_observations=risk_observations,
+                unit_spans=unit_spans,
                 adoption_counts=adoption_counts,
                 security_surfaces=security_surfaces,
                 run_scalars=run_scalars,
