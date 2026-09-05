@@ -110,6 +110,7 @@ def collect_session_snapshot(
     from ..surfaces.mcp._workspace_intents import (
         IntentOwnership,
         classify_intent_ownership,
+        is_recovery_candidate,
         list_workspace_intent_records_for_recovery,
         utc_now,
     )
@@ -141,7 +142,9 @@ def collect_session_snapshot(
             continue
         if ownership == IntentOwnership.OWN_STALE:
             stale_count += 1
-        if ownership == IntentOwnership.RECOVERABLE:
+        # Ownership alone would count a terminally closed row here: this
+        # collector reads the hygiene listing, which retains one on purpose.
+        if is_recovery_candidate(record, ownership):
             recoverable_count += 1
 
         lease_remaining = _lease_remaining_seconds(record, now)

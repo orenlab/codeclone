@@ -77,6 +77,9 @@ from ...workspace_intent.ownership import (
 from ...workspace_intent.ownership import (
     classify_intent_ownership as _classify_intent_ownership,
 )
+from ...workspace_intent.ownership import (
+    is_recovery_candidate as is_recovery_candidate,
+)
 from ...workspace_intent.paths import (
     intent_filename,
     intent_id_from_filename,
@@ -876,6 +879,7 @@ __all__ = [
     "intent_id_from_filename",
     "intent_path",
     "is_orphaned",
+    "is_recovery_candidate",
     "is_stale",
     "lifecycle_for_verification_outcome",
     "list_workspace_intent_records_for_recovery",

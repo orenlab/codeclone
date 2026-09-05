@@ -15,7 +15,7 @@ from enum import Enum
 import codeclone.workspace_intent.lifecycle as lifecycle
 
 from .contract import WorkspaceIntentRecord
-from .lifecycle import PidLiveness
+from .lifecycle import PidLiveness, is_terminal_workspace_intent_status
 
 
 class IntentOwnership(str, Enum):
@@ -61,4 +61,40 @@ def classify_intent_ownership(
     )
 
 
-__all__ = ["IntentOwnership", "classify_intent_ownership"]
+def is_recovery_candidate(
+    record: WorkspaceIntentRecord,
+    ownership: IntentOwnership,
+) -> bool:
+    """Whether ``recover`` can actually reopen this row: both axes must agree.
+
+    :class:`IntentOwnership` answers one question -- *whose agent, and is that
+    agent still there* -- and ``RECOVERABLE`` is its way of saying the
+    declaring agent is gone.  It is silent about the other axis.  A row whose
+    lifecycle status is terminal is filtered out by ``find_workspace_intent``,
+    so ``recover`` cannot reach it at all: advertising such a row produces a
+    reclaim instruction whose only possible outcome is ``not_found``.
+
+    Measured 2026-09-04, and reproduced on both registry backends: a finish
+    that reported ``intent_cleared: true`` left ``list_workspace`` publishing
+    the closed intent under ``recovery_available`` with the hint "Use
+    action='recover' with matching run_id to reclaim", while ``recover``
+    answered ``not_found`` for that same id.  The SQLite registry retains a
+    closed row for its retention window by design, so the row being *there* is
+    correct; calling it reclaimable is not.
+
+    The join lives here rather than at each call site because it was already
+    being written by hand at two of them -- the edit gate and the MCP
+    workspace-hygiene reader both skip terminal rows before classifying -- and
+    was simply missing from the other two.  One fact, one owner.
+    """
+
+    return ownership is IntentOwnership.RECOVERABLE and not (
+        is_terminal_workspace_intent_status(record.status)
+    )
+
+
+__all__ = [
+    "IntentOwnership",
+    "classify_intent_ownership",
+    "is_recovery_candidate",
+]

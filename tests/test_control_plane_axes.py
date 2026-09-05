@@ -704,3 +704,159 @@ def test_an_unknown_status_word_is_refused_by_both_translators() -> None:
     # smuggled through the verdict door either.
     with pytest.raises(ValueError, match="unknown verification outcome"):
         lifecycle_for_verification_outcome("orphaned")
+
+
+# ── Defect C: a closed row is not a recovery candidate ───────────────────
+#
+# Measured 2026-09-04 and reproduced here on BOTH registry backends: after a
+# ``finish`` returned ``intent_cleared: true`` and ``list_workspace`` reported
+# ``workspace_intents: []`` with ``orphaned_count: 0``, the same listing still
+# carried the intent under ``recovery_available`` telling the operator to
+# reclaim it -- while ``recover`` answered ``not_found`` for that very id.
+#
+# The same two-axes shape as defect B, one layer out.  ``recovery_available``
+# is fed by ``list_records_for_hygiene()``, which deliberately returns terminal
+# rows (the SQLite registry retains them for 30 days), and each row is then
+# judged by ``classify_intent_ownership`` -- which reads expiry, pid ownership,
+# lease and agent liveness, and never the lifecycle column.  "Its agent is
+# gone" (ownership) was published as "you may reopen it" (lifecycle).
+#
+# The join is not a new concept: ``workspace_intent.gate`` and
+# ``_workspace_hygiene`` already write it by hand at their own call sites.  Two
+# consumers forgot, so it is named once here and owned by the ownership module.
+
+
+def _foreign_lister(record: MCPRunRecord) -> CodeCloneMCPService:
+    """A second agent, holding the same run, that will read the registry."""
+
+    service = CodeCloneMCPService(history_limit=6)
+    service._agent_pid, service._agent_start_epoch, service._agent_label = (
+        22222,
+        200,
+        "agent-b",
+    )
+    service._runs.register(record)
+    return service
+
+
+def _orphaned_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    close_it: bool,
+) -> tuple[CodeCloneMCPService, str, Path]:
+    """One declared intent whose declaring agent is gone, optionally closed."""
+
+    _committed_repo(tmp_path)
+    owner, intent_id, record = _declared(tmp_path, intent="owner edits pkg.a")
+    if close_it:
+        assert update_workspace_intent_status(
+            root=tmp_path,
+            pid=owner._agent_pid,
+            start_epoch=owner._agent_start_epoch,
+            intent_id=intent_id,
+            new_status=WorkspaceIntentLifecycle.CLOSED.value,
+        )
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive",
+        lambda _pid: False,
+    )
+    return _foreign_lister(record), intent_id, tmp_path
+
+
+def _recovery_available(
+    service: CodeCloneMCPService, root: Path
+) -> tuple[list[Mapping[str, object]], Mapping[str, object]]:
+    listing = service.manage_change_intent(action="list_workspace", root=str(root))
+    entries = listing["recovery_available"]
+    assert isinstance(entries, list)
+    return [item for item in entries if isinstance(item, Mapping)], listing
+
+
+def test_a_closed_intent_is_not_advertised_as_reclaimable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry_backend: str,
+) -> None:
+    """The measured defect: a terminal row offered for reclaim."""
+
+    lister, intent_id, root = _orphaned_intent(tmp_path, monkeypatch, close_it=True)
+    stored = find_workspace_intent(
+        root=root, intent_id=intent_id, apply_lazy_close=False
+    )
+    # Population, stated before the verdict: the row really is retained and
+    # really is terminal.  A backend that had deleted it would make the
+    # assertion below pass for the wrong reason.
+    retained = _retained_statuses(root)
+    assert retained == [WorkspaceIntentLifecycle.CLOSED.value], retained
+    assert is_terminal_workspace_intent_status(retained[0])
+    assert stored is None, "a terminal row must not be findable"
+
+    entries, listing = _recovery_available(lister, root)
+    assert listing["workspace_intents"] == []
+    assert entries == [], (
+        f"a terminally closed row was advertised as reclaimable: {entries}"
+    )
+    assert "recovery_next_step" not in listing
+
+
+def test_an_orphaned_but_live_intent_is_still_advertised_for_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry_backend: str,
+) -> None:
+    """The opposite boundary: silencing everything is the other error.
+
+    A fix that simply stopped publishing ``recovery_available`` would pass the
+    test above and destroy the feature.  This is the test such a mutant reds.
+    """
+
+    lister, intent_id, root = _orphaned_intent(tmp_path, monkeypatch, close_it=False)
+    entries, listing = _recovery_available(lister, root)
+    assert [item["intent_id"] for item in entries] == [intent_id], listing
+    assert entries[0]["run_available"] is True
+    assert "reclaim" in str(entries[0]["hint"])
+    assert listing["recovery_next_step"]
+
+
+def test_the_recovery_listing_never_advertises_what_recover_calls_not_found(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    registry_backend: str,
+) -> None:
+    """The two doors must agree, whichever row the registry is holding.
+
+    Stated as a relation between the listing and the action rather than as a
+    fact about one row: the defect was not "this id is wrong", it was that the
+    advertisement and the operation answer to different filters.
+    """
+
+    for close_it in (True, False):
+        lister, intent_id, root = _orphaned_intent(
+            tmp_path / f"case-{close_it}", monkeypatch, close_it=close_it
+        )
+        entries, _listing = _recovery_available(lister, root)
+        for item in entries:
+            answer = lister.manage_change_intent(
+                action="recover",
+                root=str(root),
+                run_id=str(item["run_id"]),
+                intent_id=str(item["intent_id"]),
+            )
+            assert answer.get("reason") != "not_found", (
+                f"advertised {item['intent_id']!r} that recover cannot find: {answer}"
+            )
+        assert (intent_id in {str(item["intent_id"]) for item in entries}) is (
+            not close_it
+        )
+
+
+def _retained_statuses(root: Path) -> list[str]:
+    from codeclone.surfaces.mcp._workspace_intents import (
+        list_workspace_intent_records_for_recovery,
+    )
+
+    return sorted(
+        record.status
+        for record in list_workspace_intent_records_for_recovery(root=root)
+    )

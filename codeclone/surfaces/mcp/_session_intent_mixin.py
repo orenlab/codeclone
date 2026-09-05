@@ -76,6 +76,7 @@ from ._workspace_intents import (
     find_workspace_intent,
     format_utc,
     gc_workspace,
+    is_recovery_candidate,
     lifecycle_for_verification_outcome,
     list_workspace_intents,
     read_workspace_intent,
@@ -1593,7 +1594,12 @@ class _MCPSessionIntentMixin:
                 own_start_epoch=self._agent_start_epoch,
                 now=now,
             )
-            if ownership != IntentOwnership.RECOVERABLE:
+            # Both axes, not just ownership: the hygiene listing that feeds
+            # this loop deliberately includes terminal rows (SQLite retains a
+            # closed one for its retention window), and "its agent is gone" is
+            # not "you may reopen it".  Advertising a closed row produced a
+            # reclaim hint whose only possible outcome was ``not_found``.
+            if not is_recovery_candidate(record, ownership):
                 continue
             run_available = (
                 self._optional_run_record(record.run_id, root=root_path) is not None

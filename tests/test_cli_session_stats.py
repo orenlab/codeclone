@@ -9,7 +9,7 @@ import io
 import json
 import os
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2216,3 +2216,66 @@ def test_session_stats_reports_a_recycled_pid_agent_as_not_live(
     text = _quiet_text(tmp_path)
     assert "live_agents=0" in text
     assert "session-stats: idle" in text
+
+
+# ── A retained closed row is not a recoverable one ───────────────────────
+#
+# The same join defect the MCP recovery listing carried, in the second
+# consumer of the same pair of facts.  This collector reads
+# ``list_workspace_intent_records_for_recovery`` -- the hygiene listing, which
+# retains terminal rows on purpose -- and asked ownership alone whether a row
+# was recoverable.  Ownership answers "its agent is gone"; it is silent about
+# whether the row is still live, and ``recover`` refuses a terminal one.
+
+
+@pytest.fixture(params=("file", "sqlite"))
+def stats_registry_backend(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
+    """Both stores: the library default is ``file``, this repository is not."""
+
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        clear_workspace_intent_store_cache,
+    )
+
+    monkeypatch.setenv("CODECLONE_INTENT_REGISTRY_BACKEND", request.param)
+    clear_workspace_intent_store_cache()
+    yield str(request.param)
+    clear_workspace_intent_store_cache()
+
+
+def _recoverable_count(tmp_path: Path, *, status: str) -> int:
+    """One orphaned row in the given lifecycle state, counted as the CLI does."""
+
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    intents_dir.mkdir(parents=True, exist_ok=True)
+    _write_intent_file(
+        intents_dir,
+        pid=os.getpid(),
+        start_epoch=_CLI_SESSION_START_EPOCH - 1,
+        status=status,
+    )
+    # Population, before the verdict: the row really is on the hygiene listing.
+    records = list_workspace_intent_records_for_recovery(root=tmp_path)
+    assert [record.status for record in records] == [status], records
+    with patch.object(pid_mod, "is_agent_pid_alive", lambda _pid: False):
+        snapshot = collect_session_snapshot(
+            tmp_path,
+            own_pid=os.getpid(),
+            own_start_epoch=_CLI_SESSION_START_EPOCH,
+        )
+    return snapshot.recoverable_count
+
+
+def test_session_stats_does_not_count_a_closed_row_as_recoverable(
+    tmp_path: Path, stats_registry_backend: str
+) -> None:
+    assert _recoverable_count(tmp_path, status="clean") == 0
+
+
+def test_session_stats_still_counts_a_live_orphaned_row_as_recoverable(
+    tmp_path: Path, stats_registry_backend: str
+) -> None:
+    """The opposite boundary: not counting anything is the other error."""
+
+    assert _recoverable_count(tmp_path, status="active") == 1

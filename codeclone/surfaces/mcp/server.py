@@ -32,6 +32,7 @@ from ...observability import (
 )
 from ._engine_fence import fenced_server_class
 from ._protocol_diagnostics import diagnosing_server_class
+from ._shutdown import ShutdownCoordinator
 from .auth import (
     MCP_AUTH_TOKEN_ENV,
     MCPAuthConfigurationError,
@@ -391,11 +392,20 @@ def build_mcp_server(
     # tool call that carries a root.
     bootstrap(resolve_observability_config(), session_id=_observability_session_id())
 
+    def _teardown() -> None:
+        service.shutdown_cleanup()
+        shutdown()
+
+    # Two doors, one teardown: the lifespan below on a clean end of input, the
+    # signal handler when the loop is torn down under us.  Registering it here
+    # is what lets the SIGTERM path clean up at all -- measured, the lifespan
+    # is not reached on that path.
+    _PROCESS_SHUTDOWN.set_teardown(_teardown)
+
     @asynccontextmanager
     async def _lifespan(_app: FastMCP) -> AsyncIterator[dict[str, object]]:
         yield {}
-        service.shutdown_cleanup()
-        shutdown()
+        _PROCESS_SHUTDOWN.run_teardown_once()
 
     token_verifier = None
     auth_settings = None
@@ -1709,14 +1719,31 @@ def _host_is_loopback(host: str) -> bool:
         return False
 
 
-def _install_sigterm_handler() -> None:
-    """Convert SIGTERM to SystemExit so async teardown runs.
+#: Process-global, because signal disposition and interpreter exit are.
+_PROCESS_SHUTDOWN = ShutdownCoordinator()
 
-    Python's default SIGTERM handler (SIG_DFL) terminates the process
-    immediately — no ``finally`` blocks, no ``atexit``, no async
-    context manager teardown.  By raising :class:`SystemExit`, the
-    event loop unwinds normally and the FastMCP lifespan teardown
-    (which cleans workspace intent files) gets a chance to execute.
+
+def _install_sigterm_handler(
+    coordinator: ShutdownCoordinator | None = None,
+) -> None:
+    """Route SIGTERM into a bounded shutdown with a hard-kill fallback.
+
+    The previous handler raised ``SystemExit`` and nothing else, on the theory
+    that the event loop would then unwind and the FastMCP lifespan teardown
+    would clean up.  Measured 2026-09-05 on the stdio transport: it does not.
+    ``SystemExit`` aborts ``run_forever`` mid-``select`` instead of asking it
+    to stop, the lifespan ``__aexit__`` is never reached (so
+    ``shutdown_cleanup`` was never called), and interpreter shutdown then hangs
+    in ``threading._shutdown`` joining anyio's non-daemon worker thread.  The
+    polite signal was, in practice, ignored.
+
+    So the teardown is run here rather than hoped for downstream, and a
+    deadline armed first guarantees the process ends either way.  The unwind is
+    kept: on a transport where it does complete, the clean exit is still the
+    one that happens.
+
+    ``coordinator`` is injectable so a test can supply a harmless hard-exit;
+    production passes nothing and gets the process-global one.
 
     Only installed on platforms that support SIGTERM (not Windows).
     """
@@ -1725,8 +1752,10 @@ def _install_sigterm_handler() -> None:
     if not hasattr(_signal, "SIGTERM"):
         return  # pragma: no cover
 
-    def _handler(_signum: int, _frame: object) -> None:
-        raise SystemExit(0)
+    target = _PROCESS_SHUTDOWN if coordinator is None else coordinator
+
+    def _handler(signum: int, _frame: object) -> None:
+        target.request_shutdown(signum)
 
     _signal.signal(_signal.SIGTERM, _handler)
 
