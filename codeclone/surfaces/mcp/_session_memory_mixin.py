@@ -415,6 +415,7 @@ class _MCPSessionMemoryMixin:
                         proof=proof,
                         actor=actor or "",
                         protocol=protocol,
+                        statement=statement,
                     )
                 finally:
                     store.close()

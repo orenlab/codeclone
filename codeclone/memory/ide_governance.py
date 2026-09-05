@@ -12,11 +12,22 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, NoReturn, TypeGuard
+from typing import Final, Literal, NoReturn, TypeGuard
 
 from ..contracts import IDE_GOVERNANCE_PROTOCOL_VERSION
 from .exceptions import MemoryContractError
-from .governance import approve_record, archive_record, reject_record
+from .governance import (
+    GOVERNANCE_TICKET_MISMATCH_CODE,
+    amend_and_approve_record,
+    approve_record,
+    archive_record,
+    assert_record_amendable,
+    compute_statement_digest,
+    current_revision_number,
+    governance_refusal,
+    reject_record,
+    resolve_statement_origin,
+)
 from .models import MemoryRecord
 from .project import compute_project_id
 from .sqlite_store import SqliteEngineeringMemoryStore
@@ -32,7 +43,8 @@ IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset(
     {"CodeClone VS Code", "CodeClone JetBrains", "Enacta"}
 )
 
-GovernanceDecision = Literal["approve", "reject", "archive"]
+GovernanceDecision = Literal["approve", "reject", "archive", "amend_and_approve"]
+AMEND_AND_APPROVE: Final = "amend_and_approve"
 GovernanceAction = Literal[
     "register_ide_governance",
     "prepare_governance",
@@ -69,6 +81,12 @@ class IdeGovernanceTicket:
     confirmation_nonce: str
     project_id: str
     statement_digest: str
+    # The rest of what the human was shown. The digest alone is not the
+    # record: a draft can go stale with its bytes untouched (mark_stale
+    # writes no revision), so an approval guarded by the digest only would
+    # still sign a record that moved. Measured, not hypothetical.
+    revision: int
+    record_status: str
     expires_at_unix: float
     consumed: bool = False
 
@@ -81,11 +99,6 @@ class IdeGovernanceSessionState:
     client_version: str | None = None
     tickets: dict[str, IdeGovernanceTicket] = field(default_factory=dict)
     commit_attempts: int = 0
-
-
-def compute_statement_digest(statement: str) -> str:
-    normalized = statement.strip()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
 
 
 def _canonical_proof_message(
@@ -185,15 +198,37 @@ def _assert_ticket_request_matches(
     record_id: str,
     decision: GovernanceDecision,
     project_id: str,
-    statement_digest: str,
 ) -> None:
+    """Does the REQUEST contradict its ticket? Nothing about the record here.
+
+    This used to also compare the ticket's statement digest against the
+    record's current digest and blame the ticket for the difference -- so a
+    record that moved under a perfectly good ticket was reported as a ticket
+    mismatch. Two different failures, two different remedies: this one means
+    the caller sent the wrong request, and the caller fixes it by preparing
+    the governance it actually intends.
+    """
     if (
         ticket.record_id != record_id
         or ticket.decision != decision
         or ticket.project_id != project_id
-        or ticket.statement_digest != statement_digest
     ):
-        _raise_memory_contract("Governance ticket does not match the commit request.")
+        _raise_memory_contract(
+            governance_refusal(
+                GOVERNANCE_TICKET_MISMATCH_CODE,
+                reason=(
+                    "Governance ticket does not match the commit request "
+                    f"(ticket {ticket.ticket_id}: record={ticket.record_id}, "
+                    f"decision={ticket.decision}; "
+                    f"request: record={record_id}, decision={decision})."
+                ),
+                next_step=(
+                    "call manage_engineering_memory(action=prepare_governance) "
+                    "for the record and decision you intend to commit, then "
+                    "commit that ticket"
+                ),
+            )
+        )
 
 
 def _require_matching_confirmation_nonce(
@@ -319,7 +354,7 @@ def _find_project_record(
 
 
 def _is_governance_decision(value: str) -> TypeGuard[GovernanceDecision]:
-    return value in {"approve", "reject", "archive"}
+    return value in {"approve", "reject", "archive", AMEND_AND_APPROVE}
 
 
 def _validate_decision(decision: str) -> GovernanceDecision:
@@ -338,10 +373,18 @@ def _validate_record_for_decision(
     # trust-and-lifecycle state machine), archive accepts only active. Keeps the
     # IDE channel consistent with reject_record so a VS Code reject on a stale
     # record fails here with a clear message instead of raising downstream.
+    if decision == AMEND_AND_APPROVE:
+        # Only a draft is editable, and the refusal for an approved record
+        # has to say so in its own words -- "cannot amend record in status
+        # 'active'" is true but tells the human nothing about the successor
+        # path that actually corrects a published statement.
+        assert_record_amendable(record)
+        return
     allowed_by_decision: dict[GovernanceDecision, frozenset[str]] = {
         "approve": frozenset({"draft", "stale"}),
         "reject": frozenset({"draft"}),
         "archive": frozenset({"active"}),
+        AMEND_AND_APPROVE: frozenset({"draft"}),
     }
     if record.status not in allowed_by_decision[decision]:
         _raise_memory_contract(f"Cannot {decision} record in status '{record.status}'")
@@ -402,6 +445,7 @@ def prepare_governance(
     _validate_record_for_decision(record, normalized_decision)
     _validate_repository_project(project_id, root_path)
     statement_digest = compute_statement_digest(record.statement)
+    revision = current_revision_number(store, record_id)
     ticket_id = secrets.token_hex(16)
     nonce = secrets.token_hex(16)
     ticket = IdeGovernanceTicket(
@@ -411,6 +455,8 @@ def prepare_governance(
         confirmation_nonce=nonce,
         project_id=project_id,
         statement_digest=statement_digest,
+        revision=revision,
+        record_status=record.status,
         expires_at_unix=time.time() + IDE_GOVERNANCE_TICKET_TTL_SECONDS,
     )
     state.tickets[ticket_id] = ticket
@@ -444,6 +490,9 @@ def prepare_governance(
         "confirmation_nonce": nonce,
         "project_id": project_id,
         "statement_digest": statement_digest,
+        "current_revision": revision,
+        "record_status": record.status,
+        "statement_origin": resolve_statement_origin(record.payload),
         "record": record_summary,
     }
 
@@ -455,7 +504,6 @@ def _consume_ticket(
     record_id: str,
     decision: GovernanceDecision,
     project_id: str,
-    statement_digest: str,
 ) -> IdeGovernanceTicket:
     ticket = state.tickets.get(ticket_id)
     if ticket is None:
@@ -472,7 +520,6 @@ def _consume_ticket(
         record_id=record_id,
         decision=decision,
         project_id=project_id,
-        statement_digest=statement_digest,
     )
     ticket.consumed = True
     return ticket
@@ -491,6 +538,7 @@ def commit_governance(
     proof: str,
     actor: str,
     protocol: int,
+    statement: str | None = None,
 ) -> dict[str, object]:
     rejected = _require_governance_channel(state, action="commit_governance")
     if rejected is not None:
@@ -519,16 +567,19 @@ def commit_governance(
             "record_id": record_id,
         }
     _validate_repository_project(project_id, root_path)
-    statement_digest = compute_statement_digest(record.statement)
     ticket = _consume_ticket(
         state,
         ticket_id=governance_ticket,
         record_id=record_id,
         decision=normalized_decision,
         project_id=project_id,
-        statement_digest=statement_digest,
     )
     _require_matching_confirmation_nonce(ticket, confirmation_nonce)
+    # The proof authenticates the ticket the client is holding, so it is
+    # checked against the digest that was SHOWN -- not against a digest
+    # recomputed from the record now. Signing the current record would make
+    # every concurrent edit look like a forged proof, which is the same
+    # misattribution the ticket check used to commit.
     _require_valid_governance_proof(
         key=key,
         ticket_id=governance_ticket,
@@ -536,18 +587,47 @@ def commit_governance(
         decision=normalized_decision,
         confirmation_nonce=confirmation_nonce,
         project_id=project_id,
-        statement_digest=statement_digest,
+        statement_digest=ticket.statement_digest,
         protocol=protocol,
         proof=proof,
     )
     _validate_record_for_decision(record, normalized_decision)
     actor_label = actor.strip() or _resolve_client_label(state)
-    if normalized_decision == "approve":
+    receipt: dict[str, object] | None = None
+    if normalized_decision == AMEND_AND_APPROVE:
+        if statement is None:
+            _raise_memory_contract(
+                governance_refusal(
+                    GOVERNANCE_TICKET_MISMATCH_CODE,
+                    reason=(
+                        "amend_and_approve carries the amended wording, and "
+                        "this commit supplied none."
+                    ),
+                    next_step=(
+                        "submit the edited text as `statement` alongside the "
+                        "ticket, or commit decision=approve to publish the "
+                        "draft unchanged"
+                    ),
+                )
+            )
+        updated, receipt = amend_and_approve_record(
+            store,
+            record_id=record_id,
+            submitted_statement=statement,
+            expected_revision=ticket.revision,
+            shown_statement_digest=ticket.statement_digest,
+            shown_status=ticket.record_status,
+            approved_by=actor_label,
+        )
+    elif normalized_decision == "approve":
         updated = approve_record(
             store,
             record_id=record_id,
             approved_by=actor_label,
             revision_reason="ide_govern_approve",
+            expected_revision=ticket.revision,
+            shown_statement_digest=ticket.statement_digest,
+            shown_status=ticket.record_status,
         )
     elif normalized_decision == "reject":
         updated = reject_record(
@@ -556,6 +636,9 @@ def commit_governance(
             rejected_by=actor_label,
             reason="ide_govern_reject",
             revision_reason="ide_govern_reject",
+            expected_revision=ticket.revision,
+            shown_statement_digest=ticket.statement_digest,
+            shown_status=ticket.record_status,
         )
     else:
         updated = archive_record(
@@ -563,18 +646,26 @@ def commit_governance(
             record_id=record_id,
             archived_by=actor_label,
             revision_reason="ide_govern_archive",
+            expected_revision=ticket.revision,
+            shown_statement_digest=ticket.statement_digest,
+            shown_status=ticket.record_status,
         )
     state.tickets.pop(governance_ticket, None)
-    return {
+    payload: dict[str, object] = {
         "action": "commit_governance",
         "status": "ok",
         "record_id": updated.id,
         "record_status": updated.status,
         "approved_by": updated.approved_by,
+        "statement_origin": resolve_statement_origin(updated.payload),
     }
+    if receipt is not None:
+        payload["proof"] = receipt
+    return payload
 
 
 __all__ = [
+    "AMEND_AND_APPROVE",
     "GOVERNANCE_MODE_UNAVAILABLE_MESSAGE",
     "GOVERNANCE_MODE_UNAVAILABLE_NEXT_STEP",
     "IDE_GOVERNANCE_ALLOWED_CLIENTS",

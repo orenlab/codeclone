@@ -53,7 +53,7 @@ STATEMENT_FORMAT_MD: Final = "md-v1"
 STATEMENT_FORMAT_PLAIN: Final = "plain"
 STATEMENT_FORMAT_PAYLOAD_KEY: Final = "statement_format"
 
-_HELP_MENTION: Final = 'help(topic="engineering_memory")'
+HELP_MENTION: Final = 'help(topic="engineering_memory")'
 _TITLE_PREFIX: Final = "## "
 
 STATEMENT_STRUCTURE_WARN_CODE: Final = "memory_statement_unstructured"
@@ -91,38 +91,89 @@ STATEMENT_MD_WARN_CODES: Final[tuple[str, ...]] = (
     "memory_md_list_nesting",
 )
 
-_REJECT_MESSAGES: Final[dict[str, str]] = {
+# A reject is one fact (why the shape is refused) plus one remedy, and the
+# remedy differs by who is holding the keyboard. An agent retries the write
+# tool; a human in the IDE approval view has no such call -- telling them to
+# "retry record_candidate" is an instruction they cannot execute, which is
+# exactly what the in-band procedure law forbids. Same code, same reason,
+# same rules; the executable step is chosen per audience.
+STATEMENT_AUDIENCE_AGENT: Final = "agent"
+STATEMENT_AUDIENCE_HUMAN: Final = "human"
+
+_REJECT_REASONS: Final[dict[str, str]] = {
     "memory_md_image": (
-        "memory_md_image: image syntax is not allowed in memory statements — "
-        "a rendered image pings its URL (exfiltration channel). "
-        "next_step: remove the image and cite evidence as a bare URL or a "
-        "backtick code span, then retry "
-        "manage_engineering_memory(action=record_candidate). "
-        f"See {_HELP_MENTION}."
+        "image syntax is not allowed in memory statements — "
+        "a rendered image pings its URL (exfiltration channel)."
     ),
     "memory_md_html": (
-        "memory_md_html: raw HTML is not allowed in memory statements — it "
-        "injects into webview render surfaces. "
-        "next_step: wrap literal markup in a backtick code span (`<tag>`) or "
-        "rewrite it as text, then retry "
-        "manage_engineering_memory(action=record_candidate). "
-        f"See {_HELP_MENTION}."
+        "raw HTML is not allowed in memory statements — it "
+        "injects into webview render surfaces."
     ),
     "memory_md_link": (
-        "memory_md_link: [text](target) and reference-style links mask the "
-        "target in rendered UI; bare URLs only (renderers autolink them). "
-        "next_step: replace the link with its bare URL, then retry "
-        "manage_engineering_memory(action=record_candidate). "
-        f"See {_HELP_MENTION}."
+        "[text](target) and reference-style links mask the "
+        "target in rendered UI; bare URLs only (renderers autolink them)."
     ),
     "memory_md_heading_structure": (
-        "memory_md_heading_structure: a memory note carries at most one "
-        "'## ' title and it must be the first content line. "
-        "next_step: keep one leading '## ' title; split additional facts "
-        "into separate manage_engineering_memory(action=record_candidate) "
-        "calls. "
-        f"See {_HELP_MENTION}."
+        "a memory note carries at most one "
+        "'## ' title and it must be the first content line."
     ),
+}
+
+_REJECT_NEXT_STEPS: Final[dict[str, dict[str, str]]] = {
+    STATEMENT_AUDIENCE_AGENT: {
+        "memory_md_image": (
+            "remove the image and cite evidence as a bare URL or a "
+            "backtick code span, then retry "
+            "manage_engineering_memory(action=record_candidate)."
+        ),
+        "memory_md_html": (
+            "wrap literal markup in a backtick code span (`<tag>`) or "
+            "rewrite it as text, then retry "
+            "manage_engineering_memory(action=record_candidate)."
+        ),
+        "memory_md_link": (
+            "replace the link with its bare URL, then retry "
+            "manage_engineering_memory(action=record_candidate)."
+        ),
+        "memory_md_heading_structure": (
+            "keep one leading '## ' title; split additional facts "
+            "into separate manage_engineering_memory(action=record_candidate) "
+            "calls."
+        ),
+    },
+    STATEMENT_AUDIENCE_HUMAN: {
+        "memory_md_image": (
+            "in the Memory view, remove the image and cite the evidence as a "
+            "bare URL or a `backtick code span`, then approve again; the "
+            "record stays a draft until the wording validates."
+        ),
+        "memory_md_html": (
+            "in the Memory view, wrap the literal markup in a `backtick code "
+            "span` or rewrite it as text, then approve again; the record "
+            "stays a draft until the wording validates."
+        ),
+        "memory_md_link": (
+            "in the Memory view, replace the link with its bare URL, then "
+            "approve again; the record stays a draft until the wording "
+            "validates."
+        ),
+        "memory_md_heading_structure": (
+            "in the Memory view, keep one leading '## ' title and move the "
+            "extra facts out of this note, then approve again; the record "
+            "stays a draft until the wording validates."
+        ),
+    },
+}
+
+
+def reject_message(code: str, *, audience: str = STATEMENT_AUDIENCE_AGENT) -> str:
+    """Compose one typed reject line for the audience that must act on it."""
+    next_step = _REJECT_NEXT_STEPS[audience][code]
+    return f"{code}: {_REJECT_REASONS[code]} next_step: {next_step} See {HELP_MENTION}."
+
+
+_REJECT_MESSAGES: Final[dict[str, str]] = {
+    code: reject_message(code) for code in _REJECT_REASONS
 }
 
 _WARN_MESSAGES: Final[dict[str, str]] = {
@@ -266,9 +317,20 @@ def validate_statement_markdown(statement: str) -> StatementMarkdownReport:
     return StatementMarkdownReport(issues=tuple(issues))
 
 
-def markdown_reject_error(report: StatementMarkdownReport) -> str:
-    """Compose the typed contract-error text for a rejecting report."""
-    return " | ".join(issue.message for issue in report.rejects)
+def markdown_reject_error(
+    report: StatementMarkdownReport,
+    *,
+    audience: str = STATEMENT_AUDIENCE_AGENT,
+) -> str:
+    """Compose the typed contract-error text for a rejecting report.
+
+    Rules and codes are audience-invariant; only the executable next_step
+    differs, so a human amending a draft is refused by the same guard an
+    agent is -- with a remedy they can actually perform.
+    """
+    return " | ".join(
+        reject_message(issue.code, audience=audience) for issue in report.rejects
+    )
 
 
 def statement_structure_issue(
@@ -384,6 +446,9 @@ def resolve_statement_format(
 
 
 __all__ = [
+    "HELP_MENTION",
+    "STATEMENT_AUDIENCE_AGENT",
+    "STATEMENT_AUDIENCE_HUMAN",
     "STATEMENT_FORMAT_MD",
     "STATEMENT_FORMAT_PAYLOAD_KEY",
     "STATEMENT_FORMAT_PLAIN",
@@ -394,6 +459,7 @@ __all__ = [
     "StatementMarkdownIssue",
     "StatementMarkdownReport",
     "markdown_reject_error",
+    "reject_message",
     "resolve_statement_format",
     "statement_structure_issue",
     "truncate_statement_preview",

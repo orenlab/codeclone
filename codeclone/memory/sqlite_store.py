@@ -385,10 +385,41 @@ class SqliteEngineeringMemoryStore:
     def connection(self) -> sqlite3.Connection:
         return self._conn
 
-    def write_record(self, record: MemoryRecord) -> None:
+    def write_record(self, record: MemoryRecord, *, commit: bool = True) -> None:
         record = validate_memory_record(record)
         self._insert_record(record)
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
+
+    def update_record_statement(
+        self,
+        record_id: str,
+        *,
+        statement: str,
+        payload: Mapping[str, object] | None = None,
+        commit: bool = True,
+    ) -> None:
+        """Replace a record's wording (and optionally its payload) in place.
+
+        Deliberately no status change: the caller owns the lifecycle. Amending
+        and approving are one transaction at the governance layer, so this must
+        be joinable to it -- hence ``commit=False`` rather than a commit of its
+        own.
+        """
+        now = current_report_timestamp_utc()
+        if payload is None:
+            self._conn.execute(
+                "UPDATE memory_records SET statement=?, updated_at_utc=? WHERE id=?",
+                (statement, now, record_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE memory_records SET statement=?, payload_json=?, "
+                "updated_at_utc=? WHERE id=?",
+                (statement, payload_json_text(dict(payload)), now, record_id),
+            )
+        if commit:
+            self._conn.commit()
 
     def _commit_upsert_result(
         self,
