@@ -628,6 +628,6 @@ def test_the_family_token_is_the_only_way_to_name_a_family() -> None:
         if isinstance(getattr(store_module, name), StoredFamily)
     }
     declared = {entry.family for entry in store_module._FAMILIES}
-    assert {
-        getattr(store_module, name).family for name in exported
-    } == declared, "the exported family tokens and the registry disagree"
+    assert {getattr(store_module, name).family for name in exported} == declared, (
+        "the exported family tokens and the registry disagree"
+    )

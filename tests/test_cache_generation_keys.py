@@ -328,7 +328,7 @@ def has_unreachable_tail(value: int) -> int:
     value += 1
     return value
 ''',
-    "pkg/_support.py": '''
+    "pkg/_support.py": """
 def internal_only(value: int) -> int:
     return value * 3
 
@@ -339,8 +339,8 @@ def never_referenced_at_all(value: int) -> int:
 
 def only_tests_call_me(value: int) -> int:
     return value + 7
-''',
-    "pkg/consumer.py": '''
+""",
+    "pkg/consumer.py": """
 from .core import PublicWorker, public_helper
 from ._support import internal_only
 
@@ -349,8 +349,8 @@ def drive(values: list[int]) -> int:
     worker = PublicWorker("probe", 2)
     joined = public_helper([str(v) for v in values])
     return worker.compute(values) + internal_only(len(joined))
-''',
-    "pkg/twin.py": '''
+""",
+    "pkg/twin.py": """
 from .core import PublicWorker, public_helper
 from ._support import internal_only
 
@@ -359,15 +359,15 @@ def steer(numbers: list[int]) -> int:
     engine = PublicWorker("probe", 2)
     text = public_helper([str(n) for n in numbers])
     return engine.compute(numbers) + internal_only(len(text))
-''',
+""",
     "tests/__init__.py": "\n",
-    "tests/test_support.py": '''
+    "tests/test_support.py": """
 from pkg._support import only_tests_call_me
 
 
 def test_only_tests_call_me() -> None:
     assert only_tests_call_me(1) == 8
-''',
+""",
 }
 
 _SCOPE_ID: Final = "0192f3aa-6c51-7b28-9d44-1ea5c07b6f4f"
@@ -595,9 +595,7 @@ def test_the_projection_still_sees_a_change_the_cache_must_not_hide(
         encoding="utf-8",
     )
     try:
-        perturbed = _run(
-            project, tmp_path / "ctrl-cache.json", tmp_path / "ctrl.json"
-        )
+        perturbed = _run(project, tmp_path / "ctrl-cache.json", tmp_path / "ctrl.json")
     finally:
         support.write_text(original, encoding="utf-8")
 
