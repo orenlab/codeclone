@@ -105,6 +105,7 @@ def run_cli(
     cli_args: tuple[str, ...] = (),
     pyproject_lines: tuple[str, ...] = (),
     expect_warm_cache: bool = False,
+    preamble: str = "",
 ) -> subprocess.CompletedProcess[str]:
     """Spawn one full analysis of a generated tree and return the process.
 
@@ -112,6 +113,12 @@ def run_cli(
     the document go through :func:`analysis_report`, which also asserts the
     witness chain. This entry point exists for the runs whose whole point is
     the exit status - a refused flag value has no report to read.
+
+    ``preamble`` is source executed in the spawned interpreter BEFORE the CLI
+    is imported. It exists for one purpose: a suite that pins a lane must be
+    able to show the lane can move, and the only honest way to show that is to
+    break the mechanism it names and watch the reading change. Every other
+    caller leaves it empty, and an empty preamble spawns the identical argv.
     """
 
     # Rewriting the tree for a second run is what defeats the cache: the bytes
@@ -131,7 +138,7 @@ def run_cli(
         [
             sys.executable,
             "-c",
-            CLI_ENTRY,
+            preamble + CLI_ENTRY,
             str(project_root),
             "--baseline",
             str(tmp_path / f"{name}-baseline.json"),
@@ -157,6 +164,7 @@ def analysis_report(
     cli_args: tuple[str, ...] = (),
     pyproject_lines: tuple[str, ...] = (),
     expect_warm_cache: bool = False,
+    preamble: str = "",
 ) -> dict[str, object]:
     """The whole report document of one generated tree, behind the witness chain.
 
@@ -173,6 +181,7 @@ def analysis_report(
         cli_args=cli_args,
         pyproject_lines=pyproject_lines,
         expect_warm_cache=expect_warm_cache,
+        preamble=preamble,
     )
     report_path = tmp_path / f"{name}-report.json"
     assert report_path.exists(), completed.stdout + completed.stderr
@@ -260,6 +269,18 @@ def unresolved_by_qualname(family: dict[str, object]) -> dict[str, dict[str, obj
     """The reachability abstention: neither dead nor live under this world."""
 
     return _rows_by_qualname(family, "unresolved")
+
+
+def dead_rows_by_qualname(family: dict[str, object]) -> dict[str, dict[str, object]]:
+    """The dead findings, rows returned WHOLE and keyed by qualname.
+
+    :func:`dead_qualnames` answers whether a symbol was called dead;
+    this answers WHY and on what witness. A suite that reads only the set of
+    qualnames cannot see a reason collapsing or a witness list emptying, which
+    is a different report about the same symbol.
+    """
+
+    return _rows_by_qualname(family, "items")
 
 
 def metric_family_of(payload: dict[str, object], name: str) -> dict[str, object]:

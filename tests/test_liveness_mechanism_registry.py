@@ -42,7 +42,9 @@ this whole file exists to refuse.
 from __future__ import annotations
 
 import importlib
+import sys
 import textwrap
+import types
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Final, cast
@@ -998,14 +1000,22 @@ _FIXTURES["non_runtime_decorator"] = _not_a_candidate(
     """,
 )
 
+# The DOTTED form, and the shape is load-bearing.  ``from pydantic import
+# field_validator`` folds ``field_validator`` into the walk's
+# ``non_runtime_decorator_aliases``, so ``_is_non_runtime_candidate`` returns
+# True at its FIRST check and this mechanism's declared producer,
+# ``_is_known_pydantic_decorator``, is never called at all: measured
+# 2026-09-04, zero invocations while this fixture stayed green, held out of the
+# candidate set by a sibling rule doing the work.  ``pydantic.field_validator``
+# is the only shape that reaches the guard, and the battery below proves it.
 _FIXTURES["pydantic_hook_decorator"] = _not_a_candidate(
     "pkg.m:Model.check",
     """
-    from pydantic import field_validator
+    import pydantic
 
 
     class Model:
-        @field_validator("value")
+        @pydantic.field_validator("value")
         def check(cls, value):
             return value
     """,
@@ -1678,6 +1688,227 @@ def test_the_fixture_map_claims_nothing_the_registry_does_not(tmp_path: Path) ->
 
     assert sorted(set(_FIXTURES) - set(MECHANISMS)) == []
     assert set(_FIXTURES).isdisjoint(PARKED_MECHANISMS)
+
+
+# --------------------------------------------------------------------------
+# Rule 3, mutated - a fixture that survives its producer's neutralization is
+# not evidence about that producer.
+
+
+#: How a producer is made unable to emit, in the order tried.  A producer does
+#: not have one shape, so neither can its neutralization:
+#:
+#: ``substitute`` a producer bound to emit ONE word of a closed vocabulary
+#:                cannot emit "nothing" - the door fail-closes on an empty
+#:                word - so "cannot emit X" is faithfully "emits a sibling";
+#: ``arity``      a producer returning ``(target, rule)`` must keep the tuple
+#:                so the CALLER survives and simply receives no rule;
+#: ``empty``      the ordinary case: a value of the same type carrying nothing;
+#: ``noop``       a producer whose emission is a SIDE EFFECT returns None, so
+#:                emptying its return is inert and skipping the body is the
+#:                only neutralization that reaches it.
+_NEUTRALIZATION_LADDER: Final = ("substitute", "arity", "empty", "noop")
+
+#: Mechanisms whose declared producer this battery CANNOT reach, measured
+#: rather than assumed: the mutation is installed, the fixture runs, and the
+#: producer is called zero times.  Their fixtures go through ``_classify_pair``,
+#: which hands ``classify_liveness`` inputs built by hand, so what they pin is
+#: the CONSUMER's reading of a fact - never the producer that is supposed to
+#: derive it.  A survivor here is therefore INCONCLUSIVE, not vestigial: the
+#: mechanisms do matter, and what is unpinned is the link from the declared
+#: producer to the mechanism.  Rules 2 and 3 are never joined - rule 2 asks
+#: whether the producer resolves and rule 3 asks whether the fixture is causal,
+#: and nothing asks whether the fixture exercises the producer rule 2 named.
+#:
+#: This is a RATCHET on a known structural gap, not a licence: a fifth
+#: mechanism arriving here reds, and closing the gap empties the set.
+PRODUCER_UNREACHED_BY_ITS_FIXTURE: Final[frozenset[str]] = frozenset(
+    {
+        "bare_name_reference",
+        "dead_code_directive",
+        "override_decorator_evidence",
+        "self_dispatch",
+    }
+)
+
+
+def _carrying_nothing(value: object) -> object:
+    """A value of the same type that carries nothing."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return False
+    for kind, empty in (
+        (tuple, ()),
+        (frozenset, frozenset()),
+        (set, set()),
+        (list, []),
+        (dict, {}),
+        (str, ""),
+        (int, 0),
+    ):
+        if isinstance(value, kind):
+            return empty
+    return None
+
+
+def _sibling_mechanism(identifier: str) -> str | None:
+    """Another active mechanism of the same kind: a word the door accepts."""
+
+    kind = MECHANISMS[identifier].kind
+    for other in ACTIVE_MECHANISMS:
+        if other != identifier and MECHANISMS[other].kind == kind:
+            return other
+    return None
+
+
+def _neutralized(value: object, identifier: str, strategy: str) -> object:
+    if strategy == "substitute":
+        sibling = _sibling_mechanism(identifier)
+        if sibling is None:
+            return value
+        if value == identifier:
+            return sibling
+        if isinstance(value, tuple) and identifier in value:
+            return tuple(sibling if item == identifier else item for item in value)
+        return value
+    if strategy == "arity" and isinstance(value, tuple):
+        return tuple(_carrying_nothing(item) for item in value)
+    return _carrying_nothing(value)
+
+
+def _install_neutralization(
+    identifier: str, strategy: str
+) -> tuple[list[tuple[object, str, object]], dict[str, int]]:
+    """Replace a mechanism's declared producer with one that cannot emit.
+
+    A producer imported BY NAME elsewhere keeps the original binding, so every
+    already-imported module holding it is repointed too; the undo list is what
+    puts each one back.
+    """
+
+    module_name, _, qualname = MECHANISMS[identifier].producer.partition(":")
+    module = importlib.import_module(module_name)
+    owner, _, attribute = qualname.rpartition(".")
+    holder: object = getattr(module, owner) if owner else module
+    original = getattr(holder, attribute)
+    calls = {"count": 0}
+
+    def inert(*args: object, **kwargs: object) -> object:
+        calls["count"] += 1
+        if strategy == "noop":
+            return None
+        return _neutralized(original(*args, **kwargs), identifier, strategy)
+
+    inert.__name__ = str(getattr(original, "__name__", attribute))
+    undo: list[tuple[object, str, object]] = [(holder, attribute, original)]
+    setattr(holder, attribute, inert)
+    for other in list(sys.modules.values()):
+        if not isinstance(other, types.ModuleType):
+            continue
+        if getattr(other, attribute, None) is original:
+            undo.append((other, attribute, original))
+            setattr(other, attribute, inert)
+    return undo, calls
+
+
+def _fires(
+    identifier: str, root: Path, strategy: str | None = None
+) -> dict[str, object]:
+    """Run one mechanism's causal fixture, optionally under a neutralized producer."""
+
+    undo: list[tuple[object, str, object]] = []
+    calls = {"count": 0}
+    if strategy is not None:
+        undo, calls = _install_neutralization(identifier, strategy)
+    try:
+        with_construct, _ = _FIXTURES[identifier](root)
+        return {"fires": bool(with_construct), "raised": None, "calls": calls["count"]}
+    except BaseException as exc:  # a crash IS an observable change
+        return {
+            "fires": None,
+            "raised": type(exc).__name__,
+            "calls": calls["count"],
+        }
+    finally:
+        for target, attribute, original in undo:
+            setattr(target, attribute, original)
+
+
+def test_every_causal_fixture_dies_when_its_producer_cannot_emit(
+    tmp_path: Path,
+) -> None:
+    """Rule 3's own mutation evidence, and the reason it is not decoration.
+
+    Rule 3 proves a fixture is CAUSAL about a construct: the mechanism fires
+    with it and not without it.  It does not prove the fixture is about the
+    PRODUCER the registry declares.  A fixture can be perfectly causal about
+    its construct and still be satisfied by a sibling rule that reaches the
+    same outcome first - measured on ``pydantic_hook_decorator``, whose
+    declared guard was called zero times while the fixture stayed green
+    because the walk had already folded the bare import into another alias
+    set.
+
+    So each producer is replaced by a stand-in that still runs and still has
+    the right shape but carries nothing, and the fixture must then stop
+    firing.  Three outcomes, and only the third is a defect:
+
+    ``killed``       the producer ran and the fixture died - the fixture is
+                     evidence about that producer;
+    ``unreached``    the producer never ran, so the mutation was unreachable
+                     and the surviving green is INCONCLUSIVE, not a pass;
+    ``survived``     the producer demonstrably ran, emitted nothing, and the
+                     fixture fired anyway - a hollow fixture, and this list
+                     must stay empty.
+
+    The restoration is witnessed per mechanism rather than trusted: a leaked
+    stand-in would make every later row a measurement of the wrong build,
+    which is exactly the failure this battery exists to detect.
+    """
+
+    killed: list[str] = []
+    unreached: list[str] = []
+    survived: list[str] = []
+    for identifier in ACTIVE_MECHANISMS:
+        baseline = _fires(identifier, tmp_path / f"baseline-{identifier}")
+        assert baseline["fires"] is True, (
+            f"{identifier} does not fire unmutated, so nothing can be learned "
+            f"from mutating it: {baseline}"
+        )
+        reached = False
+        outcome = ""
+        for strategy in _NEUTRALIZATION_LADDER:
+            observed = _fires(
+                identifier, tmp_path / f"{strategy}-{identifier}", strategy
+            )
+            reached = reached or bool(observed["calls"])
+            if observed["fires"] is False or observed["raised"] is not None:
+                outcome = "killed"
+                break
+        if not outcome:
+            outcome = "survived" if reached else "unreached"
+        by_outcome = {"killed": killed, "unreached": unreached, "survived": survived}
+        by_outcome[outcome].append(identifier)
+
+        restored = _fires(identifier, tmp_path / f"restored-{identifier}")
+        assert restored["fires"] is True, (
+            f"a neutralization of {identifier} leaked past its own undo: {restored}"
+        )
+
+    assert survived == [], (
+        "these fixtures stayed green while their declared producer ran and "
+        f"emitted nothing, so they are evidence about something else: {survived}"
+    )
+    assert set(unreached) == PRODUCER_UNREACHED_BY_ITS_FIXTURE, (
+        "the set of fixtures that never reach their declared producer moved; "
+        "a new member is a new hollow-by-construction fixture, and a departing "
+        f"one closes part of the rule-2/rule-3 gap: {sorted(unreached)}"
+    )
+    # Population witness: an empty or tiny killed list would satisfy both
+    # assertions above while measuring nothing.
+    assert len(killed) == len(ACTIVE_MECHANISMS) - len(unreached)
+    assert len(killed) >= 37
 
 
 # --------------------------------------------------------------------------
