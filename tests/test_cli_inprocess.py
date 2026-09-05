@@ -564,9 +564,9 @@ def _write_legacy_baseline(path: Path) -> Path:
 
 def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> None:
     assert_contains_all(out, "GATING FAILURE [new-clones]")
-    assert_contains_all(out, "new_function_clone_groups")
+    assert_contains_all(out, "New function clone groups")
     if include_blocks:
-        assert_contains_all(out, "new_block_clone_groups")
+        assert_contains_all(out, "New block clone groups")
     assert_contains_all(out, "codeclone . --update-baseline")
 
 
@@ -684,7 +684,7 @@ def _assert_worker_failure_internal_error(
         args.append("--no-progress")
     _assert_cli_exit(monkeypatch, args, expected_code=5)
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
 
 
 _SUMMARY_METRIC_MAP: dict[str, str] = {
@@ -714,14 +714,17 @@ def _summary_metric(out: str, label: str) -> int:
 
 
 def _summary_clone_qualifiers(out: str) -> str:
-    """Return the parenthesised qualifiers of the summary ``Clones`` line."""
+    """Return the value of the summary ``New`` row: the baseline-relative answer.
+
+    Novelty has its own row now; the ``Clones`` row is the inventory alone.
+    """
 
     from tests._assertions import strip_ansi
 
     normalized = strip_ansi(out)
-    match = re.search(r"^\s*Clones\s+.*?\(([^)]*)\)\s*$", normalized, re.MULTILINE)
+    match = re.search(r"^\s*New\s{2,}(.*?)\s*$", normalized, re.MULTILINE)
     if match is None:
-        raise AssertionError(f"clone summary line not found\n{normalized}")
+        raise AssertionError(f"summary New row not found\n{normalized}")
     return match.group(1)
 
 
@@ -885,7 +888,7 @@ def _failed_process_result(filepath: str) -> CliFileProcessResult:
 
 
 def _assert_unreadable_source_contract_error(out: str) -> None:
-    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "CONTRACT ERROR")
     assert_contains_all(out, "could not be read in CI/gating mode")
 
 
@@ -1376,7 +1379,7 @@ def test_cli_unexpected_root_resolution_failure_is_internal(
         _run_main(monkeypatch, ["bad"])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
 
 
 def test_cli_unexpected_grouping_failure_is_internal(
@@ -1394,7 +1397,7 @@ def test_cli_unexpected_grouping_failure_is_internal(
         _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
 
 
 def test_cli_unexpected_html_render_failure_is_internal(
@@ -1416,7 +1419,7 @@ def test_cli_unexpected_html_render_failure_is_internal(
         )
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
 
 
 def test_cli_main_outputs(
@@ -1717,8 +1720,8 @@ def test_cli_reports_include_audit_metadata_invalid_baseline(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Invalid baseline file")
-    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
+    assert_contains_all(out, "Baseline ignored: invalid file")
+    assert_contains_all(out, "Nothing can be called new this run")
     _assert_report_baseline_meta(payload, status="invalid_json", loaded=False)
 
 
@@ -1784,19 +1787,19 @@ def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
     assert_contains_all(
         out,
         "legacy baseline format",
-        "Baseline is not trusted for this run and will be ignored",
-        "Baseline-relative novelty is unavailable for this run",
-        "Run: codeclone . --update-baseline",
+        "Baseline ignored: invalid file",
+        "Nothing can be called new this run",
+        "codeclone . --update-baseline",
     )
     assert_contains_none(
         out,
         "Comparison will proceed against an empty baseline",
-        "New clones detected but --fail-on-new not set.",
+        "new clone group since the baseline",
     )
     # The baseline was rejected, so the run compared nothing. The summary must
     # say so rather than print a zero it never measured.
-    assert "new unavailable" in _summary_clone_qualifiers(out)
-    assert "0 new" not in _summary_clone_qualifiers(out)
+    assert "not compared" in _summary_clone_qualifiers(out)
+    assert "0 clone groups" not in _summary_clone_qualifiers(out)
 
 
 def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
@@ -1823,7 +1826,7 @@ def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
         "legacy baseline format",
         "Invalid baseline file",
         "Baseline-aware gates require a trusted baseline",
-        "Run: codeclone . --update-baseline",
+        "codeclone . --update-baseline",
     )
 
 
@@ -1884,7 +1887,7 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "container size limit must be positive")
-    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
+    assert_contains_all(out, "Baseline ignored: invalid file")
     _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
@@ -1984,8 +1987,8 @@ def f2():
     out = capsys.readouterr().out
 
     qualifiers = _summary_clone_qualifiers(out)
-    assert "0 new" in qualifiers
-    assert "unavailable" not in qualifiers
+    assert "0 clone groups since the baseline" in qualifiers
+    assert "not compared" not in qualifiers
 
 
 def test_cli_untrusted_baseline_ignored_for_diff(
@@ -2048,11 +2051,11 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
+    assert_contains_all(out, "Baseline ignored: invalid file")
     # Console and report document must agree: the clone groups below carry
     # novelty "unavailable", so the summary may not print a new-clone count.
-    assert "new unavailable" in _summary_clone_qualifiers(out)
-    assert "0 new" not in _summary_clone_qualifiers(out)
+    assert "not compared" in _summary_clone_qualifiers(out)
+    assert "0 clone groups" not in _summary_clone_qualifiers(out)
     report = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(report)["status"] == "integrity_failed"
     assert _report_meta_baseline(report)["loaded"] is False
@@ -2428,7 +2431,7 @@ def test_cli_output_path_resolve_error_contract(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "CONTRACT ERROR")
     assert_contains_all(out, "Invalid HTML output path")
 
 
@@ -2455,7 +2458,7 @@ def test_cli_report_write_error_is_contract_error(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "CONTRACT ERROR")
     assert_contains_all(out, "Failed to write HTML report")
 
 
@@ -2517,7 +2520,7 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
 
     _assert_after_summary(
         first_out,
-        "Tip:",
+        "Tip",
         "VS Code detected",
         "marketplace.visualstudio.com",
     )
@@ -2546,7 +2549,7 @@ def test_cli_shows_gitignore_codeclone_cache_tip_when_uncovered(
     out = capsys.readouterr().out
     _assert_after_summary(
         out,
-        "Tip:",
+        "Tip",
         ".codeclone/",
         "Suggested entry",
     )
@@ -2579,7 +2582,7 @@ def test_cli_update_baseline_transitions_authenticated_v2(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Baseline updated")
+    assert_contains_all(out, "Baseline written")
 
 
 def test_cli_update_baseline_refuses_an_empty_analysis_scope(
@@ -2661,7 +2664,7 @@ def f1():
     )
 
     out = capsys.readouterr().out
-    assert_contains_all(out, "Baseline updated")
+    assert_contains_all(out, "Baseline written")
     assert baseline.exists()
 
 
@@ -2697,7 +2700,7 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Baseline updated")
+    assert_contains_all(out, "Baseline written")
     assert baseline.exists()
 
 
@@ -2814,7 +2817,7 @@ def test_cli_update_baseline_write_error_is_contract_error(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "CONTRACT ERROR")
     assert_contains_all(out, "Failed to write baseline file")
 
 
@@ -2840,7 +2843,7 @@ def test_cli_update_baseline_with_invalid_existing_file(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:", "Failed to write baseline file")
+    assert_contains_all(out, "CONTRACT ERROR", "Failed to write baseline file")
     assert baseline_path.read_text("utf-8") == "{broken json"
 
 
@@ -2861,8 +2864,8 @@ def test_cli_baseline_missing_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Baseline file not found")
-    assert_contains_all(out, "Run: codeclone . --update-baseline")
+    assert_contains_all(out, "no baseline yet")
+    assert_contains_all(out, "codeclone . --update-baseline")
 
 
 def test_cli_baseline_missing_fails_in_ci(
@@ -2885,7 +2888,7 @@ def test_cli_baseline_missing_fails_in_ci(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Baseline file not found")
+    assert_contains_all(out, "new=unavailable")
     assert_contains_all(out, "CI requires a trusted baseline")
 
 
@@ -2922,7 +2925,7 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "New clones detected but --fail-on-new not set")
+    assert_contains_all(out, "new clone group since the baseline", "--fail-on-new")
 
 
 def test_cli_negative_size_limits_fail_fast(
@@ -3214,7 +3217,7 @@ def test_cli_invalid_baseline_path_error_contract(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "CONTRACT ERROR")
     assert_contains_all(out, "Invalid baseline path")
 
 
@@ -3320,7 +3323,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     )
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert_contains_none(combined, "CONTRACT ERROR:")
+    assert_contains_none(combined, "CONTRACT ERROR")
     assert _summary_metric(captured.out, "Files skipped") == 1
     payload = json.loads(json_out.read_text("utf-8"))
     assert _report_inventory_files(payload)["source_io_skipped"] == 1
@@ -3582,7 +3585,9 @@ def test_cli_summary_format_stable(
     out = capsys.readouterr().out
     assert_contains_all(out, "Summary")
     assert out.count("Summary") == 1
-    assert_contains_none(out, "Metrics")
+    # No Metrics section; the summary row that says why it is absent is not one.
+    assert "\u2500 Metrics \u2500" not in out
+    assert_contains_all(out, "not run without a baseline")
     assert_contains_none(out, "Adoption")
     assert_contains_none(out, "Overloaded")
     assert_contains_all(out, "1 callable")
@@ -3597,7 +3602,7 @@ def test_cli_summary_format_stable(
     assert _summary_metric(out, "Block clones") >= 0
     assert _summary_metric(out, "suppressed") >= 0
     # This run has no baseline file at all, so novelty was never computed.
-    assert "new unavailable" in _summary_clone_qualifiers(out)
+    assert "not compared" in _summary_clone_qualifiers(out)
 
 
 def test_cli_summary_with_metrics_baseline_shows_metrics_section(
@@ -4328,7 +4333,7 @@ def test_cli_scan_failed_is_internal_error(
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
 
 
 def test_cli_scan_oserror_is_contract_error(
@@ -4352,7 +4357,7 @@ def test_cli_scan_oserror_is_contract_error(
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "CONTRACT ERROR")
     assert_contains_all(out, "Scan failed")
 
 
@@ -4415,7 +4420,7 @@ def test_cli_worker_failed(
         _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
 
 
 def test_cli_worker_failed_progress_sequential(
@@ -5364,11 +5369,11 @@ def test_cli_unsupported_construct_is_visibly_attributed(
     )
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert_contains_none(combined, "CONTRACT ERROR:")
+    assert_contains_none(combined, "CONTRACT ERROR")
     assert (
         "1 files not analyzed: unsupported syntax "
         "(unsupported fields on Import: is_lazy)"
-    ) in combined
+    ) in " ".join(combined.split())
     assert _summary_metric(captured.out, "Files skipped") == 1
     inventory_files = _report_inventory_files(json.loads(json_out.read_text("utf-8")))
     assert inventory_files["unsupported_construct_skipped"] == 1

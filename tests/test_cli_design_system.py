@@ -131,6 +131,9 @@ def _build_catalog() -> dict[str, str]:
         "fmt_summary_compact": ui.fmt_summary_compact(
             found=978, analyzed=978, cache_hits=0, skipped=0
         ),
+        "fmt_summary_compact_novelty": ui.fmt_summary_compact_novelty(
+            reason=ui.NOVELTY_REASON_NO_BASELINE, detail="codeclone.baseline.json"
+        ),
         "fmt_summary_compact_clones": ui.fmt_summary_compact_clones(
             function=1, block=2, segment=3, suppressed=4, low_value=5, new=6
         ),
@@ -199,8 +202,47 @@ def _build_catalog() -> dict[str, str]:
         )
         or "",
         "fmt_summary_clones": ui.fmt_summary_clones(
-            func=1200, block=2, segment=3, suppressed=23, low_value=13, new=1
+            func=1200, block=2, segment=3, suppressed=23, low_value=13
         ),
+        "fmt_summary_new": ui.fmt_summary_new(1),
+        "fmt_summary_new_not_compared": ui.fmt_summary_new(
+            None, reason=ui.NOVELTY_REASON_NO_BASELINE, detail="codeclone.baseline.json"
+        ),
+        "fmt_summary_metrics_skipped": ui.fmt_summary_metrics_skipped(requested=False),
+        "fmt_summary_metrics_skipped_requested": ui.fmt_summary_metrics_skipped(
+            requested=True
+        ),
+        "fmt_banner_root": ui.fmt_banner_root("/tmp/project"),
+        "fmt_baseline_updated": ui.fmt_baseline_updated("codeclone.baseline.json"),
+        "fmt_run_outcome": ui.fmt_run_outcome(
+            kind="not_compared",
+            elapsed=0.05,
+            reason=ui.NOVELTY_REASON_NO_BASELINE,
+            show_locations=True,
+        ),
+        "fmt_run_outcome_ignored": ui.fmt_run_outcome(
+            kind="not_compared",
+            elapsed=0.05,
+            reason=ui.NOVELTY_REASON_BASELINE_IGNORED,
+        ),
+        "fmt_run_outcome_baseline_written": ui.fmt_run_outcome(
+            kind="baseline_written",
+            elapsed=0.06,
+            baseline_display="codeclone.baseline.json",
+        ),
+        "fmt_run_outcome_clean": ui.fmt_run_outcome(
+            kind="clean", elapsed=0.04, show_locations=True, api_not_compared=True
+        ),
+        "fmt_run_outcome_gate_passed": ui.fmt_run_outcome(
+            kind="gate_passed", elapsed=0.04
+        ),
+        "fmt_run_outcome_new_clones": ui.fmt_run_outcome(
+            kind="new_clones", elapsed=0.06, new_clones=2
+        ),
+        "fmt_run_outcome_empty_scope": ui.fmt_run_outcome(
+            kind="empty_scope", elapsed=0.03
+        ),
+        "fmt_run_outcome_quiet": ui.fmt_run_outcome_quiet(new_clones=1),
         "fmt_metrics_health": ui.fmt_metrics_health(92, "A"),
         "fmt_metrics_cc": ui.fmt_metrics_cc(2.2, 34, 6),
         "fmt_metrics_coupling": ui.fmt_metrics_coupling(1.4, 27),
@@ -285,7 +327,6 @@ def _build_catalog() -> dict[str, str]:
             regressions=0,
             gate_status="pass",
         ),
-        "fmt_pipeline_done": ui.fmt_pipeline_done(12.72),
         "fmt_contract_error": ui.fmt_contract_error(
             ui.ERR_ROOT_NOT_FOUND.format(path="/tmp/project/missing")
         ),
@@ -331,6 +372,14 @@ _CATALOG = _build_catalog()
 # Formatters that are exercised under a different catalog key, keyed by the
 # extra entry name they appear under.
 _ALIASED_ENTRIES = {
+    "fmt_summary_new_not_compared",
+    "fmt_summary_metrics_skipped_requested",
+    "fmt_run_outcome_ignored",
+    "fmt_run_outcome_baseline_written",
+    "fmt_run_outcome_clean",
+    "fmt_run_outcome_gate_passed",
+    "fmt_run_outcome_new_clones",
+    "fmt_run_outcome_empty_scope",
     "fmt_summary_parsed_singular",
     "fmt_metrics_cycles_detected",
     "fmt_metrics_cycles_deferred_only",

@@ -365,6 +365,9 @@ def _render_status_report_rich(
     for label, value in _status_rows(report):
         meta.add_row(label, value)
     console.print(meta)
+    if not report.db_exists:
+        console.print(_memory_db_missing_line(report))
+        return
     if report.records_by_type:
         type_table = table_cls(box=box.SIMPLE, show_header=True, header_style="bold")
         type_table.add_column("Type", style=ui.STYLE_ACCENT)
@@ -497,13 +500,33 @@ def _render_status_report_plain(
     console.print("Engineering Memory status")
     for label, value in _status_rows(report):
         console.print(f"  {label + ':':18} {value}")
+    if not report.db_exists:
+        console.print(_memory_db_missing_line(report))
+        return
     if report.records_by_type:
         console.print("  records_by_type:")
         for key, count in sorted(report.records_by_type.items()):
             console.print(f"    {key}: {count}")
 
 
+def _memory_db_missing_line(report: MemoryStatusReport) -> str:
+    return (
+        f"  [warning]{ui.GLYPH_WARN} "
+        f"{ui.esc(ui.MEMORY_STATUS_NO_DB.format(root=report.project_root))}"
+        "[/warning]"
+    )
+
+
 def _status_rows(report: MemoryStatusReport) -> tuple[tuple[str, str], ...]:
+    if not report.db_exists:
+        # Schema, fingerprint, last run and record count are properties of a
+        # database; for one that does not exist there is nothing to report
+        # but where it would live.
+        return (
+            ("root", str(report.project_root)),
+            ("backend", report.backend),
+            ("db", str(report.db_path)),
+        )
     return (
         ("root", str(report.project_root)),
         ("backend", report.backend),

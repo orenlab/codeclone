@@ -39,7 +39,7 @@ from codeclone.contracts.errors import DiagnosedUserError
 from ._assertions import assert_contains_all, assert_contains_none
 
 _INTERNAL_ONLY = (
-    "INTERNAL ERROR:",
+    "INTERNAL ERROR",
     "Unexpected exception.",
     "Re-run with --debug to include a traceback.",
     f"{ISSUES_URL}/new?template=bug_report.yml",
@@ -83,7 +83,7 @@ def test_a_diagnosed_condition_is_reported_as_a_contract_error(
     )
 
     assert code == 2
-    assert_contains_all(out, "CONTRACT ERROR:", _MEASURED_DIAGNOSIS)
+    assert_contains_all(out, "CONTRACT ERROR", _MEASURED_DIAGNOSIS)
     assert_contains_none(out, *_INTERNAL_ONLY)
 
 
@@ -114,7 +114,7 @@ def test_a_diagnosis_without_a_step_prints_no_next_steps_block(
 
     assert code == 2
     assert_contains_all(
-        out, "CONTRACT ERROR:", "tool.codeclone.min_loc must be an integer"
+        out, "CONTRACT ERROR", "tool.codeclone.min_loc must be an integer"
     )
     assert_contains_none(out, "Next steps:", *_INTERNAL_ONLY)
 
@@ -128,7 +128,7 @@ def test_a_genuinely_internal_fault_keeps_the_internal_envelope(
 
     assert code == 5
     assert_contains_all(out, *_INTERNAL_ONLY, "Reason: RuntimeError: boom")
-    assert_contains_none(out, "CONTRACT ERROR:")
+    assert_contains_none(out, "CONTRACT ERROR")
 
 
 def test_the_quoted_configuration_survives_markup_rendering() -> None:
@@ -185,7 +185,9 @@ def test_every_step_is_rendered_as_its_own_bullet() -> None:
         )
     )
 
-    bullets = [line for line in rendered.splitlines() if line.startswith("- ")]
+    bullets = [
+        line.strip() for line in rendered.splitlines() if line.strip().startswith("- ")
+    ]
     assert bullets == ["- install the extra", "- or unset the flag"]
 
 
@@ -198,9 +200,9 @@ def test_an_empty_step_never_becomes_an_empty_bullet() -> None:
         )
     )
 
-    assert [line for line in rendered.splitlines() if line.startswith("- ")] == [
-        "- real"
-    ]
+    assert [
+        line.strip() for line in rendered.splitlines() if line.strip().startswith("- ")
+    ] == ["- real"]
 
 
 # ---------------------------------------------------------------------------

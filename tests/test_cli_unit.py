@@ -185,7 +185,7 @@ def test_diff_context_reports_whether_clone_novelty_was_computed(
 def _clone_summary_lines(new: int | None) -> tuple[str, str]:
     counts: dict[str, int] = {"segment": 0, "suppressed": 0, "low_value": 0}
     return (
-        ui.fmt_summary_clones(func=1, block=0, new=new, **counts),
+        ui.strip_markup(ui.fmt_summary_new(new)),
         ui.fmt_summary_compact_clones(function=1, block=0, new=new, **counts),
     )
 
@@ -194,9 +194,9 @@ def test_summary_clone_line_separates_unavailable_novelty_from_zero() -> None:
     counted, compact_counted = _clone_summary_lines(0)
     uncompared, compact_uncompared = _clone_summary_lines(None)
 
-    assert "new" in counted
-    assert "unavailable" not in counted
-    assert "unavailable" in uncompared
+    assert "0 clone groups since the baseline" in counted
+    assert "not compared" not in counted
+    assert "not compared" in uncompared
     assert "new=0" in compact_counted
     assert "new=unavailable" in compact_uncompared
 
@@ -356,7 +356,7 @@ def test_missing_scope_id_error_keeps_config_table_name(
         )
 
     printed = buffer.getvalue()
-    assert "CONTRACT ERROR:" in printed
+    assert "CONTRACT ERROR" in printed
     assert "[error]" not in printed
     assert "[tool.codeclone]" in printed
     # The constant used to carry a Rich escape (``\[``) from the days when this
@@ -378,7 +378,9 @@ def _scope_id_hint_block(printed: str) -> list[str]:
     only it can break a TOML file by duplicating a table header.
     """
 
-    return [line.strip() for line in printed.splitlines() if line.startswith("    ")]
+    # The refusal body sits one detail level under the banner; the paste block
+    # sits one more level under that.
+    return [line.strip() for line in printed.splitlines() if line.startswith(" " * 8)]
 
 
 def _hinted_scope_ids(printed: str) -> list[str]:
@@ -1520,7 +1522,7 @@ def test_cli_internal_error_marker(
         cli.main()
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
     assert_contains_all(out, "Unexpected exception.")
     assert_contains_all(out, "Reason: RuntimeError: boom")
     assert_contains_all(out, "Next steps:")
@@ -1549,8 +1551,8 @@ def test_cli_diagnosed_configuration_error_is_not_an_internal_error(
         cli.main()
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert_contains_all(out, "CONTRACT ERROR:", "pyproject.toml must not be a symlink.")
-    assert_contains_none(out, "INTERNAL ERROR:", "Unexpected exception.")
+    assert_contains_all(out, "CONTRACT ERROR", "pyproject.toml must not be a symlink.")
+    assert_contains_none(out, "INTERNAL ERROR", "Unexpected exception.")
 
 
 def test_cli_internal_error_debug_flag_includes_traceback(
@@ -1565,7 +1567,7 @@ def test_cli_internal_error_debug_flag_includes_traceback(
         cli.main()
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
     assert_contains_all(out, "DEBUG DETAILS")
     assert_contains_all(out, "Traceback:")
     assert_contains_all(out, "Command: codeclone --debug")
@@ -1584,7 +1586,7 @@ def test_cli_internal_error_debug_env_includes_traceback(
         cli.main()
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "INTERNAL ERROR")
     assert_contains_all(out, "DEBUG DETAILS")
     assert_contains_all(out, "Traceback:")
 
@@ -1597,7 +1599,7 @@ def test_argument_parser_contract_error_marker_for_invalid_args(
         parser.parse_args(["--unknown-flag"])
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "CONTRACT ERROR:" in err
+    assert "CONTRACT ERROR" in err
 
 
 @pytest.mark.parametrize(
@@ -2198,7 +2200,7 @@ def test_enforce_gating_names_the_next_step_for_unavailable_lanes(
 
     out = capsys.readouterr().out
     assert "clones.functions" in out
-    assert "Run: codeclone . --update-baseline" in out
+    assert "codeclone . --update-baseline" in out
 
 
 def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
@@ -2545,9 +2547,8 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         segment=3,
         suppressed=1,
         low_value=2,
-        new=0,
     )
-    assert "[bold yellow]3[/bold yellow] seg" in clones
+    assert "[bold yellow]3[/bold yellow] segment" in clones
     assert "[yellow]2[/yellow] low-value" in clones
 
     assert "5 detected" in ui.fmt_metrics_cycles(5, import_cycles=2, deferred=3)
@@ -2556,7 +2557,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         p95_depth=13,
         max_depth=16,
     )
-    assert_contains_all(dependencies, "avg 4.0", "p95 13", "max 16")
+    assert_contains_all(dependencies, "avg depth 4.0", "p95 13", "max 16")
     security_surfaces = ui.fmt_metrics_security_surfaces(
         items=5,
         categories=3,
@@ -2596,7 +2597,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         top_score=0.0,
     )
     assert "12 ranked" in limited_overloaded_modules
-    assert "report-only; limited population" in limited_overloaded_modules
+    assert "report-only, limited population" in limited_overloaded_modules
     adoption = ui.fmt_metrics_adoption(
         param_permille=750,
         return_permille=500,
@@ -3763,9 +3764,9 @@ def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
     out = capsys.readouterr().out
     for needle in (
         "GATING FAILURE [metrics]",
-        "policy",
-        "complexity_max",
-        "health_delta",
+        "Policy",
+        "Complexity max",
+        "Health delta",
     ):
         assert needle in out
 
@@ -3989,3 +3990,30 @@ def test_fail_on_unresolved_dead_code_flag_is_declared_and_defaults_off() -> Non
     # Independent of the ordinary dead-code gate in both directions.
     assert defaults.fail_dead_code is False
     assert enabled.fail_dead_code is False
+
+
+def test_config_validation_payload_survives_the_error_banner() -> None:
+    """A validator's ``[type=value_error]`` is payload; the banner keeps it.
+
+    The provisional grid console renders pre-config refusals now, and a
+    bracketed diagnosis reached it unescaped once (measured 2026-09-05):
+    ``[type=value_error, input_value='nope']`` was read as a style tag and
+    dropped, leaving ``bad key`` and nothing to act on.
+    """
+    import contextlib
+
+    from codeclone.surfaces.cli import startup as cli_startup
+    from codeclone.surfaces.cli.console import make_console
+
+    console = make_console(no_color=True, width=80)
+
+    def _raise(_root: Path) -> dict[str, object]:
+        raise ConfigValidationError("bad key [type=value_error, input_value='nope']")
+
+    with console.capture() as capture, contextlib.suppress(SystemExit):
+        cli_startup.load_pyproject_config_or_exit(
+            root_path=Path("/tmp/project"),
+            load_pyproject_config_fn=_raise,
+            printer=cast(Any, console),
+        )
+    assert "[type=value_error, input_value='nope']" in capture.get()

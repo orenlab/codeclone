@@ -150,7 +150,11 @@ def write_report_outputs(
         try:
             _open_html_report_in_browser(path=html_path)
         except Exception as exc:
-            console.print(ui.fmt_html_report_open_failed(path=html_path, error=exc))
+            console.print(
+                ui.fmt_cli_runtime_warning(
+                    ui.fmt_html_report_open_failed(path=html_path, error=exc)
+                )
+            )
 
     return html_report_path
 

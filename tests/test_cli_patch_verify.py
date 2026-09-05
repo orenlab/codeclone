@@ -275,11 +275,10 @@ def test_patch_verify_verbose_accepted() -> None:
     assert "accepted" in text.lower()
     expected_sections = (
         "Patch Verify",
-        "Strictness:",
-        "Health:",
-        "Structural delta:",
-        "Gate preview:",
-        "Contract violations:",
+        "Strictness",
+        "Health",
+        "Regressions",
+        "Gate preview",
         "Patch contract accepted",
     )
     for section in expected_sections:

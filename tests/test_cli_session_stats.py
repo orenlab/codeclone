@@ -1523,7 +1523,7 @@ def test_session_stats_rich_with_token_footprint() -> None:
     )
 
     text = _render_rich_snapshot(snapshot)
-    assert "Retention payload footprint" in text
+    assert "Footprint" in text
     assert "3,000" in text
     assert "Top payload workflows" in text
     assert "intent-test-001" in text
@@ -1547,7 +1547,7 @@ def test_session_stats_rich_no_live_agents() -> None:
     )
 
     text = _render_rich_snapshot(snapshot)
-    assert "No live workspace agents found" in text
+    assert "0 live" in text
 
 
 # ── _latest_run_text with health and findings ──

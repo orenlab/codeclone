@@ -72,6 +72,13 @@ SESSION_STATS_AUDIT: Final = "Audit trail:"
 SESSION_STATS_AUDIT_ENABLED: Final = "enabled"
 SESSION_STATS_LATEST_RUN: Final = "Latest run:"
 SESSION_STATS_LATEST_RUN_NONE: Final = "none"
+SESSION_STATS_LATEST_RUN_NONE_VERBOSE: Final = "none recorded"
+SESSION_STATS_AGENTS: Final = "Agents"
+SESSION_STATS_INTENTS: Final = "Intents"
+SESSION_STATS_REGISTRY: Final = "Registry"
+SESSION_STATS_AUDIT_SHORT: Final = "Audit"
+SESSION_STATS_HEALTH_SHORT: Final = "Health"
+SESSION_STATS_FOOTPRINT_SHORT: Final = "Footprint"
 SESSION_STATS_LATEST_RUN_SOURCE_DISK: Final = "persisted report (CLI)"
 SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_MCP: Final = "MCP session (audit)"
 SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_CLI: Final = "CLI run (audit)"
@@ -89,7 +96,6 @@ SESSION_STATS_STALE: Final = "Stale intents:"
 SESSION_STATS_EXPIRED: Final = "Expired intents:"
 SESSION_STATS_RECOVERABLE: Final = "Recoverable:"
 SESSION_STATS_WORKSPACE_HEALTH: Final = "Workspace health:"
-SESSION_STATS_NO_AGENTS: Final = "No live workspace agents found."
 SESSION_STATS_REPORT_PRESENT: Final = "report.json present ({files} files)"
 SESSION_STATS_RETENTION_FOOTPRINT: Final = "Retention payload footprint"
 SESSION_STATS_RETENTION_FOOTPRINT_VERBOSE: Final = (
@@ -102,6 +108,9 @@ AUDIT_NOT_ENABLED: Final = (
     "Audit trail is not enabled for this workspace.\n"
     "[dim]Set audit_enabled = true under \\[tool.codeclone] in "
     "pyproject.toml.[/dim]"
+)
+MEMORY_STATUS_NO_DB: Final = (
+    "No memory database yet. Create it: codeclone memory init --root {root}"
 )
 AUDIT_ERR_NO_DATA: Final = (
     "No audit events are recorded for this workspace yet.\n"
@@ -215,18 +224,13 @@ SESSION_STATS_SCOPE_FILES: Final = "files"
 
 # ── patch verify ────────────────────────────────────────────────────
 
-PATCH_VERIFY_LABEL_STRICTNESS: Final = "Strictness:"
-PATCH_VERIFY_LABEL_STATUS: Final = "Status:"
-PATCH_VERIFY_LABEL_HEALTH: Final = "Health:"
-PATCH_VERIFY_LABEL_STRUCTURAL_DELTA: Final = "Structural delta:"
-PATCH_VERIFY_LABEL_REGRESSIONS: Final = "Regressions:"
-PATCH_VERIFY_LABEL_IMPROVEMENTS: Final = "Improvements:"
-PATCH_VERIFY_LABEL_VERDICT: Final = "Verdict:"
-PATCH_VERIFY_LABEL_GATE_PREVIEW: Final = "Gate preview:"
+PATCH_VERIFY_LABEL_STRICTNESS: Final = "Strictness"
+PATCH_VERIFY_LABEL_STATUS: Final = "Status"
+PATCH_VERIFY_LABEL_HEALTH: Final = "Health"
+PATCH_VERIFY_LABEL_REGRESSIONS: Final = "Regressions"
+PATCH_VERIFY_LABEL_GATE_PREVIEW: Final = "Gate preview"
 PATCH_VERIFY_GATE_EXIT: Final = "(exit {exit_code})"
-PATCH_VERIFY_CONTRACT_VIOLATIONS: Final = "Contract violations"
-PATCH_VERIFY_VERDICT_REGRESSED: Final = "regressed"
-PATCH_VERIFY_VERDICT_STABLE: Final = "stable"
+PATCH_VERIFY_CONTRACT_VIOLATIONS: Final = "Violations"
 PATCH_VERIFY_ACCEPTED: Final = "Patch contract accepted."
 PATCH_VERIFY_VIOLATED: Final = "Patch contract violated."
 PATCH_VERIFY_RELAXED_ADVISORY: Final = (
@@ -235,14 +239,14 @@ PATCH_VERIFY_RELAXED_ADVISORY: Final = (
 
 # ── blast radius ────────────────────────────────────────────────────
 
-BLAST_RADIUS_FILES: Final = "Files:"
-BLAST_RADIUS_RISK_LEVEL: Final = "Risk level:"
+BLAST_RADIUS_FILES: Final = "Files"
+BLAST_RADIUS_RISK_LEVEL: Final = "Risk level"
 BLAST_RADIUS_DIRECT_DEPENDENTS: Final = "Direct dependents"
 BLAST_RADIUS_CLONE_COHORT: Final = "Clone cohort members"
 BLAST_RADIUS_DEPENDENCY_CYCLES: Final = "Dependency cycles"
 BLAST_RADIUS_DO_NOT_TOUCH: Final = "Do not touch"
 BLAST_RADIUS_REVIEW_CONTEXT: Final = "Review context"
-BLAST_RADIUS_GUARDRAILS: Final = "Guardrails:"
+BLAST_RADIUS_GUARDRAILS: Final = "Guardrails"
 BLAST_RADIUS_NONE: Final = "none"
 BLAST_RADIUS_MORE: Final = "... and {count} more"
 BLAST_RADIUS_REQUIRES_REPORT: Final = (

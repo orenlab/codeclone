@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from ... import ui_messages as ui
 from ...analysis.blast_radius import BlastRadiusResult, compute_blast_radius
 from ...contracts import ExitCode
+from ...ui_messages.styling import _L
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ...utils.run_identity import ReportRunIdentityError, report_run_identity
@@ -110,12 +111,13 @@ def _print_items(
     title: str,
     items: Sequence[str],
 ) -> None:
-    console.print(f"  [bold]{title} ({len(items)}):[/bold]")
     if not items:
-        console.print(f"    [dim]{ui.BLAST_RADIUS_NONE}[/dim]")
+        # An empty list is one fact and takes one line.
+        console.print(f"  [bold]{title} (0)[/bold]  [dim]{ui.BLAST_RADIUS_NONE}[/dim]")
         return
+    console.print(f"  [bold]{title} ({len(items)})[/bold]")
     for item in items[:_MAX_RENDERED_ITEMS]:
-        console.print(f"    {item}")
+        console.print(f"    {ui.esc(item)}")
     if len(items) > _MAX_RENDERED_ITEMS:
         more = ui.BLAST_RADIUS_MORE.format(count=len(items) - _MAX_RENDERED_ITEMS)
         console.print(f"    [dim]{more}[/dim]")
@@ -127,16 +129,28 @@ def _print_entries(
     title: str,
     entries: Sequence[Mapping[str, str]],
 ) -> None:
-    console.print(f"  [bold]{title} ({len(entries)}):[/bold]")
+    """Print path entries grouped by their reason.
+
+    The baseline, the state directory and the cache carry one identical
+    reason; printing it three times said one thing three ways. Paths that
+    share a reason and severity share one reason line, in the order the
+    owner listed them.
+    """
+
     if not entries:
-        console.print(f"    [dim]{ui.BLAST_RADIUS_NONE}[/dim]")
+        console.print(f"  [bold]{title} (0)[/bold]  [dim]{ui.BLAST_RADIUS_NONE}[/dim]")
         return
+    console.print(f"  [bold]{title} ({len(entries)})[/bold]")
+    groups: dict[tuple[str, str], list[str]] = {}
     for entry in entries[:_MAX_RENDERED_ITEMS]:
         path = str(entry.get("path", "")).strip()
         reason = str(entry.get("reason", "")).strip()
         severity = str(entry.get("severity", "")).strip()
+        groups.setdefault((reason, severity), []).append(path)
+    for (reason, severity), paths in groups.items():
         suffix = f" [{severity}]" if severity else ""
-        console.print(f"    {ui.esc(path)}  [dim]{ui.esc(reason + suffix)}[/dim]")
+        console.print(f"    {ui.esc(', '.join(paths))}")
+        console.print(f"      [dim]{ui.esc(reason + suffix)}[/dim]")
     if len(entries) > _MAX_RENDERED_ITEMS:
         more = ui.BLAST_RADIUS_MORE.format(count=len(entries) - _MAX_RENDERED_ITEMS)
         console.print(f"    [dim]{more}[/dim]")
@@ -201,12 +215,11 @@ def render_blast_radius(
 
     console.print()
     console.print(
-        Rule(title=ui.BLAST_RADIUS_TITLE, style="dim", characters=ui.GLYPH_RULE)
+        Rule(title=ui.BLAST_RADIUS_TITLE, style=ui.STYLE_META, characters=ui.GLYPH_RULE)
     )
-    console.print()
-    console.print(f"  [bold]{ui.BLAST_RADIUS_FILES}[/bold] {', '.join(result.origin)}")
+    console.print(f"  {ui.BLAST_RADIUS_FILES:<{_L}}{ui.esc(', '.join(result.origin))}")
     console.print(
-        f"  [bold]{ui.BLAST_RADIUS_RISK_LEVEL}[/bold] "
+        f"  {ui.BLAST_RADIUS_RISK_LEVEL:<{_L}}"
         f"{_style(result.radius_level, styles=_RISK_STYLES)}"
     )
     console.print()
@@ -238,7 +251,7 @@ def render_blast_radius(
     if result.guardrails:
         console.print(f"  [bold]{ui.BLAST_RADIUS_GUARDRAILS}[/bold]")
         for guardrail in result.guardrails:
-            console.print(f"    - {guardrail}")
+            console.print(f"    - {ui.esc(guardrail)}")
     return int(ExitCode.SUCCESS)
 
 

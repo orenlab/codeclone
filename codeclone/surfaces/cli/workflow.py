@@ -134,14 +134,13 @@ _print_gating_failure_block_impl = cli_console._print_gating_failure_block
 _print_verbose_clone_hashes = cli_console._print_verbose_clone_hashes
 _rich_progress_symbols = cli_console._rich_progress_symbols
 
-print_pipeline_done_if_needed = cli_execution.print_pipeline_done_if_needed
 run_analysis_stages = cli_execution.run_analysis_stages
 
 _build_diff_context = cli_post_run.build_diff_context
 maybe_print_changed_scope_snapshot = cli_post_run.maybe_print_changed_scope_snapshot
 print_metrics_if_available = cli_post_run.print_metrics_if_available
 resolve_changed_clone_gate = cli_post_run.resolve_changed_clone_gate
-warn_new_clones_without_fail = cli_post_run.warn_new_clones_without_fail
+print_run_outcome = cli_post_run.print_run_outcome
 maybe_print_vscode_extension_tip = cli_tips.maybe_print_vscode_extension_tip
 maybe_print_dead_code_reachability_migration_note = (
     cli_tips.maybe_print_dead_code_reachability_migration_note
@@ -238,9 +237,21 @@ def _run_controller_query(
 
 
 def _controller_query_console(args: CLIArgsLike) -> StatusConsole:
-    """Shared console for pre-analysis controller query screens."""
+    """Shared console for pre-analysis controller query screens.
+
+    Quiet mode prints one machine-readable line per screen for logs; it goes
+    through the plain console, as the analysis path does, so a long line is
+    never folded by a terminal-width console.
+    """
+    if args.quiet:
+        return require_status_console(cli_console.make_plain_console())
     return require_status_console(
-        cli_console.make_query_console(no_color=args.no_color)
+        cli_console.make_query_console(
+            no_color=args.no_color,
+            # One grid for the whole command: the controller query screens
+            # share the analysis screen's width instead of opening a second.
+            width=ui.CLI_LAYOUT_MAX_WIDTH,
+        )
     )
 
 
@@ -387,6 +398,12 @@ def _main_impl() -> None:
         "skip_metrics" in explicit_cli_dests and not bool_attr(args, "skip_metrics")
     )
 
+    # A provisional console from the command line alone, so a refusal raised
+    # before the project configuration is read -- a missing root, an invalid
+    # pyproject -- renders on the same grid as everything after it. The
+    # console is configured again once pyproject overrides are applied.
+    _configure_runtime_flags(args)
+    _configure_runtime_console(args)
     root_path = _resolve_existing_root_path(args=args, printer=_console())
     # Freeze the env-resolved observability decision for this CLI process (default
     # OFF) before config/baseline/cache work so the whole cli.analyze operation is
@@ -448,6 +465,10 @@ def _main_impl() -> None:
                 baseline_path_from_args=baseline_path_from_args,
                 printer=_console(),
             )
+        # Read before the metrics mode is configured: that step turns
+        # ``skip_metrics`` on for a run with no baseline, and the summary
+        # must be able to say which of the two absences it is printing.
+        metrics_skip_requested = bool_attr(args, "skip_metrics")
         prepare_metrics_mode_and_ui(
             args=args,
             root_path=root_path,
@@ -594,6 +615,12 @@ def _main_impl() -> None:
             discovery_result=discovery_result,
             processing_result=processing_result,
         )
+        new_clones_count, novelty_reason, novelty_detail = cli_post_run.summary_novelty(
+            diff_context=diff_context,
+            baseline_state=baseline_state,
+            baseline_path=baseline_inputs.baseline_path,
+            root_path=root_path,
+        )
         if not _controller_query_mode(args):
             _print_summary(
                 console=_console(),
@@ -613,10 +640,12 @@ def _main_impl() -> None:
                     getattr(analysis_result, "suppressed_clone_groups", ())
                 ),
                 low_value_segment_groups=(analysis_result.low_value_segment_groups),
-                new_clones_count=(
-                    diff_context.new_clones_count
-                    if diff_context.clone_novelty_available
-                    else None
+                new_clones_count=new_clones_count,
+                novelty_reason=novelty_reason,
+                novelty_detail=novelty_detail,
+                metrics_skipped=cli_post_run.metrics_skipped_state(
+                    analysis=analysis_result,
+                    skip_requested=metrics_skip_requested,
                 ),
             )
             print_metrics_if_available(
@@ -777,11 +806,26 @@ def _main_impl() -> None:
         if changed_clone_gate is not None
         else diff_context.new_clones_count
     )
-    warn_new_clones_without_fail(
-        args=args,
-        notice_new_clones_count=notice_new_clones_count,
-        console=_console(),
-    )
+    if not _controller_query_mode(args):
+        print_run_outcome(
+            args=args,
+            console=_console(),
+            elapsed=time.monotonic() - run_started_at,
+            notice_new_clones_count=notice_new_clones_count,
+            clone_novelty_available=diff_context.clone_novelty_available,
+            baseline_state=baseline_state,
+            baseline_display=cli_baseline_state.display_path(
+                baseline_inputs.baseline_path, root=root_path
+            ),
+            gating_enabled=gating_mode_enabled(args),
+            html_report_path=html_report_path,
+            has_findings=cli_post_run.has_locatable_findings(
+                analysis=analysis_result, diff_context=diff_context
+            ),
+            api_surface_enabled=api_surface_collection_enabled(args),
+            api_surface_diff_available=diff_context.api_surface_diff_available,
+            files_found=discovery_result.files_found,
+        )
     maybe_print_dead_code_reachability_migration_note(
         args=args,
         console=_console(),
@@ -809,7 +853,6 @@ def _main_impl() -> None:
         console=_console(),
         root_path=root_path,
     )
-    print_pipeline_done_if_needed(args=args, run_started_at=run_started_at)
 
 
 def _emit_cli_analysis_completed_if_enabled(

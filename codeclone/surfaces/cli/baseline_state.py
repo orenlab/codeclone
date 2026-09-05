@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -50,7 +51,9 @@ __all__ = [
     "_probe_metrics_baseline_section",
     "_resolve_clone_baseline_state",
     "_resolve_metrics_baseline_state",
+    "display_path",
     "gate_blocking_lanes",
+    "novelty_reason",
     "probe_metrics_baseline_section",
     "recover_baseline_publish_lock",
     "resolve_clone_baseline_state",
@@ -93,22 +96,55 @@ def _print_scope_id_required(console: _PrinterLike, *, root_path: Path) -> None:
     belongs in. ``codeclone setup`` would write it, but not every project runs
     setup, and a refusal that only names a requirement is not a procedure.
     """
-    console.print(ui.MARKER_CONTRACT_ERROR)
+    console.print(f"\n{' ' * ui.INDENT_UNIT}{ui.MARKER_CONTRACT_ERROR}")
+    body = ui.fmt_baseline_scope_id_required(
+        table_state=tool_codeclone_table_state(root_path),
+        config_path=root_path / "pyproject.toml",
+        # ``uuid4``, never a name-derived ``uuid5``: a deterministic id
+        # would reproduce the very failure this key prevents. Two checkouts
+        # that happen to share a project name would be handed one
+        # ``baseline_scope_id``, and the guard would again be unable to
+        # tell this project's baseline from a stranger's. The field is a
+        # discriminator, so it must be unique by construction and not by
+        # the user's choice of name.
+        scope_id=uuid4(),
+    )
     console.print(
-        ui.fmt_baseline_scope_id_required(
-            table_state=tool_codeclone_table_state(root_path),
-            config_path=root_path / "pyproject.toml",
-            # ``uuid4``, never a name-derived ``uuid5``: a deterministic id
-            # would reproduce the very failure this key prevents. Two checkouts
-            # that happen to share a project name would be handed one
-            # ``baseline_scope_id``, and the guard would again be unable to
-            # tell this project's baseline from a stranger's. The field is a
-            # discriminator, so it must be unique by construction and not by
-            # the user's choice of name.
-            scope_id=uuid4(),
+        textwrap.indent(
+            body, " " * (ui.INDENT_UNIT * 2), lambda line: bool(line.strip())
         ),
         markup=False,
     )
+
+
+def novelty_reason(baseline_state: CloneBaselineState) -> str:
+    """Why this run compared nothing, in the words of the ``New`` row.
+
+    Read from the same state the comparison owner consumed, never
+    re-derived: a missing file, a rejected one, and a loaded one whose clone
+    lanes were opaque are three different absences with three remedies.
+    """
+
+    if baseline_state.status == BaselineStatus.MISSING:
+        return ui.NOVELTY_REASON_NO_BASELINE
+    if baseline_state.status == BaselineStatus.OK:
+        return ui.NOVELTY_REASON_LANES_OPAQUE
+    return ui.NOVELTY_REASON_BASELINE_IGNORED
+
+
+def display_path(path: Path, *, root: Path) -> str:
+    """Name a file the way the reader will type it: relative to the root.
+
+    A baseline written to ``<root>/codeclone.baseline.json`` is that file to
+    the reader, not the 120-character absolute path the resolver holds.
+    Files outside the root keep their absolute spelling; there is nothing
+    shorter that still names them.
+    """
+
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def gate_blocking_lanes(
@@ -262,11 +298,11 @@ def resolve_clone_baseline_state(
         except BaselineValidationError as exc:
             baseline_status = coerce_baseline_status(exc.status)
             if not args.update_baseline:
-                console.print(ui.fmt_invalid_baseline(exc))
+                console.print(
+                    ui.fmt_invalid_baseline(exc, ignored=not args.fail_on_new)
+                )
                 if args.fail_on_new:
                     baseline_failure_code = ExitCode.CONTRACT_ERROR
-                else:
-                    console.print(ui.WARN_BASELINE_IGNORED)
         else:
             if not args.update_baseline:
                 try:
@@ -277,11 +313,11 @@ def resolve_clone_baseline_state(
                     )
                 except BaselineValidationError as exc:
                     baseline_status = coerce_baseline_status(exc.status)
-                    console.print(ui.fmt_invalid_baseline(exc))
+                    console.print(
+                        ui.fmt_invalid_baseline(exc, ignored=not args.fail_on_new)
+                    )
                     if args.fail_on_new:
                         baseline_failure_code = ExitCode.CONTRACT_ERROR
-                    else:
-                        console.print(ui.WARN_BASELINE_IGNORED)
                 else:
                     baseline_loaded = True
                     baseline_status = BaselineStatus.OK
@@ -289,8 +325,9 @@ def resolve_clone_baseline_state(
                     if opaque_lanes:
                         console.print(ui.fmt_baseline_lanes_opaque(opaque_lanes))
                     _print_foreign_interpreter_note(baseline, console=console)
-    elif not args.update_baseline:
-        console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
+    # A missing baseline is not announced here: the ``New`` summary row says
+    # "not compared (no baseline yet)" and the run outcome hands over the
+    # command, so the one absence is stated once where each question is asked.
 
     if baseline_status in BASELINE_UNTRUSTED_STATUSES:
         baseline_loaded = False
@@ -332,7 +369,11 @@ def resolve_clone_baseline_state(
                 )
             )
             sys.exit(ExitCode.CONTRACT_ERROR)
-        console.print(ui.fmt_path(ui.SUCCESS_BASELINE_UPDATED, baseline_path))
+        console.print(
+            ui.fmt_baseline_updated(
+                display_path(baseline_path, root=resolve_root_path(args))
+            )
+        )
         baseline = new_baseline
         baseline_loaded = True
         baseline_status = BaselineStatus.OK
@@ -441,7 +482,11 @@ def resolve_metrics_baseline_state(
                 )
         except BaselineValidationError as exc:
             state.status = coerce_metrics_baseline_status(exc.status)
-            console.print(ui.fmt_invalid_baseline(exc))
+            console.print(
+                ui.fmt_invalid_baseline(
+                    exc, ignored=not _metrics_baseline_gate_requested(args)
+                )
+            )
             if _metrics_baseline_gate_requested(args):
                 state.failure_code = ExitCode.CONTRACT_ERROR
         else:

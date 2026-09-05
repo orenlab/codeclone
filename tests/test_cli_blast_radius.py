@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import codeclone.surfaces.cli.blast_radius as cli_blast_radius
+from codeclone import ui_messages as ui
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.blast_radius import render_blast_radius
 
@@ -93,7 +94,7 @@ def test_blast_radius_rejects_absolute_paths(tmp_path: Path) -> None:
         )
 
     assert exc.value.code == int(ExitCode.CONTRACT_ERROR)
-    assert "CONTRACT ERROR:" in printer.text
+    assert "CONTRACT ERROR" in printer.text
     assert "absolute paths are not accepted" in printer.text
 
 
@@ -241,7 +242,7 @@ def test_blast_radius_verbose_output_renders_all_sections(tmp_path: Path) -> Non
     expected_sections = (
         "Blast Radius",
         "pkg/a.py",
-        "Risk level:",
+        "Risk level",
         "Direct dependents",
         "Clone cohort members",
         "Dependency cycles",
@@ -265,7 +266,7 @@ def test_blast_radius_verbose_with_guardrails(tmp_path: Path) -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "Guardrails:" in printer.text
+    assert "Guardrails" in printer.text
 
 
 def _report_document_many_files() -> dict[str, object]:
@@ -333,7 +334,7 @@ def test_blast_radius_skipped_warning_truncated(tmp_path: Path) -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "... and" in printer.text
+    assert "... and" in " ".join(ui.strip_markup(printer.text).split())
 
 
 def test_blast_radius_many_invalid_paths_truncated(tmp_path: Path) -> None:

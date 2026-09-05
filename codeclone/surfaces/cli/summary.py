@@ -270,6 +270,16 @@ def _print_summary(
     #: ``None`` when no clone lane was compared against the baseline. The
     #: summary then says so instead of printing a zero it did not measure.
     new_clones_count: int | None,
+    #: Why no clone lane was compared, in the words of the ``New`` row. Read
+    #: from the baseline state by the caller; empty when a comparison ran.
+    novelty_reason: str = "",
+    #: The file the reason is about, when it is about one: the path a missing
+    #: baseline was looked for at. Empty otherwise.
+    novelty_detail: str = "",
+    #: ``"requested"`` when ``--skip-metrics`` asked for a clone-only run,
+    #: ``"no_baseline"`` when the run skipped metrics because it had no
+    #: baseline to compare them against, ``None`` when metrics ran.
+    metrics_skipped: str | None = None,
 ) -> None:
     invariant_ok = files_found == (files_analyzed + cache_hits + files_skipped)
 
@@ -292,6 +302,12 @@ def _print_summary(
                 new=new_clones_count,
             )
         )
+        if new_clones_count is None and novelty_reason:
+            console.print(
+                ui.fmt_summary_compact_novelty(
+                    reason=novelty_reason, detail=novelty_detail
+                )
+            )
     else:
         from rich.rule import Rule
 
@@ -305,6 +321,12 @@ def _print_summary(
                 skipped=files_skipped,
             )
         )
+        if files_found == 0:
+            # Nothing was read, so there is no clone inventory and nothing to
+            # compare: the file row has said all there is, and the outcome
+            # block names the state. Zeros here would be measurements of
+            # code that does not exist.
+            return
         parsed_line = ui.fmt_summary_parsed(
             lines=analyzed_lines,
             functions=analyzed_functions,
@@ -320,9 +342,19 @@ def _print_summary(
                 segment=segment_clones_count,
                 suppressed=suppressed_clone_groups,
                 low_value=low_value_segment_groups,
-                new=new_clones_count,
             )
         )
+        console.print(
+            ui.fmt_summary_new(
+                new_clones_count, reason=novelty_reason, detail=novelty_detail
+            )
+        )
+        if metrics_skipped is not None:
+            console.print(
+                ui.fmt_summary_metrics_skipped(
+                    requested=(metrics_skipped == "requested")
+                )
+            )
 
     if not invariant_ok:
         console.print(ui.fmt_cli_runtime_warning(ui.WARN_SUMMARY_ACCOUNTING_MISMATCH))
@@ -419,6 +451,10 @@ def _print_metrics(
                 population=metrics.health_population,
             )
         )
+        if metrics.health_population != "complete_nonempty":
+            # Nothing was measured, so the rows below would be zeros about
+            # code nobody read; the health line has already said so.
+            return
         console.print(
             ui.fmt_metrics_cc(
                 metrics.complexity_avg,

@@ -69,7 +69,7 @@ def resolve_existing_root_path(*, args: object, printer: StatusConsole) -> Path:
         root_path = resolve_root_path(args)
     except OSError as exc:
         exit_contract_error(
-            ui.ERR_INVALID_ROOT_PATH.format(error=exc),
+            ui.ERR_INVALID_ROOT_PATH.format(error=ui.esc(exc)),
             printer=printer,
             cause=exc,
         )
@@ -90,7 +90,10 @@ def load_pyproject_config_or_exit(
     try:
         return load_pyproject_config_fn(root_path)
     except ConfigValidationError as exc:
-        exit_contract_error(str(exc), printer=printer, cause=exc)
+        # The diagnosis quotes the user's configuration back at them, and a
+        # validator's ``[type=value_error, ...]`` is exactly what a console
+        # reads as a style tag and drops.
+        exit_contract_error(ui.esc(str(exc)), printer=printer, cause=exc)
 
 
 def configure_runtime_flags(args: CLIArgsLike) -> None:

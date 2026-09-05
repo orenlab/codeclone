@@ -15,7 +15,7 @@ import textwrap
 import traceback
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from .. import __version__
 from ..contracts import ISSUES_URL
@@ -28,17 +28,22 @@ from .labels import (
     SUMMARY_COMPACT_CLONES,
     SUMMARY_COMPACT_DEPENDENCIES,
     SUMMARY_COMPACT_METRICS,
+    SUMMARY_COMPACT_NOVELTY,
     SUMMARY_COMPACT_PATCH_VERIFY,
     SUMMARY_COMPACT_SECURITY_SURFACES,
 )
 from .markers import BANNER_SUBTITLE, MARKER_CONTRACT_ERROR, MARKER_INTERNAL_ERROR
 from .runtime import (
+    ACTION_API_SURFACE_BASELINE,
+    ACTION_CI,
+    ACTION_FAIL_ON_NEW,
+    ACTION_HTML,
+    ACTION_UPDATE_BASELINE,
     ERR_BASELINE_CI_REQUIRES_TRUSTED,
     ERR_BASELINE_GATING_REQUIRES_TRUSTED,
     ERR_BASELINE_LOCK_RECOVERY_FAILED,
     ERR_BASELINE_SCOPE_ID_REQUIRED,
     ERR_BASELINE_WRITE_FAILED,
-    ERR_INVALID_BASELINE,
     ERR_INVALID_BASELINE_PATH,
     ERR_INVALID_BASELINE_SCOPE_ID,
     ERR_INVALID_OUTPUT_EXT,
@@ -58,9 +63,31 @@ from .runtime import (
     NOTE_COHESION_LCOM4_2_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION,
+    NOVELTY_REASON_NO_BASELINE,
+    OUTCOME_API_NOT_COMPARED,
+    OUTCOME_BASELINE_WRITTEN,
+    OUTCOME_BASELINE_WRITTEN_NEXT,
+    OUTCOME_CLEAN,
+    OUTCOME_CREATE_BASELINE,
+    OUTCOME_EMPTY_SCOPE,
+    OUTCOME_EMPTY_SCOPE_NEXT,
+    OUTCOME_FIRST_RUN_THEN,
+    OUTCOME_FIRST_RUN_WHY,
+    OUTCOME_GATE_IN_CI,
+    OUTCOME_GATE_PASSED,
+    OUTCOME_IGNORED_NEXT,
+    OUTCOME_LOCATIONS,
+    OUTCOME_NEW_CLONES,
+    OUTCOME_NEW_CLONES_ACCEPT,
+    OUTCOME_NEW_CLONES_BLOCK,
+    OUTCOME_NEW_CLONES_QUIET,
+    OUTCOME_NOT_COMPARED,
     SUCCESS_BASELINE_LOCK_RECOVERED,
+    SUCCESS_BASELINE_UPDATED,
     TIP_GITIGNORE_CODECLONE_CACHE,
     TIP_VSCODE_EXTENSION,
+    WARN_BASELINE_IGNORED,
+    WARN_BASELINE_INVALID,
     WARN_BASELINE_LANES_OPAQUE,
     WARN_BATCH_ITEM_FAILED,
     WARN_CACHE_SAVE_FAILED,
@@ -76,8 +103,11 @@ from .runtime import (
 from .styling import (
     _HEALTH_GRADE_STYLE,
     _L,
+    GLYPH_FAIL,
     GLYPH_OK,
     GLYPH_SEP,
+    GLYPH_WARN,
+    INDENT_UNIT,
     STYLE_COUNT_ATTENTION,
     STYLE_COUNT_ATTENTION_SOFT,
     STYLE_COUNT_CRITICAL,
@@ -86,6 +116,7 @@ from .styling import (
     STYLE_META,
     STYLE_VERDICT_FAIL,
     STYLE_VERDICT_PASS,
+    STYLE_VERDICT_PASS_STRONG,
     STYLE_VERDICT_WARN,
     _format_permille_pct,
     _v,
@@ -110,6 +141,38 @@ def banner_title(version: str) -> str:
         f"  {styled('CodeClone', STYLE_EMPHASIS)} [dim]v{version}[/dim]"
         f"  [dim]{GLYPH_SEP}[/dim]  [dim]{BANNER_SUBTITLE}[/dim]"
     )
+
+
+#: The grid: block content sits one unit in, detail under it sits two.
+_INDENT = " " * INDENT_UNIT
+_DETAIL_INDENT = " " * (INDENT_UNIT * 2)
+
+
+def _indent_block(text: str, indent: str = _DETAIL_INDENT) -> str:
+    """Indent every non-blank line of ``text``; blank lines stay empty."""
+
+    return "\n".join(
+        f"{indent}{line}" if line.strip() else "" for line in text.splitlines()
+    )
+
+
+def _advisory_block(text: str, *, glyph: str, style: str) -> str:
+    """One advisory on the grid: a glyphed head line, dim detail under it."""
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    head, *details = lines
+    rendered = [f"{_INDENT}[{style}]{glyph} {esc(head.rstrip('.'))}[/{style}]"]
+    rendered.extend(
+        f"{_DETAIL_INDENT}[{STYLE_META}]{esc(detail)}[/{STYLE_META}]"
+        for detail in details
+    )
+    return "\n".join(rendered)
+
+
+def fmt_banner_root(path: object) -> str:
+    return f"{_INDENT}{'Root':<{_L}}[{STYLE_META}]{esc(path)}[/{STYLE_META}]"
 
 
 _REPORT_FLAG_BY_LABEL = {
@@ -138,25 +201,25 @@ def fmt_invalid_output_extension(
 
 def fmt_invalid_output_path(*, label: str, path: Path, error: object) -> str:
     return ERR_INVALID_OUTPUT_PATH.format(
-        label=label, path=path, error=error, flag=_report_flag(label)
+        label=label, path=esc(path), error=esc(error), flag=_report_flag(label)
     )
 
 
 def fmt_invalid_baseline_path(*, path: Path, error: object) -> str:
-    return ERR_INVALID_BASELINE_PATH.format(path=path, error=error)
+    return ERR_INVALID_BASELINE_PATH.format(path=esc(path), error=esc(error))
 
 
 def fmt_baseline_write_failed(*, path: Path, error: object) -> str:
-    return ERR_BASELINE_WRITE_FAILED.format(path=path, error=error)
+    return ERR_BASELINE_WRITE_FAILED.format(path=esc(path), error=esc(error))
 
 
 def fmt_invalid_baseline_scope_id(*, path: Path, error: object) -> str:
-    return ERR_INVALID_BASELINE_SCOPE_ID.format(path=path, error=error)
+    return ERR_INVALID_BASELINE_SCOPE_ID.format(path=esc(path), error=esc(error))
 
 
 def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
     return ERR_REPORT_WRITE_FAILED.format(
-        label=label, path=path, error=error, flag=_report_flag(label)
+        label=label, path=esc(path), error=esc(error), flag=_report_flag(label)
     )
 
 
@@ -243,8 +306,25 @@ def fmt_legacy_repo_workspace_warning(*, legacy_dir: Path, new_dir: Path) -> str
     return WARN_LEGACY_REPO_WORKSPACE.format(legacy_dir=legacy_dir, new_dir=new_dir)
 
 
-def fmt_invalid_baseline(error: object) -> str:
-    return ERR_INVALID_BASELINE.format(error=error)
+def fmt_invalid_baseline(error: object, *, ignored: bool = True) -> str:
+    """One advisory for an unusable baseline, in the register the run needs.
+
+    ``ignored`` is the advisory register: the run continues without a
+    comparison, so the block is the whole story, remedy included. The gating
+    register states the fact and stops there -- the refusal that follows it
+    carries the remedy once, instead of both blocks naming the same command.
+    """
+
+    template = WARN_BASELINE_IGNORED if ignored else WARN_BASELINE_INVALID
+    return _advisory_block(
+        template.format(error=error),
+        glyph=GLYPH_WARN if ignored else GLYPH_FAIL,
+        style=STYLE_VERDICT_WARN if ignored else STYLE_VERDICT_FAIL,
+    )
+
+
+def fmt_baseline_updated(path: object) -> str:
+    return SUCCESS_BASELINE_UPDATED.format(path=esc(path))
 
 
 def fmt_baseline_foreign_interpreter(*, baseline_tag: str, runtime_tag: str) -> str:
@@ -255,9 +335,15 @@ def fmt_baseline_foreign_interpreter(*, baseline_tag: str, runtime_tag: str) -> 
     operator sees the provenance without being told to regenerate anything.
     """
 
-    return NOTE_BASELINE_FOREIGN_INTERPRETER.format(
+    head, detail = NOTE_BASELINE_FOREIGN_INTERPRETER.format(
         baseline_tag=baseline_tag,
         runtime_tag=runtime_tag,
+    ).splitlines()
+    label = f"[{STYLE_META}]Note[/{STYLE_META}]"
+    hang = " " * (INDENT_UNIT + len("Note") + 2)
+    return (
+        f"{_INDENT}{label}  {esc(head)}\n"
+        f"{hang}[{STYLE_META}]{esc(detail)}[/{STYLE_META}]"
     )
 
 
@@ -268,7 +354,11 @@ def fmt_baseline_lanes_opaque(lanes: Iterable[object]) -> str:
         f"{getattr(item, 'name', item)}:{getattr(item, 'reason', 'unavailable')}"
         for item in lanes
     )
-    return WARN_BASELINE_LANES_OPAQUE.format(lanes=", ".join(rows))
+    return _advisory_block(
+        WARN_BASELINE_LANES_OPAQUE.format(lanes=", ".join(rows)),
+        glyph=GLYPH_WARN,
+        style=STYLE_VERDICT_WARN,
+    )
 
 
 def fmt_baseline_gating_requires_trusted(*, ci: bool) -> str:
@@ -278,50 +368,46 @@ def fmt_baseline_gating_requires_trusted(*, ci: bool) -> str:
 
 
 def fmt_cli_runtime_warning(message: object) -> str:
+    """Put a runtime warning on the grid: glyphed head, dim detail under it.
+
+    The first paragraph is the head; a ``"; "`` list, a parenthesis or the
+    first ``": "`` splits its detail off, and every later paragraph is more
+    detail. Detail lines are wrapped to the detail column; a token longer than
+    the column (a path) is left whole for the console to fold in place.
+    """
+
     source = strip_markup(str(message)).strip()
     paragraphs = [
         line.strip() for raw_line in source.splitlines() if (line := raw_line.strip())
     ]
-    rendered: list[str] = []
-    for index, paragraph in enumerate(paragraphs):
-        label = "Warning"
-        body = paragraph.rstrip()
-        lowered = body.lower()
-        if lowered.startswith("cache "):
-            label = "Cache"
-            body = body[6:]
-        elif lowered.startswith("baseline "):
-            label = "Baseline"
-            body = body[9:]
-        elif lowered.startswith("legacy cache "):
-            label = "Cache"
+    if not paragraphs:
+        return ""
+    first, *rest = paragraphs
+    segments = [segment.strip() for segment in first.split("; ") if segment.strip()]
+    head = segments[0].rstrip(".)") if segments else first.rstrip(".)")
+    details: list[str] = []
+    if " (" in head:
+        head, extra = head.split(" (", 1)
+        details.append(extra.rstrip(".)"))
+    if not details and ": " in head:
+        head, extra = head.split(": ", 1)
+        details.append(extra.rstrip(".)"))
+    details.extend(segment.rstrip(".)") for segment in segments[1:])
+    details.extend(rest)
 
-        segments = [segment.strip() for segment in body.split("; ") if segment.strip()]
-        head = segments[0].rstrip(".)") if segments else body.rstrip(".)")
-        details: list[str] = []
-        if " (" in head:
-            head, extra = head.split(" (", 1)
-            details.append(extra.rstrip(".)"))
-        if not details and ": " in head:
-            head, extra = head.split(": ", 1)
-            details.append(extra.rstrip(".)"))
-        details.extend(segment.rstrip(".)") for segment in segments[1:])
-
-        rendered.append(f"  [warning]{label}[/warning] {esc(head)}")
-        for detail in details:
-            rendered.extend(
-                [
-                    f"    [dim]{esc(wrapped)}[/dim]"
-                    for wrapped in textwrap.wrap(
-                        detail,
-                        width=max(40, CLI_LAYOUT_MAX_WIDTH - 8),
-                        break_long_words=False,
-                        break_on_hyphens=False,
-                    )
-                ]
-            )
-        if index != len(paragraphs) - 1:
-            rendered.append("")
+    rendered = [f"{_INDENT}[warning]{GLYPH_WARN} {esc(head)}[/warning]"]
+    for detail in details:
+        rendered.extend(
+            [
+                f"{_DETAIL_INDENT}[{STYLE_META}]{esc(wrapped)}[/{STYLE_META}]"
+                for wrapped in textwrap.wrap(
+                    detail,
+                    width=max(40, CLI_LAYOUT_MAX_WIDTH - len(_DETAIL_INDENT)),
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                )
+            ]
+        )
     return "\n".join(rendered)
 
 
@@ -362,6 +448,15 @@ def fmt_summary_compact_clones(
         low_value=low_value,
         new=CLONE_NOVELTY_UNAVAILABLE_TEXT if new is None else new,
     )
+
+
+def fmt_summary_compact_novelty(*, reason: str, detail: str = "") -> str:
+    """Quiet-mode line for a run that compared nothing, with the file named."""
+
+    why = reason.replace(" ", "_")
+    if detail:
+        why = f"{why}  path={detail}"
+    return SUMMARY_COMPACT_NOVELTY.format(reason=why)
 
 
 def fmt_summary_compact_metrics(
@@ -525,25 +620,61 @@ def fmt_summary_clones(
     segment: int,
     suppressed: int,
     low_value: int,
-    new: int | None,
 ) -> str:
+    """The clone inventory of this run, family by family.
+
+    Novelty is not here any more: whether a group is new is a fact about the
+    baseline, not about the inventory, and it has its own row
+    (:func:`fmt_summary_new`) so the two questions -- how much duplication,
+    and what changed -- are answered one at a time.
+    """
+
     clone_parts = [
-        f"{_v(func, STYLE_COUNT_ATTENTION)} func",
+        f"{_v(func, STYLE_COUNT_ATTENTION)} function",
         f"{_v(block, STYLE_COUNT_ATTENTION)} block",
     ]
     if segment:
-        clone_parts.append(f"{_v(segment, STYLE_COUNT_ATTENTION)} seg")
+        clone_parts.append(f"{_v(segment, STYLE_COUNT_ATTENTION)} segment")
     main = f" {GLYPH_SEP} ".join(clone_parts)
     quals = [
         f"{_v(suppressed, STYLE_COUNT_ATTENTION_SOFT)} suppressed",
         f"{_v(low_value, STYLE_COUNT_ATTENTION_SOFT)} low-value",
     ]
-    quals.append(
-        f"[{STYLE_META}]new {CLONE_NOVELTY_UNAVAILABLE_TEXT}[/{STYLE_META}]"
-        if new is None
-        else f"{_v(new, STYLE_COUNT_CRITICAL)} new"
-    )
     return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
+
+
+def fmt_summary_new(new: int | None, *, reason: str = "", detail: str = "") -> str:
+    """The baseline-relative answer: how many clone groups are new.
+
+    ``None`` means no clone lane was compared; the row then says so and names
+    the reason in words, because "not compared" is not "zero new". ``detail``
+    is the file the reason is about -- the path a missing baseline was looked
+    for at -- so the reader who passed ``--baseline`` sees which one.
+    """
+
+    if new is None:
+        why = reason or CLONE_NOVELTY_UNAVAILABLE_TEXT
+        if detail:
+            why = f"{why} {GLYPH_SEP} {detail}"
+        absence = f"not compared ({esc(why)})"
+        return f"  {'New':<{_L}}[{STYLE_META}]{absence}[/{STYLE_META}]"
+    noun = "clone group" if new == 1 else "clone groups"
+    return f"  {'New':<{_L}}{_v(new, STYLE_COUNT_CRITICAL)} {noun} since the baseline"
+
+
+def fmt_summary_metrics_skipped(*, requested: bool) -> str:
+    """Why the Metrics section is absent, and how to get it.
+
+    A run without a baseline skips metrics by default; the reader who sees a
+    Summary and no Metrics is asking why. ``requested`` is the explicit
+    ``--skip-metrics`` case, which needs no remedy.
+    """
+
+    if requested:
+        detail = "skipped (--skip-metrics)"
+    else:
+        detail = "not run without a baseline (--no-skip-metrics runs them now)"
+    return f"  {'Metrics':<{_L}}[{STYLE_META}]{detail}[/{STYLE_META}]"
 
 
 #: Population states that print no grade on the summary line, each with its
@@ -579,7 +710,8 @@ def fmt_metrics_cc(avg: float, max_val: int, high_risk: int) -> str:
         if high_risk
         else styled("0 high-risk", STYLE_META)
     )
-    return f"  {'CC':<{_L}}avg {avg:.1f} {GLYPH_SEP} max {max_val} {GLYPH_SEP} {hr}"
+    detail = f"avg {avg:.1f} {GLYPH_SEP} max {max_val} {GLYPH_SEP} {hr}"
+    return f"  {'Complexity':<{_L}}{detail}"
 
 
 def fmt_metrics_coupling(avg: float, max_val: int) -> str:
@@ -611,7 +743,8 @@ def fmt_metrics_dependencies(
 ) -> str:
     return (
         f"  {'Dependencies':<{_L}}"
-        f"avg {avg_depth:.1f} · p95 {p95_depth} · max {max_depth}"
+        f"avg depth {avg_depth:.1f} {GLYPH_SEP} p95 {p95_depth}"
+        f" {GLYPH_SEP} max {max_depth}"
     )
 
 
@@ -669,12 +802,12 @@ def fmt_metrics_adoption(
 #: The rich line's absence sentence for an API comparison that never ran.
 #: One owner for the wording, mirroring the coverage-join "join unavailable"
 #: pattern: the fact is stated in words, never as fabricated zeros.
-_API_SURFACE_DIFF_ABSENCE: Final = "baseline comparison unavailable"
+_API_SURFACE_DIFF_ABSENCE: Final = "not compared with the baseline"
 
 #: The metrics line's absence term for a coverage join that never ran.
 #: Same role, same register: the fact is stated in words by a named owner,
 #: so the spelling cannot drift apart from the tests that pin it.
-_COVERAGE_JOIN_ABSENCE: Final = "join unavailable"
+_COVERAGE_JOIN_ABSENCE: Final = "not joined"
 
 
 def fmt_metrics_api_surface(
@@ -742,15 +875,14 @@ def fmt_metrics_overloaded_modules(
     population_status: str,
     top_score: float,
 ) -> str:
-    parts = [f"{_v(candidates, STYLE_COUNT_NEUTRAL)} candidates"]
+    parts = [f"{_v(candidates, STYLE_COUNT_NEUTRAL)} of {_v(total)} ranked"]
     if top_score > 0:
         parts.append(f"max score {top_score:.2f}")
-    parts.append(f"{_v(total)} ranked")
     summary = f" {GLYPH_SEP} ".join(parts)
     note = "report-only"
     if population_status and population_status != "ok":
-        note = f"{note}; {population_status.replace('_', ' ')} population"
-    return f"  {'Overloaded':<{_L}}{summary} [dim]({note})[/dim]"
+        note = f"{note}, {population_status.replace('_', ' ')} population"
+    return f"  {'Overloaded':<{_L}}{summary} [{STYLE_META}]({note})[/{STYLE_META}]"
 
 
 def fmt_changed_scope_paths(*, count: int) -> str:
@@ -834,12 +966,115 @@ def fmt_patch_verify_compact(
     )
 
 
-def fmt_pipeline_done(elapsed: float) -> str:
-    return f"  [dim]Pipeline done in {elapsed:.2f}s[/dim]"
+RunOutcomeKind = Literal[
+    "empty_scope",
+    "baseline_written",
+    "not_compared",
+    "clean",
+    "gate_passed",
+    "new_clones",
+]
+
+#: Column where the commands of an outcome block line up.
+_OUTCOME_LABEL_WIDTH = 26
+
+
+def fmt_run_outcome(
+    *,
+    kind: RunOutcomeKind,
+    elapsed: float,
+    baseline_display: str = "",
+    reason: str = "",
+    new_clones: int = 0,
+    show_locations: bool = False,
+    api_not_compared: bool = False,
+) -> str:
+    """The last block of a run: did it pass, and what to type now.
+
+    One block, one owner. It replaced three things that used to close a run
+    -- a "new clones detected" warning, a "pipeline done" timing line and,
+    for a first run, nothing at all -- so the reader ends every run on the
+    same line shape: a verdict glyph, the verdict, the timing, and under it
+    a sentence when one is owed and the commands that apply to this state,
+    every command in one column.
+    """
+
+    timing = f"[{STYLE_META}]{elapsed:.2f}s[/{STYLE_META}]"
+    prose: list[str] = []
+    commands: list[tuple[str, str]] = []
+    if kind == "empty_scope":
+        head = styled(f"{GLYPH_WARN} {OUTCOME_EMPTY_SCOPE}", STYLE_VERDICT_WARN)
+        prose = [OUTCOME_EMPTY_SCOPE_NEXT]
+    elif kind == "baseline_written":
+        head = styled(
+            f"{GLYPH_OK} {OUTCOME_BASELINE_WRITTEN.format(path=esc(baseline_display))}",
+            STYLE_VERDICT_PASS_STRONG,
+        )
+        prose = [OUTCOME_BASELINE_WRITTEN_NEXT]
+        commands = [(OUTCOME_GATE_IN_CI, ACTION_CI)]
+    elif kind == "not_compared":
+        head = styled(
+            f"{GLYPH_WARN} {OUTCOME_NOT_COMPARED.format(reason=esc(reason))}",
+            STYLE_VERDICT_WARN,
+        )
+        if reason == NOVELTY_REASON_NO_BASELINE:
+            prose = [OUTCOME_FIRST_RUN_WHY]
+            commands = [
+                (OUTCOME_CREATE_BASELINE, ACTION_UPDATE_BASELINE),
+                (OUTCOME_FIRST_RUN_THEN, ACTION_CI),
+            ]
+        else:
+            commands = [(OUTCOME_IGNORED_NEXT, ACTION_UPDATE_BASELINE)]
+    elif kind == "clean":
+        head = styled(f"{GLYPH_OK} {OUTCOME_CLEAN}", STYLE_VERDICT_PASS)
+    elif kind == "gate_passed":
+        head = styled(
+            f"{GLYPH_OK} {OUTCOME_GATE_PASSED} {GLYPH_SEP} exit 0",
+            STYLE_VERDICT_PASS_STRONG,
+        )
+    else:
+        head = styled(
+            f"{GLYPH_WARN} "
+            f"{OUTCOME_NEW_CLONES.format(count=n_of(new_clones, 'new clone group'))}",
+            STYLE_VERDICT_WARN,
+        )
+        commands = [
+            (OUTCOME_NEW_CLONES_BLOCK, ACTION_FAIL_ON_NEW),
+            (OUTCOME_NEW_CLONES_ACCEPT, ACTION_UPDATE_BASELINE),
+        ]
+    if show_locations and kind != "empty_scope":
+        commands.append((OUTCOME_LOCATIONS, ACTION_HTML))
+    if api_not_compared:
+        commands.append((OUTCOME_API_NOT_COMPARED, ACTION_API_SURFACE_BASELINE))
+    lines = ["", f"{_INDENT}{head} [{STYLE_META}]{GLYPH_SEP}[/{STYLE_META}] {timing}"]
+    lines.extend(f"{_DETAIL_INDENT}{line}" for line in prose)
+    lines.extend(
+        f"{_DETAIL_INDENT}{label:<{_OUTCOME_LABEL_WIDTH}}{command}"
+        for label, command in commands
+    )
+    return "\n".join(lines)
+
+
+def fmt_run_outcome_quiet(*, new_clones: int) -> str:
+    """The one outcome a quiet run still prints: new clones nobody gated."""
+
+    return (
+        f"[warning]{GLYPH_WARN} "
+        f"{OUTCOME_NEW_CLONES_QUIET.format(count=n_of(new_clones, 'new clone group'))}"
+        "[/warning]"
+    )
 
 
 def fmt_contract_error(message: str) -> str:
-    return f"{MARKER_CONTRACT_ERROR}\n{message}"
+    """The error banner: a blank line, the marker, the message under it.
+
+    The marker line carries the glyph and sits one unit in; the message sits
+    under it at two. A refusal used to start at column 0 with no air above
+    it and run into whatever printed before, which is the "ragged" the
+    maintainer named.
+    """
+
+    return f"\n{_INDENT}{MARKER_CONTRACT_ERROR}\n{_indent_block(message)}"
 
 
 _SCOPE_ID_HINT_INDENT = "    "
@@ -891,7 +1126,7 @@ def fmt_memory_root_not_found(*, path: object) -> str:
 
 
 def fmt_baseline_lock_recovery_failed(*, path: Path, reason: str) -> str:
-    return ERR_BASELINE_LOCK_RECOVERY_FAILED.format(path=path, reason=reason)
+    return ERR_BASELINE_LOCK_RECOVERY_FAILED.format(path=esc(path), reason=esc(reason))
 
 
 def fmt_baseline_lock_recovered(*, path: Path) -> str:
@@ -947,7 +1182,6 @@ def fmt_internal_error(
     error_name = type(error).__name__
     error_text = str(error).strip() or "<no message>"
     lines = [
-        MARKER_INTERNAL_ERROR,
         "Unexpected exception.",
         f"Reason: {error_name}: {error_text}",
         "",
@@ -959,24 +1193,23 @@ def fmt_internal_error(
             "and the report file if generated."
         ),
     ]
-    if not debug:
-        return "\n".join(lines)
-
-    traceback_lines = traceback.format_exception(
-        type(error), error, error.__traceback__
-    )
-    command_line = shlex.join(sys.argv)
-    lines.extend(
-        [
-            "",
-            "DEBUG DETAILS",
-            f"Platform: {platform.platform()}",
-            f"Python: {sys.version.split()[0]}",
-            f"CodeClone: {__version__}",
-            f"Command: {command_line}",
-            f"CWD: {Path.cwd()}",
-            "Traceback:",
-            "".join(traceback_lines).rstrip(),
-        ]
-    )
-    return "\n".join(lines)
+    if debug:
+        traceback_lines = traceback.format_exception(
+            type(error), error, error.__traceback__
+        )
+        command_line = shlex.join(sys.argv)
+        lines.extend(
+            [
+                "",
+                "DEBUG DETAILS",
+                f"Platform: {platform.platform()}",
+                f"Python: {sys.version.split()[0]}",
+                f"CodeClone: {__version__}",
+                f"Command: {command_line}",
+                f"CWD: {Path.cwd()}",
+                "Traceback:",
+                "".join(traceback_lines).rstrip(),
+            ]
+        )
+    body = esc("\n".join(lines))
+    return f"\n{_INDENT}{MARKER_INTERNAL_ERROR}\n{_indent_block(body)}"

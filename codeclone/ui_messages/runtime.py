@@ -4,9 +4,17 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""CLI runtime status, warning, error, and gate messages."""
+"""CLI runtime status, warning, error, and gate messages.
+
+Warning-class constants hold the sentence only; ``fmt_cli_runtime_warning``
+puts it on the grid under the advisory glyph. Error-class constants keep the
+``[error]`` headline plus a ``[dim]`` next step; ``fmt_contract_error`` puts
+them under the error banner. Neither family carries its own indentation.
+"""
 
 from __future__ import annotations
+
+from .styling import GLYPH_OK, GLYPH_WARN
 
 WARN_SUMMARY_ACCOUNTING_MISMATCH = (
     "Summary accounting mismatch: "
@@ -16,7 +24,7 @@ WARN_SUMMARY_ACCOUNTING_MISMATCH = (
 STATUS_DISCOVERING = "[success]Discovering Python files...[/success]"
 STATUS_GROUPING = "[success]Grouping clones...[/success]"
 
-INFO_PROCESSING_CHANGED = "[info]Processing {count} changed files...[/info]"
+INFO_PROCESSING_CHANGED = "  [info]Processing {count} changed files...[/info]"
 
 WARN_WORKER_FAILED = "[warning]Worker failed: {error}[/warning]"
 WARN_BATCH_ITEM_FAILED = "[warning]Failed to process batch item: {error}[/warning]"
@@ -24,9 +32,12 @@ WARN_PARALLEL_FALLBACK = (
     "[warning]Parallel processing unavailable, "
     "falling back to sequential: {error}[/warning]"
 )
-WARN_FAILED_FILES_HEADER = "\n[warning]{count} files failed to process:[/warning]"
+WARN_FAILED_FILES_HEADER = (
+    f"\n  [warning]{GLYPH_WARN} {{count}} files failed to process[/warning]"
+)
 WARN_UNSUPPORTED_CONSTRUCT_SUMMARY = (
-    "[warning]{count} files not analyzed: unsupported syntax ({constructs})[/warning]"
+    f"  [warning]{GLYPH_WARN} {{count}} files not analyzed: "
+    "unsupported syntax ({constructs})[/warning]"
 )
 WARN_CACHE_SAVE_FAILED = "[warning]Failed to save cache: {error}[/warning]"
 WARN_HTML_REPORT_OPEN_FAILED = (
@@ -113,59 +124,71 @@ ERR_UNREADABLE_SOURCE_IN_GATING = (
 )
 
 WARN_LEGACY_CACHE = (
-    "[warning]Legacy cache file found at: {legacy_path}.[/warning]\n"
-    "[warning]Cache is now stored per-project at: {new_path}.[/warning]\n"
-    "[warning]Please delete the legacy cache file and add "
-    "`.codeclone/` to .gitignore.[/warning]"
+    "Legacy cache file found at: {legacy_path}.\n"
+    "Cache is now stored per-project at: {new_path}.\n"
+    "Please delete the legacy cache file and add `.codeclone/` to .gitignore."
 )
 WARN_LEGACY_REPO_WORKSPACE = (
-    "[warning]Legacy CodeClone workspace (.cache/codeclone/) found at: "
-    "{legacy_dir}.[/warning]\n"
-    "[warning]Artifacts now live under: {new_dir}.[/warning]\n"
-    "[warning]Remove the legacy directory after you no longer need its "
-    "contents.[/warning]"
+    "Legacy CodeClone workspace (.cache/codeclone/) found at: {legacy_dir}.\n"
+    "Artifacts now live under: {new_dir}.\n"
+    "Remove the legacy directory after you no longer need its contents."
 )
 
-ERR_INVALID_BASELINE = (
-    "[error]Invalid baseline file.[/error]\n"
-    "{error}\n"
-    "Please regenerate the baseline with --update-baseline."
-)
-ACTION_UPDATE_BASELINE = "Run: codeclone . --update-baseline"
-WARN_BASELINE_MISSING = (
-    "[warning]Baseline file not found at: [bold]{path}[/bold][/warning]\n"
-    "[dim]Baseline-relative novelty is unavailable. "
-    "Use --update-baseline to create it.[/dim]\n"
-    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
-)
+# The commands every remedy names. Spelled once; every message that hands
+# one over reads it from here.
+ACTION_UPDATE_BASELINE = "codeclone . --update-baseline"
+ACTION_CI = "codeclone . --ci"
+ACTION_HTML = "codeclone . --html"
+ACTION_FAIL_ON_NEW = "codeclone . --fail-on-new"
+ACTION_API_SURFACE_BASELINE = "codeclone . --api-surface --update-baseline"
+
+# The reasons a run could not compare against the baseline, worded for the
+# ``New`` summary row. One vocabulary for the row, the outcome block, and the
+# baseline warnings, so the three cannot describe one absence three ways.
+NOVELTY_REASON_NO_BASELINE = "no baseline yet"
+NOVELTY_REASON_BASELINE_IGNORED = "baseline ignored"
+NOVELTY_REASON_LANES_OPAQUE = "clone lanes opaque"
+
+# Invalid baseline, two registers. The gating register states the fact and
+# leaves the remedy to the refusal that follows it; the advisory register
+# is the whole story because nothing follows it.
+WARN_BASELINE_INVALID = "Invalid baseline file\n{error}"
 WARN_BASELINE_IGNORED = (
-    "[warning]Baseline is not trusted for this run and will be ignored.[/warning]\n"
-    "[dim]Baseline-relative novelty is unavailable for this run.[/dim]\n"
-    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
+    "Baseline ignored: invalid file\n"
+    "{error}\n"
+    "Nothing can be called new this run.\n"
+    "Regenerate it: " + ACTION_UPDATE_BASELINE
 )
 NOTE_BASELINE_FOREIGN_INTERPRETER = (
-    "[dim]Baseline was taken on [bold]{baseline_tag}[/bold]; "
-    "this run is [bold]{runtime_tag}[/bold].[/dim]\n"
-    "[dim]Observations are interpreter-independent, so the baseline is used "
-    "and its novelty is comparable. This note is about where the reference "
-    "came from, not about whether it is trusted.[/dim]"
+    "Baseline was taken on {baseline_tag}; this run is {runtime_tag}.\n"
+    "Observations are interpreter-independent, so it is used as it is."
 )
 WARN_BASELINE_LANES_OPAQUE = (
-    "[warning]Baseline lanes are opaque for this run: [bold]{lanes}[/bold][/warning]\n"
-    "[dim]No active gate reads them, so the run continues. "
-    "Their baseline-relative novelty is reported as unavailable, "
-    "not as zero.[/dim]\n"
-    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
+    "Baseline lanes opaque for this run: {lanes}.\n"
+    "No active gate reads them, so the run continues; their novelty is "
+    "reported as unavailable, not as zero.\n"
+    "Regenerate it: " + ACTION_UPDATE_BASELINE
 )
 ERR_BASELINE_CI_REQUIRES_TRUSTED = (
-    f"[error]CI requires a trusted baseline.[/error]\n{ACTION_UPDATE_BASELINE}"
+    "[error]CI requires a trusted baseline.[/error]\n"
+    f"[dim]Create it: {ACTION_UPDATE_BASELINE}[/dim]"
 )
 ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
     "[error]Baseline-aware gates require a trusted baseline.[/error]\n"
-    f"{ACTION_UPDATE_BASELINE}"
+    f"[dim]Create it: {ACTION_UPDATE_BASELINE}[/dim]"
 )
-SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
-SUCCESS_BASELINE_LOCK_RECOVERED = "✔ Baseline publication lock recovered: {path}"
+ERR_BASELINE_LANES_UNAVAILABLE = (
+    "[error]Required baseline lanes are unavailable: {lanes}.[/error]\n"
+    f"[dim]Regenerate it: {ACTION_UPDATE_BASELINE}[/dim]"
+)
+ERR_GATE_EVIDENCE_UNAVAILABLE = (
+    "[error]Required gate evidence is unavailable.[/error]\n"
+    f"[dim]Regenerate the baseline: {ACTION_UPDATE_BASELINE}[/dim]"
+)
+SUCCESS_BASELINE_UPDATED = f"  [success]{GLYPH_OK} Baseline written: {{path}}[/success]"
+SUCCESS_BASELINE_LOCK_RECOVERED = (
+    f"{GLYPH_OK} Baseline publication lock recovered: {{path}}"
+)
 ERR_BASELINE_LOCK_RECOVERY_FAILED = (
     "[error]Baseline publication lock recovery failed for {path}: "
     "{reason}.[/error]\n"
@@ -182,48 +205,69 @@ ERR_MEMORY_ROOT_NOT_FOUND = (
     "[dim]Pass an existing directory via --root.[/dim]"
 )
 
-FAIL_NEW_TITLE = "[error]FAILED: New code clones detected.[/error]"
-FAIL_NEW_SUMMARY_TITLE = "Summary:"
-FAIL_NEW_FUNCTION = "- New function clone groups: {count}"
-FAIL_NEW_BLOCK = "- New block clone groups: {count}"
-FAIL_NEW_REPORT_TITLE = "See detailed report:"
-FAIL_NEW_ACCEPT_TITLE = "To accept these clones as technical debt, run:"
-FAIL_NEW_ACCEPT_COMMAND = "  codeclone . --update-baseline"
-FAIL_NEW_DETAIL_FUNCTION = "Details (function clone hashes):"
-FAIL_NEW_DETAIL_BLOCK = "Details (block clone hashes):"
-FAIL_METRICS_TITLE = "[error]FAILED: Metrics quality gate triggered.[/error]"
-
-WARN_NEW_CLONES_WITHOUT_FAIL = (
-    "\n[warning]New clones detected but --fail-on-new not set.[/warning]\n"
-    "Run with --update-baseline to accept them as technical debt."
+# ── run outcome: the last block of an analysis run ───────────────────
+# Each sentence answers the question the reader has at that moment: did I
+# pass, and what do I type now. The first-run register also says what the
+# product is, because that is the moment the reader asks.
+OUTCOME_EMPTY_SCOPE = "Nothing analyzed: no Python files under this root"
+OUTCOME_EMPTY_SCOPE_NEXT = (
+    "Pass a project directory that contains Python files: codeclone <root>"
 )
+OUTCOME_BASELINE_WRITTEN = "Baseline ready: {path}"
+OUTCOME_BASELINE_WRITTEN_NEXT = "Later runs report only what changed against it."
+OUTCOME_GATE_IN_CI = "Gate every change in CI:"
+OUTCOME_CREATE_BASELINE = "Create the baseline:"
+OUTCOME_NOT_COMPARED = "Not compared: {reason}"
+OUTCOME_FIRST_RUN_WHY = (
+    "CodeClone reports what changed in your code's structure against an "
+    "accepted baseline; today's findings become known debt once you create one."
+)
+OUTCOME_FIRST_RUN_THEN = "Then gate changes in CI:"
+OUTCOME_IGNORED_NEXT = "Regenerate it:"
+OUTCOME_CLEAN = "Nothing new since the baseline"
+OUTCOME_GATE_PASSED = "Gate passed: nothing new since the baseline"
+OUTCOME_NEW_CLONES = "{count} since the baseline"
+OUTCOME_NEW_CLONES_BLOCK = "Block it in CI:"
+OUTCOME_NEW_CLONES_ACCEPT = "Accept as known debt:"
+OUTCOME_LOCATIONS = "Locations:"
+OUTCOME_API_NOT_COMPARED = "Public API not compared:"
+OUTCOME_NEW_CLONES_QUIET = (
+    "{count} since the baseline (--fail-on-new blocks it, --update-baseline accepts it)"
+)
+
+# Tips and notes are label rows on the grid: the label sits in the label
+# field, the text in the value column, and the continuation under the text.
+_TIP_LABEL = "  [dim]Tip[/dim]           "
+_NOTE_LABEL = "  [dim]Note[/dim]          "
+_HANG = " " * 16
 TIP_VSCODE_EXTENSION = (
-    "\n[dim]Tip:[/dim] VS Code detected. "
+    f"\n{_TIP_LABEL}VS Code detected. "
     "CodeClone has a native extension for triage-first review and hotspot "
     "navigation.\n"
-    "[dim]{url}[/dim]"
+    f"{_HANG}[dim]{{url}}[/dim]"
 )
 NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION = (
-    "\n[dim]Note:[/dim] Dead-code reachability was refined in 2.0.1 for "
+    f"\n{_NOTE_LABEL}Dead-code reachability was refined in 2.0.1 for "
     "common Python frameworks.\n"
-    "[dim]Fewer dead-code findings after upgrading from 2.0.0 are expected: "
-    "this usually means reduced false positives, not weaker detection.[/dim]"
+    f"{_HANG}[dim]Fewer dead-code findings after upgrading from 2.0.0 are "
+    "expected: this usually means reduced false positives, not weaker "
+    "detection.[/dim]"
 )
 NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION = (
-    "\n[dim]Note:[/dim] Dead-code reachability was refined again in 2.0.2.\n"
-    "[dim]Fewer dead-code findings after upgrading from 2.0.1 are expected: "
-    "framework hooks, public exports, and guarded dynamic dispatch now produce "
-    "fewer false positives, not weaker detection.[/dim]"
+    f"\n{_NOTE_LABEL}Dead-code reachability was refined again in 2.0.2.\n"
+    f"{_HANG}[dim]Fewer dead-code findings after upgrading from 2.0.1 are "
+    "expected: framework hooks, public exports, and guarded dynamic dispatch "
+    "now produce fewer false positives, not weaker detection.[/dim]"
 )
 NOTE_COHESION_LCOM4_2_1_MIGRATION = (
-    "\n[dim]Note:[/dim] Class cohesion (LCOM4) applicability was refined in "
+    f"\n{_NOTE_LABEL}Class cohesion (LCOM4) applicability was refined in "
     "2.1.0.\n"
-    "[dim]Cohesion counts and low-cohesion class totals may change after "
+    f"{_HANG}[dim]Cohesion counts and low-cohesion class totals may change after "
     "upgrading from 2.0.2: Protocol interfaces and Pydantic validation hooks "
     "are excluded from the LCOM4 graph. This reflects tighter applicability "
     "rules, not weaker detection.[/dim]"
 )
 TIP_GITIGNORE_CODECLONE_CACHE = (
-    "\n[dim]Tip:[/dim] {message}\n[dim]Suggested entry: `{entry}`[/dim]"
+    f"\n{_TIP_LABEL}{{message}}\n{_HANG}[dim]Suggested entry: `{{entry}}`[/dim]"
 )
 NOTE_DEAD_CODE_REACHABILITY_MIGRATION = NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION

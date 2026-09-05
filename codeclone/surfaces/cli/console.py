@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import types
 from collections.abc import Mapping, Sequence
@@ -17,8 +18,9 @@ from typing import TYPE_CHECKING, cast
 
 from ... import __version__
 from ... import ui_messages as ui
+from ...contracts import ExitCode
 from ...report.gates import reasons as gate_reasons
-from ...ui_messages.styling import RICH_THEME_STYLES, strip_markup
+from ...ui_messages.styling import _L, INDENT_UNIT, RICH_THEME_STYLES, strip_markup
 from .types import CLIArgsLike, PrinterLike
 
 if TYPE_CHECKING:
@@ -33,6 +35,27 @@ if TYPE_CHECKING:
     from rich.table import Table as RichTable
     from rich.text import Text as RichText
     from rich.theme import Theme as RichTheme
+
+
+#: The narrowest column a hanging continuation may be wrapped into. Below
+#: this the indentation itself would eat the line, so the line is left to
+#: the terminal instead of being folded into a sliver.
+_MIN_HANGING_COLUMN = 24
+
+#: The value column of the design grid: one indent unit plus the label
+#: field. A row whose label sits in that field hangs its continuation under
+#: the value, not under the label.
+_VALUE_COLUMN = INDENT_UNIT + _L
+
+#: List items: the continuation of a wrapped item sits under its text.
+_BULLETS = frozenset({"- ", "• "})
+
+#: A design-grid label row: the indent, a capitalised one- or two-word
+#: label, then padding up to the value column. Glyphed lines, detail lines
+#: and prose never match, so they hang under their own indentation.
+_LABEL_ROW_RE = re.compile(
+    r"^ {" + str(INDENT_UNIT) + r"}[A-Z][A-Za-z]*(?: [A-Za-z]+)? +(?=\S)"
+)
 
 
 class PlainConsole:
@@ -91,17 +114,135 @@ def rich_progress_symbols() -> tuple[
     )
 
 
+@lru_cache(maxsize=1)
+def grid_console_class() -> type[RichConsole]:
+    """The CLI console: a Rich console whose wrapped text keeps its column.
+
+    Every line of a printed string owns the column its indentation opens. When
+    the line is longer than the console, the continuation lines are indented
+    to that same column instead of falling back to column 0 -- a path under
+    ``Root`` stays under ``Root``, a detail under a warning glyph stays under
+    the glyph. Renderables (rules, tables, progress) and prints that ask for
+    ``soft_wrap`` / ``no_wrap`` / an explicit ``width`` pass through to Rich
+    untouched.
+
+    Built lazily so quiet mode never pays for the Rich import.
+    """
+
+    from rich.console import Console as _RichConsole
+    from rich.console import JustifyMethod, OverflowMethod
+    from rich.style import Style
+    from rich.text import Text
+
+    class GridConsole(_RichConsole):
+        def _hang(self, text: Text) -> Text:
+            width = self.width
+            lines: list[Text] = []
+            for line in text.split("\n", allow_blank=True):
+                plain = line.plain
+                indent = len(plain) - len(plain.lstrip(" "))
+                label_row = _LABEL_ROW_RE.match(plain)
+                if label_row is not None and label_row.end() == _VALUE_COLUMN:
+                    indent = _VALUE_COLUMN
+                elif plain[indent : indent + 2] in _BULLETS:
+                    # A list item hangs under its text, not under its bullet.
+                    indent += 2
+                available = width - indent
+                if line.cell_len <= width or available < _MIN_HANGING_COLUMN:
+                    lines.append(line)
+                    continue
+                head = line[:indent]
+                body = line[indent:]
+                parts = body.wrap(self, available, overflow="fold")
+                for index, part in enumerate(parts):
+                    part.rstrip()
+                    prefix = head if index == 0 else Text(" " * indent)
+                    lines.append(prefix + part)
+            return Text("\n").join(lines)
+
+        def print(
+            self,
+            *objects: object,
+            sep: str = " ",
+            end: str = "\n",
+            style: str | Style | None = None,
+            justify: JustifyMethod | None = None,
+            overflow: OverflowMethod | None = None,
+            no_wrap: bool | None = None,
+            emoji: bool | None = None,
+            markup: bool | None = None,
+            highlight: bool | None = None,
+            width: int | None = None,
+            height: int | None = None,
+            crop: bool = True,
+            soft_wrap: bool | None = None,
+            new_line_start: bool = False,
+        ) -> None:
+            passthrough = (
+                not objects
+                or bool(soft_wrap)
+                or bool(no_wrap)
+                or width is not None
+                or any(not isinstance(item, str) for item in objects)
+            )
+            if passthrough:
+                super().print(
+                    *objects,
+                    sep=sep,
+                    end=end,
+                    style=style,
+                    justify=justify,
+                    overflow=overflow,
+                    no_wrap=no_wrap,
+                    emoji=emoji,
+                    markup=markup,
+                    highlight=highlight,
+                    width=width,
+                    height=height,
+                    crop=crop,
+                    soft_wrap=soft_wrap,
+                    new_line_start=new_line_start,
+                )
+                return
+            rendered = self.render_str(
+                sep.join(str(item) for item in objects),
+                emoji=emoji,
+                markup=markup,
+                highlight=highlight,
+            )
+            super().print(
+                self._hang(rendered),
+                end=end,
+                style=style,
+                justify=justify,
+                overflow="ignore",
+                no_wrap=True,
+                emoji=False,
+                markup=False,
+                highlight=False,
+                height=height,
+                crop=crop,
+                new_line_start=new_line_start,
+            )
+
+    return GridConsole
+
+
 def make_console(*, no_color: bool, width: int) -> RichConsole:
-    console_cls, theme_cls, _ = rich_console_symbols()
-    return console_cls(
+    _, theme_cls, _ = rich_console_symbols()
+    return grid_console_class()(
         theme=theme_cls(RICH_THEME_STYLES),
         no_color=no_color,
         width=width,
+        # Colour states a verdict or a count role, never decoration: the
+        # design map owns every colour on screen, so Rich's own number and
+        # string highlighter stays off.
+        highlight=False,
     )
 
 
 def supports_rich_console(console: PrinterLike) -> bool:
-    return console.__class__.__module__.startswith("rich.")
+    return any(cls.__module__.startswith("rich.") for cls in type(console).__mro__)
 
 
 @lru_cache(maxsize=1)
@@ -121,7 +262,11 @@ def rich_panel_symbols() -> tuple[
     return box, Panel, Rule, Table, Text
 
 
-def make_query_console(*, no_color: bool | None = None) -> PrinterLike:
+def make_query_console(
+    *,
+    no_color: bool | None = None,
+    width: int = ui.CLI_AUDIT_MAX_WIDTH,
+) -> PrinterLike:
     resolved_no_color = (
         bool(os.environ.get("NO_COLOR")) or not sys.stdout.isatty()
         if no_color is None
@@ -129,7 +274,7 @@ def make_query_console(*, no_color: bool | None = None) -> PrinterLike:
     )
     return cast(
         PrinterLike,
-        make_console(no_color=resolved_no_color, width=ui.CLI_AUDIT_MAX_WIDTH),
+        make_console(no_color=resolved_no_color, width=width),
     )
 
 
@@ -149,13 +294,13 @@ def _render_banner(
     console.print()
     console.print(
         rule_cls(
-            title=f"Analyze: {project_name}" if project_name else "Analyze",
-            style="dim",
-            characters="\u2500",
+            title=project_name if project_name else "Analyze",
+            style=ui.STYLE_META,
+            characters=ui.GLYPH_RULE,
         )
     )
     if root_display is not None:
-        console.print(f"  [dim]Root:[/dim] [dim]{root_display}[/dim]")
+        console.print(ui.fmt_banner_root(root_display))
 
 
 def _rich_progress_symbols() -> tuple[
@@ -181,6 +326,19 @@ def _parse_metric_reason_entry(reason: str) -> tuple[str, str]:
     return gate_reasons.parse_metric_reason_entry(reason)
 
 
+def _gate_row_label(key: str) -> str:
+    """Spell a gate-evidence key the way the reader reads it.
+
+    The keys are the gate layer's identifiers (``complexity_max``,
+    ``new_function_clone_groups``); the row label is the same words with the
+    underscores gone and a capital first letter. Total and deterministic, so a
+    key this surface has never seen still reads as words.
+    """
+
+    words = key.replace("_", " ").strip()
+    return words[:1].upper() + words[1:]
+
+
 def _print_gating_failure_block(
     *,
     console: PrinterLike,
@@ -190,19 +348,23 @@ def _print_gating_failure_block(
 ) -> None:
     from ...report.messages import gates as gate_msgs
 
+    console.print()
     console.print(
-        f"\n{ui.GLYPH_FAIL} {gate_msgs.GATE_FAILURE_HEADER.format(code=code)}",
+        f"  {ui.GLYPH_FAIL} {gate_msgs.GATE_FAILURE_HEADER.format(code=code)}"
+        f" {ui.GLYPH_SEP} exit {int(ExitCode.GATING_FAILURE)}",
         style=ui.STYLE_VERDICT_FAIL,
         markup=False,
     )
-    normalized_entries = [
-        ("policy", gate_reasons.policy_context(args=args, gate_kind=code))
+    rows = [
+        (
+            _gate_row_label("policy"),
+            gate_reasons.policy_context(args=args, gate_kind=code),
+        )
     ]
-    normalized_entries.extend((key, str(value)) for key, value in entries)
-    width = max(len(key) for key, _ in normalized_entries)
-    console.print()
-    for key, value in normalized_entries:
-        console.print(f"  {key:<{width}}  {value}", markup=False)
+    rows.extend((_gate_row_label(key), str(value)) for key, value in entries)
+    width = max(len(label) for label, _ in rows)
+    for label, value in rows:
+        console.print(f"    {label:<{width}}  {value}", markup=False)
 
 
 def _print_verbose_clone_hashes(

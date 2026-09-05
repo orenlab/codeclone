@@ -76,7 +76,7 @@ def test_cli_baseline_missing_warning(tmp_path: Path) -> None:
     result = run_cli([str(tmp_path), "--baseline", str(baseline_file), "--no-progress"])
 
     assert result.returncode == 0
-    assert_contains_all(result.stdout, "Baseline file not found at", baseline_file.name)
+    assert_contains_all(result.stdout, "no baseline yet", baseline_file.name)
 
 
 def test_cli_update_baseline(tmp_path: Path) -> None:
@@ -115,7 +115,7 @@ def f2():
     )
 
     assert result.returncode == 0
-    assert_contains_all(result.stdout, "Baseline updated")
+    assert_contains_all(result.stdout, "Baseline written")
     assert baseline_file.exists()
     content = baseline_file.read_text()
     assert "functions" in content
@@ -135,4 +135,4 @@ def f2():
         ]
     )
     assert result2.returncode == 0
-    assert_contains_all(result2.stdout, "0 new")
+    assert_contains_all(result2.stdout, "0 clone groups since the baseline")

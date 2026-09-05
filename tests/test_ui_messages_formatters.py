@@ -347,7 +347,21 @@ def test_rich_clone_line_pins_its_qualifier_group() -> None:
             segment=3,
             suppressed=23,
             low_value=13,
-            new=7,
         )
     )
-    assert "(23 suppressed, 13 low-value, 7 new)" in rendered
+    assert "(23 suppressed, 13 low-value)" in rendered
+
+
+def test_new_row_owns_the_baseline_relative_answer() -> None:
+    # Novelty left the Clones line for a row of its own: a count reads as a
+    # count, an uncompared run reads as words, and the reason travels with it.
+    counted = styling.strip_markup(formatters.fmt_summary_new(7))
+    absent = styling.strip_markup(
+        formatters.fmt_summary_new(
+            None, reason="no baseline yet", detail="codeclone.baseline.json"
+        )
+    )
+    assert counted.startswith("  New")
+    assert "7 clone groups since the baseline" in counted
+    assert "not compared (no baseline yet · codeclone.baseline.json)" in absent
+    assert "0" not in absent

@@ -8,9 +8,17 @@
 
 from __future__ import annotations
 
-BANNER_SUBTITLE = "Structural review layer"
+from .styling import GLYPH_FAIL
 
-MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
-MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
+# One line, on every screen, that says what the product does for the reader:
+# the run reports structural change against an accepted baseline. "Review
+# layer" named a category; a blind reading measured 2026-09-05 filed the
+# tool as a linter on it.
+BANNER_SUBTITLE = "structural change control for Python"
+
+# Error banners carry the fail glyph so the eye finds them on the grid; the
+# body is indented under them by ``fmt_contract_error`` / ``fmt_internal_error``.
+MARKER_CONTRACT_ERROR = f"[error]{GLYPH_FAIL} CONTRACT ERROR[/error]"
+MARKER_INTERNAL_ERROR = f"[error]{GLYPH_FAIL} INTERNAL ERROR[/error]"
 
 REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"

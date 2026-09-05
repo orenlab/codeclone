@@ -282,7 +282,7 @@ def test_case_a_untrusted_lane_no_active_gate_needs_completes(
     assert result.returncode == 0, result.stdout + result.stderr
 
     # The opaque lane is named, once, rather than silently dropped.
-    assert "Baseline lanes are opaque for this run" in result.stdout
+    assert "Baseline lanes opaque for this run" in result.stdout
     assert result.stdout.count("api_surface:payload_schema_outdated") == 1
 
     # Novelty for the opaque lane is nulled honestly; every other lane keeps
@@ -315,7 +315,7 @@ def test_case_b_untrusted_lane_an_active_gate_needs_stays_fail_closed(
         "Baseline lane compatibility failed: api_surface:payload_schema_outdated"
         in result.stdout
     )
-    assert "Baseline lanes are opaque for this run" not in result.stdout
+    assert "Baseline lanes opaque for this run" not in result.stdout
 
 
 def test_verify_compatibility_still_condemns_any_untrusted_lane(
@@ -1310,7 +1310,7 @@ def assert_pre_migration_lane_is_a_typed_absence(
         "--no-progress",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Baseline lanes are opaque for this run" in result.stdout
+    assert "Baseline lanes opaque for this run" in result.stdout
     assert result.stdout.count(f"{lane_name}:payload_schema_outdated") == 1
 
     document: Mapping[str, Any] = json.loads(report_path.read_text("utf-8"))

@@ -41,7 +41,10 @@ from ..domain.quality import (
 # ── layout grid ──────────────────────────────────────────────────────
 
 INDENT_UNIT = 2
-_L = 13  # label column width (after 2-space indent)
+# Label column width (after the 2-space indent). Even, so that the value
+# column it opens (INDENT_UNIT + _L) is itself on the grid: a continuation
+# hung under a value lands on a grid column, not one past it.
+_L = 14
 
 # ── glyph vocabulary ─────────────────────────────────────────────────
 

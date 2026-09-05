@@ -77,7 +77,7 @@ def _render_json_summary(*, console: PrinterLike, summary: AuditSummary) -> int:
         "receipts": summary.receipt_events,
         "violations": summary.violation_events,
     }
-    console.print(json.dumps(data, indent=2), markup=False)
+    console.print(json.dumps(data, indent=2), markup=False, soft_wrap=True)
     return int(ExitCode.SUCCESS)
 
 

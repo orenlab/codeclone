@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import sys
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -307,9 +306,10 @@ def enforce_gating(
             )
         )
         for failure in processing.source_read_failures[:10]:
-            printer.print(f"  • {failure}")
+            printer.print(f"    • {failure}", markup=False)
         if len(processing.source_read_failures) > 10:
-            printer.print(f"  ... and {len(processing.source_read_failures) - 10} more")
+            remaining = len(processing.source_read_failures) - 10
+            printer.print(f"    ... and {remaining} more")
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     if baseline_failure_code is not None:
@@ -330,16 +330,15 @@ def enforce_gating(
 
     if gate_result.exit_code == int(ExitCode.CONTRACT_ERROR):
         unavailable_lanes = ", ".join(gate_result.unavailable_lanes)
-        detail = (
-            f"Required baseline lanes are unavailable: {unavailable_lanes}."
-            if unavailable_lanes
-            else "Required gate evidence is unavailable."
-        )
-        printer.print(ui.fmt_contract_error(detail))
         # A typed refusal ships an executable next step (`CLI1`): the remedy
         # for an unavailable lane is the one the sibling baseline refusals
         # already spell out — regenerate the trusted baseline.
-        printer.print(ui.ACTION_UPDATE_BASELINE)
+        detail = (
+            ui.ERR_BASELINE_LANES_UNAVAILABLE.format(lanes=unavailable_lanes)
+            if unavailable_lanes
+            else ui.ERR_GATE_EVIDENCE_UNAVAILABLE
+        )
+        printer.print(ui.fmt_contract_error(detail))
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     if bool_attr(args, "fail_on_untested_hotspots"):
@@ -385,7 +384,9 @@ def enforce_gating(
         ]
         if resolved_html_report_path:
             clone_entries.append(("report", resolved_html_report_path))
-        clone_entries.append(("accept", "codeclone . --update-baseline"))
+        else:
+            clone_entries.append(("locations", ui.ACTION_HTML))
+        clone_entries.append(("accept_as_known_debt", ui.ACTION_UPDATE_BASELINE))
         print_gating_failure_block_fn(
             code="new-clones",
             entries=clone_entries,
@@ -425,12 +426,3 @@ def enforce_gating(
             args=args,
         )
         sys.exit(ExitCode.GATING_FAILURE)
-
-
-def print_pipeline_done_if_needed(*, args: object, run_started_at: float) -> None:
-    if bool_attr(args, "quiet"):
-        return
-    elapsed = time.monotonic() - run_started_at
-    printer = require_status_console(cli_state.get_console())
-    printer.print()
-    printer.print(ui.fmt_pipeline_done(elapsed))

@@ -32,6 +32,7 @@ from ...controller_insights.session_stats import (
     collect_session_snapshot,
     latest_run_source_label,
 )
+from ...ui_messages.styling import _L
 from . import console as cli_console
 from .state import CLI_SESSION_START_EPOCH
 from .types import PrinterLike
@@ -190,82 +191,93 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
 
 
 def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
-    box, panel_cls, rule_cls, table_cls, text_cls = cli_console.rich_panel_symbols()
+    box, _panel_cls, rule_cls, table_cls, text_cls = cli_console.rich_panel_symbols()
 
-    console.print(rule_cls(ui.SESSION_STATS_TITLE, style="dim", characters="─"))
-
-    summary = table_cls.grid(padding=(0, 2))
-    summary.add_column(style="dim", no_wrap=True)
-    summary.add_column()
-    summary.add_row(ui.SESSION_STATS_WORKSPACE.rstrip(":"), str(snapshot.root))
-    summary.add_row(
-        ui.SESSION_STATS_INTENT_REGISTRY.rstrip(":"),
-        f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})",
+    console.print(
+        rule_cls(ui.SESSION_STATS_TITLE, style=ui.STYLE_META, characters=ui.GLYPH_RULE)
     )
+    rows: list[tuple[str, str]] = [
+        (ui.SESSION_STATS_WORKSPACE.rstrip(":"), ui.esc(str(snapshot.root))),
+        (
+            ui.SESSION_STATS_REGISTRY,
+            f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})",
+        ),
+    ]
     if snapshot.audit_enabled and snapshot.audit_storage:
-        summary.add_row(
-            ui.SESSION_STATS_AUDIT.rstrip(":"),
-            f"{ui.SESSION_STATS_AUDIT_ENABLED} ({snapshot.audit_storage})",
+        rows.append(
+            (
+                ui.SESSION_STATS_AUDIT_SHORT,
+                f"{ui.SESSION_STATS_AUDIT_ENABLED} ({ui.esc(snapshot.audit_storage)})",
+            )
         )
     if snapshot.latest_run_id:
-        run_text = _latest_run_text(snapshot)
-        summary.add_row(ui.SESSION_STATS_LATEST_RUN.rstrip(":"), run_text)
+        rows.append(
+            (ui.SESSION_STATS_LATEST_RUN.rstrip(":"), _latest_run_text(snapshot))
+        )
         if snapshot.cache_present and snapshot.latest_run_files is not None:
-            summary.add_row(
-                ui.SESSION_STATS_CACHE.rstrip(":"),
-                ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files),
+            rows.append(
+                (
+                    ui.SESSION_STATS_CACHE.rstrip(":"),
+                    ui.SESSION_STATS_REPORT_PRESENT.format(
+                        files=snapshot.latest_run_files
+                    ),
+                )
             )
     else:
-        summary.add_row(
-            ui.SESSION_STATS_LATEST_RUN.rstrip(":"),
-            ui.SESSION_STATS_LATEST_RUN_NONE,
+        rows.append(
+            (
+                ui.SESSION_STATS_LATEST_RUN.rstrip(":"),
+                ui.SESSION_STATS_LATEST_RUN_NONE_VERBOSE,
+            )
         )
-    summary.add_row(
-        ui.SESSION_STATS_LIVE_AGENTS.rstrip(":"),
-        str(_live_agent_count(snapshot)),
+    sep = f" {ui.GLYPH_SEP} "
+    rows.append(
+        (
+            ui.SESSION_STATS_AGENTS,
+            sep.join(
+                (
+                    f"{_live_agent_count(snapshot)} live",
+                    f"{_active_intent_count(snapshot)} active intents",
+                    f"{_visible_intent_count(snapshot)} visible records",
+                )
+            ),
+        )
     )
-    summary.add_row(
-        ui.SESSION_STATS_ACTIVE_INTENTS.rstrip(":"),
-        str(_active_intent_count(snapshot)),
-    )
-    summary.add_row(
-        ui.SESSION_STATS_VISIBLE_INTENTS.rstrip(":"),
-        str(_visible_intent_count(snapshot)),
-    )
-    summary.add_row(
-        ui.SESSION_STATS_STALE.rstrip(":"),
-        str(snapshot.stale_count),
-    )
-    summary.add_row(
-        ui.SESSION_STATS_EXPIRED.rstrip(":"),
-        str(snapshot.expired_count),
-    )
-    summary.add_row(
-        ui.SESSION_STATS_RECOVERABLE.rstrip(":"),
-        str(snapshot.recoverable_count),
+    rows.append(
+        (
+            ui.SESSION_STATS_INTENTS,
+            sep.join(
+                (
+                    f"{snapshot.stale_count} stale",
+                    f"{snapshot.expired_count} expired",
+                    f"{snapshot.recoverable_count} recoverable",
+                )
+            ),
+        )
     )
     if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
         enc = snapshot.mcp_token_encoding or "unknown"
-        summary.add_row(
-            ui.SESSION_STATS_RETENTION_FOOTPRINT,
-            f"~{snapshot.mcp_token_footprint:,} tokens in retention window "
-            f"({enc}, {snapshot.mcp_token_event_count} tool calls)",
+        rows.append(
+            (
+                ui.SESSION_STATS_FOOTPRINT_SHORT,
+                f"~{snapshot.mcp_token_footprint:,} tokens in retention window "
+                f"({enc}, {snapshot.mcp_token_event_count} tool calls)",
+            )
         )
-    health_text = text_cls(
-        snapshot.workspace_health,
-        style=_health_style(snapshot.workspace_health),
+    rows.append(
+        (
+            ui.SESSION_STATS_HEALTH_SHORT,
+            ui.styled(
+                snapshot.workspace_health, _health_style(snapshot.workspace_health)
+            ),
+        )
     )
-    summary.add_row(
-        ui.SESSION_STATS_WORKSPACE_HEALTH.rstrip(":"),
-        health_text,
-    )
-    console.print(
-        panel_cls(summary, border_style=_health_style(snapshot.workspace_health))
-    )
+    for label, value in rows:
+        console.print(f"  {label:<{_L}}{value}")
 
     live_agents = [agent for agent in snapshot.agents if agent.alive]
     if not live_agents:
-        console.print(f"[dim]{ui.SESSION_STATS_NO_AGENTS}[/dim]")
+        # "Agents  0 live" has said it; a sentence under it said it again.
         _render_rich_top_workflows(console, snapshot.top_workflows)
         return int(ExitCode.SUCCESS)
 
@@ -275,7 +287,7 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
         show_lines=False,
         expand=True,
     )
-    table.add_column(ui.SESSION_STATS_COL_PID, no_wrap=True, style="dim")
+    table.add_column(ui.SESSION_STATS_COL_PID, no_wrap=True, style=ui.STYLE_META)
     table.add_column(ui.SESSION_STATS_COL_AGENT, overflow="fold")
     table.add_column(ui.SESSION_STATS_COL_OWNERSHIP, no_wrap=True)
     table.add_column(ui.SESSION_STATS_COL_STATUS, no_wrap=True)
@@ -333,7 +345,7 @@ def _render_rich_top_workflows(
             _workflow_name(workflow),
             f"~{workflow.total_tokens:,}",
             str(workflow.call_count),
-            text_cls(workflow.agent_label or "-", style="dim"),
+            text_cls(workflow.agent_label or "-", style=ui.STYLE_META),
         )
     console.print(table)
 

@@ -215,9 +215,9 @@ def print_failed_files(*, failed_files: tuple[str, ...], console: PrinterLike) -
         return
     console.print(ui.fmt_failed_files_header(len(failed_files)))
     for failure in failed_files[:10]:
-        console.print(f"  • {failure}")
+        console.print(f"    • {failure}", markup=False)
     if len(failed_files) > 10:
-        console.print(f"  ... and {len(failed_files) - 10} more")
+        console.print(f"    ... and {len(failed_files) - 10} more")
 
 
 def _resolve_cache_path(

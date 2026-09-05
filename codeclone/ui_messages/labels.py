@@ -29,6 +29,9 @@ SUMMARY_COMPACT_CLONES = (
     "Clones   func={function}  block={block}  seg={segment}"
     "  suppressed={suppressed}  low_value={low_value}  new={new}"
 )
+# Quiet-mode twin of the ``New`` row's absence sentence: why no clone lane
+# was compared, and the file the reason is about when there is one.
+SUMMARY_COMPACT_NOVELTY = "Novelty  not_compared={reason}"
 # ``cycles`` keeps the total; the parenthesised split says how many of them can
 # actually fail an import, which is the only part --fail-cycles reads.
 # ``health`` receives a pre-rendered value: ``85(B)`` for a measured run, or

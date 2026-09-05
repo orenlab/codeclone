@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from ... import ui_messages as ui
 from ...budget.patch_contract import (
@@ -17,6 +17,7 @@ from ...budget.patch_contract import (
 from ...contracts import ExitCode
 from ...core._types import AnalysisResult
 from ...report.gates.evaluator import GateResult, MetricGateConfig
+from ...ui_messages.styling import _L
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
@@ -154,20 +155,6 @@ def _contract_violations(
     return tuple(violations)
 
 
-def _render_reasons(
-    *,
-    console: PrinterLike,
-    title: str,
-    values: Sequence[str],
-) -> None:
-    console.print(f"  [bold]{title}:[/bold]")
-    if not values:
-        console.print("    [dim]none[/dim]")
-        return
-    for value in values:
-        console.print(f"    - {value}")
-
-
 def render_patch_verify(
     *,
     console: PrinterLike,
@@ -225,56 +212,44 @@ def render_patch_verify(
 
     console.print()
     console.print(
-        Rule(title=ui.PATCH_VERIFY_TITLE, style="dim", characters=ui.GLYPH_RULE)
+        Rule(title=ui.PATCH_VERIFY_TITLE, style=ui.STYLE_META, characters=ui.GLYPH_RULE)
     )
-    console.print()
+    console.print(f"  {ui.PATCH_VERIFY_LABEL_STRICTNESS:<{_L}}{validated_strictness}")
+    console.print(f"  {ui.PATCH_VERIFY_LABEL_STATUS:<{_L}}{_status_text(status)}")
     console.print(
-        f"  [bold]{ui.PATCH_VERIFY_LABEL_STRICTNESS}[/bold] {validated_strictness}"
-    )
-    console.print(
-        f"  [bold]{ui.PATCH_VERIFY_LABEL_STATUS}[/bold] {_status_text(status)}"
-    )
-    console.print()
-    console.print(
-        f"  [bold]{ui.PATCH_VERIFY_LABEL_HEALTH}[/bold] "
+        f"  {ui.PATCH_VERIFY_LABEL_HEALTH:<{_L}}"
         f"{health_before} {ui.GLYPH_ARROW} {health_after} "
         f"({health_after - health_before:+d})"
     )
-    console.print()
-    console.print(f"  [bold]{ui.PATCH_VERIFY_LABEL_STRUCTURAL_DELTA}[/bold]")
     console.print(
-        f"    {ui.PATCH_VERIFY_LABEL_REGRESSIONS} {diff_context.new_clones_count}"
+        f"  {ui.PATCH_VERIFY_LABEL_REGRESSIONS:<{_L}}"
+        f"{ui.n_of(diff_context.new_clones_count, 'new clone group')}"
     )
-    console.print(f"    {ui.PATCH_VERIFY_LABEL_IMPROVEMENTS} 0")
-    verdict = (
-        ui.PATCH_VERIFY_VERDICT_REGRESSED
-        if diff_context.new_clones_count > 0
-        else ui.PATCH_VERIFY_VERDICT_STABLE
-    )
-    console.print(f"    {ui.PATCH_VERIFY_LABEL_VERDICT} {verdict}")
-    console.print()
     console.print(
-        f"  [bold]{ui.PATCH_VERIFY_LABEL_GATE_PREVIEW}[/bold] {gate_status} "
+        f"  {ui.PATCH_VERIFY_LABEL_GATE_PREVIEW:<{_L}}{gate_status} "
         f"{ui.PATCH_VERIFY_GATE_EXIT.format(exit_code=gate_result.exit_code)}"
     )
-    if gate_result.reasons:
-        for reason in gate_result.reasons:
-            console.print(f"    - {reason}")
-    console.print()
-    _render_reasons(
-        console=console,
-        title=ui.PATCH_VERIFY_CONTRACT_VIOLATIONS,
-        values=violations,
-    )
+    for reason in gate_result.reasons:
+        console.print(f"    - {reason}")
+    # Only a run with violations lists them: "none" under a status that
+    # already says "accepted" answered nothing.
+    if violations:
+        console.print(f"  {ui.PATCH_VERIFY_CONTRACT_VIOLATIONS:<{_L}}")
+        for value in violations:
+            console.print(f"    - {value}")
     console.print()
     if status == "accepted":
-        verdict_line = ui.styled(ui.PATCH_VERIFY_ACCEPTED, ui.STYLE_VERDICT_PASS_STRONG)
+        verdict_line = ui.styled(
+            f"{ui.GLYPH_OK} {ui.PATCH_VERIFY_ACCEPTED}", ui.STYLE_VERDICT_PASS_STRONG
+        )
     elif validated_strictness == "relaxed":
         verdict_line = ui.styled(
-            ui.PATCH_VERIFY_RELAXED_ADVISORY, ui.STYLE_VERDICT_WARN
+            f"{ui.GLYPH_WARN} {ui.PATCH_VERIFY_RELAXED_ADVISORY}", ui.STYLE_VERDICT_WARN
         )
     else:
-        verdict_line = ui.styled(ui.PATCH_VERIFY_VIOLATED, ui.STYLE_VERDICT_FAIL)
+        verdict_line = ui.styled(
+            f"{ui.GLYPH_FAIL} {ui.PATCH_VERIFY_VIOLATED}", ui.STYLE_VERDICT_FAIL
+        )
     console.print(f"  {verdict_line}")
     return exit_code
 

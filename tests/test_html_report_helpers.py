@@ -379,10 +379,12 @@ def test_cli_runtime_warning_formatter_covers_baseline_and_legacy_cache_paths() 
     rendered = ui.fmt_cli_runtime_warning(
         "Baseline trust mismatch: python_tag=cp313\n\nLegacy cache format ignored"
     )
+    # One advisory on the grid: the first paragraph is the head, split at its
+    # first ": " into head and detail; every later paragraph is more detail.
     assert (
-        rendered == "  [warning]Baseline[/warning] trust mismatch\n"
-        "    [dim]python_tag=cp313[/dim]\n\n"
-        "  [warning]Cache[/warning] Legacy cache format ignored"
+        rendered == "  [warning]\u26a0 Baseline trust mismatch[/warning]\n"
+        "    [dim]python_tag=cp313[/dim]\n"
+        "    [dim]Legacy cache format ignored[/dim]"
     )
 
 
