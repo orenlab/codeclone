@@ -1313,7 +1313,7 @@ class _FamilyEntry(Protocol):
 
 
 @dataclass(frozen=True)
-class _Family(Generic[_RowT]):
+class StoredFamily(Generic[_RowT]):
     """One storage family: its name, the contract namespace of its content
     address, the decoder that reads its stored row, and the type that
     decoder produces — the mechanical inverse of one family of
@@ -1332,6 +1332,15 @@ class _Family(Generic[_RowT]):
     is recovered by CHECKING it against the declaration, never by asserting
     it.  A row filed under the wrong family is a typed refusal instead of a
     silently wrong model.
+
+    The declaration is also the PUBLIC name of a family, because
+    :meth:`RunStore.read_family` is keyed by it.  A bounded read spelled
+    ``read_family(run_id, "unit_span")`` would hand the caller back rows of
+    an erased type and would have to grow a typed refusal for a name that
+    does not exist; keyed by this token, the row type is inferred from the
+    same declaration the decoder binds and an unknown family is not
+    spellable at all.  Which families are served is therefore never a second
+    list that can drift from this one — it is this one.
     """
 
     family: str
@@ -1365,19 +1374,19 @@ class _Family(Generic[_RowT]):
 # documented public symbol — is owned by the adoption-coverage policy, so a
 # policy bump never lets these facts silently share content addresses
 # across generations.
-_FAMILY_ADOPTION_COUNT: Final = _Family(
+FAMILY_ADOPTION_COUNT: Final = StoredFamily(
     family="adoption_count",
     namespace=f"adoption_coverage:{ADOPTION_COVERAGE_POLICY_VERSION}",
     decode=_decode_adoption_count_row,
     row_type=AdoptionCountRow,
 )
-_FAMILY_ANALYSIS_POPULATION: Final = _Family(
+FAMILY_ANALYSIS_POPULATION: Final = StoredFamily(
     family="analysis_population",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_analysis_population_row,
     row_type=AnalysisPopulation,
 )
-_FAMILY_ANALYZED_FILE: Final = _Family(
+FAMILY_ANALYZED_FILE: Final = StoredFamily(
     family="analyzed_file",
     namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
     decode=_decode_file_row,
@@ -1386,13 +1395,13 @@ _FAMILY_ANALYZED_FILE: Final = _Family(
 # F5: signature meaning is owned by the API signature contract — a
 # signature-algorithm revision never lets these facts silently share
 # content addresses across generations.
-_FAMILY_API_SYMBOL: Final = _Family(
+FAMILY_API_SYMBOL: Final = StoredFamily(
     family="api_symbol",
     namespace=f"api_surface_signature:{API_SURFACE_SIGNATURE_VERSION}",
     decode=_decode_api_symbol_row,
     row_type=ApiSymbolRow,
 )
-_FAMILY_CANDIDATE: Final = _Family(
+FAMILY_CANDIDATE: Final = StoredFamily(
     family="candidate",
     namespace=f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     decode=_decode_candidate_row,
@@ -1401,19 +1410,19 @@ _FAMILY_CANDIDATE: Final = _Family(
 # F8: group_key meaning is owned by the clone fingerprint generation — a
 # fingerprint-generation bump never lets these facts silently share content
 # addresses across generations.
-_FAMILY_CLONE_GROUP: Final = _Family(
+FAMILY_CLONE_GROUP: Final = StoredFamily(
     family="clone_group",
     namespace=f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}",
     decode=_decode_clone_group_row,
     row_type=CloneGroupRow,
 )
-_FAMILY_CONTRACT: Final = _Family(
+FAMILY_CONTRACT: Final = StoredFamily(
     family="contract",
     namespace=f"contract_ir:{CONTRACT_IR_VERSION}",
     decode=_decode_contract_row,
     row_type=ContractRow,
 )
-_FAMILY_COUPLED_SET: Final = _Family(
+FAMILY_COUPLED_SET: Final = StoredFamily(
     family="coupled_set",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_coupled_row,
@@ -1422,7 +1431,7 @@ _FAMILY_COUPLED_SET: Final = _Family(
 # F2: the Wave D lane split put coupling/cohesion meaning on the design
 # metrics revision (complexity moved to its own), so a design-metrics
 # recount never lets these facts silently share content addresses.
-_FAMILY_COUPLING_COHESION: Final = _Family(
+FAMILY_COUPLING_COHESION: Final = StoredFamily(
     family="coupling_cohesion_observation",
     namespace=f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}",
     decode=_decode_coupling_cohesion_row,
@@ -1432,7 +1441,7 @@ _FAMILY_COUPLING_COHESION: Final = _Family(
 # rows, statement reachability for unreachable-statement rows — so both
 # revisions enter the content-address namespace and neither can bump
 # silently under the other.
-_FAMILY_DEAD_CODE_OBSERVATION: Final = _Family(
+FAMILY_DEAD_CODE_OBSERVATION: Final = StoredFamily(
     family="dead_code_observation",
     namespace=(
         f"liveness:{LIVENESS_POLICY_VERSION}"
@@ -1444,43 +1453,43 @@ _FAMILY_DEAD_CODE_OBSERVATION: Final = _Family(
 # F7: the cycle verdict is a canonical-model analysis fact over the
 # relation graph; no separate cycle-algorithm revision exists, and the
 # relation families it reads share this namespace.
-_FAMILY_DEPENDENCY_CYCLE: Final = _Family(
+FAMILY_DEPENDENCY_CYCLE: Final = StoredFamily(
     family="dependency_cycle",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_dependency_cycle_row,
     row_type=DependencyCycleRow,
 )
-_FAMILY_DEPENDENCY_OCCURRENCE: Final = _Family(
+FAMILY_DEPENDENCY_OCCURRENCE: Final = StoredFamily(
     family="dependency_occurrence",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_dependency_occurrence_row,
     row_type=DependencyOccurrenceRow,
 )
-_FAMILY_DEPENDENCY_RELATION: Final = _Family(
+FAMILY_DEPENDENCY_RELATION: Final = StoredFamily(
     family="dependency_relation",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_dependency_relation_row,
     row_type=DependencyRelationRow,
 )
-_FAMILY_FILE: Final = _Family(
+FAMILY_FILE: Final = StoredFamily(
     family="file",
     namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
     decode=_decode_file_row,
     row_type=FileId,
 )
-_FAMILY_FILE_MODULE: Final = _Family(
+FAMILY_FILE_MODULE: Final = StoredFamily(
     family="file_module",
     namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
     decode=_decode_file_module_row,
     row_type=FileModuleRelation,
 )
-_FAMILY_GRAPH_NODE: Final = _Family(
+FAMILY_GRAPH_NODE: Final = StoredFamily(
     family="graph_node",
     namespace=f"contract_ir:{CONTRACT_IR_VERSION}",
     decode=_decode_graph_node_row,
     row_type=GraphNodeRow,
 )
-_FAMILY_MODULE: Final = _Family(
+FAMILY_MODULE: Final = StoredFamily(
     family="module",
     namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
     decode=_decode_module_row,
@@ -1489,7 +1498,7 @@ _FAMILY_MODULE: Final = _Family(
 # F1: the risk lane rides COMPLEXITY_ALGORITHM_REVISION (the Wave D
 # two-metric split), so a complexity recount never lets these facts
 # silently share content addresses across generations.
-_FAMILY_RISK_OBSERVATION: Final = _Family(
+FAMILY_RISK_OBSERVATION: Final = StoredFamily(
     family="risk_observation",
     namespace=f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
     decode=_decode_risk_observation_row,
@@ -1501,13 +1510,13 @@ _FAMILY_RISK_OBSERVATION: Final = _Family(
 # on a complexity bump without a single span changing -- the defect the
 # CANONICAL_OBJECT_IDENTITY_VERSION split exists to prevent -- so it takes
 # the canonical-model namespace, like the dependency families.
-_FAMILY_UNIT_SPAN: Final = _Family(
+FAMILY_UNIT_SPAN: Final = StoredFamily(
     family="unit_span",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_unit_span_row,
     row_type=UnitSpanRow,
 )
-_FAMILY_RUN_SCALAR: Final = _Family(
+FAMILY_RUN_SCALAR: Final = StoredFamily(
     family="run_scalar",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
     decode=_decode_run_scalar_row,
@@ -1517,7 +1526,7 @@ _FAMILY_RUN_SCALAR: Final = _Family(
 # (which symbols and capabilities exist) and the source-kind classification
 # verdict -- so both revisions enter the content-address namespace and
 # neither can bump silently under the other (the F4 two-owner precedent).
-_FAMILY_SECURITY_SURFACE: Final = _Family(
+FAMILY_SECURITY_SURFACE: Final = StoredFamily(
     family="security_surface",
     namespace=(
         f"security_surface_catalog:{SECURITY_SURFACE_CATALOG_VERSION}"
@@ -1526,19 +1535,19 @@ _FAMILY_SECURITY_SURFACE: Final = _Family(
     decode=_decode_security_surface_row,
     row_type=SecuritySurfaceRow,
 )
-_FAMILY_SEMANTIC_EDGE: Final = _Family(
+FAMILY_SEMANTIC_EDGE: Final = StoredFamily(
     family="semantic_edge",
     namespace=f"contract_ir:{CONTRACT_IR_VERSION}",
     decode=_decode_semantic_edge_row,
     row_type=SemanticEdge,
 )
-_FAMILY_SINK_ROLE: Final = _Family(
+FAMILY_SINK_ROLE: Final = StoredFamily(
     family="sink_role",
     namespace=f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     decode=_decode_sink_role_row,
     row_type=SinkRoleRow,
 )
-_FAMILY_VIOLATION: Final = _Family(
+FAMILY_VIOLATION: Final = StoredFamily(
     family="violation",
     namespace=f"authority_analysis:{AUTHORITY_ANALYSIS_REVISION}",
     decode=_decode_violation_row,
@@ -1546,30 +1555,30 @@ _FAMILY_VIOLATION: Final = _Family(
 )
 
 _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
-    _FAMILY_ADOPTION_COUNT,
-    _FAMILY_ANALYSIS_POPULATION,
-    _FAMILY_ANALYZED_FILE,
-    _FAMILY_API_SYMBOL,
-    _FAMILY_CANDIDATE,
-    _FAMILY_CLONE_GROUP,
-    _FAMILY_CONTRACT,
-    _FAMILY_COUPLED_SET,
-    _FAMILY_COUPLING_COHESION,
-    _FAMILY_DEAD_CODE_OBSERVATION,
-    _FAMILY_DEPENDENCY_CYCLE,
-    _FAMILY_DEPENDENCY_OCCURRENCE,
-    _FAMILY_DEPENDENCY_RELATION,
-    _FAMILY_FILE,
-    _FAMILY_FILE_MODULE,
-    _FAMILY_GRAPH_NODE,
-    _FAMILY_MODULE,
-    _FAMILY_RISK_OBSERVATION,
-    _FAMILY_UNIT_SPAN,
-    _FAMILY_RUN_SCALAR,
-    _FAMILY_SECURITY_SURFACE,
-    _FAMILY_SEMANTIC_EDGE,
-    _FAMILY_SINK_ROLE,
-    _FAMILY_VIOLATION,
+    FAMILY_ADOPTION_COUNT,
+    FAMILY_ANALYSIS_POPULATION,
+    FAMILY_ANALYZED_FILE,
+    FAMILY_API_SYMBOL,
+    FAMILY_CANDIDATE,
+    FAMILY_CLONE_GROUP,
+    FAMILY_CONTRACT,
+    FAMILY_COUPLED_SET,
+    FAMILY_COUPLING_COHESION,
+    FAMILY_DEAD_CODE_OBSERVATION,
+    FAMILY_DEPENDENCY_CYCLE,
+    FAMILY_DEPENDENCY_OCCURRENCE,
+    FAMILY_DEPENDENCY_RELATION,
+    FAMILY_FILE,
+    FAMILY_FILE_MODULE,
+    FAMILY_GRAPH_NODE,
+    FAMILY_MODULE,
+    FAMILY_RISK_OBSERVATION,
+    FAMILY_UNIT_SPAN,
+    FAMILY_RUN_SCALAR,
+    FAMILY_SECURITY_SURFACE,
+    FAMILY_SEMANTIC_EDGE,
+    FAMILY_SINK_ROLE,
+    FAMILY_VIOLATION,
 )
 
 # Derived, never restated: the reader dispatch and the content address read
@@ -1598,7 +1607,7 @@ def _collect_row(
 
 def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
     """Assemble decoded family rows into one canonical model."""
-    run_scalar_rows = _FAMILY_RUN_SCALAR.rows(collected)
+    run_scalar_rows = FAMILY_RUN_SCALAR.rows(collected)
     if len(run_scalar_rows) > 1:
         # F9 law: ONE record per analysis snapshot — two stored records are
         # a writer defect, refused loudly, never last-reader-silenced.
@@ -1606,7 +1615,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
             "run carries more than one run_scalars record; the family is "
             "one record per analysis snapshot"
         )
-    population_rows = _FAMILY_ANALYSIS_POPULATION.rows(collected)
+    population_rows = FAMILY_ANALYSIS_POPULATION.rows(collected)
     if len(population_rows) > 1:
         # RULING-2026-08-31 §3: a singleton authority — two stored records
         # are a writer defect, refused loudly, never last-reader-silenced.
@@ -1615,42 +1624,42 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
             "family is one record per analysis snapshot"
         )
     return CanonicalModel(
-        files=frozenset(_FAMILY_FILE.rows(collected)),
-        modules=frozenset(_FAMILY_MODULE.rows(collected)),
-        analyzed_files=frozenset(_FAMILY_ANALYZED_FILE.rows(collected)),
-        file_modules=frozenset(_FAMILY_FILE_MODULE.rows(collected)),
+        files=frozenset(FAMILY_FILE.rows(collected)),
+        modules=frozenset(FAMILY_MODULE.rows(collected)),
+        analyzed_files=frozenset(FAMILY_ANALYZED_FILE.rows(collected)),
+        file_modules=frozenset(FAMILY_FILE_MODULE.rows(collected)),
         facts=CanonicalFacts(
             analysis=AnalysisFacts(
-                contracts=frozenset(_FAMILY_CONTRACT.rows(collected)),
-                graph_nodes=frozenset(_FAMILY_GRAPH_NODE.rows(collected)),
-                sink_roles=frozenset(_FAMILY_SINK_ROLE.rows(collected)),
-                candidates=frozenset(_FAMILY_CANDIDATE.rows(collected)),
-                semantic_edges=frozenset(_FAMILY_SEMANTIC_EDGE.rows(collected)),
+                contracts=frozenset(FAMILY_CONTRACT.rows(collected)),
+                graph_nodes=frozenset(FAMILY_GRAPH_NODE.rows(collected)),
+                sink_roles=frozenset(FAMILY_SINK_ROLE.rows(collected)),
+                candidates=frozenset(FAMILY_CANDIDATE.rows(collected)),
+                semantic_edges=frozenset(FAMILY_SEMANTIC_EDGE.rows(collected)),
                 dependency_relations=frozenset(
-                    _FAMILY_DEPENDENCY_RELATION.rows(collected)
+                    FAMILY_DEPENDENCY_RELATION.rows(collected)
                 ),
                 dependency_occurrences=frozenset(
-                    _FAMILY_DEPENDENCY_OCCURRENCE.rows(collected)
+                    FAMILY_DEPENDENCY_OCCURRENCE.rows(collected)
                 ),
-                dependency_cycles=frozenset(_FAMILY_DEPENDENCY_CYCLE.rows(collected)),
-                clone_groups=frozenset(_FAMILY_CLONE_GROUP.rows(collected)),
+                dependency_cycles=frozenset(FAMILY_DEPENDENCY_CYCLE.rows(collected)),
+                clone_groups=frozenset(FAMILY_CLONE_GROUP.rows(collected)),
                 dead_code_observations=frozenset(
-                    _FAMILY_DEAD_CODE_OBSERVATION.rows(collected)
+                    FAMILY_DEAD_CODE_OBSERVATION.rows(collected)
                 ),
-                violations=frozenset(_FAMILY_VIOLATION.rows(collected)),
+                violations=frozenset(FAMILY_VIOLATION.rows(collected)),
                 coupling_cohesion_observations=frozenset(
-                    _FAMILY_COUPLING_COHESION.rows(collected)
+                    FAMILY_COUPLING_COHESION.rows(collected)
                 ),
-                api_symbols=frozenset(_FAMILY_API_SYMBOL.rows(collected)),
-                risk_observations=frozenset(_FAMILY_RISK_OBSERVATION.rows(collected)),
-                unit_spans=frozenset(_FAMILY_UNIT_SPAN.rows(collected)),
-                adoption_counts=frozenset(_FAMILY_ADOPTION_COUNT.rows(collected)),
-                security_surfaces=frozenset(_FAMILY_SECURITY_SURFACE.rows(collected)),
+                api_symbols=frozenset(FAMILY_API_SYMBOL.rows(collected)),
+                risk_observations=frozenset(FAMILY_RISK_OBSERVATION.rows(collected)),
+                unit_spans=frozenset(FAMILY_UNIT_SPAN.rows(collected)),
+                adoption_counts=frozenset(FAMILY_ADOPTION_COUNT.rows(collected)),
+                security_surfaces=frozenset(FAMILY_SECURITY_SURFACE.rows(collected)),
                 run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
                 analysis_population=(population_rows[0] if population_rows else None),
             )
         ),
-        coupled_sets=frozenset(_FAMILY_COUPLED_SET.rows(collected)),
+        coupled_sets=frozenset(FAMILY_COUPLED_SET.rows(collected)),
     )
 
 
@@ -2789,6 +2798,87 @@ class RunStore:
             run_id=run_id,
         )
 
+    def read_family(
+        self, run_id: str, family: StoredFamily[_RowT]
+    ) -> tuple[_RowT, ...]:
+        """The rows of ONE fact family of ONE published run.
+
+        The bounded serving primitive beside :meth:`read_run`.  Measured on
+        the self-repository corpus, isolated processes, two runs each:
+        ``read_run`` answered a single family in 1.999 / 1.959 s at
+        +354.8 MB peak RSS, this read in 0.107 / 0.109 s at +16.8 MB — the
+        same 22 609 rows.  ``read_run`` materialized 245.72 MB of model to
+        serve a 31.76 MB slice, more than the whole write.
+
+        Three properties are the contract, and each is pinned executably in
+        ``tests/test_run_store_bounded_family_read.py``:
+
+        * **It does not create the store.**  Inherited, not restated: this
+          is a method, so the store is already open, and a reader opens it
+          with ``create=False`` — refused before any ``mkdir`` or
+          ``connect`` when the path holds no store.  Nothing on this path
+          constructs a store to answer with.  (The class is not spelled with
+          its call parentheses anywhere in this prose on purpose: the
+          construction ratchet reconciles its AST inventory against a
+          deliberately weaker textual witness, and that witness cannot tell
+          a call from a mention.)
+        * **It does not read an implicit latest.**  ``run_id`` is a content
+          address: an immutable reference to one published run.  A head is a
+          mutable pointer and is never consulted here — a caller who means
+          "the head" resolves it once with :meth:`head` and passes the
+          ``run_id`` it names, exactly as :func:`export_head` does.  An
+          implicit fallback is how a serving path silently answers about a
+          different run than the caller meant.
+        * **It does not materialize the whole model.**  Only this family's
+          member rows are read, decoded, and returned; no
+          :class:`~codeclone.canonical.model.CanonicalModel` and no
+          :class:`~codeclone.canonical.model.AnalysisFacts` is constructed on
+          this path.  A container with one family populated and nineteen
+          empty would report "not read" as "measured empty", which the
+          four-state law forbids; a tuple of rows cannot say that.
+
+        Rows come back in content-address order — the store's own total
+        order over immutable objects, the same order the exporter proves
+        membership in — so two reads of one run are the same sequence.
+
+        **What boundedness costs, stated rather than hidden.**  Every row
+        returned has proven against its own content address, exactly as on
+        the materializing path.  What this read cannot prove is what only
+        the whole run can: the membership digest, the scope receipt, the run
+        identity, and the model-assembly laws (a record family holding two
+        records is refused by :func:`_collected_model`, not here).  A caller
+        that needs the run proven whole calls :meth:`read_run` or
+        :func:`export_run`; a caller that needs one family cheaply calls
+        this and knows which half of the proof it bought.
+
+        The whole read is one explicit read transaction: the run lookup and
+        the family scan are two statements, and a collector committing
+        between them would otherwise turn a deleted run into an empty
+        family — an absent answer presented as a measured one.
+        """
+        cursor = self._connection.cursor()
+        cursor.execute("BEGIN")
+        try:
+            run_pk, namespace, _scope_digest, _membership = _published_run_row(
+                self._connection, run_id
+            )
+            collected: dict[str, list[object]] = {}
+            object_ids: list[str] = []
+            _scan_run_family(
+                self._connection,
+                run_pk,
+                namespace,
+                family.family,
+                object_ids,
+                collected,
+            )
+            rows = tuple(family.rows(collected))
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+        return rows
+
     def project_run(self, run_id: str) -> bytes:
         """Canonical bytes of one published run — law L8's left-hand side:
         byte-identical to ``encode_canonical_json`` of the same model."""
@@ -3168,11 +3258,36 @@ def export_head(
 
 
 __all__ = [
+    "FAMILY_ADOPTION_COUNT",
+    "FAMILY_ANALYSIS_POPULATION",
+    "FAMILY_ANALYZED_FILE",
+    "FAMILY_API_SYMBOL",
+    "FAMILY_CANDIDATE",
+    "FAMILY_CLONE_GROUP",
+    "FAMILY_CONTRACT",
+    "FAMILY_COUPLED_SET",
+    "FAMILY_COUPLING_COHESION",
+    "FAMILY_DEAD_CODE_OBSERVATION",
+    "FAMILY_DEPENDENCY_CYCLE",
+    "FAMILY_DEPENDENCY_OCCURRENCE",
+    "FAMILY_DEPENDENCY_RELATION",
+    "FAMILY_FILE",
+    "FAMILY_FILE_MODULE",
+    "FAMILY_GRAPH_NODE",
+    "FAMILY_MODULE",
+    "FAMILY_RISK_OBSERVATION",
+    "FAMILY_RUN_SCALAR",
+    "FAMILY_SECURITY_SURFACE",
+    "FAMILY_SEMANTIC_EDGE",
+    "FAMILY_SINK_ROLE",
+    "FAMILY_UNIT_SPAN",
+    "FAMILY_VIOLATION",
     "HeadState",
     "PublishReceipt",
     "RunReportEdge",
     "RunStore",
     "RunStoreGcJob",
+    "StoredFamily",
     "acquire_run_lease",
     "analysis_scope_digest",
     "collect_garbage",
