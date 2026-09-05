@@ -2901,7 +2901,7 @@
             }
           ],
           "default": null,
-          "description": "IDE governance decision: approve, reject, or archive.",
+          "description": "IDE governance decision: approve, reject, archive, or amend_and_approve. amend_and_approve carries the human-edited wording in statement and requires protocol 3; the other three are accepted at protocol 2 and 3.",
           "title": "Decision"
         },
         "experience_id": {
@@ -2966,7 +2966,7 @@
             }
           ],
           "default": null,
-          "description": "HMAC proof for commit_governance (protocol v2).",
+          "description": "HMAC proof for commit_governance, computed over the declared protocol.",
           "title": "Proof"
         },
         "protocol": {
@@ -2979,7 +2979,7 @@
             }
           ],
           "default": null,
-          "description": "IDE attestation protocol version (currently 2).",
+          "description": "IDE attestation protocol version. Supported: 2 and 3; register_ide_governance reports supported_protocols.",
           "title": "Protocol"
         },
         "record_id": {

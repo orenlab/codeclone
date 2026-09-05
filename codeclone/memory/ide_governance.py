@@ -43,6 +43,25 @@ IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset(
     {"CodeClone VS Code", "CodeClone JetBrains", "Enacta"}
 )
 
+# Which wire generations this server answers. A SET, not a range: today
+# ``2 <= p <= IDE_GOVERNANCE_PROTOCOL_VERSION`` accepts exactly the same
+# integers, and the day that constant moves to 4 the range admits an
+# unreleased generation nobody implemented. Admission is membership, so
+# adding a generation is an edit here and never an accident of ordering.
+IDE_GOVERNANCE_SUPPORTED_PROTOCOLS: Final = frozenset({2, 3})
+# amend_and_approve arrived with generation 3. A generation-2 client has no
+# field to carry the amended wording and no receipt field to read the
+# transaction back from, so the decision is refused on the wire rather than
+# half-served.
+IDE_GOVERNANCE_AMENDMENT_PROTOCOLS: Final = frozenset({3})
+
+# Two version-shaped refusals, deliberately not one. "I do not speak your
+# generation" and "your generation does not carry this decision" have
+# different remedies, and a reader who is handed the wrong one goes looking
+# in the wrong place.
+GOVERNANCE_UNSUPPORTED_PROTOCOL_CODE: Final = "governance_unsupported_protocol"
+GOVERNANCE_DECISION_PROTOCOL_CODE: Final = "decision_requires_protocol"
+
 GovernanceDecision = Literal["approve", "reject", "archive", "amend_and_approve"]
 AMEND_AND_APPROVE: Final = "amend_and_approve"
 GovernanceAction = Literal[
@@ -170,12 +189,66 @@ def _parse_governance_key(raw_key: str) -> bytes:
     return key
 
 
+def _spell_protocols(protocols: frozenset[int]) -> str:
+    """One deterministic spelling of a protocol set for humans and the wire."""
+
+    return ", ".join(str(item) for item in sorted(protocols))
+
+
 def _validate_ide_governance_protocol(protocol: int) -> None:
-    if protocol != IDE_GOVERNANCE_PROTOCOL_VERSION:
-        _raise_memory_contract(
-            f"Unsupported ide_attestation protocol {protocol!r}. "
-            f"Expected {IDE_GOVERNANCE_PROTOCOL_VERSION}."
+    """Answered generations are the declared set -- not a range around latest.
+
+    An old server meeting a new client refuses here honestly; a new server
+    meeting an old client does not, because 2 stayed in the set.
+    """
+    if protocol in IDE_GOVERNANCE_SUPPORTED_PROTOCOLS:
+        return
+    supported = _spell_protocols(IDE_GOVERNANCE_SUPPORTED_PROTOCOLS)
+    _raise_memory_contract(
+        governance_refusal(
+            GOVERNANCE_UNSUPPORTED_PROTOCOL_CODE,
+            reason=(
+                f"Unsupported ide_attestation protocol {protocol!r}; this "
+                f"server answers {supported}."
+            ),
+            next_step=(
+                "reconnect the IDE governance channel at a supported protocol "
+                f"({supported}); register_ide_governance reports "
+                "supported_protocols for this server"
+            ),
         )
+    )
+
+
+def _validate_decision_protocol(
+    decision: GovernanceDecision,
+    protocol: int,
+) -> None:
+    """A decision younger than the caller's wire is a VERSION problem.
+
+    ``amend_and_approve`` is spelled correctly here; the generation carrying
+    it is missing. Reporting that as an unknown decision would send the
+    reader to check a word that is already right.
+    """
+    if decision != AMEND_AND_APPROVE:
+        return
+    if protocol in IDE_GOVERNANCE_AMENDMENT_PROTOCOLS:
+        return
+    required = _spell_protocols(IDE_GOVERNANCE_AMENDMENT_PROTOCOLS)
+    _raise_memory_contract(
+        governance_refusal(
+            GOVERNANCE_DECISION_PROTOCOL_CODE,
+            reason=(
+                f"decision {decision!r} requires ide_attestation protocol "
+                f"{required}; this commit declared {protocol!r}."
+            ),
+            next_step=(
+                f"reconnect the IDE governance channel at protocol {required} "
+                "to amend a draft, or commit decision=approve to publish the "
+                "draft unchanged at this protocol"
+            ),
+        )
+    )
 
 
 def _governance_key_or_reject(
@@ -412,6 +485,10 @@ def register_ide_governance(
         "action": "register_ide_governance",
         "status": "ok",
         "protocol": IDE_GOVERNANCE_PROTOCOL_VERSION,
+        # Latest alone cannot be negotiated against: a client that speaks 2
+        # needs to see that 2 is still answered, and sorted() keeps the wire
+        # deterministic.
+        "supported_protocols": sorted(IDE_GOVERNANCE_SUPPORTED_PROTOCOLS),
         "client_name": client_name,
         "client_version": client_version,
         "max_commit_attempts": IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS,
@@ -555,6 +632,7 @@ def commit_governance(
         return key_or_rejected
     key = key_or_rejected
     normalized_decision = _validate_decision(decision)
+    _validate_decision_protocol(normalized_decision, protocol)
     record = _find_project_record(
         store,
         record_id=record_id,
@@ -660,17 +738,24 @@ def commit_governance(
         "statement_origin": resolve_statement_origin(updated.payload),
     }
     if receipt is not None:
+        # The same receipt bytes read back under another generation are a
+        # different claim, so the generation rides the receipt.
+        receipt["protocol"] = protocol
         payload["proof"] = receipt
     return payload
 
 
 __all__ = [
     "AMEND_AND_APPROVE",
+    "GOVERNANCE_DECISION_PROTOCOL_CODE",
     "GOVERNANCE_MODE_UNAVAILABLE_MESSAGE",
     "GOVERNANCE_MODE_UNAVAILABLE_NEXT_STEP",
+    "GOVERNANCE_UNSUPPORTED_PROTOCOL_CODE",
     "IDE_GOVERNANCE_ALLOWED_CLIENTS",
+    "IDE_GOVERNANCE_AMENDMENT_PROTOCOLS",
     "IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS",
     "IDE_GOVERNANCE_PROTOCOL_VERSION",
+    "IDE_GOVERNANCE_SUPPORTED_PROTOCOLS",
     "IDE_GOVERNANCE_TICKET_TTL_SECONDS",
     "IdeGovernanceSessionState",
     "IdeGovernanceTicket",

@@ -28,7 +28,7 @@ claims about analyzed repositories.
 | `CORPUS_EMBEDDING_CONTRACT_VERSION` | `2` | str | Embedding representation versioning |
 | `SEMANTIC_INDEX_FORMAT_VERSION` | `3` | str | Semantic index fingerprinting |
 | `TRAJECTORY_PROJECTION_VERSION` | `trajectory-v3` | str | Trajectory audit projection for patch trails |
-| `IDE_GOVERNANCE_PROTOCOL_VERSION` | `2` | int | IDE workspace coordination (workspace intents) |
+| `IDE_GOVERNANCE_PROTOCOL_VERSION` | `3` | int | IDE workspace coordination (workspace intents) |
 
 Must not be changed casually. Schema violations block finish_controlled_change.
 

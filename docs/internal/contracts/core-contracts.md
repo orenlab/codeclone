@@ -41,7 +41,7 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 | `CORPUS_NORMALIZER_VERSION` | `"1"` | source normalization | Canonical normalization for input sources. |
 | `CORPUS_PARTITION_MAP_VERSION` | `"1"` | partition mapping | Corpus partition semantics. |
 | `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `"1"` | profile manifest | Profile metadata structure. |
-| `IDE_GOVERNANCE_PROTOCOL_VERSION` | `2` (int) | IDE MCP protocol | Major version of IDE governance API. Bumps break all IDE clients. |
+| `IDE_GOVERNANCE_PROTOCOL_VERSION` | `3` (int) | IDE MCP protocol | Latest generation of the IDE governance API. Which generations a server still answers is `IDE_GOVERNANCE_SUPPORTED_PROTOCOLS` in `codeclone/memory/ide_governance.py`, so a bump alone does not retire a client. |
 | `TRAJECTORY_QUALITY_SCORE_VERSION` | `"2"` | quality scoring algorithm | Determines how quality scores are computed. |
 | `METRICS_BASELINE_SCHEMA_VERSION` | `"1.3"` | metrics baseline storage | Metrics artifact encoding version. |
 

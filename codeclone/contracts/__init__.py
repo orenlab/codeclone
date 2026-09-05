@@ -703,7 +703,10 @@ TRAJECTORY_PROJECTION_VERSION_V1: Final = "trajectory-v1"
 TRAJECTORY_QUALITY_SCORE_VERSION: Final = "2"
 EXPERIENCE_DISTILLATION_VERSION: Final = "experience-v1"
 # IDE governance HMAC attestation protocol version (IDE Memory channels).
-IDE_GOVERNANCE_PROTOCOL_VERSION: Final = 2
+# Latest generation only. Which generations a server still ANSWERS is a set
+# owned by codeclone/memory/ide_governance.py, so a bump here does not by
+# itself retire a client.
+IDE_GOVERNANCE_PROTOCOL_VERSION: Final = 3
 
 # Corpus analytics store (.codeclone/analytics/corpus_clustering.sqlite3) and
 # derived export/representation contracts. Bump independently from memory schema.

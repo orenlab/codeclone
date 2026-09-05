@@ -736,7 +736,14 @@ ManageMemoryExperienceIdParam = Annotated[
 ]
 GovernanceDecisionParam = Annotated[
     str | None,
-    Field(description="IDE governance decision: approve, reject, or archive."),
+    Field(
+        description=(
+            "IDE governance decision: approve, reject, archive, or "
+            "amend_and_approve. amend_and_approve carries the human-edited "
+            "wording in statement and requires protocol 3; the other three "
+            "are accepted at protocol 2 and 3."
+        ),
+    ),
 ]
 IdeGovernanceKeyParam = Annotated[
     str | None,
@@ -765,7 +772,11 @@ ConfirmationNonceParam = Annotated[
 ]
 GovernanceProofParam = Annotated[
     str | None,
-    Field(description="HMAC proof for commit_governance (protocol v2)."),
+    Field(
+        description=(
+            "HMAC proof for commit_governance, computed over the declared protocol."
+        ),
+    ),
 ]
 GovernanceActorParam = Annotated[
     str | None,
@@ -773,7 +784,12 @@ GovernanceActorParam = Annotated[
 ]
 GovernanceProtocolParam = Annotated[
     int | None,
-    Field(description="IDE attestation protocol version (currently 2)."),
+    Field(
+        description=(
+            "IDE attestation protocol version. Supported: 2 and 3; "
+            "register_ide_governance reports supported_protocols."
+        ),
+    ),
 ]
 MemoryRecordTypeParam = Annotated[
     MemoryRecordType | None,

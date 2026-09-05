@@ -17,7 +17,7 @@ Closure review verifies that a controlled change completes end-to-end: intent de
 |----------|--------|----------|
 | AUDIT_PROJECTION_VERSION | `audit-v1` | audit_events |
 | PATCH_TRAIL_SCHEMA_VERSION | `1` | audit_events, change_control |
-| IDE_GOVERNANCE_PROTOCOL_VERSION | `2` | change_control |
+| IDE_GOVERNANCE_PROTOCOL_VERSION | `3` | change_control |
 
 Finish applies scope checks against the declared intent snapshot and the live git tree. A "clean" result clears the intent; "unverified" or "violated" leaves it active with a deterministic next_step.
 
