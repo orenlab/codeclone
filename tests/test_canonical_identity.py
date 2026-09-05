@@ -52,6 +52,7 @@ from codeclone.canonical import (
     wire_columns,
     wire_fact_family_order,
 )
+from codeclone.canonical import codec as codec_module
 from codeclone.canonical.registry import FACT_FAMILY_FIELDS
 
 
@@ -279,6 +280,15 @@ def test_fact_family_order_is_mechanical_not_a_manual_tail() -> None:
         columns = wire_columns(family)
         assert list(columns) == sorted(columns)
         assert columns, family
+
+
+def test_every_declared_family_has_exactly_one_row_builder() -> None:
+    """The order is *total* as well as mechanical: the encoder's row-builder
+    table and the registry's family declarations are the same set. A family
+    declared without a builder is an encode-time ``KeyError``; a builder with
+    no declaration is a family the wire order can never reach."""
+    assert set(codec_module._FAMILY_ROW_BUILDERS) == set(FACT_FAMILY_FIELDS)
+    assert set(codec_module._FAMILY_ROW_BUILDERS) == set(wire_fact_family_order())
 
 
 def test_registry_wire_columns_are_exactly_the_declared_wire_fields() -> None:

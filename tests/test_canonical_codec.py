@@ -654,6 +654,16 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"target":{"3":1}',
     ),
     (
+        # The needle above MOVES the producer's slot, so the mandatory-slot
+        # loop refuses it too and the foreign-slot branch is never the reason.
+        # This one ADDS a slot to a foreign family and leaves every mandatory
+        # slot in place, so only the foreign-slot branch can refuse it.
+        "W20",
+        "foreign variant slot added beside every mandatory one",
+        '"target":{"4":1}',
+        '"target":{"3":1,"4":1}',
+    ),
+    (
         "W08",
         "unknown api symbol kind tag",
         '"symbol_kind":["method"',
@@ -869,6 +879,11 @@ def test_w23_refuses_a_tampered_integrity_digest(canonical_bytes: bytes) -> None
         # a present-but-empty sparse boolean column decodes as "no trues"
         # but is not the canonical encoding of that model (omission is)
         ("present empty sparse column", '"suppressed":[1],', '"suppressed":[],'),
+        # the C0 escape the encoder would have spelled in lowercase: this is
+        # the only input that separates the lowercase clause from its
+        # uppercase twin, because W24 refuses exactly what the encoder would
+        # not itself emit -- an encoder mutated to {code:04X} accepts it.
+        ("uppercase C0 escape", '"x.y"', '"\\u001B.y"'),
     ],
 )
 def test_w24_refuses_non_canonical_byte_encodings(
@@ -909,6 +924,23 @@ def test_canonical_string_lexeme_escapes_only_what_json_requires() -> None:
     assert canonical_string_lexeme("a\nb\tc") == '"a\\nb\\tc"'
     assert canonical_string_lexeme("a\x01b") == '"a\\u0001b"'
     assert canonical_string_lexeme("Å…é") == '"Å…é"'
+
+
+@pytest.mark.parametrize(
+    ("value", "lexeme"),
+    [
+        ("a\x1bb", '"a\\u001bb"'),
+        ("a\x0bb", '"a\\u000bb"'),
+        ("a\x1fb", '"a\\u001fb"'),
+        ("a\x01b", '"a\\u0001b"'),
+    ],
+)
+def test_c0_escapes_are_lowercase_hex(value: str, lexeme: str) -> None:
+    """SS7.9: lowercase ``\\u00xx`` for the C0 characters JSON gives no short
+    form. ``\\x01`` -- the only C0 character the rest of the suite spells --
+    has no hex letters, so it cannot tell the two cases apart; every value
+    here carries a letter in its low nibble and dies on ``{code:04X}``."""
+    assert canonical_string_lexeme(value) == lexeme
 
 
 @pytest.mark.parametrize(
@@ -1111,6 +1143,17 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
             "analysis_population member is not an object",
             lambda doc: doc["facts"].__setitem__("analysis_population", 7),
         ),
+        (
+            # The facts CONTAINER's own member order, not the columns inside
+            # one family. Nothing else reorders facts members, so without
+            # this the decoder's declared-order check for `facts` is vacuous
+            # and a reordered document is refused only by the integrity seal.
+            "W02",
+            "facts families out of the declared order",
+            lambda doc: doc.__setitem__(
+                "facts", _reordered(doc["facts"], ["candidates"])
+            ),
+        ),
     ],
     ids=[
         "W01-effect-roots-not-object",
@@ -1124,6 +1167,7 @@ def _reordered(mapping: dict[str, Any], first_keys: list[str]) -> dict[str, Any]
         "W01-facts-table-not-object",
         "W01-run-scalars-not-object",
         "W01-analysis-population-not-object",
+        "W02-facts-families-unordered",
     ],
 )
 def test_structural_refusals_on_reserialized_documents(
