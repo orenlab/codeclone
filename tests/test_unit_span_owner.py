@@ -30,7 +30,6 @@ import hashlib
 import orjson
 import pytest
 
-import codeclone.canonical.codec as codec_module
 from codeclone.canonical import (
     AnalysisFacts,
     CanonicalFacts,
@@ -200,6 +199,12 @@ def test_the_span_survives_the_wire_unchanged() -> None:
     assert decode_canonical_json(encode_canonical_json(model)) == model
 
 
+# Spelled here by hand, not imported from the codec: a helper that borrowed
+# production's own domain would follow it wherever it went and stay green,
+# so it could never witness the domain changing underneath it.
+_GENERATION_0_DOMAIN = b"cc-canonical-wire:0\x00"
+
+
 def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     """Corrupt the body and reseal integrity, so the span law is what refuses
     -- not the integrity digest standing in front of it."""
@@ -207,9 +212,7 @@ def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     body, _, _tail = text.partition(',"integrity":')
     assert body.count(needle) == 1, f"needle not unique: {needle!r}"
     new_body = body.replace(needle, replacement)[1:]
-    digest = hashlib.sha256(
-        codec_module._INTEGRITY_DOMAIN + new_body.encode("utf-8")
-    ).hexdigest()
+    digest = hashlib.sha256(_GENERATION_0_DOMAIN + new_body.encode("utf-8")).hexdigest()
     return (
         "{" + new_body + f',"integrity":{{"algorithm":"sha256","value":"{digest}"}}}}'
     ).encode("utf-8")

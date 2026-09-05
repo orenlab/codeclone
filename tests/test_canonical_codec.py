@@ -36,6 +36,7 @@ from codeclone.canonical import (
     encode_canonical_json,
 )
 from codeclone.canonical import codec as codec_module
+from codeclone.contracts import CANONICAL_WIRE_REVISION
 from tests.test_canonical_roundtrip import analysis_facts, fixture_model
 
 
@@ -50,6 +51,14 @@ def _replaced(data: bytes, needle: str, replacement: str) -> bytes:
     return text.replace(needle, replacement).encode("utf-8")
 
 
+# The inner seal's domain, spelled HERE and by hand.  A helper that imported
+# the codec's own constant would follow it wherever it went and stay green --
+# which is exactly how a second, undetected spelling of the generation
+# survived in production.  These literals are third-party witnesses.
+_GENERATION_0_DOMAIN = b"cc-canonical-wire:0\x00"
+_GENERATION_1_DOMAIN = b"cc-canonical-wire:1\x00"
+
+
 def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     """Corrupt the body and reseal integrity so only W24 can refuse."""
     text = data.decode("utf-8")
@@ -57,9 +66,7 @@ def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     body, _, _tail = text.partition(marker)
     assert body.count(needle) == 1, f"needle not unique in body: {needle!r}"
     new_body = body.replace(needle, replacement)[1:]
-    digest = hashlib.sha256(
-        codec_module._INTEGRITY_DOMAIN + new_body.encode("utf-8")
-    ).hexdigest()
+    digest = hashlib.sha256(_GENERATION_0_DOMAIN + new_body.encode("utf-8")).hexdigest()
     return (
         "{" + new_body + f',"integrity":{{"algorithm":"sha256","value":"{digest}"}}}}'
     ).encode("utf-8")
@@ -1169,3 +1176,144 @@ def test_absent_analysis_population_is_the_empty_member_decoding_none() -> None:
     assert b'"analysis_population":{}' in payload
     decoded = decode_canonical_json(payload)
     assert decoded.facts.analysis.analysis_population is None
+
+
+# ---------------------------------------------------------------------------
+# The inner seal's domain is DERIVED from the wire revision, not respelled.
+#
+# The OUTER seal already closes this class by construction
+# (``canonical.export.artifact_domain`` builds its domain from the revision).
+# The inner seal did not: its domain was an independent byte literal that
+# merely agreed with ``CANONICAL_WIRE_REVISION`` today.  The first bump would
+# have declared ``format.wire = "1"`` and sealed under the generation-0
+# domain -- the separator defeated at the exact moment it first matters.
+# ---------------------------------------------------------------------------
+
+
+def _sealed_under(body: str, domain: bytes) -> bytes:
+    """Seal one document body under an EXPLICITLY GIVEN domain.
+
+    The domain is a parameter and never read from production, so a document
+    sealed under a generation this build does not use can be built at all.
+    """
+    digest = hashlib.sha256(domain + body.encode("utf-8")).hexdigest()
+    return (
+        "{" + body + f',"integrity":{{"algorithm":"sha256","value":"{digest}"}}}}'
+    ).encode("utf-8")
+
+
+def _body_of(document: bytes) -> str:
+    """The sealed body: the bytes the seal covers, brace and tail excluded."""
+    return document.decode("utf-8").partition(',"integrity":')[0][1:]
+
+
+def test_the_seal_domain_is_derived_from_the_wire_revision() -> None:
+    """Pin 1: derivation, not coincidence.
+
+    The literals here are written by hand; production computes them.  The
+    third assertion binds today's authority to today's domain, so a real
+    generation bump has to walk through this pin deliberately instead of
+    silently leaving the seal a generation behind.
+    """
+    assert codec_module._wire_integrity_domain("0") == _GENERATION_0_DOMAIN
+    assert codec_module._wire_integrity_domain("1") == _GENERATION_1_DOMAIN
+    assert (
+        codec_module._wire_integrity_domain(CANONICAL_WIRE_REVISION)
+        == _GENERATION_0_DOMAIN
+    )
+
+
+def test_the_domain_prefix_has_exactly_one_spelling_in_the_codec() -> None:
+    """The defect itself, pinned at the source: one owner, one spelling.
+
+    The prefix may appear ONCE in the codec -- inside the constructor.  Any
+    other occurrence is a second spelling of the generation, free to drift
+    from the revision it claims to name.
+    """
+    source = inspect.getsource(codec_module)
+    assert source.count("cc-canonical-wire:") == 1
+
+
+def test_the_naive_cross_generation_pin_cannot_reach_the_seal() -> None:
+    """Reachability accounting for the pin below -- not a proof of the fix.
+
+    The obvious spelling ("a body sealed under domain 0 must not validate as
+    generation 1") is a guard no input can reach: a foreign generation is
+    refused at the revision fence, long before the seal is recomputed.
+    Written that way the pin is green in every configuration, defect or
+    repair, and proves nothing.  This test holds that fact in place.
+    """
+    native = encode_canonical_json(fixture_model())
+    forged = _sealed_under(
+        _body_of(native).replace('"wire":"0"', '"wire":"1"', 1), _GENERATION_0_DOMAIN
+    )
+    with pytest.raises(WireDecodeError) as caught:
+        decode_canonical_json(forged)
+    assert caught.value.code == "W21"
+
+
+def test_a_document_declaring_the_next_generation_is_refused_by_this_seal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin 3: the defect's own signature, in the only form that can fire.
+
+    A generation-1 build is simulated by moving the wire authority alone --
+    every derivation from it must follow, which is the whole claim.  The
+    document then DECLARES generation 1, passes the revision fence, and
+    lands precisely on the seal check.
+
+    Both boundaries die here: the forged case catches a domain hard-coded in
+    both writer and reader, and the positive control above it catches either
+    half alone -- derive the writer but not the reader, or the reverse, and
+    what this build seals it can no longer verify.
+    """
+    monkeypatch.setattr(codec_module, "CANONICAL_WIRE_REVISION", "1")
+    native = encode_canonical_json(fixture_model())
+    assert b'"wire":"1"' in native
+
+    # Positive control, same causal path: what this build seals, it verifies.
+    decode_canonical_json(native)
+
+    forged = _sealed_under(_body_of(native), _GENERATION_0_DOMAIN)
+    assert _body_of(forged) == _body_of(native), "only the seal may differ"
+    with pytest.raises(WireDecodeError) as caught:
+        decode_canonical_json(forged)
+    assert caught.value.code == "W23"
+    assert "does not seal" in str(caught.value)
+
+
+_GENERATION_9_DOMAIN = b"cc-canonical-wire:9\x00"
+
+
+def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> None:
+    """The domain comes from THIS process, never from the document.
+
+    Through :func:`decode_canonical_json` the distinction cannot arise: the
+    revision fence refuses a foreign ``format.wire`` (``W21``) some seventy
+    lines before the seal is recomputed, so the declared revision and the
+    process revision are always equal by the time integrity is checked.  A
+    pin written at that door would be green in every configuration and would
+    prove nothing.
+
+    The door it CAN be reached through is the one an external verifier uses
+    and the one a future reordering would open: :func:`_check_integrity`
+    itself.  A document that declares generation 9 and is sealed under
+    generation 9's domain must still be refused by a generation-0 build --
+    a forgery does not get to choose the domain it is checked under.
+    """
+
+    body = _body_of(encode_canonical_json(fixture_model()))
+    body_nine = body.replace('"wire":"0"', '"wire":"9"', 1)
+    assert body_nine != body, "the declared revision must actually differ"
+
+    forged = _sealed_under(body_nine, _GENERATION_9_DOMAIN)
+    root = codec_module._parse_document(forged)
+    with pytest.raises(WireDecodeError) as caught:
+        codec_module._check_integrity(forged, root)
+    assert caught.value.code == "W23"
+    assert "does not seal" in str(caught.value)
+
+    # Positive control on the same function: what this build seals, this
+    # build verifies -- so the refusal above is the domain, not the door.
+    honest = _sealed_under(body, _GENERATION_0_DOMAIN)
+    codec_module._check_integrity(honest, codec_module._parse_document(honest))

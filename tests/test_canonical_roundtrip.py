@@ -554,7 +554,15 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
 
     The literal is a contract sentinel for wire revision "0" (still a
     DRAFT); refreshing it to make the test pass is forbidden (a change here
-    IS a wire-contract change and needs its own review).  Wave 1.5 replaced
+    needs its own review).  What it is a sentinel FOR is wider than this
+    test's name: the bytes carry the ``revisions`` member as well, so the
+    digest moves for a bump of ANY of five constants -- the wire revision
+    plus ``authority_analysis``, ``canonical_model``, ``contract_ir`` and
+    ``module_identity``.  Measured 2026-09-05, one bump at a time: all five
+    moved the digest and NONE moved the byte length, which is why the
+    length assertion below cannot stand in for the digest.  A red here
+    therefore does not by itself mean the wire contract moved; read which
+    constant moved before reaching for the wire revision.  Wave 1.5 replaced
     the wave-1 literal (1594 bytes, sha256 4172612b…) deliberately: the
     draft gained the ``dependency_edges`` and ``violations`` families and
     the two class-B handle columns, so every document's bytes moved.

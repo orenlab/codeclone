@@ -191,7 +191,6 @@ _SUPPORTED_REVISIONS = {
     "contract_ir": CONTRACT_IR_VERSION,
     "module_identity": MODULE_IDENTITY_VERSION,
 }
-_INTEGRITY_DOMAIN = b"cc-canonical-wire:0\x00"
 _INTEGRITY_MARKER = b',"integrity":'
 _MAX_INT = 2**31 - 1
 _ROOT_FAMILIES = (
@@ -228,6 +227,33 @@ _ESCAPES = {
     "\r": "\\r",
     "\t": "\\t",
 }
+
+
+_WIRE_INTEGRITY_DOMAIN_PREFIX = "cc-canonical-wire:"
+
+
+def _wire_integrity_domain(wire_revision: str) -> bytes:
+    """Domain-separation prefix of the inner seal, derived from the revision.
+
+    One owner: :func:`stream_canonical_wire` seeds its hasher here and
+    :func:`_check_integrity` recomputes through the same bytes, so the
+    preimage a document is sealed with and the preimage it is checked
+    against cannot drift apart -- the two-spellings defect class, closed by
+    construction, as :func:`codeclone.canonical.export.artifact_domain`
+    already closes it for the outer seal.  Both callers pass this process's
+    own ``CANONICAL_WIRE_REVISION``, never the revision a document claims,
+    which would let a forgery choose the domain it is checked under.
+
+    What the generation inside the domain is FOR is asymmetric, and only
+    the second role justifies it.  For the in-process reader it is
+    redundant: :func:`_decode_format_and_revisions` refuses a foreign
+    generation (``W21``) before the seal is ever recomputed.  For an
+    EXTERNAL verifier -- anything that rehashes this domain plus the body
+    without running this decoder -- it is the only thing binding the seal
+    to a generation, which is why a literal here that merely agreed with
+    the revision was a latent defect and not a cosmetic one.
+    """
+    return f"{_WIRE_INTEGRITY_DOMAIN_PREFIX}{wire_revision}\x00".encode()
 
 
 def canonical_string_lexeme(value: str) -> str:
@@ -1178,7 +1204,7 @@ def stream_canonical_wire(
     it: sha256 over the wire domain plus every emitted byte between the
     outer braces that precedes the integrity tail.
     """
-    hasher = hashlib.sha256(_INTEGRITY_DOMAIN)
+    hasher = hashlib.sha256(_wire_integrity_domain(CANONICAL_WIRE_REVISION))
 
     def emit(text: str) -> None:
         data = text.encode("utf-8")
@@ -2869,7 +2895,9 @@ def _check_integrity(data: bytes, root: Mapping[str, object]) -> None:
     if marker_at < 0:
         raise _refuse("W24", "integrity member is not in canonical byte form")
     body = data[1:marker_at]
-    recomputed = hashlib.sha256(_INTEGRITY_DOMAIN + body).hexdigest()
+    recomputed = hashlib.sha256(
+        _wire_integrity_domain(CANONICAL_WIRE_REVISION) + body
+    ).hexdigest()
     if declared_digest != recomputed:
         raise _refuse(
             "W23",
