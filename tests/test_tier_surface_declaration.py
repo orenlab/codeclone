@@ -55,6 +55,7 @@ renamed-structure tier tests.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import cast
 
@@ -64,11 +65,8 @@ from codeclone.contracts import TIER_STATE_COMPLETE
 from codeclone.report.html import build_html_report
 from codeclone.report.html.primitives.escape import _escape_html
 from codeclone.report.messages.overview import (
-    TIER_COMPLETE_HINT,
-    TIER_COUNT_ABSENT,
-    TIER_DISABLED_HINT,
     TIER_DISPLAY_ORDER,
-    TIER_ROW_COUNT,
+    TIER_ENABLE_FLAGS,
     TIER_STATE_LABEL_COMPLETE,
     TIER_STATE_LABEL_DISABLED,
 )
@@ -423,6 +421,23 @@ def _html_for(state: str) -> str:
     return build_html_report(report_document=_document_with_tiers(state))
 
 
+_TIER_ROW = re.compile(
+    r'<div class="overview-fact-row overview-tier-row" data-tier="([a-z_]+)"[^>]*>'
+    r'<span class="overview-fact-label">[^<]*</span>'
+    r'<span class="overview-fact-value[^"]*">(.*?)</span></div>',
+    re.S,
+)
+
+
+def _tier_values(html: str) -> dict[str, str]:
+    """What each tier row says, as the words a reader sees (tags stripped)."""
+
+    return {
+        tier: " ".join(re.sub(r"<[^>]+>", " ", value).split())
+        for tier, value in _TIER_ROW.findall(html)
+    }
+
+
 @pytest.mark.parametrize("state", ("disabled", "complete_empty", "complete_populated"))
 def test_html_names_both_tiers(state: str) -> None:
     """The defect: the tiers appeared nowhere in the HTML report at all."""
@@ -474,21 +489,22 @@ def test_html_states_each_tier_state_verbatim(state: str, expected: str) -> None
         if complete
         else (TIER_STATE_LABEL_DISABLED, TIER_STATE_LABEL_COMPLETE)
     )
-    hint_shown, hint_absent = (
-        (TIER_COMPLETE_HINT, TIER_DISABLED_HINT)
-        if complete
-        else (TIER_DISABLED_HINT, TIER_COMPLETE_HINT)
-    )
 
     assert html.count(f'data-tier-state="{expected}"') == len(_TIERS), (
         f"{state}: both tier rows must carry the {expected!r} state"
     )
-    assert html.count(_escape_html(shown)) == len(_TIERS), (
-        f"{state}: the visible label must agree with the state attribute"
-    )
-    assert _escape_html(absent) not in html
-    assert html.count(_escape_html(hint_shown)) == len(_TIERS)
-    assert _escape_html(hint_absent) not in html
+    values = _tier_values(html)
+    assert set(values) == set(_TIERS), values
+    for tier, value in values.items():
+        assert shown in value and absent not in value, (
+            f"{state}/{tier}: the visible words must agree with the state "
+            f"attribute, got {value!r}"
+        )
+        # A tier that did not run names the flag that runs it -- and nothing
+        # else on the row; a tier that ran has no flag to offer.
+        assert (TIER_ENABLE_FLAGS[tier] in value) is (not complete), (
+            f"{state}/{tier}: {value!r}"
+        )
 
 
 def test_html_shows_the_count_only_for_a_completed_measurement() -> None:
@@ -511,18 +527,22 @@ def test_html_shows_the_count_only_for_a_completed_measurement() -> None:
     assert "data-tier-count=" not in disabled, (
         "a disabled tier must not render a count attribute of any value"
     )
-    assert disabled.count(_escape_html(TIER_COUNT_ABSENT)) == len(_TIERS), (
-        "a disabled tier must state the absence of a measurement in words"
-    )
-    assert _escape_html(TIER_COUNT_ABSENT) not in empty
+    for value in _tier_values(disabled).values():
+        assert TIER_STATE_LABEL_DISABLED in value, value
+        assert re.search(r"\d+ " + TIER_STATE_LABEL_COMPLETE, value) is None, (
+            f"a disabled tier drew a number as if it were measured: {value!r}"
+        )
+    for value in _tier_values(empty).values():
+        assert f"0 {TIER_STATE_LABEL_COMPLETE}" in value, value
+        assert TIER_STATE_LABEL_DISABLED not in value, value
 
 
-def _measured_fact_row(value: int) -> str:
-    """The exact ``Measured`` fact row the overview draws for ``value``."""
+def _measured_value(value: int) -> str:
+    """The exact value cell the overview draws for a measured count."""
 
     return (
-        f'<span class="overview-fact-label">{_escape_html(TIER_ROW_COUNT)}</span>'
-        f'<span class="overview-fact-value">{value}</span>'
+        f'<span class="overview-fact-value">{value} '
+        f"{_escape_html(TIER_STATE_LABEL_COMPLETE)}"
     )
 
 
@@ -541,10 +561,10 @@ def test_html_draws_the_measured_count_not_the_records_it_was_handed() -> None:
 
     html = _html_for("complete_truncated")
 
-    assert html.count(_measured_fact_row(_MEASURED_COUNT)) == len(_TIERS), (
+    assert html.count(_measured_value(_MEASURED_COUNT)) == len(_TIERS), (
         "the overview must draw the measured count the container published"
     )
-    assert _measured_fact_row(_CARRIED_RECORDS) not in html, (
+    assert _measured_value(_CARRIED_RECORDS) not in html, (
         "the overview drew the length of the record list instead of the count"
     )
     assert html.count(f'data-tier-count="{_MEASURED_COUNT}"') == len(_TIERS)

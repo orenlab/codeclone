@@ -51,7 +51,7 @@ import pytest
 
 from codeclone.report.html import build_html_report
 from codeclone.report.html.primitives.escape import _escape_html
-from codeclone.report.messages.overview import EXECUTIVE_HEALTH_SNAPSHOT_QUESTION
+from codeclone.report.messages.overview import EXECUTIVE_QUESTION
 from tests._report_fixtures import build_test_report_document
 
 _DIMENSION_NAMES = (
@@ -76,20 +76,23 @@ _PUBLISHED_GRADES: tuple[str, ...] = ("A", "B", "C", "D", "F")
 _WINDOW_SCORE = 77
 _WINDOW_GRADE = "B"
 
-#: What each published letter must look like: the ring's stroke and the
-#: banner's tone. Not a new calibration -- the ring paints every score exactly
-#: the colour it painted before this table existed.
-_VERDICTS: Mapping[str, tuple[str, str]] = {
-    "A": ("var(--success)", "ok"),
-    "B": ("var(--success)", "ok"),
-    "C": ("var(--warning)", "warn"),
-    "D": ("var(--error)", "risk"),
-    "F": ("var(--error)", "risk"),
+#: What each published letter must look like: the ring's stroke. Not a new
+#: calibration -- the ring paints every score exactly the colour it painted
+#: before this table existed. The banner beside the ring no longer grades
+#: health at all: it answers what changed since the baseline, and its tone is
+#: that verdict's, so the same document renders the same banner tone whatever
+#: letter or number the health block carries.
+_VERDICTS: Mapping[str, str] = {
+    "A": "var(--success)",
+    "B": "var(--success)",
+    "C": "var(--warning)",
+    "D": "var(--error)",
+    "F": "var(--error)",
 }
 
 #: A document that published no grade has no verdict to show, and showing the
 #: best or the worst one would invent it.
-_NO_VERDICT = ("var(--info)", "info")
+_NO_VERDICT = "var(--info)"
 
 #: Scores spread across every band either deleted set ever drew, including
 #: both their edges. The rendered verdict must be the same at all of them.
@@ -100,7 +103,7 @@ _RING_STROKE = re.compile(r'class="health-ring-fg"[^>]*stroke="(var\(--[a-z]+\))
 #: an unanchored match would read whichever one came first.
 _BANNER_TONE = re.compile(
     r'insight-banner insight-([a-z]+)"><div class="insight-question">'
-    + re.escape(_escape_html(EXECUTIVE_HEALTH_SNAPSHOT_QUESTION))
+    + re.escape(_escape_html(EXECUTIVE_QUESTION))
 )
 
 
@@ -135,9 +138,9 @@ def test_ring_and_banner_agree_inside_the_window_the_band_sets_disagreed_on() ->
     band" -- one number, one document, two answers.
     """
 
-    ring, tone = _rendered_verdict(_WINDOW_SCORE, _WINDOW_GRADE)
+    ring, _tone = _rendered_verdict(_WINDOW_SCORE, _WINDOW_GRADE)
 
-    assert (ring, tone) == _VERDICTS[_WINDOW_GRADE]
+    assert ring == _VERDICTS[_WINDOW_GRADE]
 
 
 @pytest.mark.parametrize("grade", _PUBLISHED_GRADES)
@@ -149,7 +152,23 @@ def test_the_verdict_follows_the_published_grade_not_the_score(grade: str) -> No
     would answer identically five times.
     """
 
-    assert _rendered_verdict(_WINDOW_SCORE, grade) == _VERDICTS[grade]
+    assert _rendered_verdict(_WINDOW_SCORE, grade)[0] == _VERDICTS[grade]
+
+
+def test_the_banner_tone_never_moves_with_health() -> None:
+    """The banner answers the baseline question; health is the ring's.
+
+    One tone across every published letter and every band edge either set
+    ever drew: a surviving band over the score, or over the grade, would
+    answer differently somewhere in this sweep.
+    """
+
+    tones = {
+        _rendered_verdict(score, grade)[1]
+        for grade in _PUBLISHED_GRADES
+        for score in _SCORES_ACROSS_THE_OLD_BANDS
+    }
+    assert len(tones) == 1, tones
 
 
 @pytest.mark.parametrize("score", _SCORES_ACROSS_THE_OLD_BANDS)
@@ -161,7 +180,7 @@ def test_the_verdict_does_not_move_when_only_the_score_moves(score: int) -> None
     does not move.
     """
 
-    assert _rendered_verdict(score, _WINDOW_GRADE) == _VERDICTS[_WINDOW_GRADE]
+    assert _rendered_verdict(score, _WINDOW_GRADE)[0] == _VERDICTS[_WINDOW_GRADE]
 
 
 @pytest.mark.parametrize("grade", _PUBLISHED_GRADES)
@@ -172,7 +191,7 @@ def test_every_published_grade_is_drawn_as_a_verdict(grade: str) -> None:
     verdict beside it fails here rather than rendering as an absence.
     """
 
-    assert _rendered_verdict(_WINDOW_SCORE, grade) != _NO_VERDICT
+    assert _rendered_verdict(_WINDOW_SCORE, grade)[0] != _NO_VERDICT
 
 
 def test_a_document_that_published_no_grade_is_drawn_without_a_verdict() -> None:
@@ -185,4 +204,4 @@ def test_a_document_that_published_no_grade_is_drawn_without_a_verdict() -> None
     already follow.
     """
 
-    assert _rendered_verdict(_WINDOW_SCORE, None) == _NO_VERDICT
+    assert _rendered_verdict(_WINDOW_SCORE, None)[0] == _NO_VERDICT

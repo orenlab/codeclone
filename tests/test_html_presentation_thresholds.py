@@ -141,12 +141,6 @@ _METRIC_BANDS_DEFERRED_TO_F3: dict[str, tuple[str, ...]] = {
         "max_cc > 15",
         "max_lcom4 > 3",
     ),
-    "codeclone/report/html/sections/_dead_code.py": (
-        # Hit-rate card: high-confidence share of the dead-code total, banded
-        # by two numbers that appear in no contract.
-        "pct > 20",
-        "pct > 50",
-    ),
     "codeclone/report/html/sections/_dependencies.py": (
         # A module is drawn as a hub above a computed threshold *and* above a
         # floor of two edges; the floor is the renderer's.

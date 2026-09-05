@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from codeclone.contracts import TIER_STATE_COMPLETE
@@ -24,7 +24,6 @@ from ...messages.overview import (
     ADOPTION_API_DISABLED,
     ADOPTION_API_SURFACE_LABEL,
     ADOPTION_BREAKING_CHANGES,
-    ADOPTION_CLUSTER_DESC,
     ADOPTION_CLUSTER_TITLE,
     ADOPTION_COVERAGE_LABEL,
     ADOPTION_DOCSTRINGS,
@@ -37,12 +36,21 @@ from ...messages.overview import (
     ADOPTION_STRICT_MODE,
     ADOPTION_STRICT_MODE_ENABLED,
     ADOPTION_TYPED_AS_ANY,
+    BASELINE_ACTION_ACCEPT,
+    BASELINE_ACTION_BLOCK,
+    BASELINE_ACTION_CREATE,
+    BASELINE_FIRST_RUN_WHY,
+    BASELINE_LANES_NOT_COMPARED,
+    BASELINE_NEW_FAMILIES,
+    BASELINE_NEW_PREFIX,
+    BASELINE_NOT_COMPARED,
+    BASELINE_NOTHING_NEW,
+    BASELINE_REASON_MISSING,
+    BASELINE_REASON_STATE,
     CLUSTER_EXECUTIVE_SUMMARY,
     CLUSTER_HEALTH_PROFILE,
-    CLUSTER_HEALTH_PROFILE_DESC,
     CLUSTER_HEALTH_PROFILE_LABEL,
     CLUSTER_HOTSPOTS_BY_DIRECTORY,
-    CLUSTER_HOTSPOTS_BY_DIRECTORY_DESC,
     CLUSTER_ISSUE_BREAKDOWN,
     CLUSTER_OVERLOADED_MODULES,
     CLUSTER_OVERLOADED_MORE_CANDIDATES,
@@ -53,10 +61,11 @@ from ...messages.overview import (
     DIRECTORY_BUCKET_LABELS,
     DIRECTORY_BUCKET_ORDER,
     DIRECTORY_KIND_LABELS,
-    EXECUTIVE_HEALTH_SNAPSHOT_QUESTION,
+    EXECUTIVE_METRICS_SKIPPED,
+    EXECUTIVE_QUESTION,
     EXECUTIVE_SCAN_SCOPE_DEFAULT,
-    EXECUTIVE_THRESHOLDS_PREFIX,
     HEALTH_ABSENCE_CARDS,
+    HEALTH_DELTA_SUFFIX,
     ISSUE_BREAKDOWN_EMPTY,
     ISSUE_BREAKDOWN_EMPTY_REASON,
     ISSUE_BREAKDOWN_ROW_LABELS,
@@ -69,6 +78,8 @@ from ...messages.overview import (
     KPI_HIGH_COMPLEXITY,
     KPI_HIGH_COUPLING,
     KPI_LOW_COHESION,
+    KPI_NOT_COMPARED,
+    KPI_NOTHING_NEW,
     KPI_SUGGESTIONS,
     KPI_TIP_CLONE_GROUPS,
     KPI_TIP_DEAD_CODE,
@@ -81,15 +92,13 @@ from ...messages.overview import (
     RADAR_DIMENSIONS,
     RADAR_LABELS,
     TIER_CLUSTER_DESC,
+    TIER_CLUSTER_ITEM_LABEL,
     TIER_CLUSTER_TITLE,
-    TIER_COMPLETE_HINT,
-    TIER_COUNT_ABSENT,
-    TIER_DISABLED_HINT,
     TIER_DISPLAY_ORDER,
+    TIER_ENABLE_FLAGS,
+    TIER_ENABLE_WITH,
     TIER_LABELS,
-    TIER_ROW_COUNT,
-    TIER_ROW_REVISION,
-    TIER_ROW_STATE,
+    TIER_REVISION,
     TIER_STATE_LABEL_COMPLETE,
     TIER_STATE_LABEL_DISABLED,
 )
@@ -233,7 +242,10 @@ def _health_gauge_html(
         else:
             cls = "health-ring-delta--down"
             sign = ""
-        delta_html = f'<div class="health-ring-delta {cls}">{sign}{health_delta}</div>'
+        delta_html = (
+            f'<div class="health-ring-delta {cls}">'
+            f"{sign}{health_delta}{_escape_html(HEALTH_DELTA_SUFFIX)}</div>"
+        )
 
     # "Get Badge" button — shown for grades A, B, C
     badge_btn_html = ""
@@ -660,60 +672,68 @@ def _adoption_and_api_section(ctx: ReportContext) -> str:
 
     return (
         '<section class="overview-cluster">'
-        + overview_cluster_header(ADOPTION_CLUSTER_TITLE, ADOPTION_CLUSTER_DESC)
+        + overview_cluster_header(ADOPTION_CLUSTER_TITLE)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + "".join(cards)
         + "</div></section>"
     )
 
 
-def _tier_card_html(container: Mapping[str, object]) -> str:
-    """Draw one advisory tier container, restating what it says about itself.
+def _tier_row_html(tier: str, container: Mapping[str, object]) -> str:
+    """Draw one advisory tier as a fact row, restating what it says about itself.
 
     The container is the authority on its own execution: ``state`` says
     whether the producer ran, and ``count`` exists only when it did. This
     function reads both and computes neither -- a ``disabled`` tier is drawn
-    with the absence stated in words, never with a ``0`` standing in for a
-    measurement that was never taken. Drawing the same "0" for both states
-    would reproduce, on the surface a human reads, exactly the confusion the
-    container's execution witness was introduced to remove.
+    with the absence stated in words and the flag that would end it, never
+    with a ``0`` standing in for a measurement that was never taken. Drawing
+    the same "0" for both states would reproduce, on the surface a human
+    reads, exactly the confusion the container's execution witness was
+    introduced to remove.
+
+    ``count`` is READ, never re-derived from the record list beside it. The
+    two are different facts: ``count`` is what the producer measured, the
+    list is what this document carries, and a ceiling or a truncation makes
+    them differ legitimately. A renderer that counted the list it was handed
+    would report the smaller number with full confidence on exactly that day.
     """
 
     state = str(container.get("state", "")).strip()
     complete = state == TIER_STATE_COMPLETE
-    rows = [
-        _fact_row(
-            TIER_ROW_STATE,
-            TIER_STATE_LABEL_COMPLETE if complete else TIER_STATE_LABEL_DISABLED,
-            value_cls="good" if complete else "muted",
-        )
-    ]
-    # ``count`` is present exactly when the producer ran, and it is READ, never
-    # re-derived from the record list beside it. The two are different facts:
-    # ``count`` is what the producer measured, the list is what this document
-    # carries, and a ceiling or a truncation makes them differ legitimately.
-    # A renderer that counted the list it was handed would report the smaller
-    # number with full confidence on exactly that day.
-    if "count" in container:
-        rows.append(
-            _fact_row(TIER_ROW_COUNT, _format_count(_as_int(container["count"])))
-        )
-    else:
-        rows.append(_fact_row(TIER_ROW_COUNT, TIER_COUNT_ABSENT, value_cls="muted"))
     revision = str(container.get("algorithm_revision", "")).strip()
-    if revision:
-        rows.append(_fact_row(TIER_ROW_REVISION, revision))
-    hint = TIER_COMPLETE_HINT if complete else TIER_DISABLED_HINT
+    if complete:
+        value_html = _escape_html(TIER_STATE_LABEL_COMPLETE)
+        if "count" in container:
+            value_html = f"{_format_count(_as_int(container['count']))} {value_html}"
+        if revision:
+            value_html += (
+                ' <span class="overview-fact-delta">'
+                f"{_escape_html(TIER_REVISION.format(revision=revision))}</span>"
+            )
+        value_cls = ""
+    else:
+        value_html = _escape_html(TIER_STATE_LABEL_DISABLED)
+        flag = TIER_ENABLE_FLAGS.get(tier, "")
+        if flag:
+            value_html += f" \u00b7 {_escape_html(TIER_ENABLE_WITH)} <code>{_escape_html(flag)}</code>"
+        value_cls = " overview-fact-value--muted"
+    count_attr = (
+        f' data-tier-count="{_as_int(container["count"])}"'
+        if "count" in container
+        else ""
+    )
     return (
-        '<div class="overview-fact-list">'
-        + "".join(rows)
-        + "</div>"
-        + f'<div class="overview-summary-value">{_escape_html(hint)}</div>'
+        '<div class="overview-fact-row overview-tier-row" '
+        f'data-tier="{_escape_html(tier)}" '
+        f'data-tier-state="{_escape_html(state)}"{count_attr}>'
+        f'<span class="overview-fact-label">{_escape_html(TIER_LABELS[tier])}</span>'
+        f'<span class="overview-fact-value{value_cls}">{value_html}</span>'
+        "</div>"
     )
 
 
 def _detection_tiers_section(ctx: ReportContext) -> str:
-    """The advisory tier cluster: one card per tier, each stating its state.
+    """The advisory tier cluster: one row per tier, each stating its state.
 
     A document that carries no tier container has no state to restate, so
     nothing is drawn for it. The renderer never manufactures a state for a
@@ -721,58 +741,98 @@ def _detection_tiers_section(ctx: ReportContext) -> str:
     """
 
     groups = _as_mapping(_as_mapping(ctx.report_document.get("findings")).get("groups"))
-    cards: list[str] = []
-    for tier in TIER_DISPLAY_ORDER:
-        container = _as_mapping(groups.get(tier))
-        if not container:
-            continue
-        cards.append(
-            '<div class="overview-tier-row" '
-            f'data-tier="{_escape_html(tier)}" '
-            f'data-tier-state="{_escape_html(str(container.get("state", "")))}"'
-            + (
-                f' data-tier-count="{_as_int(container["count"])}"'
-                if "count" in container
-                else ""
-            )
-            + ">"
-            + overview_summary_item_html(
-                label=TIER_LABELS[tier],
-                body_html=_tier_card_html(container),
-            )
-            + "</div>"
-        )
-    if not cards:
+    rows = [
+        _tier_row_html(tier, container)
+        for tier in TIER_DISPLAY_ORDER
+        for container in (_as_mapping(groups.get(tier)),)
+        if container
+    ]
+    if not rows:
         return ""
     return (
         '<section class="overview-cluster">'
         + overview_cluster_header(TIER_CLUSTER_TITLE, TIER_CLUSTER_DESC)
-        + '<div class="overview-summary-grid overview-summary-grid--2col">'
-        + "".join(cards)
+        + '<div class="overview-summary-grid">'
+        + overview_summary_item_html(
+            label=TIER_CLUSTER_ITEM_LABEL,
+            body_html='<div class="overview-fact-list">' + "".join(rows) + "</div>",
+        )
         + "</div></section>"
     )
 
 
-def _overview_counts_sentence(
+def _baseline_verdict(
     *,
-    clone_groups: int,
-    dead_total: int,
-    dead_suppressed: int,
-    dependency_cycles: int,
-) -> str:
-    """State the headline counts so each one agrees with its own number."""
+    baseline_status: str,
+    new_by_family: Mapping[str, int | None],
+    clones_not_compared: int,
+    metrics_available: bool,
+) -> tuple[str, tuple[tuple[str, str], ...], Tone]:
+    """The banner's verdict: what is new against the accepted baseline.
 
+    Every count is the document's own novelty figure for that family, read
+    exactly as the KPI card beside it reads it. The sentence names the
+    families that carry something new and never adds them up: the document
+    publishes no such total, and a sum here would be a number of the
+    renderer's own. The commands are the ones the CLI offers for the same
+    state, so the report and the terminal end a run on the same words.
+    """
+
+    if baseline_status != "trusted":
+        reason = (
+            BASELINE_REASON_MISSING
+            if baseline_status == "missing"
+            else BASELINE_REASON_STATE.format(state=baseline_status)
+        )
+        sentence = (
+            f"{BASELINE_NOT_COMPARED.format(reason=reason)} {BASELINE_FIRST_RUN_WHY}"
+        )
+        return sentence, (BASELINE_ACTION_CREATE,), "info"
+    named = [
+        f"{count} {plural_word(count, singular, plural)}"
+        for key, singular, plural in BASELINE_NEW_FAMILIES
+        for count in (new_by_family.get(key),)
+        if count
+    ]
+    tail = ""
+    if clones_not_compared:
+        tail += " " + BASELINE_LANES_NOT_COMPARED.format(
+            count=clones_not_compared,
+            noun=plural_word(clones_not_compared, "group", "groups"),
+        )
+    if not metrics_available:
+        tail += f" {EXECUTIVE_METRICS_SKIPPED}"
+    if not named:
+        return f"{BASELINE_NOTHING_NEW}{tail}", (), "ok"
+    sentence = f"{BASELINE_NEW_PREFIX}{', '.join(named)}.{tail}"
+    return sentence, (BASELINE_ACTION_BLOCK, BASELINE_ACTION_ACCEPT), "warn"
+
+
+def _actions_html(actions: Sequence[tuple[str, str]]) -> str:
+    """The commands under the verdict, label then command, one per action."""
+
+    if not actions:
+        return ""
     return (
-        f"{clone_groups} {plural_word(clone_groups, 'clone group', 'clone groups')}; "
-        f"{dead_total} {plural_word(dead_total, 'dead-code item', 'dead-code items')} "
-        f"({dead_suppressed} suppressed); "
-        f"{dependency_cycles} "
-        f"{plural_word(dependency_cycles, 'dependency cycle', 'dependency cycles')}."
+        '<div class="insight-actions">'
+        + "".join(
+            '<span class="insight-action">'
+            f'<span class="insight-action-label">{_escape_html(label)}</span> '
+            f"<code>{_escape_html(command)}</code></span>"
+            for label, command in actions
+        )
+        + "</div>"
     )
 
 
 def _scan_scope_subtitle(ctx: ReportContext) -> str:
-    """Build a subtitle string with scan-scope essentials for the Executive Summary header."""
+    """The scan scope under the Executive Summary title: what was read.
+
+    The clone thresholds this run used are provenance and live in the
+    provenance panel now; as ``func 10/6`` on this line they were the pair
+    every blind reader of the first screen named as unreadable.
+    """
+
     inventory = _as_mapping(getattr(ctx, "inventory_map", {}))
     if not inventory:
         return EXECUTIVE_SCAN_SCOPE_DEFAULT
@@ -786,24 +846,13 @@ def _scan_scope_subtitle(ctx: ReportContext) -> str:
     classes = _as_int(code.get("classes"))
     callable_total = functions + methods
 
-    scope_summary = (
-        f"{_format_count(total_found)} files \u00b7 "
-        f"{_format_count(parsed_lines)} lines \u00b7 "
-        f"{_format_count(callable_total)} callables \u00b7 "
-        f"{_format_count(classes)} classes"
-    )
-    analysis_profile = _as_mapping(ctx.meta.get("analysis_profile"))
-    if not analysis_profile:
-        return scope_summary
     return (
-        f"{scope_summary}. "
-        f"{EXECUTIVE_THRESHOLDS_PREFIX}"
-        f"func {_as_int(analysis_profile.get('min_loc'))}/"
-        f"{_as_int(analysis_profile.get('min_stmt'))} \u00b7 "
-        f"block {_as_int(analysis_profile.get('block_min_loc'))}/"
-        f"{_as_int(analysis_profile.get('block_min_stmt'))} \u00b7 "
-        f"seg {_as_int(analysis_profile.get('segment_min_loc'))}/"
-        f"{_as_int(analysis_profile.get('segment_min_stmt'))}"
+        f"{_format_count(total_found)} {plural_word(total_found, 'file', 'files')}"
+        f" \u00b7 {_format_count(parsed_lines)} "
+        f"{plural_word(parsed_lines, 'line', 'lines')}"
+        f" \u00b7 {_format_count(callable_total)} "
+        f"{plural_word(callable_total, 'callable', 'callables')}"
+        f" \u00b7 {_format_count(classes)} {plural_word(classes, 'class', 'classes')}"
     )
 
 
@@ -835,9 +884,9 @@ def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -
         files = _as_int(item.get("files"))
 
         meta_parts = [
-            _dir_meta_span(groups, "groups"),
-            _dir_meta_span(affected, "items"),
-            _dir_meta_span(files, "files"),
+            _dir_meta_span(groups, plural_word(groups, "group", "groups")),
+            _dir_meta_span(affected, plural_word(affected, "item", "items")),
+            _dir_meta_span(files, plural_word(files, "file", "files")),
         ]
         if bucket == "all":
             meta_parts.extend(
@@ -895,10 +944,7 @@ def _directory_hotspots_section(ctx: ReportContext) -> str:
         return ""
     return (
         '<section class="overview-cluster">'
-        + overview_cluster_header(
-            CLUSTER_HOTSPOTS_BY_DIRECTORY,
-            CLUSTER_HOTSPOTS_BY_DIRECTORY_DESC,
-        )
+        + overview_cluster_header(CLUSTER_HOTSPOTS_BY_DIRECTORY)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + "".join(cards)
         + "</div></section>"
@@ -1039,7 +1085,6 @@ def render_overview_panel(ctx: ReportContext) -> str:
     # renamed it to ``high_confidence`` and emits only that, so the fallback
     # could not fire in any configuration.
     dead_high_conf = _as_int(dead_code_summary.get("high_confidence"))
-    dead_suppressed = _as_int(dead_code_summary.get("suppressed", 0))
 
     health_score_raw = health_summary.get("score")
     health_score_known = (
@@ -1050,53 +1095,6 @@ def render_overview_panel(ctx: ReportContext) -> str:
     # key is present and null, and ``str(None)`` is the string "None".
     health_grade = str(health_summary.get("grade") or KPI_HEALTH_NA)
     health_population = str(health_summary.get("population", ""))
-
-    # Overview answer
-    def _answer_and_tone() -> tuple[str, Tone]:
-        health_absence = HEALTH_ABSENCE_CARDS.get(health_population)
-        if health_absence is not None:
-            # Named before the counts beside it, so the reader knows what
-            # population those counts came from — and which of the two
-            # absences produced them. Read from the same table as the card
-            # above so the two can never say different things.
-            _label, _tip, executive = health_absence
-            return (
-                f"{executive} "
-                + _overview_counts_sentence(
-                    clone_groups=ctx.clone_groups_total,
-                    dead_total=dead_total,
-                    dead_suppressed=dead_suppressed,
-                    dependency_cycles=dependency_cycle_count,
-                ),
-                "info",
-            )
-        if ctx.metrics_available and health_score_known:
-            ans = f"Health {health_score:.0f}/100 ({health_grade}); " + (
-                _overview_counts_sentence(
-                    clone_groups=ctx.clone_groups_total,
-                    dead_total=dead_total,
-                    dead_suppressed=dead_suppressed,
-                    dependency_cycles=dependency_cycle_count,
-                )
-            )
-            # Same table as the ring above, so the sentence and the shape
-            # beside it cannot answer the same question differently.
-            tone, _color = _health_grade_verdict(health_grade)
-            return ans, tone
-        if ctx.metrics_available:
-            ans = _overview_counts_sentence(
-                clone_groups=ctx.clone_groups_total,
-                dead_total=dead_total,
-                dead_suppressed=dead_suppressed,
-                dependency_cycles=dependency_cycle_count,
-            )
-            return ans, "info"
-        return (
-            f"{ctx.clone_groups_total} clone groups; metrics were skipped for this run.",
-            "info",
-        )
-
-    overview_answer, overview_tone = _answer_and_tone()
 
     # Canonical comparison and count facts; no raw MetricsDiff proxy.
     _new_complexity = (
@@ -1132,10 +1130,52 @@ def render_overview_panel(ctx: ReportContext) -> str:
     clone_suggestion_count = _as_int(suggestion_counts.get("clones"))
     structural_suggestion_count = _as_int(suggestion_counts.get("structural"))
     metrics_suggestion_count = _as_int(suggestion_counts.get("metrics"))
-    _new_clones = _as_int(ctx.clone_summary.get("new"))
+    # The clone lanes publish ``new`` only as a comparison result: without a
+    # trusted baseline the figure is not "0 new", it is no comparison at all,
+    # and the card used to draw the same "baselined" tick for both. A zero is
+    # claimed only when every group was compared; a positive count is a
+    # finding whatever the other lanes did.
+    baseline_status = str(ctx.baseline_status)
+    baseline_trusted = baseline_status == "trusted"
+    _clones_not_compared = (
+        _as_int(ctx.clone_summary.get("unavailable")) if baseline_trusted else 0
+    )
+    _new_clones = _as_int(ctx.clone_summary.get("new")) if baseline_trusted else None
+    _clone_delta_claim = (
+        None if (_clones_not_compared and not _new_clones) else _new_clones
+    )
+
+    # Overview answer: what is new against the baseline. Health is the ring's
+    # to draw and every count is a card's; the banner says the one thing the
+    # rest of the first screen does not.
+    verdict_sentence, verdict_actions, verdict_tone = _baseline_verdict(
+        baseline_status=baseline_status,
+        new_by_family={
+            "clones": _new_clones,
+            "complexity": _new_complexity,
+            "coupling": _new_coupling,
+            "dead_code": _new_dead,
+            "dep_cycles": _new_cycles,
+        },
+        clones_not_compared=_clones_not_compared,
+        metrics_available=ctx.metrics_available,
+    )
+    health_absence = HEALTH_ABSENCE_CARDS.get(health_population)
+    overview_tone: Tone
+    if health_absence is not None:
+        # Named before the verdict, so the reader knows what population the
+        # counts under it came from -- and which of the two absences produced
+        # them. Read from the same table as the ring's card, so the two can
+        # never say different things.
+        _label, _tip, executive = health_absence
+        overview_answer = f"{executive} {verdict_sentence}"
+        overview_tone = "info"
+    else:
+        overview_answer, overview_tone = verdict_sentence, verdict_tone
+    overview_actions_html = _actions_html(verdict_actions)
     _baseline_ok = (
         '<span class="kpi-micro kpi-micro--baselined">'
-        '\u2713 <span class="kpi-micro-lbl">baselined</span></span>'
+        f'\u2713 <span class="kpi-micro-lbl">{_escape_html(KPI_NOTHING_NEW)}</span></span>'
     )
 
     def _baselined_detail(
@@ -1143,22 +1183,29 @@ def render_overview_panel(ctx: ReportContext) -> str:
         delta: int | None,
         detail: str,
     ) -> tuple[str, str]:
-        """Return detail and tone from canonical comparison availability."""
+        """Return detail and tone from canonical comparison availability.
+
+        A positive delta is carried by the "+N new" badge on the card's
+        label, so the caption under the number no longer says it again.
+        """
         if delta is None or total == 0:
             return detail, "good" if total == 0 else "bad"
         if delta == 0:
             return detail + _baseline_ok, "muted"
-        return detail + _micro_badges(("new", delta)), "bad"
+        return detail, "bad"
 
     # KPI cards — compute detail + tone with baseline awareness
+    _clone_micro = _micro_badges(
+        ("func", len(ctx.func_sorted)),
+        ("block", len(ctx.block_sorted)),
+        ("seg", len(ctx.segment_sorted)),
+    )
+    if _clones_not_compared:
+        _clone_micro += _micro_badges((KPI_NOT_COMPARED, _clones_not_compared))
     _clone_detail, _clone_tone = _baselined_detail(
         ctx.clone_groups_total,
-        _new_clones,
-        _micro_badges(
-            ("func", len(ctx.func_sorted)),
-            ("block", len(ctx.block_sorted)),
-            ("seg", len(ctx.segment_sorted)),
-        ),
+        _clone_delta_claim,
+        _clone_micro,
     )
     _cx_detail, _cx_tone = _baselined_detail(
         complexity_high_risk,
@@ -1260,7 +1307,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     # Build deltas map for issue breakdown baseline awareness
     _issue_deltas: dict[str, int | None] = {
-        "clones": _new_clones,
+        "clones": _clone_delta_claim,
         "complexity": _new_complexity,
         "coupling": _new_coupling,
         "dead_code": _new_dead,
@@ -1305,9 +1352,10 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     return (
         insight_block(
-            question=EXECUTIVE_HEALTH_SNAPSHOT_QUESTION,
+            question=EXECUTIVE_QUESTION,
             answer=overview_answer,
             tone=overview_tone,
+            detail_html=overview_actions_html,
         )
         + _review_launchpad_html(ctx)
         + '<div class="overview-kpi-grid overview-kpi-grid--with-health">'
@@ -1348,10 +1396,7 @@ def _analytics_section(ctx: ReportContext) -> str:
 
     return (
         '<section class="overview-cluster">'
-        + overview_cluster_header(
-            CLUSTER_HEALTH_PROFILE,
-            CLUSTER_HEALTH_PROFILE_DESC,
-        )
+        + overview_cluster_header(CLUSTER_HEALTH_PROFILE)
         + '<div class="overview-summary-grid">'
         + overview_summary_item_html(
             label=CLUSTER_HEALTH_PROFILE_LABEL, body_html=radar_html + radar_legend

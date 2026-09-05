@@ -21,8 +21,11 @@ from ..primitives.escape import _escape_html, _meta_display
 from ..widgets.glossary import family_glossary_tip
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .._context import ReportContext
 
+_as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
@@ -70,6 +73,26 @@ _HASH_LABELS = frozenset(
 #: the row -- a presentation edit -- would have dropped the badge with nothing
 #: red anywhere. A displayed string is a human signature, not a dispatch key.
 _BASELINE_PYTHON_TAG_LABEL = "Baseline Python tag"
+
+
+def _clone_thresholds_text(profile: Mapping[str, object]) -> str | None:
+    """The clone-detection floors this run used, in words a reader can parse.
+
+    They used to ride the Executive Summary subtitle as ``func 10/6`` -- a
+    pair nobody could read without the source -- and they belong with the
+    run's other provenance, beside the analysis mode that produced them.
+    """
+
+    if not profile:
+        return None
+    return (
+        f"function {_as_int(profile.get('min_loc'))} lines / "
+        f"{_as_int(profile.get('min_stmt'))} statements \u00b7 "
+        f"block {_as_int(profile.get('block_min_loc'))} / "
+        f"{_as_int(profile.get('block_min_stmt'))} \u00b7 "
+        f"segment {_as_int(profile.get('segment_min_loc'))} / "
+        f"{_as_int(profile.get('segment_min_stmt'))}"
+    )
 
 
 def _truncate_middle(value: str, head: int, tail: int) -> str:
@@ -183,14 +206,9 @@ def build_topbar_provenance_summary(ctx: ReportContext) -> tuple[str, str, str]:
     tooltip_bits = [p for p in (bl_part, cache_part, mode_part) if p]
     tooltip = " \u00b7 ".join(tooltip_bits) if tooltip_bits else "Report provenance"
 
-    label_map = {
-        "green": "Verified",
-        "amber": "Partial",
-        "red": "Unverified",
-        "neutral": "Provenance",
-    }
-    status_label = label_map[bl_color]
-    return status_label, bl_color, tooltip
+    # The pill says what is verified. A bare "Verified" in the topbar was the
+    # one word three blind readers of the first screen could not place.
+    return bl_part, bl_color, tooltip
 
 
 def render_meta_panel(ctx: ReportContext) -> str:
@@ -244,6 +262,10 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Python", _meta_pick(meta.get("python_version"))),
         ("Python tag", python_tag_value),
         ("Analysis mode", _meta_pick(meta.get("analysis_mode"))),
+        (
+            "Clone thresholds",
+            _clone_thresholds_text(_as_mapping(meta.get("analysis_profile"))),
+        ),
         ("Report mode", report_mode_value),
         ("Report generated (UTC)", ctx.report_generated_at),
         (

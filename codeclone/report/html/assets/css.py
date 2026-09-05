@@ -442,6 +442,12 @@ _INSIGHT = """\
 .insight-question{font-size:var(--fs-xs);font-weight:600;color:var(--text-muted);
   text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
 .insight-answer{font-size:var(--fs-md);color:var(--text-secondary);line-height:1.55}
+/* The commands that apply to the verdict, in the CLI's two-column shape. */
+.insight-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-5);margin-top:var(--sp-2);
+  font-size:var(--fs-sm);color:var(--text-secondary)}
+.insight-action{display:inline-flex;align-items:baseline;gap:6px}
+.insight-action code{font-family:var(--font-mono);font-size:var(--fs-xs);padding:1px 6px;
+  border-radius:var(--radius-sm);background:var(--bg-raised);color:var(--text-primary)}
 
 .insight-ok::before{background:var(--success)}
 .insight-ok{background:color-mix(in oklch,var(--success-muted) 55%,var(--bg-surface))}
@@ -501,10 +507,12 @@ _TABLES = """\
   color:var(--text-secondary);vertical-align:top;overflow-wrap:anywhere}
 .table tbody tr:last-child td{border-bottom:none}
 .table tbody tr:hover td{background:var(--table-row-hover)}
-.table .col-name{font-weight:500;color:var(--text-primary);max-width:360px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
+.table .col-name{font-weight:500;color:var(--text-primary);max-width:360px;overflow-wrap:anywhere}
+.table .col-name .ident-symbol{display:block}
+.table .col-name .ident-module{display:block;font-family:var(--font-mono);font-size:var(--fs-2xs);
+  font-weight:400;color:var(--text-muted);line-height:1.4;margin-top:1px}
 .table .col-file,.table .col-path{color:var(--text-muted);max-width:240px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
+  overflow-wrap:anywhere}
 .table .col-number,.table .col-num{font-family:var(--font-numeric);
   font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;color:var(--text-primary)}
 .table .col-risk,.table .col-badge,.table .col-cat{white-space:nowrap}
@@ -544,6 +552,17 @@ _TABLES = """\
 .table-meta-value{color:var(--text-secondary);font-family:var(--font-mono)}
 .table-meta-count{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
   color:var(--text-secondary);white-space:nowrap}
+/* Held by tests: one chip per test module, the full test ids one click away.
+   The chip carries a count when a module holds the symbol more than once. */
+.held-tests summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;gap:3px}
+.held-tests summary::-webkit-details-marker{display:none}
+.held-test{display:inline-block;max-width:100%;padding:1px 6px;line-height:1.5;
+  border-radius:var(--radius-sm);background:var(--bg-overlay);color:var(--text-secondary);
+  font-family:var(--font-mono);font-size:var(--fs-3xs);overflow-wrap:anywhere}
+.held-test-count{font-family:var(--count-font);font-weight:var(--count-weight);color:var(--text-muted)}
+.held-tests-list{margin:var(--sp-2) 0 0;padding-left:1.1em;font-size:var(--fs-2xs);
+  color:var(--text-muted)}
+.held-tests-list code{font-family:var(--font-mono);overflow-wrap:anywhere}
 /* A distribution is scanned, never read: counts, not sentences. */
 .level-strip{display:flex;flex-wrap:wrap;gap:var(--sp-1);width:100%;
   margin:0 0 var(--sp-3)}
@@ -758,7 +777,6 @@ _OVERVIEW = """\
 .overview-kpi-cards .meta-item .meta-value{display:flex;align-items:center;
   font-size:1.85rem;line-height:1;padding:var(--sp-1) 0;letter-spacing:-0.02em}
 .overview-kpi-cards .kpi-detail{margin-top:0;gap:4px;align-self:end}
-.overview-kpi-cards .kpi-micro{padding:2px 6px;font-size:var(--fs-3xs)}
 .overview-kpi-grid--with-health .overview-health-card{padding:var(--sp-2)}
 .overview-kpi-grid--with-health .overview-health-inner{width:100%;height:100%}
 .overview-kpi-grid--with-health .health-ring{width:140px;height:140px;margin:auto}
@@ -873,12 +891,15 @@ _OVERVIEW = """\
 .meta-item--accent:hover{border-color:var(--accent-primary)}
 .kpi-detail{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
 .kpi-detail code{font-size:var(--fs-xs)}
-.kpi-micro{display:inline-flex;align-items:center;gap:3px;font-size:var(--count-size);
-  padding:1px 5px;border-radius:var(--radius-sm);background:var(--bg-raised);
-  white-space:nowrap;line-height:1.3;font-family:var(--font-sans)}
+/* The same box as .tab-count: a count beside a label is one thing on this
+   page, whether it sits on a tab or under a card's number. */
+.kpi-micro{display:inline-flex;align-items:center;gap:3px;height:18px;
+  padding:0 5px;border-radius:var(--radius-sm);background:var(--bg-overlay);
+  white-space:nowrap;line-height:1.3;font-family:var(--count-font);font-size:var(--count-size)}
 .kpi-micro-val{font-family:var(--count-font);font-weight:var(--count-weight);
   font-variant-numeric:tabular-nums;color:var(--text-muted)}
-.kpi-micro-lbl{font-weight:400;color:var(--text-muted);text-transform:lowercase}
+.kpi-micro-lbl{font-family:var(--font-sans);font-weight:400;color:var(--text-muted);
+  text-transform:lowercase}
 .kpi-micro--baselined{color:var(--success);font-weight:500;font-size:var(--fs-3xs)}
 .kpi-delta{font-size:var(--fs-3xs);font-weight:700;margin-left:auto;
   padding:1px 5px;border-radius:var(--radius-sm);white-space:nowrap}
@@ -973,6 +994,9 @@ _OVERVIEW = """\
 .overview-fact-delta{font-size:var(--fs-2xs);font-weight:400;color:var(--text-muted)}
 .overview-fact-value--warn{color:var(--warning)}
 .overview-fact-value--good{color:var(--success)}
+.overview-fact-value--muted{color:var(--text-muted);font-weight:400}
+.overview-fact-value code{font-family:var(--font-mono);font-size:var(--fs-2xs);padding:1px 5px;
+  border-radius:var(--radius-sm);background:var(--bg-raised);color:var(--text-secondary)}
 /* Source breakdown bars */
 .breakdown-list{display:flex;flex-direction:column;gap:var(--sp-2)}
 .breakdown-row{display:grid;grid-template-columns:6.5rem 2rem 1fr;align-items:center;gap:var(--sp-2)}

@@ -1860,8 +1860,7 @@ def test_html_report_metrics_risk_branches() -> None:
         "insight-risk",
         'stroke="var(--error)"',
         "Cycles: 1; avg depth: 2.5; p95 depth: 3; max dependency depth: 4.",
-        "5 candidates total; 2 high-confidence items; "
-        "0 unreachable statement region(s); 0 suppressed.",
+        "Yes: 2 high-confidence candidates.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',
         '<span class="main-tab-label">Dead Code</span>'
@@ -2160,7 +2159,7 @@ def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
         f"{total_found} files \u00b7 "
         f"{parsed_lines:,} lines \u00b7 "
         f"{functions + methods} callables \u00b7 "
-        f"{classes} classes"
+        f"{classes} {'class' if classes == 1 else 'classes'}"
     )
     _assert_html_contains(
         html,
@@ -2216,7 +2215,10 @@ def test_html_report_executive_summary_includes_effective_analysis_profile() -> 
     _assert_html_contains(
         html,
         "Executive Summary",
-        "Thresholds: func 5/2 · block 8/3 · seg 13/4",
+        # Provenance now, not the executive subtitle: the pair "func 5/2"
+        # was unreadable there and belongs with the run's other settings.
+        "Clone thresholds",
+        "function 5 lines / 2 statements · block 8 / 3 · segment 13 / 4",
     )
 
 
@@ -3178,8 +3180,11 @@ def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
         ),
     )
     assert "metrics were skipped for this run" not in html
-    assert "Health 0/100 (n/a);" in html
-    assert "2 dead-code items (0 suppressed); 0 dependency cycles." in html
+    assert "Not compared: no baseline yet." in html
+    # The counts are the cards' to state, once: the dead-code card carries the
+    # figure the banner used to repeat.
+    dead_code_card = html[html.index('<div class="meta-label">Dead Code') :]
+    assert '<div class="meta-value meta-value--bad">2</div>' in dead_code_card
     assert "High Complexity" in html
     assert '<span class="kpi-micro-val">2.5</span>' in html
     assert '<span class="kpi-micro-lbl">avg</span>' in html
@@ -3343,11 +3348,8 @@ def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:
             dead_critical=0,
         ),
     )
-    assert "Health 0/100 (n/a);" in html
-    assert (
-        "0 candidates total; 0 high-confidence items; "
-        "0 unreachable statement region(s); 0 suppressed."
-    ) in html
+    assert "Not compared: no baseline yet." in html
+    assert ("No dead-code candidates.") in html
     assert "insight-ok" in html
 
 
@@ -3406,10 +3408,7 @@ def test_html_report_renders_dead_code_split_with_suppressed_layer() -> None:
     )
     _assert_html_contains(
         html,
-        (
-            "0 candidates total; 0 high-confidence items; "
-            "0 unreachable statement region(s); 9 suppressed."
-        ),
+        ("No dead-code candidates."),
         'data-subtab-group="dead-code"',
         'data-clone-tab="active" data-subtab-group="dead-code"',
         'data-clone-tab="suppressed" data-subtab-group="dead-code"',
@@ -3438,7 +3437,7 @@ def test_html_report_metrics_object_health_score_uses_float_fallback() -> None:
             dead_critical=0,
         ),
     )
-    assert "Health 0/100 (n/a);" in html
+    assert "Not compared: no baseline yet." in html
 
 
 def test_html_report_coupling_coupled_classes_inline_for_three_or_less() -> None:
@@ -3875,11 +3874,12 @@ def test_html_report_dead_code_cards_do_not_render_negative_active_count() -> No
     )
     _assert_html_contains(
         html,
-        '<span class="kpi-micro-val">0</span><span class="kpi-micro-lbl">active</span>',
+        '<span class="kpi-micro-val">0</span>'
+        '<span class="kpi-micro-lbl">high-confidence</span>',
     )
     assert (
-        '<span class="kpi-micro-val">-1</span><span class="kpi-micro-lbl">active</span>'
-        not in html
+        '<span class="kpi-micro-val">-1</span>'
+        '<span class="kpi-micro-lbl">high-confidence</span>' not in html
     )
 
 
@@ -5504,7 +5504,17 @@ def test_html_quality_table_renders_document_order_as_is() -> None:
     # Read the complexity table body itself, not the summary cards above it.
     table = html[html.index("<th>Nesting") :]
     body = table[table.index("<tbody>") : table.index("</tbody>")]
-    rendered = re.findall(r'<td class="col-name">([^<]+)</td>', body)
+    # An identity cell draws the symbol over its module; the document's
+    # ``module:symbol`` is rejoined from the two spans it was split into.
+    rendered = [
+        f"{module}:{symbol}"
+        for symbol, module in re.findall(
+            r'<td class="col-name" title="[^"]*">'
+            r'<span class="ident-symbol">([^<]+)</span>'
+            r'<span class="ident-module">([^<]+)</span></td>',
+            body,
+        )
+    ]
     assert rendered == expected
 
 

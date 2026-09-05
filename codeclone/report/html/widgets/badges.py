@@ -28,6 +28,7 @@ from codeclone.domain.quality import (
 )
 
 from ..._source_kinds import normalize_source_kind, source_kind_label
+from ...messages.overview import KPI_NEW_BADGE
 from ..primitives.escape import _escape_html
 
 __all__ = [
@@ -385,7 +386,9 @@ def _stat_card(
 
     *delta_new* — if provided and > 0, renders a ``+N new`` badge
     inline with the label (top-right).  For "bad" metrics (complexity,
-    coupling, etc.) positive delta means regression → red.
+    coupling, etc.) positive delta means regression → red. The badge says
+    "new" in words: a bare ``+1`` beside a bare ``+3`` on the health ring
+    read as two of one kind of thing, and they are opposites.
     """
     tip_html = ""
     if glossary_tip_fn is not None:
@@ -407,7 +410,10 @@ def _stat_card(
 
     delta_html = ""
     if delta_new is not None and delta_new > 0:
-        delta_html = f'<span class="kpi-delta kpi-delta--bad">+{delta_new}</span>'
+        delta_html = (
+            '<span class="kpi-delta kpi-delta--bad">'
+            f"{_escape_html(KPI_NEW_BADGE.format(count=delta_new))}</span>"
+        )
 
     value_cls = f" meta-value--{value_tone}" if value_tone else ""
 

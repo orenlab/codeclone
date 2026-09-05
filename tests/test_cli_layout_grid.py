@@ -348,3 +348,14 @@ def test_plain_console_output_is_untouched_by_the_grid() -> None:
     with contextlib.redirect_stdout(buffer):
         cli_console.make_plain_console().print(ui.fmt_banner_root(_LONG_PATH))
     assert buffer.getvalue() == f"  {'Root':<{_L}}{_LONG_PATH}\n"
+
+
+# ---------------------------------------------------------------------------
+# The memory screens share the analysis width
+# ---------------------------------------------------------------------------
+
+
+def test_memory_screens_share_the_analysis_width() -> None:
+    from codeclone.surfaces.cli.memory_render import memory_console
+
+    assert cast(Console, memory_console()).width == ui.CLI_LAYOUT_MAX_WIDTH

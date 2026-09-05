@@ -78,6 +78,10 @@ SESSION_STATS_INTENTS: Final = "Intents"
 SESSION_STATS_REGISTRY: Final = "Registry"
 SESSION_STATS_AUDIT_SHORT: Final = "Audit"
 SESSION_STATS_HEALTH_SHORT: Final = "Health"
+#: The one row a quiet workspace prints under its run. "idle" already says
+#: no agent is live and every counter the full screen lists is zero, so the
+#: row carries where a session would register instead of six rows of zeros.
+SESSION_STATS_REGISTRY_INLINE: Final = "registry {backend} ({storage})"
 SESSION_STATS_FOOTPRINT_SHORT: Final = "Footprint"
 SESSION_STATS_LATEST_RUN_SOURCE_DISK: Final = "persisted report (CLI)"
 SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_MCP: Final = "MCP session (audit)"

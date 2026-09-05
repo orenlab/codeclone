@@ -28,11 +28,26 @@ _EMPTY_ICON = (
 )
 
 
-def insight_block(*, question: str, answer: str, tone: Tone = "info") -> str:
+def insight_block(
+    *,
+    question: str,
+    answer: str,
+    tone: Tone = "info",
+    detail_html: str = "",
+) -> str:
+    """The banner every tab opens with: a question, its answer, and a slot.
+
+    *detail_html* is rendered verbatim under the answer -- the overview puts
+    the commands that apply to its verdict there, in the same two-column
+    shape the CLI closes a run with. Callers own its escaping.
+    """
+
+    detail = f'<div class="insight-detail">{detail_html}</div>' if detail_html else ""
     return (
         f'<div class="insight-banner insight-{_escape_html(tone)}">'
         f'<div class="insight-question">{_escape_html(question)}</div>'
         f'<div class="insight-answer">{_escape_html(answer)}</div>'
+        f"{detail}"
         "</div>"
     )
 
@@ -61,6 +76,7 @@ _SUMMARY_ICON_KEYS: dict[str, tuple[str, str]] = {
     "top candidates": ("quality", "summary-icon summary-icon--info"),
     "more candidates": ("quality", "summary-icon summary-icon--info"),
     "health profile": ("health-profile", "summary-icon summary-icon--info"),
+    "dimension scores": ("health-profile", "summary-icon summary-icon--info"),
     "adoption coverage": ("coverage-adoption", "summary-icon summary-icon--info"),
     "public api surface": ("api-surface", "summary-icon summary-icon--info"),
     "coverage join": ("quality", "summary-icon summary-icon--info"),

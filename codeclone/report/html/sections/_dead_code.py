@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.explain import plural_word
 from ...messages.glossary import GLOSSARY_FAMILY_DEAD_CODE
 from ...messages.sections import METRICS_SKIPPED
+from ..primitives.escape import _escape_html
 from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import family_glossary_tip
@@ -47,21 +49,88 @@ _TIP = family_glossary_tip(GLOSSARY_FAMILY_DEAD_CODE)
 
 _DEAD_CODE_ROW_LIMIT = 200
 
+#: How a candidate's ``reason`` reads on the page. The document's vocabulary
+#: is restated, never widened: an unknown reason is drawn as its own words.
+_REASON_LABELS = {
+    "test_only_reference": "test-only reference",
+    "unreferenced": "unreferenced",
+}
+
+#: Tips for the cards whose label the glossary does not carry. ``{world}`` is
+#: the document's own ``world_contract`` word.
+_TIP_UNREACHABLE = "Statement regions no execution path can reach"
+_TIP_UNRESOLVED_OVERRIDES = (
+    "Overrides the analysis could not resolve: abstained, neither dead nor live"
+)
+_TIP_UNRESOLVED_REACH = (
+    "Externally reachable with no internal evidence under the {world} world "
+    "contract: abstained, neither dead nor live"
+)
+_ABSTENTIONS_NOTE = (
+    "Abstentions are counted on the cards, not listed: neither dead nor live."
+)
+
+
+def _reason_label(reason: str) -> str:
+    return _REASON_LABELS.get(reason, reason.replace("_", " "))
+
+
+def _held_by_tests_html(sources: Sequence[str]) -> str:
+    """The tests that hold a candidate, one chip per test module.
+
+    This column answers "what breaks if I delete this", and it answered in
+    the least readable way on the page: every dotted test id poured into a
+    narrow column, one row swelling to fifteen visual lines. The reader's
+    first question is which test *files* hold the symbol, so a chip per
+    module carries that, with how many tests in it when more than one; the
+    full ids stay in the cell, one click away, so nothing the document
+    carries is lost -- the chips are the same list, grouped.
+    """
+
+    if not sources:
+        return ""
+    by_module: dict[str, list[str]] = {}
+    for source in sources:
+        module, _separator, test = source.partition(":")
+        by_module.setdefault(module or source, []).append(test or source)
+    chips: list[str] = []
+    for module, tests in by_module.items():
+        count = (
+            f' <span class="held-test-count">&times;{len(tests)}</span>'
+            if len(tests) > 1
+            else ""
+        )
+        # A module name breaks at its dots, never mid-word, and is never
+        # clipped: a chip that hid the end of the name would hide the one
+        # segment that tells two test modules apart.
+        module_html = _escape_html(module).replace(".", ".<wbr>")
+        chips.append(
+            f'<span class="held-test" title="{_escape_html(", ".join(tests))}">'
+            f"{module_html}{count}</span>"
+        )
+    items = "".join(
+        f"<li><code>{_escape_html(source)}</code></li>" for source in sources
+    )
+    return (
+        f'<details class="held-tests"><summary>{"".join(chips)}</summary>'
+        f'<ul class="held-tests-list">{items}</ul></details>'
+    )
+
 
 def _dead_row(
     item: Mapping[str, object], ctx: ReportContext
 ) -> tuple[str, str, str, str, str, str, str]:
-    test_reference_sources = ", ".join(
+    sources = [
         str(source) for source in _as_sequence(item.get("test_reference_sources"))
-    )
+    ]
     return (
         str(item.get("qualname", "")),
         str(item.get("relative_path", "")),
         str(item.get("start_line", "")),
         str(item.get("kind", "")),
         str(item.get("confidence", "")),
-        str(item.get("reason", "unreferenced")),
-        test_reference_sources,
+        _reason_label(str(item.get("reason", "unreferenced"))),
+        _held_by_tests_html(sources),
     )
 
 
@@ -86,6 +155,7 @@ def _active_dead_code_table(ctx: ReportContext, items_data: Sequence[object]) ->
             "An entry appears when a definition has no reference anywhere in "
             "the analysed set, so an empty list means every definition is used."
         ),
+        raw_html_headers=("Held by tests",),
         row_cut_note=row_cut_note_html(
             total=len(items_data),
             shown=len(shown),
@@ -147,6 +217,7 @@ def _suppressed_dead_code_table(
             "Entries land here when a suppression rule in your configuration "
             "excludes a candidate, so this fills only once a rule matches."
         ),
+        raw_html_headers=("Held by tests",),
         column_types={"Source": "source_kind"},
         row_cut_note=row_cut_note_html(
             total=len(suppressed_data),
@@ -155,6 +226,49 @@ def _suppressed_dead_code_table(
         ),
         ctx=ctx,
     )
+
+
+def _dead_code_answer(
+    *,
+    dead_total: int,
+    dead_high_conf: int,
+    dead_unreachable_total: int,
+    abstained: bool,
+) -> tuple[str, Tone]:
+    """The verdict in words; the breakdown is the cards' to draw.
+
+    The banner used to restate every card under it in prose -- five numbers
+    said twice on one screen. It now answers the question it asks and names
+    the one figure a reader acts on; abstentions are pointed at, not counted
+    again, because they are the analysis declining to claim a finding.
+    """
+
+    tone: Tone
+    if dead_high_conf > 0 or dead_unreachable_total > 0:
+        parts = [
+            f"Yes: {dead_high_conf} high-confidence "
+            f"{plural_word(dead_high_conf, 'candidate', 'candidates')}"
+        ]
+        if dead_unreachable_total > 0:
+            parts.append(
+                f"{dead_unreachable_total} unreachable statement "
+                f"{plural_word(dead_unreachable_total, 'region', 'regions')}"
+            )
+        answer = " and ".join(parts) + "."
+        tone = "risk"
+    elif dead_total > 0:
+        answer = (
+            f"{dead_total} lower-confidence "
+            f"{plural_word(dead_total, 'candidate', 'candidates')}; none "
+            "high-confidence."
+        )
+        tone = "warn"
+    else:
+        answer = "No dead-code candidates."
+        tone = "ok"
+    if abstained:
+        answer += f" {_ABSTENTIONS_NOTE}"
+    return answer, tone
 
 
 def render_dead_code_panel(ctx: ReportContext) -> str:
@@ -193,49 +307,37 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     if not ctx.metrics_available:
         answer, tone = METRICS_SKIPPED, "info"
     else:
-        answer = (
-            f"{dead_total} candidates total; "
-            f"{dead_high_conf} high-confidence items; "
-            f"{dead_unreachable_total} unreachable statement region(s); "
-            f"{dead_suppressed_total} suppressed."
+        answer, tone = _dead_code_answer(
+            dead_total=dead_total,
+            dead_high_conf=dead_high_conf,
+            dead_unreachable_total=dead_unreachable_total,
+            abstained=bool(dead_unresolved_total or dead_unresolved_reach_total),
         )
-        if dead_unresolved_total:
-            answer += (
-                f" {dead_unresolved_total} unresolved override(s) abstained:"
-                " neither dead nor live."
-            )
-        if dead_unresolved_reach_total:
-            answer += (
-                f" {dead_unresolved_reach_total} unresolved: externally reachable"
-                " with no internal evidence under the"
-                f" {dead_world_contract or 'declared'} world contract."
-            )
-        if dead_high_conf > 0 or dead_unreachable_total > 0:
-            tone = "risk"
-        elif dead_total > 0:
-            tone = "warn"
-        else:
-            tone = "ok"
 
     active_panel = _active_dead_code_table(ctx, items_data)
     suppressed_panel = _suppressed_dead_code_table(ctx, suppressed_data)
 
-    # Stat cards
-    pct = (dead_high_conf / max(1, dead_total)) * 100 if dead_total > 0 else 0
+    # Stat cards: every figure the summary publishes, each once. The largest
+    # number on this page -- the unresolved external-reach abstentions -- used
+    # to live only inside the banner's prose; the "hit rate" card that read
+    # 100 % whenever every candidate was high-confidence is gone, because
+    # "high of total" is what the Candidates caption already says.
+    world = dead_world_contract or "declared"
     dead_cards = [
         _stat_card(
             "Candidates",
             dead_total,
-            detail=_micro_badges(("active", dead_total)),
-            value_tone="warn" if dead_total > 0 else "good",
+            detail=_micro_badges(("high-confidence", dead_high_conf)),
+            value_tone=(
+                "bad" if dead_high_conf > 0 else ("warn" if dead_total > 0 else "good")
+            ),
             glossary_tip_fn=_TIP,
         ),
         _stat_card(
-            "High confidence",
-            dead_high_conf,
-            detail=_micro_badges(("of total", dead_total)),
-            value_tone="bad" if dead_high_conf > 0 else "good",
-            glossary_tip_fn=_TIP,
+            "Unreachable regions",
+            dead_unreachable_total,
+            tip=_TIP_UNREACHABLE,
+            value_tone="bad" if dead_unreachable_total > 0 else "good",
         ),
         _stat_card(
             "Suppressed",
@@ -248,16 +350,15 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Unresolved overrides",
             dead_unresolved_total,
-            detail=_micro_badges(("abstained", dead_unresolved_total)),
+            tip=_TIP_UNRESOLVED_OVERRIDES,
             value_tone="muted",
-            glossary_tip_fn=_TIP,
         ),
         _stat_card(
-            "Hit rate",
-            f"{pct:.0f}%",
-            detail=_micro_badges(("high vs total", "")),
-            value_tone="bad" if pct > 50 else "warn" if pct > 20 else "good",
-            glossary_tip_fn=_TIP,
+            "Unresolved external reach",
+            dead_unresolved_reach_total,
+            subtext=f"{world} world contract",
+            tip=_TIP_UNRESOLVED_REACH.format(world=world),
+            value_tone="muted",
         ),
     ]
     cards_html = f'<div class="stat-cards">{"".join(dead_cards)}</div>'

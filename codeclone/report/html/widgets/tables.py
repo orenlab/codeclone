@@ -47,7 +47,7 @@ _COL_WIDTHS: dict[str, str] = {
     "fields": "68px",
     "priority": "74px",
     "risk": "78px",
-    "confidence": "116px",
+    "confidence": "100px",
     "severity": "82px",
     "effort": "78px",
     "category": "100px",
@@ -61,7 +61,7 @@ _COL_WIDTHS: dict[str, str] = {
     "source": "136px",
     # Identity columns: wide enough for a qualname, bounded so one long value
     # cannot set the width of the table.
-    "name": "240px",
+    "name": "220px",
     "module": "240px",
     "function": "240px",
     "class": "240px",
@@ -70,7 +70,7 @@ _COL_WIDTHS: dict[str, str] = {
     "sink": "240px",
     "canonical owner": "220px",
     "contract": "170px",
-    "file": "190px",
+    "file": "170px",
     "location": "190px",
     "cycle": "300px",
     "longest chain": "300px",
@@ -80,10 +80,13 @@ _COL_WIDTHS: dict[str, str] = {
     "why": "190px",
     "producers": "170px",
     "propose": "110px",
-    "rule": "130px",
+    "rule": "120px",
     "pattern": "180px",
-    "reason": "130px",
-    "held by tests": "100px",
+    "reason": "110px",
+    # Wide enough for a test module chip per line: this column answers "what
+    # breaks if I delete this", and at a hundred pixels it answered in a
+    # fifteen-line wrap of dotted paths.
+    "held by tests": "220px",
     "capability": "150px",
     "evidence": "180px",
     "review": "170px",
@@ -251,6 +254,33 @@ def row_cut_note_html(
         )
     joined = " · ".join(part for part in parts if part)
     return f'<span class="table-meta-count">{_escape_html(joined)}</span>'
+
+
+def _identity_cell_html(qualname: str) -> str:
+    """Draw a ``module:symbol`` identity as the symbol over its module.
+
+    The identity column is the one a reader acts on -- it names what to
+    delete, split or move -- and it was the one column drawn as a single
+    nowrap line cut off with an ellipsis, so on this repository twenty-six
+    of thirty dead-code rows hid the end of the name they existed to show.
+    The symbol now leads on its own line and the module qualifies it under,
+    in the muted mono the rest of the report uses for paths; nothing is
+    elided, and a name without a module separator is drawn as it came.
+    """
+
+    module, separator, symbol = qualname.rpartition(":")
+    if not separator or not module:
+        return _escape_html(qualname)
+    return (
+        f'<span class="ident-symbol">{_escape_html(symbol)}</span>'
+        f'<span class="ident-module">{_escape_html(module)}</span>'
+    )
+
+
+def _breakable_path_html(path: str) -> str:
+    """Escape a path and let it break after each separator, never mid-word."""
+
+    return _escape_html(path).replace("/", "/<wbr>")
 
 
 def _column_values(rows: Sequence[Sequence[str]], index: int) -> list[str]:
@@ -517,7 +547,14 @@ def render_rows_table(
             return (
                 f'<td{cls_attr} title="{_escape_html(cell)}">'
                 f'<a class="ide-link" data-file="{_escape_html(cell)}" data-line="1">'
-                f"{_escape_html(short)}</a></td>"
+                f"{_breakable_path_html(short)}</a></td>"
+            )
+        if cls == "col-name":
+            # The full ``module:symbol`` stays on the cell: the two lines are
+            # how it is read, the attribute is how it is searched and copied.
+            return (
+                f'<td{cls_attr} title="{_escape_html(cell)}">'
+                f"{_identity_cell_html(cell)}</td>"
             )
         return f"<td{cls_attr}>{_escape_html(cell)}</td>"
 

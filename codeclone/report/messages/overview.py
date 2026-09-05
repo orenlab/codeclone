@@ -129,7 +129,7 @@ KPI_HIGH_COUPLING: Final = "High Coupling"
 KPI_LOW_COHESION: Final = "Low Cohesion"
 KPI_DEP_CYCLES: Final = "Dep. Cycles"
 KPI_DEAD_CODE: Final = "Dead Code"
-KPI_FINDINGS: Final = "Findings"
+KPI_FINDINGS: Final = "Structural findings"
 KPI_SUGGESTIONS: Final = "Suggestions"
 
 KPI_TIP_CLONE_GROUPS: Final = "Detected code clone groups by detection level"
@@ -147,26 +147,81 @@ CLUSTER_EXECUTIVE_SUMMARY: Final = "Executive Summary"
 CLUSTER_ISSUE_BREAKDOWN: Final = "Issue breakdown"
 CLUSTER_SOURCE_BREAKDOWN: Final = "Source breakdown"
 CLUSTER_HOTSPOTS_BY_DIRECTORY: Final = "Hotspots by Directory"
-CLUSTER_HOTSPOTS_BY_DIRECTORY_DESC: Final = (
-    "Directories with the highest concentration of findings by category."
-)
 CLUSTER_OVERLOADED_MODULES: Final = "Overloaded Modules"
 CLUSTER_OVERLOADED_TOP_CANDIDATES: Final = "Top candidates"
 CLUSTER_OVERLOADED_MORE_CANDIDATES: Final = "More candidates"
 CLUSTER_ANALYTICS: Final = "Analytics"
 CLUSTER_HEALTH_PROFILE: Final = "Health Profile"
-CLUSTER_HEALTH_PROFILE_DESC: Final = "Dimension scores across all quality axes."
-CLUSTER_HEALTH_PROFILE_LABEL: Final = "Health profile"
+# The card inside the cluster answers a different question from the cluster
+# title over it ("what are these numbers?"), so the two are not one label
+# spelled twice.
+CLUSTER_HEALTH_PROFILE_LABEL: Final = "Dimension scores"
 CLUSTER_RADAR_CAPTION: Final = "Higher values indicate better code health."
 CLUSTER_RADAR_CAPTION_SUFFIX: Final = " Red labels highlight dimensions below 60."
 
 EXECUTIVE_SCAN_SCOPE_DEFAULT: Final = (
     "Project-wide context derived from the full scanned root."
 )
-# The face of the report asks what a reader opens it to ask, in the same
-# slot every other panel uses for its question.
-EXECUTIVE_HEALTH_SNAPSHOT_QUESTION: Final = "How healthy is this repository right now?"
-EXECUTIVE_THRESHOLDS_PREFIX: Final = "Thresholds: "
+
+# --- The executive banner -------------------------------------------------
+# The face of the report asks what a reader opens a change controller's
+# report to ask: what is new against the accepted baseline. Health is drawn
+# by the ring beside the banner and every count by the cards under it; the
+# banner used to restate both, so the first screen said each number twice
+# and never said the one thing nothing else on it said.
+EXECUTIVE_QUESTION: Final = "What changed since the baseline?"
+#: The verdict wordings mirror the CLI's run outcome (``ui_messages.runtime``)
+#: so a reader meets one vocabulary on both surfaces. The report package does
+#: not import that module, so the words are spelled here for this page.
+BASELINE_NOTHING_NEW: Final = "Nothing new since the baseline."
+BASELINE_NEW_PREFIX: Final = "New since the baseline: "
+BASELINE_NOT_COMPARED: Final = "Not compared: {reason}."
+BASELINE_REASON_MISSING: Final = "no baseline yet"
+BASELINE_REASON_STATE: Final = "baseline {state}"
+BASELINE_FIRST_RUN_WHY: Final = (
+    "CodeClone reports what changed in your code's structure against an "
+    "accepted baseline; today's findings become known debt once you create one."
+)
+#: A clone group whose baseline lane was unavailable has no novelty verdict;
+#: the banner says how many, in words, instead of counting them as "nothing
+#: new". Said without the word "lane": three blind readers of the first
+#: draft read "baseline lane unavailable" under a "Baseline verified" pill as
+#: a contradiction they could not resolve.
+BASELINE_LANES_NOT_COMPARED: Final = (
+    "{count} clone {noun} could not be compared: no baseline verdict."
+)
+#: The commands that apply to each verdict, as the CLI offers them.
+BASELINE_ACTION_CREATE: Final = (
+    "Create the baseline:",
+    "codeclone . --update-baseline",
+)
+BASELINE_ACTION_BLOCK: Final = ("Block it in CI:", "codeclone . --fail-on-new")
+BASELINE_ACTION_ACCEPT: Final = (
+    "Accept as known debt:",
+    "codeclone . --update-baseline",
+)
+#: The families the banner names when they carry something new, in the order
+#: the KPI cards draw them, with the noun each count takes.
+BASELINE_NEW_FAMILIES: Final[tuple[tuple[str, str, str], ...]] = (
+    ("clones", "clone group", "clone groups"),
+    ("complexity", "high-complexity function", "high-complexity functions"),
+    ("coupling", "high-coupling class", "high-coupling classes"),
+    ("dead_code", "dead-code item", "dead-code items"),
+    ("dep_cycles", "dependency cycle", "dependency cycles"),
+)
+#: The clones-only run has no metric families to compare; the banner says so
+#: in the same breath as its verdict, in its own lower-case spelling. The
+#: five family panels state the shared ``METRICS_SKIPPED`` sentence, and a
+#: sixth site of that exact string would read as a sixth skipped family.
+EXECUTIVE_METRICS_SKIPPED: Final = "Metrics were skipped for this run."
+#: What a KPI card says under its number once the comparison found nothing
+#: new in that family. "baselined" named the mechanism; this names the fact.
+KPI_NOTHING_NEW: Final = "nothing new"
+#: The card's delta badge: the count and the word, so "+1" on a clone card is
+#: not read as the same kind of thing as "+3" on the health ring.
+KPI_NEW_BADGE: Final = "+{count} new"
+KPI_NOT_COMPARED: Final = "not compared"
+HEALTH_DELTA_SUFFIX: Final = " since baseline"
 
 ADOPTION_API_DISABLED: Final = "Disabled in this run."
 # The API card's absence sentence: the surface was measured, but the baseline
@@ -178,10 +233,6 @@ ADOPTION_API_DIFF_UNAVAILABLE: Final = (
 )
 
 ADOPTION_CLUSTER_TITLE: Final = "Adoption & API"
-ADOPTION_CLUSTER_DESC: Final = (
-    "Type/docstring adoption and public API surface are shown as facts, "
-    "not style pressure."
-)
 ADOPTION_COVERAGE_LABEL: Final = "Adoption coverage"
 ADOPTION_API_SURFACE_LABEL: Final = "Public API surface"
 ADOPTION_PARAM_ANNOTATIONS: Final = "Param annotations"
@@ -206,12 +257,17 @@ ADOPTION_STRICT_MODE_ENABLED: Final = "enabled"
 # and `count` and derives nothing: a tier that reports no count is drawn with
 # no count, never with a zero, because a zero here is a measurement and the
 # renderer has none to make.
+#
+# Each tier is one fact row: what it is, whether it ran, and -- when it did
+# not -- the flag that turns it on. That is what a reader of an empty state
+# asks; the two cards of three rows and two sentences this replaced answered
+# nothing a row does not.
 TIER_CLUSTER_TITLE: Final = "Advisory detection tiers"
 TIER_CLUSTER_DESC: Final = (
-    "Reported beside the clone lane, never inside it: these records reach no "
-    "baseline lane, carry no novelty verdict, and trip no gate. They are not "
-    "counted in the findings total above."
+    "Reported beside the clone lane: no baseline verdict, no gate, not "
+    "counted in the findings above."
 )
+TIER_CLUSTER_ITEM_LABEL: Final = "Opt-in detectors"
 # The tier containers this page draws, in the order it draws them. The
 # presentation ring cannot import the domain vocabulary that names them
 # (`codeclone.domain.findings` is r2, this module and the HTML sections are
@@ -225,20 +281,13 @@ TIER_LABELS: Final[dict[str, str]] = {
     "near_miss": "Near-miss pairs",
     "renamed_structure": "Renamed structure groups",
 }
-TIER_ROW_STATE: Final = "State"
-TIER_ROW_COUNT: Final = "Measured"
-TIER_ROW_REVISION: Final = "Algorithm revision"
-TIER_STATE_LABEL_DISABLED: Final = "disabled — never ran"
-TIER_STATE_LABEL_COMPLETE: Final = "complete — measured"
-# A tier that never ran has no measurement to draw, and a "0" beside it would
-# read as one. The absence is stated in words instead.
-TIER_COUNT_ABSENT: Final = "no measurement in this run"
-TIER_DISABLED_HINT: Final = (
-    "The producer was never invoked, so this tier has no count. The revision "
-    "shown is the algorithm the opt-in would run, not evidence that it ran."
-)
-TIER_COMPLETE_HINT: Final = (
-    "The producer ran to completion, so this count is a finished measurement. "
-    "A count of 0 here means it measured nothing, never that it did not "
-    "measure."
-)
+#: The flag that turns each tier on: the one thing a reader of a tier that
+#: did not run needs beside the fact that it did not run.
+TIER_ENABLE_FLAGS: Final[dict[str, str]] = {
+    "near_miss": "--near-miss",
+    "renamed_structure": "--renamed-structure",
+}
+TIER_STATE_LABEL_DISABLED: Final = "not run"
+TIER_STATE_LABEL_COMPLETE: Final = "measured"
+TIER_ENABLE_WITH: Final = "enable with"
+TIER_REVISION: Final = "algorithm r{revision}"

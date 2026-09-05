@@ -1547,7 +1547,11 @@ def test_session_stats_rich_no_live_agents() -> None:
     )
 
     text = _render_rich_snapshot(snapshot)
-    assert "0 live" in text
+    # A dead agent is no live agent: the workspace is quiet and says so in
+    # one verdict row instead of six rows of zeros.
+    assert "idle" in text
+    assert "registry" in text
+    assert "0 live" not in text
 
 
 # ── _latest_run_text with health and findings ──
@@ -2279,3 +2283,41 @@ def test_session_stats_still_counts_a_live_orphaned_row_as_recoverable(
     """The opposite boundary: not counting anything is the other error."""
 
     assert _recoverable_count(tmp_path, status="active") == 1
+
+
+def test_a_quiet_workspace_prints_four_rows() -> None:
+    """Idle, and every counter zero: the rule, the workspace, the run, the verdict.
+
+    Six rows of zeros said no more than the word "idle" beside them; the
+    registry rides the verdict row, and the audit row appears only when the
+    trail is configured, because it names a file.
+    """
+
+    text = _render_rich_snapshot(_snapshot(), width=80)
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert len(lines) == 4, lines
+    assert [line.split()[0] for line in lines[1:]] == ["Workspace", "Latest", "Health"]
+    assert "idle" in lines[3] and "registry" in lines[3]
+    assert "Registry" not in text and "Agents" not in text and "Intents" not in text
+
+
+def test_a_quiet_workspace_still_names_its_audit_trail() -> None:
+    snapshot = _snapshot_with_audit_and_run(
+        health=90, findings=2, age_seconds=30, files=None
+    )
+    text = _render_rich_snapshot(snapshot, width=80)
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert "audit.sqlite3" in text
+    assert [line.split()[0] for line in lines[1:]] == [
+        "Workspace",
+        "Latest",
+        "Audit",
+        "Health",
+    ]
+
+
+def test_a_stale_intent_gets_the_full_screen() -> None:
+    from dataclasses import replace
+
+    text = _render_rich_snapshot(replace(_snapshot(), stale_count=1), width=80)
+    assert "Intents" in text and "1 stale" in text

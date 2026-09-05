@@ -446,6 +446,10 @@ def _section_ctx(**overrides: object) -> SimpleNamespace:
         ),
         "relative_path": lambda filepath: filepath,
         "meta": {},
+        # ``ReportContext.baseline_status`` is the document's ``baseline.state``;
+        # the overview banner reads it to decide whether a novelty count is a
+        # comparison result or the absence of one.
+        "baseline_status": "missing",
         "baseline_meta": {},
         "cache_meta": {},
         "metrics_baseline_meta": {},
@@ -574,7 +578,7 @@ def test_html_badges_and_cards_cover_effort_and_tip_paths() -> None:
     )
     assert "meta-value--good" in card_html
     assert 'data-tip="Cyclomatic hotspots"' in card_html
-    assert "+2<" in card_html
+    assert "+2 new<" in card_html
 
     plain_card_html = _stat_card("Clone Groups", 2)
     assert "kpi-help" not in plain_card_html
@@ -607,6 +611,7 @@ def test_render_overview_panel_surfaces_baselined_and_partially_baselined_kpis()
     None
 ):
     ctx = _section_ctx(
+        baseline_status="trusted",
         metrics_diff=MetricsDiff(
             new_high_risk_functions=(),
             new_high_coupling_classes=("pkg.mod:Service",),
@@ -622,7 +627,7 @@ def test_render_overview_panel_surfaces_baselined_and_partially_baselined_kpis()
 
     panel_html = render_overview_panel(cast(Any, ctx))
     assert "kpi-micro--baselined" in panel_html
-    assert '<span class="kpi-micro-lbl">baselined</span>' in panel_html
+    assert '<span class="kpi-micro-lbl">nothing new</span>' in panel_html
     assert "health-ring-delta--up" in panel_html
 
 
@@ -631,16 +636,13 @@ def test_render_overview_panel_summarizes_metrics_without_health_score() -> None
 
     # "1 dependency cycles" now agrees with its own count; the rest of the
     # sentence is unchanged.
-    assert (
-        "4 clone groups; 4 dead-code items (0 suppressed); 1 dependency cycle."
-        in panel_html
-    )
+    assert "Not compared: no baseline yet." in panel_html
 
 
 def test_render_dead_code_panel_warns_when_only_medium_confidence_items_exist() -> None:
     panel_html = render_dead_code_panel(cast(Any, _section_ctx()))
-    assert "2 candidates total" not in panel_html
-    assert "4 candidates total" in panel_html
+    assert "4 lower-confidence candidates; none high-confidence." in panel_html
+    assert "insight-warn" in panel_html
     assert "No dead code detected." not in panel_html
 
 
@@ -663,7 +665,8 @@ def test_render_dead_code_panel_derives_high_confidence_count_from_items() -> No
 
     panel_html = render_dead_code_panel(cast(Any, ctx))
 
-    assert "1 high-confidence items" in panel_html
+    assert "Yes: 1 high-confidence candidate." in panel_html
+    assert '>1</span><span class="kpi-micro-lbl">high-confidence<' in panel_html
 
 
 def test_render_dead_code_panel_shows_test_reference_reason_and_source() -> None:
@@ -689,7 +692,7 @@ def test_render_dead_code_panel_shows_test_reference_reason_and_source() -> None
 
     panel_html = render_dead_code_panel(cast(Any, ctx))
 
-    assert "test_only_reference" in panel_html
+    assert "test-only reference" in panel_html
     assert "tests.test_mod:test_holds_production_symbol" in panel_html
 
 
@@ -1994,9 +1997,7 @@ def test_overview_asks_its_question_like_every_other_tab() -> None:
     rather than answering anything.
     """
 
-    from codeclone.report.messages.overview import (
-        EXECUTIVE_HEALTH_SNAPSHOT_QUESTION as question,
-    )
+    from codeclone.report.messages.overview import EXECUTIVE_QUESTION as question
 
     assert question.endswith("?"), question
     assert "snapshot" not in question.lower()
@@ -2005,21 +2006,34 @@ def test_overview_asks_its_question_like_every_other_tab() -> None:
 def test_overview_answer_agrees_with_its_own_counts() -> None:
     """One clone group is not "1 clone groups"."""
 
-    from codeclone.report.html.sections._overview import _overview_counts_sentence
+    from codeclone.report.html.sections._overview import _baseline_verdict
 
-    single = _overview_counts_sentence(
-        clone_groups=1, dead_total=1, dead_suppressed=0, dependency_cycles=1
+    cases = (
+        (
+            {"clones": 1, "dead_code": 1, "dep_cycles": 1},
+            0,
+            ("1 clone group,", "1 dead-code item,", "1 dependency cycle."),
+        ),
+        (
+            {"clones": 3, "dead_code": 2, "dep_cycles": 0},
+            2,
+            (
+                "3 clone groups,",
+                "2 dead-code items.",
+                "2 clone groups could not be compared",
+            ),
+        ),
     )
-    plural = _overview_counts_sentence(
-        clone_groups=3, dead_total=0, dead_suppressed=2, dependency_cycles=0
-    )
-
-    assert "1 clone group;" in single
-    assert "1 dead-code item " in single
-    assert "1 dependency cycle." in single
-    assert "3 clone groups;" in plural
-    assert "0 dead-code items " in plural
-    assert "0 dependency cycles." in plural
+    for new_by_family, not_compared, needles in cases:
+        sentence, _actions, _tone = _baseline_verdict(
+            baseline_status="trusted",
+            new_by_family=new_by_family,
+            clones_not_compared=not_compared,
+            metrics_available=True,
+        )
+        for needle in needles:
+            assert needle in sentence, (needle, sentence)
+        assert ("dependency cycle" in sentence) is bool(new_by_family["dep_cycles"])
 
 
 def test_inline_empty_can_explain_the_absence() -> None:

@@ -49,7 +49,11 @@ def _table_add_row(table: object, cells: Sequence[object]) -> None:
 
 
 def memory_console() -> PrinterLike:
-    return make_query_console()
+    # One grid for the whole command. The memory screens opened a second
+    # width of 120 because their tables "fold at 80"; a folded statement
+    # hangs under its column and reads, a screen wider than every other
+    # screen of the same program does not.
+    return make_query_console(width=ui.CLI_LAYOUT_MAX_WIDTH)
 
 
 def render_search_results(

@@ -190,47 +190,111 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     return int(ExitCode.SUCCESS)
 
 
+def _workspace_is_quiet(snapshot: _SessionSnapshot) -> bool:
+    """True when every counter the full screen would list is zero.
+
+    The domain's ``workspace_health`` says ``idle`` for "no live agent"; this
+    asks the narrower question the compact screen needs -- is there any
+    count at all worth a row of its own -- so a stale or recoverable intent
+    still gets the full screen while a truly empty workspace gets four lines.
+    """
+
+    return (
+        snapshot.workspace_health == "idle"
+        and not any(agent.alive for agent in snapshot.agents)
+        and _active_intent_count(snapshot) == 0
+        and _visible_intent_count(snapshot) == 0
+        and snapshot.stale_count == 0
+        and snapshot.expired_count == 0
+        and snapshot.recoverable_count == 0
+        and not (
+            snapshot.mcp_token_footprint is not None
+            and snapshot.mcp_token_event_count > 0
+        )
+    )
+
+
+def _audit_row(snapshot: _SessionSnapshot) -> tuple[str, str]:
+    """The audit row: enabled, and the file the trail is written to."""
+
+    return (
+        ui.SESSION_STATS_AUDIT_SHORT,
+        f"{ui.SESSION_STATS_AUDIT_ENABLED} ({ui.esc(snapshot.audit_storage)})",
+    )
+
+
+def _latest_run_rows(snapshot: _SessionSnapshot) -> list[tuple[str, str]]:
+    """The latest-run row, and the cache row when a report backs it."""
+
+    if not snapshot.latest_run_id:
+        return [
+            (
+                ui.SESSION_STATS_LATEST_RUN.rstrip(":"),
+                ui.SESSION_STATS_LATEST_RUN_NONE_VERBOSE,
+            )
+        ]
+    rows = [(ui.SESSION_STATS_LATEST_RUN.rstrip(":"), _latest_run_text(snapshot))]
+    if snapshot.cache_present and snapshot.latest_run_files is not None:
+        rows.append(
+            (
+                ui.SESSION_STATS_CACHE.rstrip(":"),
+                ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files),
+            )
+        )
+    return rows
+
+
 def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     box, _panel_cls, rule_cls, table_cls, text_cls = cli_console.rich_panel_symbols()
 
     console.print(
         rule_cls(ui.SESSION_STATS_TITLE, style=ui.STYLE_META, characters=ui.GLYPH_RULE)
     )
+    sep = f" {ui.GLYPH_SEP} "
+    registry = (
+        f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})"
+    )
+    workspace_row = (
+        ui.SESSION_STATS_WORKSPACE.rstrip(":"),
+        ui.esc(str(snapshot.root)),
+    )
+    health_word = ui.styled(
+        snapshot.workspace_health, _health_style(snapshot.workspace_health)
+    )
+    if _workspace_is_quiet(snapshot):
+        # Nothing is happening: the workspace, what the last run said, and one
+        # verdict row carrying the zeros and where a session would register.
+        # Six rows of zeros said no more than the word "idle" beside them.
+        quiet_rows = [workspace_row, *_latest_run_rows(snapshot)]
+        if snapshot.audit_enabled and snapshot.audit_storage:
+            # Opt-in, and it names a file: a row of its own, as on the full
+            # screen, so the verdict row stays one line at the grid width.
+            quiet_rows.append(_audit_row(snapshot))
+        quiet_rows.append(
+            (
+                ui.SESSION_STATS_HEALTH_SHORT,
+                sep.join(
+                    (
+                        health_word,
+                        ui.SESSION_STATS_REGISTRY_INLINE.format(
+                            backend=snapshot.intent_registry_backend,
+                            storage=ui.esc(snapshot.intent_registry_storage),
+                        ),
+                    )
+                ),
+            )
+        )
+        for label, value in quiet_rows:
+            console.print(f"  {label:<{_L}}{value}")
+        return int(ExitCode.SUCCESS)
+
     rows: list[tuple[str, str]] = [
-        (ui.SESSION_STATS_WORKSPACE.rstrip(":"), ui.esc(str(snapshot.root))),
-        (
-            ui.SESSION_STATS_REGISTRY,
-            f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})",
-        ),
+        workspace_row,
+        (ui.SESSION_STATS_REGISTRY, ui.esc(registry)),
     ]
     if snapshot.audit_enabled and snapshot.audit_storage:
-        rows.append(
-            (
-                ui.SESSION_STATS_AUDIT_SHORT,
-                f"{ui.SESSION_STATS_AUDIT_ENABLED} ({ui.esc(snapshot.audit_storage)})",
-            )
-        )
-    if snapshot.latest_run_id:
-        rows.append(
-            (ui.SESSION_STATS_LATEST_RUN.rstrip(":"), _latest_run_text(snapshot))
-        )
-        if snapshot.cache_present and snapshot.latest_run_files is not None:
-            rows.append(
-                (
-                    ui.SESSION_STATS_CACHE.rstrip(":"),
-                    ui.SESSION_STATS_REPORT_PRESENT.format(
-                        files=snapshot.latest_run_files
-                    ),
-                )
-            )
-    else:
-        rows.append(
-            (
-                ui.SESSION_STATS_LATEST_RUN.rstrip(":"),
-                ui.SESSION_STATS_LATEST_RUN_NONE_VERBOSE,
-            )
-        )
-    sep = f" {ui.GLYPH_SEP} "
+        rows.append(_audit_row(snapshot))
+    rows.extend(_latest_run_rows(snapshot))
     rows.append(
         (
             ui.SESSION_STATS_AGENTS,
@@ -264,14 +328,7 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
                 f"({enc}, {snapshot.mcp_token_event_count} tool calls)",
             )
         )
-    rows.append(
-        (
-            ui.SESSION_STATS_HEALTH_SHORT,
-            ui.styled(
-                snapshot.workspace_health, _health_style(snapshot.workspace_health)
-            ),
-        )
-    )
+    rows.append((ui.SESSION_STATS_HEALTH_SHORT, health_word))
     for label, value in rows:
         console.print(f"  {label:<{_L}}{value}")
 
