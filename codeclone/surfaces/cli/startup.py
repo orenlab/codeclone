@@ -90,10 +90,14 @@ def load_pyproject_config_or_exit(
     try:
         return load_pyproject_config_fn(root_path)
     except ConfigValidationError as exc:
-        # The diagnosis quotes the user's configuration back at them, and a
-        # validator's ``[type=value_error, ...]`` is exactly what a console
-        # reads as a style tag and drops.
-        exit_contract_error(ui.esc(str(exc)), printer=printer, cause=exc)
+        # Through the diagnosed renderer, which is the only thing that carries
+        # ``remediation`` onto the terminal: this path used to render
+        # ``str(exc)`` alone, so a refusal that had a procedure printed as one
+        # that did not. The renderer also escapes -- the diagnosis quotes the
+        # user's configuration back at them, and ``[tool.codeclone]`` is
+        # exactly what a console reads as a style tag and drops.
+        printer.print(ui.fmt_diagnosed_user_error(exc))
+        raise SystemExit(ExitCode.CONTRACT_ERROR) from exc
 
 
 def configure_runtime_flags(args: CLIArgsLike) -> None:

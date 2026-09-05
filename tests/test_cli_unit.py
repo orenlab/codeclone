@@ -4017,3 +4017,52 @@ def test_config_validation_payload_survives_the_error_banner() -> None:
             printer=cast(Any, console),
         )
     assert "[type=value_error, input_value='nope']" in capture.get()
+
+
+def test_an_invalid_scope_id_reaches_the_terminal_with_its_step(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The reader's half of the scope-id diagnosis, on the reader's terminal.
+
+    ``tests/test_config_scope_id_diagnosis`` holds what the config owner
+    produces; this holds that the CLI surface carries it. The surface used to
+    render ``str(exc)`` alone, so a refusal that had a procedure printed as
+    one that did not -- and a validator's own frame, ``FoundationConfigInput``
+    and a link to its documentation, stood where the contract's reason
+    belonged. The two halves are separately breakable, so they are separately
+    pinned; they live apart because the phase-39S ratchet is shrink-only and
+    this module already carries the ``r4 -> r2`` edge the pin needs.
+    """
+
+    from codeclone.config.pyproject_loader import load_pyproject_config
+    from codeclone.surfaces.cli.startup import load_pyproject_config_or_exit
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "fixture"\nversion = "0.0.0"\n'
+        '\n[tool.codeclone]\nbaseline_scope_id = "not-a-uuid"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        load_pyproject_config_or_exit(
+            root_path=tmp_path,
+            load_pyproject_config_fn=load_pyproject_config,
+            printer=cli_console.PlainConsole(),
+        )
+
+    assert raised.value.code == 2
+    out = ui.strip_markup(capsys.readouterr().out)
+    assert "CONTRACT ERROR" in out
+    assert "Next steps:" in out
+    # The one message whose job is to name the table may not lose it.
+    assert "[tool.codeclone]" in out
+    assert "canonical UUID" in out
+    for fragment in (
+        "errors.pydantic.dev",
+        "[type=value_error",
+        "input_value=",
+        "validation error for",
+        "FoundationConfigInput",
+    ):
+        assert fragment not in out, fragment

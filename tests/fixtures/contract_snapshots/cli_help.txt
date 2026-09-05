@@ -1,5 +1,5 @@
   o
- /|\  Deterministic structural change control.  CodeClone · Structural Change Controller
+ /|\  Deterministic structural change control.  CodeClone · structural change control for Python
 o o o
 Run `codeclone --help --interactive-help` for a guided product tour.
 

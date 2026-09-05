@@ -10,6 +10,7 @@ import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
+from uuid import uuid4
 
 from ..contracts.errors import DiagnosedUserError
 from ..findings.clones.golden_fixtures import (
@@ -152,7 +153,7 @@ def load_pyproject_config(
         path_config_keys=path_config_keys,
     )
 
-    _apply_foundation_config_boundary(validated)
+    _apply_foundation_config_boundary(validated, config_path=config_path)
 
     memory_obj = codeclone_table.get(MEMORY_NESTED_TABLE_KEY)
     if memory_obj is not None:
@@ -177,7 +178,73 @@ def load_pyproject_config(
     return validated
 
 
-def _apply_foundation_config_boundary(validated: dict[str, object]) -> None:
+#: The contract's own reason for refusing a ``baseline_scope_id``, in this
+#: project's words. Framing the validator's output instead published its
+#: model class name, its ``[type=..., input_value=...]`` tail and a link to a
+#: validation library's documentation as the body of a typed refusal --
+#: measured 2026-09-05 on a real invocation, with no step to take.
+_ERR_INVALID_SCOPE_ID = (
+    "Invalid baseline_scope_id under [tool.codeclone]: {value!r} is not a "
+    "canonical UUID. The key is the discriminator that keeps this project's "
+    "baseline from being read as another project's, so it must be exactly "
+    "one canonical UUID."
+)
+_STEP_INVALID_SCOPE_ID_REPLACE = (
+    "Replace the key in {path} under [tool.codeclone] with:"
+)
+_STEP_INVALID_SCOPE_ID_LINE = 'baseline_scope_id = "{scope_id}"'
+_STEP_INVALID_SCOPE_ID_FOOTER = (
+    "That UUID was generated for this run. Commit it and never change it."
+)
+
+
+def _rejected_foundation_fields(exc: ValueError) -> frozenset[str]:
+    """Which foundation keys the boundary model refused, by name.
+
+    Reads the validator's structured result and nothing else from it: the
+    routing is a fact, the prose is this module's. Duck-typed rather than
+    imported so the config layer keeps its dependency surface, and empty
+    whenever the shape is not the one pydantic documents -- a refusal that
+    cannot be attributed falls back to the generic message rather than
+    guessing a key to blame.
+    """
+
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return frozenset()
+    try:
+        rows = errors()
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return frozenset()
+    return frozenset(
+        str(row["loc"][0]) for row in rows if isinstance(row, dict) and row.get("loc")
+    )
+
+
+def _invalid_scope_id_error(
+    *, value: object, config_path: Path
+) -> ConfigValidationError:
+    """State the contract's reason and hand over the line that fixes it.
+
+    ``uuid4`` and never a name-derived id, for the same reason the sibling
+    missing-key refusal spells out: a deterministic suggestion would hand two
+    checkouts one ``baseline_scope_id`` and reproduce the very confusion the
+    key exists to prevent.
+    """
+
+    return ConfigValidationError(
+        _ERR_INVALID_SCOPE_ID.format(value=value),
+        remediation=(
+            _STEP_INVALID_SCOPE_ID_REPLACE.format(path=config_path),
+            _STEP_INVALID_SCOPE_ID_LINE.format(scope_id=uuid4()),
+            _STEP_INVALID_SCOPE_ID_FOOTER,
+        ),
+    )
+
+
+def _apply_foundation_config_boundary(
+    validated: dict[str, object], *, config_path: Path
+) -> None:
     foundation_keys = ("source_roots", "baseline_scope_id", "project_label")
     foundation_payload = {
         key: validated[key] for key in foundation_keys if key in validated
@@ -185,6 +252,14 @@ def _apply_foundation_config_boundary(validated: dict[str, object]) -> None:
     try:
         boundary = FoundationConfigInput.model_validate(foundation_payload)
     except ValueError as exc:
+        # Only the key this refusal has a procedure for is re-framed. Widening
+        # it would print the scope-id steps under a ``source_roots`` failure,
+        # and a wrong instruction is worse than a generic one.
+        if _rejected_foundation_fields(exc) == frozenset({"baseline_scope_id"}):
+            raise _invalid_scope_id_error(
+                value=foundation_payload.get("baseline_scope_id"),
+                config_path=config_path,
+            ) from exc
         raise ConfigValidationError(
             f"Invalid value for tool.codeclone foundation configuration: {exc}"
         ) from exc

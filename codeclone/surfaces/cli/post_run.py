@@ -12,6 +12,8 @@ from pathlib import Path
 
 from ... import ui_messages as ui
 from ...api.comparison import build_comparison_context
+from ...contracts import ExitCode
+from ...contracts.errors import ContractInvariantError
 from ...core._types import AnalysisResult
 from ...models import MetricsDiff, TrustVector
 from .baseline_state import (
@@ -222,6 +224,7 @@ def print_run_outcome(
     api_surface_enabled: bool,
     api_surface_diff_available: bool,
     files_found: int,
+    gate_exit_code: int,
 ) -> None:
     """Close the run with its verdict and the commands that apply to it.
 
@@ -229,7 +232,21 @@ def print_run_outcome(
     exits 0. The block composes facts the run already established -- the
     baseline state, the new-clone count, whether a report was written -- and
     adds nothing to them.
+
+    That first sentence used to be prose, and the ``gate_passed`` branch spent
+    it: ``gating_enabled`` alone chose a line reading "Gate passed ... exit 0",
+    so a call after a refusal would have printed a pass over a failing run and
+    nothing in the process could have said otherwise. The gate's own verdict
+    travels here now and the block refuses instead of guessing -- a refusal
+    reaching this point is a CodeClone defect, never a user's configuration,
+    which is why it is raised rather than rendered.
     """
+
+    if gate_exit_code != int(ExitCode.SUCCESS):
+        raise ContractInvariantError(
+            "print_run_outcome closes a run that exits 0; "
+            f"the gate refused with exit {gate_exit_code}."
+        )
 
     if files_found == 0:
         kind: ui.RunOutcomeKind = "empty_scope"

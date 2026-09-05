@@ -825,6 +825,7 @@ def _main_impl() -> None:
             api_surface_enabled=api_surface_collection_enabled(args),
             api_surface_diff_available=diff_context.api_surface_diff_available,
             files_found=discovery_result.files_found,
+            gate_exit_code=gate_result.exit_code,
         )
     maybe_print_dead_code_reachability_migration_note(
         args=args,

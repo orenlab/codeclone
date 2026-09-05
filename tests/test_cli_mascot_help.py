@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from codeclone import ui_messages
 from codeclone.config.argparse_builder import build_parser
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli import workflow as cli_workflow
@@ -77,7 +78,7 @@ def _run_animated_rich_step(
 def test_static_help_mascot_lines_include_product_tagline() -> None:
     lines = static_help_mascot_lines(use_unicode=True)
     assert any("●" in line for line in lines)
-    assert any("Structural Change Controller" in line for line in lines)
+    assert any(ui_messages.BANNER_SUBTITLE in line for line in lines)
     assert lines[-1].startswith("Run `codeclone --help --interactive-help`")
 
 
@@ -94,7 +95,7 @@ def test_build_parser_print_help_prepends_mascot() -> None:
     buffer = io.StringIO()
     parser.print_help(file=buffer)
     text = buffer.getvalue()
-    assert "Structural Change Controller" in text
+    assert ui_messages.BANNER_SUBTITLE in text
     assert "--interactive-help" in text
     assert "usage: codeclone" in text
     assert "\x1b[" not in text
@@ -202,7 +203,7 @@ def test_cli_module_help_includes_mascot(
         cli_workflow.main()
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "Structural Change Controller" in out
+    assert ui_messages.BANNER_SUBTITLE in out
     assert "\x1b[" not in out
 
 
@@ -263,7 +264,7 @@ def test_aster_plain_lines_short_middle_row_uses_body_only() -> None:
         frame_lines=("top", "x", "bottom"),
         use_unicode=False,
     ).plain_lines()
-    assert any("Structural Change Controller" in line for line in lines)
+    assert any(ui_messages.BANNER_SUBTITLE in line for line in lines)
 
 
 def test_help_tour_rich_console_or_none_returns_none_for_non_rich_printer() -> None:
@@ -585,3 +586,43 @@ def test_mascot_animation_none_resolves_to_no_frames() -> None:
         )
         is not None
     )
+
+
+# ---------------------------------------------------------------------------
+# One owner for the product's one-line self-description
+# ---------------------------------------------------------------------------
+#
+# ``BANNER_SUBTITLE`` declares itself "one line, on every screen, that says
+# what the product does for the reader", and ``--help`` is a screen. It was
+# not reading it: the help mascot carried its own literal, so when the owner
+# moved -- ce5418cf, after a blind reading filed the previous wording as a
+# linter -- the help screen stayed behind and the two first screens a user
+# sees began naming the product differently. A second copy drifts again; the
+# pins below are what make that impossible rather than merely repaired.
+
+
+def test_the_help_screen_names_the_product_as_the_run_banner_does() -> None:
+    """The two first screens carry one self-description, not two."""
+
+    help_text = "\n".join(static_help_mascot_lines(use_unicode=True))
+    banner = ui_messages.strip_markup(ui_messages.banner_title("9.9.9"))
+
+    assert ui_messages.BANNER_SUBTITLE in banner
+    assert ui_messages.BANNER_SUBTITLE in help_text
+
+
+def test_the_help_screen_reads_the_subtitle_rather_than_repeating_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Derivation, not coincidence: move the owner and the help line moves.
+
+    Two literals that happen to agree today satisfy the pin above and drift
+    tomorrow, which is exactly what happened. Reverting the help line to a
+    literal turns this red while the agreement test stays green.
+    """
+
+    monkeypatch.setattr(ui_messages, "BANNER_SUBTITLE", "a wholly different claim")
+
+    help_text = "\n".join(static_help_mascot_lines(use_unicode=True))
+
+    assert "a wholly different claim" in help_text

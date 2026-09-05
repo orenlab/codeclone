@@ -13,6 +13,7 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .... import ui_messages as ui
 from .mascot_frames import AsterFrame, AsterState, frame_for_state
 
 if TYPE_CHECKING:
@@ -28,6 +29,20 @@ def mascot_use_unicode(*, no_color: bool = False) -> bool:
     except (LookupError, UnicodeEncodeError):
         return False
     return True
+
+
+def product_identity() -> str:
+    """The product's name and what it does, in the owner's words.
+
+    ``BANNER_SUBTITLE`` declares itself the one line on every screen that
+    says what the product does, and ``--help`` is a screen. This module used
+    to carry its own literal instead, so the two first screens a user meets
+    described the product differently the moment the owner moved -- which it
+    did, after a blind reading filed the earlier wording as a linter. Read,
+    never restated: a second copy agrees today and drifts on the next move.
+    """
+
+    return f"CodeClone {ui.GLYPH_SEP} {ui.BANNER_SUBTITLE}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +73,7 @@ class Aster:
     def plain_lines(self) -> tuple[str, ...]:
         frame = self.resolved_frame()
         lines = self._display_lines(frame.lines)
-        body = f"{frame.message}  CodeClone · Structural Change Controller"
+        body = f"{frame.message}  {product_identity()}"
         if len(lines) >= 2:
             middle = lines[1]
             padded = f"{middle}  {body}" if len(middle) < 24 else body
