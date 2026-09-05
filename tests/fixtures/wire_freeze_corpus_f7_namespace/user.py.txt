@@ -1,0 +1,13 @@
+"""Imports the namespace package itself.
+
+``metrics.dependencies._is_internal_target`` admits the target because it
+is a ``package_prefixes`` node, so the producer emits the edge; the module
+registry has no file-bearing entry for ``nsp`` because a namespace package
+owns no ``__init__.py``.
+"""
+
+from nsp import leaf
+
+
+def use_leaf() -> int:
+    return leaf.leaf_value()

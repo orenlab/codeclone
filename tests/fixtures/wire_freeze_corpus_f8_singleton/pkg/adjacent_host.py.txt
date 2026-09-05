@@ -1,0 +1,29 @@
+"""A six-statement run repeated back-to-back: period == window size.
+
+The two windows that carry one segment hash are ADJACENT (the second starts
+on the line after the first ends), so ``merge_overlapping_items`` folds them
+into one span too -- adjacency and overlap are separate merge branches, and
+a stage carrying only one of them would leave the other unproven.
+"""
+
+
+def adjacent_host(base: int) -> int:
+    seed = base * 2
+    limit = seed + 3
+    scale = limit - 1
+    step = scale + 4
+    acc = step + 1
+    if acc > 0:
+        acc = acc - 1
+    values = [acc]
+    values.append(acc + 2)
+    total = sum(values)
+    label = str(total)
+    acc = step + 1
+    if acc > 0:
+        acc = acc - 1
+    values = [acc]
+    values.append(acc + 2)
+    total = sum(values)
+    label = str(total)
+    return len(label)

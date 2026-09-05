@@ -1,0 +1,4 @@
+[tool.codeclone]
+# The full-run ingest oracle refuses a document whose ``source_facts.semantic``
+# is null, so every stage meant to be ingested whole carries the switch.
+semantic_authority = true

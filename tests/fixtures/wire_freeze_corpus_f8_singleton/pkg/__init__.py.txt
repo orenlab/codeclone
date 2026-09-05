@@ -1,0 +1,1 @@
+"""Two segment hosts whose repeated run is no longer than the sliding window."""

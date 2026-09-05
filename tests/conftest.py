@@ -80,6 +80,33 @@ _WIRE_FREEZE_CORPUS_F7 = Path(__file__).parent / "fixtures" / "wire_freeze_corpu
 # containers at once.
 _WIRE_FREEZE_CORPUS_F8 = Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f8"
 
+# The F8-singleton distinguishing stage (its own tree, its own CLI run).
+# Measured 2026-09-05 on 21 frozen external repositories: the segment lane
+# emits clone groups carrying exactly ONE item -- 378 of them, across 17 of
+# the 21 members -- and ``CloneGroupRow`` refuses a group of one, so those
+# documents cannot be ingested at all.  No fixture in this suite had ever
+# carried the shape: the base corpus pins segment groups at zero and this
+# repository emits no clones family whatsoever, so the segment path was
+# never proven on data.  The stage carries BOTH merge branches that produce
+# the shape -- overlapping windows and adjacent windows -- because
+# ``merge_overlapping_items`` reaches them through different comparisons and
+# a stage carrying one would leave the other unproven.
+_WIRE_FREEZE_CORPUS_F8_SINGLETON = (
+    Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f8_singleton"
+)
+
+# The F7-namespace distinguishing stage (its own tree, its own CLI run).
+# Measured 2026-09-05: the dependency lane emits an edge whose endpoint is a
+# NAMESPACE PACKAGE -- ``packaging`` in kivy, ``pyglet.experimental`` in
+# pyglet -- which ``metrics.dependencies._is_internal_target`` admits as
+# internal precisely because it is a ``package_prefixes`` node, while
+# ``build_identity_index`` is assembled from file-bearing ``(path, module)``
+# pairs alone and so cannot resolve it.  ``nsp/`` carries no ``__init__.py``:
+# that absence is the whole point of the stage, and adding one erases it.
+_WIRE_FREEZE_CORPUS_F7_NAMESPACE = (
+    Path(__file__).parent / "fixtures" / "wire_freeze_corpus_f7_namespace"
+)
+
 # The post-baseline stage: materialized only after the baseline is written,
 # so its clone pair is the corpus's one genuinely NEW novelty row.
 _WIRE_FREEZE_POST_BASELINE = "pkg/clones_three.py"
@@ -214,6 +241,42 @@ def corpus_f5_report(
     root = tmp_path_factory.mktemp("wire_freeze_corpus_f5")
     report_path = root / "corpus.report.json"
     _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F5, root)
+    _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
+    return _corpus_document(report_path)
+
+
+@pytest.fixture(scope="session")
+def corpus_f8_singleton_report(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, object]:
+    """One single-stage F8-singleton corpus run (no baseline: the segment
+    lane is an analysis-tier fact of the current run).
+
+    The stage exists to carry the one clone-group shape the ingest oracle
+    refuses, so that the refusal is measured on a document this project's
+    own CLI produced rather than on an external checkout.
+    """
+    root = tmp_path_factory.mktemp("wire_freeze_corpus_f8_singleton")
+    report_path = root / "corpus.report.json"
+    _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F8_SINGLETON, root)
+    _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
+    return _corpus_document(report_path)
+
+
+@pytest.fixture(scope="session")
+def corpus_f7_namespace_report(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, object]:
+    """One single-stage F7-namespace corpus run (no baseline: the dependency
+    lane is an analysis-tier fact of the current run).
+
+    ``_materialize_corpus_tree`` copies ``*.txt`` carriers only, so the
+    namespace package stays a directory without ``__init__.py`` -- the
+    condition the stage measures.
+    """
+    root = tmp_path_factory.mktemp("wire_freeze_corpus_f7_namespace")
+    report_path = root / "corpus.report.json"
+    _materialize_corpus_tree(_WIRE_FREEZE_CORPUS_F7_NAMESPACE, root)
     _run_corpus_cli([str(root), "--json", str(report_path), "--no-progress"])
     return _corpus_document(report_path)
 

@@ -1,0 +1,28 @@
+"""A three-statement run repeated three times: period < window size.
+
+The two windows that carry one segment hash OVERLAP (the second starts
+inside the first), so ``merge_overlapping_items`` folds them into one span
+and the emitted group reaches the document carrying a single item.
+"""
+
+
+def overlap_host(base: int) -> int:
+    seed = [base, base]
+    limit = len(seed) + 3
+    scale = max(limit, 1)
+    values = list(seed)
+    count = len(values)
+    width = count * 2
+    acc = scale + 1
+    if acc > 0:
+        acc = acc - 1
+    values.append(acc)
+    acc = scale + 1
+    if acc > 0:
+        acc = acc - 1
+    values.append(acc)
+    acc = scale + 1
+    if acc > 0:
+        acc = acc - 1
+    values.append(acc)
+    return len(values) + count + width

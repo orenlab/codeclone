@@ -1,0 +1,5 @@
+"""A module inside a namespace package: ``nsp/`` carries no ``__init__``."""
+
+
+def leaf_value() -> int:
+    return 1
