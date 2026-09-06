@@ -865,6 +865,56 @@ def _statement_length_warnings(
     return ()
 
 
+_UNEVIDENCED_ATTESTATION_WARN_CODE: Final = "memory_statement_unevidenced_attestation"
+
+# The attestation idiom this project actually writes measurements in: an
+# all-caps token anywhere, or a capitalised one opening a line or a sentence.
+# Lower-case mid-sentence use is prose about the word ("the thing measured",
+# 'prints `measured <name>`') and stays silent. Measured over the live store's
+# 63 drafts: 37 attest in this position with no false positive, while a bare
+# case-insensitive token would also have fired on 2 notes asserting no
+# measurement of their own. The rule is deliberately conservative -- it is an
+# advisory, and one that cries wolf gets trained away. Its cost is recall: 3
+# of those 63 state a real measurement in lower-case mid-sentence and stay
+# silent here.
+_ATTESTATION_RE: Final = re.compile(
+    r"\bMEASURED\b|\b\u0417\u0410\u041c\u0415\u0420\u0415\u041d\u041e\b"
+    r"|(?:^|(?<=[.!?]\s))(?:Measured|\u0417\u0430\u043c\u0435\u0440\u0435\u043d\u043e)\b",
+    re.MULTILINE,
+)
+
+_UNEVIDENCED_ATTESTATION_HINT: Final = (
+    f"{_UNEVIDENCED_ATTESTATION_WARN_CODE}: this statement attests a "
+    "measurement, but record_candidate "
+    "attaches no evidence row, so the note lands confidence=inferred with "
+    "evidence_count=0 and no reader can reach what was measured. "
+    "next_step: record the measured change through "
+    "finish_controlled_change(propose_memory=true), which attaches receipt, "
+    "patch-trail and commit evidence to the draft; or, if the claim is an "
+    "inference, state it without the attestation."
+)
+
+
+def _unevidenced_attestation_warning(statement: str) -> str | None:
+    """Warn when a statement attests a measurement this path cannot evidence.
+
+    ``record_candidate`` writes the record and its subjects and nothing else:
+    no ``memory_evidence`` row exists for it, and no later transition adds
+    one. Measured on the live store, 61 of 63 drafts carry
+    ``evidence_count == 0``; the two that do not came from
+    ``finish(propose_memory=true)``, which attaches its attested identifiers
+    through ``_attach_attested_evidence``. So a body that says MEASURED and
+    metadata that says inferred-with-nothing-attached disagree, and until now
+    they disagreed silently. Confidence itself is not the lever: it is
+    origin-derived (every agent record in the store is ``inferred``, every
+    system record is not) and no code path can raise it, so the honest signal
+    is the missing evidence, not a rung.
+    """
+    if _ATTESTATION_RE.search(statement) is None:
+        return None
+    return _UNEVIDENCED_ATTESTATION_HINT
+
+
 def statement_markdown_warnings(
     statement: str,
     *,
@@ -873,17 +923,20 @@ def statement_markdown_warnings(
     """Advisory statement-shape warnings for a candidate statement.
 
     Governance owns statement hygiene; surfaces call this instead of
-    reaching into the markdown validator directly. Two lanes ride it: the
-    markdown-subset discipline rules, and the structure hint that carries
-    the md-v1 shape to a writer who never called help. The hint is
-    conditional by construction, so the constant size of a record_candidate
-    response is unchanged.
+    reaching into the markdown validator directly. Three lanes ride it: the
+    markdown-subset discipline rules, the structure hint that carries the
+    md-v1 shape to a writer who never called help, and the unevidenced
+    attestation notice. Each is conditional by construction, so the constant
+    size of a record_candidate response is unchanged.
     """
     stripped = statement.strip()
     warnings = list(validate_statement_markdown(stripped).warnings)
     issue = statement_structure_issue(stripped, target_limit=target_limit)
     if issue is not None:
         warnings.append(issue.message)
+    attestation = _unevidenced_attestation_warning(stripped)
+    if attestation is not None:
+        warnings.append(attestation)
     return tuple(warnings)
 
 

@@ -788,6 +788,36 @@ def test_mcp_record_candidate_surfaces_markdown_warnings(tmp_path: Path) -> None
         assert any("memory_md_heading_level" in item for item in warnings)
 
 
+def test_mcp_record_candidate_surfaces_the_unevidenced_attestation(
+    tmp_path: Path,
+) -> None:
+    """Probe validity: prove the warning reaches the writer's own response.
+
+    A rule that fires only inside the pure aggregator is a rule no agent ever
+    reads. This crosses the real MCP seam -- the same call an agent makes --
+    and asserts the advisory arrives in ``warnings`` beside the draft it
+    describes.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        recorded = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="record_candidate",
+            record_type="risk_note",
+            statement=(
+                "## Worktree analyze ran the main checkout engine\n"
+                "MEASURED 09-06: `code_provenance.source_root` named the main "
+                "checkout while the analysed root was the worktree."
+            ),
+            subject_path="pkg/mod.py",
+        )
+        assert recorded["status"] == "draft"
+        warnings = cast("list[str]", recorded.get("warnings", []))
+        assert any(
+            "memory_statement_unevidenced_attestation" in item for item in warnings
+        ), f"attestation advisory never reached the MCP response: {warnings}"
+
+
 def test_mcp_propose_from_receipt_warns_on_batch_mean(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

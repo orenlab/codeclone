@@ -1085,3 +1085,77 @@ def test_only_the_backtick_fence_shields_its_body() -> None:
             f"{form} now accepts a tag in its body, so the contract's claim "
             "that only the backtick fence body is shielded is false"
         )
+
+
+# Both fixtures are verbatim shapes measured on the live draft population
+# (63 drafts, 2026-09-06): 37 carry an attestation token in attestation
+# position, and the two below are the only prose uses of the bare word.
+_ATTESTING_NOTE = (
+    "## MCP analyze on a worktree runs the main checkout's engine\n"
+    "MEASURED 09-06: `code_provenance.source_root` named the main checkout "
+    "while the analysed root was the worktree."
+)
+_PROSE_MEASURED_NOTE = (
+    "## Bench log prints a success word for members that failed\n"
+    "`_measure` prints `measured <name>` after the call returns, so a member "
+    "that raised is still announced as done."
+)
+
+
+def test_attesting_statement_is_told_its_note_lands_unevidenced() -> None:
+    """A note that attests a measurement cannot be checked on this path.
+
+    ``record_candidate`` writes no ``memory_evidence`` row -- measured on the
+    live store, 61 of 63 drafts carry ``evidence_count == 0``, and the two
+    that do not were written by ``finish(propose_memory=true)``. So a
+    statement that says MEASURED lands with nothing a reader can follow. The
+    contradiction has to be said out loud at the moment the writer can still
+    act on it.
+    """
+    from codeclone.memory.governance import statement_markdown_warnings
+
+    hits = [
+        item
+        for item in statement_markdown_warnings(_ATTESTING_NOTE)
+        if "memory_statement_unevidenced_attestation" in item
+    ]
+    assert hits, "attested measurement drew no warning"
+    message = hits[0]
+    assert "finish_controlled_change" in message, (
+        "warning names no evidenced path, so it is not actionable"
+    )
+    assert "next_step" in message, "warning carries no executable next step"
+
+
+def test_cyrillic_attestation_is_read_as_an_attestation() -> None:
+    """The store's notes are bilingual; the rule must not be English-only."""
+    from codeclone.memory.governance import statement_markdown_warnings
+
+    note = (
+        "## Slepaya proba\n"
+        "ЗАМЕРЕНО"  # noqa: RUF001 - the store's own attestation token
+        " 09-06: the tier input was never wired, so the guard could not fire."
+    )
+    assert [
+        item
+        for item in statement_markdown_warnings(note)
+        if "memory_statement_unevidenced_attestation" in item
+    ], "an attestation written in Cyrillic was read as prose"
+
+
+def test_prose_use_of_the_word_is_not_read_as_an_attestation() -> None:
+    """Opposite boundary: the other error is warning on a note about the word.
+
+    A rule keyed on the bare token would fire here and on "a
+    re-implementation becomes the thing measured" -- both real live-store
+    drafts that assert no measurement of their own. A warning that cries wolf
+    is trained away, so the silence here is load-bearing and reds separately
+    from the firing case above.
+    """
+    from codeclone.memory.governance import statement_markdown_warnings
+
+    assert not [
+        item
+        for item in statement_markdown_warnings(_PROSE_MEASURED_NOTE)
+        if "memory_statement_unevidenced_attestation" in item
+    ], "prose use of the word was mistaken for an attestation"
