@@ -31,7 +31,7 @@ from ...baseline import (
     publish_baseline,
     recover_publish_lock,
 )
-from ...contracts import ExitCode, HealthPopulation
+from ...contracts import ExitCode, ObservedPopulation
 from ...contracts.errors import BaselineValidationError
 from . import state as cli_state
 from .startup import resolve_root_path
@@ -278,7 +278,7 @@ def resolve_clone_baseline_state(
     console: _PrinterLike,
     required_lanes: frozenset[str],
     files_skipped: int = 0,
-    analysis_population: HealthPopulation = "complete_nonempty",
+    analysis_population: ObservedPopulation = "complete_nonempty",
 ) -> CloneBaselineState:
     baseline = Baseline(baseline_path)
     baseline_loaded = False
@@ -577,7 +577,7 @@ def _resolve_clone_baseline_state(
     analysis: AnalysisResult,
     required_lanes: frozenset[str],
     files_skipped: int = 0,
-    analysis_population: HealthPopulation = "complete_nonempty",
+    analysis_population: ObservedPopulation = "complete_nonempty",
 ) -> _CloneBaselineState:
     return resolve_clone_baseline_state(
         args=args,

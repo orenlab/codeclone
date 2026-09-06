@@ -19,6 +19,7 @@ from codeclone.models import (
     NearMissMember,
     NearMissPair,
     RenamedStructureGroup,
+    SemanticAuthorityResult,
     StructuralFindingGroup,
     Suggestion,
     SuppressedCloneGroup,
@@ -315,8 +316,16 @@ def build_test_report_document(
     gate_reasons: tuple[str, ...] = (),
     near_miss_pairs: Sequence[NearMissPair] | None = None,
     renamed_structure_groups: Sequence[RenamedStructureGroup] | None = None,
+    semantic_authority: SemanticAuthorityResult | None = None,
 ) -> dict[str, object]:
     """Build the sole canonical report-v3 fixture shape used by report tests.
+
+    ``semantic_authority`` enables the observation bundle's semantic lane the
+    way the real pipeline does (``build_observation_bundle`` derives the lane
+    from the result's presence), so a document that carries a
+    ``metrics.families.semantic_authority`` container can also carry the
+    lane that witnesses its producer — the population's authority state is
+    ``complete`` only when the lane is enabled.
 
     ``baseline_container`` defaults to ``None``, which is the container-less
     run every existing caller wants and which the builder projects as
@@ -341,6 +350,7 @@ def build_test_report_document(
         module_registry=registry,
         function_clone_keys=observed_function_clone_keys,
         block_clone_keys=observed_block_clone_keys,
+        semantic_authority=semantic_authority,
     )
     gate_config = MetricGateConfig(
         fail_complexity=-1,
@@ -362,11 +372,20 @@ def build_test_report_document(
         # embeds keeps every fixture document producer-consistent by
         # construction; a caller that needs another declaration state says
         # so through ``meta["metrics_computed"]``.
-        meta_map["metrics_computed"] = sorted(
-            section(
-                _fixture_metrics_payload(metrics, scan_root=""),
-                "families",
+        #
+        # ``api_surface`` is the one family the payload always carries a
+        # container for while the producer withholds its declaration unless
+        # the lane was opted in (``computed_metric_families(api_surface=)``);
+        # the container's own ``summary.enabled`` is that opt-in's witness,
+        # so the fixture derives the declaration from it the same way.
+        families = section(_fixture_metrics_payload(metrics, scan_root=""), "families")
+        api_surface_enabled = bool(
+            as_mapping(as_mapping(families.get("api_surface")).get("summary")).get(
+                "enabled"
             )
+        )
+        meta_map["metrics_computed"] = sorted(
+            name for name in families if name != "api_surface" or api_surface_enabled
         )
     return _build_report_document_v3(
         observation_bundle=observation_bundle,

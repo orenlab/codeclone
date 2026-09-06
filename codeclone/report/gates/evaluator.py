@@ -15,7 +15,7 @@ from ...contracts import (
     GATE_LANE_MATRIX_VERSION,
     HEALTH_INPUT_MANIFEST_VERSION,
     ExitCode,
-    HealthPopulation,
+    ObservedPopulation,
 )
 from ...metrics.registry import METRIC_FAMILIES
 from ...models import ObservationLaneName, cycle_kind_counts
@@ -114,7 +114,7 @@ class GateState:
     #: operator to two different places. Defaults to ``complete_nonempty`` so
     #: the constructors that build a state by hand keep today's behaviour
     #: exactly.
-    health_population: HealthPopulation = "complete_nonempty"
+    health_population: ObservedPopulation = "complete_nonempty"
     #: Files found and never read. Produced since the first release, carried
     #: to the summary line and the HTML meta table, and until now read by no
     #: gate and no budget at all.
@@ -129,7 +129,7 @@ class GateState:
 #: ``partial`` is deliberately absent: a truncated run measured something, and
 #: its ordinary verdict stands. Truncation has its own opt-in gate
 #: (``--fail-on-truncated-run``) and must not be smuggled in as a refusal.
-_POPULATION_REFUSALS: dict[HealthPopulation, str] = {
+_POPULATION_REFUSALS: dict[ObservedPopulation, str] = {
     "unmeasured": gate_msgs.GATE_REASON_UNMEASURED_POPULATION,
     "complete_empty": gate_msgs.GATE_REASON_EMPTY_ANALYSIS_SCOPE,
 }
@@ -958,9 +958,9 @@ def _gate_state_from_report_document(
     # nobody measured, diverging from the project-metrics road (`G3`). A
     # document from before the fact keeps today's behaviour exactly.
     published_population = str(health_summary.get("population", "")).strip()
-    health_population: HealthPopulation = (
-        cast("HealthPopulation", published_population)
-        if published_population in get_args(HealthPopulation)
+    health_population: ObservedPopulation = (
+        cast("ObservedPopulation", published_population)
+        if published_population in get_args(ObservedPopulation)
         else "complete_nonempty"
     )
     coverage_adoption_summary = _as_mapping(

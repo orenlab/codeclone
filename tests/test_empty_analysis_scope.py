@@ -39,7 +39,7 @@ import pytest
 
 from codeclone.baseline.publish import BaselinePublicationError, publish_baseline
 from codeclone.contracts import (
-    HealthPopulation,
+    ObservedPopulation,
     observed_population,
     population_carries_score,
 )
@@ -62,7 +62,7 @@ _BLOCK_ID = "|".join(("b" * 64,) * 4)
 #: Every state the two counters can name, with the input that produces it.
 #: Exhaustive on purpose: a fifth state added without a row here is a state no
 #: layer below has been shown to handle.
-_STATE_BY_COUNTERS: tuple[tuple[int, int, HealthPopulation], ...] = (
+_STATE_BY_COUNTERS: tuple[tuple[int, int, ObservedPopulation], ...] = (
     (0, 0, "complete_empty"),
     (40, 0, "unmeasured"),
     (1, 0, "unmeasured"),
@@ -129,7 +129,7 @@ def _bundle() -> ObservationBundle:
 def test_every_counter_pair_names_exactly_one_state(
     found: int,
     analyzed: int,
-    expected: HealthPopulation,
+    expected: ObservedPopulation,
 ) -> None:
     """The decision table, walked from both sides of every boundary.
 
@@ -176,7 +176,7 @@ def test_an_empty_scope_is_not_an_unread_one() -> None:
     ],
 )
 def test_only_a_non_empty_observed_population_carries_a_score(
-    population: HealthPopulation,
+    population: ObservedPopulation,
     carries: bool,
 ) -> None:
     """One owner for the derived question every surface asks.
@@ -356,7 +356,7 @@ def test_the_two_publication_refusals_do_not_borrow_each_other_s_words(
 @pytest.mark.parametrize("population", ["complete_nonempty", "partial", "unmeasured"])
 def test_publication_proceeds_for_every_state_that_is_not_an_empty_scope(
     tmp_path: Path,
-    population: HealthPopulation,
+    population: ObservedPopulation,
 ) -> None:
     """The reverse skew: the new rule must fire on one state and no other.
 
@@ -399,7 +399,9 @@ def test_publication_default_is_the_measured_state(tmp_path: Path) -> None:
 # ── end to end: the input that started this ─────────────────────────
 
 
-def _analyse(root: Path, cache_dir: Path) -> tuple[dict[str, object], HealthPopulation]:
+def _analyse(
+    root: Path, cache_dir: Path
+) -> tuple[dict[str, object], ObservedPopulation]:
     """Run the real pipeline once; return its health block and the same state.
 
     The state is re-read through the owner from the counters the run reports,

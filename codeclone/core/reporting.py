@@ -14,7 +14,7 @@ from ..baseline.container_trust import evaluate_container_trust
 from ..baseline.trust import current_python_tag
 from ..contracts import (
     DEFAULT_COVERAGE_MIN,
-    HealthPopulation,
+    ObservedPopulation,
     observed_population,
     population_universe_observed,
 )
@@ -715,7 +715,7 @@ def gate_with_config(
     #: metrics-off gate state defaulted to ``complete_nonempty``, so
     #: ``--skip-metrics`` runs answered every gate over a population nobody
     #: measured — the identical run with metrics enabled was refused.
-    analysis_population: HealthPopulation = "complete_nonempty",
+    analysis_population: ObservedPopulation = "complete_nonempty",
 ) -> tuple[MetricGateConfig, GatingResult]:
     config = gate_config if gate_config is not None else _gate_config(boot)
     # An uncompared lane contributes no new clones to count. It must not
@@ -769,7 +769,7 @@ def gate(
     new_block: Collection[str] | None,
     metrics_diff: MetricsDiff | None,
     baseline_trust: TrustVector | None = None,
-    analysis_population: HealthPopulation = "complete_nonempty",
+    analysis_population: ObservedPopulation = "complete_nonempty",
 ) -> GatingResult:
     _config, result = gate_with_config(
         boot=boot,

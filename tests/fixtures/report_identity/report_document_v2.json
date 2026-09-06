@@ -1,0 +1,2619 @@
+{
+ "baseline": {
+  "baseline_scope_id": null,
+  "disabled_capabilities": [
+   "semantic_authority"
+  ],
+  "root_digest_or_null": null,
+  "sorted_lane_trust": [
+   {
+    "name": "adoption_counts",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "api_surface",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "clones.blocks",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "clones.functions",
+    "reason": "compatible",
+    "status": "trusted"
+   },
+   {
+    "name": "coupling_cohesion_observations",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "dead_code",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "dependencies",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "module_identity",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   },
+   {
+    "name": "risk_observations",
+    "reason": "baseline_missing",
+    "status": "unavailable"
+   }
+  ],
+  "sorted_novelty_facts": [
+   {
+    "identity": "c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+    "lane": "clones.functions",
+    "novelty": "new"
+   }
+  ],
+  "state": "missing"
+ },
+ "contracts": {
+  "evaluation": {
+   "active_gate_lane_requirements": [],
+   "gate_algorithm_revision": "1",
+   "gate_lane_matrix_version": "2",
+   "gate_thresholds_digest": "0dea969259ae886b6247e500bd14e332294a7fb392a9256166820dc6ff7f4117",
+   "health_algorithm_revision": "1",
+   "health_input_lanes": [
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "health_input_manifest_version": "2"
+  },
+  "observation": {
+   "descriptors": [
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "adoption_counts",
+     "payload_schema": "2",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "api_surface",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "API_SURFACE_SIGNATURE_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.blocks",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.functions",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "coupling_cohesion_observations",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dead_code",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dependencies",
+     "payload_schema": "8",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "module_identity",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "risk_observations",
+     "payload_schema": "5",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "enabled_lanes": [
+    "adoption_counts",
+    "api_surface",
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "observation_digest_version": "1"
+  }
+ },
+ "derived": {
+  "hotlists": {
+   "highest_spread_ids": [
+    "design:dependency:pkg.a -> pkg.b",
+    "clone:function:c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+    "structural:duplicated_branches:dup-1",
+    "dead_code:pkg.module:dead_one",
+    "dead_code:pkg.module:work#27-29"
+   ],
+   "most_actionable_ids": [
+    "clone:function:c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+    "dead_code:pkg.module:dead_one",
+    "dead_code:pkg.module:work#27-29",
+    "design:coverage:pkg.module:work",
+    "design:dependency:pkg.a -> pkg.b"
+   ],
+   "production_hotspot_ids": [
+    "clone:function:c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+    "dead_code:pkg.module:dead_one",
+    "dead_code:pkg.module:work#27-29",
+    "design:coverage:pkg.module:work",
+    "design:dependency:pkg.a -> pkg.b"
+   ],
+   "test_fixture_hotspot_ids": []
+  },
+  "module_map": {
+   "default_zoom": "modules",
+   "graph_modules": {
+    "edges": [
+     {
+      "source": "pkg.a",
+      "target": "pkg.b",
+      "weight": 1
+     },
+     {
+      "source": "pkg.b",
+      "target": "pkg.a",
+      "weight": 1
+     }
+    ],
+    "nodes": [
+     {
+      "fan_in": 0,
+      "fan_out": 0,
+      "id": "pkg.a",
+      "in_cycle": true,
+      "label": "pkg.a",
+      "overloaded": {
+       "candidate_reasons": [],
+       "candidate_status": "non_candidate",
+       "score": 0.0
+      },
+      "source_kinds": [],
+      "total_degree": 0
+     },
+     {
+      "fan_in": 0,
+      "fan_out": 0,
+      "id": "pkg.b",
+      "in_cycle": true,
+      "label": "pkg.b",
+      "overloaded": {
+       "candidate_reasons": [],
+       "candidate_status": "non_candidate",
+       "score": 0.0
+      },
+      "source_kinds": [],
+      "total_degree": 0
+     }
+    ],
+    "package_depth": null,
+    "truncation": {
+     "edge_shown_count": 2,
+     "edge_universe_count": 2,
+     "node_shown_count": 2,
+     "node_universe_count": 2,
+     "seed_policy": "cycles_then_chains_then_degree",
+     "truncated": false
+    },
+    "zoom": "modules"
+   },
+   "graph_packages": {
+    "edges": [
+     {
+      "source": "pkg.a",
+      "target": "pkg.b",
+      "weight": 1
+     },
+     {
+      "source": "pkg.b",
+      "target": "pkg.a",
+      "weight": 1
+     }
+    ],
+    "nodes": [
+     {
+      "fan_in": 0,
+      "fan_out": 0,
+      "id": "pkg.a",
+      "in_cycle": false,
+      "label": "pkg.a",
+      "overloaded": {
+       "candidate_reasons": [],
+       "candidate_status": "non_candidate",
+       "score": 0.0
+      },
+      "source_kinds": [],
+      "total_degree": 0
+     },
+     {
+      "fan_in": 0,
+      "fan_out": 0,
+      "id": "pkg.b",
+      "in_cycle": false,
+      "label": "pkg.b",
+      "overloaded": {
+       "candidate_reasons": [],
+       "candidate_status": "non_candidate",
+       "score": 0.0
+      },
+      "source_kinds": [],
+      "total_degree": 0
+     }
+    ],
+    "package_depth": 2,
+    "truncation": {
+     "edge_shown_count": 2,
+     "edge_universe_count": 2,
+     "node_shown_count": 2,
+     "node_universe_count": 2,
+     "seed_policy": "cycles_then_chains_then_degree",
+     "truncated": false
+    },
+    "zoom": "packages"
+   },
+   "schema_version": "1",
+   "scope": "report_only",
+   "summary": {
+    "available": true,
+    "edge_count": 2,
+    "module_count": 2,
+    "overloaded_candidate_count": 0,
+    "overloaded_population_status": "limited",
+    "package_count_depth2": 2,
+    "unwind_candidate_count": 0
+   },
+   "unwind_candidates": []
+  },
+  "overview": {
+   "directory_hotspots": {
+    "all": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 11,
+       "files": 3,
+       "finding_groups": 8,
+       "kind_breakdown": {
+        "authority": 0,
+        "clones": 1,
+        "cohesion": 0,
+        "complexity": 1,
+        "coupling": 1,
+        "coverage": 1,
+        "dead_code": 2,
+        "dependency": 1,
+        "structural": 1
+       },
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 11,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    },
+    "authority": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "clones": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 2,
+       "files": 1,
+       "finding_groups": 1,
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 2,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    },
+    "cohesion": {
+     "has_more": false,
+     "items": [],
+     "returned": 0,
+     "total_directories": 0
+    },
+    "complexity": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 1,
+       "files": 1,
+       "finding_groups": 1,
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 1,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    },
+    "coupling": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 1,
+       "files": 1,
+       "finding_groups": 1,
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 1,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    },
+    "dead_code": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 2,
+       "files": 1,
+       "finding_groups": 2,
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 2,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    },
+    "dependency": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 2,
+       "files": 2,
+       "finding_groups": 1,
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 2,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    },
+    "structural": {
+     "has_more": false,
+     "items": [
+      {
+       "affected_items": 2,
+       "files": 1,
+       "finding_groups": 1,
+       "path": "pkg",
+       "share_pct": 100.0,
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 0,
+         "other": 0,
+         "production": 2,
+         "tests": 0
+        },
+        "dominant_kind": "production",
+        "impact_scope": "runtime"
+       }
+      }
+     ],
+     "returned": 1,
+     "total_directories": 1
+    }
+   },
+   "families": {
+    "authority": 0,
+    "clones": 1,
+    "dead_code": 2,
+    "design": 4,
+    "structural": 1
+   },
+   "health_snapshot": {
+    "grade": "C",
+    "population": "complete_nonempty",
+    "score": 65,
+    "strongest_dimension": "cohesion",
+    "weakest_dimension": "coupling"
+   },
+   "presentation_counts": {
+    "structural": 1,
+    "structural_kinds": 1,
+    "suggestions": 0,
+    "suggestions_by_family": {
+     "clones": 0,
+     "metrics": 0,
+     "structural": 0
+    }
+   },
+   "source_scope_breakdown": {
+    "production": 8
+   },
+   "top_risks": [
+    {
+     "count": 2,
+     "family": "dead_code",
+     "kind": "family_summary",
+     "label": "2 dead code items",
+     "scope": "runtime"
+    },
+    {
+     "count": 1,
+     "family": "structural",
+     "kind": "family_summary",
+     "label": "1 structural finding in production code",
+     "scope": "production"
+    }
+   ]
+  },
+  "review_queue": {
+   "items": [
+    {
+     "category": "function",
+     "effort": "",
+     "family": "clones",
+     "finding_id": "clone:function:c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+     "has_action": false,
+     "id": "clone:function:c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+     "location": "pkg/module.py:1 +1 more",
+     "novelty": "new",
+     "priority": 2.0,
+     "representative_locations": [
+      {
+       "end_line": 12,
+       "qualname": "pkg.module:alpha",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 1
+      },
+      {
+       "end_line": 31,
+       "qualname": "pkg.module:beta",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 20
+      }
+     ],
+     "severity": "warning",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "2 occurrences \u00b7 2 functions / 1 file \u00b7 production",
+     "title": "Function clone group (2 occurrences)"
+    },
+    {
+     "category": "function",
+     "effort": "",
+     "family": "dead_code",
+     "finding_id": "dead_code:pkg.module:dead_one",
+     "has_action": false,
+     "id": "dead_code:pkg.module:dead_one",
+     "location": "pkg/module.py:10",
+     "novelty": "unavailable",
+     "priority": 2.0,
+     "representative_locations": [
+      {
+       "end_line": 12,
+       "qualname": "pkg.module:dead_one",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 10
+      }
+     ],
+     "severity": "warning",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "1 occurrence \u00b7 1 function / 1 file \u00b7 production",
+     "title": "Unused function: pkg.module:dead_one"
+    },
+    {
+     "category": "unreachable_statement",
+     "effort": "",
+     "family": "dead_code",
+     "finding_id": "dead_code:pkg.module:work#27-29",
+     "has_action": false,
+     "id": "dead_code:pkg.module:work#27-29",
+     "location": "pkg/module.py:27",
+     "novelty": "unavailable",
+     "priority": 2.0,
+     "representative_locations": [
+      {
+       "end_line": 29,
+       "qualname": "pkg.module:work",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 27
+      }
+     ],
+     "severity": "warning",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "1 occurrence \u00b7 1 function / 1 file \u00b7 production",
+     "title": "Unused unreachable_statement: pkg.module:work"
+    },
+    {
+     "category": "coverage",
+     "effort": "",
+     "family": "design",
+     "finding_id": "design:coverage:pkg.module:work",
+     "has_action": false,
+     "id": "design:coverage:pkg.module:work",
+     "location": "pkg/module.py:1",
+     "novelty": "unavailable",
+     "priority": 1.5,
+     "representative_locations": [
+      {
+       "end_line": 30,
+       "qualname": "pkg.module:work",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 1
+      }
+     ],
+     "severity": "critical",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "1 occurrence \u00b7 1 function / 1 file \u00b7 production",
+     "title": "Coverage: pkg.module:work"
+    },
+    {
+     "category": "dependency",
+     "effort": "",
+     "family": "design",
+     "finding_id": "design:dependency:pkg.a -> pkg.b",
+     "has_action": false,
+     "id": "design:dependency:pkg.a -> pkg.b",
+     "location": "pkg/a.py +1 more",
+     "novelty": "unavailable",
+     "priority": 1.0,
+     "representative_locations": [
+      {
+       "end_line": 0,
+       "qualname": "",
+       "relative_path": "pkg/a.py",
+       "source_kind": "production",
+       "start_line": 0
+      },
+      {
+       "end_line": 0,
+       "qualname": "",
+       "relative_path": "pkg/b.py",
+       "source_kind": "production",
+       "start_line": 0
+      }
+     ],
+     "severity": "critical",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "2 occurrences \u00b7 0 functions / 2 files \u00b7 production",
+     "title": "Dependency"
+    },
+    {
+     "category": "complexity",
+     "effort": "",
+     "family": "design",
+     "finding_id": "design:complexity:pkg.module:work",
+     "has_action": false,
+     "id": "design:complexity:pkg.module:work",
+     "location": "pkg/module.py:1",
+     "novelty": "unavailable",
+     "priority": 1.0,
+     "representative_locations": [
+      {
+       "end_line": 30,
+       "qualname": "pkg.module:work",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 1
+      }
+     ],
+     "severity": "warning",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "1 occurrence \u00b7 1 function / 1 file \u00b7 production",
+     "title": "Complexity: pkg.module:work"
+    },
+    {
+     "category": "coupling",
+     "effort": "",
+     "family": "design",
+     "finding_id": "design:coupling:pkg.module:Hub",
+     "has_action": false,
+     "id": "design:coupling:pkg.module:Hub",
+     "location": "pkg/module.py:61",
+     "novelty": "unavailable",
+     "priority": 1.0,
+     "representative_locations": [
+      {
+       "end_line": 90,
+       "qualname": "pkg.module:Hub",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 61
+      }
+     ],
+     "severity": "warning",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "1 occurrence \u00b7 1 function / 1 file \u00b7 production",
+     "title": "Coupling: pkg.module:Hub"
+    },
+    {
+     "category": "duplicated_branches",
+     "effort": "",
+     "family": "structural",
+     "finding_id": "structural:duplicated_branches:dup-1",
+     "has_action": false,
+     "id": "structural:duplicated_branches:dup-1",
+     "location": "pkg/module.py:3 +1 more",
+     "novelty": "unavailable",
+     "priority": 0.5,
+     "representative_locations": [
+      {
+       "end_line": 6,
+       "qualname": "pkg.module:work",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 3
+      },
+      {
+       "end_line": 11,
+       "qualname": "pkg.module:work",
+       "relative_path": "pkg/module.py",
+       "source_kind": "",
+       "start_line": 8
+      }
+     ],
+     "severity": "info",
+     "source_kind": "production",
+     "steps": [],
+     "summary": "2 occurrences \u00b7 1 function / 1 file \u00b7 production",
+     "title": "Duplicated branches"
+    }
+   ],
+   "schema_version": "3",
+   "scope": "report_only",
+   "summary": {
+    "actionable": 0,
+    "by_family": {
+     "clones": 1,
+     "dead_code": 2,
+     "design": 4,
+     "structural": 1
+    },
+    "by_novelty": {
+     "known": 0,
+     "new": 1,
+     "unavailable": 7
+    },
+    "by_severity": {
+     "critical": 2,
+     "info": 1,
+     "warning": 5
+    },
+    "reviewed": 0,
+    "top_priority": 2.0,
+    "total": 8
+   }
+  },
+  "suggestions": []
+ },
+ "evaluation": {
+  "contract": {
+   "active_gate_lane_requirements": [],
+   "gate_algorithm_revision": "1",
+   "gate_lane_matrix_version": "2",
+   "gate_thresholds_digest": "0dea969259ae886b6247e500bd14e332294a7fb392a9256166820dc6ff7f4117",
+   "health_algorithm_revision": "1",
+   "health_input_lanes": [
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "health_input_manifest_version": "2"
+  },
+  "outcome": {
+   "exit_code": 0,
+   "reasons": [],
+   "required_lanes": [],
+   "unavailable_lanes": []
+  },
+  "request": {
+   "coverage_min": 50,
+   "fail_cohesion": -1,
+   "fail_complexity": -1,
+   "fail_coupling": -1,
+   "fail_cycles": false,
+   "fail_dead_code": false,
+   "fail_health": -1,
+   "fail_on_api_break": false,
+   "fail_on_authority_violation": false,
+   "fail_on_docstring_regression": false,
+   "fail_on_new": false,
+   "fail_on_new_metrics": false,
+   "fail_on_truncated_run": false,
+   "fail_on_typing_regression": false,
+   "fail_on_unresolved_dead_code": false,
+   "fail_on_untested_hotspots": false,
+   "fail_threshold": -1,
+   "min_docstring_coverage": -1,
+   "min_typing_coverage": -1
+  }
+ },
+ "findings": {
+  "groups": {
+   "authority": {
+    "groups": []
+   },
+   "clones": {
+    "blocks": [],
+    "functions": [
+     {
+      "category": "function",
+      "clone_kind": "function",
+      "clone_type": "Type-1",
+      "confidence": "high",
+      "count": 2,
+      "facts": {
+       "group_arity": 2,
+       "group_key": "c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+       "loc_buckets": [
+        "0-19"
+       ]
+      },
+      "family": "clone",
+      "id": "clone:function:c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19",
+      "items": [
+       {
+        "cyclomatic_complexity": 3,
+        "end_line": 12,
+        "fingerprint": "c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b",
+        "loc": 12,
+        "loc_bucket": "0-19",
+        "nesting_depth": 1,
+        "qualname": "pkg.module:alpha",
+        "raw_hash": "raw-c7d3c7b8",
+        "relative_path": "pkg/module.py",
+        "risk": "low",
+        "start_line": 1,
+        "stmt_count": 8
+       },
+       {
+        "cyclomatic_complexity": 3,
+        "end_line": 31,
+        "fingerprint": "c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b",
+        "loc": 12,
+        "loc_bucket": "0-19",
+        "nesting_depth": 1,
+        "qualname": "pkg.module:beta",
+        "raw_hash": "raw-c7d3c7b8",
+        "relative_path": "pkg/module.py",
+        "risk": "low",
+        "start_line": 20,
+        "stmt_count": 8
+       }
+      ],
+      "kind": "clone_group",
+      "novelty": "new",
+      "novelty_reason": null,
+      "priority": 2.0,
+      "severity": "warning",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 2,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 2
+      }
+     }
+    ],
+    "segments": [],
+    "suppressed": {
+     "blocks": [],
+     "functions": [
+      {
+       "category": "function",
+       "clone_kind": "function",
+       "clone_type": "Type-2",
+       "confidence": "high",
+       "count": 1,
+       "facts": {
+        "group_arity": 1,
+        "group_key": "golden-group",
+        "loc_buckets": [
+         "0-19"
+        ]
+       },
+       "family": "clone",
+       "id": "clone:function:golden-group",
+       "items": [
+        {
+         "cyclomatic_complexity": 1,
+         "end_line": 12,
+         "fingerprint": "fp-a",
+         "loc": 3,
+         "loc_bucket": "0-19",
+         "nesting_depth": 0,
+         "qualname": "tests.fixtures.golden.a:run",
+         "raw_hash": "",
+         "relative_path": "tests/fixtures/golden_project/a.py",
+         "risk": "low",
+         "start_line": 10,
+         "stmt_count": 2
+        }
+       ],
+       "kind": "clone_group",
+       "matched_patterns": [
+        "tests/fixtures/golden_*"
+       ],
+       "priority": 2.0,
+       "severity": "warning",
+       "source_scope": {
+        "breakdown": {
+         "fixtures": 1,
+         "other": 0,
+         "production": 0,
+         "tests": 0
+        },
+        "dominant_kind": "fixtures",
+        "impact_scope": "non_runtime"
+       },
+       "spread": {
+        "files": 1,
+        "functions": 1
+       },
+       "suppression_rule": "golden_fixture",
+       "suppression_source": "project_config"
+      }
+     ],
+     "segments": []
+    }
+   },
+   "dead_code": {
+    "groups": [
+     {
+      "category": "function",
+      "confidence": "high",
+      "count": 1,
+      "facts": {
+       "confidence": "high",
+       "kind": "function",
+       "reason": "unreferenced",
+       "test_reference_sources": []
+      },
+      "family": "dead_code",
+      "id": "dead_code:pkg.module:dead_one",
+      "items": [
+       {
+        "end_line": 12,
+        "qualname": "pkg.module:dead_one",
+        "relative_path": "pkg/module.py",
+        "start_line": 10
+       }
+      ],
+      "kind": "unused_symbol",
+      "novelty": "unavailable",
+      "novelty_reason": "lane_unavailable",
+      "priority": 2.0,
+      "severity": "warning",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 1,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 1
+      }
+     },
+     {
+      "category": "unreachable_statement",
+      "confidence": "high",
+      "count": 1,
+      "facts": {
+       "confidence": "high",
+       "policy_version": "1",
+       "reason": "after_return",
+       "statement_count": 2
+      },
+      "family": "dead_code",
+      "id": "dead_code:pkg.module:work#27-29",
+      "items": [
+       {
+        "end_line": 29,
+        "qualname": "pkg.module:work",
+        "relative_path": "pkg/module.py",
+        "start_line": 27
+       }
+      ],
+      "kind": "unreachable_statement",
+      "novelty": "unavailable",
+      "novelty_reason": "not_baseline_governed",
+      "priority": 2.0,
+      "severity": "warning",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 1,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 1
+      }
+     }
+    ]
+   },
+   "design": {
+    "groups": [
+     {
+      "category": "coverage",
+      "confidence": "high",
+      "count": 1,
+      "facts": {
+       "coverage_hotspot": true,
+       "coverage_permille": 300,
+       "coverage_status": "measured",
+       "covered_lines": 3,
+       "cyclomatic_complexity": 25,
+       "detail": "Joined line coverage is below the configured hotspot threshold.",
+       "executable_lines": 10,
+       "hotspot_threshold_percent": 50,
+       "scope_gap_hotspot": false
+      },
+      "family": "design",
+      "id": "design:coverage:pkg.module:work",
+      "items": [
+       {
+        "coverage_hotspot": true,
+        "coverage_permille": 300,
+        "coverage_status": "measured",
+        "covered_lines": 3,
+        "cyclomatic_complexity": 25,
+        "end_line": 30,
+        "executable_lines": 10,
+        "qualname": "pkg.module:work",
+        "relative_path": "pkg/module.py",
+        "risk": "high",
+        "scope_gap_hotspot": false,
+        "start_line": 1
+       }
+      ],
+      "kind": "coverage_hotspot",
+      "novelty": "unavailable",
+      "novelty_reason": "not_baseline_governed",
+      "priority": 1.5,
+      "severity": "critical",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 1,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 1
+      }
+     },
+     {
+      "category": "complexity",
+      "confidence": "high",
+      "count": 1,
+      "facts": {
+       "cyclomatic_complexity": 25,
+       "nesting_depth": 4
+      },
+      "family": "design",
+      "id": "design:complexity:pkg.module:work",
+      "items": [
+       {
+        "cyclomatic_complexity": 25,
+        "end_line": 30,
+        "nesting_depth": 4,
+        "qualname": "pkg.module:work",
+        "relative_path": "pkg/module.py",
+        "risk": "high",
+        "start_line": 1
+       }
+      ],
+      "kind": "function_hotspot",
+      "novelty": "unavailable",
+      "novelty_reason": "lane_unavailable",
+      "priority": 1.0,
+      "severity": "warning",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 1,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 1
+      }
+     },
+     {
+      "category": "coupling",
+      "confidence": "high",
+      "count": 1,
+      "facts": {
+       "cbo": 12,
+       "coupled_classes": [
+        "A",
+        "B",
+        "C"
+       ]
+      },
+      "family": "design",
+      "id": "design:coupling:pkg.module:Hub",
+      "items": [
+       {
+        "cbo": 12,
+        "coupled_classes": [
+         "A",
+         "B",
+         "C"
+        ],
+        "end_line": 90,
+        "qualname": "pkg.module:Hub",
+        "relative_path": "pkg/module.py",
+        "risk": "high",
+        "start_line": 61
+       }
+      ],
+      "kind": "class_hotspot",
+      "novelty": "unavailable",
+      "novelty_reason": "lane_unavailable",
+      "priority": 1.0,
+      "severity": "warning",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 1,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 1
+      }
+     },
+     {
+      "category": "dependency",
+      "confidence": "high",
+      "count": 2,
+      "facts": {
+       "cycle_length": 2,
+       "measured": "cycle over import-time edges"
+      },
+      "family": "design",
+      "id": "design:dependency:pkg.a -> pkg.b",
+      "items": [
+       {
+        "module": "pkg.a",
+        "relative_path": "pkg/a.py",
+        "source_kind": "production"
+       },
+       {
+        "module": "pkg.b",
+        "relative_path": "pkg/b.py",
+        "source_kind": "production"
+       }
+      ],
+      "kind": "import_cycle",
+      "novelty": "unavailable",
+      "novelty_reason": "lane_unavailable",
+      "priority": 1.0,
+      "severity": "critical",
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 2,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 2,
+       "functions": 0
+      }
+     }
+    ]
+   },
+   "near_miss": {
+    "algorithm_revision": "3",
+    "count": 1,
+    "gate_relevant": false,
+    "max_edit_statements": 1,
+    "novelty": "untracked",
+    "pairs": [
+     {
+      "edit_kind": "replace",
+      "edit_statements": 1,
+      "members": [
+       {
+        "differing_end_line": 6,
+        "differing_start_line": 6,
+        "end_line": 12,
+        "qualname": "pkg.module:alpha",
+        "relative_path": "pkg/module.py",
+        "start_line": 1
+       },
+       {
+        "differing_end_line": 20,
+        "differing_start_line": 20,
+        "end_line": 26,
+        "qualname": "pkg.module:beta",
+        "relative_path": "pkg/module.py",
+        "start_line": 15
+       }
+      ],
+      "pair_key": "pkg/module.py:pkg.module:alpha:1|pkg/module.py:pkg.module:beta:15",
+      "token_domain": "y8"
+     }
+    ],
+    "state": "complete",
+    "tier": "near_miss"
+   },
+   "renamed_structure": {
+    "algorithm_revision": "1",
+    "count": 1,
+    "gate_relevant": false,
+    "groups": [
+     {
+      "distinct_exact_fingerprints": 2,
+      "group_key": "rs-1",
+      "member_count": 2,
+      "members": [
+       {
+        "end_line": 12,
+        "fingerprint": "fp-alpha",
+        "qualname": "pkg.module:alpha",
+        "relative_path": "pkg/module.py",
+        "start_line": 1
+       },
+       {
+        "end_line": 12,
+        "fingerprint": "fp-gamma",
+        "qualname": "pkg.module:gamma",
+        "relative_path": "pkg/other.py",
+        "start_line": 1
+       }
+      ]
+     }
+    ],
+    "novelty": "untracked",
+    "state": "complete",
+    "tier": "renamed_structure"
+   },
+   "structural": {
+    "groups": [
+     {
+      "category": "duplicated_branches",
+      "confidence": "medium",
+      "count": 2,
+      "facts": {
+       "call_bucket": 1,
+       "non_overlapping": true,
+       "occurrence_count": 2,
+       "raise_bucket": 0
+      },
+      "family": "structural",
+      "id": "structural:duplicated_branches:dup-1",
+      "items": [
+       {
+        "end_line": 6,
+        "qualname": "pkg.module:work",
+        "relative_path": "pkg/module.py",
+        "start_line": 3
+       },
+       {
+        "end_line": 11,
+        "qualname": "pkg.module:work",
+        "relative_path": "pkg/module.py",
+        "start_line": 8
+       }
+      ],
+      "kind": "duplicated_branches",
+      "novelty": "unavailable",
+      "novelty_reason": "not_baseline_governed",
+      "priority": 0.5,
+      "severity": "info",
+      "signature": {
+       "debug": {
+        "calls": "1",
+        "raises": "0",
+        "stmt_seq": "assign;return",
+        "terminal": "return"
+       },
+       "stable": {
+        "control_flow": {
+         "has_loop": false,
+         "has_try": false,
+         "nested_if": false
+        },
+        "family": "duplicated_branches",
+        "stmt_shape": "assign;return",
+        "terminal_kind": "return"
+       },
+       "version": "1"
+      },
+      "source_scope": {
+       "breakdown": {
+        "fixtures": 0,
+        "other": 0,
+        "production": 2,
+        "tests": 0
+       },
+       "dominant_kind": "production",
+       "impact_scope": "runtime"
+      },
+      "spread": {
+       "files": 1,
+       "functions": 1
+      }
+     }
+    ]
+   }
+  },
+  "summary": {
+   "clones": {
+    "blocks": 0,
+    "functions": 1,
+    "instances": 2,
+    "known": 0,
+    "new": 1,
+    "segments": 0,
+    "suppressed": 1,
+    "suppressed_blocks": 0,
+    "suppressed_functions": 1,
+    "suppressed_segments": 0,
+    "unavailable": 0
+   },
+   "families": {
+    "authority": 0,
+    "clones": 1,
+    "dead_code": 2,
+    "design": 4,
+    "structural": 1
+   },
+   "impact_scope": {
+    "mixed": 0,
+    "non_runtime": 0,
+    "runtime": 8
+   },
+   "severity": {
+    "critical": 2,
+    "info": 1,
+    "warning": 5
+   },
+   "suppressed": {
+    "clones": 1,
+    "dead_code": 1
+   },
+   "total": 8
+  }
+ },
+ "integrity": {
+  "canonicalization": {
+   "envelope_null_sentinel": "integrity.digests.envelope.value",
+   "serializer": "orjson.OPT_SORT_KEYS",
+   "version": "3"
+  },
+  "digests": {
+   "analysis_facts": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "analysis_facts",
+    "value": "bb0c3b9e596390292b9f1be67ea9cf9d3c7c2317078932a97bbf64fda356d3cd"
+   },
+   "comparison": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "comparison",
+    "value": "f4bcf6b60dbab6aa623806fb38d01bb97c1c1068cacdaf85b5d440e28fa36b61"
+   },
+   "envelope": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "report_envelope",
+    "value": "adf062f9b2e1d742973b91a4468d716fa742a0778de88d7bd18867a4cbdcf5c4"
+   },
+   "evaluation": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "evaluation",
+    "value": "bcf206ade5899c4ec1dcf88e8aeb39b865ce5026fdbca220667265381f13f232"
+   },
+   "observation": {
+    "algorithm": "sha256",
+    "digest_version": "1",
+    "kind": "source_observations",
+    "value": "780f723f8ad311c41ac943ac0056e312ece7ae3e2159bf02568dc4830ce0bffd"
+   }
+  },
+  "semantic": {
+   "family_digests": {
+    "analysis": {
+     "clones": "d2394a0f97a1eff67853573c714cb197ee0162193ae5c3c37fe877b8aba94abc",
+     "dead_code": "d86a4c5157157d90dfc52ef6bd35d8aa53b0804a2be378b9d225f6d8674fb8c3",
+     "design": "6b9b1b4636363a5b6a8137c3e0e22da093514f05a62b3a9a72e33f127c614eb5",
+     "near_miss": "dc761e8468098ad14daa3f311681110ddd323f7e48411632469c7b6507563c61",
+     "renamed_structure": "7abb915eb253b3fae5dc9486f588cfb2928f975b3e44e305a6965b345d2c7662",
+     "structural": "13b31615228edaa0edd77cb97b72865d363d268689a756717a99da40e6f7fea3"
+    },
+    "evaluation": {
+     "health": "f92b622ded98e7477c975f5cd202dfdf662a1382d90ba357e70e2a92723df03c"
+    }
+   },
+   "population": {
+    "analysis_mode": "full",
+    "files": {
+     "skipped": 0,
+     "total_found": 2,
+     "unsupported_construct_skipped": 0
+    },
+    "producers": {
+     "authority": "disabled",
+     "clones": "complete",
+     "dead_code": "complete",
+     "design": "complete",
+     "gates": "complete",
+     "health": "complete",
+     "near_miss": "complete",
+     "renamed_structure": "complete",
+     "structural": "complete"
+    }
+   },
+   "realized_contracts": {
+    "analysis": {
+     "clones": {
+      "activation": "always",
+      "algorithm_revisions": {
+       "clone_fingerprint": "3"
+      },
+      "params": {
+       "block_min_loc": 20,
+       "block_min_stmt": 8,
+       "min_loc": 6,
+       "min_stmt": 4,
+       "segment_min_loc": 20,
+       "segment_min_stmt": 10
+      },
+      "params_digest": "76d40900cf72d8b09c0fe92b9eeac5e35e7862b1dd776a6e5134f7d65d211492"
+     },
+     "dead_code": {
+      "activation": "lane",
+      "algorithm_revisions": {
+       "liveness": "4",
+       "statement_reachability": "1"
+      },
+      "params": {
+       "world_contract": "open"
+      },
+      "params_digest": "482eed24b847b859225f246b74d3933de5d786d0fbebcd40ec093cbd91e3f2a6"
+     },
+     "design": {
+      "activation": "lane",
+      "algorithm_revisions": {
+       "complexity_metrics": "3",
+       "design_metrics": "2"
+      },
+      "params": {
+       "design_findings": {
+        "cohesion": {
+         "metric": "lcom4",
+         "operator": ">=",
+         "value": 4
+        },
+        "complexity": {
+         "metric": "cyclomatic_complexity",
+         "operator": ">",
+         "value": 20
+        },
+        "coupling": {
+         "metric": "cbo",
+         "operator": ">",
+         "value": 10
+        }
+       }
+      },
+      "params_digest": "a59d97006db8a6f26e5c53f5be767b40fc1ce8f8c8599e7cc3d2eb2fbc46bce4"
+     },
+     "near_miss": {
+      "activation": "opt_in",
+      "algorithm_revisions": {
+       "near_miss": "3"
+      },
+      "params": {
+       "max_edit_statements": 1
+      },
+      "params_digest": "04b6ebbce4dfa8b4c077b14c93b99b1881577869617407ea63491d68f9b8ddd7"
+     },
+     "renamed_structure": {
+      "activation": "opt_in",
+      "algorithm_revisions": {
+       "renamed_structure": "1"
+      },
+      "params": {},
+      "params_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+     },
+     "structural": {
+      "activation": "always",
+      "algorithm_revisions": {
+       "structural_findings_catalog": "1"
+      },
+      "params": {},
+      "params_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+     }
+    },
+    "comparison": {
+     "baseline": {
+      "fingerprint_version": null,
+      "loaded": false,
+      "payload_sha256": null,
+      "payload_sha256_verified": false,
+      "schema_version": null,
+      "status": null
+     },
+     "metrics_baseline": {
+      "loaded": false,
+      "payload_sha256": null,
+      "schema_version": null,
+      "status": null
+     }
+    },
+    "evaluation": {
+     "gates": {
+      "activation": "always",
+      "algorithm_revisions": {
+       "gate_algorithm": "1",
+       "gate_lane_matrix": "2",
+       "health_input_manifest": "2"
+      },
+      "thresholds_digest": "0dea969259ae886b6247e500bd14e332294a7fb392a9256166820dc6ff7f4117"
+     },
+     "health": {
+      "activation": "metrics",
+      "algorithm_revisions": {
+       "health_algorithm": "1"
+      },
+      "params": {
+       "cohesion_risk_medium_max": 3,
+       "complexity_elevated_reference_permille": 59,
+       "complexity_elevated_weight": 30,
+       "complexity_extreme_reference_permille": 10,
+       "complexity_extreme_weight": 30,
+       "complexity_outlier_saturation_multiple": 3,
+       "complexity_outlier_weight": 10,
+       "complexity_risk_low_max": 10,
+       "complexity_risk_medium_max": 20,
+       "complexity_tail_saturation_multiple": 4,
+       "complexity_typical_weight": 30,
+       "coupling_elevated_reference_permille": 100,
+       "coupling_elevated_weight": 30,
+       "coupling_extreme_reference_permille": 50,
+       "coupling_extreme_weight": 30,
+       "coupling_outlier_saturation_multiple": 3,
+       "coupling_outlier_weight": 10,
+       "coupling_risk_low_max": 4,
+       "coupling_risk_medium_max": 7,
+       "coupling_tail_saturation_multiple": 4,
+       "coupling_typical_weight": 30,
+       "dependency_cycle_penalty": 25,
+       "dependency_deferred_cycle_penalty": 25,
+       "dependency_depth_avg_multiplier": 2.0,
+       "dependency_depth_level_penalty": 4,
+       "weights": {
+        "clones": 0.25,
+        "cohesion": 0.15,
+        "complexity": 0.2,
+        "coupling": 0.1,
+        "coverage": 0.1,
+        "dead_code": 0.1,
+        "dependencies": 0.1
+       }
+      },
+      "params_digest": "b079c8ef635b922e42747ca565e09379e1ffcfe5ad591ab81c67f73e1d73b174"
+     }
+    }
+   }
+  },
+  "semantic_identity_version": "2"
+ },
+ "inventory": {
+  "code": {
+   "classes": 1,
+   "functions": 0,
+   "methods": 3,
+   "parsed_lines": 0,
+   "scope": "current_run"
+  },
+  "file_registry": {
+   "encoding": "relative_path",
+   "items": [
+    "pkg/module.py",
+    "tests/fixtures/golden_project/a.py"
+   ]
+  },
+  "files": {
+   "analyzed": 0,
+   "cached": 0,
+   "skipped": 0,
+   "source_io_skipped": 0,
+   "total_found": 2,
+   "unsupported_construct_skipped": 0,
+   "unsupported_constructs": []
+  }
+ },
+ "meta": {
+  "analysis_mode": "full",
+  "analysis_profile": {
+   "block_min_loc": 20,
+   "block_min_stmt": 8,
+   "min_loc": 6,
+   "min_stmt": 4,
+   "segment_min_loc": 20,
+   "segment_min_stmt": 10
+  },
+  "analysis_thresholds": {
+   "design_findings": {
+    "cohesion": {
+     "metric": "lcom4",
+     "operator": ">=",
+     "value": 4
+    },
+    "complexity": {
+     "metric": "cyclomatic_complexity",
+     "operator": ">",
+     "value": 20
+    },
+    "coupling": {
+     "metric": "cbo",
+     "operator": ">",
+     "value": 10
+    }
+   }
+  },
+  "baseline": {
+   "fingerprint_version": null,
+   "generator_name": null,
+   "generator_version": null,
+   "loaded": false,
+   "path": null,
+   "path_scope": null,
+   "payload_sha256": null,
+   "payload_sha256_verified": false,
+   "python_tag": null,
+   "schema_version": null,
+   "status": null
+  },
+  "cache": {
+   "path": null,
+   "path_scope": null,
+   "schema_version": null,
+   "status": null,
+   "used": false
+  },
+  "codeclone_version": "",
+  "computed_metric_families": [
+   "api_surface",
+   "cohesion",
+   "complexity",
+   "coupling",
+   "coverage_adoption",
+   "coverage_join",
+   "dead_code",
+   "dependencies",
+   "health",
+   "overloaded_modules",
+   "security_surfaces"
+  ],
+  "metrics_baseline": {
+   "loaded": false,
+   "path": null,
+   "path_scope": null,
+   "payload_sha256": null,
+   "payload_sha256_verified": false,
+   "schema_version": null,
+   "status": null
+  },
+  "project_name": "",
+  "python_tag": "",
+  "python_version": "",
+  "report_mode": "full",
+  "runtime": {
+   "analysis_started_at_utc": null,
+   "baseline_path_absolute": null,
+   "cache_path_absolute": null,
+   "metrics_baseline_path_absolute": null,
+   "report_generated_at_utc": null,
+   "scan_root_absolute": null
+  },
+  "scan_root": "."
+ },
+ "metrics": {
+  "families": {
+   "api_surface": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "added": 0,
+     "baseline_diff_available": false,
+     "breaking": 0,
+     "enabled": false,
+     "modules": 0,
+     "public_symbols": 0,
+     "strict_types": false
+    }
+   },
+   "cohesion": {
+    "items": [
+     {
+      "end_line": 60,
+      "instance_var_count": 2,
+      "lcom4": 1,
+      "method_count": 3,
+      "qualname": "pkg.module:Alpha",
+      "relative_path": "pkg/module.py",
+      "risk": "low",
+      "start_line": 40
+     }
+    ],
+    "items_truncated": false,
+    "summary": {
+     "average": 1.0,
+     "low_cohesion": 0,
+     "max": 1,
+     "total": 1
+    }
+   },
+   "complexity": {
+    "items": [
+     {
+      "cfg_cyclomatic_complexity": 27,
+      "cyclomatic_complexity": 25,
+      "end_line": 30,
+      "nesting_depth": 4,
+      "qualname": "pkg.module:work",
+      "relative_path": "pkg/module.py",
+      "risk": "high",
+      "start_line": 1
+     },
+     {
+      "cfg_cyclomatic_complexity": 5,
+      "cyclomatic_complexity": 4,
+      "end_line": 40,
+      "nesting_depth": 1,
+      "qualname": "pkg.module:tidy",
+      "relative_path": "pkg/module.py",
+      "risk": "low",
+      "start_line": 31
+     }
+    ],
+    "items_truncated": false,
+    "summary": {
+     "average": 14.5,
+     "baseline_diff_available": false,
+     "high_risk": 1,
+     "max": 25,
+     "new_high_risk": 0,
+     "total": 2
+    }
+   },
+   "coupling": {
+    "items": [
+     {
+      "cbo": 12,
+      "coupled_classes": [
+       "A",
+       "B",
+       "C"
+      ],
+      "end_line": 90,
+      "qualname": "pkg.module:Hub",
+      "relative_path": "pkg/module.py",
+      "risk": "high",
+      "start_line": 61
+     },
+     {
+      "cbo": 1,
+      "coupled_classes": [
+       "Beta"
+      ],
+      "end_line": 60,
+      "qualname": "pkg.module:Alpha",
+      "relative_path": "pkg/module.py",
+      "risk": "low",
+      "start_line": 40
+     }
+    ],
+    "items_truncated": false,
+    "summary": {
+     "average": 6.5,
+     "baseline_diff_available": false,
+     "high_risk": 1,
+     "max": 12,
+     "new_high_risk": 0,
+     "total": 2
+    }
+   },
+   "coverage_adoption": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "baseline_diff_available": false,
+     "docstring_delta": 0,
+     "docstring_permille": 0,
+     "modules": 0,
+     "param_delta": 0,
+     "param_permille": 0,
+     "params_annotated": 0,
+     "params_total": 0,
+     "public_symbol_documented": 0,
+     "public_symbol_total": 0,
+     "return_delta": 0,
+     "return_permille": 0,
+     "returns_annotated": 0,
+     "returns_total": 0,
+     "typing_any_count": 0
+    }
+   },
+   "coverage_join": {
+    "items": [
+     {
+      "coverage_hotspot": true,
+      "coverage_permille": 300,
+      "coverage_status": "measured",
+      "covered_lines": 3,
+      "cyclomatic_complexity": 25,
+      "end_line": 30,
+      "executable_lines": 10,
+      "qualname": "pkg.module:work",
+      "relative_path": "pkg/module.py",
+      "risk": "high",
+      "scope_gap_hotspot": false,
+      "start_line": 1
+     },
+     {
+      "coverage_hotspot": false,
+      "coverage_permille": 500,
+      "coverage_status": "measured",
+      "covered_lines": 5,
+      "cyclomatic_complexity": 4,
+      "end_line": 40,
+      "executable_lines": 10,
+      "qualname": "pkg.module:tidy",
+      "relative_path": "pkg/module.py",
+      "risk": "low",
+      "scope_gap_hotspot": false,
+      "start_line": 31
+     }
+    ],
+    "items_truncated": false,
+    "summary": {
+     "coverage_hotspots": 1,
+     "files": 1,
+     "hotspot_threshold_percent": 50,
+     "invalid_reason": null,
+     "measured_units": 2,
+     "missing_from_report_units": 0,
+     "overall_covered_lines": 8,
+     "overall_executable_lines": 20,
+     "overall_permille": 400,
+     "scope_gap_hotspots": 0,
+     "source": "coverage.xml",
+     "status": "ok",
+     "units": 2
+    }
+   },
+   "dead_code": {
+    "items": [
+     {
+      "confidence": "high",
+      "end_line": 12,
+      "kind": "function",
+      "qualname": "pkg.module:dead_one",
+      "reason": "unreferenced",
+      "relative_path": "pkg/module.py",
+      "start_line": 10,
+      "test_reference_sources": []
+     }
+    ],
+    "items_truncated": false,
+    "live_root_reasons": [
+     {
+      "qualname": "pkg.module:main",
+      "reason": "entrypoint"
+     }
+    ],
+    "summary": {
+     "baseline_diff_available": false,
+     "high_confidence": 1,
+     "live_roots": 1,
+     "new_items": 0,
+     "suppressed": 1,
+     "total": 1,
+     "unreachable_statements": 1,
+     "unresolved": 1,
+     "unresolved_external_override": 1,
+     "world_contract": "open"
+    },
+    "suppressed_items": [
+     {
+      "confidence": "high",
+      "end_line": 42,
+      "kind": "function",
+      "qualname": "pkg.module:quiet",
+      "reason": "unreferenced",
+      "relative_path": "pkg/module.py",
+      "start_line": 40,
+      "suppressed_by": [
+       {
+        "rule": "dead-code",
+        "source": "inline"
+       }
+      ],
+      "suppression_rule": "dead-code",
+      "suppression_source": "inline",
+      "test_reference_sources": []
+     }
+    ],
+    "unreachable_statements": [
+     {
+      "confidence": "high",
+      "end_line": 29,
+      "qualname": "pkg.module:work",
+      "reason": "after_return",
+      "relative_path": "pkg/module.py",
+      "start_line": 27,
+      "statement_count": 2
+     }
+    ],
+    "unresolved": [
+     {
+      "end_line": 25,
+      "kind": "function",
+      "qualname": "pkg.module:maybe",
+      "reachability": "externally_reachable",
+      "reason": "declared_reexport",
+      "relative_path": "pkg/module.py",
+      "start_line": 20,
+      "witness": "declared_reexport:pkg",
+      "world_contract": "open"
+     }
+    ],
+    "unresolved_overrides": [
+     {
+      "base_names": [
+       "ExternalBase"
+      ],
+      "class_qualname": "pkg.module:Child",
+      "end_line": 52,
+      "kind": "method",
+      "qualname": "pkg.module:Child.render",
+      "reason": "unresolved_external_base",
+      "relative_path": "pkg/module.py",
+      "start_line": 50
+     }
+    ]
+   },
+   "dependencies": {
+    "cycle_details": [
+     {
+      "kind": "import_cycle",
+      "member_paths": [
+       "pkg/a.py",
+       "pkg/b.py"
+      ],
+      "modules": [
+       "pkg.a",
+       "pkg.b"
+      ]
+     }
+    ],
+    "cycles": [
+     [
+      "pkg.a",
+      "pkg.b"
+     ]
+    ],
+    "dynamic_boundaries": [],
+    "items": [
+     {
+      "binding": "import_time",
+      "import_type": "import",
+      "is_lazy": false,
+      "line": 1,
+      "source": "pkg.a",
+      "target": "pkg.b"
+     },
+     {
+      "binding": "import_time",
+      "import_type": "import",
+      "is_lazy": false,
+      "line": 2,
+      "source": "pkg.b",
+      "target": "pkg.a"
+     }
+    ],
+    "items_truncated": false,
+    "longest_chains": [
+     [
+      "pkg.a",
+      "pkg.b"
+     ]
+    ],
+    "summary": {
+     "avg_depth": 1.0,
+     "baseline_diff_available": false,
+     "cycles": 1,
+     "deferred_cycles": 0,
+     "edges": 2,
+     "import_cycles": 1,
+     "max_depth": 1,
+     "modules": 2,
+     "new_cycles": 0,
+     "new_deferred_cycles": 0,
+     "new_import_cycles": 0,
+     "p95_depth": 1
+    }
+   },
+   "health": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "baseline_diff_available": false,
+     "delta": 0,
+     "dimensions": {
+      "clones": 77,
+      "cohesion": 100,
+      "complexity": 17,
+      "coupling": 10,
+      "coverage": 100,
+      "dead_code": 92,
+      "dependencies": 75
+     },
+     "grade": "C",
+     "population": "complete_nonempty",
+     "score": 65
+    }
+   },
+   "overloaded_modules": {
+    "detection": {
+     "dependency_signals": [],
+     "minimum_population": 0,
+     "scope": "report_only",
+     "shape_signals": [],
+     "size_signals": [],
+     "strategy": "project_relative_composite",
+     "version": "1"
+    },
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "average_score": 0.0,
+     "candidate_score_cutoff": 0.0,
+     "candidates": 0,
+     "population_status": "limited",
+     "top_score": 0.0,
+     "total": 0
+    }
+   },
+   "security_surfaces": {
+    "items": [],
+    "items_truncated": false,
+    "summary": {
+     "by_source_kind": {
+      "fixtures": 0,
+      "other": 0,
+      "production": 0,
+      "tests": 0
+     },
+     "categories": {},
+     "category_count": 0,
+     "exact_items": 0,
+     "fixtures": 0,
+     "items": 0,
+     "modules": 0,
+     "other": 0,
+     "production": 0,
+     "report_only": false,
+     "tests": 0
+    }
+   }
+  },
+  "summary": {
+   "api_surface": {
+    "added": 0,
+    "baseline_diff_available": false,
+    "breaking": 0,
+    "enabled": false,
+    "modules": 0,
+    "public_symbols": 0,
+    "strict_types": false
+   },
+   "cohesion": {
+    "average": 1.0,
+    "low_cohesion": 0,
+    "max": 1,
+    "total": 1
+   },
+   "complexity": {
+    "average": 14.5,
+    "baseline_diff_available": false,
+    "high_risk": 1,
+    "max": 25,
+    "new_high_risk": 0,
+    "total": 2
+   },
+   "coupling": {
+    "average": 6.5,
+    "baseline_diff_available": false,
+    "high_risk": 1,
+    "max": 12,
+    "new_high_risk": 0,
+    "total": 2
+   },
+   "coverage_adoption": {
+    "baseline_diff_available": false,
+    "docstring_delta": 0,
+    "docstring_permille": 0,
+    "modules": 0,
+    "param_delta": 0,
+    "param_permille": 0,
+    "params_annotated": 0,
+    "params_total": 0,
+    "public_symbol_documented": 0,
+    "public_symbol_total": 0,
+    "return_delta": 0,
+    "return_permille": 0,
+    "returns_annotated": 0,
+    "returns_total": 0,
+    "typing_any_count": 0
+   },
+   "coverage_join": {
+    "coverage_hotspots": 1,
+    "files": 1,
+    "hotspot_threshold_percent": 50,
+    "invalid_reason": null,
+    "measured_units": 2,
+    "missing_from_report_units": 0,
+    "overall_covered_lines": 8,
+    "overall_executable_lines": 20,
+    "overall_permille": 400,
+    "scope_gap_hotspots": 0,
+    "source": "coverage.xml",
+    "status": "ok",
+    "units": 2
+   },
+   "dead_code": {
+    "baseline_diff_available": false,
+    "high_confidence": 1,
+    "live_roots": 1,
+    "new_items": 0,
+    "suppressed": 1,
+    "total": 1,
+    "unreachable_statements": 1,
+    "unresolved": 1,
+    "unresolved_external_override": 1,
+    "world_contract": "open"
+   },
+   "dependencies": {
+    "avg_depth": 1.0,
+    "baseline_diff_available": false,
+    "cycles": 1,
+    "deferred_cycles": 0,
+    "edges": 2,
+    "import_cycles": 1,
+    "max_depth": 1,
+    "modules": 2,
+    "new_cycles": 0,
+    "new_deferred_cycles": 0,
+    "new_import_cycles": 0,
+    "p95_depth": 1
+   },
+   "health": {
+    "baseline_diff_available": false,
+    "delta": 0,
+    "dimensions": {
+     "clones": 77,
+     "cohesion": 100,
+     "complexity": 17,
+     "coupling": 10,
+     "coverage": 100,
+     "dead_code": 92,
+     "dependencies": 75
+    },
+    "grade": "C",
+    "population": "complete_nonempty",
+    "score": 65
+   },
+   "overloaded_modules": {
+    "average_score": 0.0,
+    "candidate_score_cutoff": 0.0,
+    "candidates": 0,
+    "population_status": "limited",
+    "top_score": 0.0,
+    "total": 0
+   },
+   "security_surfaces": {
+    "by_source_kind": {
+     "fixtures": 0,
+     "other": 0,
+     "production": 0,
+     "tests": 0
+    },
+    "categories": {},
+    "category_count": 0,
+    "exact_items": 0,
+    "fixtures": 0,
+    "items": 0,
+    "modules": 0,
+    "other": 0,
+    "production": 0,
+    "report_only": false,
+    "tests": 0
+   }
+  }
+ },
+ "report_schema_version": "3.3",
+ "source_facts": {
+  "analysis_contract": {
+   "design_findings": {
+    "cohesion": {
+     "metric": "lcom4",
+     "operator": ">=",
+     "value": 4
+    },
+    "complexity": {
+     "metric": "cyclomatic_complexity",
+     "operator": ">",
+     "value": 20
+    },
+    "coupling": {
+     "metric": "cbo",
+     "operator": ">",
+     "value": 10
+    }
+   }
+  },
+  "analysis_scope": [
+   {
+    "path": "pkg/module.py"
+   }
+  ],
+  "module_identity_manifest": {
+   "analysis_mount": {
+    "origin": "analysis_only",
+    "path": "."
+   },
+   "import_mounts": [
+    {
+     "module_prefix": "",
+     "origin": "root",
+     "path": "."
+    }
+   ],
+   "module_identity_version": "2",
+   "normalization": {
+    "case_sensitive": true,
+    "path_form": "posix_nfc"
+   },
+   "strategy": "root"
+  },
+  "module_registry": {
+   "digest": {
+    "algorithm": "sha256",
+    "domain": "codeclone.module-registry.v1",
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "entries_by_module": {
+    "rows": [
+     [
+      "pkg.module",
+      {
+       "analyzed": true,
+       "identity": {
+        "file": {
+         "path": "pkg/module.py"
+        },
+        "python_module": {
+         "is_package": false,
+         "module": "pkg.module",
+         "mount_path": ".",
+         "node_kind": "module_file",
+         "origin": "import_mount",
+         "package": "pkg"
+        }
+       },
+       "internality": "analyzed"
+      }
+     ]
+    ]
+   },
+   "entries_by_path": {
+    "rows": [
+     [
+      "pkg/module.py",
+      {
+       "analyzed": true,
+       "identity": {
+        "file": {
+         "path": "pkg/module.py"
+        },
+        "python_module": {
+         "is_package": false,
+         "module": "pkg.module",
+         "mount_path": ".",
+         "node_kind": "module_file",
+         "origin": "import_mount",
+         "package": "pkg"
+        }
+       },
+       "internality": "analyzed"
+      }
+     ]
+    ]
+   },
+   "manifest": {
+    "analysis_mount": {
+     "origin": "analysis_only",
+     "path": "."
+    },
+    "import_mounts": [
+     {
+      "module_prefix": "",
+      "origin": "root",
+      "path": "."
+     }
+    ],
+    "module_identity_version": "2",
+    "normalization": {
+     "case_sensitive": true,
+     "path_form": "posix_nfc"
+    },
+    "strategy": "root"
+   },
+   "manifest_digest": {
+    "algorithm": "sha256",
+    "domain": "ccmi2:manifest",
+    "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   },
+   "package_prefixes": []
+  },
+  "observation_contract": {
+   "descriptors": [
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "adoption_counts",
+     "payload_schema": "2",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "api_surface",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "API_SURFACE_SIGNATURE_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.blocks",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "clones.functions",
+     "payload_schema": "1",
+     "required_contracts": [
+      [
+       "BASELINE_FINGERPRINT_VERSION",
+       "3"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "coupling_cohesion_observations",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "1",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dead_code",
+     "payload_schema": "3",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "dependencies",
+     "payload_schema": "8",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "2",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "module_identity",
+     "payload_schema": "4",
+     "required_contracts": [
+      [
+       "MODULE_IDENTITY_VERSION",
+       "2"
+      ]
+     ]
+    },
+    {
+     "algorithm_revision": "3",
+     "canonicalization_version": "2",
+     "descriptor_version": "1",
+     "name": "risk_observations",
+     "payload_schema": "5",
+     "required_contracts": [
+      [
+       "OBSERVATION_DIGEST_VERSION",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "enabled_lanes": [
+    "adoption_counts",
+    "api_surface",
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations"
+   ],
+   "observation_digest_version": "1"
+  },
+  "semantic": null,
+  "source_fact_families": {
+   "adoption_counts": [],
+   "api_surface": [],
+   "block_clone_keys": [],
+   "coupling_cohesion_entity_population": 0,
+   "coupling_cohesion_observations": [],
+   "dead_code": [],
+   "dependencies": [],
+   "function_clone_keys": [
+    "c7d3c7b84d0ee440d27f547cb0ac1845845ffd34ee01669bcbd623adb9d3f56b|0-19"
+   ],
+   "risk_entity_population": 0,
+   "risk_observations": []
+  }
+ }
+}

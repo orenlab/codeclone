@@ -665,6 +665,10 @@ _CACHE_LANE_BY_CONSTANT: Final[dict[str, tuple[str, str]]] = {
     "REPORT_COMPARISON_IDENTITY_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
     "REPORT_EVALUATION_IDENTITY_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
     "REPORT_FAMILY_DIGEST_DOMAIN_V2": (_LANE_NONE, "report integrity digest"),
+    "REPORT_ANALYSIS_IDENTITY_DOMAIN_V3": (_LANE_NONE, "report integrity digest"),
+    "REPORT_COMPARISON_IDENTITY_DOMAIN_V3": (_LANE_NONE, "report integrity digest"),
+    "REPORT_EVALUATION_IDENTITY_DOMAIN_V3": (_LANE_NONE, "report integrity digest"),
+    "REPORT_FAMILY_DIGEST_DOMAIN_V3": (_LANE_NONE, "report integrity digest"),
     "REPORT_SEMANTIC_IDENTITY_VERSION": (
         _LANE_NONE,
         "identity generation of the report digest preimage; computed per run "

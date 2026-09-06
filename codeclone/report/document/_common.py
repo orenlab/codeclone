@@ -54,7 +54,7 @@ from ..derived import (
 )
 
 if TYPE_CHECKING:
-    from ...contracts import HealthPopulation
+    from ...contracts import ObservedPopulation
     from ...models import (
         GroupMapLike,
         MetricsDiff,
@@ -354,7 +354,7 @@ def health_verdict_withheld(health: Mapping[str, object]) -> bool:
     population = str(health.get("population", ""))
     if not population:
         return score_absent
-    state_absent = not population_carries_score(cast("HealthPopulation", population))
+    state_absent = not population_carries_score(cast("ObservedPopulation", population))
     return state_absent or score_absent
 
 

@@ -16,7 +16,7 @@ import pytest
 from codeclone.api.comparison import build_comparison_context
 from codeclone.baseline import Baseline, MetricsBaseline
 from codeclone.cache.reuse import binding_context_digest, source_content_digest
-from codeclone.contracts import HealthPopulation
+from codeclone.contracts import ObservedPopulation
 from codeclone.core._types import (
     AnalysisResult,
     _as_sorted_str_tuple,
@@ -2384,7 +2384,7 @@ def test_population_universe_observed_pins_each_state(
     )
 
     assert (
-        population_universe_observed(cast("HealthPopulation", population))
+        population_universe_observed(cast("ObservedPopulation", population))
         is universe_observed
     )
 
@@ -2493,7 +2493,7 @@ def _population_metrics(population: str) -> ProjectMetrics:
             total=50 if population in {"complete_nonempty", "partial"} else 0,
             grade="D" if population in {"complete_nonempty", "partial"} else "F",
             dimensions={},
-            population=cast("HealthPopulation", population),
+            population=cast("ObservedPopulation", population),
         ),
     )
 

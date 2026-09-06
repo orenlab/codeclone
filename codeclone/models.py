@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_valida
 
 # The four-state population contract lives in the dependency-free contract
 # ring, because the r4 surfaces that decide on it may not import this module.
-from .contracts import HealthPopulation
+from .contracts import ObservedPopulation
 
 DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
 DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
@@ -3255,7 +3255,7 @@ class HealthScore:
     #: nothing to read. Consumers that present or gate on health must consult
     #: this before quoting either field; ``population_carries_score`` is the
     #: one place that turns the four states into that yes/no.
-    population: HealthPopulation = "complete_nonempty"
+    population: ObservedPopulation = "complete_nonempty"
 
 
 @dataclass(frozen=True, slots=True)

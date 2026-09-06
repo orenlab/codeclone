@@ -51,7 +51,7 @@ from codeclone.baseline.container_digest import (
 from codeclone.baseline.diff import diff_metrics
 from codeclone.baseline.lanes import lane_payload_is_opaque
 from codeclone.baseline.metrics_baseline import _lane_payload, _snapshot
-from codeclone.contracts import HealthPopulation
+from codeclone.contracts import ObservedPopulation
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     BaselineContainerV3,
@@ -804,7 +804,7 @@ def _current_half_snapshot(
 
 @pytest.mark.parametrize("population", ["unmeasured", "complete_empty"])
 def test_the_current_snapshot_carries_the_health_refusal(
-    population: HealthPopulation,
+    population: ObservedPopulation,
 ) -> None:
     """The producer seam of the current half, pinned where the refusal drops.
 
@@ -830,7 +830,7 @@ def test_the_current_snapshot_carries_the_health_refusal(
 
 @pytest.mark.parametrize("population", ["complete_nonempty", "partial"])
 def test_a_measured_population_keeps_the_current_snapshot_health(
-    population: HealthPopulation,
+    population: ObservedPopulation,
 ) -> None:
     """The opposite boundary: a population that carries a score keeps it.
 

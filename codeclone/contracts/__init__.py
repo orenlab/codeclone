@@ -154,24 +154,49 @@ REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN: Final = "codeclone.report.analysis_facts.v1
 REPORT_COMPARISON_DIGEST_DOMAIN: Final = "codeclone.report.comparison.v1\0"
 REPORT_EVALUATION_DIGEST_DOMAIN: Final = "codeclone.report.evaluation.v1\0"
 REPORT_ENVELOPE_DIGEST_DOMAIN: Final = "codeclone.report.envelope.v1\0"
-# --- Report semantic identity v2 (RULING-2026-08-31, ratified) ---
+# --- Report semantic identity (RULING-2026-08-31, ratified; v3 2026-09-05) ---
 # The generation of the run-identity preimage, deliberately separate from
 # REPORT_SCHEMA_VERSION: the schema names the wire shape, this names what the
 # identity claims to cover. Generation "1" hashed source facts, the baseline
 # projection and the gate request; findings tiers, policy parameters and
 # evaluation outputs were outside the preimage, and five measured
-# (tree x config x engine) states shared one run_id. Generation "2" adds the
+# (tree x config x engine) states shared one run_id. Generation "2" added the
 # analysis population, the realized producer contracts and the canonical
 # family digests of every EXECUTED semantic family, per the ratified law:
 # two runs share a run_id iff they utter the same canonical set of semantic
 # statements under the same realized contract of their derivation.
-# Documents without this marker verify under generation-1 rules; the marker
-# is never inferred.
-REPORT_SEMANTIC_IDENTITY_VERSION: Final = "2"
+# Generation "3" changes what a family digest is a digest OF. Generation 2
+# hashed the FINDINGS projection of a family, so every statement the family
+# utters outside that projection was represented at no tier (measured: two
+# documents stating a different reason, reachability and witness for one
+# dead-code abstention shared a run_id), and it hashed novelty -- a
+# COMPARISON-domain fact -- inside the ANALYSIS family digests, so the tier
+# meant to be the fixed point moved on a baseline-derived fact. Generation 3
+# builds every analysis family digest only from the family's one projection
+# owner (codeclone.report.document.family_projection: whole-object membership
+# declared per producer in codeclone.contracts.report_identity, explicit
+# classified exclusions) and routes the comparison-domain statements into a
+# comparison-tier family digest of the same family. The law it carries:
+#   Every user-visible analysis-semantic assertion must be represented in
+#   exactly one identity-bearing semantic-family projection at its natural
+#   tier.
+#   If CodeClone can show two semantically different analysis statements to
+#   the user, their analysis-semantic identity must differ -- unless the
+#   difference is explicitly classified as non-semantic representation.
+# The wire did not move: every field already existed on it, only the
+# preimage's membership changed, so REPORT_SCHEMA_VERSION and the canonical
+# wire revision stay where they are. Documents without this marker verify
+# under generation-1 rules, documents marked "2" under the frozen
+# generation-2 rules; the marker is never inferred.
+REPORT_SEMANTIC_IDENTITY_VERSION: Final = "3"
 REPORT_ANALYSIS_IDENTITY_DOMAIN_V2: Final = "codeclone.report.analysis.v2\0"
 REPORT_COMPARISON_IDENTITY_DOMAIN_V2: Final = "codeclone.report.comparison.v2\0"
 REPORT_EVALUATION_IDENTITY_DOMAIN_V2: Final = "codeclone.report.evaluation.v2\0"
 REPORT_FAMILY_DIGEST_DOMAIN_V2: Final = "codeclone.report.family.v2\0"
+REPORT_ANALYSIS_IDENTITY_DOMAIN_V3: Final = "codeclone.report.analysis.v3\0"
+REPORT_COMPARISON_IDENTITY_DOMAIN_V3: Final = "codeclone.report.comparison.v3\0"
+REPORT_EVALUATION_IDENTITY_DOMAIN_V3: Final = "codeclone.report.evaluation.v3\0"
+REPORT_FAMILY_DIGEST_DOMAIN_V3: Final = "codeclone.report.family.v3\0"
 # Which of the five report digest tiers names a run, for every surface that has
 # to answer "which run is this". Exactly one tier can: ``evaluation`` seals the
 # facts, the baseline, the gate thresholds and the outcome, so two runs over one
@@ -922,11 +947,25 @@ def cli_help_epilog() -> str:
 #: * ``unmeasured``        — files exist (or the lane never ran) and none were
 #:                           observed. The only state that means "no evidence".
 #:
+#: Named after its sole computer, ``observed_population`` below, and not
+#: after any consumer. It was ``HealthPopulation`` until identity v3, which
+#: is how the false ownership got written down: health *reads* this fact, and
+#: a type named for a reader invites the next agent to re-derive the reader as
+#: the owner. ``AnalysisPopulation`` was unavailable and would have been wrong
+#: anyway — ``core.canonical_snapshot`` already spells that name for the run
+#: store's admissibility population, a different concept.
+#:
+#: An ANALYSIS-tier fact. It states what the run's execution actually reached,
+#: decided by two discovery counters and no policy at all, so no evaluation
+#: knob can move it; the analysis-semantic identity carries it
+#: (``report.document.integrity._population``, key ``observed``) and health,
+#: the gates, the baseline publisher and the CLI surfaces consume it.
+#:
 #: Lives here, in the dependency-free contract ring, rather than beside the
-#: models: health, the gates, the baseline publisher and the CLI surfaces all
-#: decide on it, and the surfaces may not import the model store at all. A
-#: fact every ring must consult belongs in the ring every ring may reach.
-HealthPopulation = Literal[
+#: models: every one of those rings decides on it, and the surfaces may not
+#: import the model store at all. A fact every ring must consult belongs in
+#: the ring every ring may reach.
+ObservedPopulation = Literal[
     "complete_nonempty",
     "complete_empty",
     "partial",
@@ -947,7 +986,7 @@ def observed_population(
     *,
     files_found: int,
     files_analyzed_or_cached: int,
-) -> HealthPopulation:
+) -> ObservedPopulation:
     """Name what the run observed, from the two counters and nothing else.
 
     The sole computer of this fact. Health, the gates, the baseline publisher
@@ -971,7 +1010,7 @@ def observed_population(
     return "complete_nonempty"
 
 
-def population_carries_score(population: HealthPopulation) -> bool:
+def population_carries_score(population: ObservedPopulation) -> bool:
     """True when a health number exists for this population.
 
     One owner for the question every presenting surface asks. ``partial`` is
@@ -997,7 +1036,7 @@ _POPULATIONS_WITH_AN_OBSERVED_UNIVERSE: Final[frozenset[str]] = frozenset(
 )
 
 
-def population_universe_observed(population: HealthPopulation) -> bool:
+def population_universe_observed(population: ObservedPopulation) -> bool:
     """True when the run observed every member of the population it found.
 
     One owner for the question a set-theoretic comparison must ask before it
@@ -1131,12 +1170,16 @@ __all__ = [
     "RENAMED_STRUCTURE_ALGORITHM_REVISION",
     "REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN",
     "REPORT_ANALYSIS_IDENTITY_DOMAIN_V2",
+    "REPORT_ANALYSIS_IDENTITY_DOMAIN_V3",
     "REPORT_COMPARISON_DIGEST_DOMAIN",
     "REPORT_COMPARISON_IDENTITY_DOMAIN_V2",
+    "REPORT_COMPARISON_IDENTITY_DOMAIN_V3",
     "REPORT_ENVELOPE_DIGEST_DOMAIN",
     "REPORT_EVALUATION_DIGEST_DOMAIN",
     "REPORT_EVALUATION_IDENTITY_DOMAIN_V2",
+    "REPORT_EVALUATION_IDENTITY_DOMAIN_V3",
     "REPORT_FAMILY_DIGEST_DOMAIN_V2",
+    "REPORT_FAMILY_DIGEST_DOMAIN_V3",
     "REPORT_RUN_IDENTITY_TIER",
     "REPORT_SCHEMA_VERSION",
     "REPORT_SEMANTIC_IDENTITY_VERSION",
@@ -1159,7 +1202,7 @@ __all__ = [
     "TRAJECTORY_QUALITY_SCORE_VERSION",
     "WIRE_VERSION",
     "ExitCode",
-    "HealthPopulation",
+    "ObservedPopulation",
     "cli_help_epilog",
     "population_universe_observed",
 ]

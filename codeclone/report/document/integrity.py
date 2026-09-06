@@ -6,7 +6,7 @@
 
 """Canonical report digest hierarchy and verification owner.
 
-Two generations live here, named by ``integrity.semantic_identity_version``:
+Three generations live here, named by ``integrity.semantic_identity_version``:
 
 * **Generation 1** (no marker) hashed the source facts, the baseline
   projection and the gate request.  Findings tiers, policy parameters and
@@ -27,7 +27,41 @@ Two generations live here, named by ``integrity.semantic_identity_version``:
                      evaluation family digests)
       run_id     = EVALUATION
 
-Verification is document-internal in both generations: no check compares a
+* **Generation 3** (identity v3, 2026-09-05) keeps the hierarchy and changes
+  what a family digest is a digest OF.  Generation 2 hashed
+  ``findings.groups[family]`` — a findings projection — so the statements a
+  family utters outside that projection were represented at no tier
+  (measured: two documents stating a different ``reason``, ``reachability``
+  and ``witness`` for one dead-code abstention shared a ``run_id``), while
+  ``novelty`` — a COMPARISON-domain fact — was hashed inside the ANALYSIS
+  family digests, so the tier meant to be the fixed point moved on a
+  baseline-derived fact.  Generation 3 builds every analysis family digest
+  only from the family's one projection owner
+  (:mod:`codeclone.report.document.family_projection`: whole-object
+  membership declared per producer, explicit classified exclusions) and
+  routes the comparison-domain statements into a comparison-tier family
+  digest of the same family::
+
+      ANALYSIS   = H(scope, population, realized analysis contracts,
+                     analysis family digests)
+      COMPARISON = H(ANALYSIS, baseline projection, realized comparison
+                     contract, comparison family digests)
+      EVALUATION = H(COMPARISON, evaluation, realized evaluation contract,
+                     evaluation family digests)
+      run_id     = EVALUATION
+
+  The law this generation carries, in its two ratified forms:
+
+      Every user-visible analysis-semantic assertion must be represented in
+      exactly one identity-bearing semantic-family projection at its
+      natural tier.
+
+      If CodeClone can show two semantically different analysis statements
+      to the user, their analysis-semantic identity must differ — unless
+      the difference is explicitly classified as non-semantic
+      representation.
+
+Verification is document-internal in every generation: no check compares a
 document against this process's constants, so a document produced by another
 engine generation stays honestly verifiable.  Live policy values (the health
 parameters) are uttered into the document at build time and checked there
@@ -39,9 +73,10 @@ realized copies, because one fact spelled twice in one document must agree.
 from __future__ import annotations
 
 import hmac
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from hashlib import sha256
+from typing import Final
 
 from ...cache.integrity import canonical_json_bytes
 from ...contracts import (
@@ -51,27 +86,33 @@ from ...contracts import (
     HEALTH_INPUT_MANIFEST_VERSION,
     REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN,
     REPORT_ANALYSIS_IDENTITY_DOMAIN_V2,
+    REPORT_ANALYSIS_IDENTITY_DOMAIN_V3,
     REPORT_COMPARISON_DIGEST_DOMAIN,
     REPORT_COMPARISON_IDENTITY_DOMAIN_V2,
+    REPORT_COMPARISON_IDENTITY_DOMAIN_V3,
     REPORT_ENVELOPE_DIGEST_DOMAIN,
     REPORT_EVALUATION_DIGEST_DOMAIN,
     REPORT_EVALUATION_IDENTITY_DOMAIN_V2,
+    REPORT_EVALUATION_IDENTITY_DOMAIN_V3,
     REPORT_FAMILY_DIGEST_DOMAIN_V2,
+    REPORT_FAMILY_DIGEST_DOMAIN_V3,
     REPORT_SEMANTIC_IDENTITY_VERSION,
+    observed_population,
 )
 from ...contracts.report_identity import (
     PRODUCER_STATE_COMPLETE,
     PRODUCER_STATE_DISABLED,
-    REPORT_SEMANTIC_PRODUCERS,
     ProducerSpec,
+    ReportIdentityRegistryError,
     producer_spec,
     realized_health_params,
     registered_revisions,
     spec_activation,
+    spec_document_sections,
     spec_enabling_lane,
     spec_family,
     spec_identity_domain,
-    spec_revision_owners,
+    spec_uttered_revision,
 )
 from ...models import (
     EvaluationContract,
@@ -85,6 +126,13 @@ from ..gates.evaluator import (
     GateResult,
     MetricGateConfig,
     active_gate_lane_requirements,
+)
+from .family_projection import (
+    analysis_semantic_projection,
+    comparison_semantic_projection,
+    document_section,
+    evaluation_semantic_projection,
+    unowned_report_sections,
 )
 
 _DIGEST_VERSION = "1"
@@ -104,6 +152,41 @@ _POPULATION_FILE_COUNTERS = (
     "skipped",
     "unsupported_construct_skipped",
 )
+
+#: The two counters the population state is decided from, summed before they
+#: are read.  Their SPLIT is provenance and must never reach a digest — a
+#: warm run moves a file from ``analyzed`` to ``cached`` and back with no
+#: change to what was observed, and the cache-trust invariant rests on that
+#: equality.  Their SUM is the fact: how much of the found universe the run
+#: actually read.
+_POPULATION_OBSERVED_COUNTERS = ("analyzed", "cached")
+
+
+def _population_counter(files_payload: Mapping[str, object], name: str) -> int:
+    value = files_payload.get(name)
+    return value if isinstance(value, int) else 0
+
+
+def _observed_population(files_payload: Mapping[str, object]) -> str:
+    """This run's execution-completeness state, from its owner.
+
+    Consults ``contracts.observed_population`` instead of restating the rule:
+    health, the gates, the baseline publisher and every renderer decide the
+    same word from the same two counters, and a second derivation here would
+    be a second semantics for one fact — which is exactly the defect this
+    statement closes.  A counter the document does not carry reads as 0, so a
+    malformed inventory degrades to ``unmeasured`` ("no evidence") rather
+    than to the favourable answer.
+    """
+
+    return observed_population(
+        files_found=_population_counter(files_payload, "total_found"),
+        files_analyzed_or_cached=sum(
+            _population_counter(files_payload, name)
+            for name in _POPULATION_OBSERVED_COUNTERS
+        ),
+    )
+
 
 #: ``meta.baseline`` fields that are comparison semantics.  Deliberately
 #: excluded: ``path`` (configuration location), ``python_tag`` (provenance —
@@ -221,30 +304,156 @@ def _comparison_digest_input(baseline: Mapping[str, object]) -> dict[str, object
 
 
 # ---------------------------------------------------------------------------
-# Generation 2: the semantic block (population, realized contracts, family
-# digests).  Everything below is computed from the document body alone plus —
-# at build time only — the live policy constants that the block itself then
-# utters, so verification never needs this process's constants.
+# Generations 2 and 3: the semantic block (population, realized contracts,
+# family digests).  Everything below is computed from the document body alone
+# plus — at build time only — the live policy constants that the block itself
+# then utters, so verification never needs this process's constants.  Each
+# generation is one row of the table below: build seals under the current
+# row, verification interprets a document under the row its marker names, and
+# neither row is ever reinterpreted by the other.
 # ---------------------------------------------------------------------------
+
+
+#: The rules one identity generation seals and verifies under, as pure data
+#: — the registry's table idiom (``ProducerSpec``): runtime model shapes
+#: belong to the model store, and this is a constants row.
+#:
+#: Keys:
+#: ``marker``             the ``semantic_identity_version`` the row answers
+#: ``analysis_domain`` / ``comparison_domain`` / ``evaluation_domain``
+#:                        the tier digest domain separators
+#: ``family_domain``      the family digest domain separator
+#: ``family_tiers``       the family-digest tiers the row utters, in
+#:                        hierarchy order.  Generation 2 knew no
+#:                        comparison-tier family projection; generation 3
+#:                        routes the comparison-domain statements there.
+#: ``population_statements``
+#:                        the statements the row's population block seals, in
+#:                        wire order.  Generation 2 sealed the file counters
+#:                        and the per-producer execution states; generation 3
+#:                        adds ``observed`` — the execution-completeness fact
+#:                        ``contracts.observed_population`` decides from the
+#:                        run's own discovery counters.  Generation 2 left
+#:                        that fact to the health family alone, so it reached
+#:                        only the EVALUATION tier: measured 2026-09-06, three
+#:                        runs stating ``complete_nonempty`` / ``partial`` /
+#:                        ``unmeasured`` shared one ``analysis_facts``
+#:                        (``e3e51652b428c75c``) — the analysis layer asserted
+#:                        that a complete and a partial analysis of one tree
+#:                        are the same facts.  Sealed per row because a
+#:                        generation's documents must keep recomputing.
+#: ``families``           the registered families the row quantifies over —
+#:                        its population, realized contracts and family
+#:                        digests.  FROZEN with the row: a producer registered
+#:                        after a generation sealed its documents must not
+#:                        enter that generation's population, or every
+#:                        document it sealed stops recomputing.  The current
+#:                        row lists every registered family (pinned by test).
+_Generation = Mapping[str, object]
+
+_GENERATION_TWO: Final[_Generation] = {
+    "marker": "2",
+    "analysis_domain": REPORT_ANALYSIS_IDENTITY_DOMAIN_V2,
+    "comparison_domain": REPORT_COMPARISON_IDENTITY_DOMAIN_V2,
+    "evaluation_domain": REPORT_EVALUATION_IDENTITY_DOMAIN_V2,
+    "family_domain": REPORT_FAMILY_DIGEST_DOMAIN_V2,
+    "family_tiers": ("analysis", "evaluation"),
+    "population_statements": ("files", "producers", "analysis_mode"),
+    "families": (
+        "authority",
+        "clones",
+        "dead_code",
+        "design",
+        "gates",
+        "health",
+        "near_miss",
+        "renamed_structure",
+        "structural",
+    ),
+}
+_GENERATION_THREE: Final[_Generation] = {
+    "marker": "3",
+    "analysis_domain": REPORT_ANALYSIS_IDENTITY_DOMAIN_V3,
+    "comparison_domain": REPORT_COMPARISON_IDENTITY_DOMAIN_V3,
+    "evaluation_domain": REPORT_EVALUATION_IDENTITY_DOMAIN_V3,
+    "family_domain": REPORT_FAMILY_DIGEST_DOMAIN_V3,
+    "family_tiers": ("analysis", "comparison", "evaluation"),
+    "population_statements": ("files", "observed", "producers", "analysis_mode"),
+    "families": (
+        "api_surface",
+        "authority",
+        "clones",
+        "coverage_adoption",
+        "coverage_join",
+        "dead_code",
+        "design",
+        "gates",
+        "health",
+        "near_miss",
+        "overloaded_modules",
+        "renamed_structure",
+        "security_surfaces",
+        "structural",
+    ),
+}
+
+
+def _generation_marker(generation: _Generation) -> str:
+    return str(generation["marker"])
+
+
+def _generation_domain(generation: _Generation, tier: str) -> str:
+    return str(generation[f"{tier}_domain"])
+
+
+def _generation_family_tiers(generation: _Generation) -> tuple[str, ...]:
+    tiers = generation["family_tiers"]
+    assert isinstance(tiers, tuple)
+    return tuple(str(tier) for tier in tiers)
+
+
+def _generation_population_statements(generation: _Generation) -> tuple[str, ...]:
+    statements = generation["population_statements"]
+    assert isinstance(statements, tuple)
+    return tuple(str(statement) for statement in statements)
+
+
+def _generation_producers(generation: _Generation) -> tuple[ProducerSpec, ...]:
+    """The registered producers one generation quantifies over, in the
+    frozen order of its row."""
+
+    families = generation["families"]
+    assert isinstance(families, tuple)
+    return tuple(producer_spec(str(family)) for family in families)
+
+
+_GENERATIONS: Final[Mapping[str, _Generation]] = {
+    _generation_marker(generation): generation
+    for generation in (_GENERATION_TWO, _GENERATION_THREE)
+}
+#: The row documents are sealed under.  Looked up, never assigned: the
+#: version constant cannot move without a generation row saying what the new
+#: number means, and a marker this table does not know is a typed refusal.
+_CURRENT_GENERATION: Final = _GENERATIONS[REPORT_SEMANTIC_IDENTITY_VERSION]
 
 
 def _params_digest(params: Mapping[str, object]) -> str:
     return sha256(canonical_json_bytes(dict(params))).hexdigest()
 
 
-#: Keys a family digest never hashes.  ``display_facts`` are renderer inputs
-#: ("Presentation facts" in the markdown/text renderers) — presentation never
-#: computes, so it never names a run.  The four line-span keys are navigation
-#: provenance: the analyzer invariant (a Python comment edit is invisible to
-#: analysis, and MCP patch verification rests on that equality) requires a
-#: finding whose only movement is a shifted location to keep its identity.
-#: Where a producer needs a position to DISAMBIGUATE two entities sharing a
-#: qualname it glues the line into its identity key (the F1 precedent;
-#: ``near_miss.pair_key`` does exactly that), and glued keys are hashed —
-#: bare span fields are not.  The registry declares those glued keys per
-#: family (``spec_identity_keys``), and the acceptance corpus pins that this
-#: set and that declaration never intersect: an identity-bearing key cannot
-#: be declared non-semantic.
+#: FROZEN with generation 2: the keys its family digest never hashed.
+#: ``display_facts`` are renderer inputs — presentation never computes, so it
+#: never names a run.  The four line-span keys are navigation provenance: the
+#: analyzer invariant (a Python comment edit is invisible to analysis, and MCP
+#: patch verification rests on that equality) requires a finding whose only
+#: movement is a shifted location to keep its identity.  Where a producer
+#: needs a position to DISAMBIGUATE two entities sharing a qualname it glues
+#: the line into its identity key (the F1 precedent; ``near_miss.pair_key``
+#: does exactly that), and glued keys are hashed — bare span fields are not.
+#: Generation 3 owns the same law in the registry
+#: (``codeclone.contracts.report_identity.UNIVERSAL_KEY_CLASSES``), where
+#: each exclusion carries its class; this set stays so a generation-2
+#: document keeps verifying under the exact rule that sealed it.
 _NON_SEMANTIC_PROJECTION_KEYS = frozenset(
     {
         "display_facts",
@@ -257,7 +466,7 @@ _NON_SEMANTIC_PROJECTION_KEYS = frozenset(
 
 
 def _semantic_projection(value: object) -> object:
-    """Project a container onto its semantic statements before digesting.
+    """Generation 2's projection of a container onto its semantic statements.
 
     The prune is recursive because the clone family nests its groups inside
     buckets and every findings family nests members inside groups.
@@ -274,12 +483,21 @@ def _semantic_projection(value: object) -> object:
     return value
 
 
-def _family_digest_value(family: str, projection: object) -> str:
+def _family_digest_value(
+    family: str,
+    projection: object,
+    *,
+    generation: _Generation,
+) -> str:
+    """Digest one family's already-projected statements under a generation's
+    family domain.  The projection is the caller's: generation 2 passes its
+    pruned findings container, generation 3 passes the owner's projection."""
+
     digest = sha256()
-    digest.update(REPORT_FAMILY_DIGEST_DOMAIN_V2.encode("utf-8"))
+    digest.update(_generation_domain(generation, "family").encode("utf-8"))
     digest.update(family.encode("utf-8"))
     digest.update(b"\x00")
-    digest.update(canonical_json_bytes(_semantic_projection(projection)))
+    digest.update(canonical_json_bytes(projection))
     return digest.hexdigest()
 
 
@@ -321,6 +539,7 @@ def _producer_state(
 
 def _population(
     *,
+    generation: _Generation,
     meta: Mapping[str, object],
     inventory: Mapping[str, object],
     groups: Mapping[str, object],
@@ -340,27 +559,56 @@ def _population(
             enabled_lanes=enabled_lanes,
             computed_metric_families=computed,
         )
-        for spec in REPORT_SEMANTIC_PRODUCERS
+        for spec in _generation_producers(generation)
     }
-    population: dict[str, object] = {
+    statements: dict[str, object] = {
         "files": files,
+        "observed": _observed_population(files_payload),
         "producers": producers,
     }
     analysis_mode = meta.get("analysis_mode")
     if isinstance(analysis_mode, str) and analysis_mode:
-        population["analysis_mode"] = analysis_mode
-    return population
+        statements["analysis_mode"] = analysis_mode
+    return {
+        name: statements[name]
+        for name in _generation_population_statements(generation)
+        if name in statements
+    }
+
+
+def _uttered_revision(
+    spec: ProducerSpec,
+    *,
+    findings: Mapping[str, object],
+    metrics: Mapping[str, object],
+) -> tuple[str, str] | None:
+    """``(semantic_name, value)`` of the revision the producer's own container
+    utters in this document, or ``None`` when the registry declares no
+    utterance for the family or the container does not utter it."""
+
+    declared = spec_uttered_revision(spec)
+    if declared is None:
+        return None
+    semantic_name, section_path, key_path = declared
+    current: object = document_section(section_path, findings=findings, metrics=metrics)
+    for key in key_path.split("."):
+        current = _as_mapping(current).get(key)
+    if isinstance(current, str) and current:
+        return semantic_name, current
+    return None
 
 
 def _realized_analysis_contracts(
     *,
+    generation: _Generation,
     groups: Mapping[str, object],
     meta: Mapping[str, object],
     producers: Mapping[str, object],
-    metrics: Mapping[str, object] = {},
+    findings: Mapping[str, object],
+    metrics: Mapping[str, object],
 ) -> dict[str, object]:
     contracts: dict[str, object] = {}
-    for spec in REPORT_SEMANTIC_PRODUCERS:
+    for spec in _generation_producers(generation):
         family = spec_family(spec)
         if spec_identity_domain(spec) != "analysis":
             continue
@@ -369,12 +617,11 @@ def _realized_analysis_contracts(
             # so a configured revision cannot sneak into the identity.
             continue
         container = _as_mapping(groups.get(family))
-        uttered_revision = container.get("algorithm_revision")
-        if isinstance(uttered_revision, str) and uttered_revision:
+        uttered = _uttered_revision(spec, findings=findings, metrics=metrics)
+        if uttered is not None:
             # Realized beats registered: the container's own utterance is
             # the revision this document derived its facts under.
-            semantic_name = spec_revision_owners(spec)[0][0]
-            revisions: dict[str, str] = {semantic_name: uttered_revision}
+            revisions: dict[str, str] = {uttered[0]: uttered[1]}
         else:
             revisions = registered_revisions(spec)
         params: dict[str, object] = {}
@@ -386,6 +633,22 @@ def _realized_analysis_contracts(
             budget = container.get("max_edit_statements")
             if budget is not None:
                 params = {"max_edit_statements": budget}
+        elif family == "overloaded_modules":
+            # The container's ``detection`` block IS the producer's realized
+            # contract: its strategy, population floor and signal sets, with
+            # the version carried above as the uttered revision.
+            detection = _as_mapping(
+                _as_mapping(
+                    document_section(
+                        "metrics.families.overloaded_modules",
+                        findings=findings,
+                        metrics=metrics,
+                    )
+                ).get("detection")
+            )
+            params = {
+                name: value for name, value in detection.items() if name != "version"
+            }
         elif family == "dead_code":
             # The world contract is a realized parameter of the derivation:
             # two runs over one tree that answer under different worlds
@@ -447,43 +710,134 @@ def _realized_evaluation_contract(
     return realized
 
 
-def _analysis_family_digests(
-    *,
-    groups: Mapping[str, object],
+def _executed_families(
     producers: Mapping[str, object],
-) -> dict[str, str]:
-    digests: dict[str, str] = {}
-    for spec in REPORT_SEMANTIC_PRODUCERS:
-        family = spec_family(spec)
-        if spec_identity_domain(spec) != "analysis":
-            continue
-        if producers.get(family) != PRODUCER_STATE_COMPLETE:
-            # count = 0 is a completed measurement; a family that never ran
-            # has no digest — its absence of execution is population state,
-            # never an empty measurement.
-            continue
-        container = _as_mapping(groups.get(family))
-        digests[family] = _family_digest_value(family, container)
-    return digests
-
-
-def _evaluation_family_digests(
     *,
+    generation: _Generation,
+    identity_domain: str,
+) -> tuple[str, ...]:
+    """The families of one identity domain that ran: count = 0 is a
+    completed measurement; a family that never ran has no digest — its
+    absence of execution is population state, never an empty measurement."""
+
+    return tuple(
+        spec_family(spec)
+        for spec in _generation_producers(generation)
+        if spec_identity_domain(spec) == identity_domain
+        and producers.get(spec_family(spec)) == PRODUCER_STATE_COMPLETE
+    )
+
+
+def _health_summary(metrics: Mapping[str, object]) -> Mapping[str, object]:
+    health = _as_mapping(
+        _as_mapping(_as_mapping(metrics).get("families")).get("health")
+    )
+    return _as_mapping(health.get("summary"))
+
+
+def _generation_two_family_digests(
+    *,
+    findings: Mapping[str, object],
     metrics: Mapping[str, object],
     producers: Mapping[str, object],
-) -> dict[str, str]:
-    digests: dict[str, str] = {}
-    if producers.get("health") == PRODUCER_STATE_COMPLETE:
-        health = _as_mapping(
-            _as_mapping(_as_mapping(metrics).get("families")).get("health")
+) -> dict[str, dict[str, str]]:
+    """FROZEN: generation 2 digested the pruned FINDINGS container of each
+    executed analysis family and the pruned health summary."""
+
+    groups = _as_mapping(findings.get("groups"))
+    analysis = {
+        family: _family_digest_value(
+            family,
+            _semantic_projection(_as_mapping(groups.get(family))),
+            generation=_GENERATION_TWO,
         )
-        summary = _as_mapping(health.get("summary"))
-        digests["health"] = _family_digest_value("health", summary)
+        for family in _executed_families(
+            producers, generation=_GENERATION_TWO, identity_domain="analysis"
+        )
+    }
+    evaluation: dict[str, str] = {}
+    if producers.get("health") == PRODUCER_STATE_COMPLETE:
+        evaluation["health"] = _family_digest_value(
+            "health",
+            _semantic_projection(_health_summary(metrics)),
+            generation=_GENERATION_TWO,
+        )
+    return {"analysis": analysis, "evaluation": evaluation}
+
+
+def _generation_three_family_digests(
+    *,
+    findings: Mapping[str, object],
+    metrics: Mapping[str, object],
+    producers: Mapping[str, object],
+) -> dict[str, dict[str, str]]:
+    """Generation 3: every family digest of every tier is built only from the
+    family's projection owner.  An analysis family's routed comparison
+    statements become the same family's comparison-tier digest; an
+    evaluation family that declares document sections is digested whole at
+    the evaluation tier (``gates`` declares none: the evaluation tier hashes
+    the gate outcome and contract directly)."""
+
+    analysis: dict[str, str] = {}
+    comparison: dict[str, str] = {}
+    for family in _executed_families(
+        producers, generation=_GENERATION_THREE, identity_domain="analysis"
+    ):
+        analysis[family] = _family_digest_value(
+            family,
+            analysis_semantic_projection(family, findings=findings, metrics=metrics),
+            generation=_GENERATION_THREE,
+        )
+        routed = comparison_semantic_projection(
+            family, findings=findings, metrics=metrics
+        )
+        if routed is not None:
+            comparison[family] = _family_digest_value(
+                family, routed, generation=_GENERATION_THREE
+            )
+    evaluation: dict[str, str] = {}
+    for family in _executed_families(
+        producers, generation=_GENERATION_THREE, identity_domain="evaluation"
+    ):
+        if not spec_document_sections(producer_spec(family)):
+            continue
+        evaluation[family] = _family_digest_value(
+            family,
+            evaluation_semantic_projection(family, findings=findings, metrics=metrics),
+            generation=_GENERATION_THREE,
+        )
+    return {"analysis": analysis, "comparison": comparison, "evaluation": evaluation}
+
+
+_FamilyDigests = Callable[..., dict[str, dict[str, str]]]
+_FAMILY_DIGESTS_BY_GENERATION: Final[Mapping[str, _FamilyDigests]] = {
+    _generation_marker(_GENERATION_TWO): _generation_two_family_digests,
+    _generation_marker(_GENERATION_THREE): _generation_three_family_digests,
+}
+
+
+def _family_digests(
+    generation: _Generation,
+    *,
+    findings: Mapping[str, object],
+    metrics: Mapping[str, object],
+    producers: Mapping[str, object],
+) -> dict[str, dict[str, str]]:
+    """The one dispatch from a generation to its family-digest rule: build
+    and verification both come through here."""
+
+    digests = _FAMILY_DIGESTS_BY_GENERATION[_generation_marker(generation)](
+        findings=findings, metrics=metrics, producers=producers
+    )
+    assert tuple(digests) == _generation_family_tiers(generation), _generation_marker(
+        generation
+    )
     return digests
 
 
 def _semantic_block(
     *,
+    generation: _Generation,
     meta: Mapping[str, object],
     inventory: Mapping[str, object],
     findings: Mapping[str, object],
@@ -497,6 +851,7 @@ def _semantic_block(
         _as_sequence_of_str(observation_contract.get("enabled_lanes"))
     )
     population = _population(
+        generation=generation,
         meta=meta,
         inventory=inventory,
         groups=groups,
@@ -507,9 +862,11 @@ def _semantic_block(
         "population": population,
         "realized_contracts": {
             "analysis": _realized_analysis_contracts(
+                generation=generation,
                 groups=groups,
                 meta=meta,
                 producers=producers,
+                findings=findings,
                 metrics=metrics,
             ),
             "comparison": _realized_comparison_contract(meta),
@@ -518,21 +875,18 @@ def _semantic_block(
                 producers=producers,
             ),
         },
-        "family_digests": {
-            "analysis": _analysis_family_digests(
-                groups=groups,
-                producers=producers,
-            ),
-            "evaluation": _evaluation_family_digests(
-                metrics=metrics,
-                producers=producers,
-            ),
-        },
+        "family_digests": _family_digests(
+            generation,
+            findings=findings,
+            metrics=metrics,
+            producers=producers,
+        ),
     }
 
 
-def _v2_tier_digests(
+def _tier_digests(
     *,
+    generation: _Generation,
     marker: object,
     report_schema_version: str,
     observation: Mapping[str, object],
@@ -541,17 +895,19 @@ def _v2_tier_digests(
     baseline: Mapping[str, object],
     evaluation: Mapping[str, object],
 ) -> dict[str, ReportDigest]:
-    """The one spelling of the generation-2 tier composition.
+    """The one spelling of the tier composition for generations 2 and 3.
 
     Build and verification both call this, so the preimage a document is
     sealed with and the preimage it is checked against cannot drift apart —
-    the two-spellings defect class, closed by construction.
+    the two-spellings defect class, closed by construction.  The generation
+    row supplies the domains; the only structural difference between the
+    two rows is the comparison-tier family digests generation 3 adds.
     """
 
     realized = _as_mapping(semantic.get("realized_contracts"))
     family_digests = _as_mapping(semantic.get("family_digests"))
     analysis_facts = _digest(
-        domain=REPORT_ANALYSIS_IDENTITY_DOMAIN_V2,
+        domain=_generation_domain(generation, "analysis"),
         kind="analysis_facts",
         payload={
             "semantic_identity_version": marker,
@@ -563,17 +919,22 @@ def _v2_tier_digests(
             "analysis_family_digests": family_digests.get("analysis"),
         },
     )
+    comparison_payload: dict[str, object] = {
+        "analysis_facts_digest": _digest_wire(analysis_facts),
+        "baseline": _comparison_digest_input(baseline),
+        "realized_comparison_contract": realized.get("comparison"),
+    }
+    if "comparison" in _generation_family_tiers(generation):
+        comparison_payload["comparison_family_digests"] = family_digests.get(
+            "comparison"
+        )
     comparison = _digest(
-        domain=REPORT_COMPARISON_IDENTITY_DOMAIN_V2,
+        domain=_generation_domain(generation, "comparison"),
         kind="comparison",
-        payload={
-            "analysis_facts_digest": _digest_wire(analysis_facts),
-            "baseline": _comparison_digest_input(baseline),
-            "realized_comparison_contract": realized.get("comparison"),
-        },
+        payload=comparison_payload,
     )
     evaluation_digest = _digest(
-        domain=REPORT_EVALUATION_IDENTITY_DOMAIN_V2,
+        domain=_generation_domain(generation, "evaluation"),
         kind="evaluation",
         payload={
             "comparison_digest": _digest_wire(comparison),
@@ -616,7 +977,19 @@ def _build_integrity_payload(
     findings: Mapping[str, object],
     metrics: Mapping[str, object],
 ) -> dict[str, object]:
+    unowned = unowned_report_sections(findings=findings, metrics=metrics)
+    if unowned:
+        # The totality law at the seal: a user-visible section no producer
+        # owns would reach no tier.  Refused here, at build time only — a
+        # document sealed before a family was registered stays verifiable
+        # under its own generation row.
+        raise ReportIdentityRegistryError(
+            "report sections with no registered identity owner: "
+            f"{', '.join(unowned)}; declare the owning producer's "
+            "document_sections in codeclone.contracts.report_identity"
+        )
     semantic = _semantic_block(
+        generation=_CURRENT_GENERATION,
         meta=meta,
         inventory=inventory,
         findings=findings,
@@ -625,8 +998,9 @@ def _build_integrity_payload(
         source_facts=source_facts,
     )
     observation = _observation_wire(observation_digest)
-    tiers = _v2_tier_digests(
-        marker=REPORT_SEMANTIC_IDENTITY_VERSION,
+    tiers = _tier_digests(
+        generation=_CURRENT_GENERATION,
+        marker=_generation_marker(_CURRENT_GENERATION),
         report_schema_version=report_schema_version,
         observation=observation,
         source_facts=source_facts,
@@ -640,7 +1014,7 @@ def _build_integrity_payload(
             "serializer": "orjson.OPT_SORT_KEYS",
             "envelope_null_sentinel": "integrity.digests.envelope.value",
         },
-        "semantic_identity_version": REPORT_SEMANTIC_IDENTITY_VERSION,
+        "semantic_identity_version": _generation_marker(_CURRENT_GENERATION),
         "semantic": semantic,
         "digests": {
             "observation": observation,
@@ -794,6 +1168,8 @@ def _verify_generation_one(document: Mapping[str, object]) -> str | None:
 def _verify_semantic_consistency(
     document: Mapping[str, object],
     semantic: Mapping[str, object],
+    *,
+    generation: _Generation,
 ) -> str | None:
     """The one-fact-spelled-twice checks: every value the semantic block
     copies from the body must agree with the body's own utterance."""
@@ -810,6 +1186,7 @@ def _verify_semantic_consistency(
         _as_sequence_of_str(observation_contract.get("enabled_lanes"))
     )
     expected_population = _population(
+        generation=generation,
         meta=meta,
         inventory=inventory,
         groups=groups,
@@ -831,12 +1208,20 @@ def _verify_semantic_consistency(
                     "its params digest"
                 )
     analysis_realized = _as_mapping(realized.get("analysis"))
+    for spec in _generation_producers(generation):
+        # One fact spelled twice: a revision the container utters must be
+        # the revision the realized contract carries for it.
+        family = spec_family(spec)
+        entry = _as_mapping(analysis_realized.get(family))
+        uttered = _uttered_revision(spec, findings=findings, metrics=metrics)
+        if not entry or uttered is None:
+            continue
+        revisions = _as_mapping(entry.get("algorithm_revisions"))
+        if revisions.get(uttered[0]) != uttered[1]:
+            return f"report {family} realized revision disagrees with its container"
     near_miss_entry = _as_mapping(analysis_realized.get("near_miss"))
     if near_miss_entry:
         container = _as_mapping(groups.get("near_miss"))
-        revisions = _as_mapping(near_miss_entry.get("algorithm_revisions"))
-        if revisions.get("near_miss") != container.get("algorithm_revision"):
-            return "report near_miss realized revision disagrees with its container"
         params = _as_mapping(near_miss_entry.get("params"))
         if params.get("max_edit_statements") != container.get("max_edit_statements"):
             return "report near_miss realized budget disagrees with its container"
@@ -848,28 +1233,44 @@ def _verify_semantic_consistency(
     if gates_entry.get("thresholds_digest") != contract.get("gate_thresholds_digest"):
         return "report realized gate thresholds disagree with the evaluation"
     family_digests = _as_mapping(semantic.get("family_digests"))
-    expected_analysis = _analysis_family_digests(groups=groups, producers=producers)
-    if _as_mapping(family_digests.get("analysis")) != expected_analysis:
-        return "report analysis family digests do not recompute"
-    expected_evaluation = _evaluation_family_digests(
-        metrics=metrics, producers=producers
+    if tuple(family_digests) != _generation_family_tiers(generation):
+        return "report family digests do not name this generation's tiers"
+    expected_digests = _family_digests(
+        generation, findings=findings, metrics=metrics, producers=producers
     )
-    if _as_mapping(family_digests.get("evaluation")) != expected_evaluation:
-        return "report evaluation family digests do not recompute"
+    for tier in _generation_family_tiers(generation):
+        if _as_mapping(family_digests.get(tier)) != expected_digests[tier]:
+            return f"report {tier} family digests do not recompute"
     return None
 
 
-def _verify_generation_two(document: Mapping[str, object]) -> str | None:
-    digests, observation_value, report_schema_version = _verification_preamble(document)
-    integrity = _as_mapping(document.get("integrity"))
-    semantic = _as_mapping(integrity.get("semantic"))
+def _semantic_block_of(document: Mapping[str, object]) -> Mapping[str, object]:
+    """The semantic block a generation-2/3 document claims to be sealed
+    over; a document without one cannot name what it seals."""
+
+    semantic = _as_mapping(_as_mapping(document.get("integrity")).get("semantic"))
     if not semantic:
-        return "report semantic identity block is missing"
-    consistency = _verify_semantic_consistency(document, semantic)
+        raise _VerificationRefusal("report semantic identity block is missing")
+    return semantic
+
+
+def _verify_semantic_generation(
+    document: Mapping[str, object],
+    generation: _Generation,
+) -> str | None:
+    """Generations 2 and 3: consistency of the semantic block, then the tier
+    composition under the generation's own domains."""
+
+    semantic = _semantic_block_of(document)
+    digests, observation_value, report_schema_version = _verification_preamble(document)
+    consistency = _verify_semantic_consistency(
+        document, semantic, generation=generation
+    )
     if consistency is not None:
         return consistency
-    expected = _v2_tier_digests(
-        marker=integrity.get("semantic_identity_version"),
+    expected = _tier_digests(
+        generation=generation,
+        marker=_as_mapping(document.get("integrity")).get("semantic_identity_version"),
         report_schema_version=report_schema_version,
         observation=_observation_wire(observation_value),
         source_facts=_as_mapping(document.get("source_facts")),
@@ -884,8 +1285,9 @@ def verify_report_integrity(document: Mapping[str, object]) -> str | None:
     """Recompute the digest tiers and authenticate the envelope.
 
     Dispatches on the document's own generation marker: absent means
-    generation 1 and generation-1 rules; the current version means
-    generation 2; anything else is a typed refusal, never a guess.
+    generation 1 and generation-1 rules; a marker the generation table knows
+    ("2", "3") is verified under that generation's frozen rules; anything
+    else is a typed refusal, never a guess.
     """
 
     integrity = _as_mapping(document.get("integrity"))
@@ -894,16 +1296,18 @@ def verify_report_integrity(document: Mapping[str, object]) -> str | None:
     if tuple(sorted(digests)) != tuple(sorted(required)):
         return "report digest set must contain exactly five named tiers"
     marker = integrity.get("semantic_identity_version")
+    generation = _GENERATIONS.get(marker) if isinstance(marker, str) else None
     try:
         if marker is None:
             return _verify_generation_one(document)
-        if marker == REPORT_SEMANTIC_IDENTITY_VERSION:
-            return _verify_generation_two(document)
+        if generation is not None:
+            return _verify_semantic_generation(document, generation)
     except _VerificationRefusal as refusal:
         return str(refusal)
+    known = ", ".join(repr(name) for name in _GENERATIONS)
     return (
         f"report semantic identity generation {marker!r} is not verifiable "
-        f"by this engine (knows: absent, {REPORT_SEMANTIC_IDENTITY_VERSION!r})"
+        f"by this engine (knows: absent, {known})"
     )
 
 

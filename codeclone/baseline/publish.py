@@ -20,7 +20,7 @@ from uuid import UUID
 
 import orjson
 
-from ..contracts import HealthPopulation
+from ..contracts import ObservedPopulation
 from ..contracts.errors import BaselineValidationError
 from ..models import (
     BaselineContainerV3,
@@ -236,7 +236,7 @@ def publish_baseline(
     max_size_bytes: int,
     project_label: str | None = None,
     files_skipped: int = 0,
-    analysis_population: HealthPopulation = "complete_nonempty",
+    analysis_population: ObservedPopulation = "complete_nonempty",
 ) -> BaselinePublicationReceipt:
     """Build and CAS-publish one complete container under one observer span.
 

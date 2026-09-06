@@ -62,7 +62,7 @@ from codeclone.models import (
 )
 
 if TYPE_CHECKING:
-    from codeclone.contracts import HealthPopulation
+    from codeclone.contracts import ObservedPopulation
 from codeclone.observations.contracts import build_observation_contract
 from codeclone.observations.lanes import _encode_api_surface_lane
 from codeclone.observations.projection import build_observation_bundle
@@ -281,7 +281,7 @@ def _refusal_project_metrics(population: str) -> ProjectMetrics:
             total=0,
             grade="F",
             dimensions={},
-            population=cast("HealthPopulation", population),
+            population=cast("ObservedPopulation", population),
         ),
         typing_param_total=0,
         typing_param_annotated=0,

@@ -45,7 +45,7 @@ from uuid import UUID
 
 import pytest
 
-from codeclone.contracts import HealthPopulation, observed_population
+from codeclone.contracts import ObservedPopulation, observed_population
 from codeclone.memory.application import execute_memory_query
 from codeclone.memory.enums import EVIDENCE_KIND_VALUES
 from codeclone.memory.exceptions import UnfitAnalysisRunError
@@ -86,7 +86,7 @@ _RUNS: Final[tuple[tuple[int, int], ...]] = ((0, 0), (2, 0), (2, 1), (2, 2))
 #: The run that realises each state, keyed by the state its own owner gives it.
 #: A collision (two runs classified alike) silently shrinks this mapping, which
 #: is why its size is asserted, not assumed.
-_COUNTERS_FOR_POPULATION: Final[dict[HealthPopulation, tuple[int, int]]] = {
+_COUNTERS_FOR_POPULATION: Final[dict[ObservedPopulation, tuple[int, int]]] = {
     observed_population(files_found=found, files_analyzed_or_cached=analyzed): (
         found,
         analyzed,
@@ -95,7 +95,7 @@ _COUNTERS_FOR_POPULATION: Final[dict[HealthPopulation, tuple[int, int]]] = {
 }
 
 
-def _the_run_that(predicate: Callable[[int, int], bool]) -> HealthPopulation:
+def _the_run_that(predicate: Callable[[int, int], bool]) -> ObservedPopulation:
     """The one state whose run answers ``predicate(found, analyzed)``.
 
     Selection by behaviour, not by spelling: the tests below need to say "the
@@ -140,7 +140,7 @@ def _all_lanes(status: LaneTrustStatus, reason: LaneTrustReason) -> TrustVector:
 def _repo_with_run(
     tmp_path: Path,
     *,
-    population: HealthPopulation,
+    population: ObservedPopulation,
     container: BaselineContainerV3 | None = None,
     trust: TrustVector | None = None,
 ) -> tuple[Path, dict[str, object]]:
@@ -163,7 +163,7 @@ def _repo_with_run(
 def _run_document(
     root: Path,
     *,
-    population: HealthPopulation,
+    population: ObservedPopulation,
     container: BaselineContainerV3 | None = None,
     trust: TrustVector | None = None,
 ) -> dict[str, object]:
@@ -305,13 +305,13 @@ def test_every_population_state_has_a_run_that_realises_it() -> None:
     here as a named failure instead of as a gap nobody is looking at.
     """
 
-    assert set(_COUNTERS_FOR_POPULATION) == set(get_args(HealthPopulation))
+    assert set(_COUNTERS_FOR_POPULATION) == set(get_args(ObservedPopulation))
     assert len(_COUNTERS_FOR_POPULATION) == len(_RUNS)
 
 
-@pytest.mark.parametrize("population", sorted(get_args(HealthPopulation)))
+@pytest.mark.parametrize("population", sorted(get_args(ObservedPopulation)))
 def test_the_mark_echoes_the_population_the_report_declared(
-    tmp_path: Path, population: HealthPopulation
+    tmp_path: Path, population: ObservedPopulation
 ) -> None:
     """The mark repeats the report's own word for what the run observed.
 
@@ -327,9 +327,9 @@ def test_the_mark_echoes_the_population_the_report_declared(
     assert _mark_fields(fitness.provenance)["population"] == population
 
 
-@pytest.mark.parametrize("population", sorted(get_args(HealthPopulation)))
+@pytest.mark.parametrize("population", sorted(get_args(ObservedPopulation)))
 def test_only_the_run_that_read_none_of_what_it_found_is_refused(
-    tmp_path: Path, population: HealthPopulation
+    tmp_path: Path, population: ObservedPopulation
 ) -> None:
     """Both signs of the refusal, over every state the contract can name.
 

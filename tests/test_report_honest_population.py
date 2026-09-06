@@ -17,9 +17,16 @@ Every guard here has a sibling in the opposite direction. A fix that painted
 the other sign, so the complete-population pins fail on that mutation and the
 unmeasured pins fail on the original one.
 
-The population is produced exactly once, in ``compute_health``. Surfaces read
-that fact; none of them re-derives it from the file counters. The
-contradictory-inventory pin below is what keeps a second counter out.
+The RULE is written down exactly once, in ``contracts.observed_population``.
+Two producers consult that owner over the run's own counters — ``compute_health``
+for the word health displays, and the analysis-semantic identity block for the
+statement ``analysis_facts`` seals (identity v3) — and they cannot disagree
+because ``core.pipeline`` builds both from ``processing.files_analyzed +
+discovery.cache_hits``, pinned end to end over a cold and a warm run in
+``test_report_semantic_identity``.
+Consulting one owner is not a second semantics; recounting is, and no SURFACE
+may recount: renderers read the stated word, and the contradictory-inventory
+pin below is what keeps a second counter out of presentation.
 """
 
 from __future__ import annotations
@@ -33,7 +40,7 @@ import pytest
 
 from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
-    HealthPopulation,
+    ObservedPopulation,
     population_carries_score,
 )
 from codeclone.report.html import build_html_report
@@ -869,7 +876,7 @@ def test_population_rides_every_surface_even_when_measured() -> None:
 #: The population value set as published under a given report schema version.
 #:
 #: Not a restatement of the enum: the members below are *compared against* the
-#: live ``HealthPopulation``, which the tests read through ``get_args``. What
+#: live ``ObservedPopulation``, which the tests read through ``get_args``. What
 #: this records is the pairing — that this exact value set went out under this
 #: exact schema version. The two must move together, because the value set is
 #: wire-visible (the report document, and the HTML data attribute) and a
@@ -904,13 +911,13 @@ def _health_block(population: str) -> dict[str, object]:
 
     base = (
         COMPLETE_HEALTH
-        if population_carries_score(cast(HealthPopulation, population))
+        if population_carries_score(cast(ObservedPopulation, population))
         else UNMEASURED_HEALTH
     )
     return dict(base) | {"population": population}
 
 
-@pytest.mark.parametrize("population", sorted(get_args(HealthPopulation)))
+@pytest.mark.parametrize("population", sorted(get_args(ObservedPopulation)))
 def test_every_population_member_reaches_the_wire(population: str) -> None:
     """Each state must be observable in the report artifacts, or it is not wire.
 
@@ -949,7 +956,7 @@ def test_the_population_value_set_cannot_move_without_the_schema_version() -> No
       the confirmation costs one line.
     """
 
-    live = (REPORT_SCHEMA_VERSION, tuple(sorted(get_args(HealthPopulation))))
+    live = (REPORT_SCHEMA_VERSION, tuple(sorted(get_args(ObservedPopulation))))
 
     assert live == _POPULATION_WIRE_CONTRACT, (
         "The report health population value set and REPORT_SCHEMA_VERSION are "

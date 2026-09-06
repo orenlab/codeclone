@@ -13,7 +13,7 @@ from typing import Literal, cast
 import pytest
 
 from codeclone.analysis.normalizer import NormalizationConfig
-from codeclone.contracts import HealthPopulation
+from codeclone.contracts import ObservedPopulation
 from codeclone.core._types import AnalysisResult, BootstrapResult, OutputPaths
 from codeclone.core.reporting import gate as cli_gate
 from codeclone.models import (
@@ -1101,7 +1101,7 @@ def _cli_gate_without_metrics(
                 for lane in TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
             ),
         ),
-        analysis_population=cast("HealthPopulation", population),
+        analysis_population=cast("ObservedPopulation", population),
     )
 
 

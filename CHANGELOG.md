@@ -5,6 +5,71 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The run identity now names what CodeClone asserts, not what one projection of it shows.**
+  `run_id` is meant to identify the canonical set of semantic statements a report utters. It did
+  not: the family digests behind it hashed the *findings* projection of each family, so every
+  statement a family makes outside that projection reached no preimage. Measured on real
+  documents: two reports stating a different `reason`, `reachability` and `witness` for the same
+  dead-code abstention received one `run_id`; so did two trees whose class `Alpha` couples to
+  `Beta` in one and to `Gamma` in the other at the same `cbo` — the count was represented, its
+  witness was not — and likewise the CFG cyclomatic complexity of every function, the suppressed
+  dead-code verdicts, the rule-3 abstentions with their base names, the live-root reasons and the
+  coverage rows below the hotspot threshold. In the other direction, `novelty` — a fact about the
+  baseline comparison — was hashed inside the analysis digests, so the tier that is supposed to be
+  the fixed point of the hierarchy moved on a baseline-derived fact. Report semantic identity
+  generation "3" fixes the boundary rather than the symptoms: each family has exactly one
+  projection owner, its membership is the whole content of the document sections its producer
+  writes and draws verdicts from (declared per producer, never a hand-picked field list), and
+  whatever leaves that projection is a named, classified exclusion — presentation, navigation
+  provenance, configuration provenance, evaluation-policy output — or is routed to a new
+  comparison-tier family digest of the same family. A field a producer adds enters the identity
+  by construction and is surfaced by a census, never silently dropped. The law it carries: every
+  user-visible analysis-semantic assertion is represented in exactly one identity-bearing
+  semantic-family projection at its natural tier. Consequences on the wire: none — every field
+  already existed, only the preimage's membership changed, so `report_schema_version` and the
+  canonical wire revision stay put; `integrity.semantic_identity_version` reads `"3"`,
+  `integrity.semantic.family_digests` gains a `comparison` tier, and every `run_id` moves once
+  for the generation change, as any run id does. Documents sealed under generation "2" keep
+  verifying under their own frozen rules, as generation "1" documents already did. Representation
+  is still not identity: a comment edit that shifts line spans, a different interpreter tag, a
+  different absolute root and a warm cache all keep the same `run_id`.
+- **The identity ratchet quantifies over every registered producer, not over one findings
+  projection.** The generation-3 census first asked its question of `findings.groups` only, and the
+  user's analysis semantics live outside it: measured with an identity coverage map over a real
+  document (every key perturbed once, resealed through the production owner), five whole metric
+  families differed on the wire while every tier and the `run_id` stayed the same — `api_surface`,
+  `coverage_adoption`, `overloaded_modules`, `security_surfaces` and the `semantic_authority`
+  container. Each is now a registered producer with one owner, its exclusions classified by name:
+  the coverage join's hotspot threshold is the `--coverage-min` *gate* echoed into the join, so it
+  and the four hotspot verdicts it decides are evaluation-policy output, while the joined line
+  counts are analysis statements; `overloaded_modules` utters its own `detection` block as its
+  realized contract; the `api_surface` list interleaves symbol rows with baseline-derived
+  `breaking_change` rows, and a row of another tier is routed whole rather than split by key. The
+  coverage join no longer rides `design`; the `health` digest is built by the same projection
+  owner as every other family digest; and the integrity builder refuses to seal a document while a
+  section the metric-family registry names has no owner, so a producer that grows a new
+  user-visible surface cannot ship it into the identity unowned. Each identity generation now
+  carries its frozen family list, so generation-2 documents keep recomputing with nine producers
+  while generation 3 quantifies over fourteen.
+- **How much of the repository a run actually read is an analysis fact, and now has an analysis
+  owner.** Whether a run observed every file it found — `complete_nonempty`, `complete_empty`,
+  `partial`, `unmeasured` — travelled on the wire only as `health.summary.population`, and health
+  is an evaluation-domain family, so the fact reached the evaluation tier alone. Measured: three
+  runs whose analysis-digested counters were held equal by construction stated all three
+  populations against one byte-identical `analysis_facts` — the analysis layer asserting that a
+  complete analysis and a partial analysis of the same tree are the same facts. It is not an
+  evaluation output at all: no evaluation parameter can move it, because it is decided by two
+  discovery counters and nothing else. The analysis population block now states it, from the same
+  single owner every other consumer asks (`observed_population`), and health's copy is classified
+  as a consumed representation rather than a second semantic carrier — one fact, one
+  identity-bearing owner, with health free to keep displaying it. What the identity reads is the
+  *sum* of the files analysed and the files served from cache, never their split: a warm run moves
+  a file from one counter to the other and must land on the identical `analysis_facts`, which it
+  does. Consequences on the wire: `integrity.semantic.population` gains `observed` under
+  generation 3; documents sealed under generation 2 keep their frozen population block and keep
+  verifying. The type behind the fact is `ObservedPopulation`, named after the one function that
+  computes it — it was `HealthPopulation`, which is how the false ownership got written down in
+  the first place.
 - **Two import dialects the binding resolver lost, taught to one owner.** A dead symbol reported
   `unreferenced` with an empty witness list reads as "nothing in the known world needs this" and
   practically invites deletion; the same symbol reported `test_only_reference` with its tests named

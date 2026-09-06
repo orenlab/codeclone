@@ -35,7 +35,7 @@ from ..contracts import (
     HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY,
     HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
     HEALTH_WEIGHTS,
-    HealthPopulation,
+    ObservedPopulation,
     observed_population,
     population_carries_score,
 )
@@ -324,7 +324,7 @@ def _convex_weights() -> dict[str, float]:
     return weights
 
 
-def _observed_population(inputs: HealthInputs) -> HealthPopulation:
+def _observed_population(inputs: HealthInputs) -> ObservedPopulation:
     """Read this run's population state off its two counters.
 
     Consults the owner instead of restating the rule. ``observed_population``
