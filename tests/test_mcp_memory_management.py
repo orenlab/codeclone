@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import secrets
-from collections.abc import Mapping
+import sqlite3
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -21,8 +23,18 @@ import codeclone.surfaces.mcp._session_memory_mixin as mcp_memory_mixin_mod
 from codeclone.memory.coverage import ScopeCoverageReport
 from codeclone.memory.exceptions import MemoryCapacityError, MemoryContractError
 from codeclone.memory.finish_workflow import FinishMemoryWorkflowResult
-from codeclone.memory.governance import record_candidate
+from codeclone.memory.governance import (
+    GOVERNANCE_RECORD_IMMUTABLE_CODE,
+    GOVERNANCE_STALE_AMENDMENT_CODE,
+    GOVERNANCE_TICKET_MISMATCH_CODE,
+    STATEMENT_ORIGIN_AGENT,
+    STATEMENT_ORIGIN_HUMAN_AMENDED,
+    record_candidate,
+)
 from codeclone.memory.ide_governance import (
+    AMEND_AND_APPROVE,
+    GOVERNANCE_DECISION_PROTOCOL_CODE,
+    IDE_GOVERNANCE_AMENDMENT_PROTOCOLS,
     IDE_GOVERNANCE_PROTOCOL_VERSION,
     compute_governance_proof,
 )
@@ -42,7 +54,7 @@ from codeclone.surfaces.mcp._session_shared import (
 from codeclone.surfaces.mcp.server import build_mcp_server
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
-from .memory_fixtures import cli_memory_repo
+from .memory_fixtures import cli_memory_repo, memory_project_db_paths
 
 
 def _memory_test_run_record(root: Path, run_id: str) -> MCPRunRecord:
@@ -1308,3 +1320,602 @@ def test_mcp_query_engineering_memory_envelope_attributes_the_trajectory_lane(
     assert set(omitted) == {"trajectories"}
     assert lane["shown"] == body["trajectory_count"]
     assert lane["reason"] == "max_results_cap"
+
+
+# ===========================================================================
+# The amendment bridge, reached the way an IDE client reaches it.
+#
+# tests/test_memory_ide_governance*.py drive codeclone.memory directly and
+# prove the record layer and the governance channel. They cannot prove that an
+# IDE client can reach either one, because they never cross the MCP surface.
+# The dispatch on that surface passes ``decision`` and ``statement`` straight
+# through, so ``amend_and_approve`` appears nowhere in it by name -- grep is
+# blind here by construction, and a live round trip is the only honest probe.
+#
+# These live in this module, rather than in one of their own, because the
+# phase 39S boundary allowlist already carries this module's edges to
+# codeclone.memory.governance and codeclone.memory.ide_governance. The policy
+# is shrink-only: a new module would have opened a new r4->r2p edge for the
+# same imports. Everything the store API would otherwise provide is read or
+# written here over raw sqlite, on a separate connection.
+# ===========================================================================
+
+_OLD_WIRE = 2
+_AMENDMENT_WIRE = min(IDE_GOVERNANCE_AMENDMENT_PROTOCOLS)
+_HUMAN_WORDING = "Human-corrected wording published from the approval view."
+
+
+def _governed_row(db_path: Path, record_id: str) -> tuple[str, str, int]:
+    """Committed state on a SEPARATE connection: status, statement, revisions.
+
+    The service opens and closes its own store per call, so asserting against
+    the service's echo would be reading the writer's own account of itself.
+    This reads what a second process would find on disk.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        status, statement = conn.execute(
+            "SELECT status, statement FROM memory_records WHERE id=?",
+            (record_id,),
+        ).fetchone()
+        (revisions,) = conn.execute(
+            "SELECT COUNT(*) FROM memory_revisions WHERE memory_id=?",
+            (record_id,),
+        ).fetchone()
+        return str(status), str(statement), int(revisions)
+    finally:
+        conn.close()
+
+
+def _foreign_write(db_path: Path, sql: str, params: tuple[object, ...]) -> None:
+    """A second writer, on its own connection, committing before we commit."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(sql, params)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class _GovernedSurface:
+    """One registered IDE governance channel, driven only through MCP."""
+
+    def __init__(self, root: Path, db_path: Path, *, channel: bool = True) -> None:
+        self.root = str(root.resolve())
+        self.db_path = db_path
+        self.service = CodeCloneMCPService(
+            history_limit=4,
+            ide_governance_channel=channel,
+        )
+        self.key_hex = secrets.token_hex(32)
+        self._drafts = 0
+        self.registered = self.call(
+            action="register_ide_governance",
+            ide_governance_key=self.key_hex,
+            client_name="CodeClone VS Code",
+            client_version="0.3.0",
+        )
+
+    def call(self, **params: object) -> dict[str, object]:
+        return self.service.manage_engineering_memory(root=self.root, **params)
+
+    def draft(self, statement: str | None = None) -> str:
+        # Candidate identity folds the statement in, so each draft needs its
+        # own wording or the second write is refused as a duplicate.
+        self._drafts += 1
+        recorded = self.call(
+            action="record_candidate",
+            record_type="architecture_decision",
+            statement=statement or f"Agent wording {self._drafts} awaiting review.",
+            subject_path="pkg/mod.py",
+        )
+        return str(recorded["record_id"])
+
+    def prepare(
+        self,
+        record_id: str,
+        decision: str = AMEND_AND_APPROVE,
+    ) -> dict[str, object]:
+        return self.call(
+            action="prepare_governance",
+            record_id=record_id,
+            decision=decision,
+        )
+
+    def pending(
+        self,
+        statement: str,
+        decision: str = AMEND_AND_APPROVE,
+    ) -> tuple[str, dict[str, object]]:
+        """A draft, plus a ticket prepared over exactly that wording."""
+        record_id = self.draft(statement)
+        return record_id, self.prepare(record_id, decision)
+
+    def commit(
+        self,
+        record_id: str,
+        prepared: dict[str, object],
+        *,
+        decision: str = AMEND_AND_APPROVE,
+        protocol: int = _AMENDMENT_WIRE,
+        statement: str | None = _HUMAN_WORDING,
+        actor: str = "den",
+    ) -> dict[str, object]:
+        ticket = str(prepared["governance_ticket"])
+        nonce = str(prepared["confirmation_nonce"])
+        return self.call(
+            action="commit_governance",
+            record_id=record_id,
+            decision=decision,
+            governance_ticket=ticket,
+            confirmation_nonce=nonce,
+            proof=compute_governance_proof(
+                bytes.fromhex(self.key_hex),
+                ticket_id=ticket,
+                record_id=record_id,
+                decision=decision,
+                confirmation_nonce=nonce,
+                project_id=str(prepared["project_id"]),
+                statement_digest=str(prepared["statement_digest"]),
+                protocol=protocol,
+            ),
+            protocol=protocol,
+            actor=actor,
+            statement=statement,
+        )
+
+    def settled(self, record_id: str) -> tuple[str, str, int]:
+        return _governed_row(self.db_path, record_id)
+
+
+@pytest.fixture
+def governed(tmp_path: Path) -> Iterator[_GovernedSurface]:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        _identity, db_path = memory_project_db_paths(root)
+        yield _GovernedSurface(root, db_path)
+
+
+# --- 1. the whole round trip ----------------------------------------------
+
+
+def test_amend_and_approve_completes_through_the_mcp_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """Edit and approve in one operation, as the maintainer performs it."""
+    record_id = governed.draft("Agent wording the human will correct.")
+    assert governed.settled(record_id) == (
+        "draft",
+        "Agent wording the human will correct.",
+        0,
+    )
+
+    prepared = governed.prepare(record_id)
+    assert prepared["status"] == "ok"
+    assert prepared["statement_origin"] == STATEMENT_ORIGIN_AGENT
+
+    committed = governed.commit(record_id, prepared)
+
+    assert committed["status"] == "ok"
+    assert committed["record_status"] == "active"
+    assert committed["statement_origin"] == STATEMENT_ORIGIN_HUMAN_AMENDED
+    assert committed["approved_by"] == "den"
+
+    receipt = committed["proof"]
+    assert isinstance(receipt, dict)
+    assert receipt["operation"] == AMEND_AND_APPROVE
+    assert receipt["protocol"] == _AMENDMENT_WIRE
+    assert receipt["shown_statement_digest"] == prepared["statement_digest"]
+    assert receipt["submitted_statement_digest"] != prepared["statement_digest"]
+    assert receipt["expected_revision_matched"] is True
+
+    status, statement, revisions = governed.settled(record_id)
+    assert (status, statement) == ("active", _HUMAN_WORDING)
+    assert revisions == 1
+
+
+def test_the_amended_record_keeps_the_agent_as_its_author(
+    governed: _GovernedSurface,
+) -> None:
+    """Two provenance facts, deliberately not one.
+
+    ``created_by`` is immutable historical fact about who produced the
+    observation; ``statement_origin`` answers whose words the CURRENT wording
+    is. A test that only checked the origin would let the author be
+    overwritten by the person who edited a sentence.
+    """
+    record_id = governed.draft()
+    governed.commit(record_id, governed.prepare(record_id))
+
+    conn = sqlite3.connect(governed.db_path)
+    try:
+        created_by, approved_by, payload_json = conn.execute(
+            "SELECT created_by, approved_by, payload_json "
+            "FROM memory_records WHERE id=?",
+            (record_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert created_by == "agent"
+    assert approved_by == "den"
+    assert json.loads(payload_json)["statement_origin"] == (
+        STATEMENT_ORIGIN_HUMAN_AMENDED
+    )
+
+
+def test_the_registered_tool_forwards_the_amended_wording(tmp_path: Path) -> None:
+    """The service is not the last mile: the tool signature is.
+
+    A tool that accepted ``statement`` and dropped it on the floor would leave
+    every service-level test here green while publishing the agent's original
+    wording. So this one round-trips through the registered FastMCP tool.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        _identity, db_path = memory_project_db_paths(root)
+        mcp = build_mcp_server(history_limit=2, ide_governance_channel=True)
+        root_str = str(root.resolve())
+        key_hex = secrets.token_hex(32)
+
+        def call(**params: object) -> dict[str, object]:
+            _content, payload = asyncio.run(
+                mcp.call_tool(
+                    "manage_engineering_memory",
+                    {"root": root_str, **params},
+                )
+            )
+            assert isinstance(payload, dict)
+            return payload
+
+        recorded = call(
+            action="record_candidate",
+            record_type="architecture_decision",
+            statement="Agent wording reaching the tool layer.",
+            subject_path="pkg/mod.py",
+        )
+        record_id = str(recorded["record_id"])
+        assert (
+            call(
+                action="register_ide_governance",
+                ide_governance_key=key_hex,
+                client_name="CodeClone VS Code",
+                client_version="0.3.0",
+            )["status"]
+            == "ok"
+        )
+        prepared = call(
+            action="prepare_governance",
+            record_id=record_id,
+            decision=AMEND_AND_APPROVE,
+        )
+        ticket = str(prepared["governance_ticket"])
+        nonce = str(prepared["confirmation_nonce"])
+        committed = call(
+            action="commit_governance",
+            record_id=record_id,
+            decision=AMEND_AND_APPROVE,
+            governance_ticket=ticket,
+            confirmation_nonce=nonce,
+            proof=compute_governance_proof(
+                bytes.fromhex(key_hex),
+                ticket_id=ticket,
+                record_id=record_id,
+                decision=AMEND_AND_APPROVE,
+                confirmation_nonce=nonce,
+                project_id=str(prepared["project_id"]),
+                statement_digest=str(prepared["statement_digest"]),
+                protocol=_AMENDMENT_WIRE,
+            ),
+            protocol=_AMENDMENT_WIRE,
+            actor="den",
+            statement=_HUMAN_WORDING,
+        )
+
+        assert committed["status"] == "ok"
+        assert _governed_row(db_path, record_id)[:2] == ("active", _HUMAN_WORDING)
+
+
+# --- 2. atomicity survives the surface ------------------------------------
+
+
+def test_a_failure_under_the_surface_call_leaves_the_record_untouched(
+    governed: _GovernedSurface,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Injected between the MCP call and the commit: neither half may land.
+
+    The seam is the surface's own ``_open_memory_store``: the service opens a
+    store per call, so the failure is armed on the very object it is about to
+    write through -- not on a store this test built, which the surface would
+    never have touched. ``write_revision`` runs after both the statement write
+    and the status write, so reaching it proves the transaction body executed
+    and that the rollback is what undid it.
+    """
+    original = "Wording that must survive the injected failure."
+    record_id, prepared = governed.pending(original)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("injected failure mid-transaction")
+
+    open_store = governed.service._open_memory_store
+
+    def _arm(root_path: Path) -> tuple[Any, Path, Any, Any]:
+        store, db_path, config, project = open_store(root_path)
+        store.write_revision = _boom  # type: ignore[method-assign]
+        return store, db_path, config, project
+
+    monkeypatch.setattr(governed.service, "_open_memory_store", _arm)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        governed.commit(record_id, prepared)
+
+    assert governed.settled(record_id) == ("draft", original, 0)
+
+
+# --- 3. the compare-and-swap reaches the surface --------------------------
+
+
+def test_a_statement_that_moved_under_the_ticket_is_refused_at_the_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """Digest axis. A real second writer, not a hand-set field."""
+    record_id, prepared = governed.pending("First author wording.")
+
+    _foreign_write(
+        governed.db_path,
+        "UPDATE memory_records SET statement=? WHERE id=?",
+        ("Second writer got here first.", record_id),
+    )
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.commit(record_id, prepared)
+    assert str(excinfo.value).startswith(f"{GOVERNANCE_STALE_AMENDMENT_CODE}:")
+    assert governed.settled(record_id) == (
+        "draft",
+        "Second writer got here first.",
+        0,
+    )
+
+
+def test_a_status_move_the_revision_axis_cannot_see_is_refused_at_the_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """Status axis, measured on the decision that can actually reach it.
+
+    ``amend_and_approve`` admits only a draft, so a record that moved to
+    ``stale`` is turned away earlier, by amendability (see the complement
+    below) -- the CAS status axis is never consulted on that path. ``approve``
+    admits ``{draft, stale}``, so it is where a status move survives long
+    enough to meet the compare-and-swap.
+
+    The accounting is asserted rather than assumed: the statement bytes are
+    unchanged and the revision count does not move across the stale write, so
+    neither of the other two axes could have produced this refusal. That the
+    store's own ``mark_stale`` moves a record this way -- row written, no
+    revision -- is pinned at the record layer by
+    ``test_stale_move_leaves_the_revision_axis_blind``.
+    """
+    record_id, prepared = governed.pending("Wording nobody touched.", "approve")
+    _status_before, statement_before, revisions_before = governed.settled(record_id)
+
+    _foreign_write(
+        governed.db_path,
+        "UPDATE memory_records SET status='stale', stale_reason=? WHERE id=?",
+        ("superseded by a later run", record_id),
+    )
+
+    status, statement, revisions_after = governed.settled(record_id)
+    assert (status, statement) == ("stale", statement_before)
+    assert revisions_before == revisions_after, "revision axis must stay blind here"
+    assert prepared["record_status"] == "draft"
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.commit(record_id, prepared, decision="approve", statement=None)
+    assert str(excinfo.value).startswith(f"{GOVERNANCE_STALE_AMENDMENT_CODE}:")
+    assert governed.settled(record_id) == ("stale", "Wording nobody touched.", 0)
+
+
+def test_amend_turns_a_moved_status_away_before_the_compare_and_swap(
+    governed: _GovernedSurface,
+) -> None:
+    """The complement, so the pin above is not read as the whole rule.
+
+    On the amend decision the same move is refused as immutability, not as a
+    stale amendment. Both refusals write nothing; they differ in the remedy
+    they hand the human, and that difference is the thing worth keeping.
+    """
+    original = "Wording that goes stale under the ticket."
+    record_id, prepared = governed.pending(original)
+
+    _foreign_write(
+        governed.db_path,
+        "UPDATE memory_records SET status='stale', stale_reason=? WHERE id=?",
+        ("superseded by a later run", record_id),
+    )
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.commit(record_id, prepared)
+    message = str(excinfo.value)
+    assert message.startswith(f"{GOVERNANCE_RECORD_IMMUTABLE_CODE}:")
+    assert GOVERNANCE_STALE_AMENDMENT_CODE not in message
+    assert governed.settled(record_id) == ("stale", original, 0)
+
+
+# --- 4. the protocol gate, both boundaries --------------------------------
+
+
+def test_amend_on_an_old_wire_refuses_as_a_version_problem_at_the_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """A client that is merely old must not be told its decision does not exist."""
+    original = "Wording an old client tried to amend."
+    record_id, prepared = governed.pending(original)
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.commit(record_id, prepared, protocol=_OLD_WIRE)
+    message = str(excinfo.value)
+    assert message.startswith(f"{GOVERNANCE_DECISION_PROTOCOL_CODE}:")
+    assert "Unknown governance decision" not in message
+    assert str(_AMENDMENT_WIRE) in message
+    assert governed.settled(record_id) == ("draft", original, 0)
+
+
+def test_the_old_wire_still_approves_through_the_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """The gate's other boundary: it must not fire on the three old decisions.
+
+    A gate that refused every decision at protocol 2 would pass the test above
+    and silently break every shipped client.
+    """
+    original = "Wording an old client approves unchanged."
+    record_id, prepared = governed.pending(original, "approve")
+    committed = governed.commit(
+        record_id,
+        prepared,
+        decision="approve",
+        protocol=_OLD_WIRE,
+        statement=None,
+    )
+    assert committed["status"] == "ok"
+    assert governed.settled(record_id)[:2] == ("active", original)
+
+
+def test_a_misspelled_decision_on_a_good_wire_is_still_unknown(
+    governed: _GovernedSurface,
+) -> None:
+    """The version gate must not swallow the spelling refusal it sits beside."""
+    record_id = governed.draft("Wording behind a misspelled decision.")
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.prepare(record_id, "amend")
+    message = str(excinfo.value)
+    assert "Unknown governance decision" in message
+    assert GOVERNANCE_DECISION_PROTOCOL_CODE not in message
+
+
+# --- 5. an approved statement is immutable through the surface ------------
+
+
+def test_amending_an_approved_record_is_refused_at_the_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """Published wording is never edited in place, and the refusal says why.
+
+    The remedy has to name the successor path, or the human is left with a
+    true statement and no way forward.
+    """
+    published = "Wording published for other agents to read."
+    record_id = governed.draft(published)
+    governed.commit(
+        record_id,
+        governed.prepare(record_id, "approve"),
+        decision="approve",
+        statement=None,
+    )
+    assert governed.settled(record_id)[:2] == ("active", published)
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.prepare(record_id)
+    message = str(excinfo.value)
+    assert message.startswith(f"{GOVERNANCE_RECORD_IMMUTABLE_CODE}:")
+    assert "supersedes" in message
+    assert governed.settled(record_id)[:2] == ("active", published)
+
+
+# --- 6. the content rules apply to the human ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("code", "submitted"),
+    [
+        ("memory_md_html", "## Title\nRaw <b>markup</b> in the amended note."),
+        # One admitted tag makes the render surface parse author markup, so
+        # <code> is refused exactly like any other tag rather than waved
+        # through as the harmless-looking one.
+        ("memory_md_html", "## Title\nA <code>span</code> in the amended note."),
+        ("memory_md_image", "## Title\n![shot](https://example.com/a.png)"),
+        ("memory_md_link", "## Title\nSee [the doc](https://example.com/doc)."),
+    ],
+)
+def test_human_submitted_markup_is_refused_with_a_step_the_human_can_run(
+    governed: _GovernedSurface,
+    code: str,
+    submitted: str,
+) -> None:
+    """Same rules as an agent gets; a remedy the approval view can execute.
+
+    Telling a human at an approval button to "retry record_candidate" is an
+    instruction they have no way to perform, so the audience of the next_step
+    is as load-bearing as the refusal itself.
+    """
+    original = f"Wording behind the {code} attempt {len(submitted)}."
+    record_id, prepared = governed.pending(original)
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.commit(record_id, prepared, statement=submitted)
+    message = str(excinfo.value)
+    assert message.startswith(f"{code}:")
+    assert "in the Memory view" in message
+    assert "record_candidate" not in message
+    assert governed.settled(record_id) == ("draft", original, 0)
+
+
+def test_amend_without_a_statement_is_refused_at_the_surface(
+    governed: _GovernedSurface,
+) -> None:
+    """The decision that carries wording, committed with none.
+
+    Reachable from any client that sends the decision and forgets the field.
+    Without this the refusal is production code no test has ever executed,
+    and the only thing standing between it and an AttributeError on ``None``.
+    """
+    original = "Wording a client tried to amend with nothing."
+    record_id, prepared = governed.pending(original)
+
+    with pytest.raises(MCPServiceContractError) as excinfo:
+        governed.commit(record_id, prepared, statement=None)
+    message = str(excinfo.value)
+    assert message.startswith(f"{GOVERNANCE_TICKET_MISMATCH_CODE}:")
+    assert "next_step:" in message
+    assert "decision=approve" in message
+    assert governed.settled(record_id) == ("draft", original, 0)
+
+
+# --- 7. agents still cannot approve ---------------------------------------
+
+
+def test_an_agent_session_cannot_reach_the_governance_channel(
+    tmp_path: Path,
+) -> None:
+    """A process boundary, not a name check.
+
+    The same code, the same calls, the same arguments -- refused because this
+    server was not launched with --ide-governance-channel. Registration is
+    refused first, so an agent cannot even acquire the key the rest needs.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        _identity, db_path = memory_project_db_paths(root)
+        agent = _GovernedSurface(root, db_path, channel=False)
+        original = "Wording an agent would like to approve itself."
+        record_id = agent.draft(original)
+
+        assert agent.registered["status"] == "rejected"
+        assert agent.registered["reason"] == "governance_mode_unavailable"
+
+        prepared = agent.prepare(record_id)
+        assert prepared["status"] == "rejected"
+        assert prepared["reason"] == "governance_mode_unavailable"
+
+        committed = agent.call(
+            action="commit_governance",
+            record_id=record_id,
+            decision=AMEND_AND_APPROVE,
+            governance_ticket="ticket",
+            confirmation_nonce="nonce",
+            proof="proof",
+            protocol=_AMENDMENT_WIRE,
+            actor="agent",
+            statement=_HUMAN_WORDING,
+        )
+        assert committed["status"] == "rejected"
+        assert committed["reason"] == "governance_mode_unavailable"
+
+        assert agent.settled(record_id) == ("draft", original, 0)
