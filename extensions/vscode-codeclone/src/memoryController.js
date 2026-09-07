@@ -744,7 +744,7 @@ class MemoryController {
             `# ${record.type || "memory"}`,
             "",
             `**Status:** ${record.status || "unknown"}`,
-            `**Confidence:** ${record.confidence || "—"}`,
+            `**Rung:** ${record.epistemic_rung || "—"}`,
             "",
             recordStatement(record),
             "",

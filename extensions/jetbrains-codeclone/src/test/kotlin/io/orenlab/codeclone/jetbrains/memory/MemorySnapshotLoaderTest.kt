@@ -41,7 +41,7 @@ class MemorySnapshotLoaderTest {
                             put("type", "risk_note")
                             put("status", "draft")
                             put("statement", "Example statement")
-                            put("confidence", "inferred")
+                            put("epistemic_rung", "inferred")
                         },
                     )
                 },
@@ -53,6 +53,6 @@ class MemorySnapshotLoaderTest {
         assertEquals("risk_note", records[0].type)
         assertEquals("draft", records[0].status)
         assertEquals("Example statement", records[0].statement)
-        assertEquals("inferred", records[0].confidence)
+        assertEquals("inferred", records[0].epistemicRung)
     }
 }

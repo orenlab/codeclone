@@ -21,7 +21,7 @@ claims about analyzed repositories.
 
 | Contract | Value | Kind | Note |
 |----------|-------|------|------|
-| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `1.7` | str | Schema for durable change/incident records |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `1.8` | str | Schema for durable change/incident records |
 | `MEMORY_PROJECTION_VERSION` | `memory-v1` | str | Memory audit trail and trajectory versioning |
 | `AUDIT_PROJECTION_VERSION` | `audit-v1` | str | Change control audit artifact versioning |
 | `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` | `1.2` | str | Analytics store and profile manifest schema |

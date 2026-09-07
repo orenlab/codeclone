@@ -21,7 +21,7 @@ from .enums import (
     IngestionMode,
     IngestionRunStatus,
     LinkRelation,
-    MemoryConfidence,
+    MemoryEpistemicRung,
     MemoryIngestSource,
     MemoryOrigin,
     MemoryRecordType,
@@ -69,7 +69,7 @@ class MemoryRecord:
     identity_key: str
     type: MemoryRecordType
     status: MemoryStatus
-    confidence: MemoryConfidence
+    epistemic_rung: MemoryEpistemicRung
     origin: MemoryOrigin
     ingest_source: MemoryIngestSource
     statement: str
@@ -110,7 +110,7 @@ class EvidenceRef:
     the shape is well formed. It cannot check that the artifact *supports* the
     statement the record makes, and nothing downstream may read it as if it
     could: a valid evidence reference is not evidence that a claim is true.
-    That is the whole reason this is a reference type and not a confidence
+    That is the whole reason this is a reference type and not a epistemic_rung
     input -- see ``record_candidate``, which attaches these without ever moving
     the epistemic rung.
 
@@ -228,7 +228,7 @@ class _MemoryRecordInput(_StrictMemoryInput):
     identity_key: NonEmptyStr
     type: MemoryRecordType
     status: MemoryStatus
-    confidence: MemoryConfidence
+    epistemic_rung: MemoryEpistemicRung
     origin: MemoryOrigin
     ingest_source: MemoryIngestSource
     statement: NonEmptyStr
@@ -386,7 +386,7 @@ def validate_memory_record(record: MemoryRecord) -> MemoryRecord:
             "identity_key": record.identity_key,
             "type": record.type,
             "status": record.status,
-            "confidence": record.confidence,
+            "epistemic_rung": record.epistemic_rung,
             "origin": record.origin,
             "ingest_source": record.ingest_source,
             "statement": record.statement,

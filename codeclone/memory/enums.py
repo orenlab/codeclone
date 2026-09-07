@@ -35,7 +35,7 @@ MemoryStatus = Literal[
     "archived",
 ]
 
-MemoryConfidence = Literal["inferred", "supported", "verified"]
+MemoryEpistemicRung = Literal["inferred", "supported", "verified"]
 
 MemoryOrigin = Literal["system", "agent", "human"]
 
@@ -135,7 +135,7 @@ MEMORY_STATUS_VALUES: tuple[MemoryStatus, ...] = (
     "rejected",
     "archived",
 )
-MEMORY_CONFIDENCE_VALUES: tuple[MemoryConfidence, ...] = (
+MEMORY_EPISTEMIC_RUNG_VALUES: tuple[MemoryEpistemicRung, ...] = (
     "inferred",
     "supported",
     "verified",
@@ -217,8 +217,8 @@ _MEMORY_RECORD_TYPE_ADAPTER: TypeAdapter[MemoryRecordType] = TypeAdapter(
     MemoryRecordType
 )
 _MEMORY_STATUS_ADAPTER: TypeAdapter[MemoryStatus] = TypeAdapter(MemoryStatus)
-_MEMORY_CONFIDENCE_ADAPTER: TypeAdapter[MemoryConfidence] = TypeAdapter(
-    MemoryConfidence
+_MEMORY_EPISTEMIC_RUNG_ADAPTER: TypeAdapter[MemoryEpistemicRung] = TypeAdapter(
+    MemoryEpistemicRung
 )
 _MEMORY_ORIGIN_ADAPTER: TypeAdapter[MemoryOrigin] = TypeAdapter(MemoryOrigin)
 _MEMORY_INGEST_SOURCE_ADAPTER: TypeAdapter[MemoryIngestSource] = TypeAdapter(
@@ -263,13 +263,13 @@ def validate_memory_status(
         raise _literal_error(field, value, MEMORY_STATUS_VALUES) from exc
 
 
-def validate_memory_confidence(
-    value: object, *, field: str = "record_confidence"
-) -> MemoryConfidence:
+def validate_memory_epistemic_rung(
+    value: object, *, field: str = "record_epistemic_rung"
+) -> MemoryEpistemicRung:
     try:
-        return _MEMORY_CONFIDENCE_ADAPTER.validate_python(value)
+        return _MEMORY_EPISTEMIC_RUNG_ADAPTER.validate_python(value)
     except ValidationError as exc:
-        raise _literal_error(field, value, MEMORY_CONFIDENCE_VALUES) from exc
+        raise _literal_error(field, value, MEMORY_EPISTEMIC_RUNG_VALUES) from exc
 
 
 def validate_memory_origin(
@@ -347,7 +347,7 @@ __all__ = [
     "INGESTION_MODE_VALUES",
     "INGESTION_RUN_STATUS_VALUES",
     "LINK_RELATION_VALUES",
-    "MEMORY_CONFIDENCE_VALUES",
+    "MEMORY_EPISTEMIC_RUNG_VALUES",
     "MEMORY_INGEST_SOURCE_VALUES",
     "MEMORY_ORIGIN_VALUES",
     "MEMORY_RECORD_TYPE_VALUES",
@@ -358,7 +358,7 @@ __all__ = [
     "IngestionMode",
     "IngestionRunStatus",
     "LinkRelation",
-    "MemoryConfidence",
+    "MemoryEpistemicRung",
     "MemoryIngestSource",
     "MemoryOrigin",
     "MemoryRecordType",
@@ -369,7 +369,7 @@ __all__ = [
     "validate_ingestion_mode",
     "validate_ingestion_run_status",
     "validate_link_relation",
-    "validate_memory_confidence",
+    "validate_memory_epistemic_rung",
     "validate_memory_ingest_source",
     "validate_memory_origin",
     "validate_memory_record_type",

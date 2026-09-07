@@ -17,10 +17,10 @@ from ...observability import is_observability_enabled, record_counter, span
 from ..embedding import embed_query
 from ..enums import (
     LinkRelation,
-    MemoryConfidence,
+    MemoryEpistemicRung,
     MemoryRecordType,
     MemoryStatus,
-    validate_memory_confidence,
+    validate_memory_epistemic_rung,
     validate_memory_record_type,
     validate_memory_status,
 )
@@ -352,7 +352,7 @@ def _record_visible(
         return True
     if record.status == "draft":
         return include_drafts
-    if record.confidence == "inferred" and not record.approved_by:
+    if record.epistemic_rung == "inferred" and not record.approved_by:
         return False
     return record.status in {"active", "stale", "draft"}
 
@@ -591,7 +591,7 @@ def _record_birth_provenance(record: MemoryRecord) -> dict[str, object]:
     it last re-verified, when was it approved, which branch was it born on --
     are drill-down questions, asked of one record at a time. The compact lane
     already carries the trust signals a reader scans for: ``status``,
-    ``confidence``, ``approved`` and ``stale_reason``.
+    ``epistemic_rung``, ``approved`` and ``stale_reason``.
 
     ``expires_at_utc`` is deliberately absent from every shape. It is NULL for
     every record the store has ever held, no production path can write it a
@@ -636,7 +636,7 @@ def _serialize_record_summary(
         "id": record.id,
         "type": record.type,
         "status": record.status,
-        "confidence": record.confidence,
+        "epistemic_rung": record.epistemic_rung,
         "approved": record.approved_by is not None,
         "statement": statement_value,
         "statement_length": statement_length,
@@ -1223,7 +1223,7 @@ def _load_patch_trails_for_trajectories(
 _MEMORY_FILTER_KEYS = (
     "types",
     "statuses",
-    "confidences",
+    "epistemic_rungs",
     "match_mode",
     "include_routine",
 )
@@ -1235,13 +1235,13 @@ def _parse_filters(
 ) -> tuple[
     tuple[MemoryRecordType, ...],
     tuple[MemoryStatus, ...],
-    tuple[MemoryConfidence, ...],
+    tuple[MemoryEpistemicRung, ...],
     SearchMatchMode,
     bool,
 ]:
     types: list[MemoryRecordType] = []
     statuses: list[MemoryStatus] = []
-    confidences: list[MemoryConfidence] = []
+    epistemic_rungs: list[MemoryEpistemicRung] = []
     match_mode: SearchMatchMode = "any"
     include_routine = False
     if filters is None:
@@ -1268,17 +1268,17 @@ def _parse_filters(
             raise MemoryContractError(str(exc)) from exc
     elif raw_statuses is not None:
         raise MemoryContractError("memory filter statuses must be a list of strings.")
-    raw_confidences = filters.get("confidences")
-    if isinstance(raw_confidences, list):
+    raw_epistemic_rungs = filters.get("epistemic_rungs")
+    if isinstance(raw_epistemic_rungs, list):
         try:
-            confidences.extend(
-                validate_memory_confidence(item) for item in raw_confidences
+            epistemic_rungs.extend(
+                validate_memory_epistemic_rung(item) for item in raw_epistemic_rungs
             )
         except ValueError as exc:
             raise MemoryContractError(str(exc)) from exc
-    elif raw_confidences is not None:
+    elif raw_epistemic_rungs is not None:
         raise MemoryContractError(
-            "memory filter confidences must be a list of strings."
+            "memory filter epistemic_rungs must be a list of strings."
         )
     raw_match = filters.get("match_mode")
     if raw_match == "all":
@@ -1295,7 +1295,7 @@ def _parse_filters(
     return (
         tuple(types),
         tuple(statuses),
-        tuple(confidences),
+        tuple(epistemic_rungs),
         match_mode,
         include_routine,
     )
@@ -1864,7 +1864,7 @@ def _fetch_search_mode_records(
     query: str | None,
     filter_types: tuple[MemoryRecordType, ...],
     statuses: tuple[MemoryStatus, ...],
-    filter_confidences: tuple[MemoryConfidence, ...],
+    filter_epistemic_rungs: tuple[MemoryEpistemicRung, ...],
     max_results: int,
     match_mode: SearchMatchMode,
 ) -> tuple[MemoryRecord, ...]:
@@ -1875,7 +1875,7 @@ def _fetch_search_mode_records(
             statement_query=statement,
             types=filter_types,
             statuses=statuses,
-            confidences=filter_confidences,
+            epistemic_rungs=filter_epistemic_rungs,
             limit=max_results + 1,
             match_mode=match_mode,
         )
@@ -1953,7 +1953,7 @@ def _records_for_list_mode(
     query: str | None,
     filter_types: tuple[MemoryRecordType, ...],
     statuses: tuple[MemoryStatus, ...],
-    filter_confidences: tuple[MemoryConfidence, ...],
+    filter_epistemic_rungs: tuple[MemoryEpistemicRung, ...],
     max_results: int,
     match_mode: SearchMatchMode,
 ) -> tuple[MemoryRecord, ...]:
@@ -1964,7 +1964,7 @@ def _records_for_list_mode(
             query=query,
             filter_types=filter_types,
             statuses=statuses,
-            filter_confidences=filter_confidences,
+            filter_epistemic_rungs=filter_epistemic_rungs,
             max_results=max_results,
             match_mode=match_mode,
         )
@@ -2146,15 +2146,15 @@ def _record_passes_filters(
     *,
     types: tuple[MemoryRecordType, ...],
     statuses: tuple[MemoryStatus, ...],
-    confidences: tuple[MemoryConfidence, ...],
+    epistemic_rungs: tuple[MemoryEpistemicRung, ...],
 ) -> bool:
-    # Mirror the types/statuses/confidences predicate the FTS branch applies in
+    # Mirror the types/statuses/epistemic_rungs predicate the FTS branch applies in
     # SQL (store.search_records), so semantic candidates cannot bypass the
     # public query filter contract. An empty category tuple means "no filter".
     return (
         (not types or record.type in types)
         and (not statuses or record.status in statuses)
-        and (not confidences or record.confidence in confidences)
+        and (not epistemic_rungs or record.epistemic_rung in epistemic_rungs)
     )
 
 
@@ -2166,7 +2166,7 @@ def _semantic_search_candidates(
     proximity: Mapping[str, float],
     filter_types: tuple[MemoryRecordType, ...],
     statuses: tuple[MemoryStatus, ...],
-    filter_confidences: tuple[MemoryConfidence, ...],
+    filter_epistemic_rungs: tuple[MemoryEpistemicRung, ...],
 ) -> list[MemoryRecord]:
     seen = {record.id for record in fts_records}
     candidates = list(fts_records)
@@ -2181,7 +2181,7 @@ def _semantic_search_candidates(
                 record,
                 types=filter_types,
                 statuses=statuses,
-                confidences=filter_confidences,
+                epistemic_rungs=filter_epistemic_rungs,
             )
         ):
             candidates.append(record)
@@ -2196,7 +2196,7 @@ def _handle_semantic_search_mode(
     query: str | None,
     filter_types: tuple[MemoryRecordType, ...],
     statuses: tuple[MemoryStatus, ...],
-    filter_confidences: tuple[MemoryConfidence, ...],
+    filter_epistemic_rungs: tuple[MemoryEpistemicRung, ...],
     match_mode: SearchMatchMode,
     max_results: int,
     detail_level: MemoryDetailLevel,
@@ -2215,7 +2215,7 @@ def _handle_semantic_search_mode(
         query=statement,
         filter_types=filter_types,
         statuses=statuses,
-        filter_confidences=filter_confidences,
+        filter_epistemic_rungs=filter_epistemic_rungs,
         max_results=max_results,
         match_mode=match_mode,
     )
@@ -2257,7 +2257,7 @@ def _handle_semantic_search_mode(
             proximity=proximity,
             filter_types=filter_types,
             statuses=statuses,
-            filter_confidences=filter_confidences,
+            filter_epistemic_rungs=filter_epistemic_rungs,
         )
         audit_events = _hydrate_audit_events(audit_db_path, audit_hits)
         trajectories = _hydrate_trajectory_hits(
@@ -2450,9 +2450,13 @@ def query_engineering_memory(
             record_id=record_id,
         )
 
-    filter_types, filter_statuses, filter_confidences, match_mode, include_routine = (
-        _parse_filters(filters)
-    )
+    (
+        filter_types,
+        filter_statuses,
+        filter_epistemic_rungs,
+        match_mode,
+        include_routine,
+    ) = _parse_filters(filters)
     if mode == "trajectory_anomalies":
         return _handle_trajectory_anomalies_mode(
             store,
@@ -2502,7 +2506,7 @@ def query_engineering_memory(
             query=query,
             filter_types=filter_types,
             statuses=statuses,
-            filter_confidences=filter_confidences,
+            filter_epistemic_rungs=filter_epistemic_rungs,
             match_mode=match_mode,
             max_results=max_results,
             detail_level=normalized_detail,
@@ -2523,7 +2527,7 @@ def query_engineering_memory(
         query=query,
         filter_types=filter_types,
         statuses=statuses,
-        filter_confidences=filter_confidences,
+        filter_epistemic_rungs=filter_epistemic_rungs,
         max_results=max_results,
         match_mode=match_mode,
     )

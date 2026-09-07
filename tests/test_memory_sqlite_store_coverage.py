@@ -46,7 +46,7 @@ def _sample_record(
         identity_key=identity,
         type="contract_note",
         status="active",
-        confidence="verified",
+        epistemic_rung="verified",
         origin="system",
         ingest_source="contract",
         statement=statement,
@@ -131,7 +131,7 @@ def test_sqlite_store_query_records_filters_and_db_path(tmp_path: Path) -> None:
         store.close()
 
 
-def test_sqlite_store_search_empty_tokens_and_confidence_filter_branches(
+def test_sqlite_store_search_empty_tokens_and_epistemic_rung_filter_branches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -165,11 +165,11 @@ def test_sqlite_store_search_empty_tokens_and_confidence_filter_branches(
         )
         assert hits_fts == []
 
-        # Cover confidence_via_subquery=True path in FTS search filtering.
+        # Cover epistemic_rung_via_subquery=True path in FTS search filtering.
         hits_fts_conf = store.search_records(
             project_id=project.id,
             statement_query="alpha",
-            confidences=("verified",),
+            epistemic_rungs=("verified",),
             limit=10,
         )
         assert hits_fts_conf
@@ -193,11 +193,11 @@ def test_sqlite_store_search_empty_tokens_and_confidence_filter_branches(
         )
         assert hits_like_empty == []
 
-        # Cover confidence-via-subquery=False (LIKE) and exercise the confidence filter.
+        # Cover rung-via-subquery=False (LIKE) and exercise the rung filter.
         hits_like_conf = store.search_records(
             project_id=project.id,
             statement_query="alpha",
-            confidences=("verified",),
+            epistemic_rungs=("verified",),
             limit=10,
         )
         assert hits_like_conf  # not empty

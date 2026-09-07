@@ -3921,7 +3921,7 @@ def test_mcp_service_get_relevant_memory_resolves_intent_scope(
             ),
             type="module_role",
             status="active",
-            confidence="supported",
+            epistemic_rung="supported",
             origin="system",
             ingest_source="analysis",
             statement="module owns retrieval helpers",

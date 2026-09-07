@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from codeclone.memory.enums import MemoryConfidence, MemoryStatus
+from codeclone.memory.enums import MemoryEpistemicRung, MemoryStatus
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.experience.models import Experience
 from codeclone.memory.models import MemoryEvidence, MemoryRecord, MemorySubject
@@ -29,7 +29,7 @@ from .memory_fixtures import memory_store
 def _record(
     *,
     status: MemoryStatus = "active",
-    confidence: MemoryConfidence = "verified",
+    epistemic_rung: MemoryEpistemicRung = "verified",
 ) -> MemoryRecord:
     now = current_report_timestamp_utc()
     return MemoryRecord(
@@ -38,7 +38,7 @@ def _record(
         identity_key="id-1",
         type="contract_note",
         status=status,
-        confidence=confidence,
+        epistemic_rung=epistemic_rung,
         origin="system",
         ingest_source="analysis",
         statement="hello",
@@ -83,7 +83,7 @@ def test_record_visible_serialize_and_parse_filters_branches() -> None:
     )
     assert (
         retrieval_service._record_visible(
-            _record(status="active", confidence="inferred"),
+            _record(status="active", epistemic_rung="inferred"),
             include_stale=False,
             include_drafts=False,
         )
@@ -103,19 +103,19 @@ def test_record_visible_serialize_and_parse_filters_branches() -> None:
     payload = retrieval_service._serialize_evidence(evidence)
     assert payload["evidence_kind"] == "report"
 
-    types, statuses, confidences, mode, include_routine = (
+    types, statuses, epistemic_rungs, mode, include_routine = (
         retrieval_service._parse_filters(
             {
                 "types": ["contract_note"],
                 "statuses": ["active"],
-                "confidences": ["verified"],
+                "epistemic_rungs": ["verified"],
                 "match_mode": "all",
             }
         )
     )
     assert types == ("contract_note",)
     assert statuses == ("active",)
-    assert confidences == ("verified",)
+    assert epistemic_rungs == ("verified",)
     assert mode == "all"
     assert include_routine is False
 
@@ -124,7 +124,7 @@ def test_record_visible_serialize_and_parse_filters_branches() -> None:
     message = str(exc_info.value)
     assert "Unknown memory filter key(s): typo." in message
     assert (
-        "Allowed keys: types, statuses, confidences, match_mode, include_routine."
+        "Allowed keys: types, statuses, epistemic_rungs, match_mode, include_routine."
         in message
     )
 
@@ -188,7 +188,7 @@ def test_for_symbol_and_unknown_mode_paths() -> None:
         query=None,
         filter_types=(),
         statuses=("active",),
-        filter_confidences=(),
+        filter_epistemic_rungs=(),
         max_results=10,
         match_mode="any",
     )
@@ -389,7 +389,7 @@ def test_relevance_score_symbol_boost() -> None:
         identity_key="id-sym",
         type="contract_note",
         status="active",
-        confidence="verified",
+        epistemic_rung="verified",
         origin="system",
         ingest_source="contract",
         statement="symbol match",
@@ -664,7 +664,7 @@ def test_handle_semantic_search_records_telemetry_when_observability_enabled(
             query="recover checkpoint",
             filter_types=(),
             statuses=("active",),
-            filter_confidences=(),
+            filter_epistemic_rungs=(),
             match_mode="any",
             max_results=5,
             detail_level="compact",
@@ -681,8 +681,8 @@ def test_handle_semantic_search_records_telemetry_when_observability_enabled(
     assert captured["retrieval.fts_hits"] == 0
 
 
-def test_parse_filters_rejects_invalid_status_and_confidence_values() -> None:
+def test_parse_filters_rejects_invalid_status_and_epistemic_rung_values() -> None:
     with pytest.raises(MemoryContractError):
         retrieval_service._parse_filters({"statuses": ["bogus-status"]})
     with pytest.raises(MemoryContractError):
-        retrieval_service._parse_filters({"confidences": ["bogus-confidence"]})
+        retrieval_service._parse_filters({"epistemic_rungs": ["bogus-epistemic_rung"]})

@@ -20,7 +20,7 @@ from ...report.meta import current_report_timestamp_utc
 from ...utils.coerce import as_mapping, as_sequence
 from ...utils.mapping_paths import section
 from ..display import format_document_link_statement
-from ..enums import MemoryConfidence
+from ..enums import MemoryEpistemicRung
 from ..identity import make_identity_key
 from ..models import (
     MemoryEvidence,
@@ -202,7 +202,7 @@ def _append_path_risk_note(
     discriminator: str,
     statement: str,
     payload: Mapping[str, object],
-    confidence: MemoryConfidence,
+    epistemic_rung: MemoryEpistemicRung,
 ) -> None:
     identity = make_identity_key(
         type="risk_note",
@@ -218,7 +218,7 @@ def _append_path_risk_note(
             identity_key=identity,
             type="risk_note",
             status="active",
-            confidence=confidence,
+            epistemic_rung=epistemic_rung,
             origin="system",
             ingest_source="analysis",
             statement=statement,
@@ -289,7 +289,7 @@ def extract_module_roles(
                 identity_key=identity,
                 type="module_role",
                 status="active",
-                confidence="supported",
+                epistemic_rung="supported",
                 origin="system",
                 ingest_source="analysis",
                 statement=(
@@ -372,7 +372,7 @@ def extract_contract_notes(
                     identity_key=identity,
                     type="contract_note",
                     status="active",
-                    confidence="verified",
+                    epistemic_rung="verified",
                     origin="system",
                     ingest_source="contract",
                     statement=f"{name} = {value} in {rel_path}.",
@@ -458,7 +458,7 @@ def extract_public_surfaces(
                 identity_key=identity,
                 type="public_surface",
                 status="active",
-                confidence="supported",
+                epistemic_rung="supported",
                 origin="system",
                 ingest_source="analysis",
                 statement=f"Public API surface includes symbol {symbol}.",
@@ -521,7 +521,7 @@ def extract_public_surfaces(
                         identity_key=identity,
                         type="public_surface",
                         status="active",
-                        confidence="verified",
+                        epistemic_rung="verified",
                         origin="system",
                         ingest_source="snapshot",
                         statement=(
@@ -604,7 +604,7 @@ def extract_risk_notes(
                 "severity": "medium",
                 "interpretation": "Structural complexity hotspot from analysis.",
             },
-            confidence="verified",
+            epistemic_rung="verified",
         )
 
     for path, categories in _production_security_categories_per_path(families):
@@ -628,7 +628,7 @@ def extract_risk_notes(
                 "categories": list(categories),
                 "interpretation": "report_only_inventory",
             },
-            confidence="supported",
+            epistemic_rung="supported",
         )
     return batch
 
@@ -674,7 +674,7 @@ def extract_test_anchors(
                     identity_key=identity,
                     type="test_anchor",
                     status="active",
-                    confidence="supported",
+                    epistemic_rung="supported",
                     origin="system",
                     ingest_source="test",
                     statement=(f"{rel} contains tests referencing symbol {symbol}."),
@@ -811,7 +811,7 @@ def extract_document_links(
                     identity_key=identity,
                     type="document_link",
                     status="active",
-                    confidence="supported",
+                    epistemic_rung="supported",
                     origin="system",
                     ingest_source="doc",
                     statement=format_document_link_statement(
@@ -927,7 +927,7 @@ def extract_git_hotspots(
                 identity_key=identity,
                 type="risk_note",
                 status="active",
-                confidence="verified",
+                epistemic_rung="verified",
                 origin="system",
                 ingest_source="git",
                 statement=(
@@ -1039,7 +1039,7 @@ def extract_contradictions(
                     identity_key=identity,
                     type="contradiction_note",
                     status="draft",
-                    confidence="supported",
+                    epistemic_rung="supported",
                     origin="system",
                     ingest_source="doc",
                     statement=(

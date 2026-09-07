@@ -94,7 +94,7 @@ def _hydrate_memory(
         score=hit.score,
         kind=record.type,
         status=record.status,
-        confidence=record.confidence,
+        epistemic_rung=record.epistemic_rung,
         subject_path=_primary_path(store.list_subjects_for_memory(record.id)),
         preview=_preview(record.statement, preview_chars),
     )
@@ -113,7 +113,7 @@ def _hydrate_audit(
         score=hit.score,
         kind=event_type,
         status=status,
-        confidence=None,
+        epistemic_rung=None,
         subject_path=None,
         preview=_preview(summary, preview_chars),
     )
@@ -136,7 +136,7 @@ def _hydrate_trajectory(
         score=hit.score,
         kind="trajectory",
         status=trajectory.outcome,
-        confidence=None,
+        epistemic_rung=None,
         subject_path=_primary_trajectory_path(trajectory),
         preview=_preview(trajectory.summary, preview_chars),
     )

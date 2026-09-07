@@ -229,7 +229,7 @@ class CodeCloneProjectService(private val project: Project) : Disposable {
                     appendLine("ID: ${record?.get("id")?.jsonPrimitive?.content ?: recordId}")
                     appendLine("Type: ${record?.get("type")?.jsonPrimitive?.content ?: "—"}")
                     appendLine("Status: ${record?.get("status")?.jsonPrimitive?.content ?: "—"}")
-                    appendLine("Confidence: ${record?.get("confidence")?.jsonPrimitive?.content ?: "—"}")
+                    appendLine("Rung: ${record?.get("epistemic_rung")?.jsonPrimitive?.content ?: "—"}")
                     appendLine()
                     appendLine(record?.get("statement")?.jsonPrimitive?.content ?: "No statement available.")
                 }
@@ -378,7 +378,7 @@ class CodeCloneProjectService(private val project: Project) : Disposable {
                 val body = buildString {
                     appendLine("Type: ${detail?.get("type")?.jsonPrimitive?.content ?: record.type}")
                     appendLine("Status: ${detail?.get("status")?.jsonPrimitive?.content ?: record.status}")
-                    appendLine("Confidence: ${detail?.get("confidence")?.jsonPrimitive?.content ?: record.confidence ?: "—"}")
+                    appendLine("Rung: ${detail?.get("epistemic_rung")?.jsonPrimitive?.content ?: record.epistemicRung ?: "—"}")
                     appendLine()
                     append(detail?.get("statement")?.jsonPrimitive?.content ?: record.statement)
                 }

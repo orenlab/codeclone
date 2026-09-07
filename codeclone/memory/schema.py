@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS memory_records (
     identity_key          TEXT NOT NULL,
     type                  TEXT NOT NULL,
     status                TEXT NOT NULL DEFAULT 'active',
-    confidence            TEXT NOT NULL DEFAULT 'supported',
+    epistemic_rung        TEXT NOT NULL DEFAULT 'supported',
     origin                TEXT NOT NULL DEFAULT 'system',
     ingest_source         TEXT NOT NULL,
     statement             TEXT NOT NULL,

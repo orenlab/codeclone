@@ -312,7 +312,7 @@ def test_prefix_store_survives_evidence_fix_untouched(tmp_path: Path) -> None:
     assert pre_fix_rows[0].digest is None
 
     before, before_version = _snapshot(db_path)
-    assert before_version == "1.7"
+    assert before_version == "1.8"
 
     # 2. Reopen with the fixed code path (ensure_schema runs). This is the
     #    user-upgrade moment.
@@ -321,7 +321,7 @@ def test_prefix_store_survives_evidence_fix_untouched(tmp_path: Path) -> None:
 
     # 3. Byte-for-byte preservation and no schema bump.
     assert after == before
-    assert after_version == before_version == "1.7"
+    assert after_version == before_version == "1.8"
 
     # 4. The store still governs, and a NEW candidate carries real evidence while
     #    the old approved record stays untouched (no retro-backfill).

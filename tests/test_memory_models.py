@@ -48,7 +48,7 @@ def test_memory_record_frozen_fields() -> None:
         identity_key="module_role:module:codeclone:inventory",
         type="module_role",
         status="active",
-        confidence="supported",
+        epistemic_rung="supported",
         origin="system",
         ingest_source="analysis",
         statement="test",

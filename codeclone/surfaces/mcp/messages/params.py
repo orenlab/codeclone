@@ -620,7 +620,7 @@ MemoryFiltersParam = Annotated[
     dict[str, object] | None,
     Field(
         description=(
-            "Optional filters: types, statuses, confidences, match_mode "
+            "Optional filters: types, statuses, epistemic_rungs, match_mode "
             "(any|all, search mode only), include_routine (trajectory_search, "
             "trajectory_anomalies, trajectory_agents, trajectory_dashboard; "
             "default false excludes run:* routine workflows). Unknown filter "

@@ -39,7 +39,7 @@ def _insert_memory_record_row(
     store._conn.execute(
         """
         INSERT INTO memory_records(
-            id, project_id, identity_key, type, status, confidence, origin,
+            id, project_id, identity_key, type, status, epistemic_rung, origin,
             ingest_source, statement, summary, payload_json, created_at_utc,
             updated_at_utc, last_verified_at_utc, expires_at_utc, created_by,
             verified_by, approved_by, approved_at_utc, report_digest,
@@ -323,7 +323,7 @@ def test_handle_semantic_search_disabled_block(tmp_path: Path) -> None:
             query="recover checkpoint",
             filter_types=(),
             statuses=("active",),
-            filter_confidences=(),
+            filter_epistemic_rungs=(),
             match_mode="any",
             max_results=5,
             detail_level="compact",

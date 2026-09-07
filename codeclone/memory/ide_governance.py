@@ -543,7 +543,7 @@ def prepare_governance(
         "type": record.type,
         "status": record.status,
         "statement": record.statement,
-        "confidence": record.confidence,
+        "epistemic_rung": record.epistemic_rung,
         "subjects": [
             {
                 "subject_kind": item.subject_kind,

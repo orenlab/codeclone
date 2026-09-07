@@ -906,7 +906,7 @@ _ATTESTATION_RE: Final = re.compile(
 _UNEVIDENCED_ATTESTATION_HINT: Final = (
     f"{_UNEVIDENCED_ATTESTATION_WARN_CODE}: this statement attests a "
     "measurement, but record_candidate "
-    "attaches no evidence row, so the note lands confidence=inferred with "
+    "attaches no evidence row, so the note lands epistemic_rung=inferred with "
     "evidence_count=0 and no reader can reach what was measured. "
     "next_step: record the measured change through "
     "finish_controlled_change(propose_memory=true), which attaches receipt, "
@@ -925,7 +925,7 @@ def _unevidenced_attestation_warning(statement: str) -> str | None:
     ``finish(propose_memory=true)``, which attaches its attested identifiers
     through ``_attach_attested_evidence``. So a body that says MEASURED and
     metadata that says inferred-with-nothing-attached disagree, and until now
-    they disagreed silently. Confidence itself is not the lever: it is
+    they disagreed silently. EpistemicRung itself is not the lever: it is
     origin-derived (every agent record in the store is ``inferred``, every
     system record is not) and no code path can raise it, so the honest signal
     is the missing evidence, not a rung.
@@ -1121,7 +1121,7 @@ def _new_draft_record(
     created_at_commit: str | None,
 ) -> MemoryRecord:
     """Build a draft agent record with the shared field defaults (status=draft,
-    confidence=inferred, origin=agent). Single source for the draft shape used by
+    epistemic_rung=inferred, origin=agent). Single source for the draft shape used by
     record_candidate and promote_experience."""
     return MemoryRecord(
         id=generate_memory_id(),
@@ -1129,7 +1129,7 @@ def _new_draft_record(
         identity_key=identity,
         type=record_type,
         status="draft",
-        confidence="inferred",
+        epistemic_rung="inferred",
         origin="agent",
         ingest_source="agent",
         statement=statement,
@@ -1172,7 +1172,7 @@ def record_candidate(
     ``evidence_refs`` attaches durable pointers at artifacts; ``evidence_validated``
     says the caller already resolved every ``run_id`` against a run that exists
     (only a surface holding the runs can do that, so governance never assumes it).
-    Neither argument touches ``confidence``: the record is born ``inferred`` with
+    Neither argument touches ``epistemic_rung``: the record is born ``inferred`` with
     five references exactly as it is with none, because a reference proves an
     artifact exists and never that it entails the statement.
     """

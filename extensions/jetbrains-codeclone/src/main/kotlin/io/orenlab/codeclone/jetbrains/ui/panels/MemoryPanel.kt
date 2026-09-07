@@ -41,7 +41,7 @@ class MemoryPanel(
         table = memoryTable,
         filter = { row, query ->
             val record = row.record
-            listOf(record.id, record.type, record.status, record.statement, record.confidence)
+            listOf(record.id, record.type, record.status, record.statement, record.epistemicRung)
                 .any { it?.lowercase()?.contains(query) == true }
         },
         placeholder = messages.getMessage("memory.search.placeholder"),

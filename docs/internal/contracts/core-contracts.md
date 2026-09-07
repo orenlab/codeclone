@@ -31,7 +31,7 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 | `EXPERIENCE_DISTILLATION_VERSION` | `"experience-v1"` | experience record format | Semantic version for distilled experience encoding. |
 | `SEMANTIC_INDEX_FORMAT_VERSION` | `"3"` | semantic vector index | Governs vector DB schema and retrieval. |
 | `SEMANTIC_PROJECTION_REVISION_VERSION` | `"1"` | semantic embedding metadata | Tracks revision of projection metadata format. |
-| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `"1.7"` | memory SQLite schema | Controls memory store structure. Must match MCP expectations. |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `"1.8"` | memory SQLite schema | Controls memory store structure. Must match MCP expectations. |
 | `CORPUS_CONTROL_PLANE_CONTRACT_VERSION` | `"1.0"` | analytics control plane | Governance metadata serialization. |
 | `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` | `"1.2"` | analytics database schema | Internal telemetry store layout. |
 | `CORPUS_EMBEDDING_CONTRACT_VERSION` | `"2"` | embedding codec | Serialization format for embeddings. |

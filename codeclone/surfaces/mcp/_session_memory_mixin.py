@@ -625,10 +625,10 @@ class _MCPSessionMemoryMixin:
             "record_id": record.id,
             "status": record.status,
             "type": record.type,
-            # Origin and confidence are echoed so the writer sees what actually
+            # Origin and epistemic_rung are echoed so the writer sees what actually
             # landed: attaching evidence does not move either of them.
             "origin": record.origin,
-            "confidence": record.confidence,
+            "epistemic_rung": record.epistemic_rung,
             "evidence_count": len(evidence_refs),
         }
         evidence_status = resolve_evidence_status(record.payload)

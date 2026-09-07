@@ -47,7 +47,7 @@ function recordCardHtml(record) {
     }
     const type = escapeHtml(item.type || "memory");
     const status = escapeHtml(item.status || "unknown");
-    const confidence = escapeHtml(item.confidence || "—");
+    const epistemicRung = escapeHtml(item.epistemic_rung || "—");
     const statement = escapeHtml(recordStatement(item));
     const subjects = safeArray(item.subjects)
         .map((raw) => {
@@ -64,7 +64,7 @@ function recordCardHtml(record) {
         '<div class="record-head">',
         `<span class="pill pill-type">${type}</span>`,
         `<span class="pill pill-status">${status}</span>`,
-        `<span class="pill pill-confidence">${confidence}</span>`,
+        `<span class="pill pill-epistemic-rung">${epistemicRung}</span>`,
         "</div>",
         `<p class="statement">${statement}</p>`,
         subjects ? `<ul class="subjects">${subjects}</ul>` : "",

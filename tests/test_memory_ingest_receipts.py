@@ -193,7 +193,7 @@ def test_analysis_ingest_still_produces_substantive_module_roles(
 
     Two different producers write this record type and they must not be confused:
     ``extract_module_roles`` states a fact about the module ("<module> is an
-    analyzed Python module in project inventory", confidence ``supported``),
+    analyzed Python module in project inventory", epistemic_rung ``supported``),
     while the removed receipt branch stated nothing. This pin fails if the
     boilerplate fix is over-cut into the substantive producer.
     """
@@ -209,7 +209,7 @@ def test_analysis_ingest_still_produces_substantive_module_roles(
         )
 
     assert [record.type for record in batch.records] == ["module_role"]
-    assert batch.records[0].confidence == "supported"
+    assert batch.records[0].epistemic_rung == "supported"
     assert "analyzed Python module" in batch.records[0].statement
 
 

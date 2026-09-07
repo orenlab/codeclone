@@ -59,7 +59,7 @@ def test_promote_experience_creates_draft_with_trajectory_evidence(
         # A human-approvable draft, not an active assertion.
         assert record.status == "draft"
         assert record.type == "risk_note"
-        assert record.confidence == "inferred"
+        assert record.epistemic_rung == "inferred"
         assert record.payload is not None
         assert record.payload.get("promoted_from_experience") == experience_id
         # One trajectory evidence row per proof trajectory.

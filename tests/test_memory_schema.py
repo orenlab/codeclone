@@ -54,7 +54,7 @@ def _memory_record(
         ),
         type="risk_note",
         status="active",
-        confidence="verified",
+        epistemic_rung="verified",
         origin="agent",
         ingest_source="agent",
         statement=statement,
@@ -102,7 +102,7 @@ def _insert_record_row(
     conn.execute(
         """
         INSERT INTO memory_records(
-            id, project_id, identity_key, type, status, confidence, origin,
+            id, project_id, identity_key, type, status, epistemic_rung, origin,
             ingest_source, statement, summary, payload_json, created_at_utc,
             updated_at_utc, last_verified_at_utc, expires_at_utc, created_by,
             verified_by, approved_by, approved_at_utc, report_digest,
@@ -119,7 +119,7 @@ def _insert_record_row(
             record.identity_key,
             record.type,
             record.status,
-            record.confidence,
+            record.epistemic_rung,
             record.origin,
             record.ingest_source,
             record.statement,
@@ -492,5 +492,104 @@ def test_ensure_schema_raises_on_unsupported_version(tmp_path: Path) -> None:
             pytest.raises(MemorySchemaError, match="Unsupported engineering memory"),
         ):
             ensure_schema(conn)
+    finally:
+        conn.close()
+
+
+def _legacy_1_7_records_table(conn: sqlite3.Connection) -> None:
+    """Rebuild memory_records as it stood at 1.7: the rung column named
+    ``confidence``. create_schema_v1 now emits the 1.8 spelling, so a genuine
+    pre-rename store has to be reconstructed to migrate one."""
+    conn.execute("DROP TABLE memory_records")
+    conn.execute(
+        """
+        CREATE TABLE memory_records (
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+            identity_key TEXT NOT NULL, type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            confidence TEXT NOT NULL DEFAULT 'supported',
+            origin TEXT NOT NULL DEFAULT 'system',
+            ingest_source TEXT NOT NULL, statement TEXT NOT NULL, summary TEXT,
+            payload_json TEXT, created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL, last_verified_at_utc TEXT,
+            expires_at_utc TEXT, created_by TEXT NOT NULL, verified_by TEXT,
+            approved_by TEXT, approved_at_utc TEXT, report_digest TEXT,
+            code_fingerprint TEXT, stale_reason TEXT, created_on_branch TEXT,
+            created_at_commit TEXT, verified_on_branch TEXT,
+            verified_at_commit TEXT, schema_version TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES memory_projects(id)
+        )
+        """
+    )
+
+
+def test_migrate_1_7_to_1_8_renames_the_rung_column_and_keeps_every_value(
+    tmp_path: Path,
+) -> None:
+    """The rename carries values across untouched.
+
+    Two unrelated things were called ``confidence``: this column, and the
+    ``high|medium|low`` analysis signal. The analysis name is older, wider and
+    published in the report schema, so the memory column is the one that moved.
+    It never measured confidence -- it records which extractor wrote the row --
+    but the migration must not reclassify a single record while renaming it.
+    """
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        _legacy_1_7_records_table(conn)
+        _insert_project(conn, project_id="proj-legacy", root=tmp_path)
+        rungs = ("inferred", "supported", "verified")
+        for index, rung in enumerate(rungs):
+            conn.execute(
+                "INSERT INTO memory_records(id, project_id, identity_key, type,"
+                " status, confidence, origin, ingest_source, statement,"
+                " created_at_utc, updated_at_utc, created_by, schema_version)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    f"mem-{index}", "proj-legacy", f"key-{index}", "risk_note",
+                    "active", rung, "system", "analysis", f"statement {index}",
+                    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "test", "1.7",
+                ),
+            )
+        set_meta(conn, "schema_version", "1.7")
+        conn.commit()
+
+        migrate_memory_schema(conn)
+
+        assert get_meta(conn, "schema_version") == "1.8"
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+        }
+        # Both halves matter: the new name arrived AND the old name is gone.
+        # Without the second assertion a store carrying both columns passes.
+        assert "epistemic_rung" in columns
+        assert "confidence" not in columns
+        carried = conn.execute(
+            "SELECT id, epistemic_rung FROM memory_records ORDER BY id"
+        ).fetchall()
+        assert carried == [(f"mem-{i}", rung) for i, rung in enumerate(rungs)]
+    finally:
+        conn.close()
+
+
+def test_fresh_store_has_no_column_named_confidence(tmp_path: Path) -> None:
+    """The separation is real in storage, not only in the Python attribute.
+
+    A fresh store must never grow the old name back: if it did, two lanes would
+    once again answer to one word in the same database.
+    """
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+        }
+        assert "epistemic_rung" in columns
+        assert "confidence" not in columns
     finally:
         conn.close()

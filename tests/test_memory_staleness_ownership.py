@@ -99,7 +99,7 @@ def _record(
         ),
         type=record_type,
         status="active",
-        confidence="supported",
+        epistemic_rung="supported",
         origin="system",
         ingest_source="doc",
         statement=f"{DOC_REL} references {TARGET_REL}.",

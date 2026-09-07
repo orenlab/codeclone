@@ -70,7 +70,7 @@ def test_relevance_score_prefers_scope_path_match() -> None:
         identity_key="k1",
         type="contract_note",
         status="active",
-        confidence="verified",
+        epistemic_rung="verified",
         origin="system",
         ingest_source="contract",
         statement="test",
@@ -122,7 +122,7 @@ def test_relevance_score_boosts_agent_drafts() -> None:
         identity_key="draft-1",
         type="change_rationale",
         status="draft",
-        confidence="inferred",
+        epistemic_rung="inferred",
         origin="agent",
         ingest_source="agent",
         statement="draft note",
@@ -165,7 +165,7 @@ def test_relevance_score_filters_global_contract_notes_for_scope() -> None:
         identity_key="global-contract",
         type="contract_note",
         status="active",
-        confidence="verified",
+        epistemic_rung="verified",
         origin="system",
         ingest_source="contract",
         statement="CACHE_VERSION is 2.8",
@@ -216,7 +216,7 @@ def test_relevance_score_keeps_git_hotspot_below_durable_scope_context() -> None
         id="mem-hotspot",
         identity_key="hotspot",
         type="risk_note",
-        confidence="verified",
+        epistemic_rung="verified",
         ingest_source="git",
         statement="pkg/service.py changed 12 times in the last 90 days.",
         payload={
@@ -288,7 +288,7 @@ def test_get_relevant_memory_ranks_module_role_for_scoped_path(tmp_path: Path) -
             ),
             type="contract_note",
             status="active",
-            confidence="verified",
+            epistemic_rung="verified",
             origin="system",
             ingest_source="contract",
             statement="CACHE_VERSION constant",
@@ -601,7 +601,7 @@ def _agent_draft_record(
         identity_key=f"k-{record_id}",
         type="risk_note",
         status="draft",
-        confidence="inferred",
+        epistemic_rung="inferred",
         origin="agent",
         ingest_source="agent",
         statement="Measured, X = 42.",
@@ -632,7 +632,7 @@ def test_evidence_reference_buys_no_served_score_or_rung() -> None:
     to do with the claim, and the reference validates -- because the store can
     only check that the artifact exists, never that it entails the statement.
     So the record must rank and read exactly as it would with no reference at
-    all. Held equal: type, status, origin, confidence, subjects, scope.
+    all. Held equal: type, status, origin, epistemic_rung, subjects, scope.
     """
     bare = _agent_draft_record(
         record_id="mem-bare", payload={"subject_path": "pkg/service.py"}
@@ -655,8 +655,8 @@ def test_evidence_reference_buys_no_served_score_or_rung() -> None:
         f"score: {laundered_score} vs {bare_score}"
     )
     assert laundered_summary["relevance_score"] == bare_summary["relevance_score"]
-    assert laundered_summary["confidence"] == "inferred"
-    assert bare_summary["confidence"] == "inferred"
+    assert laundered_summary["epistemic_rung"] == "inferred"
+    assert bare_summary["epistemic_rung"] == "inferred"
     # The reference is still visible -- unmoved is not the same as hidden.
     assert laundered_summary["evidence_count"] == 3
 

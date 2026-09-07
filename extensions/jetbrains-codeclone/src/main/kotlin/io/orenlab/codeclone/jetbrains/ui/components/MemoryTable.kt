@@ -172,7 +172,7 @@ private class StatusColumn : ColumnInfo<MemoryRow, String>("Status") {
 }
 
 private class ConfidenceColumn : ColumnInfo<MemoryRow, String>("Confidence") {
-    override fun valueOf(item: MemoryRow): String = item.record.confidence ?: "—"
+    override fun valueOf(item: MemoryRow): String = item.record.epistemicRung ?: "—"
     override fun getWidth(table: javax.swing.JTable): Int = 88
 }
 

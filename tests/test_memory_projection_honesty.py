@@ -75,7 +75,7 @@ def _seed_dated_record(
         ),
         type="architecture_decision",
         status=status,
-        confidence="supported",
+        epistemic_rung="supported",
         origin="agent",
         ingest_source="agent",
         statement=statement,

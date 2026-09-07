@@ -18,7 +18,7 @@ from ..utils.iterutils import chunked
 from .enums import (
     EVIDENCE_KIND_VALUES,
     LINK_RELATION_VALUES,
-    MEMORY_CONFIDENCE_VALUES,
+    MEMORY_EPISTEMIC_RUNG_VALUES,
     MEMORY_INGEST_SOURCE_VALUES,
     MEMORY_ORIGIN_VALUES,
     MEMORY_RECORD_TYPE_VALUES,
@@ -27,14 +27,14 @@ from .enums import (
     SUBJECT_RELATION_VALUES,
     EvidenceKind,
     LinkRelation,
-    MemoryConfidence,
+    MemoryEpistemicRung,
     MemoryIngestSource,
     MemoryOrigin,
     MemoryRecordType,
     MemoryStatus,
     SubjectKind,
     SubjectRelation,
-    validate_memory_confidence,
+    validate_memory_epistemic_rung,
     validate_memory_record_type,
     validate_memory_status,
 )
@@ -92,8 +92,8 @@ _MEMORY_RECORD_TYPES: Mapping[str, MemoryRecordType] = {
 _MEMORY_STATUSES: Mapping[str, MemoryStatus] = {
     value: value for value in MEMORY_STATUS_VALUES
 }
-_MEMORY_CONFIDENCES: Mapping[str, MemoryConfidence] = {
-    value: value for value in MEMORY_CONFIDENCE_VALUES
+_MEMORY_EPISTEMIC_RUNGS: Mapping[str, MemoryEpistemicRung] = {
+    value: value for value in MEMORY_EPISTEMIC_RUNG_VALUES
 }
 _MEMORY_ORIGINS: Mapping[str, MemoryOrigin] = {
     value: value for value in MEMORY_ORIGIN_VALUES
@@ -517,7 +517,7 @@ class SqliteEngineeringMemoryStore:
             self._conn.execute(
                 """
                 UPDATE memory_records SET
-                    statement=?, summary=?, payload_json=?, status=?, confidence=?,
+                    statement=?, summary=?, payload_json=?, status=?, epistemic_rung=?,
                     ingest_source=?, updated_at_utc=?, last_verified_at_utc=?,
                     report_digest=?, code_fingerprint=?, verified_on_branch=?,
                     verified_at_commit=?, schema_version=?
@@ -528,7 +528,7 @@ class SqliteEngineeringMemoryStore:
                     record.summary,
                     payload_json_text(record.payload),
                     record.status,
-                    record.confidence,
+                    record.epistemic_rung,
                     record.ingest_source,
                     now,
                     now,
@@ -816,13 +816,15 @@ class SqliteEngineeringMemoryStore:
         statement_query: str,
         types: Sequence[str] = (),
         statuses: Sequence[str] = (),
-        confidences: Sequence[str] = (),
+        epistemic_rungs: Sequence[str] = (),
         limit: int = 100,
         match_mode: SearchMatchMode = "any",
     ) -> list[MemoryRecord]:
         types = tuple(validate_memory_record_type(value) for value in types)
         statuses = tuple(validate_memory_status(value) for value in statuses)
-        confidences = tuple(validate_memory_confidence(value) for value in confidences)
+        epistemic_rungs = tuple(
+            validate_memory_epistemic_rung(value) for value in epistemic_rungs
+        )
         if match_mode != "any" and match_mode != "all":
             raise ValueError(
                 "Invalid Engineering Memory search_match_mode: "
@@ -834,7 +836,7 @@ class SqliteEngineeringMemoryStore:
                 statement_query=statement_query,
                 types=types,
                 statuses=statuses,
-                confidences=confidences,
+                epistemic_rungs=epistemic_rungs,
                 limit=limit,
                 match_mode=match_mode,
             )
@@ -845,7 +847,7 @@ class SqliteEngineeringMemoryStore:
             statement_query=statement_query,
             types=types,
             statuses=statuses,
-            confidences=confidences,
+            epistemic_rungs=epistemic_rungs,
             limit=limit,
             match_mode=match_mode,
         )
@@ -917,7 +919,7 @@ class SqliteEngineeringMemoryStore:
         statement_query: str,
         types: Sequence[str],
         statuses: Sequence[str],
-        confidences: Sequence[str],
+        epistemic_rungs: Sequence[str],
         limit: int,
         match_mode: SearchMatchMode,
     ) -> list[MemoryRecord] | None:
@@ -935,10 +937,10 @@ class SqliteEngineeringMemoryStore:
             params,
             types,
             statuses,
-            confidences,
+            epistemic_rungs,
             type_column="memory_records_fts.record_type",
             status_column="memory_records_fts.status",
-            confidence_via_subquery=True,
+            epistemic_rung_via_subquery=True,
         )
         where = " AND ".join(clauses)
         rows = self._conn.execute(
@@ -962,7 +964,7 @@ class SqliteEngineeringMemoryStore:
         statement_query: str,
         types: Sequence[str],
         statuses: Sequence[str],
-        confidences: Sequence[str],
+        epistemic_rungs: Sequence[str],
         limit: int,
         match_mode: SearchMatchMode,
     ) -> list[MemoryRecord]:
@@ -987,10 +989,10 @@ class SqliteEngineeringMemoryStore:
             params,
             types,
             statuses,
-            confidences,
+            epistemic_rungs,
             type_column="type",
             status_column="status",
-            confidence_via_subquery=False,
+            epistemic_rung_via_subquery=False,
         )
         where = " AND ".join(clauses)
         rows = self._conn.execute(
@@ -1425,7 +1427,7 @@ class SqliteEngineeringMemoryStore:
         self._conn.execute(
             """
             INSERT INTO memory_records(
-                id, project_id, identity_key, type, status, confidence, origin,
+                id, project_id, identity_key, type, status, epistemic_rung, origin,
                 ingest_source, statement, summary, payload_json, created_at_utc,
                 updated_at_utc, last_verified_at_utc, expires_at_utc, created_by,
                 verified_by, approved_by, approved_at_utc, report_digest,
@@ -1442,7 +1444,7 @@ class SqliteEngineeringMemoryStore:
                 record.identity_key,
                 record.type,
                 record.status,
-                record.confidence,
+                record.epistemic_rung,
                 record.origin,
                 record.ingest_source,
                 record.statement,
@@ -1503,8 +1505,8 @@ def _append_canonical_record_filters(
     _append_in_filter(
         clauses,
         params,
-        MEMORY_CONFIDENCE_VALUES,
-        f"{prefix}confidence",
+        MEMORY_EPISTEMIC_RUNG_VALUES,
+        f"{prefix}epistemic_rung",
     )
     _append_in_filter(clauses, params, MEMORY_ORIGIN_VALUES, f"{prefix}origin")
     _append_in_filter(
@@ -1515,25 +1517,25 @@ def _append_canonical_record_filters(
     )
 
 
-def _append_confidence_filter(
+def _append_epistemic_rung_filter(
     clauses: list[str],
     params: list[_SqliteParam],
-    confidences: Sequence[str],
+    epistemic_rungs: Sequence[str],
     *,
     via_subquery: bool,
 ) -> None:
-    if not confidences:
+    if not epistemic_rungs:
         return
-    placeholders = ", ".join("?" for _ in confidences)
+    placeholders = ", ".join("?" for _ in epistemic_rungs)
     if via_subquery:
         clauses.append(
             "memory_records.id IN ("
-            f"SELECT id FROM memory_records WHERE confidence IN ({placeholders})"
+            f"SELECT id FROM memory_records WHERE epistemic_rung IN ({placeholders})"
             ")"
         )
     else:
-        clauses.append(f"confidence IN ({placeholders})")
-    params.extend(confidences)
+        clauses.append(f"epistemic_rung IN ({placeholders})")
+    params.extend(epistemic_rungs)
 
 
 def _append_search_filters(
@@ -1541,19 +1543,19 @@ def _append_search_filters(
     params: list[_SqliteParam],
     types: Sequence[str],
     statuses: Sequence[str],
-    confidences: Sequence[str],
+    epistemic_rungs: Sequence[str],
     *,
     type_column: str,
     status_column: str,
-    confidence_via_subquery: bool,
+    epistemic_rung_via_subquery: bool,
 ) -> None:
     _append_in_filter(clauses, params, types, type_column)
     _append_in_filter(clauses, params, statuses, status_column)
-    _append_confidence_filter(
+    _append_epistemic_rung_filter(
         clauses,
         params,
-        confidences,
-        via_subquery=confidence_via_subquery,
+        epistemic_rungs,
+        via_subquery=epistemic_rung_via_subquery,
     )
 
 
@@ -1588,11 +1590,11 @@ def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
                 field="record_status",
                 allowed=_MEMORY_STATUSES,
             ),
-            confidence=_literal_from_row(
+            epistemic_rung=_literal_from_row(
                 row,
-                "confidence",
-                field="record_confidence",
-                allowed=_MEMORY_CONFIDENCES,
+                "epistemic_rung",
+                field="record_epistemic_rung",
+                allowed=_MEMORY_EPISTEMIC_RUNGS,
             ),
             origin=_literal_from_row(
                 row,

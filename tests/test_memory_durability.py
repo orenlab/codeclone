@@ -78,7 +78,7 @@ def _anchored_active_record(
         ),
         type="change_rationale",
         status="active",
-        confidence="supported",
+        epistemic_rung="supported",
         origin="agent",
         ingest_source="agent",
         statement="durability anchor test",

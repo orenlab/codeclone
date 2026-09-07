@@ -60,7 +60,7 @@ The four core tiers:
 
 2. **Structural controller**: Pre-edit intent declaration, workspace liveness checking, scope verification. Single active intent per MCP session; eviction on new `start_controlled_change` without prior `finish`. No memory of prior intents across restart.
 
-3. **Engineering Memory**: Durable SQLite store (`ENGINEERING_MEMORY_SCHEMA_VERSION=1.7`), never disk-anchored. Staleness pegged to commit sha, not inventory membership. Synchronous=FULL for table, NORMAL for ephemeral intent/audit tables.
+3. **Engineering Memory**: Durable SQLite store (`ENGINEERING_MEMORY_SCHEMA_VERSION=1.8`), never disk-anchored. Staleness pegged to commit sha, not inventory membership. Synchronous=FULL for table, NORMAL for ephemeral intent/audit tables.
 
 4. **Persistence**: Immutable baseline (5 MB ceiling), cache (50 MB), and report outputs. Served by analysis engine; never mutated by controller or memory.
 
@@ -91,7 +91,7 @@ analyze_changed_paths, analyze_repository, check_clones, check_cohesion, check_c
 
 ### Memory flow
 
-- **Write**: `manage_engineering_memory(action=record_candidate|promote_experience)` → commit-anchored record (sha, statement, subject_path, confidence)
+- **Write**: `manage_engineering_memory(action=record_candidate|promote_experience)` → commit-anchored record (sha, statement, subject_path, epistemic_rung)
 - **Read**: `get_relevant_memory(scope=paths|intent_id)` → ranked retrieval from sessions-local projection (stale markers, contradiction notes, evidence links)
 - **Staleness**: memory staleness is pegged to commit sha in `provenance_anchor_sha`, never disk inventory
 - **Durability**: SQLite `synchronous=FULL` ensures unclean process exit does not corrupt records; intent store uses NORMAL (loss-tolerable)

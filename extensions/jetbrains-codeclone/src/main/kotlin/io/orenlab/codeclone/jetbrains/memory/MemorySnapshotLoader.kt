@@ -90,7 +90,7 @@ object MemorySnapshotLoader {
             type = record["type"]?.jsonPrimitive?.content ?: "unknown",
             status = record["status"]?.jsonPrimitive?.content ?: "draft",
             statement = record["statement"]?.jsonPrimitive?.content ?: "",
-            confidence = record["confidence"]?.jsonPrimitive?.content,
+            epistemicRung = record["epistemic_rung"]?.jsonPrimitive?.content,
         )
     }
 

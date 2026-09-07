@@ -23,7 +23,7 @@ The audit surface comprises four public MCP tools:
 |----------|-------|---------|
 | `AUDIT_PROJECTION_VERSION` | `audit-v1` | Audit event schema version; breaking changes require new version |
 | `PATCH_TRAIL_SCHEMA_VERSION` | `1` | Patch trail record structure; covers declared/changed/untouched files, scope check, verification, workspace hygiene, evidence |
-| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `1.7` | Engineering Memory store contract; audit events reference memory decisions |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `1.8` | Engineering Memory store contract; audit events reference memory decisions |
 | `TRAJECTORY_PROJECTION_VERSION` | `trajectory-v3` | Patch trail trajectory encoding; supersedes v1 |
 
 **Contract Invariants:**

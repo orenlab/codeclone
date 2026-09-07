@@ -5,7 +5,7 @@ data class MemoryRecordItem(
     val type: String,
     val status: String,
     val statement: String,
-    val confidence: String?,
+    val epistemicRung: String?,
 )
 
 data class MemorySnapshot(

@@ -24,7 +24,7 @@ The Memory surface exposes four MCP tools:
 | `query_engineering_memory` | search, get, for_path, for_symbol, stale, drafts, coverage, status, trajectory_* | no | yes | Mode-based inspection router across all memory lanes |
 | `get_memory_projection_page` | — | no | yes | Retrieve omitted tail using digest-bound cursor from continuation |
 
-Schema version (ENGINEERING_MEMORY_SCHEMA_VERSION): 1.7.
+Schema version (ENGINEERING_MEMORY_SCHEMA_VERSION): 1.8.
 Projection version (MEMORY_PROJECTION_VERSION): memory-v1.
 
 Agent actions available via `manage_engineering_memory`:
@@ -52,7 +52,7 @@ graph LR
 ```
 
 Key modules:
-- **models.py**: MemoryRecord dataclass, record_types, confidence_levels, origins, statuses
+- **models.py**: MemoryRecord dataclass, record_types, epistemic_rungs, origins, statuses
 - **schema.py**: SQLite schema with synchronous=FULL for durability; intent/audit stores use NORMAL (loss-tolerable)
 - **staleness.py**: Determines stale_reason (drift vs anchor commit, not inventory membership)
 - **experience/distiller.py**: Converts workflow trajectories into distilled insights; watch for N+1 writes and trivial guard duplication

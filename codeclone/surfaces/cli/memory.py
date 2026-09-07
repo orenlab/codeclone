@@ -1710,7 +1710,7 @@ def _render_semantic_text(
             markup=False,
         )
         meta = " · ".join(
-            part for part in (result.kind, result.status, result.confidence) if part
+            part for part in (result.kind, result.status, result.epistemic_rung) if part
         )
         console.print(f"   {meta}", markup=False)
         if result.subject_path:

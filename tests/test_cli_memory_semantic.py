@@ -595,8 +595,8 @@ def test_memory_retrieval_parse_filters_rejects_invalid_shapes() -> None:
         retrieval_service._parse_filters({"types": "not-a-list"})
     with pytest.raises(MemoryContractError, match="statuses must be a list"):
         retrieval_service._parse_filters({"statuses": 1})
-    with pytest.raises(MemoryContractError, match="confidences must be a list"):
-        retrieval_service._parse_filters({"confidences": {"bad": True}})
+    with pytest.raises(MemoryContractError, match="epistemic_rungs must be a list"):
+        retrieval_service._parse_filters({"epistemic_rungs": {"bad": True}})
     with pytest.raises(MemoryContractError, match="match_mode must be"):
         retrieval_service._parse_filters({"match_mode": "sometimes"})
     with pytest.raises(MemoryContractError, match="include_routine must be boolean"):

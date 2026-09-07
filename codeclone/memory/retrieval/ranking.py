@@ -152,9 +152,9 @@ def relevance_score(
 
     score += _TYPE_BOOST.get(record.type, 0.0)
     score += _INGEST_BOOST.get(record.ingest_source, 0.0)
-    if record.confidence == "verified":
+    if record.epistemic_rung == "verified":
         score += 0.15
-    elif record.confidence == "supported":
+    elif record.epistemic_rung == "supported":
         score += 0.1
     if record.approved_by:
         score += 0.1

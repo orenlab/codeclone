@@ -35,7 +35,7 @@ def _sample_record() -> MemoryRecord:
         ),
         type="contract_note",
         status="active",
-        confidence="verified",
+        epistemic_rung="verified",
         origin="system",
         ingest_source="contract",
         statement="memory search helpers",

@@ -630,7 +630,7 @@ def _seed_scoped_record(
             identity_key=f"continuation:{record_id}",
             type="contract_note",
             status="active",
-            confidence="verified",
+            epistemic_rung="verified",
             origin="system",
             ingest_source="contract",
             statement=f"continuation record {record_id}",

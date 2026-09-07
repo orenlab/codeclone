@@ -145,7 +145,7 @@ class SemanticSearchResult(BaseModel):
     score: float
     kind: str = Field(min_length=1)
     status: str | None = None
-    confidence: str | None = None
+    epistemic_rung: str | None = None
     subject_path: str | None = None
     preview: str = Field(min_length=1)
 

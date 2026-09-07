@@ -2039,12 +2039,12 @@ def test_record_candidate_keeps_the_rung_inferred_however_much_evidence_is_attac
             evidence_validated=True,
         )
         assert store.count_evidence_for_memory(record.id) == 5
-        assert record.confidence == "inferred"
+        assert record.epistemic_rung == "inferred"
         assert record.origin == "agent"
         assert record.status == "draft"
         stored = store.find_record(record.id)
         assert stored is not None
-        assert stored.confidence == "inferred"
+        assert stored.epistemic_rung == "inferred"
 
 
 def test_mcp_record_candidate_refuses_a_reference_to_an_unknown_run(
@@ -2092,7 +2092,7 @@ def test_mcp_record_candidate_validates_a_reference_to_a_real_run(
             stored = reopened.find_record(record_id)
             assert stored is not None
             # Validated existence, unchanged epistemics.
-            assert stored.confidence == "inferred"
+            assert stored.epistemic_rung == "inferred"
             assert stored.origin == "agent"
             assert (stored.payload or {})["evidence_status"] == "validated_reference"
             rows = reopened.list_evidence_for_memory(record_id)

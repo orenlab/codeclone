@@ -10,7 +10,7 @@ A run already carries typed facts about its own fitness — the health
 population state owned by ``codeclone.contracts`` and the baseline lane
 verdict projected as ``baseline.state``. Ingest used to consult neither: a run
 that opened no file still produced ``status='active'``
-``confidence='supported'`` records asserting that modules it never read were
+``epistemic_rung='supported'`` records asserting that modules it never read were
 "analyzed", and nothing on the stored record told a later reader which kind of
 run had produced it.
 

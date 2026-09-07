@@ -16,7 +16,7 @@ from codeclone.memory import enums as memory_enums
     [
         (memory_enums.validate_memory_record_type, "record_type"),
         (memory_enums.validate_memory_status, "record_status"),
-        (memory_enums.validate_memory_confidence, "record_confidence"),
+        (memory_enums.validate_memory_epistemic_rung, "record_epistemic_rung"),
         (memory_enums.validate_memory_origin, "record_origin"),
         (memory_enums.validate_memory_ingest_source, "record_ingest_source"),
         (memory_enums.validate_subject_kind, "subject_kind"),

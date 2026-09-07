@@ -19,7 +19,7 @@ The MCP workflow surface (`codeclone.surfaces.mcp`) exposes a deterministic, ses
 | MEMORY_PROJECTION_VERSION               | str    | `memory-v1`      |
 | TRAJECTORY_PROJECTION_VERSION           | str    | `trajectory-v3`  |
 | SEMANTIC_INDEX_FORMAT_VERSION           | str    | `3`              |
-| ENGINEERING_MEMORY_SCHEMA_VERSION       | str    | `1.7`            |
+| ENGINEERING_MEMORY_SCHEMA_VERSION       | str    | `1.8`            |
 | REPORT_SCHEMA_VERSION                   | str    | `3.4`            |
 | CACHE_VERSION                           | str    | `4.2`            |
 | BASELINE_SCHEMA_VERSION                 | str    | `3.0`            |

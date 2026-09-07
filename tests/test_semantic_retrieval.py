@@ -98,7 +98,7 @@ def test_hydrates_memory_hit() -> None:
     index = _FakeIndex([SemanticHit(source_id=record.id, source="memory", score=0.9)])
 
     (result,) = _search(index, store)
-    assert (result.source, result.kind, result.status, result.confidence) == (
+    assert (result.source, result.kind, result.status, result.epistemic_rung) == (
         "memory",
         "contract_note",
         "active",

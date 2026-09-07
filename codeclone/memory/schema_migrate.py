@@ -12,7 +12,7 @@ import orjson
 
 from ..report.meta import current_report_timestamp_utc
 from .enums import (
-    validate_memory_confidence,
+    validate_memory_epistemic_rung,
     validate_memory_ingest_source,
     validate_memory_origin,
     validate_memory_record_type,
@@ -31,6 +31,7 @@ _SUPPORTED_LEGACY_RECORD_SCHEMA_VERSIONS = (
     "1.4",
     "1.5",
     "1.6",
+    "1.7",
 )
 _RECORD_SCHEMA_RECONCILE_SAVEPOINT = "memory_record_schema_reconcile"
 _RECORD_COLUMNS = (
@@ -39,7 +40,7 @@ _RECORD_COLUMNS = (
     "identity_key",
     "type",
     "status",
-    "confidence",
+    "epistemic_rung",
     "origin",
     "ingest_source",
     "statement",
@@ -78,22 +79,30 @@ def migrate_memory_schema(conn: sqlite3.Connection) -> None:
     if current == "1.1":
         _migrate_1_1_to_1_2(conn)
         current = "1.2"
-    later = {"1.3", "1.4", "1.5", "1.6", "1.7"}
+    later = {"1.3", "1.4", "1.5", "1.6", "1.7", "1.8"}
     if current == "1.2" and ENGINEERING_MEMORY_SCHEMA_VERSION in later:
         _migrate_1_2_to_1_3(conn)
         current = "1.3"
     if current == "1.3" and ENGINEERING_MEMORY_SCHEMA_VERSION in later - {"1.3"}:
         _migrate_1_3_to_1_4(conn)
         current = "1.4"
-    if current == "1.4" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.5", "1.6", "1.7"}:
+    if current == "1.4" and ENGINEERING_MEMORY_SCHEMA_VERSION in {
+        "1.5",
+        "1.6",
+        "1.7",
+        "1.8",
+    }:
         _migrate_1_4_to_1_5(conn)
         current = "1.5"
-    if current == "1.5" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.6", "1.7"}:
+    if current == "1.5" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.6", "1.7", "1.8"}:
         _migrate_1_5_to_1_6(conn)
         current = "1.6"
-    if current == "1.6" and ENGINEERING_MEMORY_SCHEMA_VERSION == "1.7":
+    if current == "1.6" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.7", "1.8"}:
         _migrate_1_6_to_1_7(conn)
         current = "1.7"
+    if current == "1.7" and ENGINEERING_MEMORY_SCHEMA_VERSION == "1.8":
+        _migrate_1_7_to_1_8(conn)
+        current = "1.8"
     if current == ENGINEERING_MEMORY_SCHEMA_VERSION:
         return
     msg = (
@@ -167,7 +176,9 @@ def _current_record_from_supported_legacy_row(
             identity_key=_required_text(row, "identity_key"),
             type=validate_memory_record_type(_required_text(row, "type")),
             status=validate_memory_status(_required_text(row, "status")),
-            confidence=validate_memory_confidence(_required_text(row, "confidence")),
+            epistemic_rung=validate_memory_epistemic_rung(
+                _required_text(row, "epistemic_rung")
+            ),
             origin=validate_memory_origin(_required_text(row, "origin")),
             ingest_source=validate_memory_ingest_source(
                 _required_text(row, "ingest_source")
@@ -352,6 +363,32 @@ def _migrate_1_6_to_1_7(conn: sqlite3.Connection) -> None:
         ddl_type="TEXT",
     )
     _record_schema_migration(conn, "1.7")
+
+
+def _migrate_1_7_to_1_8(conn: sqlite3.Connection) -> None:
+    """Rename the record rung column ``confidence`` -> ``epistemic_rung``.
+
+    The column never measured confidence in anything. It records which
+    extractor produced the row and how far its author was willing to vouch
+    for his own extraction -- a denormalised provenance class, written as a
+    literal at every producer and computed nowhere. It shared its old name
+    with the unrelated ``high|medium|low`` analysis signal on reachability
+    routes, dead-code items and report suggestions; that name stays with the
+    analysis lane, which is older, wider and published in the report schema.
+
+    Values are carried across untouched: this is a rename, not a
+    reclassification, and no row changes rung.
+    """
+    existing = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+    }
+    if "epistemic_rung" not in existing and "confidence" in existing:
+        conn.execute(
+            "ALTER TABLE memory_records "
+            "RENAME COLUMN confidence TO epistemic_rung"
+        )
+    _record_schema_migration(conn, "1.8")
 
 
 __all__ = ["migrate_memory_schema", "reconcile_memory_record_schema_versions"]

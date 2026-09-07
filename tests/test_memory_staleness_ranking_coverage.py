@@ -34,7 +34,7 @@ def _record(
         identity_key=f"id:{project_id}:{status}:{origin}",
         type="contract_note",
         status=status,
-        confidence="verified",
+        epistemic_rung="verified",
         origin=origin,
         ingest_source="analysis",
         statement="hello",
