@@ -87,8 +87,10 @@ def render_coverage_join_panel(ctx: ReportContext) -> str:
             detail_html="<br>".join(detail_parts) if detail_parts else None,
         )
 
+    # No "Status" card. It read "Joined" on every report that reached this
+    # line, because every other status returns above with the absence
+    # sentence -- a card whose value could not vary answered nothing.
     cards = [
-        _status_card(coverage_summary),
         _overall_coverage_card(coverage_summary),
         _coverage_hotspots_card(coverage_summary),
         _scope_gaps_card(coverage_summary),
@@ -117,18 +119,6 @@ def _coverage_join_summary(ctx: ReportContext) -> Mapping[str, object]:
     metrics_map = _as_mapping(getattr(ctx, "metrics_map", {}))
     coverage_join = _as_mapping(metrics_map.get("coverage_join"))
     return _as_mapping(coverage_join.get("summary"))
-
-
-def _status_card(coverage_summary: Mapping[str, object]) -> str:
-    source = str(coverage_summary.get("source", "")).strip()
-    return _stat_card(
-        "Status",
-        "Joined",
-        detail=_micro_badges(("source", _source_label(source))) if source else "",
-        value_tone="good",
-        css_class="meta-item",
-        glossary_tip_fn=_TIP,
-    )
 
 
 def _overall_coverage_card(coverage_summary: Mapping[str, object]) -> str:
@@ -179,10 +169,18 @@ def _scope_gaps_card(coverage_summary: Mapping[str, object]) -> str:
 
 
 def _measured_units_card(coverage_summary: Mapping[str, object]) -> str:
+    # The source file is a fact of the join, so it stays on screen: it used to
+    # ride the "Status" card, whose value could never change.
+    source = str(coverage_summary.get("source", "")).strip()
+    badges: list[tuple[str, object]] = [
+        ("units", _as_int(coverage_summary.get("units")))
+    ]
+    if source:
+        badges.append(("source", _source_label(source)))
     return _stat_card(
         "Measured units",
         _as_int(coverage_summary.get("measured_units")),
-        detail=_micro_badges(("units", _as_int(coverage_summary.get("units")))),
+        detail=_micro_badges(*badges),
         css_class="meta-item",
         glossary_tip_fn=_TIP,
     )

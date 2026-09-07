@@ -1052,3 +1052,149 @@ def test_the_banner_names_the_product_once() -> None:
     assert banner.count(ui_messages.BANNER_SUBTITLE) == 1
     assert idle_message is not None
     assert idle_message not in banner
+
+
+# ===========================================================================
+# What the tour costs, and whether the help row says so
+# ===========================================================================
+#
+# ``--interactive-help`` reads no key: the tour's only use of stdin is
+# ``isatty``. It is a timed animation -- fifteen steps typed out and held
+# for a reading pause -- and Ctrl+C is the one control a reader has. The
+# help row used to call it "the guided CodeClone product tour", a name that
+# promised a hand on the wheel; it now states the measured cost and the one
+# way out. The figures in that row are re-derived below from the tour's own
+# loop and constants, never trusted as literals: change a pause, add a step,
+# and the row is wrong until the text moves with it.
+#
+# The cost itself had a defect. ``_CHAR_INTERVAL`` is 0.022 s and the tick
+# is 0.05 s, and the loop advanced at most one character per tick, so the
+# constant could not take effect for any value at or below the tick: the
+# typewriter ran at 20 characters a second while the constant said 45, and
+# the tour's 3,400 characters cost 170 s of typing instead of 75. Both
+# directions of that error are pinned separately -- a loop that types
+# slower than its interval and one that dumps the body in a tick are
+# opposite mistakes, and one inequality cannot see both.
+
+
+def _ticks_to_type(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    body: str,
+    tick_interval: float,
+    char_interval: float,
+) -> int:
+    """Ticks ``_run_rich_step`` spends before the whole body is on screen."""
+
+    from rich.console import Console
+
+    frames: list[int] = []
+    real_panel = build_step_panel
+
+    def _recording(**kwargs: Any) -> Any:
+        frames.append(int(kwargs["visible_chars"]))
+        return real_panel(**kwargs)
+
+    monkeypatch.setattr(help_tour_mod, "build_step_panel", _recording)
+    presenter = ProgressPresenter(cast(Console, make_query_console(no_color=False)))
+    help_tour_mod._run_rich_step(
+        presenter,
+        HelpTourStep(AsterState.IDLE, "Typed", body, animate=False),
+        use_unicode=True,
+        sleep=lambda _seconds: None,
+        tick_interval=tick_interval,
+        frame_interval=tick_interval,
+        char_interval=char_interval,
+        min_read_pause=0.0,
+        cursor_blink_interval=1.0,
+    )
+    return frames.index(len(body))
+
+
+_TYPING_BODY = "x" * 100
+_TYPING_TICK = 0.05
+_TYPING_CHAR = 0.022
+_TYPING_EXPECTED_TICKS = len(_TYPING_BODY) * _TYPING_CHAR / _TYPING_TICK
+
+
+def test_the_typewriter_is_no_slower_than_its_character_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One character per tick is the measured defect; the interval must win."""
+
+    pytest.importorskip("rich")
+    ticks = _ticks_to_type(
+        monkeypatch,
+        body=_TYPING_BODY,
+        tick_interval=_TYPING_TICK,
+        char_interval=_TYPING_CHAR,
+    )
+    assert ticks <= _TYPING_EXPECTED_TICKS + 1, ticks
+
+
+def test_the_typewriter_is_no_faster_than_its_character_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The opposite error: a body dumped in a tick is not a typewriter."""
+
+    pytest.importorskip("rich")
+    ticks = _ticks_to_type(
+        monkeypatch,
+        body=_TYPING_BODY,
+        tick_interval=_TYPING_TICK,
+        char_interval=_TYPING_CHAR,
+    )
+    assert ticks >= _TYPING_EXPECTED_TICKS - 1, ticks
+
+
+def _simulated_tour_seconds() -> float:
+    """The default tour's forced watching time, from its own loop and constants.
+
+    Every ``sleep`` the rich path would make is summed instead of slept; the
+    frames are not rendered because they cost no reader time.
+    """
+
+    from rich.console import Console
+
+    seconds = 0.0
+
+    def _sleep(interval: float) -> None:
+        nonlocal seconds
+        seconds += interval
+
+    presenter = ProgressPresenter(cast(Console, make_query_console(no_color=False)))
+    for step in help_tour_mod._DEFAULT_STEPS:
+        help_tour_mod._run_rich_step(
+            presenter,
+            step,
+            use_unicode=True,
+            sleep=_sleep,
+            tick_interval=help_tour_mod._TICK_INTERVAL,
+            frame_interval=help_tour_mod._FRAME_INTERVAL,
+            char_interval=help_tour_mod._CHAR_INTERVAL,
+            min_read_pause=help_tour_mod._MIN_READ_PAUSE,
+            cursor_blink_interval=help_tour_mod._CURSOR_BLINK_INTERVAL,
+        )
+    return seconds
+
+
+def test_the_help_row_states_the_tours_measured_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Minutes to the nearest half, and the step count, both re-derived."""
+
+    pytest.importorskip("rich")
+    monkeypatch.setattr(help_tour_mod, "_show_frame", lambda *_a, **_k: None)
+
+    minutes = round(_simulated_tour_seconds() / 30) / 2
+    steps = len(help_tour_mod._DEFAULT_STEPS)
+
+    assert f"about {minutes:g} minutes" in ui_messages.HELP_INTERACTIVE
+    assert f"({steps} timed steps)" in ui_messages.HELP_INTERACTIVE
+
+
+def test_the_help_row_names_the_one_control_the_tour_has() -> None:
+    """Ctrl+C is the only input the tour honours, so the row names it."""
+
+    assert "Ctrl+C" in ui_messages.HELP_INTERACTIVE
+    assert "guided" not in ui_messages.HELP_INTERACTIVE

@@ -298,18 +298,17 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     # because it only ever asked about unreferenced symbols.
     dead_unreachable_total = _as_int(summary.get("unreachable_statements", 0))
 
-    # Count high confidence from items if summary is 0 but items have them
     items_data = _as_sequence(ctx.dead_code_map.get("items"))
     suppressed_data = _as_sequence(ctx.dead_code_map.get("suppressed_items"))
-    hi_conf_items = sum(
-        1
-        for it in items_data
-        if str(_as_mapping(it).get("confidence", "")).strip().lower() == "high"
-    )
-    if dead_total > 0 and dead_high_conf == 0 and hi_conf_items > 0:
-        dead_high_conf = min(dead_total, hi_conf_items)
-    if dead_suppressed_total == 0:
-        dead_suppressed_total = len(suppressed_data)
+    # Both counts above are read from the summary and nothing else. This panel
+    # used to recount ``high_confidence`` from the rows whenever the summary
+    # said 0, and ``suppressed`` from the suppressed rows whenever it said 0,
+    # then let the recount win. The engine that writes the rows writes the
+    # summary from them, so on an honest document the recount could never
+    # differ; the only document it changed was a contradictory one, where it
+    # overruled the published figure -- the same one the gate reads -- and
+    # turned "none high-confidence" into a risk verdict with a number the
+    # document never stated. Presentation shows what the document carries.
 
     # Insight
     answer: str

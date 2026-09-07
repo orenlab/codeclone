@@ -251,15 +251,58 @@ HELP_DEBUG = (
     "Print debug details for internal errors, including\n"
     "traceback and environment information."
 )
+# The tour reads no key: its only use of stdin is ``isatty``. Fifteen timed
+# steps play by themselves and Ctrl+C is the one control the reader has, so
+# the row says what the flag costs and how to leave, not "guided", which
+# promised a hand on the wheel. The figures are re-derived from the tour's
+# own loop and constants by ``tests/test_cli_mascot_help.py``; change a pause
+# or a step and this row is wrong until it moves with them.
 HELP_INTERACTIVE = (
-    "Open the guided CodeClone product tour. Use together\n"
-    "with --help in an interactive terminal."
+    "Play the animated product tour. It runs by itself for\n"
+    "about 2.5 minutes (15 timed steps); Ctrl+C ends it\n"
+    "early. Use together with --help in an interactive\n"
+    "terminal."
 )
 HELP_MASCOT_TAGLINE = (
     "Run `codeclone --help --interactive-help` for a guided product tour."
 )
 HELP_TOUR_INTERRUPTED = "Tour ended. `codeclone --help` lists every flag."
 HELP_BASELINE_COMMAND = "Manage the native baseline publication state."
+
+#: The subcommand trees ``codeclone --help`` names, with the summary shown
+#: beside each. The CLI dispatches five of them, and until this table existed
+#: the first screen named none: ``dispatch_subcommand`` intercepts ``argv[1]``
+#: before argparse ever sees it, so there is no subparser level for argparse to
+#: render and nothing to discover. A reader learned all sixty-four flags and
+#: could not learn that ``codeclone memory`` exists. The word "baseline" did
+#: appear twenty times, every one of them the ``--baseline*`` flags, which
+#: pointed away from the command rather than towards it.
+#:
+#: This is the presentation half of that surface. The executable half is
+#: ``_SUBCOMMAND_HANDLERS`` in ``surfaces.cli.subcommands``, and the two are
+#: pinned equal by ``tests/test_cli_routing.py``. They are written out
+#: separately on purpose: a table derived from the dispatcher would agree with
+#: it by construction and so could never catch a tree shipped without a help
+#: row -- which is precisely the drift that hid all five. Add a handler and the
+#: pin fails until a row is added here.
+#:
+#: Alphabetical: output order must not depend on dict insertion order.
+#:
+#: Keep the summaries accurate rather than decorative. Measured 2026-09-07
+#: against every shipped .md: the `baseline` tree is named in no
+#: documentation page at all, and `observability trace`, `memory semantic
+#: probe` and the three `analytics profiles` verbs are likewise undocumented,
+#: so for those readers this line is the only description that exists.
+HELP_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("analytics", "Build and query the intent analytics corpus."),
+    ("baseline", HELP_BASELINE_COMMAND),
+    ("memory", "Query and curate engineering memory."),
+    ("observability", "Inspect recorded runtime traces (maintainer only)."),
+    ("setup", "Initialize or inspect repository readiness."),
+)
+HELP_COMMANDS_TITLE = (
+    "Commands (run `codeclone <command> --help` for each tree's verbs):"
+)
 HELP_BASELINE_RECOVER_LOCK = (
     "Explicitly recover a stale baseline publication lock\n"
     "without writing the baseline."

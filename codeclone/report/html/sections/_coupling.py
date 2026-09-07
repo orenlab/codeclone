@@ -260,6 +260,40 @@ def _cohesion_cards(summary: Mapping[str, object]) -> str:
     return f'<div class="stat-cards">{"".join(cards)}</div>'
 
 
+def _family_list(names: Sequence[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c`` -- the families named in the verdict."""
+
+    if len(names) <= 1:
+        return "".join(names)
+    *head, last = names
+    return f"{', '.join(head)} and {last}"
+
+
+def _quality_answer(
+    *,
+    complexity_high_risk: int,
+    coupling_high_risk: int,
+    cohesion_low: int,
+) -> str:
+    """The verdict in words: which families hold hotspots, and a pointer."""
+
+    hot = [
+        family
+        for family, count in (
+            ("complexity", complexity_high_risk),
+            ("coupling", coupling_high_risk),
+            ("cohesion", cohesion_low),
+        )
+        if count > 0
+    ]
+    if hot:
+        return (
+            f"Yes, in {_family_list(hot)}: each family's count and "
+            "maximum are on its cards."
+        )
+    return "No function or class sits above its risk band; the maxima are on the cards."
+
+
 def render_quality_panel(ctx: ReportContext) -> str:
     """Build the unified Quality tab (Complexity + Coupling + Cohesion sub-tabs)."""
     coupling_summary = _as_mapping(ctx.coupling_map.get("summary"))
@@ -274,30 +308,29 @@ def render_quality_panel(ctx: ReportContext) -> str:
     coverage_hotspots = _as_int(coverage_join_summary.get("coverage_hotspots"))
     coverage_scope_gaps = _as_int(coverage_join_summary.get("scope_gap_hotspots"))
     coverage_join_status = str(coverage_join_summary.get("status", "")).strip()
-    cc_max = _as_int(complexity_summary.get("max"))
 
-    # Insight
+    # Insight: the verdict in words, and a pointer. The seven figures this
+    # banner used to restate -- three high-risk counts, three maxima, the
+    # security inventory -- are each a card on this tab or the next, and a
+    # number said twice on one screen is the shape the Overview and Dead
+    # Code banners already gave up. The banner points; the cards own them.
     answer: str
     tone: Tone
     if not ctx.metrics_available:
         answer = METRICS_SKIPPED
         tone = "info"
     else:
-        answer = (
-            f"High-complexity: {complexity_high_risk}; "
-            f"high-coupling: {coupling_high_risk}; "
-            f"low-cohesion: {cohesion_low}; "
-            f"security surfaces: {security_surface_items}; "
-            f"max CC {cc_max}; "
-            f"max CBO {coupling_summary.get('max', 'n/a')}; "
-            f"max LCOM4 {cohesion_summary.get('max', 'n/a')}."
+        answer = _quality_answer(
+            complexity_high_risk=complexity_high_risk,
+            coupling_high_risk=coupling_high_risk,
+            cohesion_low=cohesion_low,
         )
         if coverage_join_summary:
             if coverage_join_status == "ok":
-                answer += (
-                    f" Coverage hotspots: {coverage_hotspots}; "
-                    f"scope gaps: {coverage_scope_gaps}."
-                )
+                if coverage_hotspots > 0 or coverage_scope_gaps > 0:
+                    answer += " Coverage join adds review items; see its tab."
+                else:
+                    answer += " Coverage join adds no review items."
             else:
                 # The absence sentence is borrowed from the vocabulary owner,
                 # never respelled: one fact, one wording, on every surface.

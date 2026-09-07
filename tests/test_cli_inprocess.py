@@ -5184,9 +5184,9 @@ def test_cli_skip_metrics_html_speaks_absence_not_fabricated_zeros(
     html = html_out.read_text("utf-8")
 
     assert html.count(METRICS_SKIPPED) == 5
-    assert "Cycles: 0; avg depth: n/a" not in html
+    assert "No dependency cycles. Depth is on the cards." not in html
     assert "candidates total; 0 high-confidence items" not in html
-    assert "High-complexity: 0; high-coupling: 0" not in html
+    assert "No function or class sits above its risk band" not in html
 
 
 def test_cli_full_run_html_renders_figures_without_absence_phrases(
@@ -5194,7 +5194,7 @@ def test_cli_full_run_html_renders_figures_without_absence_phrases(
 ) -> None:
     """The reverse boundary: a metrics run keeps its figures and no absence line.
 
-    On a metrics run "Cycles: 0" is an honest measured zero, so its presence
+    On a metrics run "No dependency cycles" is an honest verdict, so its presence
     here and its absence on the skip run is exactly the distinction the
     declaration carries. ``--fail-cycles`` forces the metrics lane: without a
     metrics flag or a metrics baseline the CLI quietly runs clones-only
@@ -5212,7 +5212,7 @@ def test_cli_full_run_html_renders_figures_without_absence_phrases(
     html = html_out.read_text("utf-8")
 
     assert METRICS_SKIPPED not in html
-    assert "Cycles: 0" in html
+    assert "No dependency cycles. Depth is on the cards." in html
 
 
 def _run_report_formats(

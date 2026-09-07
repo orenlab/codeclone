@@ -494,8 +494,6 @@ def build_structural_findings_html_panel(
         question=explain_msgs.STRUCTURAL_INTRO_QUESTION,
         answer=explain_msgs.STRUCTURAL_INTRO_ANSWER.format(
             findings=_count_text(len(groups), "finding"),
-            functions=_count_text(function_total, "function"),
-            files=_count_text(file_total, "file"),
         ),
         tone="warn",
     )

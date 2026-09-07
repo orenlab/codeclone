@@ -864,19 +864,26 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
     )
 
     # Insight block
-    if novelty_enabled:
+    # The verdict, the one figure a reader acts on, and a pointer: the lane
+    # split, the instances, the novelty tally and the suppressed count it
+    # used to restate are each a card or a sub-tab on this screen.
+    group_word = plural_word(ctx.clone_groups_total, "group", "groups")
+    if ctx.clone_groups_total == 0:
+        clones_answer = "No clone groups."
+    elif novelty_enabled:
         clones_answer = (
-            f"{ctx.clone_groups_total} groups total; "
-            f"{total_new} new, {total_known} known, "
-            f"{total_unavailable} unavailable."
+            f"Yes: {ctx.clone_groups_total} clone {group_word}, {total_new} new "
+            "since the baseline. Lanes, instances and novelty are on the cards."
         )
     else:
-        clones_answer = f"{ctx.clone_groups_total} groups and {ctx.clone_instances_total} instances."
+        clones_answer = (
+            f"Yes: {ctx.clone_groups_total} clone {group_word}. Lanes and "
+            "instances are on the cards."
+        )
     if suppressed_total > 0:
-        group_word = plural_word(suppressed_total, "group is", "groups are")
         clones_answer += (
-            f" {suppressed_total} suppressed golden-fixture {group_word} excluded "
-            "from active review."
+            " Suppressed golden-fixture groups are kept out of active review; "
+            "see the Suppressed tab."
         )
     clones_tone: Tone = "warn" if ctx.clone_groups_total > 0 else "ok"
 

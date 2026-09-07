@@ -30,9 +30,12 @@ STRUCTURAL_INTRO_ANSWER_NONE: Final = (
     "No function repeats a branch body. These are report-only refactoring "
     "hints and never affect clone detection or CI verdicts."
 )
+# The verdict and the one figure a reader acts on; the function and file
+# counts it used to restate are the cards directly beneath.
 STRUCTURAL_INTRO_ANSWER: Final = (
-    "{findings} in {functions} across {files}. These are report-only "
-    "refactoring hints and never affect clone detection or CI verdicts."
+    "Yes: {findings}; functions, files and kinds are on the cards. These are "
+    "report-only refactoring hints and never affect clone detection or CI "
+    "verdicts."
 )
 STRUCTURAL_EMPTY: Final = "No structural findings detected."
 #: An empty panel must separate a clean result from a measurement that did not

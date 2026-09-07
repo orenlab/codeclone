@@ -12,7 +12,7 @@ from html import unescape
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -81,6 +81,7 @@ from codeclone.report.renderers.json import render_json_report_document
 from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,
+    build_maximal_report_document,
     repeated_block_group_key,
 )
 from tests._report_fixtures import (
@@ -1825,12 +1826,17 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
             dead_critical=0,
         ),
     )
-    assert "insight-warn" in html
-    assert "dep-graph-svg" in html
-    assert "Grade C" in html
-    assert "Cycles: 0; avg depth: 2.5; p95 depth: 3; max dependency depth: 9." in html
-    assert "pkg.mod.func" in html
-    assert "mod.py" in html
+    assert_contains_all(
+        html,
+        "insight-warn",
+        "dep-graph-svg",
+        "Grade C",
+        "No dependency cycles. Depth is on the cards.",
+        "pkg.mod.func",
+        "mod.py",
+    )
+    # the three depth figures are the cards' own and are not restated
+    assert "avg depth: 2.5" not in html
 
 
 def test_html_report_metrics_risk_branches() -> None:
@@ -1859,7 +1865,7 @@ def test_html_report_metrics_risk_branches() -> None:
         html,
         "insight-risk",
         'stroke="var(--error)"',
-        "Cycles: 1; avg depth: 2.5; p95 depth: 3; max dependency depth: 4.",
+        "Yes: 1 dependency cycle. Depth is on the cards.",
         "Yes: 2 high-confidence candidates.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',
@@ -2446,7 +2452,6 @@ def test_html_report_quality_includes_coverage_join_subtab() -> None:
         'data-clone-tab="coverage-join"',
         "Coverage Join",
         "Status",
-        "Joined",
         "Overall coverage",
         "Coverage hotspots",
         "Scope gaps",
@@ -2454,7 +2459,7 @@ def test_html_report_quality_includes_coverage_join_subtab() -> None:
         "70.0%",
         "coverage.xml",
         "pkg.mod:run",
-        "Coverage hotspots: 1; scope gaps: 0.",
+        "Coverage join adds review items; see its tab.",
     )
     assert (
         '<span class="main-tab-label">Quality</span>'
@@ -2950,7 +2955,6 @@ def test_html_report_quality_coverage_join_empty_and_invalid_states() -> None:
     _assert_html_contains(
         empty_html,
         'data-clone-tab="coverage-join"',
-        "Joined",
         "0.0%",
         "Measured units",
         "No medium/high-risk functions need joined-coverage follow-up.",
@@ -5030,7 +5034,10 @@ def test_html_report_clones_panel_explains_health_arithmetic(tmp_path: Path) -> 
         "Segment groups reported but not scored: 1.",
         # the suppressed channel is stated once, in the insight line, and
         # counted on its own card -- not repeated a third time in the note
-        "1 suppressed golden-fixture group is excluded from active review.",
+        (
+            "Suppressed golden-fixture groups are kept out of active review; "
+            "see the Suppressed tab."
+        ),
     )
     assert "Accepted groups excluded by suppression policy" not in html
     assert "golden-fixture groups are excluded" not in html
@@ -5321,7 +5328,9 @@ def test_html_report_authority_panel_reports_the_configured_registry(
         report_document=report_document,
     )
 
-    assert "0 active violations across 5 governed contracts" in html
+    assert "Yes: no active violations across the governed contracts." in html
+    # the contract count is a card's figure, not the banner's
+    assert "across 5 governed contracts" not in html
     assert "no registry is configured" not in html
 
 
@@ -5662,7 +5671,7 @@ def test_html_authority_insight_states_abstention_not_zero_violations(
     assert (
         "Authority cannot be asserted: 5 of 5 governed owners are unresolved." in html
     )
-    assert "0 active violations across 5 governed contracts" not in html
+    assert "Yes: no active violations" not in html
     # the abstention must not be dressed as a clean result in its own block
     question = "Is each governed semantic contract owned by one authority?"
     block_start = html.rindex('<div class="insight-banner', 0, html.index(question))
@@ -5686,7 +5695,7 @@ def test_html_authority_insight_reports_violations_before_abstention(
         active_violations=1,
     )
 
-    assert "1 active violations across 1 governed contracts" in html
+    assert "No: 1 active violation. Contracts, sinks and suppressions" in html
     assert "Authority cannot be asserted" not in html
 
 
@@ -5705,7 +5714,7 @@ def test_html_authority_insight_stays_clean_when_everything_resolved(
         ],
     )
 
-    assert "0 active violations across 1 governed contracts" in html
+    assert "Yes: no active violations across the governed contracts." in html
     assert "Authority cannot be asserted" not in html
 
 
@@ -6582,3 +6591,269 @@ def test_html_authority_counts_come_from_the_summary_not_from_the_rows() -> None
     assert _stat_card_badge(html, "Governed contracts", "owners") == "33"
     assert _stat_card_value(html, "Discovery") == "55"
     assert _stat_card_badge(html, "Discovery", "sinks examined") == "77"
+
+
+# ---------------------------------------------------------------------------
+# Presentation shows what the document carries; the banner points at the cards
+# ---------------------------------------------------------------------------
+#
+# Each pin below feeds the renderer a document that contradicts itself, or a
+# document whose banner used to restate its cards, and asserts the surface
+# follows the published figure and says each number once. A pin that compares
+# the renderer with a recount of the same rows proves nothing, because the two
+# agree by construction on every honest document; only a contradictory one
+# tells a reader from a recounter apart.
+
+
+def test_html_dead_code_counts_are_read_not_recounted_from_contradicting_rows() -> None:
+    """The published count wins over a recount of the rows, on both copies.
+
+    Three rows say ``high`` while the summary publishes no high-confidence
+    candidate and no suppression. The panel used to recount both from the
+    rows whenever the summary said 0 and let the recount win; the tab badge
+    carried a second copy of the same override. On this document that meant
+    a risk verdict, a "3" on the card, a badge on the tab -- numbers the
+    document never stated and the gate never read.
+    """
+
+    # The document, not the raw payload: the document layer derives its
+    # ``high_confidence`` from its own rows, so only a document edited after
+    # it was built can carry the contradiction this pin needs.
+    document = build_maximal_report_document()
+    dead_code = cast(
+        dict[str, Any],
+        cast(dict[str, Any], cast(dict[str, Any], document["metrics"])["families"])[
+            "dead_code"
+        ],
+    )
+    dead_code["summary"] = {
+        **cast(dict[str, Any], dead_code["summary"]),
+        "total": 3,
+        "high_confidence": 0,
+        "suppressed": 0,
+    }
+    dead_code["items"] = [
+        {
+            "qualname": f"pkg.mod:unused_{index}",
+            "relative_path": "pkg/mod.py",
+            "start_line": 50 + index,
+            "end_line": 50 + index,
+            "kind": "function",
+            "confidence": "high",
+        }
+        for index in range(3)
+    ]
+    dead_code["suppressed_items"] = [
+        {
+            "qualname": f"pkg.mod:suppressed_{index}",
+            "relative_path": "pkg/mod.py",
+            "start_line": 90 + index,
+            "end_line": 90 + index,
+            "kind": "function",
+            "confidence": "high",
+            "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
+        }
+        for index in range(2)
+    ]
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_document=document,
+    )
+
+    assert "3 lower-confidence candidates; none high-confidence." in html
+    assert "Yes: 3 high-confidence candidates." not in html
+    assert _stat_card_badge(html, "Candidates", "high-confidence") == "0"
+    assert _stat_card_value(html, "Suppressed") == "0"
+    # the tab badge: a published 0 draws no badge, and the recount's 3 must
+    # not come back through the second copy of the override
+    assert 'title="3 high-confidence dead-code items"' not in html
+    assert (
+        '<span class="main-tab-label">Dead Code</span><span class="tab-count"'
+        not in html
+    )
+
+
+def _coverage_join_metrics() -> dict[str, object]:
+    metrics = _metrics_payload(
+        health_score=70,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "ok",
+            "source": "/outside/project/coverage.xml",
+            "files": 1,
+            "units": 2,
+            "measured_units": 1,
+            "overall_executable_lines": 10,
+            "overall_covered_lines": 7,
+            "overall_permille": 700,
+            "missing_from_report_units": 1,
+            "coverage_hotspots": 0,
+            "scope_gap_hotspots": 0,
+            "hotspot_threshold_percent": 50,
+        },
+        "items": [],
+    }
+    return metrics
+
+
+def test_html_coverage_join_carries_no_card_whose_value_cannot_vary() -> None:
+    """The "Status = Joined" card is gone; the source it carried is not.
+
+    Every other status returns before the cards with the absence sentence, so
+    the card read "Joined" on every report that reached it -- a value that
+    could not vary answered nothing. Its one fact, the source file, moves to
+    the Measured units card, which is measured from that source.
+    """
+
+    html = _render_metrics_html(_coverage_join_metrics())
+
+    assert "Joined" not in html
+    assert re.search(r'<div class="meta-label">Status ?<', html) is None
+    assert _stat_card_badge(html, "Measured units", "source") == "coverage.xml"
+    assert "Coverage join adds no review items." in html
+
+
+def test_html_quality_banner_points_at_the_cards_instead_of_restating_them() -> None:
+    """The verdict names the families; the cards own the counts and maxima."""
+
+    hot = _render_metrics_html(
+        _metrics_payload(
+            health_score=70,
+            health_grade="B",
+            complexity_max=55,
+            complexity_high_risk=3,
+            coupling_high_risk=2,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=4,
+            dead_total=0,
+            dead_critical=0,
+        )
+    )
+    assert (
+        "Yes, in complexity and coupling: each family&#x27;s count and maximum "
+        "are on its cards."
+    ) in hot
+    assert "High-complexity: 3" not in hot
+    assert "max CC 55" not in hot
+    assert _stat_card_value(hot, "Max CC") == "55"
+
+    clean = _render_metrics_html(
+        _metrics_payload(
+            health_score=90,
+            health_grade="A",
+            complexity_max=4,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=4,
+            dead_total=0,
+            dead_critical=0,
+        )
+    )
+    assert (
+        "No function or class sits above its risk band; the maxima are on the cards."
+    ) in clean
+
+
+def test_clone_pagination_reads_the_filter_verdict_not_the_display_state() -> None:
+    """Both readers of the clone population go through one ``visible()``.
+
+    ``paginate()`` used to take the filter-passing groups as "whatever is not
+    display:none" -- and then set display:none on every group off the current
+    page, so from the second call on the population was the current page and
+    the pager collapsed to one page. The Next button called ``visible()``,
+    which no code defined, and threw. The verdict of the filters now lives on
+    the group (``data-filtered-out``) and both readers use it.
+    """
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/repo"},
+    )
+
+    assert "function visible(){" in html
+    assert html.count("const vis=visible();") == 2
+    assert "const vis=groups.filter(g=>g.style.display!=='none');" not in html
+    assert "g.dataset.filteredOut=show?'false':'true';" in html
+
+
+_Severity = Literal["critical", "warning", "info"]
+
+
+def _suggestion_of(severity: _Severity) -> Suggestion:
+    return Suggestion(
+        severity=severity,
+        category="clone",
+        title=f"Refactor duplicate block ({severity})",
+        location="/repo/pkg/mod.py",
+        steps=("Extract helper",),
+        effort="easy",
+        priority=0.5,
+        finding_family="clones",
+        fact_kind="Block clone group",
+        fact_summary="same repeated setup/assert pattern",
+        fact_count=4,
+        spread_files=1,
+        spread_functions=1,
+        clone_type="Type-4",
+        confidence="high",
+        source_kind="production",
+        source_breakdown=(("production", 4),),
+    )
+
+
+def _suggestions_html(*severities: _Severity) -> str:
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/repo"},
+        suggestions=tuple(_suggestion_of(severity) for severity in severities),
+    )
+
+
+def test_html_suggestions_banner_answers_the_question_not_the_severity_split() -> None:
+    """ "What should be prioritized next?" is answered; the split is the cards'."""
+
+    mixed = _suggestions_html("critical", "warning", "info")
+    assert (
+        "Start with the 1 critical suggestion; severity and effort are on the cards."
+        in mixed
+    )
+    assert "3 suggestions: 1 critical, 1 warning, 1 info." not in mixed
+    assert _stat_card_value(mixed, "Critical") == "1"
+
+    warnings_only = _suggestions_html("warning", "warning")
+    assert "No critical suggestions; start with the warnings on the cards." in (
+        warnings_only
+    )
+
+    info_only = _suggestions_html("info")
+    assert "Only informational suggestions; nothing needs action first." in info_only
+
+
+def test_html_provenance_summary_carries_no_product_tagline() -> None:
+    """The badge strip describes this run; the product's slogan is not a fact."""
+
+    html = _render_metrics_html(_coverage_join_metrics())
+
+    assert 'class="prov-summary"' in html
+    assert "contract-verified" not in html
+    assert "Baseline-aware" not in html

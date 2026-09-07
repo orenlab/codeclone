@@ -27,6 +27,7 @@ from codeclone.domain.quality import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_
 from codeclone.utils import coerce as _coerce
 
 from ..._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
+from ...messages.explain import plural_word
 from ...messages.glossary import GLOSSARY_FAMILY_SUGGESTIONS
 from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html
@@ -259,9 +260,21 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
     critical = sum(1 for s in rows if s.severity == "critical")
     warning = sum(1 for s in rows if s.severity == "warning")
     info = sum(1 for s in rows if s.severity == "info")
+    # The answer to the question asked, not the severity split: that is the
+    # row of cards directly beneath, and the banner points at it.
+    if critical > 0:
+        answer = (
+            f"Start with the {critical} critical "
+            f"{plural_word(critical, 'suggestion', 'suggestions')}; severity "
+            "and effort are on the cards."
+        )
+    elif warning > 0:
+        answer = "No critical suggestions; start with the warnings on the cards."
+    else:
+        answer = "Only informational suggestions; nothing needs action first."
     intro = insight_block(
         question="What should be prioritized next?",
-        answer=f"{len(rows)} suggestions: {critical} critical, {warning} warning, {info} info.",
+        answer=answer,
         tone="risk" if critical > 0 else "warn",
     )
 

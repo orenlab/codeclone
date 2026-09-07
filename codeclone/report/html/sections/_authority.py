@@ -16,6 +16,7 @@ from codeclone.utils.coerce import as_int as _as_int
 from codeclone.utils.coerce import as_mapping as _as_mapping
 from codeclone.utils.coerce import as_sequence as _as_sequence
 
+from ...messages.explain import plural_word
 from ...messages.glossary import GLOSSARY_FAMILY_AUTHORITY
 from ..primitives.escape import _escape_html
 from ..widgets.badges import _micro_badges, _stat_card
@@ -253,8 +254,6 @@ def _authority_answer(
     *,
     enabled: bool,
     active: int,
-    suppressed: int,
-    registry_contracts: int,
     governed_total: int,
     unresolved_total: int,
     candidate_total: int = 0,
@@ -277,10 +276,13 @@ def _authority_answer(
             "Semantic-authority discovery is report-only; no registry is configured.",
             "info",
         )
+    # The verdict and the one figure a reader acts on; the contract, sink and
+    # suppression counts it used to restate are the cards' own.
     if active:
         return (
-            f"{active} active violations across {registry_contracts} governed "
-            f"contracts; {suppressed} findings suppressed.",
+            f"No: {active} active "
+            f"{plural_word(active, 'violation', 'violations')}. Contracts, "
+            "sinks and suppressions are on the cards.",
             "risk",
         )
     if unresolved_total:
@@ -290,8 +292,8 @@ def _authority_answer(
             "info",
         )
     return (
-        f"{active} active violations across {registry_contracts} governed "
-        f"contracts; {suppressed} findings suppressed.",
+        "Yes: no active violations across the governed contracts. Contracts, "
+        "sinks and suppressions are on the cards.",
         "ok",
     )
 
@@ -394,8 +396,6 @@ def render_authority_panel(ctx: ReportContext) -> str:
     answer, tone = _authority_answer(
         enabled=enabled,
         active=active_total,
-        suppressed=suppressed_total,
-        registry_contracts=_as_int(summary.get("registry_contracts")),
         governed_total=governed_total,
         unresolved_total=unresolved_governed,
         candidate_total=candidate_total,

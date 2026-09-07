@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from codeclone.metrics.dependencies import select_dependency_graph_nodes
 from codeclone.utils import coerce as _coerce
 
+from ...messages.explain import plural_word
 from ...messages.glossary import GLOSSARY_FAMILY_DEPENDENCIES
 from ...messages.sections import DEPENDENCY_GRAPH_UNAVAILABLE, METRICS_SKIPPED
 from ..primitives.escape import _escape_html
@@ -174,9 +175,12 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Max depth",
             dep_max_depth,
+            # The depth profile health scores against, named in full: the
+            # banner used to spell "avg depth" and "p95 depth" and these
+            # badges are now the only place the two figures appear.
             detail=_micro_badges(
-                ("avg", dep_avg_depth_label),
-                ("p95", dep_p95_depth),
+                ("avg depth", dep_avg_depth_label),
+                ("p95 depth", dep_p95_depth),
             ),
             value_tone="bad"
             if cycle_count > 0
@@ -258,10 +262,16 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     if not ctx.metrics_available:
         answer, tone = METRICS_SKIPPED, "info"
     else:
-        answer = (
-            f"Cycles: {cycle_count}; avg depth: {dep_avg_depth_label}; "
-            f"p95 depth: {dep_p95_depth}; max dependency depth: {dep_max_depth}."
-        )
+        # The verdict and the one figure a reader acts on; the three depth
+        # figures it used to restate are the cards' own.
+        if cycle_count > 0:
+            answer = (
+                f"Yes: {cycle_count} dependency "
+                f"{plural_word(cycle_count, 'cycle', 'cycles')}. Depth is on "
+                "the cards."
+            )
+        else:
+            answer = "No dependency cycles. Depth is on the cards."
         tone = dependency_tone
 
     return (

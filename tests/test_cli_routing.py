@@ -16,6 +16,7 @@ import pytest
 
 import codeclone.surfaces.cli.controller_queries as controller_queries
 import codeclone.surfaces.cli.subcommands as subcommands
+from codeclone import ui_messages
 from codeclone.surfaces.cli.types import CLIArgsLike, StatusConsole
 from tests._import_graph import _iter_local_imports
 
@@ -263,3 +264,74 @@ def test_routing_modules_have_one_way_cli_owned_dependencies() -> None:
         "from .observability import observability_main",
     ):
         assert deferred_import not in workflow_source
+
+
+def test_every_dispatchable_tree_has_a_help_row_and_the_reverse() -> None:
+    """The first screen names exactly the trees the CLI actually dispatches.
+
+    A real cross-check, not a parser compared with itself. The two sides are
+    written out independently -- the executable table in ``subcommands``, the
+    rendered rows in ``ui_messages`` -- so each direction can fail alone:
+    delete a row and the tree still dispatches while the screen hides it; add
+    a handler and the screen advertises four of five. Deriving either side
+    from the other would make them agree by construction and catch neither,
+    which is how all five trees came to be missing from ``--help`` at once.
+    """
+
+    dispatched = set(subcommands._SUBCOMMAND_HANDLERS)
+    advertised = {name for name, _ in ui_messages.HELP_COMMANDS}
+
+    assert advertised == dispatched, {
+        "advertised_but_not_dispatched": sorted(advertised - dispatched),
+        "dispatched_but_not_advertised": sorted(dispatched - advertised),
+    }
+
+
+def test_help_rows_are_ordered_and_carry_a_summary() -> None:
+    """Order is alphabetical and each row says what the tree is for.
+
+    Rendering order must not inherit the handler dict's insertion order, and a
+    row with an empty summary would occupy the screen without answering the
+    question the section exists to answer.
+    """
+
+    names = [name for name, _ in ui_messages.HELP_COMMANDS]
+    assert names == sorted(names)
+    assert all(summary.strip() for _name, summary in ui_messages.HELP_COMMANDS)
+
+
+@pytest.mark.parametrize("command", [name for name, _ in ui_messages.HELP_COMMANDS])
+def test_every_advertised_command_actually_routes(command: str) -> None:
+    """Each advertised name reaches a handler instead of falling through.
+
+    Behavioural, so it stays honest if the tables above are ever fused: an
+    unrouted argv[1] returns quietly and the analysis path continues, which is
+    what an advertised-but-dead command would do. ``--help`` is used because
+    every tree answers it without touching the repository.
+    """
+
+    with pytest.raises(SystemExit) as caught:
+        subcommands.dispatch_subcommand(["codeclone", command, "--help"])
+
+    assert caught.value.code == 0
+
+
+def test_an_unrouted_name_falls_through_to_analysis() -> None:
+    """The positive control for the probe above.
+
+    Without this, ``test_every_advertised_command_actually_routes`` could pass
+    on a CLI where *everything* raised ``SystemExit``, proving nothing about
+    routing. A name that is not a subcommand must return quietly so the
+    analysis path can treat it as a root argument.
+    """
+
+    # Not `assert ... is None`: the function is declared to return None, so
+    # that comparison is a type error rather than a check. The claim under
+    # test is that it does NOT raise -- routing declined, analysis continues.
+    raised: BaseException | None = None
+    try:
+        subcommands.dispatch_subcommand(["codeclone", "not-a-subcommand"])
+    except SystemExit as exc:  # pragma: no cover - failure path is the finding
+        raised = exc
+
+    assert raised is None

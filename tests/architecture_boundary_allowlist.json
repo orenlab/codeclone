@@ -9,7 +9,7 @@
     "production_import:r2->r4": 16,
     "production_import:r2p->r2": 61,
     "production_import:r2p->r4": 6,
-    "production_import:r4->r2": 142,
+    "production_import:r4->r2": 141,
     "production_import:r4->r2p": 116,
     "test_import:r2p->r2": 67,
     "test_import:r4->r2": 172,
@@ -450,7 +450,6 @@
       "codeclone.workspace_intent.schema -> codeclone"
     ],
     "production_import:r4->r2": [
-      "codeclone.report.html.assemble -> codeclone.domain.quality",
       "codeclone.report.html.sections._clones -> codeclone.findings.ids",
       "codeclone.report.html.sections._clones -> codeclone.models",
       "codeclone.report.html.sections._clones -> codeclone.report._source_kinds",

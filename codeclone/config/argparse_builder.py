@@ -134,6 +134,32 @@ class _HelpFormatter(argparse.RawTextHelpFormatter):
 # contract error stops burying its own message under forty lines.
 _USAGE = "codeclone [OPTIONS] [root]"
 
+#: Column where help text starts, matching argparse's own two-column grid so
+#: the Commands rows line up with the option rows beneath them.
+_COMMAND_HELP_COLUMN = 24
+
+_DESCRIPTION = (
+    "Deterministic Structural Change Controller for AI-assisted Python development."
+)
+
+
+def _commands_section() -> str:
+    """Render the subcommand trees as a first-screen section.
+
+    argparse cannot generate this. The trees are dispatched by
+    ``dispatch_subcommand`` before the parser is reached, so the parser holds
+    no subparser action to format and its help is structurally blind to them.
+    The rows are therefore built here from :data:`ui.HELP_COMMANDS`, and the
+    committed help golden -- not a parser-introspection test -- is what pins
+    the result, so that dropping this section is a visible diff rather than a
+    test that quietly stops asserting anything.
+    """
+
+    lines = [ui.HELP_COMMANDS_TITLE]
+    for name, summary in ui.HELP_COMMANDS:
+        lines.append(f"  {name.ljust(_COMMAND_HELP_COLUMN - 2)}{summary}")
+    return "\n".join(lines)
+
 
 def _add_option(
     group: argparse._ArgumentGroup,
@@ -219,10 +245,7 @@ def build_parser(version: str) -> _ArgumentParser:
     parser = _ArgumentParser(
         prog="codeclone",
         usage=_USAGE,
-        description=(
-            "Deterministic Structural Change Controller for AI-assisted "
-            "Python development."
-        ),
+        description=f"{_DESCRIPTION}\n\n{_commands_section()}",
         add_help=False,
         formatter_class=_HelpFormatter,
         epilog=cli_help_epilog(),

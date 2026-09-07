@@ -646,7 +646,17 @@ def test_render_dead_code_panel_warns_when_only_medium_confidence_items_exist() 
     assert "No dead code detected." not in panel_html
 
 
-def test_render_dead_code_panel_derives_high_confidence_count_from_items() -> None:
+def test_render_dead_code_panel_reads_the_published_high_confidence_count() -> None:
+    """The summary is the figure; the rows never overrule it.
+
+    This document contradicts itself on purpose: the summary publishes no
+    high-confidence candidate while the one row says it is high. The panel
+    used to recount from the rows whenever the summary said 0 and let the
+    recount win -- so on this document it claimed "Yes: 1 high-confidence
+    candidate", a verdict on a number the document never stated and the
+    gate never read. It now shows what is published.
+    """
+
     ctx = _section_ctx(
         dead_code_map={
             "summary": {"total": 1, "high_confidence": 0, "suppressed": 0},
@@ -665,8 +675,9 @@ def test_render_dead_code_panel_derives_high_confidence_count_from_items() -> No
 
     panel_html = render_dead_code_panel(cast(Any, ctx))
 
-    assert "Yes: 1 high-confidence candidate." in panel_html
-    assert '>1</span><span class="kpi-micro-lbl">high-confidence<' in panel_html
+    assert "1 lower-confidence candidate; none high-confidence." in panel_html
+    assert '>0</span><span class="kpi-micro-lbl">high-confidence<' in panel_html
+    assert "Yes: 1 high-confidence candidate." not in panel_html
 
 
 def test_render_dead_code_panel_shows_test_reference_reason_and_source() -> None:

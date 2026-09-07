@@ -260,9 +260,16 @@ def _run_rich_step(
 
         if typed < total_chars:
             since_char += tick_interval
-            if since_char >= char_interval:
+            # Every whole character interval the tick covered, not at most
+            # one. ``_CHAR_INTERVAL`` is 0.022 s and the tick is 0.05 s, so
+            # one character per tick typed at 20 characters a second while
+            # the constant promised 45: the interval could not take effect
+            # for any value at or below the tick, and the tour's 3,400
+            # characters took 170 s of the reader's time instead of 75.
+            # The remainder carries over, so the rate is the interval's own.
+            while since_char >= char_interval and typed < total_chars:
                 typed += 1
-                since_char = 0.0
+                since_char -= char_interval
 
         if typed >= total_chars:
             if typing_done_at is None:

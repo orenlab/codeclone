@@ -613,11 +613,10 @@ def render_meta_panel(ctx: ReportContext) -> str:
         "</div>"
     )
 
+    # No tagline beside the badges: "Baseline-aware \u00b7 contract-verified"
+    # was the product describing itself in the slot that describes this run.
     prov_summary = (
-        f'<div class="prov-summary">{"".join(badges)}'
-        '<span class="prov-explain">Baseline-aware \u00b7 contract-verified</span></div>'
-        if badges
-        else ""
+        f'<div class="prov-summary">{"".join(badges)}</div>' if badges else ""
     )
 
     return (

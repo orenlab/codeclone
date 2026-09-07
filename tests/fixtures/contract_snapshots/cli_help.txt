@@ -7,6 +7,13 @@ usage: codeclone [OPTIONS] [root]
 
 Deterministic Structural Change Controller for AI-assisted Python development.
 
+Commands (run `codeclone <command> --help` for each tree's verbs):
+  analytics             Build and query the intent analytics corpus.
+  baseline              Manage the native baseline publication state.
+  memory                Query and curate engineering memory.
+  observability         Inspect recorded runtime traces (maintainer only).
+  setup                 Initialize or inspect repository readiness.
+
 Target:
   root                  Project root directory to scan. Defaults to the current
                         directory.
@@ -194,8 +201,10 @@ Output and UI:
 
 General:
   -h, --help            Show this help message and exit.
-  --interactive-help    Open the guided CodeClone product tour. Use together
-                        with --help in an interactive terminal.
+  --interactive-help    Play the animated product tour. It runs by itself for
+                        about 2.5 minutes (15 timed steps); Ctrl+C ends it
+                        early. Use together with --help in an interactive
+                        terminal.
   --version             Print the CodeClone version and exit.
 
 Exit codes:

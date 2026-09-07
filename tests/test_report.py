@@ -4273,3 +4273,36 @@ def test_report_reader_parses_the_stored_document_once(
         result, "detail", result
     )
     assert decodes == ["json.loads"]
+
+
+def _markdown_section(markdown: str, anchor_id: str) -> str:
+    """The Markdown between one anchor and the next, whatever the heading level."""
+
+    start = markdown.index(f'<a id="{anchor_id}"></a>')
+    rest = markdown[start + 1 :]
+    following = rest.find('<a id="')
+    return rest if following < 0 else rest[:following]
+
+
+def test_markdown_says_no_items_only_where_a_family_publishes_items() -> None:
+    """``### Health`` carries no items list, so it must not say the list is empty.
+
+    The health family declares no item keys, so ``_No detailed items._`` under
+    it described the renderer's template, not the run, on every report ever
+    written. The line is not gone: a family that does publish items and has
+    none this run still says so, which is the other half of this pin.
+    """
+
+    document = build_maximal_report_document()
+
+    assert "_No detailed items._" not in _markdown_section(
+        render_markdown_report_document(document), "health"
+    )
+
+    families = cast(
+        dict[str, object], cast(dict[str, object], document["metrics"])["families"]
+    )
+    cast(dict[str, object], families["complexity"])["items"] = []
+    stripped = render_markdown_report_document(document)
+
+    assert "_No detailed items._" in _markdown_section(stripped, "complexity")

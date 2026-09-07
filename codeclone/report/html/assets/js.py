@@ -197,6 +197,10 @@ _SECTIONS = """\
         if(!isAll(ct)&&g.dataset.cloneType!==ct)show=false;
         if(!isAll(sp)&&g.dataset.spreadBucket!==sp)show=false;
         if(minOcc&&parseInt(g.dataset.groupArity||'0',10)<4)show=false;
+        // The filter verdict lives on the group, apart from display: paginate()
+        // also writes display, so reading display back as "passed the filters"
+        // shrank the population to the current page after the first paging.
+        g.dataset.filteredOut=show?'false':'true';
         g.style.display=show?'':'none';
       });
       updateFiltersBadge();
@@ -204,18 +208,25 @@ _SECTIONS = """\
       paginate();
     }
 
+    function visible(){
+      // Groups that passed novelty and the search/filter controls, whatever
+      // page they sit on.
+      return groups.filter(g=>g.getAttribute('data-novelty-hidden')!=='true'&&g.dataset.filteredOut!=='true');
+    }
+
     function paginate(){
-      // Collect groups that passed both novelty + search/filter
-      const vis=groups.filter(g=>g.style.display!=='none');
+      const vis=visible();
       const totalPages=Math.max(1,Math.ceil(vis.length/pageSize));
       if(page>totalPages)page=totalPages;
       const start=(page-1)*pageSize;
       const end=start+pageSize;
+      groups.forEach(g=>{g.style.display='none'});
       vis.forEach((g,i)=>{g.style.display=i>=start&&i<end?'':'none'});
       if(pageMeta)pageMeta.textContent='Page '+page+' / '+totalPages+' \\u2022 '+vis.length+' groups';
-      // Also update any visible tab count
-      const tabCount=$('[data-clone-tab-count="'+id+'"]');
-      if(tabCount){tabCount.textContent=vis.length;tabCount.dataset.totalGroups=vis.length}
+      // The tab badge keeps the count the report published; the line above
+      // carries the count of what the filters left. Overwriting the badge
+      // (and its data-total-groups) made a filtered view read as the run's
+      // total, with nothing on the page still stating the real one.
     }
 
     // Register so novelty can call directly
@@ -889,11 +900,15 @@ _TOOLTIPS = """\
     tip.style.top=top+'px';
   }
   function hide(){if(tip){tip.remove();tip=null}}
+  // Capturing on document, the target is the document itself when the
+  // pointer enters or leaves the window, and a Document has no matches():
+  // every such crossing threw a TypeError to the console.
+  function isTip(t){return t instanceof Element&&t.matches('.kpi-help[data-tip]')}
   document.addEventListener('mouseenter',function(e){
-    if(e.target.matches('.kpi-help[data-tip]'))show(e);
+    if(isTip(e.target))show(e);
   },true);
   document.addEventListener('mouseleave',function(e){
-    if(e.target.matches('.kpi-help[data-tip]'))hide();
+    if(isTip(e.target))hide();
   },true);
 })();
 """

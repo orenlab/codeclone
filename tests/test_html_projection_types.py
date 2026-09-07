@@ -198,7 +198,7 @@ _LOCATION_READS: Final = (
 #: projection was typed. Typing a presentation projection may not move one byte
 #: of presentation; this constant is the only thing that can say so.
 _PANEL_DIGEST: Final = (
-    "4ffefab23eda5260757db8053a368e59fd462eeffacfdb6a1cfc3b79de45144e"
+    "076754478c9440ea6d38e4bd219bb223c7f573100faf92a3d8127076bc734a71"
 )
 
 

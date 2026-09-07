@@ -686,11 +686,15 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             lines,
             tuple((key, family_summary_map.get(key)) for key in summary_keys),
         )
-        _append_metric_items(
-            lines,
-            items=_as_sequence(family_payload.get("items")),
-            key_order=item_keys,
-        )
+        # A family that declares no item keys (health) publishes no items,
+        # so the "_No detailed items._" line it printed on every report
+        # described the template, not the run.
+        if item_keys:
+            _append_metric_items(
+                lines,
+                items=_as_sequence(family_payload.get("items")),
+                key_order=item_keys,
+            )
 
     if "dead_code" not in withheld_families:
         dead_code_family_payload = _as_mapping(metrics_families.get("dead_code"))

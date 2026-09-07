@@ -13,7 +13,6 @@ from typing import Final
 
 from ... import __version__
 from ...contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
-from ...domain.quality import CONFIDENCE_HIGH
 from ...observability import span
 from ...utils import coerce as _coerce
 from ..messages.chrome import (
@@ -153,18 +152,13 @@ def build_html_report(
     _as_sequence = _coerce.as_sequence
     _as_int = _coerce.as_int
     dead_summary = _as_mapping(ctx.dead_code_map.get("summary"))
-    dead_total = _as_int(dead_summary.get("total"))
     # ``critical`` was the raw metrics payload's spelling; the report document
     # renamed it to ``high_confidence`` and emits only that, so the fallback
     # could not fire in any configuration.
+    # Read, never recounted from the rows: the badge used to re-derive this
+    # from ``items`` whenever the summary said 0 and let the recount win, a
+    # second copy of the override the Dead Code panel carried. See the panel.
     dead_high_conf = _as_int(dead_summary.get("high_confidence"))
-    if dead_total > 0 and dead_high_conf == 0:
-        dead_high_conf = sum(
-            1
-            for item in _as_sequence(ctx.dead_code_map.get("items"))
-            if str(_as_mapping(item).get("confidence", "")).strip().lower()
-            == CONFIDENCE_HIGH
-        )
     dep_cycles = len(_as_sequence(ctx.dependencies_map.get("cycles")))
     module_map_summary = _as_mapping(
         _as_mapping(ctx.derived_map.get("module_map")).get("summary")
