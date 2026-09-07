@@ -295,6 +295,30 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # warm run over a generation-3 dependent lane disagree on every symbol the
 # arm held, so a "3" row expresses the old policy and must miss.
 #
+# (E) "5" takes the bare-name fallback's authority to conclude LIVE away and
+# admits function-local definitions to the population (criterion C, RULING
+# 2026-09-04). A symbol whose local name merely appeared among the project's
+# loaded identifiers got the report's strongest outcome - a silent skip - on
+# a spelling coincidence: measured on this repository at 5f35a50f, 4515
+# symbols (26% of 17185 candidates) were live on nothing else, 561 of them
+# sharing that spelling with another such symbol (``main`` x16,
+# ``to_payload`` x13, ``close`` x7). Under "5" a loaded Name is resolved
+# through its lexical scope chain to the definition it binds - module-level
+# or function-local, which is what lets a nested definition be referenced at
+# all - and a resolved import that lands on a re-export is followed through
+# the from-import edges to the definition; both are symbol-specific evidence
+# and hold LIVE. A bare name the resolver cannot bind is no longer evidence:
+# it is the reason for a binding abstention in BOTH worlds
+# (``ambiguous_internal_binding``), because the closed world removes the
+# unknown external consumer and not an unknown internal binding. Three
+# things on the dependent lane change: ``referenced_names`` narrows to the
+# loads no scope settles, ``referenced_qualnames`` gains the lexical
+# bindings, and ``nested_definitions`` - a population that produced zero
+# symbols under "4" - rides beside the candidates. The distinguishing
+# witness for the bump: a "4" lane read by a "5" evaluator would abstain on
+# every bare-name-only symbol a cold run proves live through its binding, and
+# would report no nested definition at all; so a "4" row must miss.
+#
 # Bump this constant whenever what counts as LIVE changes; verdicts across
 # versions are not comparable.
 #
@@ -317,7 +341,7 @@ OBSERVER_VOCABULARY_VERSION: Final = "3"
 # and never touches the neutral fingerprint lane. That miss is what this
 # bump buys, and it is pinned by
 # ``test_liveness_policy_version_misses_only_dependent_lane``.
-LIVENESS_POLICY_VERSION: Final = "4"
+LIVENESS_POLICY_VERSION: Final = "5"
 SOURCE_KIND_POLICY_VERSION: Final = "1"
 # Generation of the adoption-coverage policy: WHAT COUNTS as an annotated
 # parameter (the receiver of a non-static method is not one; ``*args`` and
@@ -617,7 +641,37 @@ CACHE_VERSION: Final = "4.1"
 # semantic identity generation stay where they are; the new payload enters the
 # run identity through the observation lane's ``abstained`` rows and the
 # realized ``world_contract`` parameter, not through a generation bump.
-REPORT_SCHEMA_VERSION: Final = "3.3"
+#
+# 3.3 -> 3.4 (criterion C, liveness policy v5): the ``dead_code`` family gains
+# a second semantic lane the old wire could not express. ``unresolved_internal``
+# holds the verdicts CodeClone withdrew on *internal* grounds and carries two
+# reason codes: ``ambiguous_internal_binding``, where the symbol's only support
+# is a bare name no binding settles, and ``opaque_internal_escape``, where the
+# value provably escaped into a callable the analysis cannot open. It is
+# counted in ``summary.unresolved_internal`` and each row names its own reason.
+#
+# The bump is owed for the same reason 3.3 was owed, one step further out: the
+# lane is a whole CLASS OF DECISIONS, and a consumer reading the old schema
+# cannot know that the class exists. It does not see a familiar field with an
+# unfamiliar value -- it sees nothing at all, and silently concludes the
+# analysis had no opinion where in fact the analysis has an explicit,
+# published abstention. That silence is the failure mode; the exact policy in
+# ``check_report_v3_compatibility`` converts it into a refusal to load.
+#
+# What the lane does NOT say: an abstention proves only that CodeClone may no
+# longer assert deadness. It never promotes the symbol to live. Under the
+# generalisation the family's arithmetic is
+#
+#     open.dead + open.unresolved_external == closed.dead
+#     open.unresolved_internal            == closed.unresolved_internal
+#
+# -- the internal lane is world-invariant by construction, because the closed
+# world removes external reach and removes nothing about internal binding.
+#
+# LIVENESS_POLICY_VERSION moves "4" -> "5" with this change and owns the
+# analysis generation; baseline schema, cache generation, module identity and
+# the semantic identity generation stay where they are.
+REPORT_SCHEMA_VERSION: Final = "3.4"
 # The clone vocabulary of the report wire: what the document calls the family
 # and what a clone group calls its kind. These are facts about the payload, not
 # a layer's opinion about it, and they live here because of who has to read

@@ -96,16 +96,20 @@ def _declaration_targets(
     """Every function, method and class declaration of one module."""
 
     targets: list[DeclarationTarget] = []
-    pending: list[tuple[ast.AST, str]] = [(tree, "")]
+    pending: list[tuple[ast.AST, str, bool]] = [(tree, "", False)]
     while pending:
-        node, prefix = pending.pop()
+        node, prefix, in_function = pending.pop()
         for child in ast.iter_child_nodes(node):
             if not isinstance(
                 child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
             ):
-                pending.append((child, prefix))
+                pending.append((child, prefix, in_function))
                 continue
-            qualname = f"{prefix}.{child.name}" if prefix else child.name
+            # The run spells a function-local declaration the way CPython's
+            # ``__qualname__`` does (liveness policy v5), and this witness
+            # must spell it the same way or the two could never meet on one.
+            boundary = ".<locals>." if in_function else "."
+            qualname = f"{prefix}{boundary}{child.name}" if prefix else child.name
             kind: DeclarationKind
             if isinstance(child, ast.ClassDef):
                 kind = "class"
@@ -127,7 +131,7 @@ def _declaration_targets(
                     ),
                 )
             )
-            pending.append((child, qualname))
+            pending.append((child, qualname, not isinstance(child, ast.ClassDef)))
     return targets
 
 

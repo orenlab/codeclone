@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .. import qualnames as _qualnames
 from ..models import (
+    NestedDefinitionKind,
     RuntimeReachabilityConfidence,
     RuntimeReachabilityEdgeKind,
     RuntimeReachabilityFact,
@@ -663,6 +665,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         runtime_objects: dict[str, _RuntimeObjectKind],
         included_routers: set[str],
         route_decorator_factories: dict[str, _RouteDecoratorFactory],
+        nested_declarations: Sequence[tuple[str, ast.AST, NestedDefinitionKind]] = (),
     ) -> None:
         self._module_name = module_name
         self._filepath = filepath
@@ -687,6 +690,43 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         ] = set()
         self.facts: list[RuntimeReachabilityFact] = []
         self._index_targets(collector)
+        self._index_nested_targets(nested_declarations)
+
+    def _index_nested_targets(
+        self,
+        nested_declarations: Sequence[tuple[str, ast.AST, NestedDefinitionKind]],
+    ) -> None:
+        """Admit the function-local population (liveness policy v5).
+
+        A route registered inside an application factory
+        (``def create_app(): @app.get("/") def index(): ...``) is the
+        commonest shape of a framework edge, and the binding visitor already
+        records ``app`` at any depth; only the target index stopped at the
+        collector's module-level units. Indexed AFTER the module-level
+        targets so a name shared with a top-level definition keeps resolving
+        to the top-level one in ``_targets_by_name``.
+        """
+        for lexical_path, node, kind in nested_declarations:
+            target = _Target(
+                qualname=f"{self._module_name}:{lexical_path}",
+                start_line=ast_node_start_line(node) or 0,
+                end_line=ast_node_end_line(node),
+                kind=kind,
+            )
+            if isinstance(node, ast.ClassDef):
+                self._class_targets[id(node)] = target
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                self._function_targets[id(node)] = target
+                if kind == "method":
+                    self._methods_by_class.setdefault(
+                        lexical_path.rsplit(".", 1)[0], []
+                    ).append(target)
+            else:
+                raise ValueError(
+                    f"nested declaration {lexical_path!r} is not a definition node"
+                )
+            self._targets_by_name.setdefault(node.name, target)
+            self._targets_by_name.setdefault(lexical_path, target)
 
     def _index_targets(self, collector: _qualnames.QualnameCollector) -> None:
         for local_name, function_node in collector.units:
@@ -1320,6 +1360,7 @@ def collect_runtime_reachability(
     filepath: str,
     collector: _qualnames.QualnameCollector,
     phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
+    nested_declarations: Sequence[tuple[str, ast.AST, NestedDefinitionKind]] = (),
 ) -> tuple[RuntimeReachabilityFact, ...]:
     handler_nodes: list[ast.AST] = []
     binding_visitor = _RuntimeBindingVisitor(
@@ -1341,6 +1382,7 @@ def collect_runtime_reachability(
         runtime_objects=binding_visitor.objects,
         included_routers=binding_visitor.included_routers,
         route_decorator_factories=binding_visitor.route_decorator_factories,
+        nested_declarations=nested_declarations,
     )
     apply_handler_node = visitor._apply_handler_node
 

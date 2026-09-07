@@ -35,11 +35,13 @@ from ..models import (
     FunctionRelationshipFactsDict,
     GitBlobIdentity,
     GitObjectFormat,
+    LivenessVocabularyError,
     ModuleApiSurfaceDict,
     ModuleDepDict,
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     NearMissElement,
+    NestedDefinitionDict,
     PublicSymbolDict,
     RelationshipRecordDict,
     RuntimeReachabilityFactDict,
@@ -53,6 +55,7 @@ from ..models import (
     StructuralFindingOccurrenceDict,
     UnreachableReason,
     UnreachableStatementItem,
+    validate_escape_witness,
 )
 from ._wire_helpers import (
     _decode_optional_wire_coupled_classes,
@@ -680,6 +683,16 @@ def _decode_wire_file_entry(
         obj=dependent_obj,
         filepath=filepath,
     )
+    # Liveness policy v5 nested population. Absent is the legal "no definition
+    # under a function scope"; a malformed row rejects the entry like ``dc``.
+    nested_definitions = _decode_optional_wire_items_for_filepath(
+        obj=dependent_obj,
+        key="nd",
+        filepath=filepath,
+        decode_item=_decode_wire_nested_definition,
+    )
+    if nested_definitions is None:
+        return None
     if not _apply_wire_class_metrics_sidecars(
         obj=dependent_obj,
         class_metrics=class_metrics,
@@ -738,6 +751,7 @@ def _decode_wire_file_entry(
                 else None
             ),
             materialized_api_surface=materialized_api_surface,
+            nested_definitions=tuple(nested_definitions),
         ),
     )
 
@@ -1034,6 +1048,11 @@ def _decode_wire_file_sections(
         decode_item=_decode_wire_dead_candidate,
     )
     star_bound = _decode_optional_wire_names(obj=obj, key="sb")
+    escape_witnesses = _decode_optional_wire_items(
+        obj=obj,
+        key="ew",
+        decode_item=_decode_wire_escape_witness,
+    )
     if (
         units is None
         or blocks is None
@@ -1042,6 +1061,7 @@ def _decode_wire_file_sections(
         or module_deps is None
         or dead_candidates is None
         or star_bound is None
+        or escape_witnesses is None
     ):
         return None
     if star_bound:
@@ -1049,6 +1069,12 @@ def _decode_wire_file_sections(
         for candidate in dead_candidates:
             if candidate["qualname"] in bound:
                 candidate["star_import_bound"] = True
+    if escape_witnesses:
+        witness_by_qualname = dict(escape_witnesses)
+        for candidate in dead_candidates:
+            witness = witness_by_qualname.get(candidate["qualname"])
+            if witness is not None:
+                candidate["escape_witness"] = witness
     return (
         units,
         blocks,
@@ -1824,6 +1850,94 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
 # unreadable one.  What a producer may still emit is the owner's
 # ``ACTIVE_LIVE_ROOT_REASONS``, which is a strictly smaller set.
 _LIVE_ROOT_REASONS: Final = frozenset(LIVE_ROOT_REASONS)
+
+# The same vocabulary as ``_LIVE_ROOT_REASONS`` plus the empty string, which is
+# how an ``nd`` row spells "this definition is not a live root". ``dc`` cannot
+# share it: there the reason field only exists on a seven-field row, and an
+# empty one there is the writer and this reader disagreeing.
+_DECODABLE_LIVE_ROOT_REASONS: Final = _LIVE_ROOT_REASONS | {""}
+
+
+def _decode_wire_nested_definition(
+    value: object,
+    filepath: str,
+) -> NestedDefinitionDict | None:
+    """One ``nd`` row (liveness policy v5): fourteen fields, all required.
+
+    A closed vocabulary on ``kind`` and on the live-root reason, exactly as
+    ``dc`` reads them, and the escape witness passes the same door the model
+    puts on it; a row that fails any field is a wire the writer and this
+    reader disagree about, and the entry is rejected rather than read with
+    an invented default.
+    """
+    row = _decode_wire_row(value, valid_lengths={14})
+    if row is None:
+        return None
+    str_fields = _decode_wire_str_fields(row, 0, 1, 2, 3, 4, 8, 13)
+    int_fields = _decode_wire_int_fields(row, 5, 6)
+    rules = _as_list(row[7])
+    bases = _as_list(row[9])
+    flags = row[10:13]
+    if (
+        str_fields is None
+        or int_fields is None
+        or rules is None
+        or bases is None
+        or not all(isinstance(item, str) for item in rules)
+        or not all(isinstance(item, str) for item in bases)
+        or not all(isinstance(flag, bool) for flag in flags)
+    ):
+        return None
+    qualname, local_name, kind, lexical_parent, lexical_path, reason, witness = (
+        str_fields
+    )
+    if kind not in {"function", "class", "method"}:
+        return None
+    if reason not in _DECODABLE_LIVE_ROOT_REASONS:
+        return None
+    if witness and not _is_escape_witness(witness):
+        return None
+    start_line, end_line = int_fields
+    return NestedDefinitionDict(
+        qualname=qualname,
+        local_name=local_name,
+        kind=kind,
+        lexical_parent=lexical_parent,
+        lexical_path=lexical_path,
+        filepath=filepath,
+        start_line=start_line,
+        end_line=end_line,
+        suppressed_rules=sorted({str(rule) for rule in rules} - {""}),
+        live_root_reason=reason,
+        owner_base_names=sorted({str(base) for base in bases} - {""}),
+        owner_has_unresolved_external_base=bool(flags[0]),
+        decorator_evidenced=bool(flags[1]),
+        self_dispatched=bool(flags[2]),
+        escape_witness=witness,
+    )
+
+
+def _is_escape_witness(value: str) -> bool:
+    """Whether a stored witness passes the model's door; refused, not fixed."""
+    try:
+        validate_escape_witness(value)
+    except LivenessVocabularyError:
+        return False
+    return True
+
+
+def _decode_wire_escape_witness(value: object) -> tuple[str, str] | None:
+    """One ``ew`` pair: the candidate's qualname and its proven flow."""
+    row = _decode_wire_row(value, valid_lengths={2})
+    if row is None:
+        return None
+    fields = _decode_wire_str_fields(row, 0, 1)
+    if fields is None:
+        return None
+    qualname, witness = fields
+    if not qualname or not witness or not _is_escape_witness(witness):
+        return None
+    return qualname, witness
 
 
 def _decode_wire_dead_candidate(

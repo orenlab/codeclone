@@ -36,6 +36,7 @@ from ..models import (
     ModuleRegistryHandle,
     ModuleTypingCoverage,
     NearMissPair,
+    NestedDefinition,
     ObservationBundle,
     ProjectMetrics,
     RehydratedCacheNeutral,
@@ -128,6 +129,9 @@ class DiscoveryResult:
     # The declaration fact of every cache hit (liveness policy v4), unioned
     # like the reference sets above; the exposure owner reads it per run.
     cached_declared_exports: frozenset[str] = frozenset()
+    # The function-local population of every cache hit (liveness policy v5),
+    # in its own channel beside the candidates it must never be mistaken for.
+    cached_nested_definitions: tuple[NestedDefinition, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +186,9 @@ class ProcessingResult:
     function_contract_summaries: tuple[FunctionContractSummary, ...] = ()
     semantic_authority: SemanticAuthorityResult | None = None
     referenced_qualnames: frozenset[str] = frozenset()
+    # The function-local population (liveness policy v5): read by the
+    # dead-code lane and the observation lane, and by nothing else.
+    nested_definitions: tuple[NestedDefinition, ...] = ()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     api_modules: tuple[ModuleApiSurface, ...] = ()
@@ -380,6 +387,10 @@ def _class_metric_sort_key(metric: ClassMetrics) -> tuple[str, int, int, str]:
 
 
 def _dead_candidate_sort_key(item: DeadCandidate) -> tuple[str, int, int, str]:
+    return item.filepath, item.start_line, item.end_line, item.qualname
+
+
+def _nested_definition_sort_key(item: NestedDefinition) -> tuple[str, int, int, str]:
     return item.filepath, item.start_line, item.end_line, item.qualname
 
 

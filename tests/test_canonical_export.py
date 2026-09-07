@@ -205,13 +205,19 @@ _TARGET = "worktree-a"
 # after-run carries facts the before-run did not.  That is correct behaviour
 # for a content address, and it is why the retired-generation literal below
 # moved too - it is the same fixture, re-answered.
-_FIXTURE_RUN_ID = "fe0628270187359d9933ecb784776d95db90f86f98e8132c9c9268bbe6466198"
+# Retiring "4" for policy v5 - a bare-name coincidence no longer confers LIVE
+# and function-local definitions enter the population (criterion C) - moved
+# the run literal from fe062827... and, for the third time, left the
+# artifact digest exactly where it was: the generation is spelled into the
+# dead-code observation family's content-address namespace and nowhere in
+# the projected bytes.
+_FIXTURE_RUN_ID = "c7c543f6d1caac631b929798c37a5dcc0461c1de8aaa64a3d965646095cfbc47"
 _FIXTURE_ARTIFACT = "bb45a956f4be26cf0d6ab311d7e3266a80ff7ac81582d5391941a3a1d96a1538"
-# The generation this fixture answered under before policy v4, and the identity
+# The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
-_RETIRED_LIVENESS_GENERATION = "3"
+_RETIRED_LIVENESS_GENERATION = "4"
 _RETIRED_GENERATION_RUN_ID = (
-    "e5d3722dce78df39e6ab9a387358174a8d33b4574cd4ca80c653f320e43ef8e2"
+    "fe0628270187359d9933ecb784776d95db90f86f98e8132c9c9268bbe6466198"
 )
 
 

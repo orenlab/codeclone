@@ -479,6 +479,36 @@ def _normalize_metrics_families(
             item["qualname"],
         ),
     )
+    # The internal abstentions (liveness policy v5), carried whole like the
+    # lane above: a row that lost its reason or its witness could no longer
+    # say whether it is a bare-name coincidence or a proven escape, nor what
+    # a proof would have to bind.
+    dead_unresolved_internal = sorted(
+        (
+            {
+                "qualname": str(item_map.get("qualname", "")),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "kind": str(item_map.get("kind", "")),
+                "local_name": str(item_map.get("local_name", "")),
+                "reason": str(item_map.get("reason", "")),
+                "witness": str(item_map.get("witness", "")),
+            }
+            for item in _as_sequence(dead_code.get("unresolved_internal"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+        ),
+    )
 
     health = _as_mapping(metrics_map.get("health"))
     health_comparison = _as_mapping(health.get("summary"))
@@ -963,6 +993,16 @@ def _normalize_metrics_families(
                 # derived under, read from the one producer and never
                 # recomputed from the list beside them.
                 "unresolved": _as_int(dead_code_summary.get("unresolved")),
+                # The internal abstentions and the judged population
+                # (liveness policy v5), read from the one producer and never
+                # recomputed from the lists beside them.
+                "unresolved_internal": _as_int(
+                    dead_code_summary.get("unresolved_internal")
+                ),
+                "candidates": _as_int(dead_code_summary.get("candidates")),
+                "nested_candidates": _as_int(
+                    dead_code_summary.get("nested_candidates")
+                ),
                 "world_contract": str(dead_code_summary.get("world_contract", "")),
                 # Carried forward, never recomputed here: the metrics payload
                 # owns this count, and every surface reading this document —
@@ -976,6 +1016,7 @@ def _normalize_metrics_families(
             "suppressed_items": dead_suppressed_items,
             "unresolved_overrides": dead_unresolved_overrides,
             "unresolved": dead_unresolved,
+            "unresolved_internal": dead_unresolved_internal,
             # Projected, not merely computed: the findings builder reads this
             # document rather than the raw metrics payload, so a list left out
             # here is dropped before any finding is built and the detector goes

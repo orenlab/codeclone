@@ -856,6 +856,11 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         "suppressed": 1,
         "unresolved_external_override": 0,
         "unresolved": 0,
+        # Liveness policy v5: the one suppressed candidate IS the judged
+        # population, and nothing in the fixture sits under a function scope.
+        "unresolved_internal": 0,
+        "candidates": 1,
+        "nested_candidates": 0,
         "world_contract": "open",
         "unreachable_statements": 0,
         "live_roots": 0,

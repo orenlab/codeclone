@@ -4942,6 +4942,12 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
         "unreachable_statements": 0,
         "unresolved_external_override": 0,
         "unresolved": 0,
+        # Liveness policy v5: every candidate in both sources carries the
+        # directive, so the judged population IS the suppressed count, and
+        # nothing sits under a function scope.
+        "unresolved_internal": 0,
+        "candidates": suppressed_count,
+        "nested_candidates": 0,
         "world_contract": "open",
         "live_roots": 0,
     }

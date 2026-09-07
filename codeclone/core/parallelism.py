@@ -25,6 +25,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    NestedDefinition,
     RuntimeReachabilityFact,
     SecuritySurface,
     SemanticAuthorityResult,
@@ -52,6 +53,7 @@ from ._types import (
     _dead_candidate_sort_key,
     _group_item_sort_key,
     _module_dep_sort_key,
+    _nested_definition_sort_key,
     _segment_to_group_item,
     _unit_to_group_item,
     structural_findings_required,
@@ -154,6 +156,7 @@ def process(
             class_metrics=discovery.cached_class_metrics,
             module_deps=discovery.cached_module_deps,
             dead_candidates=discovery.cached_dead_candidates,
+            nested_definitions=discovery.cached_nested_definitions,
             referenced_names=discovery.cached_referenced_names,
             runtime_reachability=discovery.cached_runtime_reachability,
             security_surfaces=discovery.cached_security_surfaces,
@@ -185,6 +188,9 @@ def process(
     all_class_metrics: list[ClassMetrics] = list(discovery.cached_class_metrics)
     all_module_deps: list[ModuleDep] = list(discovery.cached_module_deps)
     all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
+    all_nested_definitions: list[NestedDefinition] = list(
+        discovery.cached_nested_definitions
+    )
     all_referenced_names: set[str] = set(discovery.cached_referenced_names)
     all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
     all_declared_exports: set[str] = set(discovery.cached_declared_exports)
@@ -330,6 +336,7 @@ def process(
                 all_class_metrics.extend(result.file_metrics.class_metrics)
                 all_module_deps.extend(result.file_metrics.module_deps)
                 all_dead_candidates.extend(result.file_metrics.dead_candidates)
+                all_nested_definitions.extend(result.file_metrics.nested_definitions)
                 all_referenced_names.update(result.file_metrics.referenced_names)
                 all_referenced_qualnames.update(
                     result.file_metrics.referenced_qualnames
@@ -571,6 +578,9 @@ def process(
         module_deps=tuple(sorted(all_module_deps, key=_module_dep_sort_key)),
         dead_candidates=tuple(
             sorted(all_dead_candidates, key=_dead_candidate_sort_key)
+        ),
+        nested_definitions=tuple(
+            sorted(all_nested_definitions, key=_nested_definition_sort_key)
         ),
         referenced_names=frozenset(all_referenced_names),
         runtime_reachability=tuple(

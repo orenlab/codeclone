@@ -848,7 +848,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
         # ``items`` but are surfaced as their own paginated sibling blocks, so
         # no list's bound is conflated with another's and none is ever an
         # unbounded dump.
-        for lane in ("unresolved_overrides", "unresolved"):
+        for lane in ("unresolved_overrides", "unresolved", "unresolved_internal"):
             if lane in family_payload:
                 payload[lane] = self._paginated_sibling_lane(
                     family_payload.get(lane),

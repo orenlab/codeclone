@@ -80,6 +80,7 @@ from .entries import (
     _docstring_coverage_dict_from_model,
     _function_relationship_facts_dict_from_model,
     _module_dep_dict_from_model,
+    _nested_definition_dict_from_model,
     _new_optional_metrics_payload,
     _normalize_cached_structural_groups,
     _runtime_reachability_dict_from_model,
@@ -1040,6 +1041,14 @@ class Cache:
             api_surface,
         ) = _new_optional_metrics_payload()
         declared_exports: list[str] = []
+        nested_definition_rows = (
+            [
+                _nested_definition_dict_from_model(row, runtime_path)
+                for row in file_metrics.nested_definitions
+            ]
+            if file_metrics is not None
+            else []
+        )
         if file_metrics is not None:
             class_metrics_rows = [
                 _class_metrics_dict_from_model(metric, runtime_path)
@@ -1189,6 +1198,7 @@ class Cache:
                 class_metrics=tuple(class_metrics_rows),
                 module_deps=tuple(module_dep_rows),
                 dead_candidates=tuple(dead_candidate_rows),
+                nested_definitions=tuple(nested_definition_rows),
                 referenced_names=tuple(referenced_names),
                 referenced_qualnames=tuple(referenced_qualnames),
                 import_names=tuple(import_names),

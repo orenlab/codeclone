@@ -283,6 +283,16 @@ def dead_rows_by_qualname(family: dict[str, object]) -> dict[str, dict[str, obje
     return _rows_by_qualname(family, "items")
 
 
+def unresolved_internal_by_qualname(
+    family: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    """The internal abstention (liveness policy v5), in either world: a
+    bare-name coincidence no binding settles, or a decorated value that
+    provably escaped into an opaque callable; each row names its reason."""
+
+    return _rows_by_qualname(family, "unresolved_internal")
+
+
 def metric_family_of(payload: dict[str, object], name: str) -> dict[str, object]:
     """One metric family of an already-witnessed report document."""
 
@@ -326,7 +336,12 @@ def measured_qualnames(payload: dict[str, object]) -> frozenset[str]:
     return frozenset(str(item["qualname"]) for item in items)
 
 
-#: The four verdicts a symbol can carry once a run has seen it.
+#: The four verdicts a symbol can carry once a run has seen it. UNRESOLVED
+#: is one verdict with two wire lanes behind it: the reachability abstention
+#: (``unresolved``, world-dependent) and the internal abstention
+#: (``unresolved_internal``, liveness policy v5, world-invariant). The law
+#: in ``test_dead_code_world_matrix`` names the verdict, not the lane; the
+#: lane-specific pins read the lanes directly.
 VERDICT_LIVE = "live"
 VERDICT_DEAD = "dead"
 VERDICT_UNRESOLVED = "unresolved"
@@ -350,7 +365,9 @@ def liveness_verdict(payload: dict[str, object], qualname: str) -> str:
     family = dead_code_family_of(payload)
     if qualname in dead_qualnames(family):
         return VERDICT_DEAD
-    if qualname in unresolved_by_qualname(family):
+    if qualname in unresolved_by_qualname(family) or (
+        qualname in unresolved_internal_by_qualname(family)
+    ):
         return VERDICT_UNRESOLVED
     if qualname in unresolved_override_by_qualname(family):
         return VERDICT_UNRESOLVED_OVERRIDE

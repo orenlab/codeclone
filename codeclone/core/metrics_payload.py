@@ -32,6 +32,7 @@ from ..models import (
     SecuritySurface,
     SemanticAuthorityResult,
     UnreachableStatementFinding,
+    UnresolvedInternalItem,
     UnresolvedOverrideItem,
     UnresolvedReachabilityItem,
 )
@@ -484,6 +485,24 @@ def build_metrics_report_payload(
             "world_contract": item.world_contract,
         }
 
+    def _serialize_unresolved_internal(
+        item: UnresolvedInternalItem,
+    ) -> dict[str, object]:
+        # Liveness policy v5: identity, location, kind, the symbol's local
+        # name, the reason (a bare-name coincidence, or a proven escape into
+        # an opaque callable) and the witness that spells it. World-invariant,
+        # so no world rides the row.
+        return {
+            "qualname": item.qualname,
+            "filepath": item.filepath,
+            "start_line": item.start_line,
+            "end_line": item.end_line,
+            "kind": item.kind,
+            "local_name": item.local_name,
+            "reason": item.reason,
+            "witness": item.witness,
+        }
+
     def _serialize_unreachable_statement(
         item: UnreachableStatementFinding,
     ) -> dict[str, object]:
@@ -501,6 +520,7 @@ def build_metrics_report_payload(
 
     unresolved_override_items = tuple(project_metrics.unresolved_overrides)
     unresolved_reachability_items = tuple(project_metrics.unresolved_reachability)
+    unresolved_internal_items = tuple(project_metrics.unresolved_internal)
     unreachable_statement_items = tuple(project_metrics.unreachable_statements)
 
     payload = {
@@ -588,6 +608,17 @@ def build_metrics_report_payload(
                 _serialize_unresolved_reachability(item)
                 for item in unresolved_reachability_items
             ],
+            # The third abstention lane (liveness policy v5): the uncertainty
+            # is INSIDE the observed program - a bare name no binding settles,
+            # or a value that provably escaped into an opaque callable - and
+            # each row names which. Its own list and its own counter, for the
+            # reason the second lane has them: an internal uncertainty must
+            # stay distinguishable from both "nothing outside could reach it"
+            # and "CodeClone cannot know", and it holds in BOTH worlds.
+            "unresolved_internal": [
+                _serialize_unresolved_internal(item)
+                for item in unresolved_internal_items
+            ],
             # Same family, deliberately its own list: a dead symbol and an
             # unreachable statement inside a live symbol are different defects
             # and are never added together (39Y Y9). The list stays the
@@ -621,6 +652,14 @@ def build_metrics_report_payload(
                 # "total" would be the claim the tri-state exists to refuse.
                 "unresolved_external_override": len(unresolved_override_items),
                 "unresolved": len(unresolved_reachability_items),
+                "unresolved_internal": len(unresolved_internal_items),
+                # The population the lane judged (liveness policy v5): the
+                # module-level candidates and the function-local ones, so
+                # the inventory is explicit on the wire and a reader can
+                # tell "no nested finding" from "nested definitions were
+                # never counted".
+                "candidates": project_metrics.dead_code_candidates,
+                "nested_candidates": project_metrics.dead_code_nested_candidates,
                 # The world every verdict in this block was derived under.
                 "world_contract": project_metrics.dead_code_world,
                 # The one place this lane is counted. Every surface that shows

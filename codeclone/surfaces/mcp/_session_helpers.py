@@ -141,6 +141,12 @@ def _summary_dead_code_payload(block: Mapping[str, object]) -> dict[str, object]
         # consumer must be able to tell "nothing unresolved" from "the lane
         # was never carried" here too.
         "unresolved": _as_int(block.get("unresolved", 0), 0),
+        # The internal abstentions and the judged population (liveness policy
+        # v5), the same seam and the same reason: "no internal abstention"
+        # must be distinguishable from "the lane was never carried".
+        "unresolved_internal": _as_int(block.get("unresolved_internal", 0), 0),
+        "candidates": _as_int(block.get("candidates", 0), 0),
+        "nested_candidates": _as_int(block.get("nested_candidates", 0), 0),
         "world_contract": str(block.get("world_contract", "")),
         "live_roots": _as_int(block.get("live_roots", 0), 0),
     }

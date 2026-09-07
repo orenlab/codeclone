@@ -19,6 +19,7 @@ from ..models import (
     DEFAULT_DEAD_CODE_WORLD,
     LIVE_ROOT_REASONS,
     ApiSurfaceSnapshot,
+    DeadCandidate,
     DeadItem,
     DependencyCycleDetail,
     DepGraph,
@@ -29,11 +30,13 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    NestedDefinition,
     ProjectMetrics,
     RuntimeReachabilityFact,
     SemanticAuthorityResult,
     UnreachableStatementFinding,
     UnreachableStatementItem,
+    UnresolvedInternalItem,
     UnresolvedOverrideItem,
     UnresolvedReachabilityItem,
     WorldContract,
@@ -220,6 +223,14 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
             "unresolved_reachability",
         ),
         dead_code_world=_result_world_contract(project_fields, "dead_code_world"),
+        unresolved_internal=_result_unresolved_internal(
+            project_fields,
+            "unresolved_internal",
+        ),
+        dead_code_candidates=_result_int(project_fields, "dead_code_candidates"),
+        dead_code_nested_candidates=_result_int(
+            project_fields, "dead_code_nested_candidates"
+        ),
         unreachable_statements=_result_unreachable_statements(
             project_fields,
             "unreachable_statements",
@@ -297,6 +308,14 @@ def _is_tuple_of_unresolved_overrides(
     )
 
 
+def _is_tuple_of_unresolved_internal(
+    value: object,
+) -> TypeGuard[tuple[UnresolvedInternalItem, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, UnresolvedInternalItem) for item in value
+    )
+
+
 def _is_tuple_of_live_root_reasons(
     value: object,
 ) -> TypeGuard[tuple[tuple[str, LiveRootReason], ...]]:
@@ -327,6 +346,14 @@ def _result_unresolved_reachability(
 ) -> tuple[UnresolvedReachabilityItem, ...]:
     value = result.get(key)
     return value if _is_tuple_of_unresolved_reachability(value) else ()
+
+
+def _result_unresolved_internal(
+    result: Mapping[str, object] | MetricResult,
+    key: str,
+) -> tuple[UnresolvedInternalItem, ...]:
+    value = result.get(key)
+    return value if _is_tuple_of_unresolved_internal(value) else ()
 
 
 def _result_world_contract(
@@ -715,6 +742,11 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
     dead_items: tuple[DeadItem, ...] = ()
     unresolved_overrides: tuple[UnresolvedOverrideItem, ...] = ()
     unresolved_reachability: tuple[UnresolvedReachabilityItem, ...] = ()
+    unresolved_internal: tuple[UnresolvedInternalItem, ...] = ()
+    # The population the lane judged: zero when the lane did not run, so a
+    # reader never sees a population beside verdicts that were never made.
+    candidate_count = 0
+    nested_candidate_count = 0
     if not context.skip_dead_code:
         # classify_liveness rather than find_unused: the abstention lane is
         # the point of the rule-3 tri-state, and find_unused discards it by
@@ -730,6 +762,8 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
             class_metrics=context.class_metrics,
             external_reachability=context.external_reachability,
             world_contract=context.dead_code_world,
+            nested_definitions=tuple(context.nested_definitions),
+            module_deps=context.module_deps,
         )
         # No golden-fixture filter on this lane, deliberately. Declared
         # patterns are validated to target tests/ or tests/fixtures/ only, and
@@ -739,6 +773,9 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
         dead_items = classification.dead_items
         unresolved_overrides = classification.unresolved_overrides
         unresolved_reachability = classification.unresolved_reachability
+        unresolved_internal = classification.unresolved_internal
+        candidate_count = len(context.dead_candidates)
+        nested_candidate_count = len(context.nested_definitions)
     return {
         "unreachable_statements": _collect_unreachable_statements(
             context.units,
@@ -749,19 +786,30 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
         "dead_items": dead_items,
         "unresolved_overrides": unresolved_overrides,
         "unresolved_reachability": unresolved_reachability,
+        "unresolved_internal": unresolved_internal,
+        "dead_code_candidates": candidate_count,
+        "dead_code_nested_candidates": nested_candidate_count,
         # Config, not measurement: uttered whether or not the lane ran, so a
         # reader always learns which world the (possibly empty) verdicts
         # belong to.
         "dead_code_world": context.dead_code_world,
+        # Both populations: a nested ``@register`` hook is rooted by the same
+        # rule as a module-level one, and the evidence lane names it too.
         "live_root_reasons": tuple(
             sorted(
-                (candidate.qualname, candidate.live_root_reason)
-                for candidate in context.dead_candidates
-                if candidate.live_root_reason is not None
+                (subject.qualname, subject.live_root_reason)
+                for subject in _rooted_subjects(context)
+                if subject.live_root_reason is not None
             )
         ),
         "runtime_reachability": tuple(context.runtime_reachability),
     }
+
+
+def _rooted_subjects(
+    context: MetricProjectContext,
+) -> tuple[DeadCandidate | NestedDefinition, ...]:
+    return (*context.dead_candidates, *context.nested_definitions)
 
 
 def _compute_dead_code_family(context: MetricProjectContext) -> MetricResult:
@@ -788,6 +836,14 @@ def _aggregate_dead_code_family(results: list[MetricResult]) -> MetricAggregate:
             "unresolved_reachability": _result_unresolved_reachability(
                 result,
                 "unresolved_reachability",
+            ),
+            "unresolved_internal": _result_unresolved_internal(
+                result,
+                "unresolved_internal",
+            ),
+            "dead_code_candidates": _result_int(result, "dead_code_candidates"),
+            "dead_code_nested_candidates": _result_int(
+                result, "dead_code_nested_candidates"
             ),
             "dead_code_world": _result_world_contract(result, "dead_code_world"),
             "live_root_reasons": (

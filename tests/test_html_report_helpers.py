@@ -2634,3 +2634,113 @@ def test_pygments_highlight_refuses_unknown_languages(
 
     monkeypatch.setitem(snippets_mod._LEXERS, "python", "NotARealLexer")
     assert snippets_mod._try_pygments("x = 1", language="python") is None
+
+
+# ---------------------------------------------------------------------------
+# The HTML panel reads the lane's counter from the one producer.
+#
+# This pin belongs to the opaque_internal_escape lane, but it lives here and
+# not beside that lane's other tests: `_test_subject_ring` gives a test module
+# the highest ring among its imports, so importing the r4 HTML section from
+# tests/test_dead_code_opaque_escape.py reclassified that whole r2 module as r4
+# and turned its honest r2 imports into boundary violations. The Phase 39S
+# ratchet is shrink-only, so the r4 assertion moves to an r4 module instead.
+# ---------------------------------------------------------------------------
+
+
+def test_the_abstention_card_is_the_only_place_the_panel_shows_them() -> None:
+    """The card owns the abstention display; the banner points and counts nothing.
+
+    Two surfaces used to say the same number: prose in the banner and an
+    ``abstained`` micro-badge repeating the card's own value. The card is now
+    the single owner, and its detail decomposes the total by the uncertainty
+    that produced it instead of restating it -- which is also the home the
+    ``nested_candidates`` population never had.
+    """
+    from types import SimpleNamespace
+
+    from codeclone.contracts import REPORT_SCHEMA_VERSION
+    from codeclone.report.html.sections._dead_code import render_dead_code_panel
+
+    def context(unresolved_internal: int) -> SimpleNamespace:
+        rows = [
+            {"qualname": f"pkg.mod:a{n}", "reason": "ambiguous_internal_binding"}
+            for n in range(max(0, unresolved_internal - 1))
+        ] + (
+            [{"qualname": "pkg.mod:esc", "reason": "opaque_internal_escape"}]
+            if unresolved_internal
+            else []
+        )
+        return SimpleNamespace(
+            clone_groups_total=0,
+            clone_summary={"new": 0, "known": 0, "unavailable": 0},
+            complexity_map={"summary": {"high_risk": 0, "average": 0.0, "max": 0}},
+            coupling_map={"summary": {"high_risk": 0, "average": 0.0, "max": 0}},
+            cohesion_map={"summary": {"low_cohesion": 0, "average": 0.0, "max": 0}},
+            dead_code_map={
+                "summary": {
+                    "total": 1,
+                    "high_confidence": 1,
+                    "suppressed": 0,
+                    "unresolved_internal": unresolved_internal,
+                    "nested_candidates": 12 if unresolved_internal else 0,
+                },
+                "unresolved_internal": rows,
+                "items": [
+                    {
+                        "qualname": "pkg.mod:unused",
+                        "filepath": "pkg/mod.py",
+                        "start_line": 5,
+                        "kind": "function",
+                        "confidence": "high",
+                    }
+                ],
+                "suppressed_items": [],
+            },
+            dependencies_map={"cycles": [], "max_depth": 0},
+            health_map={"score": 82, "grade": "B", "dimensions": {}},
+            metrics_available=True,
+            structural_findings=(),
+            suggestions=(),
+            metrics_diff=None,
+            func_sorted=(),
+            block_sorted=(),
+            segment_sorted=(),
+            new_func_keys=frozenset(),
+            new_block_keys=frozenset(),
+            overview_data={"source_scope_breakdown": {"production": 1, "tests": 0}},
+            bare_qualname=lambda qualname, _filepath: qualname.rsplit(":", 1)[-1],
+            relative_path=lambda filepath: filepath,
+            meta={},
+            baseline_meta={},
+            cache_meta={},
+            metrics_baseline_meta={},
+            runtime_meta={},
+            report_document={},
+            integrity_map={},
+            report_schema_version=REPORT_SCHEMA_VERSION,
+            report_generated_at="2026-09-05T16:00:00Z",
+        )
+
+    with_rows = render_dead_code_panel(cast("Any", context(3)))
+    assert "Unresolved internal" in with_rows
+    assert '<div class="meta-value meta-value--muted">3</div>' in with_rows
+    # Decomposition, not restatement: which uncertainty, and how large the
+    # examined population was. 2 + 1 = the 3 on the card.
+    for value, label in (("2", "ambiguous binding"), ("1", "opaque escape")):
+        assert (
+            f'<span class="kpi-micro-val">{value}</span>'
+            f'<span class="kpi-micro-lbl">{label}</span>'
+        ) in with_rows, label
+    assert (
+        '<span class="kpi-micro-val">12</span>'
+        '<span class="kpi-micro-lbl">nested examined</span>'
+    ) in with_rows
+    # The banner points at abstentions; counting them again is the base rule
+    # this panel had broken, and the forbidden caption stays forbidden.
+    assert 'kpi-micro-lbl">abstained<' not in with_rows
+    assert "3 unresolved internal" not in with_rows
+
+    without_rows = render_dead_code_panel(cast("Any", context(0)))
+    assert "unresolved internal:" not in without_rows
+    assert "nested examined" not in without_rows

@@ -65,6 +65,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
+    NestedDefinition,
     ProjectMetrics,
     RuntimeReachabilityFact,
     SecuritySurface,
@@ -127,6 +128,7 @@ def compute_project_metrics(
     dead_candidates: Sequence[DeadCandidate],
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
+    nested_definitions: Sequence[NestedDefinition] = (),
     runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
     function_relationship_facts: Sequence[FunctionRelationshipFacts] = (),
     security_surfaces: Sequence[SecuritySurface] = (),
@@ -157,6 +159,7 @@ def compute_project_metrics(
         class_metrics=resolve_project_class_coupling(tuple(class_metrics)),
         module_deps=tuple(module_deps),
         dead_candidates=tuple(dead_candidates),
+        nested_definitions=tuple(nested_definitions),
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
         test_reference_sources=collect_test_reference_sources(
@@ -476,6 +479,7 @@ def analyze(
             class_metrics=class_metrics,
             module_deps=processing.module_deps,
             dead_candidates=dead_candidates,
+            nested_definitions=processing.nested_definitions,
             referenced_names=processing.referenced_names,
             referenced_qualnames=referenced_qualnames,
             runtime_reachability=processing.runtime_reachability,
@@ -506,6 +510,8 @@ def analyze(
                 function_relationship_facts=processing.function_relationship_facts,
                 class_metrics=class_metrics,
                 module_registry=discovery.module_registry,
+                nested_definitions=processing.nested_definitions,
+                module_deps=processing.module_deps,
             )
         suggestions = compute_suggestions(
             project_metrics=project_metrics,
@@ -579,6 +585,7 @@ def analyze(
                 module_deps=processing.module_deps,
                 api_modules=api_modules,
                 dead_candidates=dead_candidates,
+                nested_definitions=processing.nested_definitions,
                 abstained_qualnames=abstained_qualnames,
                 referenced_names=processing.referenced_names,
                 referenced_qualnames=processing.referenced_qualnames,

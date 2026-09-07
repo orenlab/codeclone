@@ -10,7 +10,7 @@ import ast
 import tokenize
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NamedTuple, TypeGuard
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypeGuard
 
 from .. import qualnames as _qualnames
 from ..models import (
@@ -32,11 +32,14 @@ from ..models import (
     ImportObservation,
     ModuleDep,
     ModuleRegistryHandle,
+    NestedDefinition,
+    NestedDefinitionKind,
     RelationshipOriginLane,
     RelationshipRecord,
     ResolvedSourceIdentity,
     SemanticEvent,
     emit_live_root_reason,
+    escape_witness,
     validate_resolution_rule,
 )
 from ..semantics.events import SemanticEventCollector
@@ -57,7 +60,7 @@ from .suppressions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from .suppressions import SuppressionTargetKey
 
@@ -350,6 +353,15 @@ class _ModuleWalkState:
     imported_module_aliases: dict[str, str] = field(default_factory=dict)
     external_symbol_aliases: set[str] = field(default_factory=set)
     external_module_aliases: set[str] = field(default_factory=set)
+    # Liveness policy v5: the names an import binds whose loads the lexical
+    # pass may SETTLE - a ``from`` import the registry placed inside the
+    # analysis root (the imported-symbol lane then answers for the load), or
+    # any ``import`` statement (the name denotes a module object, never a
+    # definition). A ``from`` import that resolved external, or not at all,
+    # is deliberately absent: the registry calls a script-style sibling
+    # module external too, and a load bound by such an import must stay a
+    # bare-name signal rather than be settled into silence.
+    internal_import_aliases: set[str] = field(default_factory=set)
     liveness_root_reasons: dict[str, _LocalLivenessRootReason] = field(
         default_factory=dict
     )
@@ -508,6 +520,7 @@ def _collect_import_node(
         )
         if observation.resolution == "external":
             state.external_module_aliases.add(alias_name)
+        state.internal_import_aliases.add(alias_name)
         if collect_referenced_names:
             state.imported_module_aliases[alias_name] = alias.name
         if alias.name in _PROTOCOL_MODULE_NAMES:
@@ -742,6 +755,10 @@ def _collect_import_from_node(
         state.external_symbol_aliases.update(
             alias.asname or alias.name for alias in node.names if alias.name != "*"
         )
+    elif primary_target:
+        state.internal_import_aliases.update(
+            alias.asname or alias.name for alias in node.names if alias.name != "*"
+        )
 
     if not collect_referenced_names or not primary_target:
         return
@@ -867,13 +884,903 @@ def _collect_load_reference_node(
     node: ast.AST,
     state: _ModuleWalkState,
 ) -> None:
+    # A loaded Name is kept for the imported-symbol lane and no longer written
+    # to ``referenced_names`` here: under liveness policy v5 the lexical pass
+    # below decides which loads bind a definition of this module (evidence),
+    # which are settled by a local, a parameter or a resolved import (neither
+    # evidence nor signal), and which no scope settles - only those reach
+    # ``referenced_names``. An attribute load stays a signal: its receiver
+    # type is unknown, so the name really is loaded against every candidate
+    # spelled that way.
     if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-        state.referenced_names.add(node.id)
         state.name_nodes.append(node)
         return
     if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
         state.referenced_names.add(node.attr)
         state.attr_nodes.append(node)
+
+
+# --------------------------------------------------------------------------
+# Lexical binding (liveness policy v5, criterion C).
+#
+# A loaded bare name used to be recorded as a reference to EVERY definition
+# that shared its spelling, and that coincidence conferred LIVE. This pass
+# resolves each Name load through Python's scoping rules instead - the local
+# scope, the enclosing function scopes, the module, with a class scope
+# visible only to loads written directly in its body - and answers three
+# questions at once: which definitions of this module a load provably binds
+# (evidence, module-level or function-local), which loads no scope settles
+# (the bare-name signal, which now abstains instead of conferring LIVE), and
+# which definitions sit under a function scope at all (the nested population
+# that produced zero symbols under policy "4").
+#
+# Flow-insensitive on purpose, and biased in one direction only: a load that
+# cannot be settled stays a signal, so imprecision here can move a symbol
+# from LIVE to UNRESOLVED and never to DEAD. The one flow hazard that could
+# settle a load wrongly - ``helper = helper`` in a class body reads the
+# enclosing ``helper`` before rebinding it - is closed by construction: a
+# class-body binding that is not a definition never settles a load, the
+# search continues outward.
+
+# Statement shapes that exist only on newer interpreters, resolved once: the
+# supported matrix starts at 3.10, where ``TryStar`` (3.11) and ``TypeAlias``
+# (3.12) are absent, and a reader must neither crash on them nor pretend
+# they cannot occur.
+_TRY_STATEMENTS: tuple[type[ast.stmt], ...] = tuple(
+    statement
+    for statement in (ast.Try, getattr(ast, "TryStar", None))
+    if statement is not None
+)
+_TYPE_ALIAS_STATEMENT: type[ast.stmt] | None = getattr(ast, "TypeAlias", None)
+_LexicalScopeKind = Literal["module", "class", "function", "lambda", "comprehension"]
+_LexicalResolution = Literal["definition", "import", "local", "unbound", "ambiguous"]
+_BINDING_DEFINITION: Final = "def:"
+_BINDING_LOCAL: Final = "local"
+_BINDING_IMPORT: Final = "import"
+_BINDING_TYPE_PARAM: Final = "type_param"
+_LOCALS_BOUNDARY: Final = ".<locals>."
+
+
+class _NestedDeclaration(NamedTuple):
+    """One definition under a function scope, as the walk discovers it.
+
+    ``path`` is the module-local lexical path in CPython's ``__qualname__``
+    spelling; ``parent_path`` is the path of the definition whose scope
+    directly encloses this one (a function, or a class nested in one).
+    """
+
+    path: str
+    parent_path: str
+    node: _NamedDeclarationNode
+    kind: NestedDefinitionKind
+
+
+class _LexicalScope:
+    """One scope of the lexical chain, mutated in place while it is built.
+
+    A slots class rather than a dataclass, for the reason ``QualnameCollector``
+    is one: a private working shape of the walk is not a model, and the
+    phase-39S ratchet keeps dataclasses in the model store.
+    """
+
+    __slots__ = (
+        "binding_count",
+        "bindings",
+        "global_names",
+        "kind",
+        "loads",
+        "nonlocal_names",
+        "parameters",
+        "parent",
+        "path",
+        "simple_assignments",
+        "star_import",
+    )
+
+    def __init__(
+        self,
+        kind: _LexicalScopeKind,
+        parent: _LexicalScope | None,
+        path: str,
+    ) -> None:
+        self.kind = kind
+        self.parent = parent
+        #: Lexical path of the definition that owns this scope; "" at module
+        #: scope, and inherited by lambda and comprehension scopes.
+        self.path = path
+        self.bindings: dict[str, set[str]] = {}
+        self.global_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
+        self.loads: list[str] = []
+        self.star_import = False
+        #: How many times each name is bound here - a parameter, a store, a
+        #: definition, an import alias each count once - so the escape proof
+        #: can tell a name bound exactly once from one it cannot attribute to
+        #: a single binding.
+        self.binding_count: dict[str, int] = {}
+        #: Parameter names of a function scope: values the caller supplied.
+        self.parameters: set[str] = set()
+        #: The value of every single-Name ``name = <expr>`` and
+        #: ``name: T = <expr>`` statement, per name, for the escape proof's
+        #: one-hop reading of a callee bound by assignment.
+        self.simple_assignments: dict[str, list[ast.expr]] = {}
+
+
+def _lexical_child_path(scope: _LexicalScope, name: str) -> str:
+    if scope.kind == "module":
+        return name
+    if scope.kind == "class":
+        return f"{scope.path}.{name}"
+    return f"{scope.path}{_LOCALS_BOUNDARY}{name}"
+
+
+def _lexical_module_scope(scope: _LexicalScope) -> _LexicalScope:
+    while scope.parent is not None:
+        scope = scope.parent
+    return scope
+
+
+def _lexical_binding_target(scope: _LexicalScope, name: str) -> _LexicalScope:
+    """The scope a binding of ``name`` written in ``scope`` lands in.
+
+    ``global x`` inside a function makes every binding of ``x`` there a
+    module binding; the declaration is read before the body, so the routing
+    is exact rather than order-dependent.
+    """
+    if scope.kind in {"function", "lambda"} and name in scope.global_names:
+        return _lexical_module_scope(scope)
+    return scope
+
+
+def _lexical_bind(scope: _LexicalScope, name: str, kind: str) -> None:
+    scope = _lexical_binding_target(scope, name)
+    scope.bindings.setdefault(name, set()).add(kind)
+    scope.binding_count[name] = scope.binding_count.get(name, 0) + 1
+
+
+def _lexical_binding_scope(scope: _LexicalScope) -> _LexicalScope:
+    """Where a walrus target binds: the nearest non-comprehension scope."""
+    while scope.kind == "comprehension" and scope.parent is not None:
+        scope = scope.parent
+    return scope
+
+
+def _lexical_arguments(args: ast.arguments) -> tuple[ast.arg, ...]:
+    return tuple(
+        arg
+        for arg in (
+            *args.posonlyargs,
+            *args.args,
+            args.vararg,
+            *args.kwonlyargs,
+            args.kwarg,
+        )
+        if arg is not None
+    )
+
+
+def _lexical_defaults(args: ast.arguments) -> tuple[ast.expr, ...]:
+    return (
+        *args.defaults,
+        *(default for default in args.kw_defaults if default is not None),
+    )
+
+
+class _LexicalScopeBuilder:
+    """One pass over a module: scopes, bindings, loads, nested definitions."""
+
+    __slots__ = (
+        "declarations",
+        "definition_counts",
+        "definition_nodes",
+        "definitions",
+        "enclosing_scopes",
+        "own_scopes",
+        "scopes",
+    )
+
+    def __init__(self) -> None:
+        self.scopes: list[_LexicalScope] = []
+        self.declarations: list[_NestedDeclaration] = []
+        #: Every definition the pass declared, in source order, with its
+        #: module-local lexical path; the escape proof walks these.
+        self.definitions: list[tuple[str, _NamedDeclarationNode]] = []
+        #: Path -> node (the last declaration wins) and how many declarations
+        #: spelled that path: a registrar spelled twice is no single callable.
+        self.definition_nodes: dict[str, _NamedDeclarationNode] = {}
+        self.definition_counts: dict[str, int] = {}
+        #: Node id -> the scope its decorators are evaluated in, and the scope
+        #: the definition itself owns.
+        self.enclosing_scopes: dict[int, _LexicalScope] = {}
+        self.own_scopes: dict[int, _LexicalScope] = {}
+
+    def build(self, tree: ast.AST) -> _LexicalScope:
+        module = _LexicalScope("module", None, "")
+        self.scopes.append(module)
+        statements = [
+            child for child in ast.iter_child_nodes(tree) if isinstance(child, ast.stmt)
+        ]
+        self._visit_statements(statements, module)
+        return module
+
+    # -- statements ---------------------------------------------------------
+
+    def _visit_statements(self, body: Sequence[ast.stmt], scope: _LexicalScope) -> None:
+        # Declarations are read before the body they govern: ``global`` and
+        # ``nonlocal`` are statements, and a binding above them in the source
+        # is still a global binding at runtime.
+        for statement in body:
+            if isinstance(statement, ast.Global):
+                scope.global_names.update(statement.names)
+            elif isinstance(statement, ast.Nonlocal):
+                scope.nonlocal_names.update(statement.names)
+        for statement in body:
+            self._visit_statement(statement, scope)
+
+    def _visit_statement(self, node: ast.stmt, scope: _LexicalScope) -> None:
+        self._record_simple_assignment(node, scope)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            self._visit_function(node, scope)
+        elif isinstance(node, ast.ClassDef):
+            self._visit_class(node, scope)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name.split(".", 1)[0]
+                _lexical_bind(scope, name, _BINDING_IMPORT)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "*":
+                    _lexical_module_scope(scope).star_import = True
+                else:
+                    _lexical_bind(scope, alias.asname or alias.name, _BINDING_IMPORT)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            return
+        elif isinstance(node, _TRY_STATEMENTS):
+            # ``ast.Try`` and, from 3.11, ``ast.TryStar``: the same four parts,
+            # read by name so one branch covers both without a second shape.
+            self._visit_statements(getattr(node, "body", []), scope)
+            for handler in getattr(node, "handlers", []):
+                if handler.type is not None:
+                    self._visit_expression(handler.type, scope)
+                if handler.name:
+                    _lexical_bind(scope, handler.name, _BINDING_LOCAL)
+                self._visit_statements(handler.body, scope)
+            self._visit_statements(getattr(node, "orelse", []), scope)
+            self._visit_statements(getattr(node, "finalbody", []), scope)
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            for item in node.items:
+                self._visit_expression(item.context_expr, scope)
+                if item.optional_vars is not None:
+                    self._visit_expression(item.optional_vars, scope)
+            self._visit_statements(node.body, scope)
+        elif isinstance(node, ast.Match):
+            self._visit_expression(node.subject, scope)
+            for case in node.cases:
+                self._visit_pattern(case.pattern, scope)
+                if case.guard is not None:
+                    self._visit_expression(case.guard, scope)
+                self._visit_statements(case.body, scope)
+        elif _TYPE_ALIAS_STATEMENT is not None and isinstance(
+            node, _TYPE_ALIAS_STATEMENT
+        ):
+            # ``type X[T] = ...`` (3.12): the name binds like an assignment,
+            # the parameters like type parameters, the value is an expression.
+            # Read by name with a default because the statement type does
+            # not exist on every supported interpreter.
+            alias_name = getattr(node, "name", None)
+            if isinstance(alias_name, ast.expr):
+                self._visit_expression(alias_name, scope)
+            for parameter in getattr(node, "type_params", []):
+                _lexical_bind(scope, parameter.name, _BINDING_TYPE_PARAM)
+            alias_value = getattr(node, "value", None)
+            if isinstance(alias_value, ast.expr):
+                self._visit_expression(alias_value, scope)
+        else:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.stmt):
+                    self._visit_statement(child, scope)
+                elif isinstance(child, ast.expr):
+                    self._visit_expression(child, scope)
+
+    def _visit_pattern(self, pattern: ast.pattern, scope: _LexicalScope) -> None:
+        if isinstance(pattern, ast.MatchAs | ast.MatchStar) and pattern.name:
+            _lexical_bind(scope, pattern.name, _BINDING_LOCAL)
+        elif isinstance(pattern, ast.MatchMapping) and pattern.rest:
+            _lexical_bind(scope, pattern.rest, _BINDING_LOCAL)
+        for child in ast.iter_child_nodes(pattern):
+            if isinstance(child, ast.pattern):
+                self._visit_pattern(child, scope)
+            elif isinstance(child, ast.expr):
+                self._visit_expression(child, scope)
+
+    def _declare(
+        self,
+        node: _NamedDeclarationNode,
+        scope: _LexicalScope,
+        kind: NestedDefinitionKind,
+    ) -> str:
+        path = _lexical_child_path(scope, node.name)
+        _lexical_bind(scope, node.name, f"{_BINDING_DEFINITION}{path}")
+        self.definitions.append((path, node))
+        self.definition_nodes[path] = node
+        self.definition_counts[path] = self.definition_counts.get(path, 0) + 1
+        self.enclosing_scopes[id(node)] = scope
+        if _LOCALS_BOUNDARY in path:
+            self.declarations.append(_NestedDeclaration(path, scope.path, node, kind))
+        return path
+
+    def _record_simple_assignment(self, node: ast.stmt, scope: _LexicalScope) -> None:
+        """Keep the value of a single-Name assignment beside its binding.
+
+        Only the shapes the escape proof reads: ``name = <expr>`` with one
+        Name target, and ``name: T = <expr>``. Unpacking, attribute and
+        subscript targets, loop and ``with`` targets bind through
+        ``_lexical_bind`` alone and stay unattributable on purpose.
+        """
+        if isinstance(node, ast.Assign):
+            if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+                return
+            name, value = node.targets[0].id, node.value
+        elif isinstance(node, ast.AnnAssign):
+            if not isinstance(node.target, ast.Name) or node.value is None:
+                return
+            name, value = node.target.id, node.value
+        else:
+            return
+        owner = _lexical_binding_target(scope, name)
+        owner.simple_assignments.setdefault(name, []).append(value)
+
+    def _visit_function(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef, scope: _LexicalScope
+    ) -> None:
+        path = self._declare(
+            node, scope, "method" if scope.kind == "class" else "function"
+        )
+        # Decorators, defaults, annotations and the return annotation are
+        # evaluated in the ENCLOSING scope: a parameter named like a decorator
+        # must not capture the decorator's load.
+        for decorator in node.decorator_list:
+            self._visit_expression(decorator, scope)
+        for default in _lexical_defaults(node.args):
+            self._visit_expression(default, scope)
+        for argument in _lexical_arguments(node.args):
+            if argument.annotation is not None:
+                self._visit_expression(argument.annotation, scope)
+        if node.returns is not None:
+            self._visit_expression(node.returns, scope)
+        function = _LexicalScope("function", scope, path)
+        self.scopes.append(function)
+        self.own_scopes[id(node)] = function
+        for parameter in getattr(node, "type_params", ()):
+            _lexical_bind(function, parameter.name, _BINDING_TYPE_PARAM)
+        for argument in _lexical_arguments(node.args):
+            _lexical_bind(function, argument.arg, _BINDING_LOCAL)
+            function.parameters.add(argument.arg)
+        self._visit_statements(node.body, function)
+
+    def _visit_class(self, node: ast.ClassDef, scope: _LexicalScope) -> None:
+        path = self._declare(node, scope, "class")
+        for decorator in node.decorator_list:
+            self._visit_expression(decorator, scope)
+        for base in node.bases:
+            self._visit_expression(base, scope)
+        for keyword in node.keywords:
+            self._visit_expression(keyword.value, scope)
+        klass = _LexicalScope("class", scope, path)
+        self.scopes.append(klass)
+        self.own_scopes[id(node)] = klass
+        for parameter in getattr(node, "type_params", ()):
+            _lexical_bind(klass, parameter.name, _BINDING_TYPE_PARAM)
+        self._visit_statements(node.body, klass)
+
+    # -- expressions --------------------------------------------------------
+
+    def _visit_expression(self, node: ast.expr, scope: _LexicalScope) -> None:
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load):
+                scope.loads.append(node.id)
+            else:
+                _lexical_bind(scope, node.id, _BINDING_LOCAL)
+        elif isinstance(node, ast.Attribute):
+            # The attribute name is the receiver-blind signal
+            # ``_collect_load_reference_node`` already records.
+            self._visit_expression(node.value, scope)
+        elif isinstance(node, ast.NamedExpr):
+            owner = _lexical_binding_scope(scope)
+            if isinstance(node.target, ast.Name):
+                _lexical_bind(owner, node.target.id, _BINDING_LOCAL)
+            self._visit_expression(node.value, scope)
+        elif isinstance(node, ast.Lambda):
+            for default in _lexical_defaults(node.args):
+                self._visit_expression(default, scope)
+            inner = _LexicalScope("lambda", scope, scope.path)
+            self.scopes.append(inner)
+            for argument in _lexical_arguments(node.args):
+                _lexical_bind(inner, argument.arg, _BINDING_LOCAL)
+            self._visit_expression(node.body, inner)
+        elif isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp):
+            inner = self._visit_generators(node.generators, scope)
+            self._visit_expression(node.elt, inner)
+        elif isinstance(node, ast.DictComp):
+            inner = self._visit_generators(node.generators, scope)
+            self._visit_expression(node.key, inner)
+            self._visit_expression(node.value, inner)
+        else:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.expr):
+                    self._visit_expression(child, scope)
+                elif isinstance(child, ast.keyword):
+                    self._visit_expression(child.value, scope)
+
+    def _visit_generators(
+        self, generators: Sequence[ast.comprehension], scope: _LexicalScope
+    ) -> _LexicalScope:
+        # The outermost iterable is evaluated in the enclosing scope; every
+        # target binds in the comprehension's own scope (Python 3 semantics).
+        inner = _LexicalScope("comprehension", scope, scope.path)
+        self.scopes.append(inner)
+        for index, generator in enumerate(generators):
+            self._visit_expression(generator.iter, scope if index == 0 else inner)
+            self._visit_expression(generator.target, inner)
+            for condition in generator.ifs:
+                self._visit_expression(condition, inner)
+        return inner
+
+
+def _classify_lexical_binding(kinds: set[str]) -> tuple[_LexicalResolution, str | None]:
+    definitions = {
+        kind.removeprefix(_BINDING_DEFINITION)
+        for kind in kinds
+        if kind.startswith(_BINDING_DEFINITION)
+    }
+    others = {kind for kind in kinds if not kind.startswith(_BINDING_DEFINITION)}
+    if len(definitions) == 1 and not others:
+        return "definition", next(iter(definitions))
+    if definitions:
+        # A name the scope binds both as a definition and as something else
+        # (``helper = decorate(helper)``) has no single binding a load can be
+        # attributed to; it stays a signal.
+        return "ambiguous", None
+    if _BINDING_IMPORT in others:
+        return "import", None
+    return "local", None
+
+
+def _resolve_lexical_load(
+    name: str, scope: _LexicalScope
+) -> tuple[_LexicalResolution, str | None]:
+    """Python's lookup for one loaded name, over the scope chain."""
+
+    current: _LexicalScope | None = scope
+    innermost = True
+    while current is not None:
+        if current.kind == "class" and not innermost:
+            current = current.parent
+            continue
+        if current.kind in {"function", "lambda"}:
+            if name in current.global_names:
+                kinds = _lexical_module_scope(current).bindings.get(name)
+                return _classify_lexical_binding(kinds) if kinds else ("unbound", None)
+            if name in current.nonlocal_names:
+                current = current.parent
+                innermost = False
+                continue
+        kinds = current.bindings.get(name)
+        if kinds is not None and not (
+            current.kind == "class"
+            and not any(kind.startswith(_BINDING_DEFINITION) for kind in kinds)
+        ):
+            return _classify_lexical_binding(kinds)
+        innermost = False
+        current = current.parent
+    return "unbound", None
+
+
+class _LexicalBindingFacts(NamedTuple):
+    #: Definitions of this module a load provably binds, as module-local
+    #: lexical paths; self-references excluded.
+    bound_definition_paths: frozenset[str]
+    #: Loaded names no scope of this module settles.
+    unsettled_names: frozenset[str]
+    #: Every definition under a function scope, in source order.
+    nested_declarations: tuple[_NestedDeclaration, ...]
+    #: Module-local lexical path -> the proven opaque-escape flow of the
+    #: definition's value (liveness policy v5); absent when none was proven.
+    escape_witnesses: Mapping[str, str]
+
+
+def _collect_lexical_binding_facts(
+    tree: ast.AST,
+    *,
+    settled_import_names: frozenset[str],
+    external_import_names: frozenset[str] = frozenset(),
+) -> _LexicalBindingFacts:
+    """Run the lexical pass; ``settled_import_names`` are the aliases a
+    resolved import binds, whose loads the imported-symbol lane already
+    answers for. A load bound by any other import - external, or one the
+    registry could not place, which is the shape of a script-style sibling
+    module - stays a signal: the resolver knows the load is not this
+    module's, not where it goes."""
+
+    builder = _LexicalScopeBuilder()
+    builder.build(tree)
+    bound: set[str] = set()
+    unsettled: set[str] = set()
+    for scope in builder.scopes:
+        for name in scope.loads:
+            resolution, path = _resolve_lexical_load(name, scope)
+            if resolution == "definition":
+                # A definition loading its own name is not its own consumer:
+                # neither evidence nor a signal.
+                if path != scope.path:
+                    bound.add(path or "")
+            elif resolution == "import":
+                if name not in settled_import_names:
+                    unsettled.add(name)
+            elif resolution != "local":
+                unsettled.add(name)
+    return _LexicalBindingFacts(
+        bound_definition_paths=frozenset(bound),
+        unsettled_names=frozenset(unsettled),
+        nested_declarations=tuple(builder.declarations),
+        escape_witnesses=_collect_opaque_escape_witnesses(
+            builder,
+            internal_import_names=settled_import_names,
+            external_import_names=external_import_names,
+        ),
+    )
+
+
+# --------------------------------------------------------------------------
+# Opaque internal escape (liveness policy v5, the same generation).
+#
+# Measured on this repository at 5f35a50f: eight MCP resource handlers carry
+# a bare ``@resource(...)`` whose name binds to a function-local
+# ``def resource`` that hands the decorated function to ``mcp.resource(...)``
+# - a callable this analyzer resolves to no definition - and the lane called
+# them DEAD. The rule below does not prove such a symbol live; it proves
+# DEAD may no longer be asserted:
+#
+#     decorated definition
+#     + the innermost decorator lexically resolves to a local callable
+#     + the decorated value provably flows into an opaque callable
+#     + the analyzer cannot establish what that consumer does
+#     ----------------------------------------------------------------
+#     DEAD is forbidden -> UNRESOLVED (opaque_internal_escape), both worlds
+#
+# Narrow and constructive by design, not a general escape engine. The proof
+# follows exactly one registrar, at most one returned inner function, and a
+# DIRECT argument position; every statement it walks past is straight-line;
+# the callee root is read through at most three assignment aliases. Where
+# the proof cannot be completed - a registration behind a conditional, two
+# returns, a re-assigned parameter, a value routed through a call the
+# analyzer CAN resolve - nothing is emitted and the symbol stays dead: the
+# failure to avoid is "when in doubt, abstain", which erodes the dead lane.
+# Every witness names the proven flow; no name coincidence can produce one.
+
+_ESCAPE_STRAIGHT_LINE_STATEMENTS: tuple[type[ast.stmt], ...] = (
+    ast.Expr,
+    ast.Assign,
+    ast.AnnAssign,
+    ast.AugAssign,
+    ast.Pass,
+    ast.Import,
+    ast.ImportFrom,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Assert,
+    # Declarations, not control flow; a declaration of the PARAMETER itself
+    # is refused separately by ``_escape_parameter_is_stable``.
+    ast.Global,
+    ast.Nonlocal,
+)
+#: How many ``name = <alias>`` hops the callee classification follows before
+#: it gives up (``unknown``, which never fires).
+_ESCAPE_ALIAS_HOPS: Final = 3
+_EscapeCallee = Literal["resolvable", "opaque", "unknown"]
+
+
+def _collect_opaque_escape_witnesses(
+    builder: _LexicalScopeBuilder,
+    *,
+    internal_import_names: frozenset[str],
+    external_import_names: frozenset[str],
+) -> dict[str, str]:
+    """Module-local lexical path -> witness, for every definition whose
+    innermost decorator binds to a local registrar with a proven flow of the
+    decorated value into an opaque callable. Keyed on the BINDING the
+    decorator's name resolves to, never on the name."""
+
+    witnesses: dict[str, str] = {}
+    for path, node in builder.definitions:
+        witness = _escape_witness_for_definition(
+            node,
+            builder,
+            internal_import_names=internal_import_names,
+            external_import_names=external_import_names,
+        )
+        if witness is not None:
+            witnesses[path] = witness
+    return witnesses
+
+
+def _escape_witness_for_definition(
+    node: _NamedDeclarationNode,
+    builder: _LexicalScopeBuilder,
+    *,
+    internal_import_names: frozenset[str],
+    external_import_names: frozenset[str],
+) -> str | None:
+    if not node.decorator_list:
+        return None
+    # Only the innermost decorator receives the definition itself; an outer
+    # one receives whatever the inner returned, which is not this value.
+    decorator = node.decorator_list[-1]
+    root = decorator.func if isinstance(decorator, ast.Call) else decorator
+    if not isinstance(root, ast.Name):
+        return None
+    resolution, registrar_path = _resolve_lexical_load(
+        root.id, builder.enclosing_scopes[id(node)]
+    )
+    if resolution != "definition" or registrar_path is None:
+        return None
+    if builder.definition_counts.get(registrar_path) != 1:
+        return None
+    registrar = builder.definition_nodes[registrar_path]
+    if not isinstance(registrar, ast.FunctionDef | ast.AsyncFunctionDef):
+        return None
+    entry = _escape_entry_function(decorator, registrar, builder)
+    if entry is None:
+        return None
+    positional = [*entry.args.posonlyargs, *entry.args.args]
+    if not positional:
+        return None
+    parameter = positional[0].arg
+    if not _escape_parameter_is_stable(entry, parameter):
+        return None
+    entry_scope = builder.own_scopes[id(entry)]
+    for call in _escape_consuming_calls(entry, parameter):
+        leaf, dotted = _escape_callee_root(call.func)
+        if not isinstance(leaf, ast.Name) or dotted is None:
+            continue
+        verdict, origin = _escape_classify_callee(
+            leaf.id,
+            dotted,
+            entry_scope,
+            builder,
+            internal_import_names=internal_import_names,
+            external_import_names=external_import_names,
+            hops=_ESCAPE_ALIAS_HOPS,
+        )
+        if verdict == "opaque":
+            spelled = f"{root.id}(...)" if isinstance(decorator, ast.Call) else root.id
+            return escape_witness(spelled, registrar_path, parameter, origin)
+    return None
+
+
+def _escape_entry_function(
+    decorator: ast.expr,
+    registrar: _qualnames.FunctionNode,
+    builder: _LexicalScopeBuilder,
+) -> _qualnames.FunctionNode | None:
+    """The function that receives the decorated value as its first parameter.
+
+    ``@registrar`` hands it to the registrar itself. ``@registrar(...)`` hands
+    it to whatever the registrar RETURNS, which the proof admits only when
+    the registrar's body is straight-line with exactly one ``return`` of a
+    name bound once, as a function defined directly in that body. Two
+    returns, a conditional, a returned call: no entry function, no proof.
+    """
+    if not isinstance(decorator, ast.Call):
+        return registrar
+    returns = [
+        statement for statement in registrar.body if isinstance(statement, ast.Return)
+    ]
+    if len(returns) != 1 or not all(
+        isinstance(statement, _ESCAPE_STRAIGHT_LINE_STATEMENTS)
+        for statement in registrar.body
+        if not isinstance(statement, ast.Return)
+    ):
+        return None
+    returned = returns[0].value
+    if not isinstance(returned, ast.Name):
+        return None
+    scope = builder.own_scopes[id(registrar)]
+    inner_path = f"{scope.path}{_LOCALS_BOUNDARY}{returned.id}"
+    if (
+        scope.bindings.get(returned.id) != {f"{_BINDING_DEFINITION}{inner_path}"}
+        or scope.binding_count.get(returned.id) != 1
+        or builder.definition_counts.get(inner_path) != 1
+    ):
+        return None
+    inner = builder.definition_nodes[inner_path]
+    if not isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef) or not any(
+        statement is inner for statement in registrar.body
+    ):
+        return None
+    return inner
+
+
+def _escape_parameter_is_stable(node: _qualnames.FunctionNode, parameter: str) -> bool:
+    """The parameter is never stored, deleted or re-declared anywhere inside."""
+    for child in ast.walk(node):
+        if (
+            isinstance(child, ast.Name)
+            and child.id == parameter
+            and not isinstance(child.ctx, ast.Load)
+        ):
+            return False
+        if isinstance(child, ast.Global | ast.Nonlocal) and parameter in child.names:
+            return False
+    return True
+
+
+def _escape_consuming_calls(
+    node: _qualnames.FunctionNode, parameter: str
+) -> Iterator[ast.Call]:
+    """Calls that receive the parameter as a DIRECT argument, reached
+    unconditionally: top-level ``Expr``, ``Assign``, ``AnnAssign`` and
+    ``Return`` statements, scanned in order until the first ``return`` or the
+    first statement that is not straight-line."""
+    for statement in node.body:
+        value: ast.expr | None = None
+        if isinstance(statement, ast.Expr | ast.Return | ast.Assign | ast.AnnAssign):
+            value = statement.value
+        if isinstance(value, ast.Call) and _escape_call_receives(value, parameter):
+            yield value
+        if isinstance(statement, ast.Return) or not isinstance(
+            statement, _ESCAPE_STRAIGHT_LINE_STATEMENTS
+        ):
+            return
+
+
+def _escape_call_receives(call: ast.Call, parameter: str) -> bool:
+    return any(
+        isinstance(argument, ast.Name) and argument.id == parameter
+        for argument in call.args
+    ) or any(
+        isinstance(keyword.value, ast.Name) and keyword.value.id == parameter
+        for keyword in call.keywords
+    )
+
+
+def _escape_callee_root(expr: ast.expr) -> tuple[ast.expr, str | None]:
+    """The leaf of a callee chain and its dotted spelling.
+
+    ``mcp.resource(uri)`` -> (``mcp``, ``"mcp.resource"``); calls and
+    subscripts along the chain are peeled, attributes are kept in order.
+    A chain that does not bottom out in a Name spells nothing.
+    """
+    attributes: list[str] = []
+    current = expr
+    while True:
+        if isinstance(current, ast.Call):
+            current = current.func
+        elif isinstance(current, ast.Attribute):
+            attributes.append(current.attr)
+            current = current.value
+        elif isinstance(current, ast.Subscript):
+            current = current.value
+        else:
+            break
+    if not isinstance(current, ast.Name):
+        return current, None
+    return current, ".".join([current.id, *reversed(attributes)])
+
+
+def _escape_binding_scope(name: str, scope: _LexicalScope) -> _LexicalScope | None:
+    """The scope ``_resolve_lexical_load`` would read ``name`` from, or ``None``
+    when no scope of the chain binds it (a builtin, a star-imported name, a
+    ``global`` declaration the module never binds)."""
+    current: _LexicalScope | None = scope
+    innermost = True
+    while current is not None:
+        if current.kind == "class" and not innermost:
+            current = current.parent
+            continue
+        if current.kind in {"function", "lambda"}:
+            if name in current.global_names:
+                module = _lexical_module_scope(current)
+                return module if name in module.bindings else None
+            if name in current.nonlocal_names:
+                current = current.parent
+                innermost = False
+                continue
+        kinds = current.bindings.get(name)
+        if kinds is not None and not (
+            current.kind == "class"
+            and not any(kind.startswith(_BINDING_DEFINITION) for kind in kinds)
+        ):
+            return current
+        innermost = False
+        current = current.parent
+    return None
+
+
+def _escape_nonlocal_rebinds(
+    scope: _LexicalScope, name: str, builder: _LexicalScopeBuilder
+) -> bool:
+    """Whether a scope nested in ``scope`` declares ``name`` nonlocal."""
+    for candidate in builder.scopes:
+        if name not in candidate.nonlocal_names:
+            continue
+        parent = candidate.parent
+        while parent is not None:
+            if parent is scope:
+                return True
+            parent = parent.parent
+    return False
+
+
+def _escape_classify_callee(
+    name: str,
+    dotted: str,
+    scope: _LexicalScope,
+    builder: _LexicalScopeBuilder,
+    *,
+    internal_import_names: frozenset[str],
+    external_import_names: frozenset[str],
+    hops: int,
+) -> tuple[_EscapeCallee, str]:
+    """What the analyzer can say about the callee rooted at ``name``.
+
+    ``resolvable``: the root binds to a definition of this module or to an
+    import placed inside the analysis root, directly or through assignment
+    aliases - a consumer the analyzer can see, so the rule does not fire.
+    ``opaque``: an external import, a parameter (a value the caller
+    supplied), or a name bound once to the RESULT of a call - a callable this
+    analyzer resolves to no definition. ``unknown``: everything the proof
+    cannot attribute (an unbound or star-imported name, an import the
+    registry could not place, a name bound more than once or by unpacking,
+    a literal), which never fires. The second element is the dotted origin
+    the witness spells: the assigned call for a call result, the callee
+    itself otherwise.
+    """
+    # One walk, not two: the scope that binds the name is found once, and
+    # its kinds are classified exactly as ``_resolve_lexical_load`` would
+    # classify them; a name no scope binds (a builtin, a star import) has no
+    # scope to read and never fires.
+    binding_scope = _escape_binding_scope(name, scope)
+    if binding_scope is None:
+        return "unknown", dotted
+    resolution, _path = _classify_lexical_binding(binding_scope.bindings[name])
+    if resolution == "definition":
+        return "resolvable", dotted
+    if resolution == "import":
+        if name in external_import_names:
+            return "opaque", dotted
+        if name in internal_import_names:
+            return "resolvable", dotted
+        return "unknown", dotted
+    if resolution != "local":
+        return "unknown", dotted
+    if name in binding_scope.parameters:
+        return "opaque", dotted
+    values = binding_scope.simple_assignments.get(name, [])
+    if (
+        len(values) != 1
+        or binding_scope.binding_count.get(name) != 1
+        or _escape_nonlocal_rebinds(binding_scope, name, builder)
+    ):
+        return "unknown", dotted
+    value = values[0]
+    leaf, origin = _escape_callee_root(value)
+    if not isinstance(leaf, ast.Name) or origin is None:
+        return "unknown", dotted
+    if isinstance(value, ast.Call):
+        return "opaque", origin
+    if isinstance(value, ast.Name | ast.Attribute) and hops > 0:
+        return _escape_classify_callee(
+            leaf.id,
+            origin,
+            binding_scope,
+            builder,
+            internal_import_names=internal_import_names,
+            external_import_names=external_import_names,
+            hops=hops - 1,
+        )
+    return "unknown", dotted
 
 
 @dataclass(frozen=True, slots=True)
@@ -1671,6 +2578,7 @@ def _resolve_referenced_qualnames(
     module_name: str,
     collector: _qualnames.QualnameCollector,
     state: _ModuleWalkState,
+    lexical_binding_paths: frozenset[str] = frozenset(),
 ) -> frozenset[str]:
     top_level_class_by_name = {
         class_qualname: class_qualname
@@ -1721,6 +2629,13 @@ def _resolve_referenced_qualnames(
     # of ``__all__``. Targets were resolved to exact identity at collection
     # time, so this is a plain union.
     resolved.update(state.explicit_reexport_qualnames)
+
+    # Liveness policy v5: a loaded Name resolved through the lexical scope
+    # chain to a definition of this module - a top-level function or class,
+    # a method loaded in its class body, or a function-local definition.
+    # Symbol-specific by Python's own rules, which is what the bare-name
+    # coincidence never was.
+    resolved.update(f"{module_name}:{path}" for path in lexical_binding_paths)
 
     local_top_level_names = frozenset(
         {
@@ -1797,28 +2712,45 @@ def _collect_external_decorator_root_reasons(
     emit_live_root_reason(LIVENESS_EXTERNAL_DECORATOR)
     return {
         f"{module_name}:{local_name}": LIVENESS_EXTERNAL_DECORATOR
-        # An ``@overload`` stub is a DECLARATION of this symbol, not a use of
-        # it: every stub shares the implementation's qualname, so admitting one
-        # lets a symbol stand as its own external evidence. ``typing.overload``
-        # resolves through an external module alias and is otherwise
-        # indistinguishable from a framework registration, which is how a
-        # method whose only real evidence was an ordinary call site came to be
-        # recorded as live because something external decorated it.
         for local_name, function_node in collector.units
-        if not _is_typing_overload_stub(
+        if _external_decorator_roots_function(
             function_node,
+            external_symbol_aliases=frozenset(state.external_symbol_aliases),
+            external_module_aliases=frozenset(state.external_module_aliases),
+            local_top_level_names=local_top_level_names,
+            hook_marker_aliases=hook_marker_aliases,
             overload_aliases=overload_aliases,
         )
-        and (
-            _has_external_decorator(
-                function_node,
-                external_symbol_aliases=state.external_symbol_aliases,
-                external_module_aliases=state.external_module_aliases,
-                local_top_level_names=local_top_level_names,
-            )
-            or _has_hook_marker_decorator(function_node, hook_marker_aliases)
-        )
     }
+
+
+def _external_decorator_roots_function(
+    function_node: _qualnames.FunctionNode,
+    *,
+    external_symbol_aliases: frozenset[str],
+    external_module_aliases: frozenset[str],
+    local_top_level_names: frozenset[str],
+    hook_marker_aliases: frozenset[str],
+    overload_aliases: frozenset[str],
+) -> bool:
+    """The external-decorator root rule for one function, any lexical depth.
+
+    An ``@overload`` stub is a DECLARATION of this symbol, not a use of it:
+    every stub shares the implementation's qualname, so admitting one lets a
+    symbol stand as its own external evidence. ``typing.overload`` resolves
+    through an external module alias and is otherwise indistinguishable from
+    a framework registration, which is how a method whose only real evidence
+    was an ordinary call site came to be recorded as live because something
+    external decorated it.
+    """
+    if _is_typing_overload_stub(function_node, overload_aliases=overload_aliases):
+        return False
+    return _has_external_decorator(
+        function_node,
+        external_symbol_aliases=set(external_symbol_aliases),
+        external_module_aliases=set(external_module_aliases),
+        local_top_level_names=local_top_level_names,
+    ) or _has_hook_marker_decorator(function_node, hook_marker_aliases)
 
 
 def _class_base_expr_name(node: ast.expr) -> str | None:
@@ -1852,30 +2784,49 @@ def _collect_class_base_facts(
     base_names_by_class: list[tuple[str, tuple[str, ...]]] = []
     unresolved_external: set[str] = set()
     for class_qualname, class_node in collector.class_nodes:
-        base_names: set[str] = set()
-        has_unresolved_external_base = False
-        for base in class_node.bases:
-            base_name = _class_base_expr_name(base)
-            if base_name is None:
-                continue
-            base_names.add(base_name)
-            root_name = base_name.partition(".")[0]
-            if root_name in local_top_level_names:
-                continue
-            if (
-                root_name in state.external_symbol_aliases
-                or root_name in state.external_module_aliases
-            ):
-                has_unresolved_external_base = True
+        base_names, has_unresolved_external_base = _class_base_facts_for_node(
+            class_node,
+            external_symbol_aliases=frozenset(state.external_symbol_aliases),
+            external_module_aliases=frozenset(state.external_module_aliases),
+            local_top_level_names=local_top_level_names,
+        )
         if not base_names:
             continue
-        base_names_by_class.append((class_qualname, tuple(sorted(base_names))))
+        base_names_by_class.append((class_qualname, base_names))
         if has_unresolved_external_base:
             unresolved_external.add(class_qualname)
     return (
         tuple(sorted(base_names_by_class, key=lambda item: item[0])),
         frozenset(unresolved_external),
     )
+
+
+def _class_base_facts_for_node(
+    class_node: ast.ClassDef,
+    *,
+    external_symbol_aliases: frozenset[str],
+    external_module_aliases: frozenset[str],
+    local_top_level_names: frozenset[str],
+) -> tuple[tuple[str, ...], bool]:
+    """One class's sorted base names, and whether a base escapes the root.
+
+    The one rule for module-level and function-local classes alike, so a
+    nested class is governed by rule 3 under exactly the opacity doctrine
+    its module-level twin is.
+    """
+    base_names: set[str] = set()
+    has_unresolved_external_base = False
+    for base in class_node.bases:
+        base_name = _class_base_expr_name(base)
+        if base_name is None:
+            continue
+        base_names.add(base_name)
+        root_name = base_name.partition(".")[0]
+        if root_name in local_top_level_names:
+            continue
+        if root_name in external_symbol_aliases or root_name in external_module_aliases:
+            has_unresolved_external_base = True
+    return tuple(sorted(base_names)), has_unresolved_external_base
 
 
 def _collect_decorator_evidenced_methods(
@@ -1981,6 +2932,17 @@ class _ModuleWalkResult(NamedTuple):
     pydantic_module_aliases: frozenset[str]
     cohesion_ignored_decorator_aliases: frozenset[str]
     semantic_events: tuple[SemanticEvent, ...]
+    #: Liveness policy v5: every definition under a function scope, and the
+    #: alias facts the nested population's own rules read (the module walk
+    #: state stays private to the walk; these are its relevant projections).
+    nested_declarations: tuple[_NestedDeclaration, ...]
+    external_symbol_aliases: frozenset[str]
+    external_module_aliases: frozenset[str]
+    hook_marker_aliases: frozenset[str]
+    local_top_level_names: frozenset[str]
+    #: Liveness policy v5: module-local lexical path -> the proven
+    #: opaque-escape flow of the definition's value, sorted.
+    escape_witnesses: tuple[tuple[str, str], ...]
 
 
 def _collect_module_walk_node(
@@ -2181,7 +3143,19 @@ def _collect_module_walk_data(
         event_collector=event_collector,
         collect_referenced_names=collect_referenced_names,
     )
+    # The lexical pass runs for every lane: the nested population is
+    # discovered in a test file too (and then judged non-actionable by its
+    # lane, exactly like a module-level test definition), while the
+    # reference facts are read only where references are collected at all.
+    lexical = _collect_lexical_binding_facts(
+        tree,
+        settled_import_names=frozenset(state.internal_import_aliases),
+        external_import_names=frozenset(
+            state.external_symbol_aliases | state.external_module_aliases
+        ),
+    )
     if collect_referenced_names:
+        state.referenced_names.update(lexical.unsettled_names)
         state.referenced_names.update(_collect_dynamic_getattr_names(tree))
     _append_dynamic_load_deps(
         events=event_collector.events,
@@ -2201,20 +3175,22 @@ def _collect_module_walk_data(
             module_name=module_name,
             collector=collector,
             state=state,
+            lexical_binding_paths=lexical.bound_definition_paths,
         )
         if collect_referenced_names
         else frozenset()
     )
 
+    local_top_level_names = frozenset(
+        {
+            *(name for name, _node in collector.units if "." not in name),
+            *(name for name, _node in collector.class_nodes if "." not in name),
+        }
+    )
     class_base_names, unresolved_external_base_classes = _collect_class_base_facts(
         collector=collector,
         state=state,
-        local_top_level_names=frozenset(
-            {
-                *(name for name, _node in collector.units if "." not in name),
-                *(name for name, _node in collector.class_nodes if "." not in name),
-            }
-        ),
+        local_top_level_names=local_top_level_names,
     )
 
     return _ModuleWalkResult(
@@ -2247,6 +3223,12 @@ def _collect_module_walk_data(
             state.cohesion_ignored_decorator_aliases
         ),
         semantic_events=event_collector.events,
+        nested_declarations=lexical.nested_declarations,
+        external_symbol_aliases=frozenset(state.external_symbol_aliases),
+        external_module_aliases=frozenset(state.external_module_aliases),
+        hook_marker_aliases=_resolve_hook_marker_aliases(state),
+        local_top_level_names=local_top_level_names,
+        escape_witnesses=tuple(sorted(lexical.escape_witnesses.items())),
     )
 
 
@@ -2326,6 +3308,137 @@ def _collect_dead_candidates(
     )
 
 
+def _collect_nested_definitions(
+    *,
+    filepath: str,
+    module_name: str,
+    declarations: Sequence[_NestedDeclaration],
+    suppression_index: Mapping[SuppressionTargetKey, tuple[str, ...]],
+    protocol_symbol_aliases: frozenset[str],
+    protocol_module_aliases: frozenset[str],
+    non_runtime_decorator_aliases: frozenset[str],
+    pydantic_module_aliases: frozenset[str],
+    external_symbol_aliases: frozenset[str],
+    external_module_aliases: frozenset[str],
+    hook_marker_aliases: frozenset[str],
+    local_top_level_names: frozenset[str],
+    self_dispatched_by_class: Mapping[str, frozenset[str]],
+    escape_witnesses: Mapping[str, str] | None = None,
+) -> tuple[NestedDefinition, ...]:
+    """The nested population, judged by the rules its module-level twin gets.
+
+    Every admission rule the module-level candidate builder applies is applied
+    here by the same predicate: a Protocol class and its members never become
+    candidates, a non-runtime decorator (``@overload``, ``@abstractmethod``, a
+    pydantic hook) keeps a function out, an external decorator or a proven
+    hook marker roots one, a directive silences one. The rule-3 facts a
+    nested method needs ride its own row, since no ``ClassMetrics`` row
+    exists for a function-local class to carry them.
+    """
+    protocol_class_paths: set[str] = set()
+    base_facts_by_class: dict[str, tuple[tuple[str, ...], bool]] = {}
+    witnesses: Mapping[str, str] = escape_witnesses if escape_witnesses else {}
+    for declaration in declarations:
+        if not isinstance(declaration.node, ast.ClassDef):
+            continue
+        if _is_protocol_class(
+            declaration.node,
+            protocol_symbol_aliases=protocol_symbol_aliases,
+            protocol_module_aliases=protocol_module_aliases,
+        ):
+            protocol_class_paths.add(declaration.path)
+        base_facts_by_class[declaration.path] = _class_base_facts_for_node(
+            declaration.node,
+            external_symbol_aliases=external_symbol_aliases,
+            external_module_aliases=external_module_aliases,
+            local_top_level_names=local_top_level_names,
+        )
+
+    rows: list[NestedDefinition] = []
+    for declaration in declarations:
+        span = _node_line_span(declaration.node)
+        if span is None:
+            continue
+        live_root_reason: _LocalLivenessRootReason | None = None
+        owner_base_names: tuple[str, ...] = ()
+        owner_has_unresolved_external_base = False
+        decorator_evidenced = False
+        self_dispatched = False
+        if isinstance(declaration.node, ast.ClassDef):
+            if declaration.path in protocol_class_paths:
+                continue
+        else:
+            if declaration.parent_path in protocol_class_paths:
+                continue
+            if _is_non_runtime_candidate(
+                declaration.node,
+                non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+                pydantic_module_aliases=pydantic_module_aliases,
+            ):
+                continue
+            if _external_decorator_roots_function(
+                declaration.node,
+                external_symbol_aliases=external_symbol_aliases,
+                external_module_aliases=external_module_aliases,
+                local_top_level_names=local_top_level_names,
+                hook_marker_aliases=hook_marker_aliases,
+                overload_aliases=non_runtime_decorator_aliases,
+            ):
+                live_root_reason = LIVENESS_EXTERNAL_DECORATOR
+            if declaration.kind == "method":
+                owner_base_names, owner_has_unresolved_external_base = (
+                    base_facts_by_class.get(declaration.parent_path, ((), False))
+                )
+                decorator_evidenced = any(
+                    _decorator_evidence_marker(decorator) is not None
+                    for decorator in declaration.node.decorator_list
+                )
+                self_dispatched = declaration.node.name in self_dispatched_by_class.get(
+                    declaration.parent_path, frozenset()
+                )
+        start, end = span
+        qualname = f"{module_name}:{declaration.path}"
+        rows.append(
+            NestedDefinition(
+                qualname=qualname,
+                local_name=declaration.node.name,
+                kind=declaration.kind,
+                lexical_parent=f"{module_name}:{declaration.parent_path}",
+                lexical_path=declaration.path,
+                filepath=filepath,
+                start_line=start,
+                end_line=end,
+                suppressed_rules=suppression_index.get(
+                    suppression_target_key(
+                        filepath=filepath,
+                        qualname=qualname,
+                        start_line=start,
+                        end_line=end,
+                        kind=declaration.kind,
+                    ),
+                    (),
+                ),
+                live_root_reason=live_root_reason,
+                owner_base_names=owner_base_names,
+                owner_has_unresolved_external_base=owner_has_unresolved_external_base,
+                decorator_evidenced=decorator_evidenced,
+                self_dispatched=self_dispatched,
+                escape_witness=witnesses.get(declaration.path),
+            )
+        )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda item: (
+                item.filepath,
+                item.start_line,
+                item.end_line,
+                item.qualname,
+            ),
+        )
+    )
+
+
 def _collect_declaration_targets(
     *,
     filepath: str,
@@ -2334,6 +3447,7 @@ def _collect_declaration_targets(
     source_tokens: tuple[tokenize.TokenInfo, ...] = (),
     source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None,
     include_inline_lines: bool = False,
+    nested_declarations: Sequence[_NestedDeclaration] = (),
 ) -> tuple[DeclarationTarget, ...]:
     declarations: list[DeclarationTarget] = []
     declaration_specs: list[
@@ -2349,6 +3463,13 @@ def _collect_declaration_targets(
     declaration_specs.extend(
         (class_qualname, class_node, "class")
         for class_qualname, class_node in collector.class_nodes
+    )
+    # A directive on a function-local definition binds exactly as one on its
+    # module-level twin does: the nested population entered the lane, so the
+    # local policy that silences a member of the lane reaches it too.
+    declaration_specs.extend(
+        (declaration.path, declaration.node, declaration.kind)
+        for declaration in nested_declarations
     )
 
     for qualname_suffix, node, kind in declaration_specs:
@@ -2395,6 +3516,7 @@ def _build_suppression_index_for_source(
     filepath: str,
     module_name: str,
     collector: _qualnames.QualnameCollector,
+    nested_declarations: Sequence[_NestedDeclaration] = (),
 ) -> Mapping[SuppressionTargetKey, tuple[str, ...]]:
     suppression_directives = extract_suppression_directives(source)
     if not suppression_directives:
@@ -2417,6 +3539,7 @@ def _build_suppression_index_for_source(
         source_tokens=source_tokens,
         source_token_index=source_token_index,
         include_inline_lines=needs_inline_binding,
+        nested_declarations=nested_declarations,
     )
     suppression_bindings = bind_suppressions_to_declarations(
         directives=suppression_directives,

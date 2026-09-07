@@ -26,6 +26,7 @@ from ..findings.clones.grouping import is_clone_eligible
 from ..findings.structural.detectors import scan_function_structure
 from ..metrics.adoption import collect_module_adoption
 from ..metrics.api_surface import collect_module_api_surface
+from ..metrics.class_facts import _class_methods, collect_class_walk_facts
 from ..metrics.complexity import risk_level
 from ..metrics.source_decisions import source_decision_complexity
 from ..models import (
@@ -52,11 +53,16 @@ from ._module_walk import (
     _collect_dead_candidates,
     _collect_function_relationship_facts,
     _collect_module_walk_data,
+    _collect_nested_definitions,
     _is_typing_overload_stub,
     resolve_import_observation,
 )
 from .binding import BindingContext, build_module_bindings
-from .class_metrics import _class_metrics_for_node, _node_line_span
+from .class_metrics import (
+    _class_metrics_for_node,
+    _node_line_span,
+    _self_dispatched_methods,
+)
 from .fingerprint import (
     _cfg_fingerprint_and_complexity,
     bucket_loc,
@@ -264,6 +270,31 @@ def _with_walk_live_root_reasons(
     )
 
 
+def _with_walk_escape_witnesses(
+    candidates: tuple[DeadCandidate, ...],
+    *,
+    witnesses: Sequence[tuple[str, str]],
+    module_name: str,
+) -> tuple[DeadCandidate, ...]:
+    """Attach the walk's opaque-escape witnesses (liveness policy v5).
+
+    The walk keys them by module-local lexical path, the candidate by
+    qualname; the join is the module prefix. Folded in here for the reason
+    the root reasons are: the candidate is the per-symbol fact that rides the
+    cache wire, so a warm run abstains exactly where a cold one does.
+    """
+
+    witness_by_qualname = {f"{module_name}:{path}": w for path, w in witnesses}
+    if not witness_by_qualname:
+        return candidates
+    return tuple(
+        replace(candidate, escape_witness=witness)
+        if (witness := witness_by_qualname.get(candidate.qualname)) is not None
+        else candidate
+        for candidate in candidates
+    )
+
+
 def _with_star_import_bindings(
     candidates: tuple[DeadCandidate, ...],
     *,
@@ -373,6 +404,7 @@ def extract_units_and_stats_from_source(
             filepath=filepath,
             module_name=module_name,
             collector=collector,
+            nested_declarations=_walk.nested_declarations,
         )
     with phase_ledger.phase(AnalysisPhaseKey.MODULE_BINDINGS):
         module_bindings = _module_bindings(tree, identity, registry)
@@ -648,6 +680,61 @@ def extract_units_and_stats_from_source(
             dead_candidates,
             star_import_bound_qualnames=_walk.star_import_bound_qualnames,
         )
+        dead_candidates = _with_walk_escape_witnesses(
+            dead_candidates,
+            witnesses=_walk.escape_witnesses,
+            module_name=module_name,
+        )
+        # The function-local population (liveness policy v5). A nested
+        # class's ``self.<name>()`` facts come from the SAME producer the
+        # module-level class metrics use, called over the nested node: one
+        # mechanism, one owner, a second call site.
+        self_dispatched_by_class: dict[str, frozenset[str]] = {}
+        for declaration in _walk.nested_declarations:
+            if not isinstance(declaration.node, ast.ClassDef):
+                continue
+            ignored_methods = _cohesion_ignored_method_names(
+                declaration.node,
+                protocol_symbol_aliases=protocol_symbol_aliases,
+                protocol_module_aliases=protocol_module_aliases,
+                pydantic_module_aliases=pydantic_module_aliases,
+                cohesion_ignored_decorator_aliases=cohesion_ignored_decorator_aliases,
+            )
+            nested_facts = collect_class_walk_facts(
+                declaration.node,
+                analyzed_method_names=frozenset(
+                    method.name
+                    for method in _class_methods(declaration.node)
+                    if method.name not in ignored_methods
+                ),
+                imported_symbol_targets=_walk.binding_symbol_targets,
+                imported_module_targets=_walk.binding_module_targets,
+            )
+            dispatched_prefix = f"{module_name}:{declaration.path}."
+            self_dispatched_by_class[declaration.path] = frozenset(
+                qualname.removeprefix(dispatched_prefix)
+                for qualname in _self_dispatched_methods(
+                    nested_facts.method_calls,
+                    module_name=module_name,
+                    class_qualname=declaration.path,
+                )
+            )
+        nested_definitions = _collect_nested_definitions(
+            filepath=filepath,
+            module_name=module_name,
+            declarations=_walk.nested_declarations,
+            suppression_index=suppression_index,
+            protocol_symbol_aliases=protocol_symbol_aliases,
+            protocol_module_aliases=protocol_module_aliases,
+            non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+            pydantic_module_aliases=pydantic_module_aliases,
+            external_symbol_aliases=_walk.external_symbol_aliases,
+            external_module_aliases=_walk.external_module_aliases,
+            hook_marker_aliases=_walk.hook_marker_aliases,
+            local_top_level_names=_walk.local_top_level_names,
+            self_dispatched_by_class=self_dispatched_by_class,
+            escape_witnesses=dict(_walk.escape_witnesses),
+        )
 
     sorted_class_metrics = tuple(
         sorted(
@@ -696,6 +783,10 @@ def extract_units_and_stats_from_source(
             filepath=filepath,
             collector=collector,
             phase_ledger=phase_ledger,
+            nested_declarations=tuple(
+                (declaration.path, declaration.node, declaration.kind)
+                for declaration in _walk.nested_declarations
+            ),
         )
 
     return (
@@ -733,6 +824,7 @@ def extract_units_and_stats_from_source(
             docstring_coverage=docstring_coverage,
             api_surface=api_surface,
             function_relationship_facts=function_relationship_facts,
+            nested_definitions=nested_definitions,
         ),
         structural_findings,
     )

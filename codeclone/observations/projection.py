@@ -32,6 +32,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
+    NestedDefinition,
     ObservationBundle,
     ResolvedSourceIdentity,
     RiskObservation,
@@ -221,7 +222,7 @@ def _api_surface_observations(
 
 
 def _dead_code_observations(
-    candidates: Sequence[DeadCandidate],
+    candidates: Sequence[DeadCandidate | NestedDefinition],
     *,
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
@@ -422,6 +423,11 @@ def build_observation_bundle(
     module_deps: Sequence[ModuleDep] = (),
     api_modules: Sequence[ModuleApiSurface] = (),
     dead_candidates: Sequence[DeadCandidate] = (),
+    # The function-local population (liveness policy v5) enters the run
+    # identity through the same rows as the candidates: an entity the lane
+    # judges is an entity the identity must see, or two trees differing only
+    # in a nested definition's reference would share a run id.
+    nested_definitions: Sequence[NestedDefinition] = (),
     abstained_qualnames: frozenset[str] = frozenset(),
     referenced_names: frozenset[str] = frozenset(),
     referenced_qualnames: frozenset[str] = frozenset(),
@@ -460,7 +466,7 @@ def build_observation_bundle(
             tuple(
                 sorted(
                     _dead_code_observations(
-                        dead_candidates,
+                        (*dead_candidates, *nested_definitions),
                         referenced_names=referenced_names,
                         referenced_qualnames=referenced_qualnames,
                         runtime_reachability=runtime_reachability,

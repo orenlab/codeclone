@@ -29,6 +29,8 @@ from ..models import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverage,
     ModuleTypingCoverageDict,
+    NestedDefinition,
+    NestedDefinitionDict,
     PublicSymbolDict,
     RelationshipRecord,
     RelationshipRecordDict,
@@ -478,7 +480,34 @@ def _dead_candidate_dict_from_model(
         result["live_root_reason"] = candidate.live_root_reason
     if candidate.star_import_bound:
         result["star_import_bound"] = True
+    if candidate.escape_witness is not None:
+        result["escape_witness"] = candidate.escape_witness
     return result
+
+
+def _nested_definition_dict_from_model(
+    row: NestedDefinition,
+    filepath: str,
+) -> NestedDefinitionDict:
+    """One cached nested row, every field written (liveness policy v5)."""
+
+    return NestedDefinitionDict(
+        qualname=row.qualname,
+        local_name=row.local_name,
+        kind=row.kind,
+        lexical_parent=row.lexical_parent,
+        lexical_path=row.lexical_path,
+        filepath=filepath,
+        start_line=row.start_line,
+        end_line=row.end_line,
+        suppressed_rules=sorted(set(row.suppressed_rules)),
+        live_root_reason=row.live_root_reason or "",
+        owner_base_names=sorted(set(row.owner_base_names)),
+        owner_has_unresolved_external_base=row.owner_has_unresolved_external_base,
+        decorator_evidenced=row.decorator_evidenced,
+        self_dispatched=row.self_dispatched,
+        escape_witness=row.escape_witness or "",
+    )
 
 
 def _security_surface_dict_from_model(
@@ -562,6 +591,7 @@ __all__ = [
     "ModuleDepDict",
     "ModuleDocstringCoverageDict",
     "ModuleTypingCoverageDict",
+    "NestedDefinitionDict",
     "PublicSymbolDict",
     "RelationshipRecordDict",
     "RuntimeReachabilityFactDict",

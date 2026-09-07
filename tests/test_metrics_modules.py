@@ -834,6 +834,12 @@ def test_find_unused_filters_non_actionable_and_preserves_ordering() -> None:
         definitions=definitions,
         referenced_names=frozenset({"used", "MaybeUsed"}),
     )
+    # ``used`` is a bare-name coincidence and is therefore in the binding
+    # abstention lane, not here (liveness policy v5). ``MaybeUsed`` is keyed
+    # by its LOCAL name ``unreferenced_name``, which nothing loads, so it is
+    # dead - and dead at high confidence: ``medium`` used to mean "a bare
+    # name spells this symbol", and that case is now an abstention, never a
+    # finding.
     assert found == (
         DeadItem(
             qualname="pkg.mod:MaybeUsed",
@@ -841,7 +847,7 @@ def test_find_unused_filters_non_actionable_and_preserves_ordering() -> None:
             start_line=2,
             end_line=2,
             kind="class",
-            confidence="medium",
+            confidence="high",
         ),
         DeadItem(
             qualname="pkg.mod:dead",
@@ -1553,10 +1559,10 @@ def test_tri_state_liveness_is_stable_and_the_bypass_stays_narrow() -> None:
 
     The cache half (tests/test_cache.py) proves the 3.2 wire returns a warm
     run exactly the facts a cold run computed. This half proves the verdict is
-    a pure function of those facts, so cold and warm agree, and pins the
-    narrowness of the rule-3 bypass: the SAME bare method name still revives
-    the local-base method through the untouched name gate, while only the
-    external-base sibling abstains.
+    a pure function of those facts, so cold and warm agree, and pins the two
+    abstentions apart: the SAME bare method name puts the local-base method
+    in the BINDING abstention lane (liveness policy v5 - a coincidence
+    revives nothing), while the external-base sibling abstains under rule 3.
     """
     definitions = (
         DeadCandidate(
@@ -1589,7 +1595,7 @@ def test_tri_state_liveness_is_stable_and_the_bypass_stays_narrow() -> None:
         ),
     )
 
-    def classify() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def classify() -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
         result = classify_liveness(
             definitions=definitions,
             referenced_names=frozenset({"handle"}),
@@ -1598,15 +1604,17 @@ def test_tri_state_liveness_is_stable_and_the_bypass_stays_narrow() -> None:
         return (
             tuple(item.qualname for item in result.dead_items),
             tuple(item.qualname for item in result.unresolved_overrides),
+            tuple(item.qualname for item in result.unresolved_internal),
         )
 
-    dead, unresolved = classify()
+    dead, unresolved, bindings = classify()
     # Repeating the call on identical facts is the cold-vs-warm equality.
-    assert classify() == (dead, unresolved)
+    assert classify() == (dead, unresolved, bindings)
 
     assert unresolved == ("x:Adapter.handle",)
-    # LocalOnly.handle is neither dead nor abstaining: the shared bare name
-    # still revives it, because the bypass touches only opaque-base methods.
+    # LocalOnly.handle is neither dead nor live: the shared bare name is a
+    # coincidence no binding settles, so it abstains in its own lane.
+    assert bindings == ("x:LocalOnly.handle",)
     assert dead == ()
 
 

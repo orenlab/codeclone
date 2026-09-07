@@ -692,6 +692,23 @@ _FIXTURES["same_module_class_attribute_reference"] = _qualname_pair(
 # entry into referenced_qualnames, and rule 4 requires a parked mechanism to
 # carry no fixture. Rule 3 named all four by id on the rebased tree before a
 # line of this file changed.
+_FIXTURES["lexical_binding_reference"] = _qualname_pair(
+    "pkg.m:run.<locals>.helper",
+    """
+    def run():
+        def helper():
+            return 1
+
+        return helper()
+    """,
+    """
+    def run():
+        def helper():
+            return 1
+
+        return 1
+    """,
+)
 _FIXTURES["explicit_reexport_alias"] = _qualname_pair(
     "other:thing",
     """
@@ -718,7 +735,13 @@ def _classify_pair(
 
 
 def _is_live(kwargs: Inputs) -> bool:
-    """The symbol is not reported dead, and not merely abstained."""
+    """The symbol is not reported dead, and not merely abstained.
+
+    All three abstention lanes count as "not live": the binding lane
+    (liveness policy v5) is what a dangling import target falls back to, so
+    a fixture that removed its edge and forgot this lane would read the
+    resulting abstention as co-presence.
+    """
     classification = classify_liveness(**kwargs)  # type: ignore[arg-type]
     definitions = cast("tuple[DeadCandidate, ...]", kwargs["definitions"])
     qualname = definitions[0].qualname
@@ -728,6 +751,8 @@ def _is_live(kwargs: Inputs) -> bool:
         not in {item.qualname for item in classification.unresolved_overrides}
         and qualname
         not in {item.qualname for item in classification.unresolved_reachability}
+        and qualname
+        not in {item.qualname for item in classification.unresolved_internal}
     )
 
 
@@ -772,8 +797,89 @@ _FIXTURES["test_source_lane"] = _classify_pair(
     _test_lane_inputs("pkg/m.py"),
 )
 
-_FIXTURES["bare_name_reference"] = _classify_pair(
-    _is_live,
+# ``bare_name_reference`` carries no fixture: liveness policy v5 parked it as
+# a LIVE rule (rule 4 forbids a fixture on a parked mechanism), and what the
+# construct is worth now is pinned below as ``ambiguous_internal_binding``.
+
+
+def _abstains_as_binding(kwargs: Inputs) -> bool:
+    classification = classify_liveness(**kwargs)  # type: ignore[arg-type]
+    return any(
+        item.reason == "ambiguous_internal_binding"
+        for item in classification.unresolved_internal
+    )
+
+
+def _escape_pair(target: str, with_source: str, without_source: str) -> Fixture:
+    """Rule 3 for ``opaque_internal_escape``: the REAL walk over a module
+    whose registrar hands the decorated value to an opaque callable, and the
+    same module with only that one flow statement removed. The producer is
+    the walk; the row it earns is read off the evaluator, so the pair proves
+    the whole path from the construct to the abstention and not a flag."""
+
+    def abstains(root: Path, source: str) -> bool:
+        metrics = _metrics(root, {"pkg/__init__.py": "\n", "pkg/m.py": source})
+        walked = metrics["pkg/m.py"]
+        classification = classify_liveness(
+            definitions=walked.dead_candidates,
+            referenced_names=frozenset(),
+            nested_definitions=walked.nested_definitions,
+        )
+        return any(
+            item.qualname == target and item.reason == "opaque_internal_escape"
+            for item in classification.unresolved_internal
+        )
+
+    def observe(root: Path) -> tuple[bool, bool]:
+        return abstains(root / "with", with_source), abstains(
+            root / "without", without_source
+        )
+
+    return observe
+
+
+_FIXTURES["opaque_internal_escape"] = _escape_pair(
+    "pkg.m:handler",
+    """
+    import vendor
+
+
+    def resource(uri):
+        decorator = vendor.resource(uri)
+
+        def register(func):
+            decorator(func)
+            return func
+
+        return register
+
+
+    @resource("codeclone://x")
+    def handler():
+        return 1
+    """,
+    """
+    import vendor
+
+
+    def resource(uri):
+        decorator = vendor.resource(uri)
+
+        def register(func):
+            return func
+
+        return register
+
+
+    @resource("codeclone://x")
+    def handler():
+        return 1
+    """,
+)
+
+
+_FIXTURES["ambiguous_internal_binding"] = _classify_pair(
+    _abstains_as_binding,
     {
         "definitions": (_candidate("pkg.m:helper", kind="function"),),
         "referenced_names": frozenset({"helper"}),
@@ -782,6 +888,29 @@ _FIXTURES["bare_name_reference"] = _classify_pair(
         "definitions": (_candidate("pkg.m:helper", kind="function"),),
         "referenced_names": frozenset(),
     },
+)
+
+
+def _reexport_hop_inputs(with_edge: bool) -> Inputs:
+    # A consumer bound ``pkg:helper`` through the package; the definition is
+    # ``pkg._impl:helper``. The from-import edge of ``pkg/__init__.py`` is
+    # the only thing that carries the reference to the definition.
+    return {
+        "definitions": (_candidate("pkg._impl:helper", kind="function"),),
+        "referenced_names": frozenset(),
+        "referenced_qualnames": frozenset({"pkg:helper"}),
+        "module_deps": (
+            (_dep("pkg", "pkg._impl", requested_names=("helper",)),)
+            if with_edge
+            else ()
+        ),
+    }
+
+
+_FIXTURES["reexport_hop_reference"] = _classify_pair(
+    _is_live,
+    _reexport_hop_inputs(True),
+    _reexport_hop_inputs(False),
 )
 
 _FIXTURES["dead_code_directive"] = _classify_pair(
@@ -1732,6 +1861,19 @@ PRODUCER_UNREACHED_BY_ITS_FIXTURE: Final[frozenset[str]] = frozenset(
 )
 
 
+#: A THIRD reason a member leaves the set above, and the one this ratchet
+#: could not say: liveness policy v5 PARKED the mechanism.  Rule 4 forbids a
+#: fixture on a parked mechanism, so it cannot appear in ``unreached`` at all
+#: while it stays parked -- but deleting the row outright would record the
+#: departure as "the rule-2/rule-3 gap closed", which is a lie about why the
+#: producer is unreachable.  This is not an addition to the ACTIVE vocabulary
+#: and grants nothing; it is shrink-sensitive, so un-parking a mechanism or
+#: dropping it from the registry makes the row superfluous and reds below.
+PRODUCER_UNREACHED_WHILE_PARKED: Final[frozenset[str]] = frozenset(
+    {"bare_name_reference"}
+)
+
+
 def _carrying_nothing(value: object) -> object:
     """A value of the same type that carries nothing."""
 
@@ -1900,11 +2042,23 @@ def test_every_causal_fixture_dies_when_its_producer_cannot_emit(
         "these fixtures stayed green while their declared producer ran and "
         f"emitted nothing, so they are evidence about something else: {survived}"
     )
-    assert set(unreached) == PRODUCER_UNREACHED_BY_ITS_FIXTURE, (
+    assert set(unreached) == (
+        PRODUCER_UNREACHED_BY_ITS_FIXTURE - PRODUCER_UNREACHED_WHILE_PARKED
+    ), (
         "the set of fixtures that never reach their declared producer moved; "
-        "a new member is a new hollow-by-construction fixture, and a departing "
-        f"one closes part of the rule-2/rule-3 gap: {sorted(unreached)}"
+        "a new member is a new hollow-by-construction fixture, a departing one "
+        "closes part of the rule-2/rule-3 gap, and one that left because its "
+        "mechanism was parked belongs in PRODUCER_UNREACHED_WHILE_PARKED: "
+        f"{sorted(unreached)}"
     )
+    # Shrink-sensitive, so the exemption cannot outlive its reason: a parked
+    # entry is only true while the registry actually parks it.
+    assert PRODUCER_UNREACHED_WHILE_PARKED.issubset(PARKED_MECHANISMS), (
+        "recorded as unreachable because parked, but the registry no longer "
+        "parks them, so the row is superfluous: "
+        f"{sorted(PRODUCER_UNREACHED_WHILE_PARKED - set(PARKED_MECHANISMS))}"
+    )
+    assert PRODUCER_UNREACHED_WHILE_PARKED.issubset(PRODUCER_UNREACHED_BY_ITS_FIXTURE)
     # Population witness: an empty or tiny killed list would satisfy both
     # assertions above while measuring nothing.
     assert len(killed) == len(ACTIVE_MECHANISMS) - len(unreached)

@@ -32,6 +32,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    NestedDefinition,
     RehydratedCacheNeutral,
     RelationshipRecord,
     RuntimeReachabilityFact,
@@ -52,6 +53,7 @@ from ._types import (
     _dead_candidate_sort_key,
     _group_item_sort_key,
     _module_dep_sort_key,
+    _nested_definition_sort_key,
     _segment_to_group_item,
     _unit_to_group_item,
     structural_findings_required,
@@ -71,6 +73,9 @@ from .discovery_cache import (
     # metrics loader, so callers reach it here instead of importing the
     # internal discovery_cache module directly.
     load_cached_metrics_extended as load_cached_metrics_extended,
+)
+from .discovery_cache import (
+    load_cached_nested_definitions as _load_cached_nested_definitions,
 )
 from .discovery_cache import usable_cached_source_stats as _usable_cached_source_stats
 
@@ -275,6 +280,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     cached_sf: list[StructuralFindingGroup] = []
     cached_relationship_facts: list[FunctionRelationshipFacts] = []
     cached_declared_exports: set[str] = set()
+    cached_nested_definitions: list[NestedDefinition] = []
     cached_source_stats_by_file: list[tuple[str, int, int, int, int]] = []
     cached_source_digest_by_file: list[tuple[str, str]] = []
     cached_semantic_events: list[SemanticEvent] = []
@@ -487,6 +493,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                         cached_declared_exports.update(
                             _load_cached_declared_exports(cached)
                         )
+                        cached_nested_definitions.extend(
+                            _load_cached_nested_definitions(cached)
+                        )
                         if typing_coverage is not None:
                             cached_typing_modules.append(typing_coverage)
                         if docstring_coverage is not None:
@@ -596,6 +605,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         ),
         cached_referenced_qualnames=frozenset(cached_referenced_qualnames),
         cached_declared_exports=frozenset(cached_declared_exports),
+        cached_nested_definitions=tuple(
+            sorted(cached_nested_definitions, key=_nested_definition_sort_key)
+        ),
         cached_typing_modules=tuple(
             sorted(cached_typing_modules, key=lambda item: (item.filepath, item.module))
         ),

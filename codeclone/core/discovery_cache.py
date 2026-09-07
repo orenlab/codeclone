@@ -26,6 +26,9 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
+    NestedDefinition,
+    NestedDefinitionDict,
+    NestedDefinitionKind,
     PublicSymbol,
     RuntimeReachabilityConfidence,
     RuntimeReachabilityEdgeKind,
@@ -128,6 +131,64 @@ def _dead_candidate_kind(value: object) -> DeadCodeCandidateKind | None:
             return "import"
         case _:
             return None
+
+
+def _nested_definition_kind(value: object) -> NestedDefinitionKind | None:
+    """Narrow one cached nested ``kind`` onto the population's vocabulary.
+
+    Three arms and no ``import`` arm, because the nested population is
+    definitions only; a row carrying anything else is a writer this reader
+    does not understand and is dropped, never read as a function.
+    """
+    match value:
+        case "function":
+            return "function"
+        case "class":
+            return "class"
+        case "method":
+            return "method"
+        case _:
+            return None
+
+
+def _nested_definition_from_cache_row(
+    row: NestedDefinitionDict,
+) -> NestedDefinition | None:
+    kind = _nested_definition_kind(row.get("kind"))
+    if (
+        kind is None
+        or not row.get("qualname")
+        or not row.get("local_name")
+        or not row.get("filepath")
+        or not row.get("lexical_parent")
+        or not row.get("lexical_path")
+    ):
+        return None
+    try:
+        return NestedDefinition(
+            qualname=row["qualname"],
+            local_name=row["local_name"],
+            kind=kind,
+            lexical_parent=row["lexical_parent"],
+            lexical_path=row["lexical_path"],
+            filepath=row["filepath"],
+            start_line=row["start_line"],
+            end_line=row["end_line"],
+            suppressed_rules=_as_sorted_str_tuple(row.get("suppressed_rules", [])),
+            live_root_reason=_live_root_reason(row.get("live_root_reason")),
+            owner_base_names=_as_sorted_str_tuple(row.get("owner_base_names", [])),
+            owner_has_unresolved_external_base=(
+                row.get("owner_has_unresolved_external_base", False) is True
+            ),
+            decorator_evidenced=row.get("decorator_evidenced", False) is True,
+            self_dispatched=row.get("self_dispatched", False) is True,
+            escape_witness=_escape_witness(row.get("escape_witness")),
+        )
+    except ValueError:
+        # The row's own construction law refused it (a path without a
+        # function boundary, a qualname that does not spell its path): a
+        # writer this reader does not understand, dropped rather than read.
+        return None
 
 
 def _security_surface_category(value: object) -> SecuritySurfaceCategory | None:
@@ -651,7 +712,17 @@ def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate
         suppressed_rules=_as_sorted_str_tuple(dead_row.get("suppressed_rules", [])),
         live_root_reason=_live_root_reason(dead_row.get("live_root_reason")),
         star_import_bound=dead_row.get("star_import_bound", False) is True,
+        escape_witness=_escape_witness(dead_row.get("escape_witness")),
     )
+
+
+def _escape_witness(value: object) -> str | None:
+    """Narrow a cached escape witness: a non-empty string, else no witness.
+
+    The wire decoder has already put the string through the model's door, so
+    this only turns the row's ``""`` back into the model's ``None``.
+    """
+    return value if isinstance(value, str) and value else None
 
 
 def _live_root_reason(value: object) -> LiveRootReason | None:
@@ -818,3 +889,23 @@ def load_cached_declared_exports(entry: CacheEntryV3) -> frozenset[str]:
     """
 
     return frozenset(entry.module_dependent.declared_exports)
+
+
+def load_cached_nested_definitions(
+    entry: CacheEntryV3,
+) -> tuple[NestedDefinition, ...]:
+    """The function-local population of one cached row (liveness policy v5).
+
+    Its own loader for the reason ``load_cached_declared_exports`` has one:
+    the metrics tuple is unpacked by position, and a population is not a
+    metric. Rehydrated for test files too, exactly as the module-level
+    candidates are; the test-lane rule is applied by the evaluator, which
+    reads the file's lane and never the row's.
+    """
+
+    rows: list[NestedDefinition] = []
+    for row in entry.module_dependent.nested_definitions:
+        parsed = _nested_definition_from_cache_row(row)
+        if parsed is not None:
+            rows.append(parsed)
+    return tuple(rows)

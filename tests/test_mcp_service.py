@@ -11072,6 +11072,11 @@ def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
         # family that never ran states no world - "" is the honest absence,
         # not a default smuggled in as a measurement.
         "unresolved": 0,
+        # Liveness policy v5: the binding lane and the judged population
+        # ride the same block, and a family that never ran judged nothing.
+        "unresolved_internal": 0,
+        "candidates": 0,
+        "nested_candidates": 0,
         "world_contract": "",
     }
     # ... but neither the stored summary nor get_run_summary surfaces it, the

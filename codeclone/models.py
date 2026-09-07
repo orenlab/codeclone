@@ -10,7 +10,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Final, Literal, Protocol, TypedDict, TypeVar, cast
+from typing import Final, Literal, Protocol, TypedDict, TypeVar, cast, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_validator
@@ -76,6 +76,11 @@ ImportSyntaxKind = Literal["import", "from_import"]
 # ``tests/test_pipeline_process.py`` pins the divergence in both directions so
 # it cannot change, or be repaired, silently.
 DeadCodeCandidateKind = Literal["function", "class", "method", "import"]
+# The kinds a function-local definition can take (liveness policy v5): a
+# ``def`` under a function, a ``class`` under a function, or a method of such
+# a class. ``import`` is absent by construction: an import is a binding, and
+# the nested population is definitions only.
+NestedDefinitionKind = Literal["function", "class", "method"]
 # The dead-code lane's extensibility axis, orthogonal to DeadCodeCandidateKind:
 # "symbol" asks whether a definition is referenced, "unreachable_statement"
 # whether a statement inside a live definition can run (39Y Y9). Extending this
@@ -112,6 +117,20 @@ DEFAULT_DEAD_CODE_WORLD: Final[WorldContract] = "open"
 ReachabilityState = Literal["reachable", "not_reachable", "unresolved"]
 # Why the evaluator could call a symbol neither dead nor live.
 UnresolvedReason = Literal["externally_reachable", "reachability_unresolved"]
+# Why the evaluator could call a symbol neither dead nor live on INTERNAL
+# grounds alone (liveness policy v5). ``ambiguous_internal_binding``: its bare
+# local name is loaded somewhere in the project and no binding proves which
+# definition that load reaches. ``opaque_internal_escape``: the binding IS
+# resolved - the innermost decorator names a local registrar - and what is
+# ambiguous is the value's onward fate: it provably flows into a callable the
+# analyzer cannot resolve to any definition. Both are world-invariant, unlike
+# the two reasons above: the closed world removes the unknown external
+# consumer, it does not turn an uncertainty INSIDE the observed program into
+# proof of absence.
+UnresolvedInternalReason = Literal[
+    "ambiguous_internal_binding",
+    "opaque_internal_escape",
+]
 DependencyResolution = Literal[
     "analyzed",
     "known_internal_not_analyzed",
@@ -1324,6 +1343,38 @@ class DeadCandidateDict(DeadCandidateDictBase, total=False):
     # keying the dependent cache lane is what keeps such a row from being read
     # as an answer to a question it was never asked.
     star_import_bound: bool
+    # Liveness policy v5 opaque-escape witness (``ew`` sidecar on the wire).
+    # Optional, and its absence is "no proven escape": the policy version
+    # keying the dependent lane is what keeps a row written before the fact
+    # existed from being read as that answer.
+    escape_witness: str
+
+
+class NestedDefinitionDict(TypedDict):
+    """Cache row of one function-local definition (liveness policy v5).
+
+    Every field is required and always written: the row was born under the
+    policy that introduced it, so an absent field is a writer this reader
+    does not understand, never a fact that predates the reader.
+    """
+
+    qualname: str
+    local_name: str
+    kind: str
+    lexical_parent: str
+    lexical_path: str
+    filepath: str
+    start_line: int
+    end_line: int
+    suppressed_rules: list[str]
+    live_root_reason: str
+    owner_base_names: list[str]
+    owner_has_unresolved_external_base: bool
+    decorator_evidenced: bool
+    self_dispatched: bool
+    #: The proven opaque-escape flow, or ``""`` when none was proven; always
+    #: written, like every other field of the row.
+    escape_witness: str
 
 
 class SecuritySurfaceDict(TypedDict):
@@ -1530,6 +1581,11 @@ class CacheDependentPayload:
     #: dependent reuse profile carries LIVENESS_POLICY_VERSION, so such a row
     #: misses the lane instead of decoding as "declares nothing".
     declared_exports: tuple[str, ...] = ()
+    #: The function-local population (liveness policy v5), ``nd`` on the
+    #: wire. Empty is the legal reading of a module with no definition under
+    #: a function scope; a row written before the population existed never
+    #: reads as that, for the same reason ``declared_exports`` never does.
+    nested_definitions: tuple[NestedDefinitionDict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2669,6 +2725,90 @@ class DeadCandidate:
     # symbol. Same carrier argument as the reason above: it rides the wire with
     # the symbol, so a warm run answers the binding question as a cold one does.
     star_import_bound: bool = False
+    # Liveness policy v5: the proven flow of this definition's value into a
+    # callable the analyzer cannot resolve, spelled by ``escape_witness``;
+    # ``None`` when no such flow was proven. The same carrier argument once
+    # more: the fact rides the wire with the symbol, so a warm run abstains
+    # exactly where a cold one does.
+    escape_witness: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.escape_witness is not None:
+            validate_escape_witness(self.escape_witness)
+
+
+@dataclass(frozen=True, slots=True)
+class NestedDefinition:
+    """The population contract for a definition inside a function scope.
+
+    Criterion C2 (liveness policy v5): a function-local ``def`` or ``class``,
+    and the methods of such a class, used to be invisible to every lane -
+    nesting a definition moved it out of CodeClone's jurisdiction, which is a
+    governance bypass and not a missing capability. The population enters
+    exactly ONE consumer path - discovery, binding facts, liveness - through
+    this record and never through ``DeadCandidate``: the module-level
+    population is also read by the entrypoint, api-exposure, observation and
+    authority consumers, and none of them may gain members by the accident of
+    a shared row type.
+
+    Identity distinguishes lexical owners by construction. ``lexical_path``
+    is CPython's ``__qualname__`` spelling (``outer.<locals>.inner``), so two
+    ``helper`` definitions under different parents are two symbols and the
+    bare-name fallback is handed no new collisions.
+
+    A nested definition has no external namespace: nothing outside the module
+    can spell ``from module import helper`` for a closure, so the evaluator
+    never asks the world contract about it. The rule-3 facts a method row
+    needs ride the row itself, because the owning nested class has no
+    ``ClassMetrics`` to carry them.
+    """
+
+    qualname: str
+    local_name: str
+    kind: NestedDefinitionKind
+    #: Qualname of the definition whose scope directly encloses this one.
+    lexical_parent: str
+    #: Module-local path, ``<locals>`` marking every function boundary.
+    lexical_path: str
+    filepath: str
+    start_line: int
+    end_line: int
+    suppressed_rules: tuple[str, ...] = ()
+    live_root_reason: LiveRootReason | None = None
+    #: Method rows: the bases of the owning nested class, and whether one of
+    #: them binds outside the analysis root (rule 3 then governs the method).
+    owner_base_names: tuple[str, ...] = ()
+    owner_has_unresolved_external_base: bool = False
+    #: Method rows: an explicit dispatch contract (``@override``) on the
+    #: method, row 2 of the rule-3 table.
+    decorator_evidenced: bool = False
+    #: Method rows: ``self.<name>()`` inside the owning class, row 1.
+    self_dispatched: bool = False
+    #: The proven opaque-escape flow, exactly as ``DeadCandidate`` carries it.
+    escape_witness: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.escape_witness is not None:
+            validate_escape_witness(self.escape_witness)
+        if ".<locals>." not in self.lexical_path:
+            raise ValueError(
+                f"nested definition {self.qualname!r} sits under no function "
+                f"scope: its lexical path {self.lexical_path!r} carries no "
+                f"'<locals>' boundary"
+            )
+        if not self.qualname.endswith(f":{self.lexical_path}"):
+            raise ValueError(
+                f"nested definition qualname {self.qualname!r} does not spell "
+                f"its lexical path {self.lexical_path!r}"
+            )
+        if self.suppressed_rules != tuple(sorted(set(self.suppressed_rules))):
+            raise ValueError(
+                "nested definition suppressed rules must be sorted and unique"
+            )
+        if self.owner_base_names != tuple(sorted(set(self.owner_base_names))):
+            raise ValueError(
+                "nested definition owner base names must be sorted and unique"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2769,6 +2909,65 @@ class UnresolvedReachabilityItem:
 
 
 @dataclass(frozen=True, slots=True)
+class UnresolvedInternalItem:
+    """A symbol the analysis refuses to call dead OR live on INTERNAL grounds.
+
+    One lane, two reasons (liveness policy v5), both world-invariant because
+    the uncertainty is inside the observed program and no world contract can
+    dissolve it: the closed world removes the unknown EXTERNAL consumer, it
+    does not turn an internal uncertainty into proof of absence.
+
+    ``ambiguous_internal_binding`` (criterion C1): the symbol's only support
+    is a bare-name coincidence - its local name is loaded somewhere in the
+    project, but no binding proves which definition that load reaches (an
+    attribute on a receiver of unknown type, a name no scope of its module
+    binds, an import the registry could not place). Before v5 that
+    coincidence conferred LIVE, the report's strongest outcome, with no
+    marker at all; measured on this repository at 5f35a50f, 4515 symbols
+    (26% of the candidate population) were live on nothing else, 561 of them
+    sharing their name with another such symbol. The witness names the
+    construct and the name it matched, so a reader can see exactly what a
+    proof would have to bind.
+
+    ``opaque_internal_escape``: the binding IS resolved - the innermost
+    decorator names a local registrar - and what is ambiguous is the value's
+    onward fate. The registrar provably hands the decorated value to a
+    callable the analyzer cannot resolve to any definition, so DEAD may no
+    longer be asserted; LIVE is not proven either. Measured on this
+    repository at 5f35a50f: eight MCP resource handlers were reported dead
+    through exactly this shape. The witness is the proven flow, never a
+    name: the decorator, the registrar it binds to, the parameter that
+    received the value, and the opaque call the value flowed into.
+    """
+
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    kind: DeadCodeCandidateKind
+    local_name: str
+    witness: str
+    reason: UnresolvedInternalReason = "ambiguous_internal_binding"
+
+    def __post_init__(self) -> None:
+        if self.reason == "ambiguous_internal_binding":
+            expected = binding_witness(self.local_name)
+            if self.witness != expected:
+                raise LivenessVocabularyError(
+                    f"binding abstention witness {self.witness!r} does not name "
+                    f"the bare name {self.local_name!r} through the declared "
+                    f"construct; expected {expected!r}"
+                )
+        elif self.reason == "opaque_internal_escape":
+            validate_escape_witness(self.witness)
+        else:
+            raise LivenessVocabularyError(
+                f"unknown internal abstention reason {self.reason!r}; the lane "
+                f"admits {get_args(UnresolvedInternalReason)}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class UnreachableStatementFinding:
     """One unreachable region, located in the repository (39Y Y9).
 
@@ -2801,6 +3000,14 @@ class LivenessClassification:
     # consumer can tell "no live evidence and nothing outside could reach it"
     # from "no live evidence and CodeClone cannot know".
     unresolved_reachability: tuple[UnresolvedReachabilityItem, ...] = ()
+    # The internal abstentions (liveness policy v5): a third lane, for the
+    # same reason the second is not folded into the first - "the uncertainty
+    # is inside the observed program" (a bare name nothing binds, a value that
+    # escaped into opaque semantics) is a distinct epistemic situation from
+    # either of the other two, and a consumer must be able to tell them apart
+    # without re-deriving them. World-invariant by construction; each row
+    # names its ``reason``.
+    unresolved_internal: tuple[UnresolvedInternalItem, ...] = ()
 
 
 RuntimeReachabilityFramework = Literal[
@@ -3233,6 +3440,9 @@ class FileMetrics:
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     semantic_facts: SemanticFileFacts = field(default_factory=SemanticFileFacts)
+    # The function-local population (liveness policy v5), in its own channel
+    # so that no consumer of ``dead_candidates`` admits it by accident.
+    nested_definitions: tuple[NestedDefinition, ...] = ()
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
     # ``<module>:<name>`` for every name the module's static ``__all__``
     # declares. A declaration, never a reference: it rides the dependent
@@ -3395,6 +3605,14 @@ class ProjectMetrics:
     # because they are not comparable across worlds.
     unresolved_reachability: tuple[UnresolvedReachabilityItem, ...] = ()
     dead_code_world: WorldContract = DEFAULT_DEAD_CODE_WORLD
+    # Internal abstentions (liveness policy v5), beside the two lanes above
+    # and never inside any dead count.
+    unresolved_internal: tuple[UnresolvedInternalItem, ...] = ()
+    # The population the dead-code lane judged: module-level candidates and
+    # the function-local ones. Reported so the inventory is explicit on the
+    # wire rather than inferable from the verdict lanes.
+    dead_code_candidates: int = 0
+    dead_code_nested_candidates: int = 0
     api_surface: ApiSurfaceSnapshot | None = None
     semantic_authority: SemanticAuthorityResult | None = None
 
@@ -4555,6 +4773,10 @@ class MetricProjectContext:
     #: under a world nobody declared.
     dead_code_world: WorldContract
     external_reachability: tuple[ExternalReachability, ...] = ()
+    #: The function-local population (liveness policy v5). Read by the
+    #: dead-code family only; every other family reads ``units`` and
+    #: ``class_metrics`` and never sees it.
+    nested_definitions: tuple[NestedDefinition, ...] = ()
     test_reference_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
@@ -4653,6 +4875,9 @@ class CacheFactsDict(CacheFactsDictBase, total=False):
     # Liveness policy v4 declaration fact (``dx`` on the wire); absent when
     # the module declares no static ``__all__`` name.
     declared_exports: list[str]
+    # Liveness policy v5 nested population (``nd`` on the wire); absent when
+    # no definition sits under a function scope.
+    nested_definitions: list[NestedDefinitionDict]
 
 
 GroupMap = dict[str, list[GroupItem]]
@@ -5245,6 +5470,16 @@ LIVENESS_PYDANTIC_HOOK_DECORATOR: Final = "pydantic_hook_decorator"
 LIVENESS_UNRESOLVED_EXTERNAL_OVERRIDE: Final = "unresolved_external_override"
 LIVENESS_EXTERNALLY_REACHABLE: Final = "externally_reachable"
 LIVENESS_REACHABILITY_UNRESOLVED: Final = "reachability_unresolved"
+# Liveness policy v5 (criterion C): the lexical resolver and the re-export
+# hop are what a bare name used to stand in for; the abstention is what the
+# bare name is worth once it stands for nothing.
+LIVENESS_LEXICAL_BINDING_REFERENCE: Final = "lexical_binding_reference"
+LIVENESS_REEXPORT_HOP_REFERENCE: Final = "reexport_hop_reference"
+LIVENESS_AMBIGUOUS_INTERNAL_BINDING: Final = "ambiguous_internal_binding"
+# Liveness policy v5, same generation: a resolved binding whose value's fate
+# is what stays ambiguous - the decorated value provably left into a callable
+# the analyzer cannot resolve.
+LIVENESS_OPAQUE_INTERNAL_ESCAPE: Final = "opaque_internal_escape"
 
 _ENTRYPOINTS = "codeclone.core.entrypoints"
 _CLASS_METRICS = "codeclone.analysis.class_metrics"
@@ -5343,11 +5578,33 @@ _LIVENESS_EVIDENCE: Final[tuple[MechanismSpec, ...]] = (
         "a console script, gui script or entry-point group declared in "
         "pyproject.toml resolves to the symbol",
     ),
+    # Parked by liveness policy v5 (criterion C1). The construct is still
+    # read - a loaded bare name the resolver could not bind still rides
+    # ``referenced_names`` - but it no longer confers LIVE: it is the reason
+    # a binding abstention gives, and the abstention's witness spells this
+    # id so the row can be traced back to the coincidence it names.
     _liveness(
         LIVENESS_BARE_NAME_REFERENCE,
-        f"{_WALK}:_collect_load_reference_node",
-        "the symbol's bare local name is loaded somewhere in the project; not "
-        "receiver-specific, and denied to methods under an opaque base",
+        "",
+        "the symbol's bare local name is loaded somewhere in the project; "
+        "measured at 5f35a50f holding 4515 symbols live on a spelling "
+        "coincidence, 561 of them sharing that spelling with another such "
+        "symbol; the LIVE rule was removed and the coincidence now abstains",
+        park_reason=PARK_PRODUCER_RETRACTED,
+    ),
+    _liveness(
+        LIVENESS_LEXICAL_BINDING_REFERENCE,
+        _REFERENCED_QUALNAMES,
+        "a bare name is loaded in a scope whose lexical chain binds it to a "
+        "definition of the same module - module-level or function-local - "
+        "under Python's scoping rules, so the reference is symbol-specific",
+    ),
+    _liveness(
+        LIVENESS_REEXPORT_HOP_REFERENCE,
+        f"{_DEAD_CODE}:resolve_reexport_hops",
+        "a resolved import binds a name that its target module only "
+        "re-imports, and the from-import edges lead to the module that "
+        "defines it, so the reference reaches the definition",
     ),
     _liveness(
         LIVENESS_SELF_DISPATCH,
@@ -5432,6 +5689,22 @@ _LIVENESS_EVIDENCE: Final[tuple[MechanismSpec, ...]] = (
         f"{_DEAD_CODE}:classify_liveness",
         "under the open world a symbol whose exposure no static read can "
         "settle is unresolved, never dead",
+        witness_type="abstention_record",
+    ),
+    _liveness(
+        LIVENESS_AMBIGUOUS_INTERNAL_BINDING,
+        f"{_DEAD_CODE}:classify_liveness",
+        "under either world a symbol whose only support is a bare name no "
+        "binding settles is unresolved, never live and never dead",
+        witness_type="abstention_record",
+    ),
+    _liveness(
+        LIVENESS_OPAQUE_INTERNAL_ESCAPE,
+        f"{_WALK}:_collect_opaque_escape_witnesses",
+        "under either world a definition whose innermost decorator binds to a "
+        "local registrar that provably hands the decorated value to a callable "
+        "the analyzer cannot resolve is unresolved, never dead; the witness is "
+        "the proven flow, never a name",
         witness_type="abstention_record",
     ),
 )
@@ -5859,6 +6132,77 @@ def witness_mechanism(witness: str) -> str | None:
     """The declared mechanism a witness names, or ``None`` if it names none."""
     mechanism = witness.partition(":")[0]
     return mechanism if mechanism in _EXPOSURE_MECHANISMS else None
+
+
+def binding_witness(local_name: str) -> str:
+    """Format the ``ambiguous_internal_binding`` witness: construct, then name.
+
+    The bare-name mechanism is parked as a LIVE rule and lives on as the
+    construct a binding abstention names, so the witness spells the parked
+    id: a reader can trace the row to the coincidence it is about, and the
+    door on the row refuses a witness spelled any other way.
+    """
+    return f"{LIVENESS_BARE_NAME_REFERENCE}:{local_name}"
+
+
+_ESCAPE_WITNESS_ARROW: Final = " -> "
+_ESCAPE_WITNESS_LINKS: Final = ("@", "local ", "parameter ", "opaque call ")
+
+
+def escape_witness(
+    decorator: str,
+    registrar_path: str,
+    parameter: str,
+    opaque_call: str,
+) -> str:
+    """Format the ``opaque_internal_escape`` witness: the proven flow, in order.
+
+    ``@resource(...) -> local build.<locals>.resource -> parameter func ->
+    opaque call mcp.resource(...)``: the decorator as written (a call form
+    keeps its ``(...)``), the module-local lexical path of the registrar the
+    name binds to, the parameter that received the decorated value, and the
+    dotted callee the value flowed into. Four links, one per step of the
+    proof; the door on the row parses the shape back and refuses any other.
+    """
+    return _ESCAPE_WITNESS_ARROW.join(
+        (
+            f"@{decorator}",
+            f"local {registrar_path}",
+            f"parameter {parameter}",
+            f"opaque call {opaque_call}(...)",
+        )
+    )
+
+
+def validate_escape_witness(witness: str) -> str:
+    """The door on an escape witness: four links, each naming its construct.
+
+    Refused empty, refused with a link missing or spelled through another
+    construct, refused when a link carries a space (every link body is one
+    token: a name, a lexical path, a dotted callee), and refused when the
+    opaque call does not end in ``(...)``. A ``bare_name_reference:x``
+    witness on an escape row is exactly what this catches: the row would
+    claim a proven flow and show a spelling coincidence.
+    """
+    links = witness.split(_ESCAPE_WITNESS_ARROW)
+    if len(links) != len(_ESCAPE_WITNESS_LINKS):
+        raise LivenessVocabularyError(
+            f"escape witness {witness!r} does not spell the four links of the "
+            f"proven flow (decorator, local registrar, parameter, opaque call)"
+        )
+    for link, prefix in zip(links, _ESCAPE_WITNESS_LINKS, strict=True):
+        body = link.removeprefix(prefix)
+        if body == link or not body or " " in body:
+            raise LivenessVocabularyError(
+                f"escape witness link {link!r} does not name its construct "
+                f"through {prefix.strip() or '@'!r}"
+            )
+    if not links[-1].endswith("(...)") or links[-1] == "opaque call (...)":
+        raise LivenessVocabularyError(
+            f"escape witness {witness!r} does not end in the opaque call the "
+            f"value flowed into"
+        )
+    return witness
 
 
 def abstention_reason_for_state(state: ReachabilityState) -> UnresolvedReason:

@@ -229,6 +229,26 @@ def test_liveness_policy_version_misses_only_dependent_lane(
     )
 
 
+def test_liveness_policy_generation_four_misses_the_dependent_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The distinguishing witness of "4" -> "5" (criterion C, 2026-09-05).
+
+    A generation-4 dependent lane carries every loaded identifier in
+    ``referenced_names``, none of the lexical bindings in
+    ``referenced_qualnames`` and no nested row at all, so a warm run over it
+    would abstain on every bare-name-only symbol a cold run proves live
+    through its binding and would report no function-local definition.
+    The lane must miss, and only that lane.
+    """
+    _assert_profile_input_misses_only_dependent_lane(
+        monkeypatch,
+        profile_input="LIVENESS_POLICY_VERSION",
+        legacy_value="4",
+        current_value=LIVENESS_POLICY_VERSION,
+    )
+
+
 def test_liveness_policy_generation_three_misses_the_dependent_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

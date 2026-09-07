@@ -3975,7 +3975,7 @@ def test_both_novelty_writers_answer_the_same_word(
 #: ``unresolved`` lane and ``world_contract``); the vocabulary is unchanged and
 #: is recorded here against the new version, as the pin asks.
 _NOVELTY_REASON_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.3",
+    "3.4",
     (
         "comparison_unavailable",
         "entity_not_compared",

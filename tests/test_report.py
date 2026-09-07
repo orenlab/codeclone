@@ -1818,6 +1818,11 @@ def test_report_json_dead_code_summary_uses_high_confidence_key() -> None:
         # RULING 2026-09-01: the reachability abstentions and their world ride
         # the same block; a synthetic payload that stated no world utters "".
         "unresolved": 0,
+        # Liveness policy v5: the binding abstentions and the judged
+        # population ride the same block; a synthetic payload judged nothing.
+        "unresolved_internal": 0,
+        "candidates": 0,
+        "nested_candidates": 0,
         "world_contract": "",
         "unreachable_statements": 0,
         "live_roots": 0,
@@ -1903,6 +1908,9 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
         "new_items": 0,
         "unresolved_external_override": 0,
         "unresolved": 0,
+        "unresolved_internal": 0,
+        "candidates": 0,
+        "nested_candidates": 0,
         "world_contract": "",
         "unreachable_statements": 0,
         "live_roots": 0,

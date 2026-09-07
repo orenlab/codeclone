@@ -130,7 +130,7 @@ def test_the_open_world_summary_names_the_lane_the_world_and_the_schema(
     # The export chain is reachability evidence now, never a live root.
     assert "export_root" not in set(live_root_reason_by_qualname(family).values())
 
-    assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION == "3.3"
+    assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION == "3.4"
 
 
 def test_the_closed_world_calls_b_dead_from_the_cli_flag(tmp_path: Path) -> None:

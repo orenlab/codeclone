@@ -1249,11 +1249,21 @@ def test_collect_module_walk_data_edge_branches() -> None:
     )
     assert walk.referenced_names == frozenset()
 
+    # Liveness policy v5: a load the lexical chain settles is neither evidence
+    # nor a signal. ``x`` is the lambda's own parameter, so it never reaches
+    # ``referenced_names``; a free name in the same position still does,
+    # which is what keeps this a pin on the resolver and not on the walk
+    # going silent.
     _lambda_tree, _lambda_collector, lambda_walk = _collect_module_walk(
         "(lambda x: x)(1)",
         module_name="pkg.mod",
     )
-    assert lambda_walk.referenced_names == frozenset({"x"})
+    assert lambda_walk.referenced_names == frozenset()
+    _free_tree, _free_collector, free_walk = _collect_module_walk(
+        "(lambda x: y)(1)",
+        module_name="pkg.mod",
+    )
+    assert free_walk.referenced_names == frozenset({"y"})
 
 
 def test_collect_module_walk_data_without_referenced_name_collection() -> None:
@@ -1356,7 +1366,11 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
         node=cast(ast.Constant, ast.parse("1", mode="eval").body),
         state=state,
     )
-    assert "value" in state.referenced_names
+    # Liveness policy v5: a Name load is kept for the imported-symbol lane
+    # and left for the lexical pass to settle; only an attribute load, whose
+    # receiver type is unknown, is a bare-name signal at this point.
+    assert name_node in state.name_nodes
+    assert "value" not in state.referenced_names
     assert "attr" in state.referenced_names
 
 
@@ -1959,8 +1973,13 @@ def test_dead_code_distinguishes_test_only_reference_from_unreferenced() -> None
     # 3 -> 4 when an ``__all__`` entry stopped counting as internal use: a
     # "3" dependent lane still carries the declaration folded into
     # ``referenced_qualnames``, and a warm run over it would call
-    # ``public_api`` live where this cold run calls it dead.
-    assert contracts.LIVENESS_POLICY_VERSION == "4"
+    # ``public_api`` live where this cold run calls it dead. It moved 4 -> 5
+    # when a bare-name coincidence stopped conferring LIVE and function-local
+    # definitions entered the population (criterion C): a "4" dependent lane
+    # carries every loaded identifier as a reference and no nested row at
+    # all, so a warm run over it would abstain on symbols this cold run
+    # proves live through their binding and would report no nested symbol.
+    assert contracts.LIVENESS_POLICY_VERSION == "5"
 
 
 def test_extraction_uses_module_identity_for_test_named_package_trees() -> None:
@@ -1985,7 +2004,11 @@ result = helper()
         min_stmt=1,
         module_registry=package_registry,
     )
-    assert "helper" in package_metrics.referenced_names
+    # Liveness policy v5: the module-scope call binds the module's own
+    # ``helper`` through the lexical chain, so the reference is a resolved
+    # qualname and the bare name is no longer a signal.
+    assert "example.testing.helpers:helper" in package_metrics.referenced_qualnames
+    assert "helper" not in package_metrics.referenced_names
 
     test_path = "testing/case.py"
     test_registry = build_test_module_registry(root=fixture_root / "repo_root")
@@ -1999,6 +2022,7 @@ result = helper()
         module_registry=test_registry,
     )
     assert test_metrics.referenced_names == frozenset()
+    assert test_metrics.referenced_qualnames == frozenset()
 
 
 def test_package_export_chain_is_exposure_evidence_not_internal_use() -> None:

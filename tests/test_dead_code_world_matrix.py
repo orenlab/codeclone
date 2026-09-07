@@ -22,13 +22,12 @@ symbol-specific evidence - popular names like ``get``, ``save`` or ``close``
 would revive half a project through an unrelated receiver - so a symbol whose
 only support is a bare-name match is not proven live in either world.
 
-Today the bare-name fallback still grants LIVE. That is what the bare-name
-authority criterion changes, and it is not this suite's work: it carries its
-own blind external benchmark because it moves a user-facing verdict on a
-measured 4513 symbols in this repository alone. So row 3 is pinned as
-``xfail(strict=True)``: it states the law now, it fails loudly the day the
-law is satisfied, and the XPASS is the signal to delete the marker rather
-than to discover the row was never pinned at all.
+Row 3 was pinned as ``xfail(strict=True)`` while the bare-name fallback still
+granted LIVE, so that the law was stated before it held and the strict XPASS
+would be the signal that criterion C had landed. It landed with liveness
+policy v5: a bare name no binding settles is the reason for a binding
+abstention (``unresolved_internal``, ``ambiguous_internal_binding``) in both
+worlds, and the marker is gone. The row is an ordinary law now.
 
 Each row is CAUSAL, not asserted: every fixture is paired with a control
 that differs only in the mechanism the row names, and the control's verdict
@@ -47,7 +46,11 @@ from tests._liveness_report_helpers import (
     VERDICT_LIVE,
     VERDICT_UNRESOLVED,
     analysis_report,
+    dead_code_family_of,
     liveness_verdict,
+    unresolved_by_qualname,
+    unresolved_internal_by_qualname,
+    unresolved_override_by_qualname,
 )
 
 _SCOPE_ID = "0192f3aa-6c51-7b28-9d44-1ea5c07b6f41"
@@ -105,24 +108,12 @@ _MATRIX: dict[str, dict[str, str]] = {
     _ROW3: {"open": VERDICT_UNRESOLVED, "closed": VERDICT_UNRESOLVED},
 }
 
-#: Row 3 is the future. Naming the criterion here rather than in a comment
-#: means the exit condition travels with the marker.
-_ROW3_EXIT = (
-    "bare-name authority (criterion C): a bare-name match is not "
-    "symbol-specific evidence and must abstain in BOTH worlds. Delete this "
-    "marker when C lands - the strict XPASS is the signal."
-)
-
 _ROWS = pytest.mark.parametrize(
     "qualname",
     [
         pytest.param(_ROW1, id="row1-proven-internal-use"),
         pytest.param(_ROW2, id="row2-unknown-external-reachability"),
-        pytest.param(
-            _ROW3,
-            id="row3-ambiguous-bare-name",
-            marks=pytest.mark.xfail(strict=True, reason=_ROW3_EXIT),
-        ),
+        pytest.param(_ROW3, id="row3-ambiguous-bare-name"),
     ],
 )
 
@@ -194,7 +185,7 @@ def touch_bare_name(obj: Any) -> int:
         assert liveness_verdict(payload, _ROW1) == expected
 
 
-def test_row3_is_live_today_because_of_the_bare_name_and_nothing_else(
+def test_row3_abstains_because_of_the_bare_name_and_nothing_else(
     matrix_reports: dict[str, dict[str, object]],
     tmp_path: Path,
 ) -> None:
@@ -203,19 +194,31 @@ def test_row3_is_live_today_because_of_the_bare_name_and_nothing_else(
     ``row3_ambiguous_bare_name`` and ``control_no_support_at_all`` are
     siblings in the same PRIVATE module, so neither is externally reachable
     and the reachability lane cannot be what separates them. The control is
-    dead in both worlds; the fixture is not; removing the single ambiguous
+    dead in both worlds; the fixture abstains in both, in the binding lane,
+    naming the coincidence it is about; removing the single ambiguous
     attribute call collapses the fixture onto the control.
 
-    This test deliberately does NOT assert the law - it asserts the current
-    behaviour the law contradicts, so that the row-3 strict xfail above is
-    known to be xfailing for the measured reason and not for a typo.
+    Both boundaries of criterion C1 are held here: the bare name must not
+    confer LIVE (the row is in an abstention lane), and it must not be
+    ignored either (the row is not dead while the load exists).
     """
 
     for world in ("open", "closed"):
+        family = dead_code_family_of(matrix_reports[world])
         assert liveness_verdict(matrix_reports[world], _CONTROL_UNSUPPORTED) == (
             VERDICT_DEAD
         )
-        assert liveness_verdict(matrix_reports[world], _ROW3) == VERDICT_LIVE
+        assert liveness_verdict(matrix_reports[world], _ROW3) == VERDICT_UNRESOLVED
+        row = unresolved_internal_by_qualname(family)[_ROW3]
+        assert {key: row[key] for key in ("reason", "local_name", "witness")} == {
+            "reason": "ambiguous_internal_binding",
+            "local_name": "row3_ambiguous_bare_name",
+            "witness": "bare_name_reference:row3_ambiguous_bare_name",
+        }
+        # The binding lane is its own lane: the row is in neither of the
+        # other two, so the three abstentions never blur into one count.
+        assert _ROW3 not in unresolved_by_qualname(family)
+        assert _ROW3 not in unresolved_override_by_qualname(family)
 
     without_bare_name = dict(_MATRIX_TREE)
     without_bare_name["pkg/entry.py"] = """

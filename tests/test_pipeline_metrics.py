@@ -629,6 +629,11 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
         "suppressed": 1,
         "unresolved_external_override": 0,
         "unresolved": 0,
+        # Liveness policy v5: the binding abstentions and the judged
+        # population, zero for a synthetic project-metrics fixture.
+        "unresolved_internal": 0,
+        "candidates": 0,
+        "nested_candidates": 0,
         "world_contract": "open",
         "unreachable_statements": 0,
         "live_roots": 0,

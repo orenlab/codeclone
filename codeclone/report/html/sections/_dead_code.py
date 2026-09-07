@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
@@ -281,6 +282,15 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     dead_suppressed_total = _as_int(summary.get("suppressed", 0))
     dead_unresolved_total = _as_int(summary.get("unresolved_external_override", 0))
     dead_unresolved_reach_total = _as_int(summary.get("unresolved", 0))
+    dead_unresolved_internal_total = _as_int(summary.get("unresolved_internal", 0))
+    dead_nested_candidates = _as_int(summary.get("nested_candidates", 0))
+    # The abstention card is the only surface that shows these, so the reason
+    # census is counted here rather than published as a second summary field:
+    # a number with one reader does not need a second producer.
+    _unresolved_internal_reasons = Counter(
+        str(_as_mapping(row).get("reason", "")).strip()
+        for row in _as_sequence(ctx.dead_code_map.get("unresolved_internal"))
+    )
     dead_world_contract = str(summary.get("world_contract", ""))
     # Published once by the metrics payload and read here, exactly as the
     # gate and the text/markdown surfaces read it. This panel used to say
@@ -352,6 +362,33 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
             dead_unresolved_total,
             tip=_TIP_UNRESOLVED_OVERRIDES,
             value_tone="muted",
+        ),
+        # Same tone and for the same reason: an internal abstention is the
+        # analysis declining to decide on an uncertainty inside the program -
+        # a spelling coincidence it will not call a reference, a value that
+        # left into opaque semantics it will not call dead.
+        _stat_card(
+            "Unresolved internal",
+            dead_unresolved_internal_total,
+            # Decomposition, never restatement: the value is the total, and
+            # these say which uncertainty produced it and how large the
+            # population examined was. The card is the only owner of the
+            # abstention display -- the banner points at it and counts
+            # nothing, and an "abstained" micro-badge repeating the card's
+            # own value is what this replaced.
+            detail=_micro_badges(
+                (
+                    "ambiguous binding",
+                    _unresolved_internal_reasons.get("ambiguous_internal_binding"),
+                ),
+                (
+                    "opaque escape",
+                    _unresolved_internal_reasons.get("opaque_internal_escape"),
+                ),
+                ("nested examined", dead_nested_candidates or None),
+            ),
+            value_tone="muted",
+            glossary_tip_fn=_TIP,
         ),
         _stat_card(
             "Unresolved external reach",

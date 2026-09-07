@@ -890,7 +890,7 @@ def test_population_rides_every_surface_even_when_measured() -> None:
 #: ``unresolved`` lane and ``world_contract``); the members are unchanged and
 #: are recorded here against the new version, as the pin asks.
 _POPULATION_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.3",
+    "3.4",
     ("complete_empty", "complete_nonempty", "partial", "unmeasured"),
 )
 

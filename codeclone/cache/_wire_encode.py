@@ -423,6 +423,52 @@ def _encode_dead_candidates(entry: CacheFactsDict, wire: dict[str, object]) -> N
     )
     if star_bound:
         wire["sb"] = star_bound
+    # The escape witness (liveness policy v5) rides beside the rows for the
+    # reason the star-binding fact does: a fifth positional slot would make
+    # every reader fill the ones before it. ``[qualname, witness]`` pairs,
+    # sorted, present only for the candidates that carry one.
+    escape_witnesses = sorted(
+        (str(candidate["qualname"]), str(candidate["escape_witness"]))
+        for candidate in dead_candidates
+        if candidate.get("escape_witness")
+    )
+    if escape_witnesses:
+        wire["ew"] = [[qualname, witness] for qualname, witness in escape_witnesses]
+
+
+def _encode_nested_definitions(entry: CacheFactsDict, wire: dict[str, object]) -> None:
+    """``nd``: the function-local population (liveness policy v5).
+
+    A fixed-width row with every field written, deliberately unlike the
+    positional tail of ``dc``: the row was born whole under the policy that
+    introduced it, so there is no older shape to stay unambiguous against,
+    and a reader that had to fill absent slots would be inventing facts.
+    """
+    rows = sorted(
+        entry.get("nested_definitions", []),
+        key=lambda row: (row["start_line"], row["end_line"], row["qualname"]),
+    )
+    if not rows:
+        return
+    wire["nd"] = [
+        [
+            row["qualname"],
+            row["local_name"],
+            row["kind"],
+            row["lexical_parent"],
+            row["lexical_path"],
+            row["start_line"],
+            row["end_line"],
+            sorted(set(row["suppressed_rules"])),
+            row["live_root_reason"],
+            sorted(set(row["owner_base_names"])),
+            bool(row["owner_has_unresolved_external_base"]),
+            bool(row["decorator_evidenced"]),
+            bool(row["self_dispatched"]),
+            str(row["escape_witness"]),
+        ]
+        for row in rows
+    ]
 
 
 def _encode_name_lists(entry: CacheFactsDict, wire: dict[str, object]) -> None:
@@ -731,6 +777,8 @@ def _dependent_facts(entry: CacheEntryV3) -> CacheFactsDict:
     )
     if dependent.declared_exports:
         facts["declared_exports"] = list(dependent.declared_exports)
+    if dependent.nested_definitions:
+        facts["nested_definitions"] = list(dependent.nested_definitions)
     if dependent.typing_coverage is not None:
         facts["typing_coverage"] = dependent.typing_coverage
     if dependent.docstring_coverage is not None:
@@ -775,6 +823,7 @@ def _encode_wire_file_entry(entry: CacheEntryV3) -> dict[str, object]:
     _encode_class_metrics(dependent_facts, dependent_wire)
     _encode_module_deps(dependent_facts, dependent_wire)
     _encode_dead_candidates(dependent_facts, dependent_wire)
+    _encode_nested_definitions(dependent_facts, dependent_wire)
     _encode_name_lists(dependent_facts, dependent_wire)
     _encode_runtime_reachability(dependent_facts, dependent_wire)
     _encode_function_relationship_facts(dependent_facts, dependent_wire)
