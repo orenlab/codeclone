@@ -83,8 +83,9 @@ error.
 
 ## How to read it
 
-The maintainer-facing surface is the MCP tool `query_platform_observability`, a
-read-only sectioned slicer. It emits **numeric metrics only** — never raw SQL or
+There are two maintainer-facing surfaces, both read-only.
+
+The MCP surface is `query_platform_observability`, a sectioned slicer. It emits **numeric metrics only** — never raw SQL or
 payloads. Start at the `summary` section and follow the recommended next
 sections:
 
@@ -95,6 +96,15 @@ sections:
 `detail_level` accepts `compact`, `normal`, or `full` (aggregate sections
 downgrade `full` to `normal`); `limit` clamps to `[1, 100]`. The
 branded HTML cockpit remains the human-facing everything-view.
+
+The CLI surface is `codeclone observability trace`. It opens the same store
+read-only and prints the recorded operation trace as JSON on stdout, or writes
+it with `--json PATH` and `--html PATH` — both may be given in one invocation.
+`--last N` bounds the window, `--operation ID` focuses one operation and its
+chain, and `--correlation ID` filters by correlation id. When no store exists
+the command prints how to start collecting and exits 0, so it is safe to run
+against a repository that never recorded anything. The full option list is in
+the [CLI reference](cli.md).
 
 For the maintainer-only skill, see `codeclone-platform-observability`; in an MCP
 client, `help(topic="observability")` gives the compact contract.

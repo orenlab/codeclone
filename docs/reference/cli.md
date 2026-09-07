@@ -16,7 +16,7 @@ codeclone [options] [root]
 
 The root directory defaults to the current directory. Analysis produces findings on structural clones, code metrics, dependencies, and code health. Reporting formats include JSON, HTML, Markdown, SARIF, and plain text.
 
-Specialized subcommands manage setup, engineering memory, and analytics. Exit code 0 indicates success; 2 signals contract violations; 3 indicates gating failures; 5 is an internal error.
+Specialized subcommands manage setup, engineering memory, analytics, baseline publication state, and recorded runtime traces. Exit code 0 indicates success; 2 signals contract violations; 3 indicates gating failures; 5 is an internal error.
 
 ## Global options
 
@@ -136,6 +136,20 @@ than through the import-time gate.
 
 ## Commands
 
+Five subcommand trees sit in front of the analysis parser: `setup`,
+`analytics`, `baseline`, `memory`, and `observability`. They are dispatched
+before the analysis options are parsed, so each tree owns its own parser and
+prints its own help. `codeclone --help` lists the five trees but not their
+verbs; to see the verbs of one tree, ask that tree:
+
+```bash
+codeclone <command> --help
+codeclone <command> <verb> --help
+```
+
+Every verb that acts on a repository takes `--root`, defaulting to the current
+directory.
+
 ### `setup [action]`
 
 Initialize or inspect repository readiness.
@@ -160,37 +174,228 @@ Manage engineering memory (durable knowledge base).
 
 **Subcommands:**
 - `init`: Initialize engineering memory
-- `status`: Show memory status
-- `for-path`: List records for a source path
-- `search`: Search records by keyword
-- `stale`: List stale records
-- `vacuum`: Purge expired records
-- `coverage`: Show memory coverage
-- `review-candidates`: List draft candidates
-- `approve`: Approve a draft record
-- `reject`: Reject a draft record
-- `archive`: Archive an active record
-- `semantic`: Semantic index management (status / rebuild / search)
-- `trajectory`: Trajectory projections (status / rebuild / list / search / show / agents / anomalies / dashboard / export)
-- `jobs`: Projection rebuild jobs (status / enqueue / run-once / list)
+- `status`: Show engineering memory status
+- `for-path PATH`: List memory records linked to a source path
+- `search QUERY`: Search engineering memory records by keyword
+- `stale`: List stale engineering memory records
+- `vacuum`: Purge expired stale, draft, rejected, and archived records
+- `coverage PATHS...`: Show memory coverage for repo-relative paths
+- `review-candidates`: List draft memory candidates awaiting review
+- `approve`: Approve a draft memory record
+- `reject`: Reject a draft memory record
+- `archive`: Archive an active memory record
+- `semantic`: Semantic retrieval index — see below
+- `trajectory`: Trajectory projections and analytics — see below
+- `jobs`: Projection rebuild jobs — see below
+
+The last three are command groups rather than verbs: each takes a verb of its
+own; invoked bare, a group exits 2 and prints its verb list in the usage line.
+
+#### `memory semantic`
+
+The semantic retrieval index over memory records. `status` reports whether the
+index has been built and which embedding provider is configured; retrieval
+falls back to keyword search when it has not.
+
+**Verbs:**
+- `status`: Show semantic index status
+- `rebuild`: Rebuild the semantic index. **Writes the index**
+- `search QUERY`: Semantic free-text search over memory. `--limit` (default 10), `--json`
+- `probe`: Measure semantic projection length distribution per lane. `--json`, `--exact-tokens`
+
+`probe` is a read-only measurement and does not embed anything. It reports, per
+lane, the document count and the character and token percentiles of the text
+that would be embedded, together with how many documents exceed the model's
+token limit — the number to look at before a `rebuild`. By default lengths are
+estimated with the `chars_approx` estimator; `--exact-tokens` counts them with
+the embedding model's own tokenizer, which loads FastEmbed when configured.
+
+```bash
+codeclone memory semantic status
+codeclone memory semantic probe
+codeclone memory semantic probe --json
+codeclone memory semantic search "cache invalidation" --limit 5
+```
+
+`search` needs a built index: until `rebuild` has run it reports the reason it
+is unavailable and exits 2.
+
+#### `memory trajectory`
+
+Trajectory projections derived from the audit event core: one trajectory per
+change-control workflow, with its steps, outcome, and any detected anomalies.
+
+**Verbs:**
+- `status`: Show trajectory projection status
+- `rebuild`: Rebuild trajectory projections from the audit event core. **Writes the projections**
+- `list`: List stored trajectories. `--limit` (default 20)
+- `search QUERY`: Search stored trajectories by keyword. `--limit` (default 10), `--match {any,all}`
+- `show TRAJECTORY_ID`: Show one stored trajectory; short id prefixes are accepted
+- `agents`: Aggregate trajectories by agent label. `--include-routine`, `--json`
+- `anomalies`: List trajectories with detected anomalies. `--limit` (default 25), `--include-routine`, `--json`
+- `dashboard`: Combined status, agents, and anomalies summary. `--limit` (default 25), `--include-routine`, `--json`
+- `export`: Export trajectories to local JSONL. `--profile` and `--out` are required; `--allow-external-out`, `--force`, `--json`
+
+Export is disabled by default: without `trajectory_export_enabled` in the
+memory configuration the command refuses unless `--force` is passed. `--out`
+must stay inside the repository root unless `--allow-external-out` is given.
+
+```bash
+codeclone memory trajectory status
+codeclone memory trajectory list --limit 5
+codeclone memory trajectory agents --json
+codeclone memory trajectory show 4f2a91c8
+```
+
+#### `memory jobs`
+
+Background jobs that rebuild the memory projections. Enqueueing normally spawns
+a worker process; `run-once` is the foreground path used in CI and when the
+spawned worker is unwanted.
+
+**Verbs:**
+- `status`: Show projection rebuild job status
+- `enqueue`: Enqueue a projection rebuild bundle job. **Writes a job**. `--force`, `--no-spawn`
+- `run-once`: Claim and run one pending job. **Writes projections**. `--not-before`
+- `list`: List recent projection jobs. `--limit` (default 20), `--json`
+
+`--force` enqueues even when the policy is off or the stimulus is unchanged,
+and `--no-spawn` records the job without starting a background worker.
+`--not-before` takes an ISO-8601 UTC deadline and defers the run until then
+before loading the embedding model, which coalesces a burst of rebuilds into
+one trailing-edge flush.
+
+```bash
+codeclone memory jobs status
+codeclone memory jobs list --limit 10 --json
+```
 
 ### `analytics [subcommand]`
 
-Manage and query code analytics.
+Build and query the intent analytics corpus.
 
 **Subcommands:**
-- `snapshot`: Capture current metrics snapshot
-- `embed`: Embed code representations
-- `cluster`: Clustering operations
-- `build`: Build analytics indices
-- `clusters`: List available clusters
-- `cluster-show`: Show cluster details
-- `outliers`: Identify outlier code
-- `profiles`: Show analytics profiles
+- `snapshot`: Build an immutable intent corpus snapshot
+- `embed`: Generate analytics embeddings for a snapshot
+- `cluster`: Cluster an embedded snapshot
+- `build`: Snapshot, embed, and cluster end-to-end
+- `clusters`: List clustering runs for a snapshot
+- `cluster-show`: Export one clustering run as JSON
+- `outliers`: Show noise cluster assignments
+- `profiles`: Inspect the analytics profile registry — see below
+
+#### `analytics profiles`
+
+A profile is a named clustering search space: which representations to use,
+which parameter grid to sweep, and which suitability bounds a run must satisfy.
+Profiles ship with the package; this group inspects the resolved registry and
+never modifies it.
+
+**Verbs:**
+- `list`: List registered profiles
+- `show`: Show one profile manifest. `--profile-id` is required
+- `validate`: Validate one manifest, or the resolved registry when no path is given. `--path`
+
+All three are read-only, take `--root`, and print JSON on stdout — there is no
+`--json` flag because there is no other format. `list` reports each profile's
+id, version, label, source, and manifest digest; `show` prints the full
+manifest, including its search space and suitability bounds; `validate` returns
+a `valid` verdict alongside the digest of every manifest it checked. An
+unknown `--profile-id` exits 2.
+
+```bash
+codeclone analytics profiles list
+codeclone analytics profiles show --profile-id intent-small-balanced-v1
+codeclone analytics profiles validate
+```
+
+### `baseline [subcommand]`
+
+Manage the native baseline publication state.
+
+Publishing a baseline takes a lock beside the baseline file so two writers
+cannot interleave. If the publishing process dies, that lock can outlive it and
+every later publish refuses. This tree clears such a lock without writing a
+baseline; nothing here recomputes or republishes analysis results.
+
+**Subcommands:**
+- `recover-lock`: Explicitly recover a stale baseline publication lock without writing the baseline
+
+#### `baseline recover-lock`
+
+**Options:**
+- `--path PATH` (required): Baseline target whose adjacent lock is recovered
+- `--expected-token TOKEN` (required): Exact lock token observed by the operator
+- `--force`: Allow recovery of foreign-host or malformed lock evidence
+
+**This command deletes lock state.** The lock lives beside its baseline as
+`<baseline>.publish.lock`, and the token it holds is not printed by any other
+command — the operator reads it out of that file. Passing it back with
+`--expected-token` is what makes recovery deliberate rather than blind.
+
+Recovery is refused, and the refusal cannot be forced, when:
+
+- the token does not match the one in the lock, or
+- the lock's owning process is still alive on this host.
+
+`--force` covers only the two cases where the evidence itself is unusable: a
+lock written by another host, and a lock that cannot be parsed at all. It does
+not override a live owner, so it is not a way to take a lock away from a
+running publisher.
+
+On success the command prints a confirmation and exits 0; a refusal prints the
+reason and exits 2. Either way no baseline is written.
+
+```bash
+# Read the token the lock is holding, then hand it back
+cat codeclone.baseline.json.publish.lock
+
+codeclone baseline recover-lock \
+  --path codeclone.baseline.json \
+  --expected-token <token-from-the-lock-file>
+```
 
 ### `observability [subcommand]`
 
-Observe CodeClone runtime behavior (maintainer only).
+Inspect recorded runtime traces (maintainer only).
+
+Platform observability is a development-only diagnostic and is **off by
+default**. Runs are recorded only when `CODECLONE_OBSERVABILITY_ENABLED=1` is
+set, and the store lives under the analysed repository. This command opens that
+store read-only and never writes it; with no store present it prints a notice
+explaining how to start collecting and exits 0.
+
+**Subcommands:**
+- `trace`: Render the recorded operation trace
+
+#### `observability trace`
+
+**Options:**
+- `--root ROOT`: Repository root path
+- `--last N`: Show the last N root operations
+- `--operation ID`: Focus one operation id and its chain
+- `--correlation ID`: Filter by correlation id
+- `--json PATH`: Write JSON to this path
+- `--html PATH`: Write HTML to this path
+
+With neither `--json` nor `--html`, the trace is printed as JSON on stdout.
+Both may be given in one invocation; each writes its file and prints the path
+written. The payload carries the operation tree, the per-plane operation lists,
+a waterfall, phase aggregates, and the span-retention accounting that says
+which operations were truncated.
+
+```bash
+# Record a run
+CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
+
+# Read the trace back
+codeclone observability trace
+codeclone observability trace --last 20
+codeclone observability trace --html trace.html
+```
+
+For the trace contract and what the store retains, see
+[Platform observability](observability.md).
 
 ## `codeclone-mcp` (MCP server launcher)
 
@@ -292,6 +497,14 @@ codeclone memory search "clustering algorithm"
 codeclone setup status
 codeclone setup plan
 codeclone setup apply --yes
+
+# Analytics profile registry (read-only)
+codeclone analytics profiles list
+codeclone analytics profiles validate
+
+# Recorded runtime trace (maintainer only)
+CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
+codeclone observability trace --last 20
 ```
 
 ## Workflow
