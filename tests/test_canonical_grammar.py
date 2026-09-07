@@ -69,6 +69,8 @@ _EXPECTED_TIERS: dict[str, str] = {
     "dependency_relations": "analysis",
     "file_modules": "analysis",
     "graph_nodes": "analysis",
+    "import_observations": "analysis",
+    "relationship_observations": "analysis",
     "risk_observations": "analysis",
     "run_scalars": "analysis",
     "security_surfaces": "analysis",
@@ -92,6 +94,8 @@ _EXPECTED_KINDS: dict[str, str] = {
     "dependency_relations": "normalized_fact",
     "file_modules": "normalized_fact",
     "graph_nodes": "normalized_fact",
+    "import_observations": "normalized_fact",
+    "relationship_observations": "normalized_fact",
     "risk_observations": "normalized_fact",
     "run_scalars": "run_population",
     "security_surfaces": "normalized_fact",
@@ -426,7 +430,7 @@ def test_registry_source_executes_the_wire_gate_at_import() -> None:
 
 
 def test_the_real_wire_population_passes_the_gate() -> None:
-    """Witness that the instrument is on: 20 families, 97 fact fields.
+    """Witness that the instrument is on: 22 families, 118 fact fields.
 
     93 until the authority ``violations`` family gained ``locations``, the
     one published authority column measured NOT derivable from the stored
@@ -438,10 +442,17 @@ def test_the_real_wire_population_passes_the_gate() -> None:
     producer's glued complexity row.  A family was added here, deliberately
     -- the span could not be a column of ``risk_observations`` because
     ``dimension`` is in that family's key.
+
+    20 -> 22 families and 97 -> 118 fields with canonical model revision 2
+    (2026-09-07): ``import_observations`` (13 stored fields) and
+    ``relationship_observations`` (8 stored fields; its ``path`` and
+    ``resolution_status`` are representation projections and are not
+    counted here because they have no residence).  Two families added
+    deliberately, in one migration, by maintainer sanction.
     """
     families = _wire_field_names()
-    assert len(families) == 20
-    assert sum(len(fields) for fields in families.values()) == 97
+    assert len(families) == 22
+    assert sum(len(fields) for fields in families.values()) == 118
     require_analysis_wire_families(families)
 
 

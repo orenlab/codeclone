@@ -48,8 +48,22 @@ from typing import NamedTuple
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
 # ingest oracle, and importing the oracle from a production path would
 # make the test oracle a production dependency (ruling 2026-08-24 §6).
-from ..canonical.errors import RunReportLinkError, UnknownRunError
-from ..canonical.identity import FileId, ModuleId
+from ..canonical.errors import (
+    RunReportLinkError,
+    SemanticGrammarError,
+    UnknownRunError,
+)
+from ..canonical.identity import (
+    UNRESOLVED_IMPORT_RESOLUTIONS,
+    FileId,
+    ImportTarget,
+    ModuleId,
+    OpaqueDottedHead,
+    OpaqueEntity,
+    RelationshipTarget,
+    SymbolId,
+    UnresolvedTarget,
+)
 from ..canonical.model import (
     AdoptionCountRow,
     AnalysisFacts,
@@ -69,6 +83,8 @@ from ..canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    ImportObservationRow,
+    RelationshipObservationRow,
     RiskObservationRow,
     RunScalars,
     SecuritySurfaceRow,
@@ -76,6 +92,7 @@ from ..canonical.model import (
     SinkRoleRow,
     UnitSpanRow,
     ViolationRow,
+    relationship_resolution_status,
 )
 from ..canonical.semantic_grammar import (
     IdentityIndex,
@@ -110,7 +127,9 @@ from ..models import (
     AdoptionCount,
     ApiSymbolObservation,
     DeadCodeObservation,
+    FunctionRelationshipFacts,
     IntegerObservation,
+    ModuleDep,
     ModuleRegistryHandle,
     ObservationBundle,
     RiskObservation,
@@ -589,6 +608,168 @@ def _family_payload(payload: Mapping[str, object], family: str) -> Mapping[str, 
     return _as_mapping(payload.get(family))
 
 
+def _import_target(dep: ModuleDep, index: IdentityIndex) -> ImportTarget:
+    """The tagged import target: the producer's classification decides the
+    variant, the run's own registry checks it, nothing is guessed.
+
+    ``analyzed`` resolves through the one endpoint grammar owner and is
+    REFUSED when the registry does not carry the module (a classification
+    the run cannot back is a producer defect, never an opaque head); the
+    two unresolved resolutions carry no target by the producer's own law;
+    everything else is a dotted string outside the registry.
+    """
+    if dep.resolution in UNRESOLVED_IMPORT_RESOLUTIONS:
+        if dep.target:
+            raise SemanticGrammarError(
+                f"import_observations: an import classified {dep.resolution!r} "
+                f"names a target {dep.target!r}; refusing the contradiction"
+            )
+        return UnresolvedTarget()
+    if not dep.target:
+        raise SemanticGrammarError(
+            f"import_observations: an import classified {dep.resolution!r} "
+            "names no target; refusing to invent one"
+        )
+    if dep.resolution == "analyzed":
+        return parse_endpoint(index, dep.target, "import_observations.target")
+    return OpaqueDottedHead(dep.target)
+
+
+def _import_observation_rows(
+    deps: Sequence[ModuleDep], index: IdentityIndex
+) -> frozenset[ImportObservationRow]:
+    """Every import the walk observed, as the revision-2 family carries it.
+
+    The family keys the WHOLE observation, so a served row repeated exactly
+    could not come back out of the store; rather than absorb the repeat the
+    edge refuses to build (the hard law: express every family or refuse,
+    never publish a smaller population).  Measured 0 repeats on 11 445 rows
+    @ f117a8ad and 0 on 9 on the serving corpus, so the refusal is reachable
+    only by a producer that starts emitting one statement twice.
+    """
+    rows = [
+        ImportObservationRow(
+            source=parse_endpoint(index, dep.source, "import_observations.source"),
+            target=_import_target(dep, index),
+            dependency_type=dep.import_type,
+            line=dep.line,
+            resolution=dep.resolution,
+            mechanism=dep.mechanism,
+            binding=dep.binding,
+            is_lazy=dep.is_lazy,
+            level=dep.level,
+            requested_module=dep.requested_module,
+            requested_names=dep.requested_names,
+            candidate_targets=dep.candidate_targets,
+            inventory_expansion=dep.inventory_expansion,
+        )
+        for dep in deps
+    ]
+    observations = frozenset(rows)
+    if len(observations) != len(rows):
+        raise ProducerSnapshotUnavailable(
+            f"import_observations: {len(rows) - len(observations)} served import "
+            "rows repeat exactly; the family keys the whole observation and "
+            "cannot express a repeat"
+        )
+    return observations
+
+
+def _relationship_target(text: str | None, index: IdentityIndex) -> RelationshipTarget:
+    """The tagged relationship target from the producer's glued spelling.
+
+    A head the run's registry knows — a module it mapped, a path it analyzed
+    — resolves through the one symbol grammar owner into the FILE-headed
+    SYMBOL; any other head rides the opaque variant verbatim (an import
+    outside the tree); ``None`` is the nullary variant.  The split at the
+    producer's ModuleKey colon is checked, never repaired.
+    """
+    if text is None:
+        return UnresolvedTarget()
+    head, separator, local = text.partition(":")
+    if not separator or not head or not local or ":" in local:
+        raise SemanticGrammarError(
+            f"relationship_observations: target {text!r} is not a head:local "
+            "glued reference"
+        )
+    if head in index.module_to_path or head in index.analyzed_paths:
+        return parse_symbol(index, text, "relationship_observations.target")
+    return OpaqueEntity(head, local)
+
+
+def _relationship_observation_rows(
+    facts: Sequence[FunctionRelationshipFacts], index: IdentityIndex
+) -> frozenset[RelationshipObservationRow]:
+    """Every call/reference record, counted per observation.
+
+    The producer emits one record per expression, so identical records on
+    one line are a MULTIPLICITY the family carries as ``occurrence_count``
+    (1 342 repeated groups of 112 967 records @ f117a8ad).  Two served
+    fields are derived, and the edge refuses a record that contradicts its
+    own derivation rather than storing one half of it: ``resolution_status``
+    must be what the target variant says, and ``path`` must be the source
+    symbol's own file (the served value is that file under the analysis
+    root).
+    """
+    counted: dict[
+        tuple[SymbolId, RelationshipTarget, str, str, int, str | None, str | None], int
+    ] = {}
+    for entry in facts:
+        source = parse_symbol(
+            index, entry.source_qualname, "relationship_observations.source"
+        )
+        for record in entry.relationships:
+            target = _relationship_target(record.target_qualname, index)
+            if record.resolution_status != relationship_resolution_status(target):
+                raise ProducerSnapshotUnavailable(
+                    "relationship_observations: a record of "
+                    f"{entry.source_qualname!r} says {record.resolution_status!r} "
+                    f"about a target the model reads as "
+                    f"{relationship_resolution_status(target)!r}"
+                )
+            served_path = record.path.replace(os.sep, "/")
+            if not (
+                served_path == source.file.path
+                or served_path.endswith("/" + source.file.path)
+            ):
+                raise ProducerSnapshotUnavailable(
+                    "relationship_observations: a record of "
+                    f"{entry.source_qualname!r} is placed at {record.path!r}, not "
+                    f"in its source's file {source.file.path!r}"
+                )
+            key = (
+                source,
+                target,
+                record.relation_kind,
+                record.origin_lane,
+                record.line,
+                record.expression,
+                record.resolution_rule,
+            )
+            counted[key] = counted.get(key, 0) + 1
+    return frozenset(
+        RelationshipObservationRow(
+            source=source,
+            target=target,
+            relation_kind=relation_kind,
+            origin_lane=origin_lane,
+            line=line,
+            expression=expression,
+            resolution_rule=resolution_rule,
+            occurrence_count=count,
+        )
+        for (
+            source,
+            target,
+            relation_kind,
+            origin_lane,
+            line,
+            expression,
+            resolution_rule,
+        ), count in counted.items()
+    )
+
+
 def _dependency_cycle_rows(
     payload: Mapping[str, object], index: IdentityIndex
 ) -> frozenset[DependencyCycleRow]:
@@ -957,6 +1138,15 @@ def canonical_snapshot_from_producers(
         dependency_relations=relations,
         dependency_occurrences=occurrences,
         dependency_cycles=_dependency_cycle_rows(payload, index),
+        # Canonical model revision 2: the two served slices, read from the
+        # producers that serve them (``processing.module_deps`` and
+        # ``processing.function_relationship_facts`` are exactly what the
+        # MCP record holds), never from the report document, which carries
+        # neither.
+        import_observations=_import_observation_rows(processing.module_deps, index),
+        relationship_observations=_relationship_observation_rows(
+            processing.function_relationship_facts, index
+        ),
         dead_code_observations=_dead_code_rows(structural.dead_code, index),
         coupling_cohesion_observations=_coupling_cohesion_rows(
             structural.coupling_cohesion_observations, index

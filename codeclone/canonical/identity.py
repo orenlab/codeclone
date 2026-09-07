@@ -26,10 +26,15 @@ Ordinals are computed at projection time and never stored.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, get_args
 
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.models import LIVE_ROOT_REASONS as _LIVE_ROOT_REASONS
+from codeclone.models import RESOLUTION_MECHANISMS as _RESOLUTION_MECHANISMS
+from codeclone.models import DependencyMechanism as _DependencyMechanism
+from codeclone.models import DependencyResolution as _DependencyResolution
+from codeclone.models import RelationshipKind as _RelationshipKind
+from codeclone.models import RelationshipOriginLane as _RelationshipOriginLane
 
 # Contract tag strings (F-3 §7.3). Codes are stable contract strings, never
 # integers and never Python enum order; renaming one is a
@@ -45,6 +50,13 @@ HEAD_TAG_OPAQUE: Final = "opaque"
 #: could not place in its own analysis scope — different facts, different
 #: tags, so a wire reader never has to guess which one it is holding.
 LOCATION_TAG_UNRESOLVED: Final = "unresolved_location"
+#: Tag of the nullary TARGET variant of the revision-2 observation families:
+#: the producer asserted NO target (an import it could not resolve, a call
+#: whose callee it could not name).  A third spelling beside the root-family
+#: ``unresolved`` and the location ``unresolved_location`` on purpose: a root
+#: is a transitive sentinel, a location is a site the scope cannot place, and
+#: this is an absent referent — three facts, three tags.
+TARGET_TAG_UNRESOLVED: Final = "unresolved_target"
 
 ROOT_FAMILY_OPERATION: Final = "operation"
 ROOT_FAMILY_PRODUCER: Final = "producer"
@@ -167,6 +179,26 @@ DEAD_CODE_OBSERVATION_KINDS: Final = ("symbol", "unreachable_statement")
 # vocabulary and deliberately still carries the retired reason, because a
 # stored artifact may.
 LIVE_ROOT_REASONS: Final = _LIVE_ROOT_REASONS
+# Canonical model revision 2 — the two served observation families.  Every
+# vocabulary here is TAKEN from its one producer owner in ``codeclone.models``
+# (the ``Literal`` types the walk is typed against, and the mechanism
+# registry that ``validate_resolution_rule`` already gates), never mirrored:
+# the LIVE_ROOT_REASONS lesson above is that a mirror governs nothing once
+# it is the fifth copy.  The wire refuses unknowns (W08); the meaning of an
+# import classification is the module walk's (MODULE_IDENTITY_VERSION owns
+# what "analyzed" means), and the meaning of a relationship record is owned
+# by FUNCTION_RELATIONSHIP_ALGORITHM_REVISION, which the store spells into
+# that family's content-address namespace.
+IMPORT_RESOLUTIONS: Final[tuple[str, ...]] = get_args(_DependencyResolution)
+IMPORT_MECHANISMS: Final[tuple[str, ...]] = get_args(_DependencyMechanism)
+#: The producer law (``ImportObservation.__post_init__``): exactly these two
+#: resolutions carry no target and no candidate; every other resolution
+#: carries one.  Pinned against the producer by driving it, not by reading
+#: this tuple back.
+UNRESOLVED_IMPORT_RESOLUTIONS: Final = ("unresolved_relative", "unresolved_dynamic")
+RELATIONSHIP_KINDS: Final[tuple[str, ...]] = get_args(_RelationshipKind)
+RELATIONSHIP_ORIGIN_LANES: Final[tuple[str, ...]] = get_args(_RelationshipOriginLane)
+RELATIONSHIP_RESOLUTION_RULES: Final[tuple[str, ...]] = _RESOLUTION_MECHANISMS
 # F3 adoption_counts (wave 4): the closed feature vocabulary, mirrored
 # verbatim from the ONE producer (``observations/projection.py``
 # ``_adoption_counts``) and pinned against its source by test — no Literal
@@ -439,6 +471,41 @@ DeadCodeEntity = SymbolId | ModuleSymbol | OpaqueEntity
 
 
 @dataclass(frozen=True, slots=True)
+class UnresolvedTarget:
+    """Nullary TARGET variant: the producer asserted no referent at all.
+
+    An import whose module the walk could not resolve (a relative import
+    that escapes its package, a dynamic load with an opaque argument) and a
+    call whose callee it could not name both end here — not in an empty
+    string, which a document may still publish and which no identity
+    domain can hold (measured 2026-09-03: 19 served import rows on this
+    repository named an empty target; 2026-09-07 at f117a8ad: 22, every one
+    ``unresolved_dynamic``).  The variant IS the fact: "the producer said
+    it resolved nothing" is a different statement from "the producer said
+    nothing", and the revision-1 families could say neither.
+    """
+
+
+#: Import target — the revision-2 tagged union: a MODULE or FILE of the run
+#: (the producer classified the import ``analyzed``), an opaque dotted head
+#: outside the run's registry (``external``, ``known_internal_not_analyzed``,
+#: ``ambiguous`` — a dotted string with no right to a MODULE identity, the
+#: ``OperationHead`` precedent), or no target.  The variant is decided by the
+#: producer's own classification and checked against the run's registry, so
+#: an ``analyzed`` import whose module the run does not carry is refused,
+#: never guessed into a domain.
+ImportTarget = ModuleId | FileId | OpaqueDottedHead | UnresolvedTarget
+
+#: Relationship target — the revision-2 tagged union: the FILE-headed SYMBOL
+#: of a unit the run analyzed (module head resolved through ``file_modules``,
+#: path head taken as is), the opaque ``head:local`` reference verbatim when
+#: the head is neither (an import outside the tree: ``typing:cast``), or no
+#: target — an unresolved call.  A reference record never carries the nullary
+#: variant: the producer emits a reference only once it named its target.
+RelationshipTarget = SymbolId | OpaqueEntity | UnresolvedTarget
+
+
+@dataclass(frozen=True, slots=True)
 class OperationTarget:
     """Target of an ``operation:`` root — never a SYMBOL (0 of 1 080).
 
@@ -554,6 +621,32 @@ def dead_code_entity_key(entity: DeadCodeEntity) -> tuple[object, ...]:
     if isinstance(entity, OpaqueEntity):
         return (HEAD_TAG_OPAQUE, _utf8(entity.head), _utf8(entity.qualname))
     raise CanonicalModelError(f"value is not a dead-code entity: {entity!r}")
+
+
+def import_target_key(target: ImportTarget) -> tuple[str, bytes]:
+    """Total canonical key of an import target across its tagged union: the
+    variant tag first (the variant IS identity), then the variant's own key
+    bytes — the endpoint-key construction, so the union grows no second
+    ordering.  The nullary variant keys on empty bytes: nothing to order
+    within it, and every other variant carries text."""
+    if isinstance(target, UnresolvedTarget):
+        return (TARGET_TAG_UNRESOLVED, b"")
+    if isinstance(target, OpaqueDottedHead):
+        return (HEAD_TAG_OPAQUE, _utf8(target.text))
+    return endpoint_key(target)
+
+
+def relationship_target_key(target: RelationshipTarget) -> tuple[object, ...]:
+    """Total canonical key of a relationship target across its tagged union
+    (the dead-code entity construction: tag first, then the variant's key
+    bytes; the nullary variant is its tag alone)."""
+    if isinstance(target, SymbolId):
+        return (DOMAIN_TAG_SYMBOL, _utf8(target.file.path), _utf8(target.qualname))
+    if isinstance(target, OpaqueEntity):
+        return (HEAD_TAG_OPAQUE, _utf8(target.head), _utf8(target.qualname))
+    if isinstance(target, UnresolvedTarget):
+        return (TARGET_TAG_UNRESOLVED,)
+    raise CanonicalModelError(f"value is not a relationship target: {target!r}")
 
 
 def source_location_key(location: SourceLocation) -> tuple[bytes, int, str]:

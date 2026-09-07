@@ -26,17 +26,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from codeclone.canonical.serving import ServedUnitLocation
 from codeclone.models import FunctionRelationshipFacts, ModuleDep
 
-
-@dataclass(frozen=True, slots=True)
-class ServedUnitLocation:
-    """One row of the served unit index, copied field for field."""
-
-    qualname: str
-    path: str
-    start_line: int
-    end_line: int
+# ``ServedUnitLocation`` is the production projection's own row shape
+# (``codeclone.canonical.serving``), re-exported rather than restated: the
+# served unit index and the store-projected one are compared as ONE type,
+# so a field added to either side is a type error on the other rather than
+# a silently unequal tuple.
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -54,3 +51,6 @@ class ServedRunStoreProjection:
     unit_inventory: tuple[ServedUnitLocation, ...]
     relationship_facts: tuple[FunctionRelationshipFacts, ...]
     module_imports: tuple[ModuleDep, ...]
+
+
+__all__ = ["ServedRunStoreProjection", "ServedUnitLocation"]

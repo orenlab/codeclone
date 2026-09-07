@@ -109,6 +109,7 @@ from codeclone.canonical.export import (
 from codeclone.canonical.identity import (
     DOMAIN_TAG_FILE,
     LOCATION_TAG_UNRESOLVED,
+    TARGET_TAG_UNRESOLVED,
     AnalysisFile,
     DeadCodeEntity,
     DependencyEndpoint,
@@ -116,6 +117,7 @@ from codeclone.canonical.identity import (
     EffectRoot,
     FileId,
     FileLine,
+    ImportTarget,
     KnownModule,
     ModuleId,
     ModuleSymbol,
@@ -125,12 +127,16 @@ from codeclone.canonical.identity import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    RelationshipTarget,
     SourceLocation,
     SymbolId,
     UnresolvedLocation,
     UnresolvedRoot,
+    UnresolvedTarget,
     canonical_key,
     dead_code_entity_key,
+    import_target_key,
+    relationship_target_key,
 )
 from codeclone.canonical.model import (
     AdoptionCountRow,
@@ -151,6 +157,8 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    ImportObservationRow,
+    RelationshipObservationRow,
     RiskObservationRow,
     RunScalars,
     SecuritySurfaceRow,
@@ -170,6 +178,7 @@ from codeclone.contracts import (
     COMPLEXITY_ALGORITHM_REVISION,
     CONTRACT_IR_VERSION,
     DESIGN_METRICS_ALGORITHM_REVISION,
+    FUNCTION_RELATIONSHIP_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
     MODULE_IDENTITY_VERSION,
     SECURITY_SURFACE_CATALOG_VERSION,
@@ -460,6 +469,59 @@ def _decode_dead_code_entity_value(value: object, where: str) -> DeadCodeEntity:
     if tag == "opaque":
         return OpaqueEntity(head, qualname)
     raise StoreIntegrityError(f"{where}: unknown dead-code entity tag {tag!r}")
+
+
+def _import_target_value(target: ImportTarget) -> list[str]:
+    """One import target in the store's tagged spelling: the endpoint
+    spelling for a MODULE or FILE of the run, the opaque head verbatim, and
+    the bare tag for the nullary variant — the ``_root_value`` law, where an
+    unresolved root is its family tag alone."""
+    if isinstance(target, UnresolvedTarget):
+        return [TARGET_TAG_UNRESOLVED]
+    if isinstance(target, OpaqueDottedHead):
+        return ["opaque", target.text]
+    return _endpoint_value(target)
+
+
+def _decode_import_target_value(value: object, where: str) -> ImportTarget:
+    if not isinstance(value, list) or not value or not isinstance(value[0], str):
+        raise StoreIntegrityError(f"{where}: stored import target has no tag")
+    tag = value[0]
+    if tag == TARGET_TAG_UNRESOLVED and len(value) == 1:
+        return UnresolvedTarget()
+    if tag == "opaque" and len(value) == 2 and isinstance(value[1], str):
+        return OpaqueDottedHead(value[1])
+    if tag in ("module", "file"):
+        return _decode_endpoint(value, where)
+    raise StoreIntegrityError(f"{where}: unknown import target tag {tag!r}")
+
+
+def _relationship_target_value(target: RelationshipTarget) -> list[str]:
+    """One relationship target in the store's tagged spelling (the
+    dead-code entity construction, plus the bare nullary tag)."""
+    if isinstance(target, UnresolvedTarget):
+        return [TARGET_TAG_UNRESOLVED]
+    if isinstance(target, SymbolId):
+        return ["symbol", target.file.path, target.qualname]
+    return ["opaque", target.head, target.qualname]
+
+
+def _decode_relationship_target_value(value: object, where: str) -> RelationshipTarget:
+    if not isinstance(value, list) or not value or not isinstance(value[0], str):
+        raise StoreIntegrityError(f"{where}: stored relationship target has no tag")
+    tag = value[0]
+    if tag == TARGET_TAG_UNRESOLVED and len(value) == 1:
+        return UnresolvedTarget()
+    if tag in ("symbol", "opaque") and len(value) == 3:
+        head, qualname = value[1], value[2]
+        if not isinstance(head, str) or not isinstance(qualname, str):
+            raise StoreIntegrityError(
+                f"{where}: stored relationship target is not a [tag, head, qualname]"
+            )
+        if tag == "symbol":
+            return SymbolId(FileId(head), qualname)
+        return OpaqueEntity(head, qualname)
+    raise StoreIntegrityError(f"{where}: unknown relationship target tag {tag!r}")
 
 
 def _source_location_value(location: SourceLocation) -> list[object]:
@@ -844,6 +906,7 @@ def _observation_model_rows(
                 "visibility": api_symbol.visibility,
             },
         )
+    yield from _revision_two_model_rows(facts)
     if facts.run_scalars is not None:
         # F9: exactly one record per snapshot — a run-level fact, no rows.
         yield ("run_scalar", dict(sorted(asdict(facts.run_scalars).items())))
@@ -864,10 +927,103 @@ def _observation_model_rows(
         )
 
 
+def _revision_two_model_rows(
+    facts: AnalysisFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """Storage rows of the canonical-model revision-2 observation families.
+
+    Split out for the same reason :func:`_observation_model_rows` was: the
+    row walk stays a walk, and two more families do not push one function
+    over the complexity gate.  Row order here is the same insurance as
+    everywhere in this walk (see :func:`_model_rows`) — the content address
+    owns determinism, and ``None`` payload values ride as JSON null exactly
+    as ``live_root_reason`` and the surface ``qualname`` already do.
+    """
+    for observation in sorted(
+        facts.import_observations,
+        key=lambda row: (
+            _endpoint_value(row.source),
+            import_target_key(row.target),
+            row.dependency_type,
+            row.line,
+            row.resolution,
+            row.mechanism,
+            row.binding,
+            row.is_lazy,
+            row.level,
+            row.requested_module or "",
+            row.requested_names,
+            row.candidate_targets,
+            row.inventory_expansion,
+        ),
+    ):
+        yield (
+            "import_observation",
+            {
+                "binding": observation.binding,
+                "candidate_targets": list(observation.candidate_targets),
+                "dependency_type": observation.dependency_type,
+                "inventory_expansion": observation.inventory_expansion,
+                "is_lazy": observation.is_lazy,
+                "level": observation.level,
+                "line": observation.line,
+                "mechanism": observation.mechanism,
+                "requested_module": observation.requested_module,
+                "requested_names": list(observation.requested_names),
+                "resolution": observation.resolution,
+                "source": _endpoint_value(observation.source),
+                "target": _import_target_value(observation.target),
+            },
+        )
+    for relationship in sorted(
+        facts.relationship_observations,
+        key=lambda row: (
+            canonical_key(row.source),
+            relationship_target_key(row.target),
+            row.relation_kind,
+            row.origin_lane,
+            row.line,
+            row.expression or "",
+            row.resolution_rule or "",
+        ),
+    ):
+        yield (
+            "relationship_observation",
+            {
+                "expression": relationship.expression,
+                "line": relationship.line,
+                "occurrence_count": relationship.occurrence_count,
+                "origin_lane": relationship.origin_lane,
+                "relation_kind": relationship.relation_kind,
+                "resolution_rule": relationship.resolution_rule,
+                "source": _symbol_value(relationship.source),
+                "target": _relationship_target_value(relationship.target),
+            },
+        )
+
+
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
     if key not in row:
         raise StoreIntegrityError(f"{where}: stored row is missing {key!r}")
     return row[key]
+
+
+def _require_int(row: Mapping[str, object], key: str, where: str) -> int:
+    value = _require_field(row, key, where)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise StoreIntegrityError(f"{where}: stored field {key!r} is not an int")
+    return value
+
+
+def _require_optional_str(
+    row: Mapping[str, object], key: str, where: str
+) -> str | None:
+    value = _require_field(row, key, where)
+    if value is not None and not isinstance(value, str):
+        raise StoreIntegrityError(
+            f"{where}: stored field {key!r} is neither a string nor null"
+        )
+    return value
 
 
 def _require_str(row: Mapping[str, object], key: str, where: str) -> str:
@@ -1292,6 +1448,45 @@ def _decode_violation_row(row: Mapping[str, object], where: str) -> ViolationRow
     )
 
 
+def _decode_import_observation_row(
+    row: Mapping[str, object], where: str
+) -> ImportObservationRow:
+    return ImportObservationRow(
+        source=_decode_endpoint(_require_field(row, "source", where), where),
+        target=_decode_import_target_value(
+            _require_field(row, "target", where), f"{where}.target"
+        ),
+        dependency_type=_require_str(row, "dependency_type", where),
+        line=_require_line(row, "line", where),
+        resolution=_require_str(row, "resolution", where),
+        mechanism=_require_str(row, "mechanism", where),
+        binding=_require_str(row, "binding", where),
+        is_lazy=_require_bool(row, "is_lazy", where),
+        level=_require_int(row, "level", where),
+        requested_module=_require_optional_str(row, "requested_module", where),
+        requested_names=tuple(_require_str_list(row, "requested_names", where)),
+        candidate_targets=tuple(_require_str_list(row, "candidate_targets", where)),
+        inventory_expansion=_require_bool(row, "inventory_expansion", where),
+    )
+
+
+def _decode_relationship_observation_row(
+    row: Mapping[str, object], where: str
+) -> RelationshipObservationRow:
+    return RelationshipObservationRow(
+        source=_row_symbol(row, "source", where),
+        target=_decode_relationship_target_value(
+            _require_field(row, "target", where), f"{where}.target"
+        ),
+        relation_kind=_require_str(row, "relation_kind", where),
+        origin_lane=_require_str(row, "origin_lane", where),
+        line=_require_line(row, "line", where),
+        expression=_require_optional_str(row, "expression", where),
+        resolution_rule=_require_optional_str(row, "resolution_rule", where),
+        occurrence_count=_require_int(row, "occurrence_count", where),
+    )
+
+
 # ---------------------------------------------------------------------------
 # The family registry — the one place a storage family is declared
 # ---------------------------------------------------------------------------
@@ -1489,11 +1684,32 @@ FAMILY_GRAPH_NODE: Final = StoredFamily(
     decode=_decode_graph_node_row,
     row_type=GraphNodeRow,
 )
+# Canonical model revision 2: the import observation is a fact of the module
+# walk's own import classification, which no metric revision owns, so it
+# takes the canonical-model namespace like the dependency families whose
+# vocabulary it shares.
+FAMILY_IMPORT_OBSERVATION: Final = StoredFamily(
+    family="import_observation",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_import_observation_row,
+    row_type=ImportObservationRow,
+)
 FAMILY_MODULE: Final = StoredFamily(
     family="module",
     namespace=f"module_identity:{MODULE_IDENTITY_VERSION}",
     decode=_decode_module_row,
     row_type=ModuleId,
+)
+# Canonical model revision 2: which call and reference expressions become
+# records, and the qualname each resolves to, are decided by the function
+# relationship algorithm (the cache lane already keys on it, X-04), so that
+# revision enters the content-address namespace and a resolver change never
+# lets these facts silently share addresses across generations.
+FAMILY_RELATIONSHIP_OBSERVATION: Final = StoredFamily(
+    family="relationship_observation",
+    namespace=f"function_relationship:{FUNCTION_RELATIONSHIP_ALGORITHM_REVISION}",
+    decode=_decode_relationship_observation_row,
+    row_type=RelationshipObservationRow,
 )
 # F1: the risk lane rides COMPLEXITY_ALGORITHM_REVISION (the Wave D
 # two-metric split), so a complexity recount never lets these facts
@@ -1571,7 +1787,9 @@ _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_FILE,
     FAMILY_FILE_MODULE,
     FAMILY_GRAPH_NODE,
+    FAMILY_IMPORT_OBSERVATION,
     FAMILY_MODULE,
+    FAMILY_RELATIONSHIP_OBSERVATION,
     FAMILY_RISK_OBSERVATION,
     FAMILY_UNIT_SPAN,
     FAMILY_RUN_SCALAR,
@@ -1642,6 +1860,12 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                     FAMILY_DEPENDENCY_OCCURRENCE.rows(collected)
                 ),
                 dependency_cycles=frozenset(FAMILY_DEPENDENCY_CYCLE.rows(collected)),
+                import_observations=frozenset(
+                    FAMILY_IMPORT_OBSERVATION.rows(collected)
+                ),
+                relationship_observations=frozenset(
+                    FAMILY_RELATIONSHIP_OBSERVATION.rows(collected)
+                ),
                 clone_groups=frozenset(FAMILY_CLONE_GROUP.rows(collected)),
                 dead_code_observations=frozenset(
                     FAMILY_DEAD_CODE_OBSERVATION.rows(collected)
@@ -1737,11 +1961,18 @@ def _contract_epoch() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _open_witness(cursor: sqlite3.Cursor) -> tuple[int, str, str]:
+def _open_witness(cursor: sqlite3.Cursor, *, path: str) -> tuple[int, str, str]:
     """Create-or-verify the layered witness; returns the fence triple.
 
     Law 7: an existing store whose witness is not this process's declared
-    generation is refused, never reinterpreted.
+    generation is refused, never reinterpreted.  The refusal names every
+    diverging layer with BOTH revisions and the executable migration path,
+    because the reader that meets it is a serving path or a publish path
+    whose user has nothing else to go on: "canonical_model stored '1',
+    declared '2'" tells the maintainer which epoch the file belongs to,
+    "diverging layers: [...]" alone told them nothing about which side was
+    which (measured 2026-09-07 on the first real generation-1 store opened
+    by the revision-2 build).
     """
     meta = cursor.execute(
         "SELECT store_epoch, storage_schema_revision, contract_epoch "
@@ -1764,11 +1995,21 @@ def _open_witness(cursor: sqlite3.Cursor) -> tuple[int, str, str]:
     stored = dict(cursor.execute("SELECT layer, revision FROM witness ORDER BY layer"))
     declared = {layer: revision for layer, revision, _role in _WITNESS_LAYERS}
     if stored != declared:
-        diverging = sorted(set(stored.items()) ^ set(declared.items()))
+        diverging = tuple(
+            (layer, stored.get(layer), declared.get(layer))
+            for layer in sorted(set(stored) | set(declared))
+            if stored.get(layer) != declared.get(layer)
+        )
+        spelled = ", ".join(
+            f"{layer} stored {stored_revision!r} declared {declared_revision!r}"
+            for layer, stored_revision, declared_revision in diverging
+        )
         raise StoreCompatibilityError(
             "store witness is not this process's declared generation; "
-            f"diverging layers: {diverging!r}. Refusing the stored "
-            "generation (law 7)."
+            f"diverging layers: {spelled}. Refusing the stored generation "
+            f"(law 7) at {path}.",
+            diverging=diverging,
+            path=path,
         )
     return (int(meta[0]), str(meta[1]), str(meta[2]))
 
@@ -2028,6 +2269,8 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "dependency_relations": "dependency_relation",
     "file_modules": "file_module",
     "graph_nodes": "graph_node",
+    "import_observations": "import_observation",
+    "relationship_observations": "relationship_observation",
     "risk_observations": "risk_observation",
     "run_scalars": "run_scalar",
     "security_surfaces": "security_surface",
@@ -2499,7 +2742,7 @@ class RunStore:
         cursor = self._connection.cursor()
         cursor.execute("BEGIN IMMEDIATE")
         try:
-            fence = _open_witness(cursor)
+            fence = _open_witness(cursor, path=self._path)
             cursor.execute("COMMIT")
         except BaseException:
             cursor.execute("ROLLBACK")
@@ -3274,7 +3517,9 @@ __all__ = [
     "FAMILY_FILE",
     "FAMILY_FILE_MODULE",
     "FAMILY_GRAPH_NODE",
+    "FAMILY_IMPORT_OBSERVATION",
     "FAMILY_MODULE",
+    "FAMILY_RELATIONSHIP_OBSERVATION",
     "FAMILY_RISK_OBSERVATION",
     "FAMILY_RUN_SCALAR",
     "FAMILY_SECURITY_SURFACE",

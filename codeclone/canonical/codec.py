@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from itertools import pairwise
 from typing import Any, TypeVar, cast
@@ -85,11 +85,16 @@ from codeclone.canonical.identity import (
     DOMAIN_TAG_SYMBOL,
     EFFECT_KINDS,
     HEAD_TAG_OPAQUE,
+    IMPORT_MECHANISMS,
+    IMPORT_RESOLUTIONS,
     IMPORT_TYPES,
     LIVE_ROOT_REASONS,
     LOCATION_TAG_UNRESOLVED,
     OPERATION_KINDS,
     PRODUCER_EXECUTION_STATES,
+    RELATIONSHIP_KINDS,
+    RELATIONSHIP_ORIGIN_LANES,
+    RELATIONSHIP_RESOLUTION_RULES,
     RISK_DIMENSIONS,
     ROOT_FAMILY_EFFECT,
     ROOT_FAMILY_OPERATION,
@@ -100,6 +105,7 @@ from codeclone.canonical.identity import (
     SECURITY_LOCATION_SCOPES,
     SECURITY_SOURCE_KINDS,
     SECURITY_SURFACE_CATEGORIES,
+    TARGET_TAG_UNRESOLVED,
     VIOLATION_KINDS,
     AnalysisFile,
     DependencyEndpoint,
@@ -107,6 +113,7 @@ from codeclone.canonical.identity import (
     EffectRoot,
     FileId,
     FileLine,
+    ImportTarget,
     KnownModule,
     ModuleId,
     ModuleSymbol,
@@ -116,10 +123,12 @@ from codeclone.canonical.identity import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    RelationshipTarget,
     SourceLocation,
     SymbolId,
     UnresolvedLocation,
     UnresolvedRoot,
+    UnresolvedTarget,
     canonical_key,
     dead_code_entity_key,
     root_family,
@@ -144,6 +153,8 @@ from codeclone.canonical.model import (
     DependencyRelationRow,
     FileModuleRelation,
     GraphNodeRow,
+    ImportObservationRow,
+    RelationshipObservationRow,
     RiskObservationRow,
     RunScalars,
     SecuritySurfaceRow,
@@ -214,9 +225,26 @@ _EFFECT_ROOT_SPARSE_COLUMNS = (
     "target",
 )
 _KNOWN_REFERENCE_TAGS = frozenset(
-    {DOMAIN_TAG_FILE, DOMAIN_TAG_MODULE, "symbol", "effect_root", HEAD_TAG_OPAQUE}
+    {
+        DOMAIN_TAG_FILE,
+        DOMAIN_TAG_MODULE,
+        "symbol",
+        "effect_root",
+        HEAD_TAG_OPAQUE,
+        TARGET_TAG_UNRESOLVED,
+    }
 )
 _HEAD_TAGS = frozenset({DOMAIN_TAG_FILE, DOMAIN_TAG_MODULE, HEAD_TAG_OPAQUE})
+# Wire revision 1: the tagged target slots of the two revision-2 families.
+# The import slot admits the endpoint tags, an opaque head and the nullary
+# variant; the relationship slot admits a symbol, an opaque head:local and
+# the nullary variant.  Neither admits the other's tags (W09).
+_IMPORT_TARGET_TAGS = frozenset(
+    {DOMAIN_TAG_FILE, DOMAIN_TAG_MODULE, HEAD_TAG_OPAQUE, TARGET_TAG_UNRESOLVED}
+)
+_RELATIONSHIP_TARGET_TAGS = frozenset(
+    {DOMAIN_TAG_SYMBOL, HEAD_TAG_OPAQUE, TARGET_TAG_UNRESOLVED}
+)
 
 _ESCAPES = {
     '"': '\\"',
@@ -370,7 +398,19 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
     referenced.update(row.symbol for row in facts.api_symbols)
     referenced.update(row.symbol for row in facts.risk_observations)
     referenced.update(row.symbol for row in facts.unit_spans)
+    referenced.update(_relationship_symbols(facts.relationship_observations))
     return referenced
+
+
+def _relationship_symbols(
+    rows: Iterable[RelationshipObservationRow],
+) -> Iterator[SymbolId]:
+    """The SYMBOL references a relationship family carries: every source,
+    and every target that resolved to a symbol of the run."""
+    for row in rows:
+        yield row.source
+        if isinstance(row.target, SymbolId):
+            yield row.target
 
 
 def _root_carriers(
@@ -1015,6 +1055,145 @@ def _sink_role_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, obje
     ]
 
 
+def _import_target_sort_key(target: ImportTarget, plan: WirePlan) -> tuple[object, ...]:
+    """The tagged slot's order: tag first, then the variant's own ordinal
+    or text.  Two slots compare past the tag only when the tags agree, so
+    an ordinal never meets a text."""
+    if isinstance(target, UnresolvedTarget):
+        return (TARGET_TAG_UNRESOLVED, 0)
+    if isinstance(target, OpaqueDottedHead):
+        return (HEAD_TAG_OPAQUE, target.text)
+    return _endpoint_sort_key(target, plan.module_ordinal, plan.file_ordinal)
+
+
+def _import_target_value(target: ImportTarget, plan: WirePlan) -> list[object]:
+    """The tagged wire slot of one import target — the variant IS the
+    identity, so the tag is emitted, never re-derived by a reader; the
+    nullary variant is its tag alone (the ``unresolved`` root precedent)."""
+    if isinstance(target, UnresolvedTarget):
+        return [TARGET_TAG_UNRESOLVED]
+    if isinstance(target, OpaqueDottedHead):
+        return [HEAD_TAG_OPAQUE, target.text]
+    return _endpoint_value(target, plan.module_ordinal, plan.file_ordinal)
+
+
+def _import_observation_sort_key(
+    row: ImportObservationRow, plan: WirePlan
+) -> tuple[object, ...]:
+    # The whole observation is the row's identity, so the whole observation
+    # is its order: every column, in one fixed sequence, nested so that no
+    # slot of one shape ever lines up against a slot of another.
+    return (
+        _endpoint_sort_key(row.source, plan.module_ordinal, plan.file_ordinal),
+        _import_target_sort_key(row.target, plan),
+        row.dependency_type,
+        row.line,
+        row.resolution,
+        row.mechanism,
+        row.binding,
+        row.is_lazy,
+        row.level,
+        row.requested_module or "",
+        row.requested_names,
+        row.candidate_targets,
+        row.inventory_expansion,
+    )
+
+
+def _import_observation_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "binding": row.binding,
+            "candidate_targets": list(row.candidate_targets),
+            "dependency_type": row.dependency_type,
+            "inventory_expansion": row.inventory_expansion,
+            "is_lazy": row.is_lazy,
+            "level": row.level,
+            "line": row.line,
+            "mechanism": row.mechanism,
+            # Absent rides as the empty string, which the producer never
+            # emits (``requested_module`` is a statement's own text or
+            # ``None``) — the ``live_root_reason`` spelling.
+            "requested_module": row.requested_module or "",
+            "requested_names": list(row.requested_names),
+            "resolution": row.resolution,
+            "source": _endpoint_value(
+                row.source, plan.module_ordinal, plan.file_ordinal
+            ),
+            "target": _import_target_value(row.target, plan),
+        }
+        for row in sorted(
+            facts.import_observations,
+            key=lambda row: _import_observation_sort_key(row, plan),
+        )
+    ]
+
+
+def _relationship_target_sort_key(
+    target: RelationshipTarget, plan: WirePlan
+) -> tuple[object, ...]:
+    if isinstance(target, UnresolvedTarget):
+        return (TARGET_TAG_UNRESOLVED, 0)
+    if isinstance(target, SymbolId):
+        return (DOMAIN_TAG_SYMBOL, plan.symbol_ordinal[target])
+    return (HEAD_TAG_OPAQUE, target.head, target.qualname)
+
+
+def _relationship_target_value(
+    target: RelationshipTarget, plan: WirePlan
+) -> list[object]:
+    """The tagged wire slot of one relationship target (the dead-code entity
+    construction: ``[symbol, ordinal]`` or ``[opaque, head, qualname]``,
+    plus the nullary variant as its tag alone)."""
+    if isinstance(target, UnresolvedTarget):
+        return [TARGET_TAG_UNRESOLVED]
+    if isinstance(target, SymbolId):
+        return [DOMAIN_TAG_SYMBOL, plan.symbol_ordinal[target]]
+    return [HEAD_TAG_OPAQUE, target.head, target.qualname]
+
+
+def _relationship_observation_sort_key(
+    row: RelationshipObservationRow, plan: WirePlan
+) -> tuple[object, ...]:
+    # The observation key (``occurrence_count`` is payload and never
+    # enters: two rows of one observation cannot coexist in the model).
+    return (
+        plan.symbol_ordinal[row.source],
+        _relationship_target_sort_key(row.target, plan),
+        row.relation_kind,
+        row.origin_lane,
+        row.line,
+        row.expression or "",
+        row.resolution_rule or "",
+    )
+
+
+def _relationship_observation_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            # Absent rides as the empty string, which the producer never
+            # emits for either column (``ast.unparse(...) or None``; a rule
+            # is a closed vocabulary member or ``None``).
+            "expression": row.expression or "",
+            "line": row.line,
+            "occurrence_count": row.occurrence_count,
+            "origin_lane": row.origin_lane,
+            "relation_kind": row.relation_kind,
+            "resolution_rule": row.resolution_rule or "",
+            "source": plan.symbol_ordinal[row.source],
+            "target": _relationship_target_value(row.target, plan),
+        }
+        for row in sorted(
+            facts.relationship_observations,
+            key=lambda row: _relationship_observation_sort_key(row, plan),
+        )
+    ]
+
+
 _FAMILY_ROW_BUILDERS: dict[
     str, Callable[[AnalysisFacts, WirePlan], list[dict[str, object]]]
 ] = {
@@ -1031,6 +1210,8 @@ _FAMILY_ROW_BUILDERS: dict[
     "dependency_relations": _dependency_relation_rows,
     "file_modules": _file_module_rows,
     "graph_nodes": _graph_node_rows,
+    "import_observations": _import_observation_rows,
+    "relationship_observations": _relationship_observation_rows,
     "risk_observations": _risk_observation_rows,
     "run_scalars": _run_scalars_rows,
     "security_surfaces": _security_surface_rows,
@@ -1616,11 +1797,24 @@ def _parse_document(data: bytes) -> Mapping[str, object]:
 
 def _decode_format_and_revisions(root: Mapping[str, object]) -> None:
     fmt = _expect_object(root["format"], ("name", "wire"), "format")
-    if (
-        _expect_string(fmt["name"], "format.name") != _FORMAT_NAME
-        or _expect_string(fmt["wire"], "format.wire") != CANONICAL_WIRE_REVISION
-    ):
-        raise _refuse("W21", "format declares an incompatible generation")
+    name = _expect_string(fmt["name"], "format.name")
+    if name != _FORMAT_NAME:
+        raise _refuse(
+            "W21", f"format declares an incompatible generation: name {name!r}"
+        )
+    wire = _expect_string(fmt["wire"], "format.wire")
+    if wire != CANONICAL_WIRE_REVISION:
+        # A foreign generation is named on both sides and handed its
+        # migration path: a reader meeting a generation-0 document has
+        # nothing else to go on, and "incompatible" alone told it neither
+        # which generation it holds nor what to do about it.
+        raise _refuse(
+            "W21",
+            f"format declares wire generation {wire!r}; this build reads "
+            f"{CANONICAL_WIRE_REVISION!r} only. next_step: re-export the run "
+            "from a store this build can open, or re-run the analysis with the "
+            "run store enabled to publish it under this generation",
+        )
     revisions_raw = root["revisions"]
     if not isinstance(revisions_raw, dict):
         raise _refuse("W21", "revisions member is not an object")
@@ -2731,6 +2925,274 @@ def _decode_source_locations(
     return locations
 
 
+def _decode_strings(value: object, where: str) -> list[str]:
+    """One string column cell that holds a list of strings."""
+    return [
+        _expect_string(item, f"{where}[{position}]")
+        for position, item in enumerate(_expect_list(value, where))
+    ]
+
+
+def _expect_vocabulary(
+    value: object, vocabulary: tuple[str, ...], where: str, what: str
+) -> str:
+    """One closed-vocabulary cell: a string, and a member (W08)."""
+    text = _expect_string(value, where)
+    if text not in vocabulary:
+        raise _refuse("W08", f"unknown {what} tag {text!r}")
+    return text
+
+
+def _decode_target_slot(
+    value: object, admitted: frozenset[str], where: str, what: str
+) -> tuple[list[object], str]:
+    """The shared prologue of the two revision-2 target slots: a non-empty
+    list, a known reference tag (W08), and one admitted for this slot (W09).
+    One spelling, so the two unions never grow two readings of a tag."""
+    slot = _expect_list(value, where)
+    if not slot:
+        raise _refuse("W18", f"{where} target slot is empty")
+    tag = _expect_string(slot[0], f"{where}.tag")
+    if tag not in _KNOWN_REFERENCE_TAGS:
+        raise _refuse("W08", f"unknown reference tag {tag!r}")
+    if tag not in admitted:
+        raise _refuse("W09", f"reference tag {tag!r} is not admitted for {what}")
+    return slot, tag
+
+
+def _decode_import_target(
+    value: object,
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+    where: str,
+) -> tuple[ImportTarget, tuple[object, ...]]:
+    """One tagged import-target slot and its order key."""
+    slot, tag = _decode_target_slot(
+        value, _IMPORT_TARGET_TAGS, where, "an import target"
+    )
+    if tag == TARGET_TAG_UNRESOLVED:
+        if len(slot) != 1:
+            raise _refuse("W18", f"{where} unresolved target carries a value")
+        return UnresolvedTarget(), (tag, 0)
+    if tag == HEAD_TAG_OPAQUE:
+        if len(slot) != 2:
+            raise _refuse("W18", f"{where} is not an [opaque, text] slot")
+        text = _expect_string(slot[1], f"{where}.text")
+        if not text:
+            raise _refuse("W18", f"{where} opaque head is empty")
+        return OpaqueDottedHead(text), (tag, text)
+    endpoint, key = _decode_endpoint(value, files, modules, where, "an import target")
+    return endpoint, key
+
+
+def _decode_import_observations(
+    facts: Mapping[str, object],
+    files: Sequence[FileId],
+    modules: Sequence[ModuleId],
+) -> frozenset[ImportObservationRow]:
+    prefix = "facts.import_observations"
+    columns, flags, row_count = _decode_columns(
+        "import_observations", facts["import_observations"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        source, source_key = _decode_endpoint(
+            columns["source"][index], files, modules, f"{prefix}.source[{index}]"
+        )
+        target, target_key = _decode_import_target(
+            columns["target"][index], files, modules, f"{prefix}.target[{index}]"
+        )
+        dependency_type = _expect_vocabulary(
+            columns["dependency_type"][index],
+            IMPORT_TYPES,
+            f"{prefix}.dependency_type[{index}]",
+            "dependency_type",
+        )
+        resolution = _expect_vocabulary(
+            columns["resolution"][index],
+            IMPORT_RESOLUTIONS,
+            f"{prefix}.resolution[{index}]",
+            "import resolution",
+        )
+        mechanism = _expect_vocabulary(
+            columns["mechanism"][index],
+            IMPORT_MECHANISMS,
+            f"{prefix}.mechanism[{index}]",
+            "import mechanism",
+        )
+        binding = _expect_vocabulary(
+            columns["binding"][index],
+            DEPENDENCY_BINDINGS,
+            f"{prefix}.binding[{index}]",
+            "dependency binding",
+        )
+        line = _expect_wire_int(columns["line"][index], f"{prefix}.line[{index}]")
+        level = _expect_wire_int(columns["level"][index], f"{prefix}.level[{index}]")
+        requested_module = _expect_string(
+            columns["requested_module"][index], f"{prefix}.requested_module[{index}]"
+        )
+        requested_names = _decode_strings(
+            columns["requested_names"][index], f"{prefix}.requested_names[{index}]"
+        )
+        candidate_targets = _decode_strings(
+            columns["candidate_targets"][index],
+            f"{prefix}.candidate_targets[{index}]",
+        )
+        is_lazy = index in flags["is_lazy"]
+        inventory_expansion = index in flags["inventory_expansion"]
+        try:
+            row = ImportObservationRow(
+                source=source,
+                target=target,
+                dependency_type=dependency_type,
+                line=line,
+                resolution=resolution,
+                mechanism=mechanism,
+                binding=binding,
+                is_lazy=is_lazy,
+                level=level,
+                requested_module=requested_module or None,
+                requested_names=tuple(requested_names),
+                candidate_targets=tuple(candidate_targets),
+                inventory_expansion=inventory_expansion,
+            )
+        except CanonicalModelError as error:
+            # The cross-column laws (a resolution against its target variant,
+            # the producer's candidate law) are the model's; the wire
+            # refuses the contradiction under its contract code rather than
+            # letting a model error escape the decoder.
+            raise _refuse("W20", f"{prefix}[{index}]: {error}") from error
+        rows.append(row)
+        keys.append(
+            (
+                source_key,
+                target_key,
+                dependency_type,
+                line,
+                resolution,
+                mechanism,
+                binding,
+                is_lazy,
+                level,
+                requested_module,
+                tuple(requested_names),
+                tuple(candidate_targets),
+                inventory_expansion,
+            )
+        )
+    _expect_strictly_increasing(keys, prefix)
+    return frozenset(rows)
+
+
+def _decode_relationship_target(
+    value: object, symbols: Sequence[SymbolId], where: str
+) -> tuple[RelationshipTarget, tuple[object, ...]]:
+    """One tagged relationship-target slot and its order key."""
+    slot, tag = _decode_target_slot(
+        value, _RELATIONSHIP_TARGET_TAGS, where, "a relationship target"
+    )
+    if tag == TARGET_TAG_UNRESOLVED:
+        if len(slot) != 1:
+            raise _refuse("W18", f"{where} unresolved target carries a value")
+        return UnresolvedTarget(), (tag, 0)
+    if tag == DOMAIN_TAG_SYMBOL:
+        if len(slot) != 2:
+            raise _refuse("W18", f"{where} is not a [symbol, ordinal] slot")
+        ordinal = _expect_ordinal(slot[1], len(symbols), where)
+        return symbols[ordinal], (tag, ordinal)
+    if len(slot) != 3:
+        raise _refuse("W18", f"{where} is not an [opaque, head, qualname] slot")
+    head = _expect_string(slot[1], f"{where}.head")
+    qualname = _expect_string(slot[2], f"{where}.qualname")
+    if not head or not qualname:
+        raise _refuse("W18", f"{where} opaque target has an empty head or qualname")
+    return OpaqueEntity(head, qualname), (tag, head, qualname)
+
+
+def _decode_relationship_observations(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[RelationshipObservationRow]:
+    prefix = "facts.relationship_observations"
+    columns, _flags, row_count = _decode_columns(
+        "relationship_observations", facts["relationship_observations"]
+    )
+    rows = []
+    keys = []
+    for index in range(row_count):
+        source_ordinal = _expect_ordinal(
+            columns["source"][index], len(symbols), f"{prefix}.source[{index}]"
+        )
+        target, target_key = _decode_relationship_target(
+            columns["target"][index], symbols, f"{prefix}.target[{index}]"
+        )
+        relation_kind = _expect_vocabulary(
+            columns["relation_kind"][index],
+            RELATIONSHIP_KINDS,
+            f"{prefix}.relation_kind[{index}]",
+            "relationship kind",
+        )
+        origin_lane = _expect_vocabulary(
+            columns["origin_lane"][index],
+            RELATIONSHIP_ORIGIN_LANES,
+            f"{prefix}.origin_lane[{index}]",
+            "relationship origin lane",
+        )
+        line = _expect_wire_int(columns["line"][index], f"{prefix}.line[{index}]")
+        if line < 1:
+            raise _refuse(
+                "W07",
+                f"{prefix}.line[{index}] is {line}, outside the producer's "
+                "positive line domain",
+            )
+        occurrence_count = _expect_wire_int(
+            columns["occurrence_count"][index], f"{prefix}.occurrence_count[{index}]"
+        )
+        if occurrence_count < 1:
+            raise _refuse(
+                "W07",
+                f"{prefix}.occurrence_count[{index}] is {occurrence_count}; a "
+                "stored observation was observed at least once",
+            )
+        expression = _expect_string(
+            columns["expression"][index], f"{prefix}.expression[{index}]"
+        )
+        resolution_rule = _expect_string(
+            columns["resolution_rule"][index], f"{prefix}.resolution_rule[{index}]"
+        )
+        if resolution_rule and resolution_rule not in RELATIONSHIP_RESOLUTION_RULES:
+            raise _refuse(
+                "W08", f"unknown relationship resolution rule tag {resolution_rule!r}"
+            )
+        try:
+            row = RelationshipObservationRow(
+                source=symbols[source_ordinal],
+                target=target,
+                relation_kind=relation_kind,
+                origin_lane=origin_lane,
+                line=line,
+                expression=expression or None,
+                resolution_rule=resolution_rule or None,
+                occurrence_count=occurrence_count,
+            )
+        except CanonicalModelError as error:
+            raise _refuse("W20", f"{prefix}[{index}]: {error}") from error
+        rows.append(row)
+        keys.append(
+            (
+                source_ordinal,
+                target_key,
+                relation_kind,
+                origin_lane,
+                line,
+                expression,
+                resolution_rule,
+            )
+        )
+    _expect_strictly_increasing(keys, prefix)
+    return frozenset(rows)
+
+
 def _decode_violations(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
@@ -2957,6 +3419,10 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
         facts_section, files, modules, relation_keys
     )
     dependency_cycles = _decode_dependency_cycles(facts_section, modules)
+    import_observations = _decode_import_observations(facts_section, files, modules)
+    relationship_observations = _decode_relationship_observations(
+        facts_section, symbols
+    )
     clone_groups = _decode_clone_groups(facts_section, symbols)
     dead_code_observations = _decode_dead_code_observations(
         facts_section, symbols, modules
@@ -2999,6 +3465,8 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 dependency_relations=dependency_relations,
                 dependency_occurrences=dependency_occurrences,
                 dependency_cycles=dependency_cycles,
+                import_observations=import_observations,
+                relationship_observations=relationship_observations,
                 clone_groups=clone_groups,
                 dead_code_observations=dead_code_observations,
                 violations=frozenset(violations),

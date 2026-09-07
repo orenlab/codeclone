@@ -211,8 +211,12 @@ _TARGET = "worktree-a"
 # artifact digest exactly where it was: the generation is spelled into the
 # dead-code observation family's content-address namespace and nowhere in
 # the projected bytes.
-_FIXTURE_RUN_ID = "c7c543f6d1caac631b929798c37a5dcc0461c1de8aaa64a3d965646095cfbc47"
-_FIXTURE_ARTIFACT = "bb45a956f4be26cf0d6ab311d7e3266a80ff7ac81582d5391941a3a1d96a1538"
+# Moved deliberately on 2026-09-07 with canonical model revision 2 and wire
+# revision 1: the run identity joins the ``canonical_model`` analysis layer
+# and the fixture gained two families, so the run id moved; the artifact
+# digest carries the wire revision inside its domain and moved with it.
+_FIXTURE_RUN_ID = "f515ee815e779b3edc5122fadc4b61cef94d6137d983e1d1f3c33930412d7ae7"
+_FIXTURE_ARTIFACT = "abdace474002cd736ef2b1d21641c9efd9bdeb12445ce287490029fea729330d"
 # The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
 _RETIRED_LIVENESS_GENERATION = "4"
@@ -332,7 +336,7 @@ def test_known_answer_run_and_artifact_identity(tmp_path: Path) -> None:
     # inside the artifact preimage and nowhere inside the run identity.
     assert (
         envelope.artifact_digest
-        == hashlib.sha256(b"cc-canonical-artifact:0\x00" + data).hexdigest()
+        == hashlib.sha256(b"cc-canonical-artifact:1\x00" + data).hexdigest()
     )
     assert envelope.artifact_digest != envelope.run_id
 

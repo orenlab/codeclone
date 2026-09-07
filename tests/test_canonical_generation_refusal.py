@@ -1,0 +1,161 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+"""An artifact of the previous generation is REFUSED, never reinterpreted.
+
+The epoch boundary of 2026-09-07 moved two constants together —
+``CANONICAL_MODEL_REVISION`` 1 -> 2 and ``CANONICAL_WIRE_REVISION`` 0 -> 1 —
+and the honesty law of a boundary is that the old generation's artifacts
+say typed what they are and how to move on.  The artifacts here are REAL:
+``tests/fixtures/run_store_generation_1`` was produced by the revision-1
+build at commit f117a8ad, on a clean tree, over the serving corpus, and its
+provenance file records the constants that build declared, the run it
+published and the digests of the files (a hand-written store would only
+prove that the tests agree with themselves).
+
+Both constants are held separately: the store's refusal names every
+diverging witness layer with both revisions, so reverting either constant
+alone changes the named set, and the wire's refusal names the wire
+generation on both sides.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+import sqlite3
+from pathlib import Path
+from typing import cast
+
+import pytest
+
+from codeclone.canonical import (
+    STORE_GENERATION_NEXT_STEP,
+    ExportEnvelope,
+    ExportIntegrityError,
+    RunStore,
+    StoreCompatibilityError,
+    WireDecodeError,
+    WitnessLayer,
+    decode_canonical_json,
+    verify_export_artifact,
+)
+from codeclone.contracts import CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISION
+from tests.test_canonical_roundtrip import fixture_model
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "run_store_generation_1"
+
+
+@pytest.fixture(scope="module")
+def provenance() -> dict[str, object]:
+    return cast(
+        "dict[str, object]",
+        json.loads((_FIXTURES / "provenance.json").read_text("utf-8")),
+    )
+
+
+def test_the_artifacts_are_the_ones_the_revision_one_build_produced(
+    provenance: dict[str, object],
+) -> None:
+    """Fixture integrity: the files are byte-identical to what the
+    provenance records, and the build that produced them declared the
+    previous generation of exactly the two constants that moved."""
+    produced_by = cast("dict[str, str]", provenance["produced_by"])
+    assert (
+        produced_by["CANONICAL_MODEL_REVISION"],
+        produced_by["CANONICAL_WIRE_REVISION"],
+        produced_by["git_status_porcelain"],
+    ) == ("1", "0", "")
+    assert (CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISION) == ("2", "1")
+    recorded = cast("dict[str, str]", provenance["sha256"])
+    measured = {
+        name: hashlib.sha256((_FIXTURES / name).read_bytes()).hexdigest()
+        for name in recorded
+    }
+    assert measured == recorded
+    # The store really is a generation-1 store: its own witness table says so.
+    with sqlite3.connect(_FIXTURES / "runs.sqlite3") as connection:
+        witness = dict(connection.execute("SELECT layer, revision FROM witness"))
+        objects = connection.execute("SELECT count(*) FROM objects").fetchone()[0]
+    assert witness["canonical_model"] == "1" and witness["canonical_wire"] == "0"
+    assert objects > 0 and objects == provenance["objects"]
+
+
+def test_a_generation_one_store_is_refused_at_open_with_its_migration_path(
+    tmp_path: Path,
+) -> None:
+    """Law 7 on a real file: refused before a single address is read, naming
+    each diverging layer with BOTH revisions, the refused path and the one
+    step a reader can take.  The file is left as it was."""
+    store = tmp_path / "runs.sqlite3"
+    shutil.copy(_FIXTURES / "runs.sqlite3", store)
+    before = hashlib.sha256(store.read_bytes()).hexdigest()
+    with pytest.raises(StoreCompatibilityError) as caught:
+        RunStore(store, create=False)
+    refusal = caught.value
+    assert refusal.diverging == (
+        ("canonical_model", "1", "2"),
+        ("canonical_wire", "0", "1"),
+    )
+    assert refusal.path == str(store)
+    assert refusal.next_step == STORE_GENERATION_NEXT_STEP
+    message = str(refusal)
+    assert "canonical_model stored '1' declared '2'" in message
+    assert "canonical_wire stored '0' declared '1'" in message
+    assert "(law 7)" in message and STORE_GENERATION_NEXT_STEP in message
+    with sqlite3.connect(store) as connection:
+        assert dict(connection.execute("SELECT layer, revision FROM witness")) == {
+            "authority_analysis": "1",
+            "canonical_model": "1",
+            "canonical_object_identity": "1",
+            "canonical_wire": "0",
+            "contract_ir": "1",
+            "module_identity": "2",
+            "storage_schema": "1",
+        }
+    assert hashlib.sha256(store.read_bytes()).hexdigest() == before
+    # Positive control on the same door: a store THIS build writes opens.
+    with RunStore(tmp_path / "current.sqlite3") as current:
+        current.write_full_run(
+            fixture_model(), namespace="control", target="t", expected_generation=0
+        )
+    with RunStore(tmp_path / "current.sqlite3", create=False):
+        pass
+
+
+def test_a_generation_zero_wire_document_is_refused_at_the_revision_fence() -> None:
+    """W21 on a real document, naming the generation it declares and the one
+    this build reads, with the migration path — never decoded under the
+    new grammar."""
+    data = (_FIXTURES / "run.wire.json").read_bytes()
+    assert b'"wire":"0"' in data and b'"canonical_model":"1"' in data
+    with pytest.raises(WireDecodeError) as caught:
+        decode_canonical_json(data)
+    assert caught.value.code == "W21"
+    assert "declares wire generation '0'" in caught.value.detail
+    assert "this build reads '1' only" in caught.value.detail
+    assert "next_step" in caught.value.detail
+
+
+def test_a_generation_zero_export_envelope_is_refused_by_this_verifier() -> None:
+    data = (_FIXTURES / "run.wire.json").read_bytes()
+    raw = json.loads((_FIXTURES / "run.envelope.json").read_text("utf-8"))
+    envelope = ExportEnvelope(
+        run_id=str(raw["run_id"]),
+        artifact_digest=str(raw["artifact_digest"]),
+        byte_count=int(raw["byte_count"]),
+        wire_revision=str(raw["wire_revision"]),
+        witness=tuple(
+            WitnessLayer(
+                layer=str(w["layer"]), revision=str(w["revision"]), role=str(w["role"])
+            )
+            for w in raw["witness"]
+        ),
+    )
+    assert envelope.wire_revision == "0" and len(data) == envelope.byte_count
+    with pytest.raises(ExportIntegrityError, match="declares wire revision '0'"):
+        verify_export_artifact(data, envelope)

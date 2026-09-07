@@ -80,15 +80,21 @@ from codeclone.canonical.identity import (
     DEAD_CODE_OBSERVATION_KINDS,
     DEPENDENCY_BINDINGS,
     DEPENDENCY_CYCLE_KINDS,
+    IMPORT_MECHANISMS,
+    IMPORT_RESOLUTIONS,
     IMPORT_TYPES,
     LIVE_ROOT_REASONS,
     PRODUCER_EXECUTION_STATES,
+    RELATIONSHIP_KINDS,
+    RELATIONSHIP_ORIGIN_LANES,
+    RELATIONSHIP_RESOLUTION_RULES,
     RISK_DIMENSIONS,
     SECURITY_CLASSIFICATION_MODES,
     SECURITY_EVIDENCE_KINDS,
     SECURITY_LOCATION_SCOPES,
     SECURITY_SOURCE_KINDS,
     SECURITY_SURFACE_CATEGORIES,
+    UNRESOLVED_IMPORT_RESOLUTIONS,
     VIOLATION_KINDS,
     AnalysisFile,
     DeadCodeEntity,
@@ -96,17 +102,23 @@ from codeclone.canonical.identity import (
     EffectRoot,
     FileId,
     FileLine,
+    ImportTarget,
     KnownModule,
     ModuleId,
     ModuleSymbol,
+    OpaqueDottedHead,
     OperationRoot,
     ProducerRoot,
+    RelationshipTarget,
     ScopeRef,
     SourceLocation,
     SymbolId,
+    UnresolvedTarget,
     canonical_key,
     dead_code_entity_key,
     endpoint_key,
+    import_target_key,
+    relationship_target_key,
     source_location_key,
 )
 
@@ -278,6 +290,224 @@ class DependencyCycleRow:
             raise CanonicalModelError(
                 "a dependency cycle names at least two modules "
                 "(the producer's Tarjan floor drops self-loops)"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ImportObservationRow:
+    """One import the module walk OBSERVED (canonical model revision 2).
+
+    The population the dependency lane deliberately does not carry: that
+    lane keeps internal, source-bearing edges so the gate and the SCC pass
+    consume one graph (the ratified selection law, ``metrics/dependencies``),
+    and this family is a DIFFERENT population contract — every ``ModuleDep``
+    the producer serves, external and unresolved targets included.  Measured
+    at f117a8ad on this repository: 11 445 served rows, of which 6 491
+    ``analyzed``, 4 932 ``external``, 22 ``unresolved_dynamic``; the
+    dependency lane carried the 6 491.  The sanction that admitted this
+    family forbids widening the dependency families instead.
+
+    Logical key — the WHOLE observation.  The producer keys nothing here:
+    ``core/parallelism`` sorts the served rows and never deduplicates them,
+    and the row shape is what one import statement asserts, so two equal
+    rows would be one statement observed twice — measured 11 445/11 445
+    distinct on every field @ f117a8ad, 9/9 on the serving corpus.  A set
+    cannot hold two equal rows, and the serving projection compares the
+    served MULTISET against the store's so a repeat that appeared would be
+    visible rather than absorbed.
+
+    ``target`` is the tagged union decided by the producer's own
+    ``resolution`` and checked against the run's registry (the laws below):
+    an ``analyzed`` import names a MODULE or FILE the run carries, the two
+    ``unresolved_*`` resolutions carry no target and no candidate (the
+    producer's own ``ImportObservation`` law, restated at the model so a
+    contradicting row is refused rather than stored), and every other
+    resolution rides an opaque dotted head — a string outside the registry
+    with no right to a MODULE identity.  ``dependency_type`` is the served
+    ``import_type`` under the name the dependency families already use for
+    the same vocabulary.  ``line`` admits zero for the reason
+    ``DependencyOccurrenceRow`` does (a coerced zero is storable and visibly
+    zero); ``level`` is the relative-import depth; ``requested_module`` is
+    absent on a bare relative import (190 of 11 445 @ f117a8ad).
+    """
+
+    source: DependencyEndpoint
+    target: ImportTarget
+    dependency_type: str
+    line: int
+    resolution: str
+    mechanism: str
+    binding: str
+    is_lazy: bool
+    level: int
+    requested_module: str | None
+    requested_names: tuple[str, ...]
+    candidate_targets: tuple[str, ...]
+    inventory_expansion: bool
+
+    def __post_init__(self) -> None:
+        _prove_import_vocabularies(self)
+        _prove_import_payload(self)
+        _prove_import_target_law(self)
+
+
+def _prove_import_vocabularies(row: ImportObservationRow) -> None:
+    """The four closed vocabularies of an import observation."""
+    if row.dependency_type not in IMPORT_TYPES:
+        raise CanonicalModelError(f"unknown dependency_type: {row.dependency_type!r}")
+    if row.resolution not in IMPORT_RESOLUTIONS:
+        raise CanonicalModelError(f"unknown import resolution: {row.resolution!r}")
+    if row.mechanism not in IMPORT_MECHANISMS:
+        raise CanonicalModelError(f"unknown import mechanism: {row.mechanism!r}")
+    if row.binding not in DEPENDENCY_BINDINGS:
+        raise CanonicalModelError(f"unknown dependency binding: {row.binding!r}")
+
+
+def _prove_import_payload(row: ImportObservationRow) -> None:
+    """The producer's own payload laws: non-negative ints, an absent-or-
+    non-empty requested module, sorted names, sorted unique candidates."""
+    for name, value in (("line", row.line), ("level", row.level)):
+        if isinstance(value, bool) or value < 0:
+            raise CanonicalModelError(
+                f"import observation {name} must be a non-negative int: {value!r}"
+            )
+    if row.requested_module is not None and not row.requested_module:
+        raise CanonicalModelError(
+            "import observation requested_module is absent or non-empty, "
+            "never the empty string"
+        )
+    if list(row.requested_names) != sorted(row.requested_names) or any(
+        not name for name in row.requested_names
+    ):
+        raise CanonicalModelError(
+            "import observation requested names must be sorted, non-empty "
+            f"strings: {row.requested_names!r}"
+        )
+    if row.candidate_targets != tuple(sorted(set(row.candidate_targets))) or (
+        any(not target for target in row.candidate_targets)
+    ):
+        raise CanonicalModelError(
+            "import candidate targets must be sorted, unique, non-empty "
+            f"strings: {row.candidate_targets!r}"
+        )
+
+
+def _prove_import_target_law(row: ImportObservationRow) -> None:
+    """The classification decides the variant, and the row may not
+    contradict it (the laws in the row's docstring)."""
+    unresolved = row.resolution in UNRESOLVED_IMPORT_RESOLUTIONS
+    if unresolved != isinstance(row.target, UnresolvedTarget):
+        raise CanonicalModelError(
+            f"an import classified {row.resolution!r} "
+            f"{'carries no' if unresolved else 'carries a'} target; "
+            f"the row says otherwise: {row.target!r}"
+        )
+    if unresolved and row.candidate_targets:
+        raise CanonicalModelError("an unresolved import carries no candidate targets")
+    if row.resolution == "unresolved_dynamic" and row.mechanism != "dynamic":
+        raise CanonicalModelError("only a dynamic load can be unresolved_dynamic")
+    if row.resolution == "analyzed":
+        if not isinstance(row.target, ModuleId | FileId):
+            raise CanonicalModelError(
+                "an import classified analyzed names a MODULE or FILE of "
+                f"the run, not {row.target!r}"
+            )
+    elif not unresolved and not isinstance(row.target, OpaqueDottedHead):
+        raise CanonicalModelError(
+            f"an import classified {row.resolution!r} names a head outside "
+            f"the run's registry (an opaque dotted head), not {row.target!r}"
+        )
+
+
+def relationship_resolution_status(target: RelationshipTarget) -> str:
+    """The served ``resolution_status``, derived from the target variant.
+
+    The producer sets it by exactly this rule (``_relationship_record``:
+    ``"resolved" if target_qualname is not None else "unresolved"``), so a
+    stored column would be the same fact twice; the registry declares the
+    field a representation projection and this is its one owner.
+    """
+    return "unresolved" if isinstance(target, UnresolvedTarget) else "resolved"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RelationshipObservationRow:
+    """One call/reference RECORD of a function (canonical model revision 2).
+
+    The served ``relationship_facts`` slice, which revision 1 could not
+    express: ``semantic_edges`` filled two of its eight fields, from a
+    different lane, with no way to say "unresolved" — and roughly half of
+    the population is unresolved (49 475 of 112 967 records @ f117a8ad on
+    this repository; 8 of 17 on the serving corpus).
+
+    Logical key — the observation: ``(source, target, relation_kind,
+    origin_lane, line, expression, resolution_rule)``.  ``occurrence_count``
+    is payload and the family's honest answer to multiplicity: the producer
+    emits one record per call/reference EXPRESSION, so ``f(g(), g())`` is
+    two identical records on one line, and a set-valued family would
+    silently collapse them — measured @ f117a8ad: 112 967 records, 111 587
+    distinct on every field, 1 342 groups repeated on one line (the largest
+    three times).  The count is the number of records the producer emitted for the
+    observation, so the served tuple is reconstructible exactly: expand each
+    row ``occurrence_count`` times and sort by the producer's own key.  An
+    artificial per-line ordinal was rejected: the producer records no such
+    discriminator, and an identity nobody asserted is a guessed identity.
+
+    ``target`` is the tagged union (:data:`RelationshipTarget`); the served
+    ``resolution_status`` is DERIVED from it (:func:`relationship_resolution_status`)
+    and the served ``path`` from the source SYMBOL's file plus the serving
+    root — both declared representation projections, never stored.  A
+    ``reference`` record always names a target: the producer emits one only
+    once it resolved the expression, and an unresolved reference row would
+    assert an observation the producer never made.  ``line`` is positive
+    (the producer clamps ``max(1, lineno)``); ``expression`` is the unparsed
+    source text and is absent, never empty (``ast.unparse(...) or None``);
+    ``resolution_rule`` is the producer's closed mechanism vocabulary.
+    """
+
+    source: SymbolId
+    target: RelationshipTarget
+    relation_kind: str
+    origin_lane: str
+    line: int
+    expression: str | None
+    resolution_rule: str | None
+    occurrence_count: int
+
+    def __post_init__(self) -> None:
+        if self.relation_kind not in RELATIONSHIP_KINDS:
+            raise CanonicalModelError(
+                f"unknown relationship kind: {self.relation_kind!r}"
+            )
+        if self.origin_lane not in RELATIONSHIP_ORIGIN_LANES:
+            raise CanonicalModelError(
+                f"unknown relationship origin lane: {self.origin_lane!r}"
+            )
+        if isinstance(self.line, bool) or self.line < 1:
+            raise CanonicalModelError(
+                f"relationship line must be a positive int: {self.line!r}"
+            )
+        if isinstance(self.occurrence_count, bool) or self.occurrence_count < 1:
+            raise CanonicalModelError(
+                "relationship occurrence count must be a positive int: "
+                f"{self.occurrence_count!r}"
+            )
+        if self.expression is not None and not self.expression:
+            raise CanonicalModelError(
+                "relationship expression is absent or non-empty, never the empty string"
+            )
+        if self.resolution_rule is not None and (
+            self.resolution_rule not in RELATIONSHIP_RESOLUTION_RULES
+        ):
+            raise CanonicalModelError(
+                f"unknown relationship resolution rule: {self.resolution_rule!r}"
+            )
+        if self.relation_kind == "reference" and isinstance(
+            self.target, UnresolvedTarget
+        ):
+            raise CanonicalModelError(
+                "a reference record always names its target (the producer "
+                "emits a reference only once it resolved the expression)"
             )
 
 
@@ -1000,6 +1230,16 @@ class AnalysisFacts:
         default_factory=frozenset
     )
     dependency_cycles: frozenset[DependencyCycleRow] = field(default_factory=frozenset)
+    # Canonical model revision 2: the two served observation families.  A
+    # legacy report document carries neither (the surface serves them from
+    # the parent's memory), so the ingest oracle answers them empty and the
+    # producer-native snapshot is their one source.
+    import_observations: frozenset[ImportObservationRow] = field(
+        default_factory=frozenset
+    )
+    relationship_observations: frozenset[RelationshipObservationRow] = field(
+        default_factory=frozenset
+    )
     clone_groups: frozenset[CloneGroupRow] = field(default_factory=frozenset)
     dead_code_observations: frozenset[DeadCodeObservationRow] = field(
         default_factory=frozenset
@@ -1232,6 +1472,44 @@ def _violation_natural_key(row: ViolationRow) -> tuple[object, ...]:
     )
 
 
+def _import_observation_key(row: ImportObservationRow) -> tuple[object, ...]:
+    # The whole observation is the key (see the row class): every field
+    # enters, in one fixed order, so two rows collide only when they say
+    # exactly the same thing.
+    return (
+        endpoint_key(row.source),
+        import_target_key(row.target),
+        row.dependency_type,
+        row.line,
+        row.resolution,
+        row.mechanism,
+        row.binding,
+        row.is_lazy,
+        row.level,
+        row.requested_module or "",
+        row.requested_names,
+        row.candidate_targets,
+        row.inventory_expansion,
+    )
+
+
+def _relationship_observation_key(
+    row: RelationshipObservationRow,
+) -> tuple[object, ...]:
+    # The observation, without its multiplicity: ``occurrence_count`` is the
+    # one payload field, so two rows of one observation differing only in
+    # their count collide here and are refused.
+    return (
+        canonical_key(row.source),
+        relationship_target_key(row.target),
+        row.relation_kind,
+        row.origin_lane,
+        row.line,
+        row.expression or "",
+        row.resolution_rule or "",
+    )
+
+
 class _DomainClosure:
     """Referential closure of the identity domains — never invents facts."""
 
@@ -1273,6 +1551,16 @@ class _DomainClosure:
             self.modules.add(endpoint)
         else:
             self.files.add(endpoint)
+
+    def see_import_target(self, target: ImportTarget) -> None:
+        # The opaque head and the nullary variant have no domain to admit —
+        # that is what each of them asserts.
+        if isinstance(target, ModuleId | FileId):
+            self.see_endpoint(target)
+
+    def see_relationship_target(self, target: RelationshipTarget) -> None:
+        if isinstance(target, SymbolId):
+            self.see_symbol(target)
 
     def see_violation(self, violation: ViolationRow) -> None:
         self.see_symbol(violation.sink_identity)
@@ -1324,6 +1612,12 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         closure.see_endpoint(occurrence.relation.target)
     for cycle in facts.dependency_cycles:
         closure.modules.update(cycle.modules)
+    for import_observation in facts.import_observations:
+        closure.see_endpoint(import_observation.source)
+        closure.see_import_target(import_observation.target)
+    for relationship in facts.relationship_observations:
+        closure.see_symbol(relationship.source)
+        closure.see_relationship_target(relationship.target)
     for group in facts.clone_groups:
         for item in group.items:
             closure.see_symbol(item.symbol)
@@ -1380,6 +1674,16 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         facts.dependency_cycles,
         "dependency_cycles.modules",
         _dependency_cycle_set_key,
+    )
+    _unique_by_key(
+        facts.import_observations,
+        "import_observations.observation",
+        _import_observation_key,
+    )
+    _unique_by_key(
+        facts.relationship_observations,
+        "relationship_observations.observation",
+        _relationship_observation_key,
     )
     _unique_by_key(facts.clone_groups, "clone_groups.key", _clone_group_natural_key)
     _unique_by_key(

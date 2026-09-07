@@ -47,13 +47,28 @@ PORTABLE_PATH_PROFILE_VERSION: Final = "1"
 SEMANTIC_EVENT_VERSION: Final = "1"
 CONTRACT_IR_VERSION: Final = "1"
 # Canonical normalized model (F-3) — the one semantic model shared by the
-# run-store backend and canonical JSON vNext. Revision "1" is the frozen
+# run-store backend and canonical JSON vNext. Revision "1" was the frozen
 # semantic substrate ratified 2026-08-13 (three-class value epistemics;
 # ModuleKey split by places; SYMBOL = (FILE, qualname), proven lossless
 # against the legacy ModuleKey addressing on the frozen corpus). Independent
 # of REPORT_SCHEMA_VERSION and of any storage schema revision by design: a
 # projection revision never reaches back into semantic identity.
-CANONICAL_MODEL_REVISION: Final = "1"
+#
+# Revision "2" (sanctioned 2026-09-05; ONE migration carrying both families)
+# adds the two observation families the served MCP surface reads out of the
+# parent's memory and revision "1" could not express: ``import_observations``
+# — every import the walk observed, external and unresolved targets included
+# (measured at f117a8ad on this repository: 11 445 served rows against the
+# 6 491 internal edges the dependency lane carries) — and
+# ``relationship_observations`` — the per-function call/reference records in
+# BOTH resolution states, with the multiplicity the producer emits (112 967
+# records, 1 342 groups repeated on one line, 49 475 unresolved). The
+# dependency graph the gate and the SCC pass consume is NOT widened: those
+# stay the internal-only families, and the sanction forbids folding external
+# targets into them. The wire revision moves with this constant in the same
+# epoch (below), so no generation of the store or of a wire document carries
+# one of the two families without the other.
+CANONICAL_MODEL_REVISION: Final = "2"
 # Generation of the CANONICAL OBJECT IDENTITY: the semantic preimage by which a
 # stored object, a scope receipt, a membership digest and a run are addressed.
 # This constant and no other owns the run-store's domain separators. It moves
@@ -81,13 +96,21 @@ CANONICAL_MODEL_REVISION: Final = "1"
 # run_id through the domain separator only, and a store file written under a
 # different identity generation is refused at open rather than reinterpreted.
 CANONICAL_OBJECT_IDENTITY_VERSION: Final = "1"
-# Wire revision of canonical JSON vNext. "0" is the pre-freeze draft grammar
+# Wire revision of canonical JSON vNext. "0" was the pre-freeze draft grammar
 # built by backend wave 1 (root members: format, revisions, values, domains,
-# sets, scope, facts, integrity). The bump to "1" is the wire-freeze event
-# and belongs to the maintainer once the sanctioned closed list (mechanical
-# facts order, discriminator-first proof, columnar benchmark, lexical
-# float/escape law, exact integrity preimage, violation_id fixture) closes.
-CANONICAL_WIRE_REVISION: Final = "0"
+# sets, scope, facts, integrity). "1" carries the two families of canonical
+# model revision "2" as two more ``facts`` tables in the mechanical family
+# order, plus one more tagged reference slot (``unresolved_target``) for a
+# target the producer asserted nothing about; every document's bytes and the
+# inner seal's domain move with it, so a generation-0 document is refused at
+# the revision fence (``W21``) naming the generation it declares and the one
+# this build reads — never reinterpreted. The two constants moved together,
+# in one epoch, by maintainer sanction: two consecutive store generations for
+# one unpublished version would make every user throw the store away twice.
+# Whether "1" is also the FROZEN grammar of §7 is a separate evidence
+# question (the wire corpus benchmark is still an instrumentation run, not
+# freeze evidence); a freeze that changes bytes bumps again.
+CANONICAL_WIRE_REVISION: Final = "1"
 # Storage schema revision of the canonical run-store (backend wave 2).
 # Deliberately separate from CANONICAL_WIRE_REVISION and REPORT_SCHEMA_VERSION
 # (F-3 §10, brief §14): the SQLite physics may change without claiming the

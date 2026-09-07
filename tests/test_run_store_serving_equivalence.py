@@ -26,41 +26,44 @@ satisfy, and the two still unsatisfied are marked ``xfail(strict=True)``:
     equivalence below carries no expected failure any more.
 
 ``module_imports``
-    Every served field is expressible and every stored row reproduces a
-    served row exactly.  The POPULATION is a strict subset: the canonical
-    dependency lane ingests only internal source-bearing edges, so that the
-    gate and the SCC pass consume one graph, and every external import is
-    absent by design.
+    SATISFIED 2026-09-07, by canonical model revision 2.  Every served
+    field was always expressible; the POPULATION was a strict subset,
+    because the dependency lane ingests only internal source-bearing edges
+    so that the gate and the SCC pass consume one graph.  The
+    ``import_observations`` family is the second lane the marker's exit
+    condition named: every import the walk observed, external and
+    unresolved targets included, and the dependency lane is left exactly as
+    it was — pinned below as a strict subset, because the sanction forbids
+    widening it.
 
 ``relationship_facts``
-    There is no relationship family.  ``semantic_edges`` is the only family
-    carrying a relation at all — two of the eight served fields, a different
-    lane's derivation, and no way at all to say "unresolved", which is
-    roughly half of what the surface serves.
+    SATISFIED 2026-09-07, by canonical model revision 2.  The
+    ``relationship_observations`` family carries all eight served fields
+    and BOTH resolution states — the nullary target variant is the fact
+    "the producer resolved nothing" — plus the multiplicity the producer
+    emits (one record per expression, so ``f(g(), g())`` is two records),
+    counted per observation and expanded on the way out.
 
-**What a red here means.**  When the gap a pin names is closed the pin
-XPASSes and CI turns red.  That red says *the proof changed: remove the
-expected failure and ratify the new capability*.  It never says *restore the
-gap to make the suite green.*
+**What the pins compare now.**  Each slice is read out of the store by the
+PRODUCTION projection (``codeclone.canonical.serving``) — the one owner the
+surface serves through — and compared with the live producer's own tuple
+on the SAME execution: every field, in the producer's own order.  A pin
+that rebuilt the projection for itself would stay green under a real
+mutation of the one that serves.  Each pin states its population before it
+compares (both target kinds, both resolution states), so it cannot pass on
+an empty or one-sided slice.
 
-**Why each pin has a control beside it.**  A strict ``xfail`` that fails for
-a reason nobody chose — an import error, a fixture that never built a store
-— keeps passing as ``xfail`` long after its defect is gone and then never
-flips.  So each pin's projection is total (it raises nothing and drops only
-a file the run never mapped to a module), and each has a positive control
-that drives the SAME projection with the missing piece supplied by hand.
-The control shares every helper with the pin, so scaffolding that stopped
-short of the comparison turns the control RED instead of leaving the pin
-quietly xfailing forever (Probe Validity Law, ``AGENTS.md`` §17).
+**What a red here means.**  A regression: some canonical fact the served
+slice needs stopped being stated, or stopped agreeing.  Never a gap to
+restore, and never a reason to narrow the served slice to the store.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import typing
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 
@@ -70,13 +73,19 @@ from codeclone.canonical import (
     CloneItemRow,
     DependencyEndpoint,
     DependencyOccurrenceRow,
-    DependencyRelationRow,
     FileId,
     ModuleId,
     RunStore,
     SecuritySurfaceRow,
+    ServedRunSlices,
     SymbolId,
     UnitSpanRow,
+    read_served_run_slices,
+)
+from codeclone.models import (
+    ModuleDep,
+    RelationshipRecord,
+    RelationshipResolutionStatus,
 )
 from tests._served_run import ServedRunStoreProjection
 
@@ -522,6 +531,11 @@ def test_the_unit_projection_agrees_on_every_field_but_the_closing_line(
 
 
 # -- 2. the module imports --------------------------------------------------
+#
+# RATIFIED 2026-09-07 (canonical model revision 2).  Two statements, both
+# pinned: the ``import_observations`` family reproduces the served slice
+# exactly, and the dependency lane the gate consumes stays the strict subset
+# it always was -- the sanction that admitted the family forbids widening it.
 
 DependencyRow = tuple[str, str, str, int]
 
@@ -531,13 +545,14 @@ def _endpoint_name(endpoint: DependencyEndpoint) -> str:
     return endpoint.module if isinstance(endpoint, ModuleId) else endpoint.path
 
 
-def _project_module_imports(
+def _dependency_lane_rows(
     occurrences: Iterable[DependencyOccurrenceRow],
 ) -> frozenset[DependencyRow]:
-    """Rebuild the served import slice out of canonical occurrence rows.
+    """The dependency lane's occurrences in the served import row shape.
 
-    Total: it raises nothing and drops nothing.  ``occurrences`` is the one
-    input the pin and its control disagree about.
+    Total: it raises nothing and drops nothing.  Kept for ONE statement --
+    the subset relation below -- and never the serving projection, which
+    lives in production.
     """
     return frozenset(
         (
@@ -550,206 +565,92 @@ def _project_module_imports(
     )
 
 
-def _occurrences_the_canonical_run_offers(
-    model: CanonicalModel,
-) -> tuple[DependencyOccurrenceRow, ...]:
-    """Every import occurrence the canonical model can state today.
-
-    ``dependency_occurrences`` is the whole of it.  The lane ingests only
-    internal source-bearing edges, so that the gate and the SCC pass consume
-    one graph; an import whose target is outside the analyzed tree has no
-    row here by design, not by omission.
-    """
-    return tuple(model.facts.analysis.dependency_occurrences)
-
-
-def _served_import_rows(
-    served: ServedRunStoreProjection,
-) -> frozenset[DependencyRow]:
+def _served_import_rows(served: ServedRunStoreProjection) -> frozenset[DependencyRow]:
     return frozenset(
         (row.source, row.target, row.import_type, row.line)
         for row in served.module_imports
     )
 
 
-def _occurrences_stubbed_by_hand(
-    missing: Iterable[DependencyRow],
-) -> tuple[DependencyOccurrenceRow, ...]:
-    """The external-target rows the canonical dependency lane omits.
+@pytest.fixture(scope="session")
+def store_served_slices(
+    served_run_store_projection: ServedRunStoreProjection,
+) -> ServedRunSlices:
+    """The production projection's answer for the SAME execution.
 
-    Fabricated in the canonical row type, not in the served one, so the
-    control drives the same endpoint translation the pin does.
-
-    A ``ModuleId`` refuses an empty name, which is not an obstacle here and
-    is a finding on its own: 19 served import rows on the self-repository at
-    ``4512acf0`` name an empty target, and no canonical identity can hold
-    one.  The corpus deliberately carries none, so the fabrication stays a
-    fabrication of the population and not of the vocabulary.
+    Read out of the store through the one owner the surface serves through
+    (``codeclone.canonical.serving``), never a projection rebuilt here: a
+    pin that rebuilt it would stay green under a real mutation of the one
+    that serves.
     """
-    return tuple(
-        DependencyOccurrenceRow(
-            relation=DependencyRelationRow(
-                source=ModuleId(module=source),
-                target=ModuleId(module=target),
-                dependency_type=import_type,
-            ),
-            line=line,
-            binding="import_time",
-            is_lazy=False,
+    with RunStore(served_run_store_projection.store_path, create=False) as store:
+        return read_served_run_slices(
+            store,
+            served_run_store_projection.store_run_id,
+            root=served_run_store_projection.root,
         )
-        for source, target, import_type, line in sorted(missing)
-    )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "module_imports: every served field is expressible and every stored "
-        "row reproduces a served row exactly, but the canonical population is "
-        "a strict SUBSET. _dependency_rows ingests only internal "
-        "source-bearing edges so that the gate and the SCC pass consume one "
-        "graph, and every external import is therefore absent by design: the "
-        "store carries 5 of the 9 served rows on this corpus and the 4 it "
-        "does not are exactly the external ones. Measured on the "
-        "self-repository at 4512acf0: 6 238 stored occurrences against 10 953 "
-        "served rows -- 4 715 served-only, 0 store-only, 152 import names "
-        "lost. "
-        "EXIT CONDITION: give the canonical model a population that carries "
-        "external import targets -- a second lane, or a widened one that does "
-        "not disturb the graph the gate consumes -- then DELETE this marker "
-        "and ratify the new capability. Never narrow the served slice to "
-        "match the store."
-    ),
-)
+def test_the_dependency_lane_stays_a_strict_subset_of_the_served_imports(
+    served_run_store_projection: ServedRunStoreProjection,
+    canonical_run: CanonicalModel,
+) -> None:
+    """Sanction condition 1, executable: the gate's graph was NOT widened.
+
+    ``dependency_occurrences`` still carries only the internal, source-bearing
+    edges (5 of the 9 served rows on this corpus), and the rows it lacks are
+    exactly the external ones.  A red here means the dependency lane grew to
+    match the served slice -- the repair the sanction forbids -- or shrank.
+    """
+    served = _served_import_rows(served_run_store_projection)
+    lane = _dependency_lane_rows(canonical_run.facts.analysis.dependency_occurrences)
+    assert lane, "the canonical dependency lane carried no rows"
+    assert lane < served, "the dependency lane is no longer a strict subset"
+    by_row: dict[DependencyRow, ModuleDep] = {
+        (dep.source, dep.target, dep.import_type, dep.line): dep
+        for dep in served_run_store_projection.module_imports
+    }
+    assert {by_row[row].resolution for row in served - lane} == {"external"}
+
+
 def test_module_imports_are_reconstructible_from_the_canonical_run(
     served_run_store_projection: ServedRunStoreProjection,
     canonical_run: CanonicalModel,
+    store_served_slices: ServedRunSlices,
 ) -> None:
-    projected = _project_module_imports(
-        _occurrences_the_canonical_run_offers(canonical_run)
-    )
-    assert projected == _served_import_rows(served_run_store_projection)
+    """RATIFIED 2026-09-07: the served import slice IS expressible from the run.
 
+    This carried ``xfail(strict=True)`` from 2026-09-03 until the
+    ``import_observations`` family landed: the dependency lane omits every
+    external import by design, so the store held 5 of the 9 served rows here
+    and 6 238 of 10 953 on the self-repository.  The marker's own exit
+    condition named a second lane, and this is that lane -- the expected
+    failure is removed, not the comparison weakened.
 
-def test_module_imports_reconstruct_once_the_population_is_widened(
-    served_run_store_projection: ServedRunStoreProjection,
-    canonical_run: CanonicalModel,
-) -> None:
-    """Positive control: the same projection over a widened population.
+    The comparison is the production projection against the LIVE producer's
+    tuple: every field of every ``ModuleDep``, in the producer's own order.
+    The population is stated before it is compared, so the pin cannot pass
+    on an empty or one-sided slice: an internal and an external target must
+    both be present.  The nullary variant is not populated on this corpus;
+    ``test_run_store_serving`` drives it by fixture, and the self-repository
+    measurement of 2026-09-07 carries 22 of them.
 
-    The load-bearing half is the subset assertion.  It is the claim that
-    every row the store DOES carry comes back as a served row field for
-    field, with no row the store invented — if any of the four fields
-    disagreed, or if the store carried a row the surface does not, widening
-    could not repair it.
+    A red here is a REGRESSION and never a gap to restore.
     """
-    served = _served_import_rows(served_run_store_projection)
-    offered = _occurrences_the_canonical_run_offers(canonical_run)
-    projected = _project_module_imports(offered)
-    assert projected, "the canonical dependency lane carried no rows"
-    assert projected < served, (
-        "the store's import population is no longer a strict subset of the "
-        "served one; the pin above no longer measures what it says"
-    )
-    widened = offered + _occurrences_stubbed_by_hand(served - projected)
-    assert _project_module_imports(widened) == served
+    served = served_run_store_projection.module_imports
+    assert served, "the served slice is empty; the comparison would be hollow"
+    resolutions = Counter(dep.resolution for dep in served)
+    assert resolutions["external"] and resolutions["analyzed"], resolutions
+    stored = canonical_run.facts.analysis.import_observations
+    assert len(stored) == len(served), "the family and the slice differ in size"
+    assert store_served_slices.module_imports == served
 
 
 # -- 3. the relationship records -------------------------------------------
-
-RelationshipRow = tuple[
-    str | None,  # relation_kind
-    str | None,  # resolution_status
-    str | None,  # origin_lane
-    str,  # source_qualname
-    str | None,  # target_qualname
-    str,  # path
-    int | None,  # line
-    str | None,  # resolution_rule
-]
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class CanonicalRelationship:
-    """One relationship in the shape a canonical family would carry it.
-
-    Identities are canonical: a SYMBOL is ``(FILE, local qualname)``, and a
-    target outside the analyzed tree is an opaque dotted head, which is how
-    the store's own grammar already spells one.  The producer's glued
-    ``module:local`` dialect is this projection's OUTPUT, never its input —
-    a row that arrived pre-glued would prove nothing about the bridge.
-    """
-
-    source: SymbolId
-    target: SymbolId | None = None
-    target_head: str | None = None
-    relation_kind: str | None = None
-    resolution_status: str | None = None
-    origin_lane: str | None = None
-    line: int | None = None
-    resolution_rule: str | None = None
-
-
-def _project_relationships(
-    *,
-    root: Path,
-    modules_by_path: Mapping[str, str],
-    analyzed_paths: frozenset[str],
-    rows: Iterable[CanonicalRelationship],
-) -> frozenset[RelationshipRow]:
-    """Rebuild the served relationship slice out of canonical rows.
-
-    Total: it raises nothing and drops only a source FILE the run neither
-    mapped to a MODULE nor recorded as analyzed.  Heads are glued by the
-    same rule the unit index uses — a module when the run mapped one, the
-    file's own path otherwise — because it is one producer dialect and a
-    second spelling of it here would be a second dialect.  ``rows`` is the
-    one input the pin and its control disagree about.
-    """
-    projected: set[RelationshipRow] = set()
-    for row in rows:
-        source_head = _qualname_head(
-            row.source.file.path, modules_by_path, analyzed_paths
-        )
-        if source_head is None:
-            continue
-        target = row.target_head
-        if row.target is not None:
-            target_head = _qualname_head(
-                row.target.file.path, modules_by_path, analyzed_paths
-            )
-            target = (
-                None if target_head is None else f"{target_head}:{row.target.qualname}"
-            )
-        projected.add(
-            (
-                row.relation_kind,
-                row.resolution_status,
-                row.origin_lane,
-                f"{source_head}:{row.source.qualname}",
-                target,
-                str(root / row.source.file.path),
-                row.line,
-                row.resolution_rule,
-            )
-        )
-    return frozenset(projected)
-
-
-def _relationships_the_canonical_run_offers(
-    model: CanonicalModel,
-) -> tuple[CanonicalRelationship, ...]:
-    """Every relationship the canonical model can state today.
-
-    There is no relationship family.  ``semantic_edges`` is the only family
-    carrying a relation at all, it fills two of the eight served fields, and
-    its row shape has no way to say "unresolved" — an edge is there or it is
-    not.
-    """
-    return tuple(
-        CanonicalRelationship(source=edge.source, target=edge.target)
-        for edge in model.facts.analysis.semantic_edges
-    )
+#
+# RATIFIED 2026-09-07 (canonical model revision 2): the
+# ``relationship_observations`` family carries all eight served fields and
+# BOTH resolution states, with the multiplicity the producer emits.
 
 
 def _canonical_symbol(
@@ -762,6 +663,7 @@ def _canonical_symbol(
     The inverse of :func:`_qualname_head`: a module head resolves through
     ``file_modules``, a path head through the analyzed set, and anything
     else — an import outside the tree — is not a canonical SYMBOL at all.
+    Used for the population accounting only.
     """
     head, separator, local = qualname.partition(":")
     if not separator or not local:
@@ -774,137 +676,76 @@ def _canonical_symbol(
     return SymbolId(file=FileId(path=path), qualname=local)
 
 
-def _served_relationship_rows(
-    served: ServedRunStoreProjection,
-) -> frozenset[RelationshipRow]:
-    return frozenset(
-        (
-            record.relation_kind,
-            record.resolution_status,
-            record.origin_lane,
-            record.source_qualname,
-            record.target_qualname,
-            record.path,
-            record.line,
-            record.resolution_rule,
-        )
-        for facts in served.relationship_facts
-        for record in facts.relationships
-    )
+def _relationship_population(
+    records: list[RelationshipRecord], canonical_run: CanonicalModel
+) -> tuple[Counter[RelationshipResolutionStatus], list[str], list[str]]:
+    """The population the comparison must contain before it can see anything:
+    both resolution states, and resolved targets split into the run's own
+    SYMBOLS and the heads outside it."""
+    statuses = Counter(record.resolution_status for record in records)
+    paths_by_module = _paths_by_module(canonical_run)
+    analyzed = _analyzed_paths(canonical_run)
+    resolved = [r.target_qualname for r in records if r.target_qualname is not None]
+    internal = [t for t in resolved if _canonical_symbol(t, paths_by_module, analyzed)]
+    external = [
+        t for t in resolved if _canonical_symbol(t, paths_by_module, analyzed) is None
+    ]
+    return statuses, internal, external
 
 
-def _relationships_stubbed_by_hand(
-    served: ServedRunStoreProjection,
-    model: CanonicalModel,
-) -> tuple[CanonicalRelationship, ...]:
-    """The relationship family the canonical model does not have.
-
-    Fabricated, and deliberately not a copy: every identity is re-stated
-    through the run's OWN ``file_modules`` projection, so the control drives
-    the same MODULE↔FILE bridge the pin does.  A target the run analyzed
-    becomes a canonical SYMBOL; a target outside it stays an opaque head,
-    because that is the only thing the canonical model could hold for it.
-    """
-    paths_by_module = _paths_by_module(model)
-    analyzed_paths = _analyzed_paths(model)
-    rows: list[CanonicalRelationship] = []
-    for facts in served.relationship_facts:
-        for record in facts.relationships:
-            source = _canonical_symbol(
-                record.source_qualname, paths_by_module, analyzed_paths
-            )
-            assert source is not None, record.source_qualname
-            target = (
-                None
-                if record.target_qualname is None
-                else _canonical_symbol(
-                    record.target_qualname, paths_by_module, analyzed_paths
-                )
-            )
-            rows.append(
-                CanonicalRelationship(
-                    source=source,
-                    target=target,
-                    target_head=(
-                        record.target_qualname
-                        if record.target_qualname is not None and target is None
-                        else None
-                    ),
-                    relation_kind=record.relation_kind,
-                    resolution_status=record.resolution_status,
-                    origin_lane=record.origin_lane,
-                    line=record.line,
-                    resolution_rule=record.resolution_rule,
-                )
-            )
-    return tuple(rows)
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "relationship_facts: the canonical model has no relationship family. "
-        "semantic_edges is the only family carrying a relation -- 2 of the 8 "
-        "served fields, a different lane's derivation, and no representation "
-        "of an unresolved edge at all: 3 projected rows against 17 served "
-        "records of which 8 are unresolved on this corpus, with not one row "
-        "in common. Measured on the self-repository at 4512acf0: 22 713 "
-        "projected rows against 99 700 distinct served rows (104 628 records, "
-        "50 156 of them unresolved), again with none in common. "
-        "relation_kind, resolution_status, "
-        "origin_lane, line and resolution_rule have no owner in any family, "
-        "and the internal CLASS targets these records name are not carried as "
-        "canonical symbols either. "
-        "EXIT CONDITION: give the canonical model a relationship family that "
-        "carries all eight fields and BOTH resolution states, then DELETE "
-        "this marker and ratify the new capability. Never drop the unresolved "
-        "half to make the two sides agree."
-    ),
-)
 def test_relationship_facts_are_reconstructible_from_the_canonical_run(
     served_run_store_projection: ServedRunStoreProjection,
     canonical_run: CanonicalModel,
+    store_served_slices: ServedRunSlices,
 ) -> None:
-    projected = _project_relationships(
-        root=served_run_store_projection.root,
-        modules_by_path=_modules_by_path(canonical_run),
-        analyzed_paths=_analyzed_paths(canonical_run),
-        rows=_relationships_the_canonical_run_offers(canonical_run),
-    )
-    assert projected == _served_relationship_rows(served_run_store_projection)
+    """RATIFIED 2026-09-07: the served relationship slice IS expressible.
 
+    This carried ``xfail(strict=True)`` from 2026-09-03 until the
+    ``relationship_observations`` family landed: the model had no
+    relationship family at all — ``semantic_edges`` filled two of the eight
+    served fields from another lane and could not say "unresolved", which
+    is 8 of the 17 records here and 49 475 of 112 967 on the self-
+    repository.  The marker's exit condition asked for all eight fields and
+    both resolution states; this family carries them, and the expected
+    failure is removed rather than the comparison weakened.
 
-def test_relationship_facts_reconstruct_once_the_family_is_stubbed(
-    served_run_store_projection: ServedRunStoreProjection,
-    canonical_run: CanonicalModel,
-) -> None:
-    """Positive control: the same projection over a stubbed family.
-
-    What it proves is not that a copy equals itself.  The stub carries
-    canonical identities only, so the projection has to rebuild every glued
-    qualname and every absolute path from the run's own FILE↔MODULE
-    projection — and it proves the canonical model already holds the
-    identities such a family would need for its SOURCES.  It does not hold
-    them for the internal CLASS targets, which is why those arrive as
-    fabricated symbols and not as a lookup.
+    The comparison is the production projection against the LIVE producer's
+    tuple: every ``RelationshipRecord`` of every source, every field
+    (``path`` and ``expression`` included), in the producer's own order,
+    with multiplicity expanded.  The population is stated first: both
+    resolution states, an internal SYMBOL target and an external opaque
+    one, and the family's own target variants — a store that spelled an
+    internal target as an opaque head would still serve the same glued
+    string, so that mutation is caught here on the FAMILY rather than on
+    the slice.  No record repeats on this corpus (the self-repository
+    carries 1 342 repeated groups); ``test_run_store_serving`` drives the
+    multiplicity by fixture.
     """
-    served = _served_relationship_rows(served_run_store_projection)
+    served = served_run_store_projection.relationship_facts
+    records = [record for facts in served for record in facts.relationships]
+    assert records, "the served slice is empty; the comparison would be hollow"
+    statuses, internal, external = _relationship_population(records, canonical_run)
+    assert statuses["unresolved"] and statuses["resolved"], statuses
+    assert internal and external, (internal, external)
+    rows = canonical_run.facts.analysis.relationship_observations
+    variants = Counter(type(row.target).__name__ for row in rows)
+    assert variants["SymbolId"] == len(internal), variants
+    assert variants["OpaqueEntity"] == len(external), variants
+    assert variants["UnresolvedTarget"] == statuses["unresolved"], variants
+    assert sum(row.occurrence_count for row in rows) == len(records)
+    assert store_served_slices.relationship_facts == served
+
+
+# -- 4. the unit index, through the production projection ------------------
+
+
+def test_the_unit_index_is_served_by_the_production_projection(
+    served_run_store_projection: ServedRunStoreProjection,
+    store_served_slices: ServedRunSlices,
+) -> None:
+    """Section 1 proves the closing line has an owner; this proves the
+    projection the surface serves through reproduces the whole index, row
+    for row, in the surface's own order."""
+    served = served_run_store_projection.unit_inventory
     assert served, "the served slice is empty; the comparison would be hollow"
-    offered = _relationships_the_canonical_run_offers(canonical_run)
-    assert offered, "semantic_edges carried no rows; nothing was projected"
-    stubbed = _relationships_stubbed_by_hand(served_run_store_projection, canonical_run)
-    # The population the stub has to carry, stated before it is compared: a
-    # control that never saw an unresolved record would prove nothing about
-    # the half of the slice the store cannot represent.
-    assert any(row.target is None and row.target_head is None for row in stubbed)
-    assert any(row.target is not None for row in stubbed)
-    assert any(row.target_head is not None for row in stubbed)
-    assert (
-        _project_relationships(
-            root=served_run_store_projection.root,
-            modules_by_path=_modules_by_path(canonical_run),
-            analyzed_paths=_analyzed_paths(canonical_run),
-            rows=stubbed,
-        )
-        == served
-    )
+    assert store_served_slices.unit_inventory == served

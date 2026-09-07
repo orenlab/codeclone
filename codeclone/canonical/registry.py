@@ -621,6 +621,221 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # Canonical model revision 2: every import the module walk observed —
+    # the served ``module_imports`` slice, external and unresolved targets
+    # included.  A DIFFERENT population contract from the dependency
+    # families (which keep the internal graph the gate consumes and are not
+    # widened by sanction): 11 445 served rows against 6 491 dependency
+    # occurrences @ f117a8ad (a dated observation).  Key: the whole
+    # observation (11 445/11 445 distinct on every field @ f117a8ad).
+    "import_observations": (
+        FieldDeclaration(
+            "binding",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "classified binding time; closed vocabulary (DEPENDENCY_BINDINGS)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "candidate_targets",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the producer's sorted, unique candidate list; empty iff unresolved",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "dependency_type",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the served import_type; closed vocabulary (IMPORT_TYPES)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "inventory_expansion",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the row was expanded from a from-import of a package member",
+            stored=True,
+            wire=True,
+            wire_shape="sparse_bool_positions",
+        ),
+        FieldDeclaration(
+            "is_lazy",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "raw PEP 810 marker",
+            stored=True,
+            wire=True,
+            wire_shape="sparse_bool_positions",
+        ),
+        FieldDeclaration(
+            "level",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "relative-import depth; zero on absolute imports",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "line",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the statement's own line; zero admitted as a coerced document zero",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "mechanism",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "static statement or dynamic load; closed (IMPORT_MECHANISMS)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "requested_module",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the module text the statement named; absent on a bare relative "
+            "import, spelled empty on the wire",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "requested_names",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the names a from-import requested, in the producer's sorted order",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "resolution",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the producer's classification; closed (IMPORT_RESOLUTIONS); the "
+            "target variant is checked against it",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "the importing file as the producer keys it; DependencyEndpoint "
+            "MODULE | FILE (54 of 11 445 served sources are module-less paths)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "target",
+            ANALYSIS_FACT,
+            "module_walk_producer",
+            "tagged ImportTarget: MODULE | FILE of the run, opaque dotted "
+            "head outside its registry, or unresolved_target",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # Canonical model revision 2: the per-function call/reference records
+    # — the served ``relationship_facts`` slice in BOTH resolution states.
+    # Key: the observation; ``occurrence_count`` is the one payload field
+    # (1 342 of 112 967 records @ f117a8ad repeat on one line).
+    "relationship_observations": (
+        FieldDeclaration(
+            "expression",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "unparsed source text of the call/reference; absent, never "
+            "empty (spelled empty on the wire)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "line",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "the expression's line, clamped positive by the producer",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "occurrence_count",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "how many records the producer emitted for this observation; "
+            "payload, never key; the served tuple expands by it",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "origin_lane",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "production or test source; closed (RELATIONSHIP_ORIGIN_LANES)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "path",
+            REPRESENTATION,
+            "function_relationship_producer",
+            "the source SYMBOL's file joined to the serving root — the "
+            "served absolute path is a rendering, never a column (§2.3)",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "relation_kind",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "call or reference; closed (RELATIONSHIP_KINDS)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "resolution_rule",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "the mechanism that resolved (or failed to resolve) the "
+            "expression; closed (RELATIONSHIP_RESOLUTION_RULES); absent "
+            "spelled empty on the wire",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "resolution_status",
+            REPRESENTATION,
+            "function_relationship_producer",
+            "resolved iff the target is a symbol or an opaque head, "
+            "unresolved iff it is the nullary variant — the producer's own "
+            "rule, owned by relationship_resolution_status(); a column would "
+            "be the same fact twice",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "source",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "the recording function's SYMBOL; the served glued qualname is "
+            "rebuilt through file_modules",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "target",
+            ANALYSIS_FACT,
+            "function_relationship_producer",
+            "tagged RelationshipTarget: SYMBOL of the run, opaque head:local "
+            "outside it, or unresolved_target",
+            stored=True,
+            wire=True,
+        ),
+    ),
     # The DECLARATION entity: key (SYMBOL, start_line), measured total on
     # the self-repo corpus (15 934/15 934 distinct @ 4512acf0, 2026-09-03 —
     # a dated observation, not an invariant; the key's totality is what

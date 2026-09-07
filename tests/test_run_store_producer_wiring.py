@@ -663,6 +663,15 @@ def test_the_producer_native_model_equals_the_legacy_oracle(
         rows = getattr(produced, family)
         assert rows, f"{family} carries no rows; the comparison would be hollow"
         assert rows == getattr(expected, family), family
+    # Canonical model revision 2: the two families the sealed document does
+    # not carry (the surface serves them out of the parent's memory).  The
+    # oracle has no source for them and answers EMPTY by construction, so
+    # equality would be hollow; what is asserted is the asymmetry itself on
+    # a non-empty native population — a document that starts carrying them
+    # turns this red, and the oracle is then taught deliberately.
+    for family in ("import_observations", "relationship_observations"):
+        assert getattr(produced, family), f"{family} carries no rows"
+        assert getattr(expected, family) == frozenset(), family
 
     population = produced.analysis_population
     assert population is not None
@@ -723,7 +732,13 @@ def test_the_publication_has_exactly_one_production_call_site() -> None:
         for path in (_ROOT / "codeclone").rglob("*.py")
         if "resolve_run_store_config" in path.read_text("utf-8")
     )
+    # The serving door (2026-09-07) is the ONE read-side resolver, and it
+    # resolves the same flag through the same owner on purpose: a store the
+    # rollout does not name is never read, so turning the flag off after an
+    # execution published sends the surface back to memory rather than to a
+    # file the rollout no longer owns.  A third resolver is still drift.
     assert resolvers == [
+        "codeclone/api/run_store_serving.py",
         "codeclone/core/canonical_snapshot.py",
         "codeclone/core/reporting.py",
     ]

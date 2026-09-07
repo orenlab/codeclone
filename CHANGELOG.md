@@ -5,6 +5,19 @@
 Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
 gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
 
+- **The canonical run store now serves a real product consumer.** Canonical model revision `2`
+  (`CANONICAL_MODEL_REVISION`) adds the two fact families the MCP surface used to serve only out of
+  the parent's memory — `import_observations` (every import the walk observed, external and
+  unresolved targets included; a different population from the internal-only dependency graph the
+  gate consumes, which is deliberately not widened) and `relationship_observations` (the
+  per-function call/reference records in both resolution states, counted per observation so a
+  record repeated on one line comes back as many times as the producer emitted it). Canonical JSON
+  vNext moves to wire revision `1` in the same epoch. `get_implementation_context(query=...)` is the
+  first consumer: when the execution published into the enabled run store and the store's answer
+  equals the record's field for field, the search is served out of the store and says so under
+  `serving`; otherwise it serves from memory with a typed reason and counts the fallback. A store or
+  wire document of the previous generation is refused with the diverging layers, both revisions and
+  the migration path — never reinterpreted.
 - **The run identity now names what CodeClone asserts, not what one projection of it shows.**
   `run_id` is meant to identify the canonical set of semantic statements a report utters. It did
   not: the family digests behind it hashed the *findings* projection of each family, so every

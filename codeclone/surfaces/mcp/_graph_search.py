@@ -6,13 +6,20 @@
 
 """Bounded, deterministic name search across one stored MCP run.
 
-Three lanes are indexed from a single ``MCPRunRecord``:
+Three lanes are indexed from the three served slices of one execution:
 
 * ``definition`` — analyzed function/method/class qualnames (``unit_inventory``).
 * ``call`` / ``reference`` — resolved relationship targets, including external
   ``module:attr`` targets reached through a tracked import (``relationship_facts``).
 * ``import`` — raw imports, including external/stdlib, that the report's
   dependency family filters out to internal-only (``module_imports``).
+
+The slices come from the run store when this execution published one and the
+store's answer agrees with the record's, and from the record's memory
+otherwise (``_run_store_serving``); every response says which, under
+``serving``.  This tool is the first production consumer of the store: the
+smallest one whose whole read set — every field of all three slices — the
+canonical model can express since revision 2.
 
 Matching is an adaptive cascade (``exact`` -> ``token`` -> ``prefix`` ->
 ``substring``); only the narrowest non-empty tier is returned, so a precise hit
@@ -26,7 +33,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ...api.run_store_serving import RunStoreServingOutcome, ServedRunSlices
 from ._implementation_context import _repo_relative
+from ._run_store_serving import served_slices
 from ._session_shared import MCPRunRecord
 
 _TIER_ORDER: tuple[str, ...] = ("exact", "token", "prefix", "substring")
@@ -72,17 +81,17 @@ def _match_tier(name: str, query_casefold: str) -> str | None:
     return None
 
 
-def _module_path_index(record: MCPRunRecord) -> dict[str, str]:
+def _module_path_index(slices: ServedRunSlices) -> dict[str, str]:
     """Map each analyzed module to a repo-relative file path via its units."""
     index: dict[str, str] = {}
-    for unit in record.unit_inventory:
+    for unit in slices.unit_inventory:
         module = unit.qualname.split(":", 1)[0]
         index.setdefault(module, unit.path)
     return index
 
 
 def _build_search_entries(
-    record: MCPRunRecord,
+    slices: ServedRunSlices,
     root: Path,
 ) -> list[_SearchEntry]:
     entries: list[_SearchEntry] = [
@@ -93,9 +102,9 @@ def _build_search_entries(
             line=unit.start_line,
             detail=None,
         )
-        for unit in record.unit_inventory
+        for unit in slices.unit_inventory
     ]
-    for facts in record.relationship_facts:
+    for facts in slices.relationship_facts:
         for relation in facts.relationships:
             if relation.target_qualname is None:
                 continue
@@ -109,7 +118,7 @@ def _build_search_entries(
                     detail=relation.source_qualname,
                 )
             )
-    module_paths = _module_path_index(record)
+    module_paths = _module_path_index(slices)
     entries.extend(
         _SearchEntry(
             lane="import",
@@ -118,7 +127,7 @@ def _build_search_entries(
             line=dep.line,
             detail=dep.import_type,
         )
-        for dep in record.module_imports
+        for dep in slices.module_imports
     )
     return entries
 
@@ -151,6 +160,7 @@ def _search_response(
     tier: str,
     matches: list[_SearchEntry],
     budget: int,
+    serving: RunStoreServingOutcome,
 ) -> dict[str, object]:
     ordered = sorted(
         matches,
@@ -173,11 +183,14 @@ def _search_response(
         "match_tier": tier,
         "results": grouped,
         "results_summary": _bounded_summary(total=len(ordered), shown=len(shown)),
+        "serving": serving.as_payload(),
     }
 
 
-def _no_matches_response(*, query: str) -> dict[str, object]:
-    return {
+def _no_matches_response(
+    *, query: str, serving: RunStoreServingOutcome | None = None
+) -> dict[str, object]:
+    response: dict[str, object] = {
         "status": "no_matches",
         "query": query,
         "results": {},
@@ -190,6 +203,11 @@ def _no_matches_response(*, query: str) -> dict[str, object]:
             "Re-run analyze_repository if the stored run is stale.",
         ],
     }
+    if serving is not None:
+        # A blank query never resolved any slices, so it has no provenance
+        # to state; every searched query does, matches or not.
+        response["serving"] = serving.as_payload()
+    return response
 
 
 def search_graph(
@@ -202,13 +220,16 @@ def search_graph(
     """Search analyzed names across definitions, calls/references, and imports.
 
     Returns the narrowest non-empty match tier grouped by lane, or a compact
-    ``no_matches`` response with ``next_steps`` when nothing matches.
+    ``no_matches`` response with ``next_steps`` when nothing matches.  Both
+    carry ``serving`` — the provenance of the slices that were searched:
+    ``source`` is ``run_store`` or ``memory`` and ``reason`` says why.
     """
     normalized = query.strip()
     if not normalized:
         return _no_matches_response(query=query)
     query_casefold = normalized.casefold()
-    entries = _build_search_entries(record, root)
+    slices, serving = served_slices(record)
+    entries = _build_search_entries(slices, root)
     buckets: dict[str, list[_SearchEntry]] = {tier: [] for tier in _TIER_ORDER}
     for entry in entries:
         tier = _match_tier(entry.name, query_casefold)
@@ -221,5 +242,6 @@ def search_graph(
                 tier=tier,
                 matches=buckets[tier],
                 budget=budget,
+                serving=serving,
             )
-    return _no_matches_response(query=normalized)
+    return _no_matches_response(query=normalized, serving=serving)

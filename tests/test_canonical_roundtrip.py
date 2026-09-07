@@ -55,6 +55,7 @@ from codeclone.canonical import (
     FileLine,
     FileModuleRelation,
     GraphNodeRow,
+    ImportObservationRow,
     KnownModule,
     ModuleId,
     ModuleSymbol,
@@ -63,6 +64,7 @@ from codeclone.canonical import (
     OperationRoot,
     OperationTarget,
     ProducerRoot,
+    RelationshipObservationRow,
     RiskObservationRow,
     RunScalars,
     SecuritySurfaceRow,
@@ -72,6 +74,7 @@ from codeclone.canonical import (
     UnitSpanRow,
     UnresolvedLocation,
     UnresolvedRoot,
+    UnresolvedTarget,
     ViolationRow,
     decode_canonical_json,
     encode_canonical_json,
@@ -166,6 +169,136 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
     dependency_cycles = [
         DependencyCycleRow("import_cycle", frozenset({ma, mh})),
         DependencyCycleRow("deferred_cycle", frozenset({ma, mh, mz})),
+    ]
+    # Canonical model revision 2: every import the walk observed, external
+    # and unresolved targets included -- a DIFFERENT population from the
+    # dependency lane above, which is deliberately not widened.  One row per
+    # variant of the tagged target (a MODULE of the run, an opaque dotted
+    # head outside it, the nullary variant), a FILE-headed module-less
+    # source, both sparse booleans set on some row and clear on the others,
+    # a relative import with no requested module, a coerced zero line, and
+    # the dynamic mechanism.
+    import_observations = [
+        ImportObservationRow(
+            source=ma,
+            target=mh,
+            dependency_type="import",
+            line=4,
+            resolution="analyzed",
+            mechanism="static",
+            binding="import_time",
+            is_lazy=False,
+            level=0,
+            requested_module="tools.helper",
+            requested_names=(),
+            candidate_targets=("tools.helper",),
+            inventory_expansion=False,
+        ),
+        ImportObservationRow(
+            source=ma,
+            target=OpaqueDottedHead("os.path"),
+            dependency_type="from_import",
+            line=6,
+            resolution="external",
+            mechanism="static",
+            binding="type_checking",
+            is_lazy=True,
+            level=0,
+            requested_module="os.path",
+            requested_names=("join", "split"),
+            candidate_targets=("os.path",),
+            inventory_expansion=False,
+        ),
+        ImportObservationRow(
+            source=fb,
+            target=UnresolvedTarget(),
+            dependency_type="import",
+            line=0,
+            resolution="unresolved_dynamic",
+            mechanism="dynamic",
+            binding="deferred_function",
+            is_lazy=False,
+            level=0,
+            requested_module=None,
+            requested_names=(),
+            candidate_targets=(),
+            inventory_expansion=False,
+        ),
+        ImportObservationRow(
+            source=ma,
+            target=OpaqueDottedHead("pkg.sibling"),
+            dependency_type="from_import",
+            line=7,
+            resolution="known_internal_not_analyzed",
+            mechanism="static",
+            binding="import_time",
+            is_lazy=False,
+            level=1,
+            requested_module=None,
+            requested_names=("sibling",),
+            candidate_targets=("pkg.sibling",),
+            inventory_expansion=True,
+        ),
+    ]
+    # Canonical model revision 2: the call/reference records in BOTH
+    # resolution states.  A SYMBOL target of the run, an opaque head:local
+    # outside it repeated three times on one line (the multiplicity the
+    # family counts), the nullary variant with the producer's unresolved
+    # rule, a reference with the two absent-able columns absent, and a
+    # class-method target referenced by NO other family (the closure must
+    # admit it into the SYMBOL domain on this family's word alone).
+    sw = SymbolId(fb, "Widget.render")
+    relationship_observations = [
+        RelationshipObservationRow(
+            source=sa,
+            target=sc,
+            relation_kind="call",
+            origin_lane="production",
+            line=12,
+            expression="self.stop",
+            resolution_rule="self_or_cls_method",
+            occurrence_count=1,
+        ),
+        RelationshipObservationRow(
+            source=sa,
+            target=OpaqueEntity("typing", "cast"),
+            relation_kind="call",
+            origin_lane="production",
+            line=13,
+            expression="cast",
+            resolution_rule="imported_symbol",
+            occurrence_count=3,
+        ),
+        RelationshipObservationRow(
+            source=sb,
+            target=UnresolvedTarget(),
+            relation_kind="call",
+            origin_lane="test",
+            line=20,
+            expression="dynamic()",
+            resolution_rule="unresolved_dynamic",
+            occurrence_count=1,
+        ),
+        RelationshipObservationRow(
+            source=sb,
+            target=sa,
+            relation_kind="reference",
+            origin_lane="test",
+            line=21,
+            expression=None,
+            resolution_rule=None,
+            occurrence_count=1,
+        ),
+        RelationshipObservationRow(
+            source=se,
+            target=sw,
+            relation_kind="call",
+            origin_lane="production",
+            line=2,
+            expression="Widget.render",
+            resolution_rule="same_module_class_method",
+            occurrence_count=2,
+        ),
     ]
     # F8 (wave 4): the EMITTED population only.  The block group's three
     # items include an intra-function pair (one SYMBOL, two spans) — group
@@ -510,6 +643,8 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         dependency_relations = list(reversed(dependency_relations))
         dependency_occurrences = list(reversed(dependency_occurrences))
         dependency_cycles = list(reversed(dependency_cycles))
+        import_observations = list(reversed(import_observations))
+        relationship_observations = list(reversed(relationship_observations))
         clone_groups = list(reversed(clone_groups))
         dead_code_observations = list(reversed(dead_code_observations))
         violations = list(reversed(violations))
@@ -532,6 +667,8 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             dependency_relations=frozenset(dependency_relations),
             dependency_occurrences=frozenset(dependency_occurrences),
             dependency_cycles=frozenset(dependency_cycles),
+            import_observations=frozenset(import_observations),
+            relationship_observations=frozenset(relationship_observations),
             clone_groups=frozenset(clone_groups),
             dead_code_observations=frozenset(dead_code_observations),
             violations=frozenset(violations),
@@ -638,12 +775,27 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     plus a module-less file on the site floor — including one DEGENERATE
     span (``end == start``), the boundary admitted where ``end < start``
     is refused.
+
+    Canonical model revision 2 and wire revision 1 (2026-09-07, one epoch by
+    maintainer sanction) then replaced that literal deliberately (6753
+    bytes, sha256 6023e72b…): the draft gained the two served observation
+    families — ``import_observations`` (four rows: a MODULE target, two
+    opaque dotted heads, the nullary ``unresolved_target`` variant, a
+    FILE-headed module-less source, both sparse booleans populated, a
+    coerced zero line) and ``relationship_observations`` (five rows: a
+    SYMBOL target, an opaque ``head:local`` counted three times, the
+    nullary variant, absent ``expression``/``resolution_rule`` spelled
+    empty, and a class-method target referenced by no other family) — plus
+    the ``format.wire`` and ``revisions.canonical_model`` members moved, so
+    every document's bytes and the seal's domain moved with them.  The
+    name of this test keeps the generation it was born under; the literal
+    is now the wire revision 1 sentinel.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 6753
+    assert len(payload) == 7987
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "6023e72b3b0b8f287756b4c570d2ab8b54287161675658f9eaff240d6f6ed99f"
+        == "6a944dcd64f2397bbcae693d5b16bdd2d9d69800d38b2911ac5d21653c9dfa46"
     )
 
 

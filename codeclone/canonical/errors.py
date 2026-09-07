@@ -75,10 +75,48 @@ class RunStoreError(RuntimeError):
     """Base typed failure of the canonical run-store (backend wave 2)."""
 
 
+#: The one migration path a reader of a foreign-generation store can follow.
+#: The store is service data, never a user artifact: the report document is
+#: the proof, and every run in the store is republishable from a fresh
+#: analysis.  Spelled once, here, so the refusal at ``open`` and the serving
+#: fallback name the same step.
+STORE_GENERATION_NEXT_STEP: Final = (
+    "the store holds no user artifact (the report document is the proof): "
+    "move or delete the store file and re-run the analysis with the run store "
+    "enabled to publish under this build's generation, or read it with a build "
+    "that declares the stored generation"
+)
+
+
 class StoreCompatibilityError(RunStoreError):
     """Law 7 refusal at ``open``: the store's layered compatibility witness
     is not the one this process declares.  The process refuses the stored
-    generation; it never guesses."""
+    generation; it never guesses.
+
+    Carries the machine-readable ``diverging`` layers — ``(layer, stored,
+    declared)`` triples, ``None`` for a layer one side does not declare at
+    all — the ``path`` of the refused store, and the executable
+    ``next_step``, so a reader can tell a generation-1 store from a
+    generation-2 one and knows what to do about it rather than parsing
+    prose.  Measured 2026-09-07: a store written by the canonical model
+    revision-1 build, opened by the revision-2 build, diverges on exactly
+    ``canonical_model`` (``1`` vs ``2``) and ``canonical_wire`` (``0`` vs
+    ``1``) — the two constants that moved in one epoch.
+    """
+
+    __slots__ = ("diverging", "next_step", "path")
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        diverging: tuple[tuple[str, str | None, str | None], ...] = (),
+        path: str = "",
+    ) -> None:
+        super().__init__(f"{detail} next_step: {STORE_GENERATION_NEXT_STEP}.")
+        self.diverging = diverging
+        self.path = path
+        self.next_step = STORE_GENERATION_NEXT_STEP
 
 
 class StoreFenceError(RunStoreError):

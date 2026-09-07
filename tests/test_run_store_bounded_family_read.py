@@ -90,7 +90,7 @@ def _read_any_family(
     """The bounded read, driven over the registry rather than over a token.
 
     Enumerating the registry is erased by construction -- its members have
-    twenty-four different row types, so the tuple that holds them can only be
+    twenty-six different row types, so the tuple that holds them can only be
     typed by the face they share.  The contract itself is NOT erased: a caller
     that names one family passes its token and gets that family's row type
     back, which is what every other call in this module does.  The cast is the
@@ -222,7 +222,7 @@ def test_the_bounded_read_order_is_content_derived_not_insertion_derived(
     Measured first, and it is the whole reason this test is shaped like this:
     over every store the obvious constructions build -- one model, the
     reverse-insertion twin, a superset published first -- storage order and
-    content-address order agree in all 24 families, so an order pin driven by
+    content-address order agree in all 26 families, so an order pin driven by
     any of them stays green for a rowid-ordered read.  The case needs a prior
     run holding a STRICT subset that is not content-address-minimal, and WHICH
     span that is depends on the namespace the addresses are computed in, not
@@ -595,7 +595,9 @@ _MODEL_ACCESSORS: Final[dict[str, Callable[[CanonicalModel], frozenset[object]]]
     "file": lambda m: m.files,
     "file_module": lambda m: m.file_modules,
     "graph_node": lambda m: m.facts.analysis.graph_nodes,
+    "import_observation": lambda m: m.facts.analysis.import_observations,
     "module": lambda m: m.modules,
+    "relationship_observation": (lambda m: m.facts.analysis.relationship_observations),
     "risk_observation": lambda m: m.facts.analysis.risk_observations,
     "run_scalar": lambda m: _optional(m.facts.analysis.run_scalars),
     "security_surface": lambda m: m.facts.analysis.security_surfaces,

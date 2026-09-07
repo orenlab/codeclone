@@ -513,6 +513,14 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "run_store_runs_retained",
         "run_store_selector_hits",
         "run_store_selector_misses",
+        # The canonical run store as a SERVING backend (rollout 2026-09-07):
+        # one count per search_graph query, by where its slices came from.
+        # A rollout is real only while ``divergent`` and ``fallback`` read
+        # zero against a non-zero ``store_backed``.
+        "run_store_serving_divergent",
+        "run_store_serving_fallback",
+        "run_store_serving_memory",
+        "run_store_serving_store_backed",
         "audit_digest_links",
         "baseline_bytes",
         "baseline_compatibility_fail",

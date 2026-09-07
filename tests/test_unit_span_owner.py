@@ -201,8 +201,10 @@ def test_the_span_survives_the_wire_unchanged() -> None:
 
 # Spelled here by hand, not imported from the codec: a helper that borrowed
 # production's own domain would follow it wherever it went and stay green,
-# so it could never witness the domain changing underneath it.
-_GENERATION_0_DOMAIN = b"cc-canonical-wire:0\x00"
+# so it could never witness the domain changing underneath it.  It witnessed
+# one on 2026-09-07: wire revision 0 -> 1 (canonical model revision 2, one
+# epoch), and this literal was moved deliberately with it.
+_GENERATION_1_DOMAIN = b"cc-canonical-wire:1\x00"
 
 
 def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
@@ -212,7 +214,7 @@ def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     body, _, _tail = text.partition(',"integrity":')
     assert body.count(needle) == 1, f"needle not unique: {needle!r}"
     new_body = body.replace(needle, replacement)[1:]
-    digest = hashlib.sha256(_GENERATION_0_DOMAIN + new_body.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(_GENERATION_1_DOMAIN + new_body.encode("utf-8")).hexdigest()
     return (
         "{" + new_body + f',"integrity":{{"algorithm":"sha256","value":"{digest}"}}}}'
     ).encode("utf-8")

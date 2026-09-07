@@ -180,6 +180,8 @@ FAMILY_SEMANTIC_GRAMMAR: Final[Mapping[str, FamilyGrammar]] = {
     "dependency_relations": FamilyGrammar("normalized_fact"),
     "file_modules": FamilyGrammar("normalized_fact"),
     "graph_nodes": FamilyGrammar("normalized_fact"),
+    "import_observations": FamilyGrammar("normalized_fact"),
+    "relationship_observations": FamilyGrammar("normalized_fact"),
     "risk_observations": FamilyGrammar("normalized_fact"),
     "run_scalars": FamilyGrammar("run_population"),
     "security_surfaces": FamilyGrammar("normalized_fact"),

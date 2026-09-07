@@ -456,3 +456,136 @@ def test_the_dependency_relation_key_never_absorbs_the_occurrence_site() -> None
         "source",
         "target",
     )
+
+
+# ---------------------------------------------------------------------------
+# Canonical model revision 2: the two served observation families.
+# ---------------------------------------------------------------------------
+
+
+def test_revision_two_vocabularies_are_the_producers_not_copies() -> None:
+    """Each vocabulary is taken from its producer owner, and the pin drives
+    the OWNER rather than reading the tuple back: every member is accepted
+    by the producer's own gate and a foreign value is refused by both the
+    producer and the model row."""
+    from typing import get_args
+
+    from codeclone.canonical import (
+        IMPORT_MECHANISMS,
+        IMPORT_RESOLUTIONS,
+        RELATIONSHIP_KINDS,
+        RELATIONSHIP_ORIGIN_LANES,
+        RELATIONSHIP_RESOLUTION_RULES,
+        CanonicalModelError,
+        FileId,
+        RelationshipObservationRow,
+        SymbolId,
+        UnresolvedTarget,
+    )
+    from codeclone.models import (
+        DependencyMechanism,
+        DependencyResolution,
+        LivenessVocabularyError,
+        RelationshipKind,
+        RelationshipOriginLane,
+        validate_resolution_rule,
+    )
+
+    assert set(IMPORT_RESOLUTIONS) == set(get_args(DependencyResolution))
+    assert set(IMPORT_MECHANISMS) == set(get_args(DependencyMechanism))
+    assert set(RELATIONSHIP_KINDS) == set(get_args(RelationshipKind))
+    assert set(RELATIONSHIP_ORIGIN_LANES) == set(get_args(RelationshipOriginLane))
+    for rule in RELATIONSHIP_RESOLUTION_RULES:
+        assert validate_resolution_rule(rule) == rule
+    with pytest.raises(LivenessVocabularyError):
+        validate_resolution_rule("not_a_rule")
+    with pytest.raises(
+        CanonicalModelError, match="unknown relationship resolution rule"
+    ):
+        RelationshipObservationRow(
+            source=SymbolId(FileId("a.py"), "f"),
+            target=UnresolvedTarget(),
+            relation_kind="call",
+            origin_lane="production",
+            line=1,
+            expression="g()",
+            resolution_rule="not_a_rule",
+            occurrence_count=1,
+        )
+
+
+def test_the_unresolved_import_resolutions_are_the_producers_own_law() -> None:
+    """``UNRESOLVED_IMPORT_RESOLUTIONS`` names exactly the resolutions under
+    which the producer refuses a target: driven on ``ImportObservation``
+    itself, one resolution at a time, in both directions."""
+    from codeclone.canonical import IMPORT_RESOLUTIONS, UNRESOLVED_IMPORT_RESOLUTIONS
+    from codeclone.models import (
+        FileIdentity,
+        ImportObservation,
+        ResolvedSourceIdentity,
+    )
+
+    source = ResolvedSourceIdentity(
+        file=FileIdentity(path="pkg/x.py"), python_module=None
+    )
+    refuses_a_target: set[str] = set()
+    for resolution in IMPORT_RESOLUTIONS:
+        mechanism = "dynamic" if resolution == "unresolved_dynamic" else "static"
+        try:
+            ImportObservation(
+                source=source,
+                syntax_kind="import",
+                level=0,
+                requested_module="x",
+                requested_names=(),
+                resolution=resolution,  # type: ignore[arg-type]
+                candidate_targets=("x",),
+                resolved_target="x",
+                mechanism=mechanism,  # type: ignore[arg-type]
+            )
+        except ValueError:
+            refuses_a_target.add(resolution)
+            ImportObservation(
+                source=source,
+                syntax_kind="import",
+                level=0,
+                requested_module=None,
+                requested_names=(),
+                resolution=resolution,  # type: ignore[arg-type]
+                candidate_targets=(),
+                resolved_target=None,
+                mechanism=mechanism,  # type: ignore[arg-type]
+            )
+    assert refuses_a_target == set(UNRESOLVED_IMPORT_RESOLUTIONS)
+
+
+def test_revision_two_declared_fields_are_the_fields_the_rows_carry() -> None:
+    """The registry's stored/wire columns are exactly the row dataclass
+    fields; the two representation projections of the relationship family
+    are declared, unstored, and name their derivation owner."""
+    from dataclasses import fields
+
+    from codeclone.canonical import (
+        FACT_FAMILY_FIELDS,
+        ImportObservationRow,
+        RelationshipObservationRow,
+        wire_columns,
+    )
+
+    assert set(wire_columns("import_observations")) == {
+        field.name for field in fields(ImportObservationRow)
+    }
+    assert set(wire_columns("relationship_observations")) == {
+        field.name for field in fields(RelationshipObservationRow)
+    }
+    representation = {
+        declaration.field: declaration
+        for declaration in FACT_FAMILY_FIELDS["relationship_observations"]
+        if not declaration.stored and not declaration.wire
+    }
+    assert set(representation) == {"path", "resolution_status"}
+    assert (
+        "relationship_resolution_status"
+        in representation["resolution_status"].derivation
+    )
+    assert "serving root" in representation["path"].derivation

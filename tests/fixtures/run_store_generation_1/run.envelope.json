@@ -1,0 +1,43 @@
+{
+ "artifact_digest": "32ac9b9dbad95d5d4b28502b7397b8d11739a3bd91658c928ef37baaa0531665",
+ "byte_count": 10028,
+ "run_id": "026d58c202238fc4b5206856ac99b476e064078c85885ee6e5692128ce9a5e66",
+ "wire_revision": "0",
+ "witness": [
+  {
+   "layer": "authority_analysis",
+   "revision": "1",
+   "role": "analysis"
+  },
+  {
+   "layer": "canonical_model",
+   "revision": "1",
+   "role": "analysis"
+  },
+  {
+   "layer": "canonical_object_identity",
+   "revision": "1",
+   "role": "identity"
+  },
+  {
+   "layer": "canonical_wire",
+   "revision": "0",
+   "role": "projection"
+  },
+  {
+   "layer": "contract_ir",
+   "revision": "1",
+   "role": "analysis"
+  },
+  {
+   "layer": "module_identity",
+   "revision": "2",
+   "role": "analysis"
+  },
+  {
+   "layer": "storage_schema",
+   "revision": "1",
+   "role": "storage"
+  }
+ ]
+}

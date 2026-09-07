@@ -20452,3 +20452,286 @@ def test_disambiguated_short_id_still_reaches_the_payload_through_id(
     assert projected["canonical_id"] == first
     assert "short_id" not in projected
     assert "html_anchor" not in projected
+
+
+# -- the run store as a serving backend (canonical model revision 2) -------
+
+
+def _serving_corpus_source() -> str:
+    return (
+        "import logging\n"
+        "import os.path\n"
+        "\n"
+        "\n"
+        "def make_logger() -> object:\n"
+        "    return logging.getLogger(__name__)\n"
+    )
+
+
+def _enable_run_store(monkeypatch: pytest.MonkeyPatch, store: Path) -> None:
+    monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
+    monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
+    monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store))
+
+
+def _forget_run_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "CODECLONE_RUN_STORE_ENABLED",
+        "CODECLONE_RUN_STORE_FORCE",
+        "CODECLONE_RUN_STORE_PATH",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _searched_names(result: dict[str, object]) -> set[str]:
+    results = cast("dict[str, list[dict[str, object]]]", result["results"])
+    return {str(row["name"]) for rows in results.values() for row in rows}
+
+
+def test_mcp_service_query_is_served_from_the_run_store_when_this_execution_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rollout's real consumer (ruling 2026-09-05): with the store
+    enabled the execution publishes, the query is answered OUT OF THE STORE
+    and the response says so — including the external import the report's
+    dependency family never carried, which is what the second lane is for."""
+    _enable_run_store(monkeypatch, tmp_path.parent / f"{tmp_path.name}-runs.sqlite3")
+    service, summary = _analyze_context_run(
+        tmp_path, relative_path="pkg/logwrap.py", source=_serving_corpus_source()
+    )
+    run_id = str(summary["run_id"])
+    link = service._runs.resolve_any_root().execution.run_snapshot_link
+    assert link is not None and link.store_run_id, link
+
+    found = service.get_implementation_context(
+        root=str(tmp_path), run_id=run_id, query="logging"
+    )
+    assert found["status"] == "ok"
+    assert found["serving"] == {
+        "source": "run_store",
+        "reason": "served",
+        "store_run_id": link.store_run_id,
+    }
+    assert "logging" in _searched_names(found)
+    # Each lane answers at its own narrowest tier, so each is asked for.
+    calls = service.get_implementation_context(
+        root=str(tmp_path), run_id=run_id, query="getLogger"
+    )
+    assert "logging:getLogger" in _searched_names(calls)
+    external = service.get_implementation_context(
+        root=str(tmp_path), run_id=run_id, query="os.path"
+    )
+    assert external["status"] == "ok" and "os.path" in _searched_names(external)
+    miss = service.get_implementation_context(
+        root=str(tmp_path), run_id=run_id, query="zzz_no_such_name"
+    )
+    assert miss["status"] == "no_matches"
+    assert cast("dict[str, object]", miss["serving"])["source"] == "run_store"
+
+
+def test_mcp_service_query_serves_from_memory_by_default_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default configuration control: no store, the same answer out of
+    memory, and the provenance says ``not_published`` with the publication
+    outcome — a rollout that is off is stated, never mistaken for one that
+    fell back."""
+    _forget_run_store(monkeypatch)
+    service, summary = _analyze_context_run(
+        tmp_path, relative_path="pkg/logwrap.py", source=_serving_corpus_source()
+    )
+    found = service.get_implementation_context(
+        root=str(tmp_path), run_id=str(summary["run_id"]), query="logging"
+    )
+    assert found["status"] == "ok"
+    assert found["serving"] == {
+        "source": "memory",
+        "reason": "not_published",
+        "detail": "disabled",
+    }
+    assert "logging" in _searched_names(found)
+
+
+def test_mcp_service_store_backed_and_memory_answers_are_the_same_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Equivalence on the served RESPONSE, not on the slices: every lane of
+    the same query, with and without the store, byte for byte except the
+    provenance block that says where it came from."""
+    source = _serving_corpus_source()
+    _forget_run_store(monkeypatch)
+    memory_service, memory_summary = _analyze_context_run(
+        tmp_path / "memory", relative_path="pkg/logwrap.py", source=source
+    )
+    _enable_run_store(monkeypatch, tmp_path / "runs.sqlite3")
+    store_service, store_summary = _analyze_context_run(
+        tmp_path / "store", relative_path="pkg/logwrap.py", source=source
+    )
+    assert memory_summary["run_id"] == store_summary["run_id"]
+    for query in ("logging", "getLogger", "make_logger", "os.path", "pkg"):
+        memory = memory_service.get_implementation_context(
+            root=str(tmp_path / "memory"),
+            run_id=str(memory_summary["run_id"]),
+            query=query,
+        )
+        stored = store_service.get_implementation_context(
+            root=str(tmp_path / "store"),
+            run_id=str(store_summary["run_id"]),
+            query=query,
+        )
+        assert memory["status"] == stored["status"] == "ok", query
+        assert cast("dict[str, object]", memory["serving"])["source"] == "memory"
+        assert cast("dict[str, object]", stored["serving"])["source"] == "run_store"
+        # The searched answer, without the two blocks that legitimately
+        # differ: the provenance itself, and the response-size estimate
+        # the governance envelope takes over the whole payload.
+        answer = ("status", "query", "match_tier", "results", "results_summary")
+        assert {key: memory[key] for key in answer} == {
+            key: stored[key] for key in answer
+        }, query
+
+
+def test_search_graph_serves_memory_and_says_divergent_when_the_store_disagrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shadow read: a store answer that disagrees with the record's is
+    never served — memory is, and the divergence is named.  The same door
+    answering the SAME slices is served store-backed, so the comparison and
+    nothing else decides."""
+    from codeclone.api.run_store_serving import RunStoreServingOutcome
+    from codeclone.surfaces.mcp import _graph_search as graph_search_mod
+    from codeclone.surfaces.mcp import _run_store_serving as serving_mod
+    from codeclone.surfaces.mcp._session_shared import MCPUnitLocation
+
+    record = replace(
+        _dummy_run_record(tmp_path, "graphsearch12345"),
+        unit_inventory=(MCPUnitLocation("pkg.m:save", "pkg/m.py", 3, 9),),
+    )
+    memory = serving_mod.memory_slices(record)
+    served = RunStoreServingOutcome(
+        source="run_store", reason="served", store_run_id="s" * 64
+    )
+    lost_a_row = replace(memory, unit_inventory=())
+    monkeypatch.setattr(
+        serving_mod, "read_run_store_slices", lambda **_: (lost_a_row, served)
+    )
+    found = graph_search_mod.search_graph(record=record, root=tmp_path, query="save")
+    assert found["status"] == "ok"
+    assert found["serving"] == {
+        "source": "memory",
+        "reason": "divergent",
+        "store_run_id": "s" * 64,
+    }
+    monkeypatch.setattr(
+        serving_mod, "read_run_store_slices", lambda **_: (memory, served)
+    )
+    agreed = graph_search_mod.search_graph(record=record, root=tmp_path, query="save")
+    assert cast("dict[str, object]", agreed["serving"])["source"] == "run_store"
+    assert agreed["results"] == found["results"]
+
+
+def test_search_graph_counts_where_its_slices_came_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each branch of the serving decision is one counter on the tool span,
+    so a rollout is measurable: store-backed, memory by design, fallback,
+    divergent — four queries, four counters, none shared."""
+    import json as _json
+    import sqlite3 as _sqlite3
+
+    from codeclone.api.run_store_serving import RunStoreServingOutcome
+    from codeclone.observability import bootstrap, operation, shutdown, span
+    from codeclone.surfaces.mcp import _graph_search as graph_search_mod
+    from codeclone.surfaces.mcp import _run_store_serving as serving_mod
+    from codeclone.surfaces.mcp._session_shared import MCPUnitLocation
+
+    record = replace(
+        _dummy_run_record(tmp_path, "graphsearch12345"),
+        unit_inventory=(MCPUnitLocation("pkg.m:save", "pkg/m.py", 3, 9),),
+    )
+    memory = serving_mod.memory_slices(record)
+    answers = {
+        "store_backed": (
+            memory,
+            RunStoreServingOutcome(
+                source="run_store", reason="served", store_run_id="s" * 64
+            ),
+        ),
+        "memory": (
+            None,
+            RunStoreServingOutcome(source="memory", reason="not_published"),
+        ),
+        "fallback": (
+            None,
+            RunStoreServingOutcome(source="memory", reason="store_absent"),
+        ),
+        "divergent": (
+            replace(memory, unit_inventory=()),
+            RunStoreServingOutcome(
+                source="run_store", reason="served", store_run_id="s" * 64
+            ),
+        ),
+    }
+    monkeypatch.setenv("CODECLONE_OBSERVABILITY_ENABLED", "1")
+    monkeypatch.delenv("CODECLONE_OBSERVABILITY_PROFILE", raising=False)
+    bootstrap(root=tmp_path)
+    try:
+        for name, answer in answers.items():
+            monkeypatch.setattr(
+                serving_mod, "read_run_store_slices", lambda a=answer, **_: a
+            )
+            with (
+                operation(name="mcp.get_implementation_context", surface="mcp"),
+                span(name="mcp.get_implementation_context"),
+            ):
+                response = graph_search_mod.search_graph(
+                    record=record, root=tmp_path, query="save"
+                )
+            assert response["status"] == "ok", name
+    finally:
+        shutdown()
+    store = next(tmp_path.rglob("platform_observability.sqlite3"))
+    connection = _sqlite3.connect(store)
+    try:
+        rows = connection.execute(
+            "SELECT counters_json FROM platform_spans WHERE name=? ORDER BY rowid",
+            ("mcp.get_implementation_context",),
+        ).fetchall()
+    finally:
+        connection.close()
+    counted = [
+        {k: v for k, v in _json.loads(raw).items() if k.startswith("run_store_serving")}
+        for (raw,) in rows
+    ]
+    assert counted == [
+        {"run_store_serving_store_backed": 1},
+        {"run_store_serving_memory": 1},
+        {"run_store_serving_fallback": 1},
+        {"run_store_serving_divergent": 1},
+    ]
+
+
+def test_search_graph_serves_the_stores_object_when_the_store_agrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Content equality cannot tell "served from the store" from "served from
+    memory while claiming the store" — when the two agree they are equal by
+    construction.  The mechanism is pinned by identity: what the surface
+    hands to the search is the object the door returned, never the record's
+    own tuple wearing the store's provenance."""
+    from codeclone.api.run_store_serving import RunStoreServingOutcome
+    from codeclone.surfaces.mcp import _run_store_serving as serving_mod
+
+    record = _dummy_run_record(tmp_path, "identitypin12345")
+    memory = serving_mod.memory_slices(record)
+    stored = replace(memory)  # equal to memory, and a different object
+    assert stored == memory and stored is not memory
+    served = RunStoreServingOutcome(
+        source="run_store", reason="served", store_run_id="s" * 64
+    )
+    monkeypatch.setattr(
+        serving_mod, "read_run_store_slices", lambda **_: (stored, served)
+    )
+    chosen, outcome = serving_mod.served_slices(record)
+    assert outcome is served
+    assert chosen is stored, "the surface served memory while claiming the store"

@@ -66,15 +66,15 @@ def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     body, _, _tail = text.partition(marker)
     assert body.count(needle) == 1, f"needle not unique in body: {needle!r}"
     new_body = body.replace(needle, replacement)[1:]
-    digest = hashlib.sha256(_GENERATION_0_DOMAIN + new_body.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(_GENERATION_1_DOMAIN + new_body.encode("utf-8")).hexdigest()
     return (
         "{" + new_body + f',"integrity":{{"algorithm":"sha256","value":"{digest}"}}}}'
     ).encode("utf-8")
 
 
-_SEG_FORMAT = '"format":{"name":"codeclone-canonical","wire":"0"}'
+_SEG_FORMAT = '"format":{"name":"codeclone-canonical","wire":"1"}'
 _SEG_REVISIONS = (
-    '"revisions":{"authority_analysis":"1","canonical_model":"1",'
+    '"revisions":{"authority_analysis":"1","canonical_model":"2",'
     '"contract_ir":"1","module_identity":"2"}'
 )
 
@@ -89,8 +89,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W02",
         "column order",
-        '"file":[0,0,0,1,1,2,2,2],"qualname":["A.maybe","A.run","A.stop","dead_probe","run","clone_only","helper","zz"]',
-        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","clone_only","helper","zz"],"file":[0,0,0,1,1,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2],"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz"]',
+        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz"],"file":[0,0,0,1,1,2,2,2,2]',
     ),
     (
         "W02",
@@ -101,22 +101,27 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W03",
         "duplicate object key",
-        '{"name":"codeclone-canonical","wire":"0"}',
-        '{"name":"codeclone-canonical","name":"codeclone-canonical","wire":"0"}',
+        '{"name":"codeclone-canonical","wire":"1"}',
+        '{"name":"codeclone-canonical","name":"codeclone-canonical","wire":"1"}',
     ),
     ("W05", "lone surrogate escape", '"zz"', '"z\\ud800z"'),
-    ("W06", "NaN literal", '"file":[0,0,0,1,1,2,2,2]', '"file":[NaN,0,0,1,1,2,2,2]'),
+    (
+        "W06",
+        "NaN literal",
+        '"file":[0,0,0,1,1,2,2,2,2]',
+        '"file":[NaN,0,0,1,1,2,2,2,2]',
+    ),
     (
         "W07",
         "fraction in an integer slot",
-        '"file":[0,0,0,1,1,2,2,2]',
-        '"file":[0.5,0,0,1,1,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2]',
+        '"file":[0.5,0,0,1,1,2,2,2,2]',
     ),
     (
         "W07",
         "integer above 2**31-1",
-        '"file":[0,0,0,1,1,2,2,2]',
-        '"file":[2147483648,0,0,1,1,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2]',
+        '"file":[2147483648,0,0,1,1,2,2,2,2]',
     ),
     (
         "W08",
@@ -134,8 +139,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W10",
         "ordinal beyond its table",
-        '"file":[0,0,0,1,1,2,2,2]',
-        '"file":[0,0,0,1,1,2,2,9]',
+        '"file":[0,0,0,1,1,2,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,9]',
     ),
     (
         "W08",
@@ -604,21 +609,21 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W13",
         "parallel semantic edge (simple-graph pin)",
-        '"source":[1,2,6],"target":[6,7,2]',
-        '"source":[1,2,2],"target":[6,7,7]',
+        '"source":[1,2,7],"target":[7,8,2]',
+        '"source":[1,2,2],"target":[7,8,8]',
     ),
     ("W14", "set elements unsorted", "[4,5]", "[5,4]"),
     ("W14", "set element repeated", "[4,5]", "[4,4]"),
     (
         "W15",
         "diverging column lengths",
-        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","clone_only","helper","zz"]',
-        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","clone_only","helper"]',
+        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz"]',
+        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper"]',
     ),
     (
         "W16",
         "producer without the FUNCTION role",
-        '"producer_sets":[[1,2],[1,6]]',
+        '"producer_sets":[[1,2],[1,7]]',
         '"producer_sets":[[1,2],[1,3]]',
     ),
     ("W17", "absolute FILE path", '"path":["pkg/a.py",', '"path":["/pkg/a.py",'),
@@ -715,8 +720,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W12",
         "api symbol rows out of key order",
-        '"symbol":[1,2,4,6,6],"symbol_kind"',
-        '"symbol":[1,2,4,6,2],"symbol_kind"',
+        '"symbol":[1,2,4,7,7],"symbol_kind"',
+        '"symbol":[1,2,4,7,2],"symbol_kind"',
     ),
     (
         "W18",
@@ -808,10 +813,63 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '[["complexity","complete"],["near_miss","not_executed"]',
         '[["near_miss","not_executed"],["complexity","complete"]',
     ),
+    # Canonical model revision 2 (2026-09-07): every new decoder guard has an
+    # input that reaches it and trips it -- a guard nothing is shown to reach
+    # is theater.  Two tagged target slots, two closed vocabularies, the
+    # cross-column contradiction the model refuses under the wire's own code,
+    # the two positive floors, the row order, and the nullary variant's shape.
+    (
+        "W08",
+        "unknown import resolution tag",
+        '"resolution":["unresolved_dynamic","analyzed","external",',
+        '"resolution":["unresolved_dynamic","analyzed","banana",',
+    ),
+    (
+        "W09",
+        "import target tag not admitted",
+        '["opaque","os.path"]',
+        '["symbol","os.path"]',
+    ),
+    (
+        "W09",
+        "relationship target tag not admitted",
+        '["opaque","typing","cast"]',
+        '["module","typing","cast"]',
+    ),
+    (
+        "W20",
+        "analyzed import with an opaque target (cross-column contradiction)",
+        '"resolution":["unresolved_dynamic","analyzed","external",',
+        '"resolution":["unresolved_dynamic","analyzed","analyzed",',
+    ),
+    (
+        "W07",
+        "relationship occurrence count below its floor",
+        '"occurrence_count":[3,1,2,1,1]',
+        '"occurrence_count":[0,1,2,1,1]',
+    ),
+    (
+        "W07",
+        "relationship line below its floor",
+        '"line":[13,12,2,21,20]',
+        '"line":[0,12,2,21,20]',
+    ),
+    (
+        "W12",
+        "relationship rows out of key order",
+        '"source":[1,1,4,7,7],"target":[["opaque","typing","cast"]',
+        '"source":[1,1,7,4,7],"target":[["opaque","typing","cast"]',
+    ),
+    (
+        "W18",
+        "unresolved relationship target carrying a value",
+        '["symbol",1],["unresolved_target"]',
+        '["symbol",1],["unresolved_target",0]',
+    ),
     (
         "W21",
         "incompatible revision value",
-        '"canonical_model":"1"',
+        '"canonical_model":"2"',
         '"canonical_model":"9"',
     ),
     ("W21", "incomplete revisions", '"contract_ir":"1",', ""),
@@ -869,7 +927,7 @@ def test_w23_refuses_a_tampered_integrity_digest(canonical_bytes: bytes) -> None
 @pytest.mark.parametrize(
     ("label", "needle", "replacement"),
     [
-        ("inserted whitespace", '"wire":"0"}', '"wire":"0" }'),
+        ("inserted whitespace", '"wire":"1"}', '"wire":"1" }'),
         ("non-canonical escape", '"x.y"', '"\\u0078.y"'),
         (
             "non-canonical float lexeme",
@@ -979,8 +1037,8 @@ _SECONDARY_REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W18",
         "string in an integer column",
-        '"function":[1,2,4,6]',
-        '"function":["1",2,4,6]',
+        '"function":[1,2,4,7]',
+        '"function":["1",2,4,7]',
     ),
     (
         "W18",
@@ -1263,7 +1321,7 @@ def test_the_seal_domain_is_derived_from_the_wire_revision() -> None:
     assert codec_module._wire_integrity_domain("1") == _GENERATION_1_DOMAIN
     assert (
         codec_module._wire_integrity_domain(CANONICAL_WIRE_REVISION)
-        == _GENERATION_0_DOMAIN
+        == _GENERATION_1_DOMAIN
     )
 
 
@@ -1281,15 +1339,15 @@ def test_the_domain_prefix_has_exactly_one_spelling_in_the_codec() -> None:
 def test_the_naive_cross_generation_pin_cannot_reach_the_seal() -> None:
     """Reachability accounting for the pin below -- not a proof of the fix.
 
-    The obvious spelling ("a body sealed under domain 0 must not validate as
-    generation 1") is a guard no input can reach: a foreign generation is
+    The obvious spelling ("a body sealed under domain 1 must not validate as
+    generation 2") is a guard no input can reach: a foreign generation is
     refused at the revision fence, long before the seal is recomputed.
     Written that way the pin is green in every configuration, defect or
     repair, and proves nothing.  This test holds that fact in place.
     """
     native = encode_canonical_json(fixture_model())
     forged = _sealed_under(
-        _body_of(native).replace('"wire":"0"', '"wire":"1"', 1), _GENERATION_0_DOMAIN
+        _body_of(native).replace('"wire":"1"', '"wire":"2"', 1), _GENERATION_1_DOMAIN
     )
     with pytest.raises(WireDecodeError) as caught:
         decode_canonical_json(forged)
@@ -1301,9 +1359,9 @@ def test_a_document_declaring_the_next_generation_is_refused_by_this_seal(
 ) -> None:
     """Pin 3: the defect's own signature, in the only form that can fire.
 
-    A generation-1 build is simulated by moving the wire authority alone --
+    A generation-2 build is simulated by moving the wire authority alone --
     every derivation from it must follow, which is the whole claim.  The
-    document then DECLARES generation 1, passes the revision fence, and
+    document then DECLARES generation 2, passes the revision fence, and
     lands precisely on the seal check.
 
     Both boundaries die here: the forged case catches a domain hard-coded in
@@ -1311,14 +1369,14 @@ def test_a_document_declaring_the_next_generation_is_refused_by_this_seal(
     half alone -- derive the writer but not the reader, or the reverse, and
     what this build seals it can no longer verify.
     """
-    monkeypatch.setattr(codec_module, "CANONICAL_WIRE_REVISION", "1")
+    monkeypatch.setattr(codec_module, "CANONICAL_WIRE_REVISION", "2")
     native = encode_canonical_json(fixture_model())
-    assert b'"wire":"1"' in native
+    assert b'"wire":"2"' in native
 
     # Positive control, same causal path: what this build seals, it verifies.
     decode_canonical_json(native)
 
-    forged = _sealed_under(_body_of(native), _GENERATION_0_DOMAIN)
+    forged = _sealed_under(_body_of(native), _GENERATION_1_DOMAIN)
     assert _body_of(forged) == _body_of(native), "only the seal may differ"
     with pytest.raises(WireDecodeError) as caught:
         decode_canonical_json(forged)
@@ -1342,12 +1400,12 @@ def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> 
     The door it CAN be reached through is the one an external verifier uses
     and the one a future reordering would open: :func:`_check_integrity`
     itself.  A document that declares generation 9 and is sealed under
-    generation 9's domain must still be refused by a generation-0 build --
+    generation 9's domain must still be refused by a generation-1 build --
     a forgery does not get to choose the domain it is checked under.
     """
 
     body = _body_of(encode_canonical_json(fixture_model()))
-    body_nine = body.replace('"wire":"0"', '"wire":"9"', 1)
+    body_nine = body.replace('"wire":"1"', '"wire":"9"', 1)
     assert body_nine != body, "the declared revision must actually differ"
 
     forged = _sealed_under(body_nine, _GENERATION_9_DOMAIN)
@@ -1359,5 +1417,5 @@ def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> 
 
     # Positive control on the same function: what this build seals, this
     # build verifies -- so the refusal above is the domain, not the door.
-    honest = _sealed_under(body, _GENERATION_0_DOMAIN)
+    honest = _sealed_under(body, _GENERATION_1_DOMAIN)
     codec_module._check_integrity(honest, codec_module._parse_document(honest))
