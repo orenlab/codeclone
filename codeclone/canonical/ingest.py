@@ -162,10 +162,31 @@ def _document_identity_index(document: Mapping[str, object]) -> IdentityIndex:
             _mapping(python_module, "python_module"), "module", "python_module"
         )
         pairs.append((path, module))
+    # Read optionally, unlike every other registry field this function needs.
+    # The prefix lane can only WIDEN what resolves, so a document that omits
+    # it resolves exactly what it resolved before the lane existed, and no
+    # document that ingested yesterday is refused today. A present container
+    # is still held to its shape: a malformed row is a defect, not an absence.
+    prefixes_value = registry.get("package_prefixes")
+    prefix_modules: frozenset[str] = frozenset()
+    if prefixes_value is not None:
+        prefix_modules = frozenset(
+            _string(
+                _mapping(prefix, "package_prefixes row"),
+                "module",
+                "package_prefixes row",
+            )
+            for prefix in _sequence(prefixes_value, "module_registry.package_prefixes")
+        )
     # The conflict law over these pairs is the SHARED owner's, not this
     # reader's: the producer path extracts the same pairs from a live
-    # registry handle and must be refused by the same rule.
-    return build_identity_index(pairs, analyzed_paths=analyzed_paths)
+    # registry handle and must be refused by the same rule. The prefix nodes
+    # ride the same call for the same reason -- the producer's own
+    # ``_is_internal_target`` counts them as internal modules, so a reading
+    # that dropped them would refuse the producer's own document.
+    return build_identity_index(
+        pairs, analyzed_paths=analyzed_paths, prefix_modules=prefix_modules
+    )
 
 
 def _document_root_set(

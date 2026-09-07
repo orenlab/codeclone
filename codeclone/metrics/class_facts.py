@@ -114,6 +114,131 @@ def _collect_method_node(
         method_calls[method_name].add(node.func.attr)
 
 
+def _receiver_is_the_instance(method: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether ``self`` inside ``method`` provably binds the declaring class.
+
+    Python binds the first parameter of an ordinary method to the instance;
+    nothing binds the SPELLING ``self``. The three ways the spelling can mean
+    something else are refused here:
+
+    * a ``@staticmethod`` takes no receiver, so its first parameter is an
+      ordinary value the caller supplied - and if it is named ``self``, every
+      ``self.<name>()`` in its body is a call on an unknown object;
+    * a method whose first parameter is named something else (``cls``, or a
+      house style) leaves ``self`` free for any other binding;
+    * a method that REBINDS ``self`` anywhere in its body no longer has one
+      receiver for the flow-insensitive read this lane performs.
+
+    Refusing is safe in this lane and only here: the method's own name is
+    already a bare-name signal, so a refused dispatch abstains as
+    ``ambiguous_internal_binding`` rather than being reported dead.
+    """
+    if any(
+        _annotation_name(decorator) == "staticmethod"
+        for decorator in method.decorator_list
+    ):
+        return False
+    parameters = [*method.args.posonlyargs, *method.args.args]
+    if not parameters or parameters[0].arg != "self":
+        return False
+    return not any(
+        isinstance(node, ast.Name)
+        and node.id == "self"
+        and isinstance(node.ctx, ast.Store | ast.Del)
+        for node in ast.walk(method)
+    )
+
+
+def _receiver_bound_nodes(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[ast.AST]:
+    """The nodes of ``method`` where ``self`` still binds ITS receiver.
+
+    ``ast.walk`` descends through every nested function, lambda and class, and
+    each of those can bind ``self`` again - a nested ``def inner(self)``, or a
+    nested class whose own methods take their own receiver. Attributing their
+    calls to the enclosing method's class is the containment claim this walk
+    used to make without checking it. The traversal stops at any nested scope
+    that rebinds the name; a nested scope that does NOT is still reading the
+    enclosing receiver by closure, so it is kept.
+    """
+    nodes: list[ast.AST] = []
+    stack: list[ast.AST] = [method]
+    seen = False
+    while stack:
+        node = stack.pop()
+        if seen and _opens_its_own_receiver_scope(node):
+            continue
+        seen = True
+        nodes.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return nodes
+
+
+def _opens_its_own_receiver_scope(node: ast.AST) -> bool:
+    """Whether ``self`` inside ``node`` is a DIFFERENT binding.
+
+    A nested class always is: its methods take their own receiver. A nested
+    function or lambda is one exactly when it declares a ``self`` parameter;
+    one that does not still reads the enclosing receiver by closure.
+    """
+
+    if isinstance(node, ast.ClassDef):
+        return True
+    if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+        return False
+    arguments = node.args
+    return any(
+        argument is not None and argument.arg == "self"
+        for argument in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        )
+    )
+
+
+def _is_self_method_call(
+    node: ast.AST, method_calls: dict[str, set[str]]
+) -> str | None:
+    """The callee of a ``self.<name>()`` whose ``<name>`` is a method here."""
+
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        and node.func.attr in method_calls
+    ):
+        return node.func.attr
+    return None
+
+
+def _collect_self_dispatched_calls(
+    methods: list[ast.FunctionDef | ast.AsyncFunctionDef],
+    *,
+    method_calls: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    """The receiver-proven projection of ``method_calls`` (liveness policy v5).
+
+    Read from the same nodes rather than collected beside them, so the proven
+    lane can only ever be a SUBSET of what cohesion reads and LCOM's input is
+    untouched by construction.
+    """
+
+    dispatched: dict[str, set[str]] = {name: set() for name in method_calls}
+    for method in methods:
+        if method.name not in dispatched or not _receiver_is_the_instance(method):
+            continue
+        for node in _receiver_bound_nodes(method):
+            callee = _is_self_method_call(node, method_calls)
+            if callee is not None:
+                dispatched[method.name].add(callee)
+    return dispatched
+
+
 def collect_class_walk_facts(
     class_node: ast.ClassDef,
     *,
@@ -168,6 +293,9 @@ def collect_class_walk_facts(
         instantiation_candidates=frozenset(instantiation_candidates),
         method_to_attrs=method_to_attrs,
         method_calls=method_calls,
+        self_dispatched_calls=_collect_self_dispatched_calls(
+            methods, method_calls=method_calls
+        ),
         all_method_count=len(methods),
     )
 

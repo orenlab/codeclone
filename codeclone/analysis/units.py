@@ -714,7 +714,7 @@ def extract_units_and_stats_from_source(
             self_dispatched_by_class[declaration.path] = frozenset(
                 qualname.removeprefix(dispatched_prefix)
                 for qualname in _self_dispatched_methods(
-                    nested_facts.method_calls,
+                    nested_facts.self_dispatched_calls,
                     module_name=module_name,
                     class_qualname=declaration.path,
                 )
@@ -723,6 +723,7 @@ def extract_units_and_stats_from_source(
             filepath=filepath,
             module_name=module_name,
             declarations=_walk.nested_declarations,
+            proven_decorator_roots=_walk.proven_decorator_roots,
             suppression_index=suppression_index,
             protocol_symbol_aliases=protocol_symbol_aliases,
             protocol_module_aliases=protocol_module_aliases,

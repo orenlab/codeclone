@@ -235,6 +235,122 @@ def test_the_endpoint_rule_reaches_both_domains_and_its_refusal(
         parse_endpoint(index, "nowhere", "w")
 
 
+#: What a run's registry calls a package prefix: a MODULE identity carrying
+#: no file of its own.  ``_package_prefixes`` excludes every prefix that is a
+#: regular package, so the prefix set and the file-bearing set are disjoint
+#: BY CONSTRUCTION -- which is why the index can carry them side by side
+#: without one shadowing the other.
+_PREFIX_INDEX_PAIRS = [("nsp/leaf.py", "nsp.leaf")]
+_PREFIX_INDEX_PATHS = frozenset({"nsp/leaf.py"})
+
+
+def _prefix_index() -> IdentityIndex:
+    return build_identity_index(
+        _PREFIX_INDEX_PAIRS,
+        analyzed_paths=_PREFIX_INDEX_PATHS,
+        prefix_modules=frozenset({"nsp"}),
+    )
+
+
+def test_the_index_carries_the_registrys_file_less_prefix_modules() -> None:
+    """The registry's second class of MODULE identity reaches the grammar.
+
+    Measured 2026-09-07 on the F7-namespace stage, with the run store
+    enabled so BOTH readings executed: the producer's own
+    ``metrics.dependencies._is_internal_target`` calls a ``package_prefixes``
+    node internal and emits ``user -> nsp``, while the index was assembled
+    from file-bearing pairs alone.  The producer-native publication came back
+    ``failed`` and the ingest oracle raised the SAME message -- one law with
+    two spellings, refusing the producer's own document in both consumers.
+
+    The prefix lane is separate from ``module_to_path`` on purpose: a prefix
+    module has no file, so it can head no FILE-based SYMBOL, and folding it
+    into the path map would have to invent a path.
+    """
+    index = _prefix_index()
+    assert index.module_to_path == {"nsp.leaf": "nsp/leaf.py"}
+    assert index.prefix_modules == frozenset({"nsp"})
+    # The default keeps every existing caller's index exactly as it was.
+    assert (
+        build_identity_index([], analyzed_paths=frozenset()).prefix_modules
+        == frozenset()
+    )
+
+
+def test_a_name_that_is_both_a_file_and_a_prefix_keeps_its_file() -> None:
+    """A ``galaxy.py`` beside a ``galaxy/`` is an ordinary tree, not a defect.
+
+    This pin exists because the opposite was written first and REFUTED by
+    data.  The prefix lane landed with a refusal on the assumption that
+    ``_package_prefixes`` -- which excludes every prefix that is a regular
+    package -- made the two sets disjoint by construction.  The 21-repository
+    corpus said otherwise on the first run: vispy carries
+    ``examples/demo/gloo/galaxy.py`` beside an ``examples/demo/gloo/galaxy/``
+    directory holding ``galaxy.py``, ``galaxy_simulation.py`` and
+    ``galaxy_specrend.py``, so ``examples.demo.gloo.galaxy`` is a file-bearing
+    module AND the prefix of three deeper ones.  Refusing that would deny an
+    identity the producer did assert, on well-formed source.
+
+    The file-bearing entry answers, because ``parse_endpoint`` consults it
+    first; the collision is invisible to any reader because both lanes spell
+    the answer ``ModuleId(text)``.
+    """
+    index = build_identity_index(
+        [("examples/demo/gloo/galaxy.py", "examples.demo.gloo.galaxy")],
+        analyzed_paths=frozenset({"examples/demo/gloo/galaxy.py"}),
+        prefix_modules=frozenset({"examples.demo.gloo.galaxy"}),
+    )
+    assert index.module_to_path == {
+        "examples.demo.gloo.galaxy": "examples/demo/gloo/galaxy.py"
+    }
+    assert index.prefix_modules == frozenset({"examples.demo.gloo.galaxy"})
+    assert parse_endpoint(index, "examples.demo.gloo.galaxy", "w") == ModuleId(
+        "examples.demo.gloo.galaxy"
+    )
+    # The file-bearing map decides, and it still decides for the file lane.
+    assert parse_symbol(index, "examples.demo.gloo.galaxy:fn", "w") == SymbolId(
+        FileId("examples/demo/gloo/galaxy.py"), "fn"
+    )
+
+
+def test_the_endpoint_rule_resolves_a_prefix_module_and_still_refuses_a_stranger() -> (
+    None
+):
+    """Both boundaries of the widening, under one index.
+
+    The prefix module resolves to the MODULE domain -- the same domain a
+    file-bearing registry module resolves to, because that is what the
+    producer asserted about it -- and a name in neither lane is refused with
+    the message unchanged, so the refusal that guards every other endpoint
+    still reads verbatim.
+    """
+    index = _prefix_index()
+    assert parse_endpoint(index, "nsp", "dependencies.target") == ModuleId("nsp")
+    assert parse_endpoint(index, "nsp.leaf", "w") == ModuleId("nsp.leaf")
+    assert parse_endpoint(index, "nsp/leaf.py", "w") == FileId("nsp/leaf.py")
+    with pytest.raises(SemanticGrammarError) as excinfo:
+        parse_endpoint(index, "elsewhere", "dependencies.target")
+    assert str(excinfo.value) == (
+        "dependencies.target: endpoint 'elsewhere' is neither a registry "
+        "module nor an analyzed path"
+    )
+
+
+def test_a_prefix_module_heads_no_symbol_and_no_operation() -> None:
+    """The widening is the ENDPOINT lane's, and only that lane's.
+
+    A prefix module names no file, so it can head no FILE-based SYMBOL; and
+    admitting it as a ``KnownModule`` operation head would move an identity
+    on documents that already ingest, which no measurement asked for.  Both
+    lanes are pinned here so that widening either is a deliberate act with
+    its own evidence rather than a side effect of this one.
+    """
+    index = _prefix_index()
+    with pytest.raises(SemanticGrammarError, match="refusing to guess"):
+        parse_symbol(index, "nsp:fn", "w")
+    assert parse_operation_head(index, "nsp") == OpaqueDottedHead("nsp")
+
+
 def test_the_lane_rule_refuses_both_ways(index: IdentityIndex) -> None:
     assert parse_lane_symbol(index, "pkg/a.py", "fn", "risk") == SymbolId(
         FileId("pkg/a.py"), "fn"

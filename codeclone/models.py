@@ -2425,6 +2425,17 @@ class ClassWalkFacts:
     instantiation_candidates: frozenset[str]
     method_to_attrs: dict[str, set[str]]
     method_calls: dict[str, set[str]]
+    # Cohesion's adjacency input: every ``self.<name>()`` the class walk
+    # reached, receiver unproven. It stays exactly that, because LCOM is a
+    # user-facing score and this generation does not move one.
+    #
+    # Liveness policy v5, same generation: the row-1 evidence lane reads the
+    # PROVEN subset below instead. ``self`` is a spelling, and a spelling is
+    # not a receiver - measured on a ``@staticmethod`` whose first parameter
+    # happened to be named ``self``, and again on a nested function that took
+    # a ``self`` parameter inside a method, both of which held an unrelated
+    # method of the enclosing class live.
+    self_dispatched_calls: dict[str, set[str]]
     all_method_count: int
 
 

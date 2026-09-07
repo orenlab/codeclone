@@ -255,9 +255,16 @@ def _identity_index(
     """Project a live registry handle into the shared grammar's index.
 
     Extraction only.  The conflict law over the pairs — a module claiming
-    two files, a file claiming two modules — is the grammar owner's, and it
-    is the SAME rule the legacy ingest oracle is refused by; that is the
-    whole point of the 2026-08-31 transplant.
+    two files, a file claiming two modules, a module that is both a file and
+    a prefix node — is the grammar owner's, and it is the SAME rule the
+    legacy ingest oracle is refused by; that is the whole point of the
+    2026-08-31 transplant.
+
+    The registry's ``package_prefixes`` travel with the pairs because they
+    are the run's OTHER class of MODULE identity: ``metrics.dependencies``
+    already calls them internal and emits edges to them, so an index that
+    saw only file-bearing pairs made this path refuse the run it was
+    publishing (measured 2026-09-05 on kivy and pyglet).
     """
 
     return build_identity_index(
@@ -267,6 +274,7 @@ def _identity_index(
             if entry.identity.python_module is not None
         ),
         analyzed_paths=analyzed_paths,
+        prefix_modules=frozenset(prefix.module for prefix in registry.package_prefixes),
     )
 
 

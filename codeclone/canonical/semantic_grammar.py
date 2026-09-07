@@ -96,19 +96,42 @@ class IdentityIndex:
     module_to_path: Mapping[str, str]
     path_to_module: Mapping[str, str]
     analyzed_paths: frozenset[str]
+    #: The registry's MODULE identities that carry no file of their own --
+    #: implicit namespace packages and synthetic import-mount prefixes, which
+    #: the registry publishes as ``package_prefixes``.  A second lane rather
+    #: than an entry in ``module_to_path`` because there is no path to put
+    #: there and inventing one would mint an identity the producer never
+    #: asserted.  Defaulted so that a caller which has no prefixes to declare
+    #: builds exactly the index it built before this lane existed.
+    prefix_modules: frozenset[str] = frozenset()
 
 
 def build_identity_index(
     pairs: Iterable[tuple[str, str]],
     *,
     analyzed_paths: frozenset[str],
+    prefix_modules: frozenset[str] = frozenset(),
 ) -> IdentityIndex:
-    """Index ``(path, module)`` pairs, refusing a registry at war with itself.
+    """Index the registry's identities, refusing a registry at war with itself.
 
     A module claiming two files, or a file claiming two modules, is a
     producer defect: resolving it either way would mint an identity the
     producer never asserted, and that identity would become a wrong content
     address in the run store.
+
+    ``prefix_modules`` carries the run's file-less MODULE identities.  It is
+    NOT held to disjointness from the file-bearing modules, and that is a
+    measurement rather than a preference: vispy carries
+    ``examples/demo/gloo/galaxy.py`` beside an ``examples/demo/gloo/galaxy/``
+    directory of three more modules, so the one dotted name is a file-bearing
+    module AND the prefix of deeper ones at once (measured 2026-09-07 on the
+    21-repository corpus, where a refusal written on the assumed disjointness
+    fired on real, well-formed source).  A ``galaxy.py`` beside a ``galaxy/``
+    is an ordinary tree, not a registry at war with itself, and refusing it
+    would deny an identity the producer did assert.  ``parse_endpoint``
+    consults the file-bearing map first, so the collision resolves to the
+    entry that carries a file — and both lanes spell the answer
+    ``ModuleId(text)``, so no reader can tell which branch answered.
     """
 
     module_to_path: dict[str, str] = {}
@@ -130,6 +153,7 @@ def build_identity_index(
         module_to_path=module_to_path,
         path_to_module=path_to_module,
         analyzed_paths=analyzed_paths,
+        prefix_modules=frozenset(prefix_modules),
     )
 
 
@@ -154,12 +178,30 @@ def parse_symbol(index: IdentityIndex, key: str, where: str) -> SymbolId:
 def parse_endpoint(index: IdentityIndex, text: str, where: str) -> DependencyEndpoint:
     """The ratified ``MODULE | FILE`` union, resolved by the registry — never
     by the shape of the string (F-3 §2.1.8: the producer decides the
-    domain, not the spelling)."""
+    domain, not the spelling).
+
+    A file-less prefix module resolves to the MODULE domain like any other
+    registry module.  It is checked LAST so that every text which already
+    resolved keeps resolving through the same branch it did before, and the
+    refusal that guards a name in no lane at all reads verbatim as it did.
+
+    Measured 2026-09-05 (kivy's ``packaging``, pyglet's ``pyglet.experimental``)
+    and re-derived 2026-09-07 with the run store enabled: the producer's
+    ``metrics.dependencies._is_internal_target`` calls a ``package_prefixes``
+    node internal and emits the edge, so refusing it here made BOTH readings
+    reject the producer's own document — the producer-native publication came
+    back ``failed`` with the same message the ingest oracle raised.  Only the
+    endpoint lane widens: a prefix module heads no FILE-based SYMBOL, and
+    admitting it as an operation head would move identities on documents that
+    already ingest.
+    """
 
     if text in index.module_to_path:
         return ModuleId(text)
     if text in index.analyzed_paths:
         return FileId(text)
+    if text in index.prefix_modules:
+        return ModuleId(text)
     raise SemanticGrammarError(
         f"{where}: endpoint {text!r} is neither a registry module nor an analyzed path"
     )

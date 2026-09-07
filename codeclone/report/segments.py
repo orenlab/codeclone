@@ -178,20 +178,40 @@ def _analyze_segment_group(
     return analyses
 
 
-def merge_segment_report_groups(segment_groups: GroupMapLike) -> GroupMap:
-    """Merge overlapping segment windows without judging what is left.
+#: A clone group names at least two occurrences. Re-checked AFTER the merge
+#: because that is where the arity can fall: ``build_segment_groups`` already
+#: refuses a bucket of fewer than two windows, and every group the report
+#: published carrying a single item got there when ``merge_overlapping_items``
+#: folded a contiguous run of windows inside one function.
+SEGMENT_MIN_OCCURRENCES = 2
 
-    The shaping every segment lane needs, and nothing more. The low-value
-    filter deliberately does not live here: a lane whose groups a user rule
-    already withheld must not have them re-judged by the detector's own
-    precision filter, and the only way a caller cannot get that wrong is for
-    the two operations to be different functions.
+
+def merge_segment_report_groups(segment_groups: GroupMapLike) -> GroupMap:
+    """Merge overlapping segment windows and keep what is still a group.
+
+    The shaping every segment lane needs, and nothing more.
+
+    Two windows that overlap or touch inside one function are ONE occurrence
+    once normalized, and a group naming one occurrence is not a clone
+    finding: it is the history of how the group arose. Measured 2026-09-05
+    across 21 frozen repositories -- 378 such groups in 17 of them, every one
+    of them ``segments``, ``functions`` and ``blocks`` clean everywhere --
+    each published to the user as a repeated segment worth extracting. The
+    pre-merge multiplicity may some day be carried as a separate diagnostic
+    fact; it may never stand in for the arity of a clone group.
+
+    Arity is not the detector's precision filter and lives here rather than
+    beside it: it parses no source and judges no quality, so a lane whose
+    groups a user rule already withheld can be shaped by this function
+    without having its evidence re-judged. The low-value filter deliberately
+    does NOT live here, and the only way a caller cannot get that wrong is
+    for the two operations to be different functions.
     """
 
     merged_groups: GroupMap = {}
     for key, items in segment_groups.items():
         merged_items = merge_segment_items(items)
-        if not merged_items:
+        if len(merged_items) < SEGMENT_MIN_OCCURRENCES:
             continue
         merged_groups[key] = merged_items
     return merged_groups
@@ -204,6 +224,11 @@ def prepare_segment_report_groups(
 
     Merges overlapping windows, then drops low-value boilerplate groups and
     returns how many it dropped. Detection hashes remain unchanged.
+
+    The count is a PRECISION signal and covers only groups that reached the
+    filter. A group the merge collapsed to one item never does: it is dropped
+    one step earlier for not being a group, and counting it here would claim
+    the detector judged something it never looked at.
 
     The active lane only. A lane whose groups a user suppression rule already
     withheld must call :func:`merge_segment_report_groups` instead: judging a

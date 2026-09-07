@@ -443,11 +443,21 @@ def test_f8_family_carries_the_emitted_population_and_not_the_suppressed(
     assert len(rows) == 6
     # The policy-held lane is shaped by ``merge_segment_report_groups`` and is
     # no longer re-judged by the ACTIVE lane's low-value filter, so the
-    # container now publishes every group the user rule withheld.  Under the
+    # container publishes every group the user rule withheld.  Under the
     # double filter this corpus reported 3: the filter deleted half of the
     # evidence the document had promised to publish, and dropped the count of
     # what it deleted at the same time.
-    assert len(suppressed) == 6
+    #
+    # Five, not six, since 2026-09-07.  The sixth was
+    # ``...|tests.fixtures.golden.gold_host_two:gold_host_two``, measured with
+    # ``count: 1`` and ONE item -- a post-merge singleton, the same shape the
+    # emitted lane stopped publishing, in the held container.  Arity is not
+    # the precision filter: it parses nothing and judges nothing, and one
+    # document must not answer "is this a clone group" two ways depending on
+    # which container the group sits in.  What the user's rule withheld is a
+    # FILE; the arity is the detector's own merge, and a held group of one
+    # misstates what was withheld.
+    assert len(suppressed) == 5
 
 
 def test_f8_family_witnesses_every_emitted_container(

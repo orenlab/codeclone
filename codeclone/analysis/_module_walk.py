@@ -1070,7 +1070,9 @@ class _LexicalScopeBuilder:
     """One pass over a module: scopes, bindings, loads, nested definitions."""
 
     __slots__ = (
+        "attribute_loads",
         "declarations",
+        "decorator_roots",
         "definition_counts",
         "definition_nodes",
         "definitions",
@@ -1082,6 +1084,13 @@ class _LexicalScopeBuilder:
     def __init__(self) -> None:
         self.scopes: list[_LexicalScope] = []
         self.declarations: list[_NestedDeclaration] = []
+        #: Every ``<Name>.<attr>`` load, with the scope the receiver name is
+        #: written in: the receiver's binding is resolved there, never
+        #: against a module-wide map.
+        self.attribute_loads: list[tuple[_LexicalScope, str, str]] = []
+        #: (definition path, decorator root name, the scope the decorator is
+        #: EVALUATED in - the enclosing one, not the definition's own).
+        self.decorator_roots: list[tuple[str, str, _LexicalScope]] = []
         #: Every definition the pass declared, in source order, with its
         #: module-local lexical path; the escape proof walks these.
         self.definitions: list[tuple[str, _NamedDeclarationNode]] = []
@@ -1209,6 +1218,32 @@ class _LexicalScopeBuilder:
             self.declarations.append(_NestedDeclaration(path, scope.path, node, kind))
         return path
 
+    def _record_attribute_receiver(
+        self, node: ast.Attribute, scope: _LexicalScope
+    ) -> None:
+        """Keep a bare-Name receiver beside the scope it is written in."""
+        if isinstance(node.ctx, ast.Load) and isinstance(node.value, ast.Name):
+            self.attribute_loads.append((scope, node.value.id, node.attr))
+
+    def _record_decorator_roots(
+        self,
+        path: str,
+        decorators: Sequence[ast.expr],
+        scope: _LexicalScope,
+    ) -> None:
+        """Keep each decorator's root name beside the scope it resolves in.
+
+        ``scope`` is the definition's ENCLOSING scope, which is where Python
+        evaluates a decorator expression - so a parameter of the function
+        that holds this definition is visible here, and that is exactly the
+        binding the alias maps must not be read through.
+        """
+        for decorator in decorators:
+            name = _decorator_expr_name(decorator)
+            if name is None:
+                continue
+            self.decorator_roots.append((path, name.partition(".")[0], scope))
+
     def _record_simple_assignment(self, node: ast.stmt, scope: _LexicalScope) -> None:
         """Keep the value of a single-Name assignment beside its binding.
 
@@ -1239,6 +1274,7 @@ class _LexicalScopeBuilder:
         # Decorators, defaults, annotations and the return annotation are
         # evaluated in the ENCLOSING scope: a parameter named like a decorator
         # must not capture the decorator's load.
+        self._record_decorator_roots(path, node.decorator_list, scope)
         for decorator in node.decorator_list:
             self._visit_expression(decorator, scope)
         for default in _lexical_defaults(node.args):
@@ -1260,6 +1296,7 @@ class _LexicalScopeBuilder:
 
     def _visit_class(self, node: ast.ClassDef, scope: _LexicalScope) -> None:
         path = self._declare(node, scope, "class")
+        self._record_decorator_roots(path, node.decorator_list, scope)
         for decorator in node.decorator_list:
             self._visit_expression(decorator, scope)
         for base in node.bases:
@@ -1283,7 +1320,11 @@ class _LexicalScopeBuilder:
                 _lexical_bind(scope, node.id, _BINDING_LOCAL)
         elif isinstance(node, ast.Attribute):
             # The attribute name is the receiver-blind signal
-            # ``_collect_load_reference_node`` already records.
+            # ``_collect_load_reference_node`` already records. The receiver
+            # is kept WITH ITS SCOPE beside it, so the arms that used to read
+            # a definition's owner off the receiver's spelling can ask what
+            # the name actually binds here.
+            self._record_attribute_receiver(node, scope)
             self._visit_expression(node.value, scope)
         elif isinstance(node, ast.NamedExpr):
             owner = _lexical_binding_scope(scope)
@@ -1346,10 +1387,17 @@ def _classify_lexical_binding(kinds: set[str]) -> tuple[_LexicalResolution, str 
     return "local", None
 
 
-def _resolve_lexical_load(
+def _lexical_binding_site(
     name: str, scope: _LexicalScope
-) -> tuple[_LexicalResolution, str | None]:
-    """Python's lookup for one loaded name, over the scope chain."""
+) -> tuple[_LexicalScope, set[str]] | None:
+    """The scope Python's lookup settles ``name`` in, and how it binds there.
+
+    ``None`` when no scope of this module binds the name. Returning the SITE
+    rather than only its classification is what lets a caller ask the second
+    question the liveness lanes need: not just "what kind of binding is this"
+    but "is that binding the module-level object my alias map describes, or
+    something a body rebound".
+    """
 
     current: _LexicalScope | None = scope
     innermost = True
@@ -1359,8 +1407,9 @@ def _resolve_lexical_load(
             continue
         if current.kind in {"function", "lambda"}:
             if name in current.global_names:
-                kinds = _lexical_module_scope(current).bindings.get(name)
-                return _classify_lexical_binding(kinds) if kinds else ("unbound", None)
+                module_scope = _lexical_module_scope(current)
+                kinds = module_scope.bindings.get(name)
+                return (module_scope, kinds) if kinds else None
             if name in current.nonlocal_names:
                 current = current.parent
                 innermost = False
@@ -1370,10 +1419,91 @@ def _resolve_lexical_load(
             current.kind == "class"
             and not any(kind.startswith(_BINDING_DEFINITION) for kind in kinds)
         ):
-            return _classify_lexical_binding(kinds)
+            return current, kinds
         innermost = False
         current = current.parent
-    return "unbound", None
+    return None
+
+
+def _resolve_lexical_load(
+    name: str, scope: _LexicalScope
+) -> tuple[_LexicalResolution, str | None]:
+    """Python's lookup for one loaded name, over the scope chain."""
+
+    site = _lexical_binding_site(name, scope)
+    if site is None:
+        return "unbound", None
+    return _classify_lexical_binding(site[1])
+
+
+class _ProvenBinding(NamedTuple):
+    """What a receiver name is PROVEN to bind at the site it is written.
+
+    Liveness policy v5, same generation, correcting the arms that read the
+    owner off a spelling: a qualified spelling carries no liveness authority
+    until the receiver binding is proven, so this is the only door through
+    which ``receiver.attr`` may name a definition.
+
+    ``kind`` is ``"definition"`` with the module-local lexical ``path`` of the
+    definition the receiver binds, or ``"import"`` when the receiver binds an
+    import and nothing else. Every other outcome - a parameter, a local, a
+    loop or comprehension target, a name bound both as a definition and as
+    something else, a name bound by an import AND rebound - is not proven and
+    has no entry here: the caller must abstain.
+    """
+
+    kind: Literal["definition", "import"]
+    path: str | None
+
+
+def _proven_receiver_binding(name: str, scope: _LexicalScope) -> _ProvenBinding | None:
+    """The proven binding of a receiver name loaded in ``scope``, or ``None``.
+
+    ``_classify_lexical_binding`` answers a different question - whether a
+    load is SETTLED, so that an unsettled one stays a bare-name signal - and
+    it deliberately calls a name bound as both an import and a local
+    "import", because either way the load is not this module's to explain.
+    Authority is the stricter question, so the import arm is re-checked here
+    against the raw kinds instead of being taken from that verdict.
+    """
+
+    site = _lexical_binding_site(name, scope)
+    if site is None:
+        return None
+    _binding_scope, kinds = site
+    resolution, path = _classify_lexical_binding(kinds)
+    if resolution == "definition" and path is not None:
+        return _ProvenBinding("definition", path)
+    if resolution == "import" and kinds == {_BINDING_IMPORT}:
+        return _ProvenBinding("import", None)
+    return None
+
+
+def _decorator_root_binds_module_object(name: str, scope: _LexicalScope) -> bool:
+    """Whether a decorator's root name binds the module-level object the
+    walk's alias maps describe, rather than a value some body supplied.
+
+    The external-alias and hook-marker maps are module-wide by construction:
+    they record what an import statement resolved to, and what a module-level
+    assignment proved to be a pluggy marker. Both are statements ABOUT the
+    module scope, so a decorator whose root the enclosing function bound -
+    a parameter, a loop target, a comprehension variable, a local - is not
+    the object either map describes, and the spelling it shares with one
+    proves nothing.
+
+    A function-local ``import`` is admitted: the name then binds a module
+    object at that very site, which is the same fact the map records, only
+    written closer in.
+    """
+
+    site = _lexical_binding_site(name, scope)
+    if site is None:
+        return False
+    binding_scope, kinds = site
+    if kinds == {_BINDING_IMPORT}:
+        return True
+    resolution, _path = _classify_lexical_binding(kinds)
+    return binding_scope.kind == "module" and resolution != "ambiguous"
 
 
 class _LexicalBindingFacts(NamedTuple):
@@ -1382,6 +1512,20 @@ class _LexicalBindingFacts(NamedTuple):
     bound_definition_paths: frozenset[str]
     #: Loaded names no scope of this module settles.
     unsettled_names: frozenset[str]
+    #: Bare names PROVEN to bind an import at some load site, so the
+    #: imported-symbol arm may name what the import binds.
+    import_bound_names: frozenset[str]
+    #: ``(receiver, attribute)`` pairs whose receiver is proven to bind an
+    #: import at that site - the only pairs the imported-module-attribute arm
+    #: may resolve through the module-wide alias map.
+    import_bound_attributes: frozenset[tuple[str, str]]
+    #: ``(definition path, attribute)`` pairs whose receiver is proven to
+    #: bind that definition at that site - the only pairs the same-module
+    #: class-attribute arm may resolve.
+    definition_bound_attributes: frozenset[tuple[str, str]]
+    #: ``(definition path, decorator root name)`` pairs whose root provably
+    #: binds the module-level object the walk's alias maps describe.
+    proven_decorator_roots: frozenset[tuple[str, str]]
     #: Every definition under a function scope, in source order.
     nested_declarations: tuple[_NestedDeclaration, ...]
     #: Module-local lexical path -> the proven opaque-escape flow of the
@@ -1404,24 +1548,24 @@ def _collect_lexical_binding_facts(
 
     builder = _LexicalScopeBuilder()
     builder.build(tree)
-    bound: set[str] = set()
-    unsettled: set[str] = set()
-    for scope in builder.scopes:
-        for name in scope.loads:
-            resolution, path = _resolve_lexical_load(name, scope)
-            if resolution == "definition":
-                # A definition loading its own name is not its own consumer:
-                # neither evidence nor a signal.
-                if path != scope.path:
-                    bound.add(path or "")
-            elif resolution == "import":
-                if name not in settled_import_names:
-                    unsettled.add(name)
-            elif resolution != "local":
-                unsettled.add(name)
+    bound, unsettled, import_bound_names = _lexical_load_facts(
+        builder,
+        settled_import_names=settled_import_names,
+    )
+    import_bound_attributes, definition_bound_attributes = _attribute_receiver_facts(
+        builder
+    )
     return _LexicalBindingFacts(
-        bound_definition_paths=frozenset(bound),
-        unsettled_names=frozenset(unsettled),
+        bound_definition_paths=bound,
+        unsettled_names=unsettled,
+        import_bound_names=import_bound_names,
+        import_bound_attributes=import_bound_attributes,
+        definition_bound_attributes=definition_bound_attributes,
+        proven_decorator_roots=frozenset(
+            (path, root)
+            for path, root, scope in builder.decorator_roots
+            if _decorator_root_binds_module_object(root, scope)
+        ),
         nested_declarations=tuple(builder.declarations),
         escape_witnesses=_collect_opaque_escape_witnesses(
             builder,
@@ -1429,6 +1573,77 @@ def _collect_lexical_binding_facts(
             external_import_names=external_import_names,
         ),
     )
+
+
+def _lexical_load_facts(
+    builder: _LexicalScopeBuilder,
+    *,
+    settled_import_names: frozenset[str],
+) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """What every bare-name load of this module settles to.
+
+    Returns the definitions a load provably binds, the loads no scope
+    settles, and the names PROVEN to bind an import - evidence, signal, and
+    the imported-symbol lane's authority, in that order.
+    """
+
+    bound: set[str] = set()
+    unsettled: set[str] = set()
+    import_bound: set[str] = set()
+    for scope in builder.scopes:
+        for name in scope.loads:
+            resolution, path = _resolve_lexical_load(name, scope)
+            proven = _proven_receiver_binding(name, scope)
+            if proven is not None and proven.kind == "import":
+                import_bound.add(name)
+            if resolution == "definition":
+                # A definition loading its own name is not its own consumer:
+                # neither evidence nor a signal.
+                if path != scope.path:
+                    bound.add(path or "")
+                continue
+            if resolution == "local":
+                continue
+            # Everything left is a signal, except a load the imported-symbol
+            # lane still ANSWERS for. Once that lane requires a proven
+            # binding, a load it refuses is no longer answered for and must
+            # not be silenced: a name bound both by an import and by a
+            # module-level rebinding (``from x import y`` then
+            # ``y = wrap(y)``) has no single owner, and dropping both its
+            # evidence and its signal reported the imported definition DEAD
+            # while the module called the wrapper around it. Measured: that
+            # verdict flipped LIVE -> DEAD on a three-line fixture before
+            # ``proven is None`` joined this condition.
+            if (
+                resolution != "import"
+                or name not in settled_import_names
+                or proven is None
+            ):
+                unsettled.add(name)
+    return frozenset(bound), frozenset(unsettled), frozenset(import_bound)
+
+
+def _attribute_receiver_facts(
+    builder: _LexicalScopeBuilder,
+) -> tuple[frozenset[tuple[str, str]], frozenset[tuple[str, str]]]:
+    """The ``receiver.attribute`` pairs whose receiver binding is PROVEN.
+
+    Keyed by the pair rather than by the receiver alone: one spelling can be
+    an import in one scope and a parameter in the next, and only the site
+    that proved it may name a definition.
+    """
+
+    imported: set[tuple[str, str]] = set()
+    defined: set[tuple[str, str]] = set()
+    for scope, receiver, attribute in builder.attribute_loads:
+        proven = _proven_receiver_binding(receiver, scope)
+        if proven is None:
+            continue
+        if proven.kind == "import":
+            imported.add((receiver, attribute))
+        elif proven.path is not None:
+            defined.add((proven.path, attribute))
+    return frozenset(imported), frozenset(defined)
 
 
 # --------------------------------------------------------------------------
@@ -2578,8 +2793,32 @@ def _resolve_referenced_qualnames(
     module_name: str,
     collector: _qualnames.QualnameCollector,
     state: _ModuleWalkState,
-    lexical_binding_paths: frozenset[str] = frozenset(),
+    lexical_binding_paths: frozenset[str],
+    import_bound_names: frozenset[str],
+    import_bound_attributes: frozenset[tuple[str, str]],
+    definition_bound_attributes: frozenset[tuple[str, str]],
+    proven_decorator_roots: frozenset[tuple[str, str]],
 ) -> frozenset[str]:
+    """Which definitions this module's loads PROVABLY reference.
+
+    Liveness policy v5, same generation. Every arm below used to recover the
+    owner of a reference from a SPELLING: the loaded name was looked up in a
+    module-wide map (what an import bound, which classes this module declares)
+    with no regard for what the name binds where it is written. Measured on a
+    two-class fixture, a parameter that merely spelled a class name held that
+    class's method live, and the negative arm - an identically shaped class
+    nothing mentions - stayed dead, so the receiver's spelling was the whole
+    cause.
+
+    The three ``*_bound_*`` facts are that missing proof, resolved by the
+    lexical pass in the scope each load is written in. A receiver whose
+    binding is not proven contributes nothing here; its ATTRIBUTE name is
+    already a bare-name signal (``_collect_load_reference_node``), so the
+    symbol abstains as ``ambiguous_internal_binding`` instead of being called
+    live. That backstop is what makes tightening safe in this lane: refusing
+    unproven evidence here moves a symbol from LIVE to UNRESOLVED, never to
+    DEAD.
+    """
     top_level_class_by_name = {
         class_qualname: class_qualname
         for class_qualname, _class_node in collector.class_nodes
@@ -2598,23 +2837,21 @@ def _resolve_referenced_qualnames(
 
     resolved: set[str] = set()
     for name_node in state.name_nodes:
-        for qualname in state.imported_symbol_bindings.get(name_node.id, ()):
-            resolved.add(qualname)
+        if name_node.id in import_bound_names:
+            resolved.update(state.imported_symbol_bindings.get(name_node.id, ()))
 
     for attr_node in state.attr_nodes:
-        base = attr_node.value
-        if isinstance(base, ast.Name):
-            imported_module = state.imported_module_aliases.get(base.id)
-            if imported_module is not None:
-                resolved.add(f"{imported_module}:{attr_node.attr}")
-            else:
-                class_qualname = top_level_class_by_name.get(base.id)
-                if class_qualname is not None:
-                    local_method_qualname = (
-                        f"{module_name}:{class_qualname}.{attr_node.attr}"
-                    )
-                    if local_method_qualname in local_method_qualnames:
-                        resolved.add(local_method_qualname)
+        qualname = _proven_attribute_reference(
+            attr_node,
+            module_name=module_name,
+            state=state,
+            top_level_class_by_name=top_level_class_by_name,
+            local_method_qualnames=local_method_qualnames,
+            import_bound_attributes=import_bound_attributes,
+            definition_bound_attributes=definition_bound_attributes,
+        )
+        if qualname is not None:
+            resolved.add(qualname)
 
     # No ``__all__`` arm here, by liveness policy v4 (RULING 2026-09-01,
     # corrected 2026-09-03): a static ``__all__`` member used to be folded in
@@ -2648,11 +2885,51 @@ def _resolve_referenced_qualnames(
         collector=collector,
         state=state,
         local_top_level_names=local_top_level_names,
+        proven_decorator_roots=proven_decorator_roots,
     )
     resolved.update(external_decorator_roots)
     state.liveness_root_reasons.update(external_decorator_roots)
 
     return frozenset(resolved)
+
+
+def _proven_attribute_reference(
+    attr_node: ast.Attribute,
+    *,
+    module_name: str,
+    state: _ModuleWalkState,
+    top_level_class_by_name: Mapping[str, str],
+    local_method_qualnames: frozenset[str],
+    import_bound_attributes: frozenset[tuple[str, str]],
+    definition_bound_attributes: frozenset[tuple[str, str]],
+) -> str | None:
+    """The definition one ``receiver.attr`` load PROVABLY names, if any.
+
+    Both arms keep the target map they always read - the module-wide import
+    aliases, the top-level classes of this module - and gain the binding
+    proof in front of it, so the change is subtractive only. A receiver
+    proven to bind a NESTED class would resolve here too and is deliberately
+    left out: admitting it would ADD liveness, which is a widening and a
+    separate decision, not this correction.
+    """
+
+    base = attr_node.value
+    if not isinstance(base, ast.Name):
+        return None
+    pair = (base.id, attr_node.attr)
+    if pair in import_bound_attributes:
+        imported_module = state.imported_module_aliases.get(base.id)
+        if imported_module is not None:
+            return f"{imported_module}:{attr_node.attr}"
+    if pair not in definition_bound_attributes:
+        return None
+    class_qualname = top_level_class_by_name.get(base.id)
+    if class_qualname is None:
+        return None
+    local_method_qualname = f"{module_name}:{class_qualname}.{attr_node.attr}"
+    if local_method_qualname not in local_method_qualnames:
+        return None
+    return local_method_qualname
 
 
 def _resolve_star_import_bound_qualnames(
@@ -2704,6 +2981,7 @@ def _collect_external_decorator_root_reasons(
     collector: _qualnames.QualnameCollector,
     state: _ModuleWalkState,
     local_top_level_names: frozenset[str],
+    proven_decorator_roots: frozenset[tuple[str, str]],
 ) -> dict[str, _LocalLivenessRootReason]:
     hook_marker_aliases = _resolve_hook_marker_aliases(state)
     overload_aliases = frozenset(state.non_runtime_decorator_aliases)
@@ -2720,8 +2998,24 @@ def _collect_external_decorator_root_reasons(
             local_top_level_names=local_top_level_names,
             hook_marker_aliases=hook_marker_aliases,
             overload_aliases=overload_aliases,
+            proven_roots=proven_roots_for(proven_decorator_roots, local_name),
         )
     }
+
+
+def proven_roots_for(
+    proven_decorator_roots: frozenset[tuple[str, str]],
+    path: str,
+) -> frozenset[str]:
+    """The decorator root names proven to bind a module object for ``path``.
+
+    The walk keys the proof by the definition's module-local lexical path,
+    which for a module-level function or a class-body method is the same
+    string the qualname collector uses, and for a function-local definition
+    is the ``<locals>`` path the nested population is keyed by. One join, two
+    call sites.
+    """
+    return frozenset(root for owner, root in proven_decorator_roots if owner == path)
 
 
 def _external_decorator_roots_function(
@@ -2732,6 +3026,7 @@ def _external_decorator_roots_function(
     local_top_level_names: frozenset[str],
     hook_marker_aliases: frozenset[str],
     overload_aliases: frozenset[str],
+    proven_roots: frozenset[str] = frozenset(),
 ) -> bool:
     """The external-decorator root rule for one function, any lexical depth.
 
@@ -2747,10 +3042,15 @@ def _external_decorator_roots_function(
         return False
     return _has_external_decorator(
         function_node,
-        external_symbol_aliases=set(external_symbol_aliases),
-        external_module_aliases=set(external_module_aliases),
+        external_symbol_aliases=external_symbol_aliases,
+        external_module_aliases=external_module_aliases,
         local_top_level_names=local_top_level_names,
-    ) or _has_hook_marker_decorator(function_node, hook_marker_aliases)
+        proven_roots=proven_roots,
+    ) or _has_hook_marker_decorator(
+        function_node,
+        hook_marker_aliases,
+        proven_roots=proven_roots,
+    )
 
 
 def _class_base_expr_name(node: ast.expr) -> str | None:
@@ -2863,6 +3163,8 @@ def _decorator_evidence_marker(decorator: ast.expr) -> str | None:
 def _has_hook_marker_decorator(
     node: _qualnames.FunctionNode,
     hook_marker_aliases: frozenset[str],
+    *,
+    proven_roots: frozenset[str] = frozenset(),
 ) -> bool:
     """Whether a decorator expression IS a proven hook marker alias.
 
@@ -2870,11 +3172,16 @@ def _has_hook_marker_decorator(
     and ``@hookimpl(tryfirst=True)`` both fire while an attribute path rooted
     at a marker alias does not - the proof covers the marker object itself,
     nothing reached through it.
+
+    The alias map proves what a MODULE-LEVEL assignment bound; ``proven_roots``
+    proves that this decorator's name still binds that object where the
+    decorator is written. Both halves are required: the map alone let a
+    parameter spelling the marker's name root the definition it decorated.
     """
     if not hook_marker_aliases:
         return False
     return any(
-        _decorator_expr_name(decorator) in hook_marker_aliases
+        _decorator_expr_name(decorator) in hook_marker_aliases & proven_roots
         for decorator in node.decorator_list
     )
 
@@ -2882,20 +3189,28 @@ def _has_hook_marker_decorator(
 def _has_external_decorator(
     node: _qualnames.FunctionNode,
     *,
-    external_symbol_aliases: set[str],
-    external_module_aliases: set[str],
+    external_symbol_aliases: frozenset[str],
+    external_module_aliases: frozenset[str],
     local_top_level_names: frozenset[str],
+    proven_roots: frozenset[str] = frozenset(),
 ) -> bool:
-    for decorator in node.decorator_list:
-        name = _decorator_expr_name(decorator)
-        if name is None:
-            continue
-        root_name = name.partition(".")[0]
-        if root_name in local_top_level_names:
-            continue
-        if root_name in external_symbol_aliases or root_name in external_module_aliases:
-            return True
-    return False
+    """Whether an import this analyzer cannot follow decorates the definition.
+
+    ``proven_roots`` is the binding half of the claim. The alias sets are
+    module-wide facts about what an import resolved to; on their own they let
+    any name that merely SPELLS an alias root a definition - measured on a
+    nested definition whose decorator root was a parameter of the enclosing
+    function, which was rooted live exactly as if the module alias had been
+    used. The root must bind the module object here, not only elsewhere.
+    """
+    admissible = (proven_roots - local_top_level_names) & (
+        external_symbol_aliases | external_module_aliases
+    )
+    return any(
+        name is not None and name.partition(".")[0] in admissible
+        for decorator in node.decorator_list
+        if (name := _decorator_expr_name(decorator)) is not None
+    )
 
 
 class _ModuleWalkResult(NamedTuple):
@@ -2940,6 +3255,12 @@ class _ModuleWalkResult(NamedTuple):
     external_module_aliases: frozenset[str]
     hook_marker_aliases: frozenset[str]
     local_top_level_names: frozenset[str]
+    #: Liveness policy v5, same generation: ``(definition path, decorator
+    #: root name)`` for every decorator whose root PROVABLY binds the
+    #: module-level object the alias facts above describe. The alias sets say
+    #: what an import resolved to; only this says the decorator's name still
+    #: means that object where it is written.
+    proven_decorator_roots: frozenset[tuple[str, str]]
     #: Liveness policy v5: module-local lexical path -> the proven
     #: opaque-escape flow of the definition's value, sorted.
     escape_witnesses: tuple[tuple[str, str], ...]
@@ -3176,6 +3497,10 @@ def _collect_module_walk_data(
             collector=collector,
             state=state,
             lexical_binding_paths=lexical.bound_definition_paths,
+            import_bound_names=lexical.import_bound_names,
+            import_bound_attributes=lexical.import_bound_attributes,
+            definition_bound_attributes=lexical.definition_bound_attributes,
+            proven_decorator_roots=lexical.proven_decorator_roots,
         )
         if collect_referenced_names
         else frozenset()
@@ -3228,6 +3553,7 @@ def _collect_module_walk_data(
         external_module_aliases=frozenset(state.external_module_aliases),
         hook_marker_aliases=_resolve_hook_marker_aliases(state),
         local_top_level_names=local_top_level_names,
+        proven_decorator_roots=lexical.proven_decorator_roots,
         escape_witnesses=tuple(sorted(lexical.escape_witnesses.items())),
     )
 
@@ -3324,6 +3650,7 @@ def _collect_nested_definitions(
     local_top_level_names: frozenset[str],
     self_dispatched_by_class: Mapping[str, frozenset[str]],
     escape_witnesses: Mapping[str, str] | None = None,
+    proven_decorator_roots: frozenset[tuple[str, str]],
 ) -> tuple[NestedDefinition, ...]:
     """The nested population, judged by the rules its module-level twin gets.
 
@@ -3383,6 +3710,9 @@ def _collect_nested_definitions(
                 local_top_level_names=local_top_level_names,
                 hook_marker_aliases=hook_marker_aliases,
                 overload_aliases=non_runtime_decorator_aliases,
+                proven_roots=proven_roots_for(
+                    proven_decorator_roots, declaration.path
+                ),
             ):
                 live_root_reason = LIVENESS_EXTERNAL_DECORATOR
             if declaration.kind == "method":

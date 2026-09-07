@@ -1485,10 +1485,23 @@ dynamic = factory().attr
         else:
             module_walk_mod._collect_load_reference_node(node=node, state=state)
 
+    # The binding proof is not optional: every arm below reads an owner off a
+    # name, and each may do so only where the lexical pass proved what that
+    # name binds AT THE LOAD SITE. The facts come from the same tree, which is
+    # what the walk does.
+    lexical = module_walk_mod._collect_lexical_binding_facts(
+        tree,
+        settled_import_names=frozenset(state.internal_import_aliases),
+    )
     resolved = module_walk_mod._resolve_referenced_qualnames(
         module_name="pkg.mod",
         collector=collector,
         state=state,
+        lexical_binding_paths=lexical.bound_definition_paths,
+        import_bound_names=lexical.import_bound_names,
+        import_bound_attributes=lexical.import_bound_attributes,
+        definition_bound_attributes=lexical.definition_bound_attributes,
+        proven_decorator_roots=lexical.proven_decorator_roots,
     )
     assert "pkg.runtime:handler" in resolved
     assert "pkg.helpers:decorate" in resolved

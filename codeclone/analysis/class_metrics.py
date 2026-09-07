@@ -27,27 +27,33 @@ def _node_line_span(node: ast.AST) -> tuple[int, int] | None:
 
 
 def _self_dispatched_methods(
-    method_calls: dict[str, set[str]],
+    self_dispatched_calls: dict[str, set[str]],
     *,
     module_name: str,
     class_qualname: str,
 ) -> tuple[str, ...]:
     """Qualify the walk's self-call targets for the rule-3 decision table.
 
-    The walk records ``self.<name>()`` only when ``<name>`` is itself a method
-    of the class being walked, so the callee set needs no further filtering:
-    an unrelated class's self-call can never appear here. Qualifying the names
-    with the module prefix makes them comparable to ``DeadCandidate.qualname``.
+    Two halves make row-1 evidence, and this lane used to have only one. The
+    CALLEE half was always checked: the walk records ``self.<name>()`` only
+    when ``<name>`` is itself a method of the class being walked, so an
+    unrelated class's callee can never appear here. The RECEIVER half is
+    ``self_dispatched_calls`` (liveness policy v5, same generation), which
+    admits a call only from a method whose first parameter really is the
+    instance - not a ``@staticmethod`` argument, not a nested function's own
+    ``self`` parameter, not a method that rebinds the name. Qualifying with
+    the module prefix makes the result comparable to
+    ``DeadCandidate.qualname``.
 
-    Methods excluded from the cohesion walk are absent from ``method_calls``
-    and therefore never recorded as dispatched. That direction is deliberate:
+    Methods excluded from the cohesion walk are absent from the map and
+    therefore never recorded as dispatched. That direction is deliberate:
     a missing fact abstains, it never claims liveness without evidence.
     """
     return tuple(
         sorted(
             {
                 f"{module_name}:{class_qualname}.{callee}"
-                for callees in method_calls.values()
+                for callees in self_dispatched_calls.values()
                 for callee in callees
             }
         )
@@ -102,7 +108,7 @@ def _class_metrics_for_node(
         coupled_classes=coupled_classes,
         instantiation_candidates=tuple(sorted(facts.instantiation_candidates)),
         self_dispatched_methods=_self_dispatched_methods(
-            facts.method_calls,
+            facts.self_dispatched_calls,
             module_name=module_name,
             class_qualname=class_qualname,
         ),

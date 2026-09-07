@@ -2058,7 +2058,7 @@ def test_cache_refuses_a_legacy_json_monolith_at_the_cache_path(
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "4.1"
+    assert Cache._CACHE_VERSION == "4.2"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -2073,7 +2073,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     )
     old_cache.save()
 
-    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "4.1"
+    assert _read_cache_meta(cache_path)[META_KEY_VERSION] == "4.2"
     _write_cache_meta(cache_path, **{META_KEY_VERSION: "2.10"})
 
     regenerated = Cache(cache_path, root=tmp_path)
@@ -4187,7 +4187,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     assert "SECURITY_SURFACE_CATALOG_VERSION" in source
     assert "RUNTIME_REACHABILITY_CATALOG_VERSION" in source
     assert "STRUCTURAL_FINDINGS_CATALOG_VERSION" in source
-    assert CACHE_VERSION == "4.1"
+    assert CACHE_VERSION == "4.2"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

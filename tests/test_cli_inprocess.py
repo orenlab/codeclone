@@ -3761,30 +3761,53 @@ golden_fixture_paths = ["tests/fixtures/golden_*"]
     )
 
 
-#: One function whose body is a long chain of same-shaped assignments. Every
-#: six-statement window normalises to the same hash, so the detector reports a
-#: segment clone group, and the report's low-value filter classifies that group
-#: as "too simple" and drops it. Both properties are load-bearing: the tests
-#: below use this one shape to keep the two suppression populations apart.
+#: A statement whose shape matches neither chain, placed BETWEEN the two runs
+#: of each source below so their windows cannot fold into one occurrence.
+_SHAPE_BREAK = "abs"
+
+
+#: One function carrying the same flat assignment chain TWICE. Every
+#: six-statement window inside a run normalises to the same hash, so the
+#: detector reports a segment clone group, and the report's low-value filter
+#: classifies that group as "too simple" and drops it. Both properties are
+#: load-bearing: the tests below use this one shape to keep the two
+#: suppression populations apart.
+#:
+#: The chain is emitted twice rather than once because a clone group names at
+#: least two occurrences. A single contiguous run is one occurrence once
+#: ``merge_overlapping_items`` has folded its overlapping windows, and a group
+#: left naming one item is dropped for not being a group at all -- so a fixture
+#: built from one run reaches neither the low-value filter nor the held
+#: container, and every assertion about them passes or fails vacuously.
 def _low_value_segment_source(func_name: str) -> str:
     lines = [f"def {func_name}(seed: int) -> int:", "    step0 = seed"]
-    lines.extend(
-        f"    step{index} = step{index - 1} + {index}" for index in range(1, 26)
-    )
-    lines.append("    return step25")
+    index = 0
+    for run in range(2):
+        if run:
+            lines.append(f"    step{index} = {_SHAPE_BREAK}(step{index})")
+        for _ in range(25):
+            index += 1
+            lines.append(f"    step{index} = step{index - 1} + {index}")
+    lines.append(f"    return step{index}")
     return "\n".join(lines) + "\n"
 
 
 #: The mirror shape: repeated windows the low-value filter must NOT drop,
 #: because they carry control flow and more than one statement type. It is the
 #: witness that this corpus really produces segment clone groups, so a test
-#: asserting the low-value group is absent cannot pass vacuously.
+#: asserting the low-value group is absent cannot pass vacuously. Emitted as
+#: two gap-separated runs for the same reason as the chain above.
 def _surviving_segment_source(func_name: str) -> str:
     lines = [f"def {func_name}(seed: int) -> int:", "    acc = seed"]
-    for index in range(1, 13):
-        lines.append(f"    part{index} = acc + {index}")
-        lines.append(f"    if part{index} > 0:")
-        lines.append(f"        acc = part{index}")
+    index = 0
+    for run in range(2):
+        if run:
+            lines.append(f"    acc = {_SHAPE_BREAK}(acc)")
+        for _ in range(12):
+            index += 1
+            lines.append(f"    part{index} = acc + {index}")
+            lines.append(f"    if part{index} > 0:")
+            lines.append(f"        acc = part{index}")
     lines.append("    return acc")
     return "\n".join(lines) + "\n"
 

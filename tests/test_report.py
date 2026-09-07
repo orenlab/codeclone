@@ -63,8 +63,12 @@ from codeclone.report.segments import (
 from codeclone.report.segments import (
     collect_file_functions as _collect_file_functions,
 )
+from codeclone.report.segments import (
+    merge_segment_items,
+    merge_segment_report_groups,
+    prepare_segment_report_groups,
+)
 from codeclone.report.segments import merge_segment_items as _merge_segment_items
-from codeclone.report.segments import prepare_segment_report_groups
 from codeclone.report.segments import (
     segment_statements as _segment_statements,
 )
@@ -2991,6 +2995,249 @@ def test_segment_groups_merge_overlaps(tmp_path: Path) -> None:
     assert items[1]["end_line"] == 9
 
 
+#: One function whose body carries two identical control-flow runs with a gap
+#: between them.  Used by the arity pins below: the gap is what decides whether
+#: ``merge_overlapping_items`` can fold the two windows into one item, so the
+#: same source carries BOTH boundaries and neither can drift on the other's
+#: fixture.
+_TWO_RUNS_WITH_A_GAP = "\n".join(
+    [
+        "def f():",
+        "    x = 1",
+        "    if x:",
+        "        y = 2",
+        "    z = 3",
+        "    w = 4",
+        "    a = 5",
+        "    if a:",
+        "        b = 6",
+        "    c = 7",
+        "    d = 8",
+        "    e = 9",
+        "    g = 10",
+    ]
+)
+
+#: A body of attribute assignments only — what the low-value filter calls
+#: boilerplate.  Its windows overlap, so before the arity rule the merged
+#: SINGLE item was still handed to the filter and counted as low value.
+_ATTRIBUTE_BOILERPLATE = "\n".join(
+    [
+        "def f():",
+        "    self.a = 1",
+        "    self.b = 2",
+        "    self.c = 3",
+        "    self.d = 4",
+        "    self.e = 5",
+        "    self.g = 6",
+    ]
+)
+
+
+def _segment_window(path: Path, start: int, end: int) -> dict[str, object]:
+    return {
+        "segment_sig": "sig",
+        "segment_hash": "hash",
+        "qualname": "mod:f",
+        "filepath": str(path),
+        "start_line": start,
+        "end_line": end,
+        "size": end - start + 1,
+    }
+
+
+def _segment_group_over(
+    tmp_path: Path, *spans: tuple[int, int]
+) -> dict[str, list[dict[str, object]]]:
+    """One segment group over ``_TWO_RUNS_WITH_A_GAP``, windowed at ``spans``.
+
+    Only the fixture materialisation moves in here. The spans stay at every
+    call site, because they are what decides the boundary under test --
+    ``(2, 6)`` with ``(4, 8)`` folds to one occurrence, ``(2, 6)`` with
+    ``(9, 13)`` cannot -- and a helper that chose them would let one
+    boundary's pin drift along with the other's.
+    """
+
+    source = tmp_path / "a.py"
+    source.write_text(_TWO_RUNS_WITH_A_GAP, "utf-8")
+    return {"seg|mod:f": [_segment_window(source, start, end) for start, end in spans]}
+
+
+def test_a_segment_group_the_merge_collapses_to_one_item_is_not_a_group(
+    tmp_path: Path,
+) -> None:
+    """A contiguous run of windows inside ONE function is one occurrence.
+
+    Measured 2026-09-05 on 21 frozen repositories and re-derived 2026-09-07
+    through the producer's own path on click: ``build_segment_groups`` never
+    emits a group of fewer than two windows — it applies ``min_occurrences``
+    twice and again per function — so every group the report published with
+    a single item got there afterwards, when ``merge_overlapping_items``
+    folded a contiguous run and nothing re-checked arity.  The document then
+    told the user "segment clone, consider a shared utility" about ONE
+    occurrence.
+
+    Both fold branches are exercised because they are reached by different
+    comparisons — ``start <= current_end`` for an overlap and
+    ``start == current_end + 1`` for an adjacency — and a pin carrying one
+    would leave the other free to move.
+    """
+    overlapping = _segment_group_over(tmp_path, (2, 6), (4, 8))
+    adjacent = _segment_group_over(tmp_path, (2, 6), (7, 10))
+
+    # Probe validity: both inputs really do fold to one item, so the pins
+    # below are read on a population that exists rather than on an empty one.
+    assert len(merge_segment_items(overlapping["seg|mod:f"])) == 1
+    assert len(merge_segment_items(adjacent["seg|mod:f"])) == 1
+
+    assert prepare_segment_report_groups(overlapping) == ({}, 0)
+    assert prepare_segment_report_groups(adjacent) == ({}, 0)
+
+
+def test_a_gap_separated_segment_group_survives_with_both_occurrences(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: two occurrences the fold cannot join stay.
+
+    Measured on the same 21 repositories: the 67 groups that survived the
+    merge with more than one item were exactly the gap-separated ones. A
+    rule that dropped them too would delete a true clone finding, so the
+    surviving side is pinned beside the removed one and by a different test.
+    """
+    groups = _segment_group_over(tmp_path, (2, 6), (9, 13))
+
+    filtered, low_value = prepare_segment_report_groups(groups)
+    assert list(filtered) == ["seg|mod:f"]
+    assert [
+        (item["start_line"], item["end_line"]) for item in filtered["seg|mod:f"]
+    ] == [
+        (2, 6),
+        (9, 13),
+    ]
+    assert low_value == 0
+
+
+def test_the_policy_held_lane_publishes_no_segment_group_of_one_either(
+    tmp_path: Path,
+) -> None:
+    """The shaping shared by both lanes carries the arity rule.
+
+    ``merge_segment_report_groups`` shapes the lane a user suppression rule
+    withheld, and that lane is published to the user as ``clones.suppressed``.
+    Arity is not the detector's precision filter — it parses nothing and
+    judges nothing — it is what makes a group a group, so it belongs to the
+    shaping both lanes share rather than to the active lane alone.
+    """
+    collapsing = _segment_group_over(tmp_path, (2, 6), (4, 8))
+    surviving = _segment_group_over(tmp_path, (2, 6), (9, 13))
+
+    assert merge_segment_report_groups(collapsing) == {}
+    assert len(merge_segment_report_groups(surviving)["seg|mod:f"]) == 2
+
+
+#: The segment-projection shaping and the cache generation that shipped it,
+#: recorded as ONE fact.
+#:
+#: ``core/pipeline.py`` stores the SHAPED groups under a digest of the RAW
+#: groups, taken before the shaping runs, and serves the stored value back
+#: without calling the shaping again — ``test_pipeline_uses_cached_segment_
+#: report_projection`` in ``tests/test_core_branch_coverage.py`` pins that
+#: with a stub that reds if the cached path ever re-shapes. A key that cannot
+#: see the shaping cannot invalidate what a previous shaping stored, the
+#: stored payload carries only ``{digest, suppressed, groups}`` and no
+#: generation stamp of its own, and ``cache/store.py`` gates reuse on
+#: ``CACHE_VERSION`` alone. So the generation is the only owner left, and the
+#: shaping may not move without it.
+#:
+#: Measured on click @36baa15f, 2026-09-07: a store written by the engine
+#: BEFORE the arity rule and read by the engine AFTER it served 12 segment
+#: groups, 5 of them naming a single occurrence — the defect, republished by
+#: an engine that no longer produces it — while the same engine cold produced
+#: 7 groups and no singleton. Bumping the generation made the warm run
+#: recompute and utter the cold run's findings byte for byte.
+_SEGMENT_PROJECTION_CACHE_CONTRACT = (
+    "4.2",
+    (("collapsed_by_the_merge", 0), ("separated_by_a_gap", 1)),
+)
+
+
+def _segment_shaping_witness(tmp_path: Path) -> tuple[tuple[str, int], ...]:
+    """What the shaping publishes for the two arrangements that decide it."""
+
+    collapsed = _segment_group_over(tmp_path, (2, 6), (4, 8))
+    separated = _segment_group_over(tmp_path, (2, 6), (9, 13))
+    # Probe validity: the two inputs really are the two sides of the rule, so
+    # the witness is read on a population that distinguishes them.
+    assert len(merge_segment_items(collapsed["seg|mod:f"])) == 1
+    assert len(merge_segment_items(separated["seg|mod:f"])) == 2
+    return (
+        ("collapsed_by_the_merge", len(merge_segment_report_groups(collapsed))),
+        ("separated_by_a_gap", len(merge_segment_report_groups(separated))),
+    )
+
+
+def test_the_segment_shaping_cannot_move_without_the_cache_generation(
+    tmp_path: Path,
+) -> None:
+    """The shaping and ``CACHE_VERSION`` are one fact; they move together.
+
+    Deliberately not ``assert CACHE_VERSION == "4.2"`` — that would move the
+    magic number into the test and assert nothing about *why* the generation
+    has that value. The rule asserted here is the pairing, with the shaping
+    re-derived from the live functions rather than retyped, so:
+
+    * changing what the shaping publishes without bumping the generation reds,
+      and that is the silent failure this pairing exists to make impossible —
+      a warm store keeps serving the previous shaping under this build's
+      stamp, and the run looks fast and healthy while it republishes a finding
+      the engine no longer produces;
+    * bumping the generation without touching the shaping also reds, which is
+      intended. A generation bump for any other reason is exactly the moment
+      to confirm that this cached projection is still shaped the way the
+      ledger says, and the confirmation costs one line.
+    """
+
+    live = (CACHE_VERSION, _segment_shaping_witness(tmp_path))
+
+    assert live == _SEGMENT_PROJECTION_CACHE_CONTRACT, (
+        "The segment report projection's shaping and CACHE_VERSION are one "
+        "cache contract: the projection is keyed on a digest taken before the "
+        "shaping, so nothing but the generation can invalidate a store the "
+        "previous shaping wrote. If the shaping changed, bump CACHE_VERSION "
+        "and record the new pair here. If the generation changed for another "
+        f"reason, record the unchanged shaping against it. Live: {live}. "
+        f"Recorded: {_SEGMENT_PROJECTION_CACHE_CONTRACT}."
+    )
+
+
+def test_the_low_value_counter_counts_only_what_reached_the_filter(
+    tmp_path: Path,
+) -> None:
+    """``low_value_segment_groups`` is a precision signal, not an arity one.
+
+    The same input under the two rules gives the counter two different
+    values, which is why it is measured here rather than assumed: a group of
+    one that is ALSO boilerplate used to be counted as a low-value removal.
+    It is now removed one step earlier, for not being a group at all, and the
+    precision counter must not claim it.
+    """
+    source = tmp_path / "a.py"
+    source.write_text(_ATTRIBUTE_BOILERPLATE, "utf-8")
+    collapsing = {
+        "seg|mod:f": [_segment_window(source, 2, 4), _segment_window(source, 3, 5)]
+    }
+
+    # The distinguishing property: this group IS boilerplate, so the filter
+    # would have counted it. Proven by the surviving arrangement of the same
+    # statements, which the filter does count.
+    surviving = {
+        "seg|mod:f": [_segment_window(source, 2, 3), _segment_window(source, 5, 6)]
+    }
+    assert prepare_segment_report_groups(surviving) == ({}, 1)
+
+    assert prepare_segment_report_groups(collapsing) == ({}, 0)
+
+
 def test_segment_groups_suppress_boilerplate(tmp_path: Path) -> None:
     src = "\n".join(
         [
@@ -3000,10 +3247,19 @@ def test_segment_groups_suppress_boilerplate(tmp_path: Path) -> None:
             "    self.c = 3",
             "    self.d = factory()",
             "    self.e = 5",
+            "    pass",
+            "    self.a = 1",
+            "    self.b = 2",
+            "    self.c = 3",
+            "    self.d = factory()",
+            "    self.e = 5",
         ]
     )
     f = tmp_path / "a.py"
     f.write_text(src, "utf-8")
+    # Two occurrences separated by a gap, because a run of windows the
+    # merge folds into one item is no longer a clone group at all and
+    # would never reach the low-value filter this test is about.
     group = {
         "seg|mod:f": [
             {
@@ -3020,8 +3276,8 @@ def test_segment_groups_suppress_boilerplate(tmp_path: Path) -> None:
                 "segment_hash": "hash",
                 "qualname": "mod:f",
                 "filepath": str(f),
-                "start_line": 2,
-                "end_line": 6,
+                "start_line": 8,
+                "end_line": 12,
                 "size": 5,
             },
         ]
@@ -3038,10 +3294,17 @@ def test_segment_groups_keep_call_statement(tmp_path: Path) -> None:
             "    self.x = 1",
             "    init()",
             "    self.y = 2",
+            "    pass",
+            "    self.x = 1",
+            "    init()",
+            "    self.y = 2",
         ]
     )
     f = tmp_path / "a.py"
     f.write_text(src, "utf-8")
+    # Two occurrences separated by a gap, because a run of windows the
+    # merge folds into one item is no longer a clone group at all and
+    # would never reach the low-value filter this test is about.
     group = {
         "seg|mod:f": [
             {
@@ -3058,8 +3321,8 @@ def test_segment_groups_keep_call_statement(tmp_path: Path) -> None:
                 "segment_hash": "hash",
                 "qualname": "mod:f",
                 "filepath": str(f),
-                "start_line": 2,
-                "end_line": 4,
+                "start_line": 6,
+                "end_line": 8,
                 "size": 3,
             },
         ]
@@ -3075,10 +3338,16 @@ def test_segment_groups_suppress_rhs_call_assigns(tmp_path: Path) -> None:
             "def f():",
             "    self.x = init()",
             "    self.y = factory()",
+            "    pass",
+            "    self.x = init()",
+            "    self.y = factory()",
         ]
     )
     f = tmp_path / "a.py"
     f.write_text(src, "utf-8")
+    # Two occurrences separated by a gap, because a run of windows the
+    # merge folds into one item is no longer a clone group at all and
+    # would never reach the low-value filter this test is about.
     group = {
         "seg|mod:f": [
             {
@@ -3095,8 +3364,8 @@ def test_segment_groups_suppress_rhs_call_assigns(tmp_path: Path) -> None:
                 "segment_hash": "hash",
                 "qualname": "mod:f",
                 "filepath": str(f),
-                "start_line": 2,
-                "end_line": 3,
+                "start_line": 5,
+                "end_line": 6,
                 "size": 2,
             },
         ]
@@ -3114,10 +3383,18 @@ def test_segment_groups_keep_control_flow(tmp_path: Path) -> None:
             "    if flag:",
             "        self.b = 2",
             "    self.c = 3",
+            "    pass",
+            "    self.a = 1",
+            "    if flag:",
+            "        self.b = 2",
+            "    self.c = 3",
         ]
     )
     f = tmp_path / "a.py"
     f.write_text(src, "utf-8")
+    # Two occurrences separated by a gap, because a run of windows the
+    # merge folds into one item is no longer a clone group at all and
+    # would never reach the low-value filter this test is about.
     group = {
         "seg|mod:f": [
             {
@@ -3134,8 +3411,8 @@ def test_segment_groups_keep_control_flow(tmp_path: Path) -> None:
                 "segment_hash": "hash",
                 "qualname": "mod:f",
                 "filepath": str(f),
-                "start_line": 2,
-                "end_line": 5,
+                "start_line": 7,
+                "end_line": 10,
                 "size": 4,
             },
         ]
@@ -3151,10 +3428,16 @@ def test_segment_groups_keep_min_unique_types(tmp_path: Path) -> None:
             "def f():",
             "    self.a = 1",
             "    x += 1",
+            "    pass",
+            "    self.a = 1",
+            "    x += 1",
         ]
     )
     f = tmp_path / "a.py"
     f.write_text(src, "utf-8")
+    # Two occurrences separated by a gap, because a run of windows the
+    # merge folds into one item is no longer a clone group at all and
+    # would never reach the low-value filter this test is about.
     group = {
         "seg|mod:f": [
             {
@@ -3171,8 +3454,8 @@ def test_segment_groups_keep_min_unique_types(tmp_path: Path) -> None:
                 "segment_hash": "hash",
                 "qualname": "mod:f",
                 "filepath": str(f),
-                "start_line": 2,
-                "end_line": 3,
+                "start_line": 5,
+                "end_line": 6,
                 "size": 2,
             },
         ]
@@ -3261,6 +3544,9 @@ def test_segment_helpers_cover_edge_cases(tmp_path: Path) -> None:
 
 
 def test_segment_prepare_unknown_paths(tmp_path: Path) -> None:
+    # Two occurrences, gap-separated: the group must be a group before
+    # the filter is asked anything about it, and this test is about what
+    # the filter does when it cannot resolve the source at all.
     group = {
         "seg|mod:f": [
             {
@@ -3271,7 +3557,16 @@ def test_segment_prepare_unknown_paths(tmp_path: Path) -> None:
                 "start_line": 1,
                 "end_line": 2,
                 "size": 2,
-            }
+            },
+            {
+                "segment_sig": "sig",
+                "segment_hash": "hash",
+                "qualname": "",
+                "filepath": "missing.py",
+                "start_line": 11,
+                "end_line": 12,
+                "size": 2,
+            },
         ]
     }
     filtered, low_value = prepare_segment_report_groups(group)
@@ -3299,6 +3594,9 @@ def test_segment_prepare_empty_merge() -> None:
 
 
 def test_segment_prepare_missing_file(tmp_path: Path) -> None:
+    # Two occurrences, gap-separated: the group must be a group before
+    # the filter is asked anything about it, and this test is about what
+    # the filter does when it cannot resolve the source at all.
     group = {
         "seg|mod:f": [
             {
@@ -3309,7 +3607,16 @@ def test_segment_prepare_missing_file(tmp_path: Path) -> None:
                 "start_line": 1,
                 "end_line": 2,
                 "size": 2,
-            }
+            },
+            {
+                "segment_sig": "sig",
+                "segment_hash": "hash",
+                "qualname": "mod:f",
+                "filepath": str(tmp_path / "missing.py"),
+                "start_line": 11,
+                "end_line": 12,
+                "size": 2,
+            },
         ]
     }
     filtered, low_value = prepare_segment_report_groups(group)
@@ -3338,6 +3645,9 @@ def test_segment_prepare_unresolvable_cases(
         f = tmp_path / "a.py"
         f.write_text("def f():\n    x = 1\n", "utf-8")
 
+    # Two occurrences, gap-separated: the group must be a group before
+    # the filter is asked anything about it, and this test is about what
+    # the filter does when it cannot resolve the source at all.
     group = {
         "seg|mod:f": [
             {
@@ -3348,7 +3658,16 @@ def test_segment_prepare_unresolvable_cases(
                 "start_line": start_line,
                 "end_line": end_line,
                 "size": 2,
-            }
+            },
+            {
+                "segment_sig": "sig",
+                "segment_hash": "hash",
+                "qualname": "mod:f",
+                "filepath": str(f),
+                "start_line": start_line + 20,
+                "end_line": end_line + 20,
+                "size": 2,
+            },
         ]
     }
     filtered, low_value = prepare_segment_report_groups(group)

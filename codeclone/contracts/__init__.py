@@ -613,7 +613,28 @@ TIER_STATE_COMPLETE: Final = "complete"
 # It is disposable acceleration state and never truth, so this constant reaches
 # no report, no baseline and no content address: nothing downstream of a run
 # changes value because the cache changed shape.
-CACHE_VERSION: Final = "4.1"
+#
+# 4.1 -> 4.2: the segment report projection is keyed on the digest of the RAW
+# groups, taken BEFORE ``prepare_segment_report_groups``. That function now
+# drops a group the overlap merge collapses to a single occurrence, so a 4.1
+# store holds the OLD shaping of an input whose digest did not move -- the key
+# cannot see the change, and no narrower owner can invalidate it: the stored
+# payload carries only ``{digest, suppressed, groups}`` with no generation
+# stamp of its own, and this constant is the only gate on reuse
+# (``cache/store.py`` refuses a store whose ``v`` differs and accepts every
+# store whose ``v`` matches). Measured on click @36baa15f, 2026-09-07: a store
+# written by the unfixed engine and read by the FIXED one served 12 segment
+# groups, 5 of them naming a single occurrence -- the defect, republished by an
+# engine that no longer produces it -- while the same engine cold produced 7
+# groups and no singleton. The bump is therefore part of the correctness fix
+# and not housekeeping: without it an upgrade in the field keeps emitting the
+# finding until something unrelated happens to invalidate the store.
+#
+# A generation bump and NOT a new axis. A ``SEGMENT_*_REVISION`` would
+# invalidate less, and that economy is exactly what may not be bought here: the
+# projection payload has nowhere to record which generation shaped it, so a
+# narrower constant could not be read back off a stored row at all.
+CACHE_VERSION: Final = "4.2"
 # 3.0 -> 3.1: the ``metrics.families.health.summary.population`` value set
 # changed. "complete" became "complete_nonempty" and "complete_empty" joined
 # it, because one word was carrying two facts — a population that exists and

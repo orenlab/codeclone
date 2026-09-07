@@ -948,6 +948,45 @@ def test_the_endpoint_resolver_reaches_both_domains_and_its_refusal(
         parse_endpoint(index, "nowhere", "e")
 
 
+def test_the_producer_projection_carries_the_registrys_file_less_prefixes(
+    tmp_path: Path,
+) -> None:
+    """The producer path resolves a namespace-package endpoint too.
+
+    Measured 2026-09-07 with the run store enabled, on a tree whose only
+    internal dependency target is an implicit namespace package: the
+    producer-native publication came back ``outcome=failed`` carrying the
+    SAME ``SemanticGrammarError`` the ingest oracle raised, because THIS
+    projection handed the grammar file-bearing pairs alone while
+    ``metrics.dependencies._is_internal_target`` had already called the
+    prefix node internal and emitted the edge to it.
+
+    The projection is extraction, the grammar decides -- but what the two
+    readings EXTRACT must not differ, and only a pin on this side can say
+    so.  Measured on the whole suite: with the prefix argument removed from
+    this projection alone, every other test stayed green.
+    """
+    (tmp_path / "nsp").mkdir()
+    # No __init__.py. That absence is the whole case: it is what makes the
+    # registry publish ``nsp`` as a prefix node instead of an entry.
+    (tmp_path / "nsp" / "leaf.py").write_text('"""Leaf."""\n', "utf-8")
+    (tmp_path / "user.py").write_text("from nsp import leaf\n", "utf-8")
+    registry = build_module_registry(root=tmp_path)
+
+    # Probe validity, before anything is read off the index: the registry
+    # really does publish the prefix node, and really does not carry it as a
+    # file-bearing entry, so the assertions below are read on a case that
+    # exists rather than on an empty one.
+    assert [
+        (prefix.module, prefix.node_kind) for prefix in registry.package_prefixes
+    ] == [("nsp", "namespace_package")]
+
+    index = _identity_index(registry, frozenset({"nsp/leaf.py", "user.py"}))
+    assert "nsp" not in index.module_to_path
+    assert index.prefix_modules == frozenset({"nsp"})
+    assert parse_endpoint(index, "nsp", "dependencies.target") == ModuleId("nsp")
+
+
 def test_the_lane_identity_law_refuses_both_ways(index: IdentityIndex) -> None:
     assert parse_lane_symbol(index, "pkg/a.py", "fn", "risk") == SymbolId(
         FileId("pkg/a.py"), "fn"
