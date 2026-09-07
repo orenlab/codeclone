@@ -27,18 +27,50 @@ def _handle_interactive_help(
     *,
     on_error: Callable[[str], NoReturn],
 ) -> None:
+    """Dispatch ``--help --interactive-help``, and own the tour's interrupt.
+
+    Leaving a tour early is how a reader ends it, not a fault, so Ctrl+C must
+    not read like one.  Nothing on this path used to catch it:
+    ``KeyboardInterrupt`` is a ``BaseException``, so ``main``'s ``except
+    Exception`` envelope never sees it, and the interpreter printed its own
+    stack over the last animation frame -- five files of CodeClone internals
+    shown to somebody who had asked for help.
+
+    The guard sits here rather than inside the tour because this is the
+    boundary of the whole tour: the import, building the console, the first
+    frame before the Live starts, every sleep inside a step, and the gap
+    between steps are all under it.  A guard around the sleep alone would
+    leave the frames either side of it uncovered.  Unwinding is Rich's job
+    and already correct -- ``live_context`` is a context manager, so the Live
+    is torn down and the cursor restored while the exception travels.
+
+    The exit code is ``SUCCESS`` because that is what the product's only
+    other interrupt handler does (``surfaces.mcp.server.main`` returns on
+    ``KeyboardInterrupt``) and because an interrupted help screen is still a
+    help screen: ``--help`` exits 0, and ending it early did not fail
+    anything.  Deliberately NOT 130: that would be a fifth exit code, and the
+    screen right below prints the exit-code contract as a closed list.
+    """
+
     from ..surfaces.cli.ui.help_presenter import (
         help_flag_present,
         interactive_help_requested,
+        print_tour_interrupted,
     )
 
     if not interactive_help_requested(argv):
         return
     if not help_flag_present(argv):
         on_error("--interactive-help must be used with --help")
-    from ..surfaces.cli.ui.help_tour import run_interactive_help_tour
 
-    raise SystemExit(run_interactive_help_tour())
+    try:
+        from ..surfaces.cli.ui.help_tour import run_interactive_help_tour
+
+        exit_code = run_interactive_help_tour()
+    except KeyboardInterrupt:
+        print_tour_interrupted()
+        exit_code = int(ExitCode.SUCCESS)
+    raise SystemExit(exit_code)
 
 
 class _ArgumentParser(argparse.ArgumentParser):
@@ -91,6 +123,16 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 class _HelpFormatter(argparse.RawTextHelpFormatter):
     """Product-oriented help formatter extension point."""
+
+
+# argparse's generated usage spells every one of the sixty-four flags into a
+# bracketed grammar: forty lines, the largest single block on the screen, and
+# a strict subset of the option sections underneath it -- same flags, same
+# metavars, same ``--x | --no-x`` pairs, only unreadable.  It answers "how do
+# I invoke this" no better than one line does, and "which flags exist" worse
+# than the grouped list does.  ``parser.error`` prints the usage too, so a
+# contract error stops burying its own message under forty lines.
+_USAGE = "codeclone [OPTIONS] [root]"
 
 
 def _add_option(
@@ -176,6 +218,7 @@ def _add_option(
 def build_parser(version: str) -> _ArgumentParser:
     parser = _ArgumentParser(
         prog="codeclone",
+        usage=_USAGE,
         description=(
             "Deterministic Structural Change Controller for AI-assisted "
             "Python development."

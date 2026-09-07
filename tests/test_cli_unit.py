@@ -1370,8 +1370,12 @@ def test_cli_help_text_consistency(
     out = capsys.readouterr().out
     expected_parts = (
         "usage: codeclone ",
-        "[--version]",
-        "[-h]",
+        # "[--version]" and "[-h]" only ever existed inside argparse's
+        # generated usage grammar. The usage line now states the invocation
+        # shape and the option sections own the flag inventory, so both are
+        # checked in the form the "General:" section actually prints.
+        "--version",
+        "-h, --help",
         "--interactive-help",
         (
             "Deterministic Structural Change Controller for AI-assisted "
@@ -1416,8 +1420,14 @@ def test_cli_help_text_consistency(
         f"Issues:     {ISSUES_URL}",
         f"Docs:       {DOCS_URL}",
     )
+    # Compared with runs of whitespace collapsed: these are claims about
+    # which facts the screen states, not about where a line happens to wrap.
+    # Held verbatim, the four "If enabled without a value, uses N." rows broke
+    # the moment the help text was re-wrapped to the CLI layout grid, though
+    # every word was still on the screen.
+    flat = " ".join(out.split())
     for expected in expected_parts:
-        assert expected in out
+        assert " ".join(expected.split()) in flat, expected
     assert_contains_none(out, "\x1b[")
 
 

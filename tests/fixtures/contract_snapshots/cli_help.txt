@@ -1,186 +1,152 @@
   o
- /|\  Deterministic structural change control.  CodeClone · structural change control for Python
+ /|\  CodeClone · structural change control for Python
 o o o
 Run `codeclone --help --interactive-help` for a guided product tour.
 
-usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
-                 [--processes PROCESSES] [--changed-only | --no-changed-only]
-                 [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
-                 [--blast-radius FILE [FILE ...]] [--patch-verify]
-                 [--strictness LEVEL] [--session-stats] [--audit]
-                 [--audit-json] [--near-miss] [--renamed-structure]
-                 [--cache-path [FILE]] [--cache-dir [FILE]]
-                 [--max-cache-size-mb MB] [--baseline [FILE]]
-                 [--max-baseline-size-mb MB]
-                 [--update-baseline | --no-update-baseline]
-                 [--semantic-authority | --no-semantic-authority]
-                 [--ci | --no-ci] [--api-surface | --no-api-surface]
-                 [--coverage FILE] [--fail-on-new | --no-fail-on-new]
-                 [--fail-on-new-metrics | --no-fail-on-new-metrics]
-                 [--fail-threshold MAX_CLONES] [--fail-complexity [CC_MAX]]
-                 [--fail-coupling [CBO_MAX]] [--fail-cohesion [LCOM4_MAX]]
-                 [--fail-cycles | --no-fail-cycles]
-                 [--fail-dead-code | --no-fail-dead-code]
-                 [--fail-on-unresolved-dead-code | --no-fail-on-unresolved-dead-code]
-                 [--fail-on-truncated-run | --no-fail-on-truncated-run]
-                 [--fail-health [SCORE_MIN]]
-                 [--fail-on-typing-regression | --no-fail-on-typing-regression]
-                 [--fail-on-docstring-regression | --no-fail-on-docstring-regression]
-                 [--fail-on-api-break | --no-fail-on-api-break]
-                 [--fail-on-authority-violation | --no-fail-on-authority-violation]
-                 [--fail-on-untested-hotspots | --no-fail-on-untested-hotspots]
-                 [--min-typing-coverage PERCENT]
-                 [--min-docstring-coverage PERCENT] [--coverage-min PERCENT]
-                 [--skip-metrics | --no-skip-metrics]
-                 [--skip-dead-code | --no-skip-dead-code]
-                 [--dead-code-world {open,closed}]
-                 [--skip-dependencies | --no-skip-dependencies]
-                 [--html [FILE]] [--json [FILE]] [--md [FILE]]
-                 [--sarif [FILE]] [--text [FILE]]
-                 [--timestamped-report-paths | --no-timestamped-report-paths]
-                 [--open-html-report | --no-open-html-report] [--no-progress]
-                 [--progress] [--no-color] [--color] [--quiet | --no-quiet]
-                 [--verbose | --no-verbose] [--debug | --no-debug] [-h]
-                 [--interactive-help] [--version]
-                 [root]
+usage: codeclone [OPTIONS] [root]
 
 Deterministic Structural Change Controller for AI-assisted Python development.
 
 Target:
-  root                  Project root directory to scan.
-                        Defaults to the current directory.
+  root                  Project root directory to scan. Defaults to the current
+                        directory.
 
 Analysis:
   --min-loc MIN_LOC     Minimum Lines of Code (LOC) required for clone analysis.
                         Default: 10.
-  --min-stmt MIN_STMT   Minimum top-level statements in the function body required for
-                        clone analysis. Statements nested inside them are not counted.
-                        Default: 6.
+  --min-stmt MIN_STMT   Minimum top-level statements in the function body
+                        required for clone analysis. Statements nested inside
+                        them are not counted. Default: 6.
   --processes PROCESSES
-                        Number of parallel worker processes.
-                        Default: 4.
+                        Number of parallel worker processes. Default: 4.
   --changed-only, --no-changed-only
-                        Limit clone gating and changed-scope summaries to findings that touch
-                        files from a git diff selection.
+                        Limit clone gating and changed-scope summaries to
+                        findings that touch files from a git diff selection.
   --diff-against GIT_REF
                         Resolve changed files from `git diff --name-only <REF>`.
                         Use together with --changed-only.
   --paths-from-git-diff GIT_REF
-                        Shorthand for --changed-only using `git diff --name-only <REF>`.
-                        Useful for PR and CI review flows.
+                        Shorthand for --changed-only using `git diff --name-only
+                        <REF>`. Useful for PR and CI review flows.
   --blast-radius FILE [FILE ...]
-                        Show structural blast radius for the given files.
-                        Runs analysis first, then projects dependents, clone cohorts,
+                        Show structural blast radius for the given files. Runs
+                        analysis first, then projects dependents, clone cohorts,
                         risk signals, and do-not-touch boundaries.
-  --patch-verify        Verify the current patch against the trusted baseline budget.
-                        Runs analysis, checks baseline-relative regressions and gate status, then exits.
-  --strictness LEVEL    Strictness profile for --patch-verify: ci, strict, or relaxed.
-                        Default: ci.
-  --session-stats       Show workspace session status: active agents, intents, lease health.
-                        Read-only, does not run analysis.
-  --audit               Show local Controller audit trail from the configured audit database.
-                        Read-only, does not run analysis.
-  --audit-json          Output audit payload footprint as JSON.
-                        Implies --audit. Useful for cross-repository comparison.
-  --near-miss           Report near-miss clone pairs: functions whose normalized statement
-                        sequences differ by exactly one statement.
+  --patch-verify        Verify the current patch against the trusted baseline
+                        budget. Runs analysis, checks baseline-relative
+                        regressions and gate status, then exits.
+  --strictness LEVEL    Strictness profile for --patch-verify: ci, strict, or
+                        relaxed. Default: ci.
+  --session-stats       Show workspace session status: active agents, intents,
+                        lease health. Read-only, does not run analysis.
+  --audit               Show local Controller audit trail from the configured
+                        audit database. Read-only, does not run analysis.
+  --audit-json          Output audit payload footprint as JSON. Implies --audit.
+                        Useful for cross-repository comparison.
+  --near-miss           Report near-miss clone pairs: functions whose normalized
+                        statement sequences differ by exactly one statement.
                         Advisory only; never enters clone gates or the baseline.
-  --renamed-structure   Report renamed-structure clone groups: functions identical up to a
-                        bijective, consistent renaming of locals and receiver attributes.
-                        Advisory only; never enters clone gates or the baseline.
-  --cache-path [FILE]   Path to the cache file.
-                        If FILE is omitted, uses <root>/.codeclone/db/cache.sqlite3.
+  --renamed-structure   Report renamed-structure clone groups: functions
+                        identical up to a bijective, consistent renaming of
+                        locals and receiver attributes. Advisory only; never
+                        enters clone gates or the baseline.
+  --cache-path [FILE]   Path to the cache file. If FILE is omitted, uses
+                        <root>/.codeclone/db/cache.sqlite3.
   --cache-dir [FILE]    Legacy alias for --cache-path.
-                        Prefer --cache-path in new configurations.
   --max-cache-size-mb MB
-                        Maximum cache file size in MB.
-                        Default: 256.
+                        Maximum cache file size in MB. Default: 256.
 
 Baselines and CI:
-  --baseline [FILE]     Path to the clone baseline.
-                        If FILE is omitted, uses codeclone.baseline.json.
+  --baseline [FILE]     Path to the clone baseline. If FILE is omitted, uses
+                        codeclone.baseline.json.
   --max-baseline-size-mb MB
-                        Maximum allowed baseline size in MB.
-                        Default: 5.
+                        Maximum allowed baseline size in MB. Default: 5.
   --update-baseline, --no-update-baseline
                         Overwrite the clone baseline with current results.
                         Disabled by default.
   --semantic-authority, --no-semantic-authority
-                        Collect report-only semantic authority candidates and provenance facts.
-                        Disabled by default.
-  --ci, --no-ci         Enable CI preset.
-                        Equivalent to: --fail-on-new --no-color --quiet.
-                        When a trusted metrics baseline is available, CI mode also enables
-                        metrics regression gating.
+                        Collect report-only semantic authority candidates and
+                        provenance facts. Disabled by default.
+  --ci, --no-ci         Enable CI preset. Equivalent to: --fail-on-new
+                        --no-color --quiet. When a trusted metrics baseline is
+                        available, CI mode also enables metrics regression
+                        gating.
   --api-surface, --no-api-surface
-                        Collect public API surface facts for baseline-aware compatibility review.
-                        Disabled by default.
-  --coverage FILE       Join external Cobertura XML line coverage to function spans.
-                        Pass a `coverage xml` report path.
+                        Collect public API surface facts for baseline-aware
+                        compatibility review. Disabled by default.
+  --coverage FILE       Join external Cobertura XML line coverage to function
+                        spans. Pass a `coverage xml` report path.
 
 Quality gates:
   --fail-on-new, --no-fail-on-new
-                        Exit with code 3 if NEW clone findings not present in the baseline
-                        are detected.
+                        Exit with code 3 if NEW clone findings not present in
+                        the baseline are detected.
   --fail-on-new-metrics, --no-fail-on-new-metrics
-                        Exit with code 3 if new metrics violations appear relative to the
-                        metrics baseline.
-  --fail-threshold MAX_CLONES
-                        Exit with code 3 if the total number of function + block clone groups
-                        exceeds this value.
-                        Disabled unless set.
-  --fail-complexity [CC_MAX]
-                        Exit with code 3 if any function exceeds the cyclomatic complexity
-                        threshold.
-                        If enabled without a value, uses 20.
-  --fail-coupling [CBO_MAX]
-                        Exit with code 3 if any class exceeds the coupling threshold.
-                        If enabled without a value, uses 10.
-  --fail-cohesion [LCOM4_MAX]
-                        Exit with code 3 if any class exceeds the cohesion threshold.
-                        If enabled without a value, uses 4.
-  --fail-cycles, --no-fail-cycles
-                        Exit with code 3 if circular module dependencies are detected.
-  --fail-dead-code, --no-fail-dead-code
-                        Exit with code 3 if high-confidence dead code is detected.
-  --fail-on-unresolved-dead-code, --no-fail-on-unresolved-dead-code
-                        Exit with code 3 if any symbol is an unresolved external override.
-                        These are abstentions, not findings: a public method whose class inherits from a base outside the analysis root, with no evidence either way. Off by default, and never counted as dead code.
-  --fail-on-truncated-run, --no-fail-on-truncated-run
-                        Exit with code 3 if the run could not read every file it found.
-                        Files lost to a dead worker, a permission fault or an unreadable
-                        encoding leave metrics measured over an incomplete population.
-                        Off by default; publishing a baseline from such a run is refused
-                        unconditionally either way.
-  --fail-health [SCORE_MIN]
-                        Exit with code 3 if the overall health score falls below the threshold.
-                        If enabled without a value, uses 60.
-  --fail-on-typing-regression, --no-fail-on-typing-regression
-                        Exit with code 3 if typing adoption coverage regresses relative to the
-                        metrics baseline.
-  --fail-on-docstring-regression, --no-fail-on-docstring-regression
-                        Exit with code 3 if public docstring coverage regresses relative to the
-                        metrics baseline.
-  --fail-on-api-break, --no-fail-on-api-break
-                        Exit with code 3 if public API removals or signature breaks are detected
+                        Exit with code 3 if new metrics violations appear
                         relative to the metrics baseline.
+  --fail-threshold MAX_CLONES
+                        Exit with code 3 if the total number of function + block
+                        clone groups exceeds this value. Disabled unless set.
+  --fail-complexity [CC_MAX]
+                        Exit with code 3 if any function exceeds the cyclomatic
+                        complexity threshold. If enabled without a value, uses
+                        20.
+  --fail-coupling [CBO_MAX]
+                        Exit with code 3 if any class exceeds the coupling
+                        threshold. If enabled without a value, uses 10.
+  --fail-cohesion [LCOM4_MAX]
+                        Exit with code 3 if any class exceeds the cohesion
+                        threshold. If enabled without a value, uses 4.
+  --fail-cycles, --no-fail-cycles
+                        Exit with code 3 if circular module dependencies are
+                        detected.
+  --fail-dead-code, --no-fail-dead-code
+                        Exit with code 3 if high-confidence dead code is
+                        detected.
+  --fail-on-unresolved-dead-code, --no-fail-on-unresolved-dead-code
+                        Exit with code 3 if any symbol is an unresolved external
+                        override. These are abstentions, not findings: a public
+                        method whose class inherits from a base outside the
+                        analysis root, with no evidence either way. Off by
+                        default, and never counted as dead code.
+  --fail-on-truncated-run, --no-fail-on-truncated-run
+                        Exit with code 3 if the run could not read every file it
+                        found. Files lost to a dead worker, a permission fault
+                        or an unreadable encoding leave metrics measured over an
+                        incomplete population. Off by default; publishing a
+                        baseline from such a run is refused unconditionally
+                        either way.
+  --fail-health [SCORE_MIN]
+                        Exit with code 3 if the overall health score falls below
+                        the threshold. If enabled without a value, uses 60.
+  --fail-on-typing-regression, --no-fail-on-typing-regression
+                        Exit with code 3 if typing adoption coverage regresses
+                        relative to the metrics baseline.
+  --fail-on-docstring-regression, --no-fail-on-docstring-regression
+                        Exit with code 3 if public docstring coverage regresses
+                        relative to the metrics baseline.
+  --fail-on-api-break, --no-fail-on-api-break
+                        Exit with code 3 if public API removals or signature
+                        breaks are detected relative to the metrics baseline.
   --fail-on-authority-violation, --no-fail-on-authority-violation
-                        Exit with code 3 if a governed semantic contract has an authority violation.
-                        Requires a reviewed [[tool.codeclone.authority]] registry entry.
+                        Exit with code 3 if a governed semantic contract has an
+                        authority violation. Requires a reviewed
+                        [[tool.codeclone.authority]] registry entry.
   --fail-on-untested-hotspots, --no-fail-on-untested-hotspots
-                        Exit with code 3 if medium/high-risk functions measured by Coverage Join
-                        fall below the joined coverage threshold.
-                        Requires --coverage.
+                        Exit with code 3 if medium/high-risk functions measured
+                        by Coverage Join fall below the joined coverage
+                        threshold. Requires --coverage.
   --min-typing-coverage PERCENT
-                        Exit with code 3 if parameter typing coverage falls below the threshold.
-                        Threshold is a whole percent from 0 to 100.
+                        Exit with code 3 if parameter typing coverage falls
+                        below the threshold. Threshold is a whole percent from 0
+                        to 100.
   --min-docstring-coverage PERCENT
-                        Exit with code 3 if public docstring coverage falls below the threshold.
-                        Threshold is a whole percent from 0 to 100.
+                        Exit with code 3 if public docstring coverage falls
+                        below the threshold. Threshold is a whole percent from 0
+                        to 100.
   --coverage-min PERCENT
                         Coverage threshold for untested hotspot detection.
-                        Threshold is a whole percent from 0 to 100.
-                        Default: 50.
+                        Threshold is a whole percent from 0 to 100. Default: 50.
 
 Analysis stages:
   --skip-metrics, --no-skip-metrics
@@ -188,24 +154,25 @@ Analysis stages:
   --skip-dead-code, --no-skip-dead-code
                         Skip dead code detection.
   --dead-code-world {open,closed}
-                        World contract for dead-code verdicts.
-                        open (default): a symbol consumers outside the repository could reach is
-                        never asserted dead on internal evidence alone; it is reported as
-                        unresolved. closed: every consumer is inside the repository.
+                        World contract for dead-code verdicts. open (default): a
+                        symbol consumers outside the repository could reach is
+                        never asserted dead on internal evidence alone; it is
+                        reported as unresolved. closed: every consumer is inside
+                        the repository.
   --skip-dependencies, --no-skip-dependencies
                         Skip dependency graph analysis.
 
 Reporting:
-  --html [FILE]         Generate an HTML report.
-                        If FILE is omitted, writes to .codeclone/report.html.
-  --json [FILE]         Generate the canonical JSON report.
-                        If FILE is omitted, writes to .codeclone/report.json.
-  --md [FILE]           Generate a Markdown report.
-                        If FILE is omitted, writes to .codeclone/report.md.
-  --sarif [FILE]        Generate a SARIF 2.1.0 report.
-                        If FILE is omitted, writes to .codeclone/report.sarif.
-  --text [FILE]         Generate a plain-text report.
-                        If FILE is omitted, writes to .codeclone/report.txt.
+  --html [FILE]         Generate an HTML report. If FILE is omitted, writes to
+                        .codeclone/report.html.
+  --json [FILE]         Generate the canonical JSON report. If FILE is omitted,
+                        writes to .codeclone/report.json.
+  --md [FILE]           Generate a Markdown report. If FILE is omitted, writes
+                        to .codeclone/report.md.
+  --sarif [FILE]        Generate a SARIF 2.1.0 report. If FILE is omitted,
+                        writes to .codeclone/report.sarif.
+  --text [FILE]         Generate a plain-text report. If FILE is omitted, writes
+                        to .codeclone/report.txt.
   --timestamped-report-paths, --no-timestamped-report-paths
                         Append a UTC timestamp to default report filenames.
                         Applies only to report flags passed without FILE.
@@ -214,21 +181,21 @@ Output and UI:
   --open-html-report, --no-open-html-report
                         Open the generated HTML report in the default browser.
                         Requires --html.
-  --no-progress         Disable progress output.
-                        Recommended for CI logs.
+  --no-progress         Disable progress output. Recommended for CI logs.
   --progress            Force-enable progress output.
   --no-color            Disable ANSI colors.
   --color               Force-enable ANSI colors.
-  --quiet, --no-quiet   Reduce output to warnings, errors, and essential summaries.
+  --quiet, --no-quiet   Reduce output to warnings, errors, and essential
+                        summaries.
   --verbose, --no-verbose
                         Include detailed identifiers for NEW clone findings.
-  --debug, --no-debug   Print debug details for internal errors, including traceback and
-                        environment information.
+  --debug, --no-debug   Print debug details for internal errors, including
+                        traceback and environment information.
 
 General:
   -h, --help            Show this help message and exit.
-  --interactive-help    Open the guided CodeClone product tour.
-                        Use together with --help in an interactive terminal.
+  --interactive-help    Open the guided CodeClone product tour. Use together
+                        with --help in an interactive terminal.
   --version             Print the CodeClone version and exit.
 
 Exit codes:

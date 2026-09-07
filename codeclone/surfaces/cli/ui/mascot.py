@@ -71,9 +71,19 @@ class Aster:
         return ("",) * top_padding + stripped + ("",) * bottom_padding
 
     def plain_lines(self) -> tuple[str, ...]:
+        """Frame plus its own message -- and nothing about the product.
+
+        This used to append ``product_identity()`` to every caller's message.
+        On ``--help`` that put the idle frame's wording and the product's
+        identity on one line, both saying "structural change control"; on the
+        plain tour it restated the identity under all fifteen steps.  Callers
+        that want the identity pass it as the message (see
+        ``help_presenter.static_help_mascot_lines``).
+        """
+
         frame = self.resolved_frame()
         lines = self._display_lines(frame.lines)
-        body = f"{frame.message}  {product_identity()}"
+        body = frame.message or ""
         if len(lines) >= 2:
             middle = lines[1]
             padded = f"{middle}  {body}" if len(middle) < 24 else body
