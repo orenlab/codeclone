@@ -582,3 +582,126 @@ def test_get_relevant_memory_requires_scope_or_symbols(tmp_path: Path) -> None:
             symbols=(),
             scope_resolved_from="test",
         )
+
+
+def _agent_draft_record(
+    *,
+    record_id: str,
+    payload: dict[str, object],
+) -> MemoryRecord:
+    """Two records identical but for their payload: the laundering comparison.
+
+    Everything the ranking formula reads other than the payload is held equal,
+    so a score difference can only come from the evidence lever under test.
+    """
+    now = current_report_timestamp_utc()
+    return MemoryRecord(
+        id=record_id,
+        project_id="proj-1",
+        identity_key=f"k-{record_id}",
+        type="risk_note",
+        status="draft",
+        confidence="inferred",
+        origin="agent",
+        ingest_source="agent",
+        statement="Measured, X = 42.",
+        summary=None,
+        payload=payload,
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by="agent",
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=None,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+
+
+def test_evidence_reference_buys_no_served_score_or_rung() -> None:
+    """The laundering case: a genuine but irrelevant run reference buys nothing.
+
+    An agent writes "Measured, X = 42", attaches a real run_id that has nothing
+    to do with the claim, and the reference validates -- because the store can
+    only check that the artifact exists, never that it entails the statement.
+    So the record must rank and read exactly as it would with no reference at
+    all. Held equal: type, status, origin, confidence, subjects, scope.
+    """
+    bare = _agent_draft_record(
+        record_id="mem-bare", payload={"subject_path": "pkg/service.py"}
+    )
+    laundered = _agent_draft_record(
+        record_id="mem-laundered",
+        payload={
+            "subject_path": "pkg/service.py",
+            "evidence_status": "validated_reference",
+        },
+    )
+
+    bare_score, bare_summary = _score_scoped_record(bare, evidence_count=0)
+    laundered_score, laundered_summary = _score_scoped_record(
+        laundered, evidence_count=3
+    )
+
+    assert laundered_score == bare_score, (
+        "a valid-but-irrelevant evidence reference moved the served relevance "
+        f"score: {laundered_score} vs {bare_score}"
+    )
+    assert laundered_summary["relevance_score"] == bare_summary["relevance_score"]
+    assert laundered_summary["confidence"] == "inferred"
+    assert bare_summary["confidence"] == "inferred"
+    # The reference is still visible -- unmoved is not the same as hidden.
+    assert laundered_summary["evidence_count"] == 3
+
+
+def test_attested_evidence_without_a_reference_marker_keeps_its_ranking_bonus() -> None:
+    """The opposite boundary: the guard must not be a blanket kill.
+
+    Evidence written by finish(propose_memory=true) carries no evidence_status
+    marker, and its ranking bonus is exactly what it was before typed refs
+    existed. This is what makes "no existing served score moves" true rather
+    than merely asserted -- and it proves the P1 guard is reachable by SOME
+    input and dead for others, not dead for all.
+    """
+    attested = _agent_draft_record(
+        record_id="mem-attested", payload={"subject_path": "pkg/service.py"}
+    )
+    with_evidence, _ = _score_scoped_record(attested, evidence_count=3)
+    without_evidence, _ = _score_scoped_record(attested, evidence_count=0)
+    assert with_evidence == round(without_evidence + 0.06, 4), (
+        "unmarked attested evidence lost its pre-existing ranking bonus: "
+        f"{with_evidence} vs {without_evidence}"
+    )
+
+
+def test_served_summary_distinguishes_attached_from_validated_reference() -> None:
+    """A reader can tell an unchecked ref from one resolved against a real run."""
+    attached = _agent_draft_record(
+        record_id="mem-attached",
+        payload={"subject_path": "pkg/service.py", "evidence_status": "attached"},
+    )
+    validated = _agent_draft_record(
+        record_id="mem-validated",
+        payload={
+            "subject_path": "pkg/service.py",
+            "evidence_status": "validated_reference",
+        },
+    )
+    plain = _agent_draft_record(
+        record_id="mem-plain", payload={"subject_path": "pkg/service.py"}
+    )
+
+    _, attached_summary = _score_scoped_record(attached, evidence_count=1)
+    _, validated_summary = _score_scoped_record(validated, evidence_count=1)
+    _, plain_summary = _score_scoped_record(plain, evidence_count=1)
+
+    assert attached_summary["evidence_status"] == "attached"
+    assert validated_summary["evidence_status"] == "validated_reference"
+    assert "evidence_status" not in plain_summary

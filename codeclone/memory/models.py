@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -30,6 +30,15 @@ from .enums import (
     SubjectRelation,
 )
 from .identity import make_identity_key
+
+#: Payload key marking that a record's evidence rows are agent-asserted
+#: references. Derived-not-backfilled: a record written before typed references
+#: existed carries no marker and reads exactly as it did before.
+EVIDENCE_STATUS_PAYLOAD_KEY: Final = "evidence_status"
+#: References are typed and well formed; nothing checked that the artifact exists.
+EVIDENCE_STATUS_ATTACHED: Final = "attached"
+#: Every run id resolved against a run the server actually holds.
+EVIDENCE_STATUS_VALIDATED: Final = "validated_reference"
 
 UpsertAction = Literal["created", "updated", "unchanged", "skipped"]
 NonEmptyStr = Annotated[str, Field(min_length=1)]
@@ -91,6 +100,33 @@ class MemorySubject:
     subject_kind: SubjectKind
     subject_key: str
     relation: SubjectRelation = "about"
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceRef:
+    """A typed pointer at an artifact CodeClone produced. Existence, not entailment.
+
+    The store can check that ``run_id`` names a run it actually holds and that
+    the shape is well formed. It cannot check that the artifact *supports* the
+    statement the record makes, and nothing downstream may read it as if it
+    could: a valid evidence reference is not evidence that a claim is true.
+    That is the whole reason this is a reference type and not a confidence
+    input -- see ``record_candidate``, which attaches these without ever moving
+    the epistemic rung.
+
+    Owned here, beside ``MemoryEvidence``, because the two are one fact in two
+    forms: this is the reference a caller passes in, that is the row the store
+    writes out. Splitting them across modules to keep a counter flat would buy
+    a number with cohesion. Same shape as every sibling in this module --
+    frozen, slotted -- so a reader meets one idiom, not two.
+    """
+
+    kind: EvidenceKind
+    run_id: str
+    #: execution_event_id, or another locator naming the artifact inside the run.
+    locator: str | None = None
+    #: Optional subject/scope this reference speaks about.
+    subject: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +267,13 @@ class _MemorySubjectInput(_StrictMemoryInput):
     subject_kind: SubjectKind
     subject_key: NonEmptyStr
     relation: SubjectRelation
+
+
+class _EvidenceRefInput(_StrictMemoryInput):
+    kind: EvidenceKind
+    run_id: NonEmptyStr
+    locator: str | None
+    subject: str | None
 
 
 class _MemoryEvidenceInput(_StrictMemoryInput):
@@ -386,6 +429,26 @@ def validate_memory_subject(subject: MemorySubject) -> MemorySubject:
     return subject
 
 
+def validate_evidence_ref(ref: EvidenceRef) -> EvidenceRef:
+    """Structural validation only: known kind, non-empty run id.
+
+    Deliberately says nothing about whether the referenced artifact exists --
+    resolving a run id needs the surface that holds the runs -- and nothing at
+    all about whether it supports the statement.
+    """
+    _validate_input(
+        _EvidenceRefInput,
+        {
+            "kind": ref.kind,
+            "run_id": ref.run_id,
+            "locator": ref.locator,
+            "subject": ref.subject,
+        },
+        entity="evidence_ref",
+    )
+    return ref
+
+
 def validate_memory_evidence(evidence: MemoryEvidence) -> MemoryEvidence:
     _validate_input(
         _MemoryEvidenceInput,
@@ -484,6 +547,22 @@ class RecordBatch:
         return self
 
 
+def resolve_evidence_status(payload: Mapping[str, object] | None) -> str | None:
+    """How this record's evidence was checked, or ``None`` when it carries none.
+
+    Derived from the payload, never backfilled. A record whose evidence rows
+    predate typed references returns ``None`` and keeps serving evidence_count
+    alone, exactly as before. An unrecognised marker value also returns
+    ``None`` rather than being echoed: the served vocabulary is closed.
+    """
+    if not payload:
+        return None
+    value = payload.get(EVIDENCE_STATUS_PAYLOAD_KEY)
+    if value in (EVIDENCE_STATUS_ATTACHED, EVIDENCE_STATUS_VALIDATED):
+        return str(value)
+    return None
+
+
 def payload_json_text(payload: dict[str, object] | None) -> str | None:
     if payload is None:
         return None
@@ -507,6 +586,10 @@ def parse_payload_json(text: str | None) -> dict[str, object] | None:
 
 
 __all__ = [
+    "EVIDENCE_STATUS_ATTACHED",
+    "EVIDENCE_STATUS_PAYLOAD_KEY",
+    "EVIDENCE_STATUS_VALIDATED",
+    "EvidenceRef",
     "IngestionRun",
     "MemoryEvidence",
     "MemoryLink",
@@ -522,6 +605,8 @@ __all__ = [
     "make_identity_key",
     "parse_payload_json",
     "payload_json_text",
+    "resolve_evidence_status",
+    "validate_evidence_ref",
     "validate_ingestion_run",
     "validate_memory_evidence",
     "validate_memory_link",

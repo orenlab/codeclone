@@ -1829,8 +1829,13 @@ def test_amending_an_approved_record_is_refused_at_the_surface(
 ) -> None:
     """Published wording is never edited in place, and the refusal says why.
 
-    The remedy has to name the successor path, or the human is left with a
-    true statement and no way forward.
+    The remedy has to name a route the human can actually take, or they are
+    left with a true statement and no way forward. It used to name "Memory
+    view: Supersede": measured 2026-09-07, that control exists in no surface --
+    `supersede_approved_record` has no production caller, GovernanceDecision
+    carries approve/reject/archive/amend_and_approve, and `supersede` appears
+    nowhere in extensions/ (the same grep finds approve 14, reject 12,
+    archive 1). So the assertion is now on a route that resolves.
     """
     published = "Wording published for other agents to read."
     record_id = governed.draft(published)
@@ -1846,7 +1851,8 @@ def test_amending_an_approved_record_is_refused_at_the_surface(
         governed.prepare(record_id)
     message = str(excinfo.value)
     assert message.startswith(f"{GOVERNANCE_RECORD_IMMUTABLE_CODE}:")
-    assert "supersedes" in message
+    assert "record_candidate" in message
+    assert "Supersede" not in message
     assert governed.settled(record_id)[:2] == ("active", published)
 
 
@@ -1949,3 +1955,194 @@ def test_an_agent_session_cannot_reach_the_governance_channel(
         assert committed["reason"] == "governance_mode_unavailable"
 
         assert agent.settled(record_id) == ("draft", original, 0)
+
+
+def _evidence_kinds(store: object, record_id: str) -> list[str]:
+    rows = store.list_evidence_for_memory(record_id)  # type: ignore[attr-defined]
+    return sorted(row.evidence_kind for row in rows)
+
+
+def test_record_candidate_attaches_a_typed_evidence_reference(tmp_path: Path) -> None:
+    """A typed reference lands as durable evidence the reader can follow."""
+    from codeclone.memory.governance import EvidenceRef
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (_root, project, store):
+        record = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="Ingest refuses two shapes on real code.",
+            subject_path="pkg/mod.py",
+            max_candidates=100,
+            evidence_refs=(
+                EvidenceRef(kind="report", run_id="85c6fe82", locator="exec-1"),
+                EvidenceRef(kind="git_commit", run_id="85c6fe82", subject="pkg/mod.py"),
+            ),
+        )
+        assert store.count_evidence_for_memory(record.id) == 2
+        assert _evidence_kinds(store, record.id) == ["git_commit", "report"]
+        assert (record.payload or {})["evidence_status"] == "attached"
+        # Every ref must be reachable back to the run that produced it.
+        refs = store.list_evidence_for_memory(record.id)
+        assert {row.ref for row in refs} == {"run:85c6fe82"}
+
+
+def test_record_candidate_refuses_free_text_evidence(tmp_path: Path) -> None:
+    """Prose is not a reference. The refusal is typed and executable."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (_root, project, store):
+        with pytest.raises(MemoryContractError) as excinfo:
+            record_candidate(
+                store,
+                project=project,
+                record_type="risk_note",
+                statement="Measured, X = 42.",
+                subject_path="pkg/mod.py",
+                max_candidates=100,
+                # Deliberately wrong: the static type already refuses prose
+                # here, and this pins that the runtime refuses it too -- an
+                # agent reaching the store through an untyped call site must
+                # not be able to launder a sentence as evidence.
+                evidence_refs=("I ran the benchmark and it was faster",),  # type: ignore[arg-type]
+            )
+        message = str(excinfo.value)
+        assert message.startswith("memory_evidence_ref_untyped:")
+        assert "next_step:" in message
+        # Refused before anything was written.
+        assert store.count_records_by_status(project.id, "draft") == 0
+
+
+def test_record_candidate_keeps_the_rung_inferred_however_much_evidence_is_attached(
+    tmp_path: Path,
+) -> None:
+    """The epistemic rung does not rise on this path. Not automatically, not ever.
+
+    Measured on the live store: agent x inferred 1773 with zero exceptions, and
+    1697 agent records approved by a human are all still `inferred`. Attaching
+    evidence must not be the thing that finally forks that field.
+    """
+    from codeclone.memory.governance import EvidenceRef
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (_root, project, store):
+        record = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="Five references do not make a claim true.",
+            subject_path="pkg/mod.py",
+            max_candidates=100,
+            evidence_refs=tuple(
+                EvidenceRef(
+                    kind="report", run_id=f"run{index:05d}", locator=f"loc-{index}"
+                )
+                for index in range(5)
+            ),
+            evidence_validated=True,
+        )
+        assert store.count_evidence_for_memory(record.id) == 5
+        assert record.confidence == "inferred"
+        assert record.origin == "agent"
+        assert record.status == "draft"
+        stored = store.find_record(record.id)
+        assert stored is not None
+        assert stored.confidence == "inferred"
+
+
+def test_mcp_record_candidate_refuses_a_reference_to_an_unknown_run(
+    tmp_path: Path,
+) -> None:
+    """A reference naming a run that does not exist is refused, typed."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        with pytest.raises(MCPServiceContractError) as excinfo:
+            service.manage_engineering_memory(
+                root=str(root.resolve()),
+                action="record_candidate",
+                record_type="risk_note",
+                statement="A claim pointing at nothing.",
+                subject_path="pkg/mod.py",
+                run_id="deadbeefdeadbeef",
+            )
+        message = str(excinfo.value)
+        assert message.startswith("memory_evidence_ref_unknown_run:")
+        assert "analyze_repository" in message
+        assert "next_step:" in message
+
+
+def test_mcp_record_candidate_validates_a_reference_to_a_real_run(
+    tmp_path: Path,
+) -> None:
+    """A run this server actually holds validates; the rung still does not move."""
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        service._runs.register(_memory_test_run_record(root, "memoryrun1234567"))
+        payload = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="record_candidate",
+            record_type="risk_note",
+            statement="Ingest refuses two shapes on real code.",
+            subject_path="pkg/mod.py",
+            run_id="memoryrun1234567",
+        )
+        assert payload["evidence_status"] == "validated_reference"
+        assert payload["evidence_count"] == 1
+        record_id = payload["record_id"]
+        assert isinstance(record_id, str)
+        reopened = service._open_memory_store(root.resolve())[0]
+        try:
+            stored = reopened.find_record(record_id)
+            assert stored is not None
+            # Validated existence, unchanged epistemics.
+            assert stored.confidence == "inferred"
+            assert stored.origin == "agent"
+            assert (stored.payload or {})["evidence_status"] == "validated_reference"
+            rows = reopened.list_evidence_for_memory(record_id)
+            assert [row.ref for row in rows] == ["run:memoryrun1234567"]
+        finally:
+            reopened.close()
+
+
+def test_supersede_refusal_names_a_route_a_human_can_actually_take(
+    tmp_path: Path,
+) -> None:
+    """No typed outcome may name a route that does not exist.
+
+    `supersede_approved_record` has no production caller and no surface reaches
+    it: GovernanceDecision carries approve/reject/archive/amend_and_approve and
+    the MCP action list has no `supersede`. So the refusal must not send a human
+    to a "Memory view: Supersede" control, and the route it does name is proven
+    here by executing it.
+    """
+    from codeclone.memory.governance import assert_record_amendable
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (_root, project, store):
+        approved = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="A published statement.",
+            subject_path="pkg/mod.py",
+            max_candidates=100,
+        )
+        store.update_record_status(approved.id, status="active", approved_by="human")
+        published = store.find_record(approved.id)
+        assert published is not None
+
+        with pytest.raises(MemoryContractError) as excinfo:
+            assert_record_amendable(published)
+        message = str(excinfo.value)
+        assert message.startswith(f"{GOVERNANCE_RECORD_IMMUTABLE_CODE}:")
+        assert "Supersede" not in message, (
+            "the refusal still points at a Memory view control that does not exist"
+        )
+        assert "record_candidate" in message
+
+        # The named route is executable: it runs, here, now.
+        successor = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="The corrected statement.",
+            subject_path="pkg/mod.py",
+            max_candidates=100,
+        )
+        assert successor.status == "draft"

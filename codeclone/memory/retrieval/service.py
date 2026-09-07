@@ -26,7 +26,13 @@ from ..enums import (
 )
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..experience.models import Experience
-from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
+from ..models import (
+    MemoryEvidence,
+    MemoryQuery,
+    MemoryRecord,
+    MemorySubject,
+    resolve_evidence_status,
+)
 from ..paths import (
     MEMORY_RETRIEVAL_SCOPE_REQUIRED_ERROR,
     normalize_memory_scope_path,
@@ -651,6 +657,14 @@ def _serialize_record_summary(
         payload["subjects_truncated"] = len(serialized_subjects) < len(subjects)
         if statement_length > len(statement_value):
             payload["statement_truncated"] = True
+    evidence_status = resolve_evidence_status(record.payload)
+    if evidence_status is not None:
+        # Present only for records carrying agent-asserted references. Both
+        # values mean the same thing about truth -- nothing. "attached" says the
+        # reference is well formed; "validated_reference" says its run id
+        # resolved to a run the server holds. Neither says the artifact supports
+        # the statement, and a reader must not read either as support.
+        payload["evidence_status"] = evidence_status
     marker = resolve_statement_format(record.statement, record.payload)
     if marker is not None:
         # Stamped at write or structurally md-v1 (leading validated '## '

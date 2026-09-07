@@ -24,6 +24,10 @@ from .enums import MemoryRecordType, validate_memory_record_type
 from .exceptions import MemoryCapacityError, MemoryContractError
 from .identity import make_identity_key
 from .models import (
+    EVIDENCE_STATUS_ATTACHED,
+    EVIDENCE_STATUS_PAYLOAD_KEY,
+    EVIDENCE_STATUS_VALIDATED,
+    EvidenceRef,
     MemoryEvidence,
     MemoryLink,
     MemoryProject,
@@ -32,6 +36,8 @@ from .models import (
     MemoryRevision,
     MemorySubject,
     generate_memory_id,
+    resolve_evidence_status,
+    validate_evidence_ref,
 )
 from .paths import normalize_memory_scope_path
 from .project import (
@@ -136,6 +142,10 @@ GOVERNANCE_STALE_AMENDMENT_CODE: Final = "governance_stale_amendment"
 GOVERNANCE_RECORD_IMMUTABLE_CODE: Final = "governance_record_immutable"
 GOVERNANCE_TICKET_MISMATCH_CODE: Final = "governance_ticket_mismatch"
 GOVERNANCE_EMPTY_STATEMENT_CODE: Final = "governance_empty_statement"
+MEMORY_EVIDENCE_REF_UNTYPED_CODE: Final = "memory_evidence_ref_untyped"
+MEMORY_EVIDENCE_REF_INVALID_CODE: Final = "memory_evidence_ref_invalid"
+MEMORY_EVIDENCE_REF_UNKNOWN_RUN_CODE: Final = "memory_evidence_ref_unknown_run"
+
 
 _AMENDABLE_STATUS: Final = "draft"
 
@@ -191,10 +201,20 @@ def assert_record_amendable(record: MemoryRecord) -> None:
     if record.status == _AMENDABLE_STATUS:
         return
     if record.status == "active":
+        # Measured 2026-09-07: `supersede_approved_record` has no production
+        # caller, GovernanceDecision carries approve/reject/archive/
+        # amend_and_approve only, `action="supersede"` answers "Unknown
+        # manage_engineering_memory action", and `supersede` appears nowhere in
+        # extensions/ (same grep finds approve 14, reject 12, archive 1). So the
+        # old wording sent a human to a "Memory view: Supersede" control that
+        # exists in no surface. Every step named here executes today; the linked
+        # successor route stays unnamed until something implements it.
         next_step = (
-            "an approved statement is never edited in place -- record the "
-            "correction as a new candidate linked with 'supersedes' "
-            "(Memory view: Supersede), leaving the published record intact"
+            "an approved statement is never edited in place -- write the "
+            "correction as a new draft with "
+            "manage_engineering_memory(action=record_candidate) and approve it "
+            "in the Memory view, then archive this record there; the published "
+            "statement stays readable either way"
         )
     else:
         next_step = (
@@ -976,6 +996,117 @@ def batch_statement_length_warnings(
     )
 
 
+def _normalize_evidence_refs(
+    refs: object,
+) -> tuple[EvidenceRef, ...]:
+    """Accept typed references; refuse prose, typed, before anything is written.
+
+    Free text is the laundering surface this path exists to close: a sentence
+    can assert anything and be checked against nothing, while a reference names
+    an artifact that either exists or does not. ``str``/``bytes`` are rejected
+    explicitly rather than iterated, because a bare string is itself a sequence
+    and would otherwise decompose into characters.
+    """
+    if refs is None:
+        return ()
+    if isinstance(refs, (str, bytes)) or not isinstance(refs, Sequence):
+        raise MemoryContractError(
+            governance_refusal(
+                MEMORY_EVIDENCE_REF_UNTYPED_CODE,
+                reason=(
+                    "evidence_refs must be a sequence of EvidenceRef, not free text."
+                ),
+                next_step=(
+                    "pass EvidenceRef(kind=..., run_id=..., locator=..., "
+                    "subject=...) naming an artifact a reader can open; prose "
+                    "belongs in the statement"
+                ),
+            )
+        )
+    normalized: list[EvidenceRef] = []
+    for ref in refs:
+        if not isinstance(ref, EvidenceRef):
+            raise MemoryContractError(
+                governance_refusal(
+                    MEMORY_EVIDENCE_REF_UNTYPED_CODE,
+                    reason=(
+                        f"evidence reference {type(ref).__name__} is not an "
+                        "EvidenceRef; free-text evidence is refused."
+                    ),
+                    next_step=(
+                        "pass EvidenceRef(kind=..., run_id=..., locator=..., "
+                        "subject=...) naming an artifact a reader can open; prose "
+                        "belongs in the statement"
+                    ),
+                )
+            )
+        try:
+            normalized.append(validate_evidence_ref(ref))
+        except Exception as exc:
+            raise MemoryContractError(
+                governance_refusal(
+                    MEMORY_EVIDENCE_REF_INVALID_CODE,
+                    reason=f"evidence reference is not well formed: {exc}",
+                    next_step=(
+                        "use a known evidence kind and a non-empty run_id from "
+                        "an analyze_repository response"
+                    ),
+                )
+            ) from exc
+    return tuple(normalized)
+
+
+def _write_evidence_refs(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    memory_id: str,
+    refs: Sequence[EvidenceRef],
+    now: str,
+) -> None:
+    """Persist typed references as ordinary evidence rows.
+
+    ``ref`` carries the run so the row is reachable from the artifact side, and
+    ``locator`` keeps whatever named the artifact inside that run. No digest is
+    invented here: the reference asserts existence, and a digest would read as
+    an attestation this path never performed.
+    """
+    for ref in refs:
+        store.write_evidence(
+            MemoryEvidence(
+                id=generate_memory_id(prefix="evid"),
+                memory_id=memory_id,
+                evidence_kind=ref.kind,
+                ref=f"run:{ref.run_id}",
+                locator=ref.locator or ref.subject,
+                quote=None,
+                digest=None,
+                created_at_utc=now,
+            )
+        )
+
+
+def _candidate_payload(
+    *,
+    subject_path: str,
+    refs: Sequence[EvidenceRef],
+    validated: bool,
+) -> dict[str, object]:
+    """The draft payload, plus the evidence marker when references are attached.
+
+    Absent when there are no references, so every record written before typed
+    refs existed keeps serving exactly what it served before.
+    """
+    payload: dict[str, object] = {
+        "subject_path": subject_path,
+        STATEMENT_FORMAT_PAYLOAD_KEY: STATEMENT_FORMAT_MD,
+    }
+    if refs:
+        payload[EVIDENCE_STATUS_PAYLOAD_KEY] = (
+            EVIDENCE_STATUS_VALIDATED if validated else EVIDENCE_STATUS_ATTACHED
+        )
+    return payload
+
+
 def _new_draft_record(
     *,
     project: MemoryProject,
@@ -1033,8 +1164,22 @@ def record_candidate(
     created_by: str = "agent",
     max_candidates: int,
     max_statement_chars: int = DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
+    evidence_refs: Sequence[EvidenceRef] | None = None,
+    evidence_validated: bool = False,
 ) -> MemoryRecord:
+    """Write one draft agent record, optionally carrying typed evidence refs.
+
+    ``evidence_refs`` attaches durable pointers at artifacts; ``evidence_validated``
+    says the caller already resolved every ``run_id`` against a run that exists
+    (only a surface holding the runs can do that, so governance never assumes it).
+    Neither argument touches ``confidence``: the record is born ``inferred`` with
+    five references exactly as it is with none, because a reference proves an
+    artifact exists and never that it entails the statement.
+    """
     record_type = _validate_candidate_record_type(record_type)
+    # Refuse malformed references before any capacity or identity work, so a
+    # rejected write leaves the store exactly as it found it.
+    normalized_refs = _normalize_evidence_refs(evidence_refs)
     stripped = statement.strip()
     if not stripped:
         raise MemoryContractError("Candidate statement must not be empty.")
@@ -1082,10 +1227,11 @@ def record_candidate(
         record_type=record_type,
         identity=identity,
         statement=stripped,
-        payload={
-            "subject_path": normalized_path,
-            STATEMENT_FORMAT_PAYLOAD_KEY: STATEMENT_FORMAT_MD,
-        },
+        payload=_candidate_payload(
+            subject_path=normalized_path,
+            refs=normalized_refs,
+            validated=evidence_validated,
+        ),
         now=now,
         created_by=created_by,
         code_fingerprint=code_fingerprint,
@@ -1112,6 +1258,12 @@ def record_candidate(
             subject_key=repo_path_to_module_key(normalized_path),
             relation="about",
         )
+    )
+    _write_evidence_refs(
+        store,
+        memory_id=record.id,
+        refs=normalized_refs,
+        now=now,
     )
     store.sync_fts_record(record.id)
     store.commit()
@@ -1232,15 +1384,22 @@ def validate_memory_claims(
 
 
 __all__ = [
+    "EVIDENCE_STATUS_ATTACHED",
+    "EVIDENCE_STATUS_PAYLOAD_KEY",
+    "EVIDENCE_STATUS_VALIDATED",
     "GOVERNANCE_EMPTY_STATEMENT_CODE",
     "GOVERNANCE_RECORD_IMMUTABLE_CODE",
     "GOVERNANCE_STALE_AMENDMENT_CODE",
     "GOVERNANCE_TICKET_MISMATCH_CODE",
+    "MEMORY_EVIDENCE_REF_INVALID_CODE",
+    "MEMORY_EVIDENCE_REF_UNKNOWN_RUN_CODE",
+    "MEMORY_EVIDENCE_REF_UNTYPED_CODE",
     "MEMORY_STATEMENT_TOO_LONG_ERROR",
     "STATEMENT_ORIGIN_AGENT",
     "STATEMENT_ORIGIN_HUMAN_AMENDED",
     "STATEMENT_ORIGIN_PAYLOAD_KEY",
     "ClaimValidationResult",
+    "EvidenceRef",
     "amend_and_approve_record",
     "apply_record_cas",
     "approve_record",
@@ -1254,6 +1413,7 @@ __all__ = [
     "promote_experience",
     "record_candidate",
     "reject_record",
+    "resolve_evidence_status",
     "resolve_statement_origin",
     "statement_markdown_warnings",
     "supersede_approved_record",

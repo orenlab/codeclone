@@ -32,7 +32,7 @@ from ...memory.ide_governance import (
     register_ide_governance,
 )
 from ...memory.ingest.mcp_sync import execute_mcp_memory_sync
-from ...memory.models import MemoryProject
+from ...memory.models import EvidenceRef, MemoryProject
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import (
@@ -459,11 +459,13 @@ class _MCPSessionMemoryMixin:
                 try:
                     return self._manage_memory_record_candidate(
                         store,
+                        root_path=root_path,
                         project=project,
                         config=config,
                         record_type=record_type,
                         statement=statement,
                         subject_path=subject_path,
+                        run_id=run_id,
                     )
                 finally:
                     store.close()
@@ -524,17 +526,67 @@ class _MCPSessionMemoryMixin:
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
 
+    def _resolve_evidence_reference(
+        self,
+        root_path: Path,
+        *,
+        run_id: str,
+        subject_path: str | None,
+    ) -> tuple[EvidenceRef, ...]:
+        """Turn a run id into a typed reference, or refuse because it names nothing.
+
+        This is the only place the existence half of the contract can be
+        honoured: governance has no access to the runs, so it can validate the
+        shape of a reference but never that the artifact is real. What is
+        checked here is existence and root-binding, and that is all -- whether
+        the run supports the statement is not a question this or any other code
+        path on this route answers.
+        """
+        from ...memory.governance import (
+            MEMORY_EVIDENCE_REF_UNKNOWN_RUN_CODE,
+            EvidenceRef,
+            governance_refusal,
+        )
+
+        try:
+            record = self._memory_run_record(root_path, run_id)
+        except MCPServiceContractError as exc:
+            raise MCPServiceContractError(
+                governance_refusal(
+                    MEMORY_EVIDENCE_REF_UNKNOWN_RUN_CODE,
+                    reason=(
+                        f"evidence reference names run {run_id!r}, which this "
+                        f"server does not hold for this root ({exc})."
+                    ),
+                    next_step=(
+                        "run analyze_repository(root=...) and attach the run_id "
+                        "it returns, or omit run_id to record the candidate "
+                        "without evidence"
+                    ),
+                )
+            ) from exc
+        return (
+            EvidenceRef(
+                kind="report",
+                run_id=record.run_id,
+                locator=record.execution.execution_event_id,
+                subject=subject_path,
+            ),
+        )
+
     def _manage_memory_record_candidate(
         self,
         store: SqliteEngineeringMemoryStore,
         *,
+        root_path: Path,
         project: MemoryProject,
         config: MemoryConfig,
         record_type: MemoryRecordType | None,
         statement: str | None,
         subject_path: str | None,
+        run_id: str | None = None,
     ) -> dict[str, object]:
-        from ...memory.governance import record_candidate
+        from ...memory.governance import record_candidate, resolve_evidence_status
 
         if not record_type or not statement:
             raise MCPServiceContractError(
@@ -544,6 +596,19 @@ class _MCPSessionMemoryMixin:
             canonical_type = validate_memory_record_type(record_type)
         except ValueError as exc:
             raise MCPServiceContractError(str(exc)) from exc
+        # There is no free-text evidence field on this surface by construction:
+        # an agent names a run, and the run either exists or the write is
+        # refused. Prose can only ever land in the statement, where it is read
+        # as the agent's claim rather than as support for it.
+        evidence_refs = (
+            self._resolve_evidence_reference(
+                root_path,
+                run_id=run_id,
+                subject_path=subject_path,
+            )
+            if run_id
+            else ()
+        )
         record = record_candidate(
             store,
             project=project,
@@ -552,13 +617,23 @@ class _MCPSessionMemoryMixin:
             subject_path=subject_path,
             max_candidates=config.max_candidates,
             max_statement_chars=config.max_statement_chars,
+            evidence_refs=evidence_refs,
+            evidence_validated=bool(evidence_refs),
         )
         payload: dict[str, object] = {
             "action": "record_candidate",
             "record_id": record.id,
             "status": record.status,
             "type": record.type,
+            # Origin and confidence are echoed so the writer sees what actually
+            # landed: attaching evidence does not move either of them.
+            "origin": record.origin,
+            "confidence": record.confidence,
+            "evidence_count": len(evidence_refs),
         }
+        evidence_status = resolve_evidence_status(record.payload)
+        if evidence_status is not None:
+            payload["evidence_status"] = evidence_status
         from ...memory.governance import statement_markdown_warnings
 
         markdown_warnings = statement_markdown_warnings(statement)

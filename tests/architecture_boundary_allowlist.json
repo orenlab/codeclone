@@ -1,7 +1,7 @@
 {
   "counts": {
     "model_store:base_model_definition": 20,
-    "model_store:dataclass_definition": 283,
+    "model_store:dataclass_definition": 284,
     "model_store:pydantic_dependency": 9,
     "production_import:r1->r2": 2,
     "production_import:r1->r2p": 5,
@@ -17,6 +17,7 @@
   },
   "notes": {
     "codeclone.analysis.binding": "39Y-FP: analysis-local frozen structures for the lexical scope graph. 16 exact precedents already in this family (cfg_model::Block, cfg_model::CFG, _module_walk::_ModuleWalkState, _module_walk::_RelationshipImportIndex, ...); the 39S sweep owns all 20 together. _DraftBindings is the 5th entry: it exists because the sanctioned cohesion fix split the binding accumulator out of _ScopeDraft.",
+    "codeclone.memory.models::EvidenceRef": "Sanctioned by the maintainer 2026-09-07, the one deliberate growth of this list. EvidenceRef is the input form of the fact MemoryEvidence persists; the two are owned together or neither is understood. The alternative on offer was to spell it as a NamedTuple, which this rule does not count -- a carrier the gate cannot see is the Phase-39S laundering the gate exists to catch -- or to exile it plus EvidenceKind into the root model store, buying a flat counter with cohesion. Both were refused. The row joins the ten memory.models entries already queued for the a3 model-store migration and migrates with its sibling, not separately. Growth here is a maintainer decision, never an agent's.",
     "codeclone.memory.project -> codeclone.paths.module_identity.projection": "Cycle-honesty wave: the maintainer's path law routes EVERY module-to-path projection through the module-identity owner; memory.project's phantom module_key.replace('.','/')+'.py' was one of the lying surfaces. memory.project already reaches r2 (baseline.trust, config.memory, report.meta); the sanctioned owner routing adds projection to that established set.",
     "tests -> codeclone.cache.reuse": "39Y-FP section 3a: both test modules already reach cache internals (_validators, _wire_decode, _wire_encode, entries, ...); the sanctioned binding-context cache key added reuse to that established set.",
     "tests.test_dependency_cycle_honesty": "Cycle-honesty wave: red-first pins for the edge-binding classifier, the import_time-subgraph cycle law, the module-path projection owner, and the payload_schema-6 wire codec. Same deep-import family as test_extractor and test_cache, which already reach these r2 internals."
@@ -186,6 +187,7 @@
       "codeclone.memory.jobs.store::EnqueueProjectionJobResult",
       "codeclone.memory.jobs.worker::ProjectionWorkerResult",
       "codeclone.memory.jobs.workflow::_FlushDecision",
+      "codeclone.memory.models::EvidenceRef",
       "codeclone.memory.models::IngestionRun",
       "codeclone.memory.models::MemoryEvidence",
       "codeclone.memory.models::MemoryLink",

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from ..models import MemoryRecord, MemorySubject
+from ..models import EVIDENCE_STATUS_PAYLOAD_KEY, MemoryRecord, MemorySubject
 from ..paths import expand_scope_paths, subject_matches_scope
 
 _TYPE_BOOST: dict[str, float] = {
@@ -99,6 +99,28 @@ def _context_signal_adjustment(record: MemoryRecord) -> float:
     return 0.0
 
 
+def _is_agent_asserted_reference(record: MemoryRecord) -> bool:
+    """Does this record's evidence consist of references an agent asserted?
+
+    The evidence bonus rewards a record whose claim can be checked against
+    something. An agent-asserted reference is checked for *existence* only --
+    the store confirms the run is real, never that the artifact entails the
+    statement -- so it must buy no ranking. Otherwise "attach any valid run id"
+    becomes a way to purchase relevance, which is exactly the laundering the
+    reference type was introduced to prevent.
+
+    Keyed on the payload marker that only the typed-reference path writes, not
+    on origin: measured on the live store, ~2000 agent-origin records already
+    carry ordinary attested evidence rows, and keying on origin would silently
+    re-rank every one of them. The marker's population before it existed was 0
+    (measured, against a positive control), so no record's served score moves.
+    """
+    payload = record.payload
+    if not payload:
+        return False
+    return EVIDENCE_STATUS_PAYLOAD_KEY in payload
+
+
 def relevance_score(
     *,
     record: MemoryRecord,
@@ -136,7 +158,7 @@ def relevance_score(
         score += 0.1
     if record.approved_by:
         score += 0.1
-    if evidence_count > 0:
+    if evidence_count > 0 and not _is_agent_asserted_reference(record):
         score += min(0.1, evidence_count * 0.02)
     if record.status == "draft":
         score += 0.3
