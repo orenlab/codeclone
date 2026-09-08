@@ -1085,6 +1085,46 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             self._last_gate_results[record.run_id] = dict(result)
         return result
 
+    def _session_gate_result(self, run_id: str) -> dict[str, object] | None:
+        """The one lookup of this session's gate results; a miss is None.
+
+        A gate verdict is not a property of a run.  The sixteen thresholds
+        arrive with the request and are rebuilt on every call, so the same
+        ``run_id`` answers differently under a different policy -- what this
+        cache holds is therefore ONE realized evaluation, and its absence
+        means no evaluation was realized.  It does not mean the gates ran and
+        came back clean.  Handing a caller ``would_fail=False`` on a miss
+        publishes UNKNOWN under the name of PASS, which is the one reading
+        this cache must never allow: the caller is deciding whether to merge.
+
+        Measured 2026-09-08 on the engine before this correction: the resource
+        surface already refused a miss here while ``generate_pr_summary``
+        defaulted, so the product implemented the right law in one place and
+        the wrong one 130 lines away, and a summary could report no blocking
+        gates for a run nothing had gated.
+        """
+
+        with self._state_lock:
+            gate_result = self._last_gate_results.get(run_id)
+        return None if gate_result is None else dict(gate_result)
+
+    def _require_session_gate_result(self, run_id: str) -> dict[str, object]:
+        """The resource surface's policy: the caller asked, so a miss refuses.
+
+        ``codeclone://.../gates`` exists to answer one question, so having no
+        answer is the whole outcome and a refusal is the honest shape.  The PR
+        summary is a composition of six parts and takes the other policy: one
+        absent component may not delete the other five, so it reports the
+        absence in place rather than raising.
+        """
+
+        gate_result = self._session_gate_result(run_id)
+        if gate_result is None:
+            raise MCPServiceContractError(
+                "No gate evaluation result is available in this MCP session."
+            )
+        return gate_result
+
     def _evaluate_gate_snapshot(
         self,
         *,
@@ -1430,13 +1470,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 focus="all",
             )
             resolved = _helpers._dict_rows(compare_payload.get("improvements"))
-        with self._state_lock:
-            gate_result = dict(
-                self._last_gate_results.get(
-                    record.run_id,
-                    {"would_fail": False, "reasons": []},
-                )
-            )
+        gate_result = self._session_gate_result(record.run_id)
         verdict = _helpers._changed_verdict(
             changed_projection={
                 "total": len(scoped_items),
@@ -1453,7 +1487,20 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             "verdict": verdict,
             "new_findings_in_changed_files": changed_items,
             "resolved": resolved,
-            "blocking_gates": _helpers._string_rows(gate_result.get("reasons")),
+            # Three states, so the impossible pair cannot be spelled: an absent
+            # evaluation carries ``blocking_gates: None`` and an evaluated one
+            # carries a list, where ``[]`` means exactly "evaluated, none block".
+            # A bare nullable field would leave the reason for the null untyped,
+            # and a new key beside the old one would keep the false PASS alive
+            # for every consumer that does not know to look for it.
+            "gate_evaluation": (
+                {"status": "not_evaluated", "blocking_gates": None}
+                if gate_result is None
+                else {
+                    "status": "evaluated",
+                    "blocking_gates": _helpers._string_rows(gate_result.get("reasons")),
+                }
+            ),
         }
         if output_format == "json":
             return payload
@@ -1564,13 +1611,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if suffix == "health":
             return _json_text_payload(_helpers._summary_health_payload(record.summary))
         if suffix == "gates":
-            with self._state_lock:
-                gate_result = self._last_gate_results.get(record.run_id)
-            if gate_result is None:
-                raise MCPServiceContractError(
-                    "No gate evaluation result is available in this MCP session."
-                )
-            return _json_text_payload(gate_result)
+            return _json_text_payload(self._require_session_gate_result(record.run_id))
         if suffix == "changed":
             if record.changed_projection is None:
                 raise MCPServiceContractError(

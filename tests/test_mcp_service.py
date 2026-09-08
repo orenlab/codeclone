@@ -4738,6 +4738,151 @@ def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
     assert gate_result["reasons"] == ["clone:threshold:1:0"]
 
 
+def _gate_probe_run(tmp_path: Path) -> tuple[CodeCloneMCPService, str]:
+    """One analysed run whose gates can be evaluated, or deliberately not.
+
+    The three pins below each need the same starting point and differ only in
+    what they do to the gate state afterwards, so the setup is stated once:
+    repeating it three times would make the difference between them harder to
+    see, not easier.
+    """
+
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    )
+    return service, str(summary["run_id"])
+
+
+def test_pr_summary_reports_an_unevaluated_gate_state_instead_of_calling_it_clean(
+    tmp_path: Path,
+) -> None:
+    """An absent gate evaluation is UNKNOWN, and a PR summary may not read it as PASS.
+
+    The verdict is not a property of a run: the thresholds arrive with the
+    request, so the cache holds ONE realized evaluation and its absence means
+    none was realized.  Before this correction the summary supplied
+    ``{"would_fail": False, "reasons": []}`` on a miss, so it could report no
+    blocking gates for a run nothing had gated -- in the one document a reader
+    consults while deciding whether to merge.
+
+    The three reachable arms are one causal claim, not three assertions.  The
+    two evaluated arms are the positive controls that keep the third honest: a
+    surface that said "not evaluated" unconditionally would satisfy the third
+    alone, and a surface that never distinguished them would satisfy neither.
+    """
+
+    service, run_id = _gate_probe_run(tmp_path)
+
+    unevaluated = service.generate_pr_summary(
+        run_id=run_id, changed_paths=("pkg/dup.py",), format="json"
+    )
+    assert unevaluated["gate_evaluation"] == {
+        "status": "not_evaluated",
+        "blocking_gates": None,
+    }
+    # The other five parts of the composition survive the absent sixth.
+    assert unevaluated["run_id"] == run_id
+    assert unevaluated["changed_files"] == 1
+    assert "health" in unevaluated
+    assert "verdict" in unevaluated
+
+    failing = service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=0))
+    assert failing["would_fail"] is True
+    after_failure = service.generate_pr_summary(
+        run_id=run_id, changed_paths=("pkg/dup.py",), format="json"
+    )
+    assert after_failure["gate_evaluation"] == {
+        "status": "evaluated",
+        "blocking_gates": cast("list[str]", failing["reasons"]),
+    }
+    assert after_failure["gate_evaluation"]["blocking_gates"] != []
+
+    passing = service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=99))
+    assert passing["would_fail"] is False
+    after_pass = service.generate_pr_summary(
+        run_id=run_id, changed_paths=("pkg/dup.py",), format="json"
+    )
+    assert after_pass["gate_evaluation"] == {
+        "status": "evaluated",
+        "blocking_gates": [],
+    }
+
+
+def test_pr_summary_gate_status_and_blocking_gates_cannot_contradict_each_other(
+    tmp_path: Path,
+) -> None:
+    """The two impossible pairs must be unspellable, not merely unspelled.
+
+    ``[]`` means "evaluated, none block" and ``None`` means "no evaluation
+    exists".  If the discriminator and the list could disagree, a reader would
+    be back to guessing which of the two an empty answer meant -- the very
+    ambiguity the status field was added to break.
+    """
+
+    service, run_id = _gate_probe_run(tmp_path)
+
+    observed: list[tuple[str, object]] = []
+    for evaluate_first in (False, True):
+        if evaluate_first:
+            service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=0))
+        payload = service.generate_pr_summary(
+            run_id=run_id, changed_paths=("pkg/dup.py",), format="json"
+        )
+        evaluation = cast("dict[str, object]", payload["gate_evaluation"])
+        status = str(evaluation["status"])
+        blocking = evaluation["blocking_gates"]
+        observed.append((status, blocking))
+        if status == "not_evaluated":
+            assert blocking is None, (
+                "an unevaluated gate state carried a list, so an empty list would "
+                f"again mean two different things: {blocking!r}"
+            )
+        else:
+            assert status == "evaluated", f"unknown gate status {status!r}"
+            assert isinstance(blocking, list), (
+                "an evaluated gate state carried None, so a real evaluation would "
+                f"be indistinguishable from an absent one: {blocking!r}"
+            )
+
+    assert [status for status, _ in observed] == ["not_evaluated", "evaluated"], (
+        "the probe never reached both states, so it proved nothing about either: "
+        f"{observed}"
+    )
+
+
+def test_pr_summary_markdown_says_gates_were_not_evaluated_rather_than_none(
+    tmp_path: Path,
+) -> None:
+    """The heading a human reads must not print "none" for "never ran".
+
+    The markdown is the artefact that ends up in someone else's pull request.
+    "- none" under "Blocking gates" used to cover both a clean evaluation and
+    no evaluation at all, and the reader had no way to tell which they were
+    being shown.
+    """
+
+    service, run_id = _gate_probe_run(tmp_path)
+
+    unevaluated = str(
+        service.generate_pr_summary(
+            run_id=run_id, changed_paths=("pkg/dup.py",), format="markdown"
+        )["content"]
+    )
+    assert "### Blocking gates\n- not evaluated" in unevaluated
+    assert "### Blocking gates\n- none" not in unevaluated
+
+    service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=99))
+    evaluated = str(
+        service.generate_pr_summary(
+            run_id=run_id, changed_paths=("pkg/dup.py",), format="markdown"
+        )["content"]
+    )
+    assert "### Blocking gates\n- none" in evaluated
+    assert "not evaluated" not in evaluated
+
+
 def test_mcp_service_resources_expose_latest_summary(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
@@ -10023,7 +10168,7 @@ def test_mcp_service_compare_runs_marks_different_roots_incomparable(
             "verdict": "stable",
             "new_findings_in_changed_files": [],
             "resolved": [],
-            "blocking_gates": [],
+            "gate_evaluation": {"status": "evaluated", "blocking_gates": []},
         }
     )
     assert "- None" in empty_markdown
@@ -10637,7 +10782,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             "verdict": "improved",
             "new_findings_in_changed_files": [],
             "resolved": [{"title": "Fixed", "location": "pkg/dup.py"}],
-            "blocking_gates": [],
+            "gate_evaluation": {"status": "evaluated", "blocking_gates": []},
         }
     )
     assert "### Resolved (1)" in resolved_markdown

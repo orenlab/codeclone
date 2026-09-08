@@ -1166,8 +1166,12 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
         for item in _as_sequence(payload.get("new_findings_in_changed_files"))
     ]
     resolved = [_as_mapping(item) for item in _as_sequence(payload.get("resolved"))]
+    gate_evaluation = _as_mapping(payload.get("gate_evaluation"))
+    gate_evaluated = gate_evaluation.get("status") == "evaluated"
     blocking_gates = [
-        str(item) for item in _as_sequence(payload.get("blocking_gates")) if str(item)
+        str(item)
+        for item in _as_sequence(gate_evaluation.get("blocking_gates"))
+        if str(item)
     ]
     delta_text = f"{delta:+d}" if payload.get("health_delta") is not None else "n/a"
     # This heading goes into someone else's pull request. "None/100 (None)"
@@ -1227,7 +1231,13 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
             ]
         )
     lines.extend(["", "### Blocking gates"])
-    if not blocking_gates:
+    # This heading goes into someone else's pull request, and "none" used to be
+    # printed for two different things: gates that ran and cleared, and gates
+    # that never ran at all. A reader deciding whether to merge cannot tell
+    # those apart, so the unevaluated case says so instead of claiming a pass.
+    if not gate_evaluated:
+        lines.append("- not evaluated")
+    elif not blocking_gates:
         lines.append("- none")
     else:
         lines.extend([f"- `{reason}`" for reason in blocking_gates])
