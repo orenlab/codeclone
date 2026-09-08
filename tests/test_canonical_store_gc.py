@@ -461,6 +461,64 @@ def test_foreign_keys_refuse_deleting_a_rooted_run_even_for_a_buggy_sweep(
             store._connection.execute("DELETE FROM objects")
 
 
+def _page_stats(store: RunStore) -> tuple[int, int, int]:
+    """``(auto_vacuum, page_count, freelist_count)`` from the file itself."""
+
+    cursor = store._connection.cursor()
+    return tuple(  # type: ignore[return-value]
+        int(cursor.execute(f"PRAGMA {name}").fetchone()[0])
+        for name in ("auto_vacuum", "page_count", "freelist_count")
+    )
+
+
+def test_the_sweep_returns_the_pages_it_freed_to_the_file(tmp_path: Path) -> None:
+    """A collected run must leave the FILE, not only the tables.
+
+    Deleting rows moves their pages onto SQLite's freelist, where they are
+    reused but never given back.  Measured 2026-09-08 on the engine before
+    this correction: a sweep that collected eleven runs of twelve left
+    ``page_count`` unmoved at 273 and ``freelist_count`` at 225 — 82% of
+    the store free and not one page returned, so a store whose runs are
+    swept could only ever grow, and ``_database_bytes`` went on reporting
+    the peak forever.
+
+    The two halves are pinned apart because they fail apart.  The header
+    setting can only be asked for at open, on a database with no table yet;
+    the release can only be asked for after the sweep's transaction, which
+    is one atom on purpose.  Dropping either leaves the other looking fine,
+    so this reads the database's own page arithmetic and never a number the
+    sweep reports about itself.
+    """
+
+    store = _store(tmp_path)
+    for index in range(12):
+        _publish(
+            store,
+            _wider_model(*(f"pad-{index}-{n}" for n in range(400 + index))),
+            expected_generation=index,
+        )
+
+    auto_vacuum, pages_before, freelist_before = _page_stats(store)
+    assert auto_vacuum == 2, (
+        "the store must be opened with incremental auto-vacuum; on a "
+        f"database that already holds a table the setting is a no-op, got {auto_vacuum}"
+    )
+    assert freelist_before == 0
+
+    collect_garbage(store, retain_history=1)
+
+    _, pages_after, freelist_after = _page_stats(store)
+    assert pages_after < pages_before, (
+        "the sweep freed pages and kept them: page_count stayed at "
+        f"{pages_after} of {pages_before}, so the collected runs left the "
+        "tables but not the file"
+    )
+    assert freelist_after == 0, (
+        f"{freelist_after} freed pages were left on the freelist instead of "
+        "being returned to the file"
+    )
+
+
 def test_the_sweep_leaves_meta_witness_namespaces_and_heads_alone(
     tmp_path: Path,
 ) -> None:

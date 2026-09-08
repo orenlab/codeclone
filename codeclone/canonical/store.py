@@ -2708,11 +2708,16 @@ class RunStore:
         # is this store's explicit override: the durability of a published
         # immutable run is not weakened to NORMAL as a side effect of
         # unification (NORMAL would be a separate measured decision).
+        # ``auto_vacuum=INCREMENTAL`` is the second override, and it is
+        # asked here because this is a store whose runs are SWEPT: without
+        # it the sweep's deletions only reach the freelist, so a store that
+        # collected eleven runs of twelve keeps every page it ever grew.
         self._connection = open_sqlite_db(
             Path(self._path),
             ensure_schema=_ensure_schema,
             foreign_keys=True,
             synchronous="FULL",
+            auto_vacuum="INCREMENTAL",
         )
         self._fence: tuple[int, str, str] = (0, "", "")
         self._initialize()
@@ -3348,6 +3353,29 @@ def runs_over_scope(store: RunStore, *, scope_digest: str) -> tuple[str, ...]:
     )
 
 
+def _release_freed_pages(store: RunStore) -> None:
+    """Hand the pages the sweep freed back to the file.
+
+    ``PRAGMA incremental_vacuum`` cannot run inside a transaction, and the
+    sweep is deliberately ONE atom whose crash behaviour is pinned, so the
+    release is a separate idempotent step after the commit rather than a
+    statement smuggled into the fence.  A process that dies between the two
+    leaves the pages on the freelist — reused, never lost — and the next
+    sweep releases them, so the report never becomes a claim about the file.
+
+    On a store opened before this setting existed the header still says
+    ``auto_vacuum=NONE`` and the pragma is a documented no-op: SQLite cannot
+    move a populated database onto incremental auto-vacuum without a full
+    rewrite, and rewriting a user's store as a side effect of a sweep would
+    be a much larger decision than the sweep was given.
+    """
+
+    connection = store._connection
+    if connection.in_transaction:
+        connection.commit()
+    connection.execute("PRAGMA incremental_vacuum").fetchall()
+
+
 def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
     """Sweep everything unreachable from the §8 roots, atomically.
 
@@ -3402,6 +3430,7 @@ def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
             "(SELECT object_pk FROM run_members)"
         )
         objects_collected = cursor.rowcount
+    _release_freed_pages(store)
     return GcJobReport.build(
         job=_GC_JOB_NAME,
         candidates=len(runs),

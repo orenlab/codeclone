@@ -19,12 +19,32 @@ _SQLITE_PRAGMAS = (
 _SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
+_SYNCHRONOUS_LEVELS = ("NORMAL", "FULL", "EXTRA", "OFF")
+_AUTO_VACUUM_LEVELS = ("NONE", "FULL", "INCREMENTAL")
+
+
+def _pragma_choice(name: str, value: str, allowed: tuple[str, ...]) -> str:
+    """One optional pragma value, refused by name unless it is one of *allowed*.
+
+    Both overrides this helper opens with are the same shape — a caller's
+    word checked against a closed set and upper-cased — and stating that
+    shape twice is how the second one drifts from the first.
+    """
+
+    level = value.upper()
+    if level not in allowed:
+        msg = f"{name} must be one of {allowed}, got {value!r}"
+        raise ValueError(msg)
+    return level
+
+
 def open_sqlite_db(
     path: Path,
     *,
     ensure_schema: Callable[[sqlite3.Connection], None],
     foreign_keys: bool = False,
     synchronous: str | None = None,
+    auto_vacuum: str | None = None,
     factory: type[sqlite3.Connection] | None = None,
 ) -> sqlite3.Connection:
     """Open a SQLite database with standard pragmas.
@@ -34,6 +54,15 @@ def open_sqlite_db(
     (e.g. engineering memory).  *factory* overrides the connection class
     (e.g. an observability-instrumented subclass); ``None`` keeps the stdlib
     default so this base helper stays decoupled from optional instrumentation.
+
+    *auto_vacuum* is the one pragma that cannot be decided later: SQLite
+    reads it from the header, and on a database that already holds a table
+    a change is a silent no-op until a full ``VACUUM`` rewrites the file.
+    It is therefore issued FIRST, ahead of every other pragma and ahead of
+    *ensure_schema*, so a store that wants its freed pages back can ask for
+    that on the only occasion the question is still open.  A store that does
+    not pass it keeps SQLite's default (``NONE``): freed pages stay on the
+    freelist and are reused, never returned.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     # Only pass ``factory`` when supplied so the default path stays byte-identical
@@ -62,14 +91,13 @@ def open_sqlite_db(
                 "PRAGMA foreign_keys=ON" if stmt.endswith("foreign_keys=OFF") else stmt
                 for stmt in pragmas
             )
+        if auto_vacuum is not None:
+            level = _pragma_choice("auto_vacuum", auto_vacuum, _AUTO_VACUUM_LEVELS)
+            pragmas = (f"PRAGMA auto_vacuum={level}", *pragmas)
         if synchronous is not None:
-            allowed = ("NORMAL", "FULL", "EXTRA", "OFF")
-            upper = synchronous.upper()
-            if upper not in allowed:
-                msg = f"synchronous must be one of {allowed}, got {synchronous!r}"
-                raise ValueError(msg)
+            level = _pragma_choice("synchronous", synchronous, _SYNCHRONOUS_LEVELS)
             pragmas = tuple(
-                f"PRAGMA synchronous={upper}"
+                f"PRAGMA synchronous={level}"
                 if stmt.startswith("PRAGMA synchronous=")
                 else stmt
                 for stmt in pragmas
