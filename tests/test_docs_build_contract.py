@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -36,12 +37,29 @@ def test_docs_admonition_indentation_is_valid() -> None:
     assert violations == []
 
 
-def test_docs_build_strict() -> None:
-    _require_docs_source()
+def _build_docs_site(tmp_path: Path) -> Path:
+    """Build the site from a copy of the docs tree, never inside the checkout.
+
+    The docs are this repository's and stay its measurement subject; the BUILD
+    is what moved. ``zensical build`` writes ``site/`` beside the config it is
+    handed and ``uv run`` in a project directory syncs that project's
+    environment, so building in the checkout rewrote ``<root>/site/`` twice per
+    suite and let uv touch the checkout's own ``.venv``. zensical resolves
+    ``docs_dir`` relative to the config file and refuses an absolute one
+    (measured 2026-09-07: ``invariant: Id(Format(Path(RootDir)))``), so the
+    copy carries the config alongside; ``--no-project`` keeps uv out of the
+    checkout's environment.
+    """
+
+    stage = tmp_path / "docs-stage"
+    stage.mkdir()
+    shutil.copytree(_DOCS_ROOT, stage / "docs")
+    shutil.copy2(_REPO_ROOT / "zensical.toml", stage / "zensical.toml")
     result = subprocess.run(
         [
             "uv",
             "run",
+            "--no-project",
             "--with",
             "zensical==0.0.46",
             "zensical",
@@ -49,34 +67,24 @@ def test_docs_build_strict() -> None:
             "--clean",
             "--strict",
         ],
-        cwd=_REPO_ROOT,
+        cwd=stage,
         capture_output=True,
         text=True,
         timeout=120,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+    return stage / "site"
 
 
-def test_sample_report_built_page_has_absolute_artifact_links() -> None:
+def test_docs_build_strict(tmp_path: Path) -> None:
     _require_docs_source()
-    site_root = _REPO_ROOT / "site"
-    build = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--with",
-            "zensical==0.0.46",
-            "zensical",
-            "build",
-            "--clean",
-            "--strict",
-        ],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert build.returncode == 0, build.stderr or build.stdout
+    site_root = _build_docs_site(tmp_path)
+    assert (site_root / "index.html").is_file()
+
+
+def test_sample_report_built_page_has_absolute_artifact_links(tmp_path: Path) -> None:
+    _require_docs_source()
+    site_root = _build_docs_site(tmp_path)
     candidates = (
         site_root / "examples" / "report" / "index.html",
         site_root / "examples" / "report.html",

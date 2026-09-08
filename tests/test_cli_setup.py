@@ -176,11 +176,22 @@ def test_lazy_load_setup_not_imported_with_main() -> None:
     assert "codeclone.surfaces.cli.setup" not in sys.modules
 
 
-def test_lazy_load_positive_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lazy_load_positive_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     for name in list(sys.modules):
         if name.startswith("codeclone.surfaces.cli.setup"):
             del sys.modules[name]
-    monkeypatch.setattr(sys, "argv", ["codeclone", "setup", "status"])
+    # The subject is the deferred import, not this checkout. Pointed at the
+    # process working directory, ``setup status`` opened the checkout's own
+    # ``.codeclone/db/audit.sqlite3`` and the engineering-memory store of its
+    # anchor -- the main checkout, for a linked worktree -- and on 2026-09-07
+    # that migrated the SHARED store's schema from under every other checkout.
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["codeclone", "setup", "status", "--root", str(tmp_path)]
+    )
     with pytest.raises(SystemExit) as exc:
         import codeclone.surfaces.cli.workflow as workflow
 

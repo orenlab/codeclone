@@ -262,7 +262,14 @@ def test_iter_py_files_excluded_parent_dir_does_not_short_circuit(
 def test_sensitive_prefix_blocked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sensitive_root = Path.cwd() / "tmp_sensitive_root"
+    # Manufactured under tmp_path. It used to be created in the process
+    # working directory -- the checkout itself -- and removed by hand at the
+    # end of the test, so one failed assertion left a directory in the live
+    # tree and every later run tripped over it. The scanner exempts the
+    # system temp root before it looks at SENSITIVE_DIRS (which is why cwd was
+    # reached for), so the temp root is pointed elsewhere first.
+    _configure_fake_tempdir(tmp_path, monkeypatch)
+    sensitive_root = tmp_path.resolve() / "sensitive_root"
     sensitive_root.mkdir()
     sub = sensitive_root / "sub"
     sub.mkdir()
@@ -272,19 +279,16 @@ def test_sensitive_prefix_blocked(
     with pytest.raises(ValidationError):
         list(scanner.iter_py_files(str(sub)))
 
-    sub.rmdir()
-    sensitive_root.rmdir()
-
 
 def test_sensitive_root_blocked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = Path.cwd() / "tmp_sensitive_root2"
+    _configure_fake_tempdir(tmp_path, monkeypatch)
+    root = tmp_path.resolve() / "sensitive_root"
     root.mkdir()
     monkeypatch.setattr(scanner, "SENSITIVE_DIRS", {str(root)})
     with pytest.raises(ValidationError):
         list(scanner.iter_py_files(str(root)))
-    root.rmdir()
 
 
 def test_sensitive_directory_blocked_via_dotdot(

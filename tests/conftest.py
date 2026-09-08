@@ -17,6 +17,13 @@ import pytest
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import RUN_SNAPSHOT_PUBLICATION_PUBLISHED
+from tests._live_state import (
+    LIVE_STATE_GUARD_KEY,
+    LIVE_STATE_MARKER,
+    TREE_RESIDUE_GATE_TEST,
+    LiveStateGuard,
+    live_state_guard,
+)
 from tests._served_run import (
     ServedRunStoreProjection,
     ServedUnitLocation,
@@ -26,6 +33,11 @@ from tests._sqlite_cleanup import (
     make_tracking_connect,
     sweep_leaked_sqlite_connections_via_gc,
 )
+
+# ``pytester`` drives the end-to-end controls of the live-state boundary: an
+# inner pytest session, wired through this very conftest, must red on a
+# deliberately offending test.
+pytest_plugins = ["pytester"]
 
 ReportMetaFactory = Callable[..., dict[str, object]]
 
@@ -616,3 +628,92 @@ def run_store_cli() -> RunStoreCorpusRunner:
         )
 
     return _run
+
+
+# ---------------------------------------------------------------------------
+# The live-state boundary (tests/_live_state.py).
+#
+# One mechanism, installed once per session and applied to every test without
+# the test knowing it exists: the live repository's default durable-state
+# anchor is relocated to a scratch directory private to the running test (and
+# the product's containment gate reads the relocated path as contained where
+# its original is, so consumers re-validating it get the original's answer), an
+# open of any SQLite store under a live service directory is refused, a git
+# subprocess that would mutate a live repository is refused, and the hosting
+# checkout's tree is compared before and after the run. Session- and
+# module-scoped fixtures are covered too, because the patches are process-wide
+# and the per-test toggle happens in hooks that run before any fixture.
+#
+# ``@pytest.mark.live_state(reason=...)`` lifts the in-process enforcements for
+# a test whose legitimate subject is live state; every opt-in is listed in the
+# terminal summary so it cannot be quiet.
+# ---------------------------------------------------------------------------
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        f"{LIVE_STATE_MARKER}(reason): the test's legitimate subject is live "
+        "CodeClone state; the live-state boundary is lifted for it and the "
+        "opt-in is listed in the terminal summary",
+    )
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    session.config.stash[LIVE_STATE_GUARD_KEY] = LiveStateGuard.install()
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    guard = session.config.stash.get(LIVE_STATE_GUARD_KEY, None)
+    if guard is not None:
+        guard.uninstall()
+
+
+def pytest_collection_modifyitems(
+    session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """The residue gate measures the whole run, so it runs after everything."""
+
+    gate = [item for item in items if item.name == TREE_RESIDUE_GATE_TEST]
+    for item in gate:
+        items.remove(item)
+    items.extend(gate)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    marker = item.get_closest_marker(LIVE_STATE_MARKER)
+    reason: str | None = None
+    if marker is not None:
+        candidate = marker.kwargs.get("reason", marker.args[0] if marker.args else None)
+        if not isinstance(candidate, str) or not candidate.strip():
+            pytest.fail(
+                f"{item.nodeid}: @pytest.mark.{LIVE_STATE_MARKER} requires "
+                "reason='...': say what live state the test measures and why it "
+                "cannot use tmp_path",
+                pytrace=False,
+            )
+        reason = candidate.strip()
+    live_state_guard(item.config).enter_test(item.nodeid, reason)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    violations = live_state_guard(item.config).exit_test()
+    if violations:
+        pytest.fail(
+            "the test reached for live CodeClone state (refused; nothing was "
+            "written):\n" + "\n".join(f"  {violation}" for violation in violations),
+            pytrace=False,
+        )
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, exitstatus: int, config: pytest.Config
+) -> None:
+    guard = config.stash.get(LIVE_STATE_GUARD_KEY, None)
+    if guard is None or not guard.opted_in:
+        return
+    terminalreporter.section("live-state opt-ins", sep="-")
+    for nodeid, reason in guard.opted_in:
+        terminalreporter.line(f"{nodeid}: {reason}")

@@ -809,13 +809,15 @@ def _owned_container_path() -> str:
     return ".".join(SUPPRESSED_CONTAINER_PATH)
 
 
-def _modules_addressing_the_suppressed_container() -> dict[str, tuple[str, ...]]:
+def _modules_addressing_the_suppressed_container(
+    root: Path = _REPO_ROOT,
+) -> dict[str, tuple[str, ...]]:
     """Every scanned module whose report-document reads reach the container."""
 
     owned = _owned_container_path()
     found: dict[str, set[str]] = {}
-    for relative in _tracked_python_sources():
-        module = _REPO_ROOT / relative
+    for relative in _tracked_python_sources(root):
+        module = root / relative
         try:
             reads = report_document_reads(module.read_text("utf-8"))
         except SyntaxError:
@@ -838,7 +840,7 @@ def _modules_addressing_the_suppressed_container() -> dict[str, tuple[str, ...]]
 _UNPARSABLE_SOURCES: set[str] = set()
 
 
-def _tracked_python_sources() -> tuple[str, ...]:
+def _tracked_python_sources(root: Path = _REPO_ROOT) -> tuple[str, ...]:
     """Every tracked ``.py`` under the scanned trees, in path order.
 
     The universe is what git tracks, not what the working tree happens to hold.
@@ -854,7 +856,7 @@ def _tracked_python_sources() -> tuple[str, ...]:
         # files directly under each tree -- measured at 545 against 548 for
         # ``codeclone`` alone, ``__init__.py`` among the three it lost.
         ["git", "ls-files", "-z", "--", *_SCANNED_TREES],
-        cwd=_REPO_ROOT,
+        cwd=root,
         capture_output=True,
         check=True,
         text=True,
@@ -1123,7 +1125,34 @@ def test_the_baseline_lane_names_are_not_bound_to_the_findings_vocabulary() -> N
     )
 
 
-def test_the_scan_names_a_source_it_cannot_parse_instead_of_skipping_it() -> None:
+@pytest.fixture
+def probe_checkout(tmp_path: Path) -> Path:
+    """A throwaway repository shaped like this one, for probes that add sources.
+
+    The two probes below need a source they can add to and drop from a git
+    index. They used to do that to THIS checkout: a file written into the real
+    package and ``git add -N`` against the real index -- live state that every
+    concurrent change-control intent reads as dirt -- with a cleanup that did
+    not survive a kill. The real checkout is the ratchets' measurement
+    subject, never their scratch pad; the probes get a repository of their own.
+    """
+
+    root = tmp_path / "checkout"
+    package = root / "codeclone"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "--quiet"], cwd=root, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "add", "codeclone"], cwd=root, check=True, capture_output=True
+    )
+    return root
+
+
+def test_the_scan_names_a_source_it_cannot_parse_instead_of_skipping_it(
+    probe_checkout: Path,
+) -> None:
     """An unreadable source is an unresolved site, not an absence of one.
 
     The scan used to die on the first file it could not parse, so one vendored
@@ -1133,25 +1162,26 @@ def test_the_scan_names_a_source_it_cannot_parse_instead_of_skipping_it() -> Non
     parse reports a coverage it does not have (`I5`).
     """
 
-    unreadable = _REPO_ROOT / "codeclone" / "_unparsable_probe.py"
+    unreadable = probe_checkout / "codeclone" / "_unparsable_probe.py"
     unreadable.write_text("idents = [`ident` for ident in x]\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-N", str(unreadable)], cwd=_REPO_ROOT, check=True)
+    subprocess.run(
+        ["git", "add", "-N", str(unreadable)],
+        cwd=probe_checkout,
+        check=True,
+        capture_output=True,
+    )
+    _UNPARSABLE_SOURCES.clear()
     try:
-        _UNPARSABLE_SOURCES.clear()
-        _modules_addressing_the_suppressed_container()
+        _modules_addressing_the_suppressed_container(probe_checkout)
 
         assert "codeclone/_unparsable_probe.py" in _UNPARSABLE_SOURCES
     finally:
-        subprocess.run(
-            ["git", "rm", "--cached", "--quiet", str(unreadable)],
-            cwd=_REPO_ROOT,
-            check=False,
-        )
-        unreadable.unlink()
         _UNPARSABLE_SOURCES.clear()
 
 
-def test_the_scan_universe_is_what_git_tracks_not_what_the_tree_holds() -> None:
+def test_the_scan_universe_is_what_git_tracks_not_what_the_tree_holds(
+    probe_checkout: Path,
+) -> None:
     """An untracked source is not source this ratchet governs.
 
     A checkout carries build output, IDE sandboxes and vendored third-party
@@ -1165,12 +1195,13 @@ def test_the_scan_universe_is_what_git_tracks_not_what_the_tree_holds() -> None:
     universe needs a pin of its own.
     """
 
-    untracked = _REPO_ROOT / "codeclone" / "_untracked_probe.py"
+    untracked = probe_checkout / "codeclone" / "_untracked_probe.py"
     untracked.write_text("value = 1\n", encoding="utf-8")
-    try:
-        assert "codeclone/_untracked_probe.py" not in _tracked_python_sources()
-    finally:
-        untracked.unlink()
+
+    tracked = _tracked_python_sources(probe_checkout)
+
+    assert "codeclone/__init__.py" in tracked
+    assert "codeclone/_untracked_probe.py" not in tracked
 
 
 # --------------------------------------------------------------------------------------
@@ -1274,7 +1305,7 @@ _CLONE_VOCABULARY_BORROWERS: dict[str, str] = {
 _VOCABULARY_RESTATED_PENDING: dict[str, str] = {}
 
 
-def _parsed_tracked_sources() -> dict[str, ast.Module]:
+def _parsed_tracked_sources(root: Path = _REPO_ROOT) -> dict[str, ast.Module]:
     """Every tracked source under the scanned trees, parsed once.
 
     Shares ``_UNPARSABLE_SOURCES`` with the container scan for the same reason
@@ -1283,18 +1314,20 @@ def _parsed_tracked_sources() -> dict[str, ast.Module]:
     """
 
     parsed: dict[str, ast.Module] = {}
-    for relative in _tracked_python_sources():
-        tree = _parsed_or_named_unreadable(relative)
+    for relative in _tracked_python_sources(root):
+        tree = _parsed_or_named_unreadable(relative, root)
         if tree is not None:
             parsed[relative] = tree
     return parsed
 
 
-def _parsed_or_named_unreadable(relative: str) -> ast.Module | None:
+def _parsed_or_named_unreadable(
+    relative: str, root: Path = _REPO_ROOT
+) -> ast.Module | None:
     """Parse one tracked source, naming it instead of dying when it cannot be."""
 
     try:
-        return ast.parse((_REPO_ROOT / relative).read_text("utf-8"))
+        return ast.parse((root / relative).read_text("utf-8"))
     except SyntaxError:
         _UNPARSABLE_SOURCES.add(relative)
         return None
