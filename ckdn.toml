@@ -49,6 +49,20 @@ fail_fast = false
 command = "uv run ruff check --output-format json --output-file {run_dir}/ruff.json ."
 parser = "ruff"
 
+# `format` is a SECOND axis, not a second spelling of lint. Measured 2026-09-08 on
+# one deliberately unformatted file: `ruff check` answered "All checks passed!"
+# (rc 0) while `ruff format --check` answered "1 file would be reformatted"
+# (rc 1). Until this check existed, an executor could run the whole declared
+# verification stack green and still hand over bytes the pre-commit hook
+# rewrites -- and the sanctioned --no-verify grant skips that hook along with
+# the red gate it was granted for, which is how three files reached the branch
+# unformatted on 2026-09-07.
+# `--check`, never a bare `format`: ckdn is a deterministic verifier, not a
+# mutator of the tree it is verifying.
+[check.format]
+command = "uv run ruff format --check ."
+parser = "generic"
+
 # [check.build]
 # command = "uv build"
 # parser = "generic"
