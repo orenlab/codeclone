@@ -913,39 +913,100 @@ _FIXTURES["reexport_hop_reference"] = _classify_pair(
     _reexport_hop_inputs(False),
 )
 
-_FIXTURES["dead_code_directive"] = _classify_pair(
-    _is_live,
-    {
-        "definitions": (
-            _candidate(
-                "pkg.m:helper", kind="function", suppressed_rules=("dead-code",)
-            ),
-        ),
-        "referenced_names": frozenset(),
-    },
-    {
-        "definitions": (_candidate("pkg.m:helper", kind="function"),),
-        "referenced_names": frozenset(),
-    },
+
+def _real_suppression_pair(
+    target: str, with_source: str, without_source: str
+) -> Fixture:
+    """Rule 3 for ``dead_code_directive``: the REAL tokenizer scan over real
+    source, not a hand-built ``suppressed_rules`` keyword. The declared
+    producer, ``bind_suppressions_to_declarations`` (analysis/suppressions.py),
+    binds what ``extract_suppression_directives`` finds in the source text to
+    real AST declaration spans; only an actual
+    ``# codeclone: ignore[dead-code]`` comment proves it fires, through the
+    same real walk every fixture above already runs (``_candidates``), not a
+    second bespoke path.
+    """
+
+    def observe(root: Path, source: str) -> bool:
+        candidate = _candidates(root, {"pkg/__init__.py": "\n", "pkg/m.py": source})[
+            target
+        ]
+        return _is_live({"definitions": (candidate,), "referenced_names": frozenset()})
+
+    def observe_pair(root: Path) -> tuple[bool, bool]:
+        return (
+            observe(root / "with", with_source),
+            observe(root / "without", without_source),
+        )
+
+    return observe_pair
+
+
+_FIXTURES["dead_code_directive"] = _real_suppression_pair(
+    "pkg.m:helper",
+    """
+    def helper():  # codeclone: ignore[dead-code]
+        return 1
+    """,
+    """
+    def helper():
+        return 1
+    """,
 )
 
-_FIXTURES["self_dispatch"] = _classify_pair(
-    _is_live,
-    {
-        "definitions": (_candidate("pkg.m:Holder.render"),),
-        "referenced_names": frozenset(),
-        "class_metrics": (
-            _class(
-                "pkg.m:Holder",
-                self_dispatched_methods=frozenset({"pkg.m:Holder.render"}),
-            ),
-        ),
-    },
-    {
-        "definitions": (_candidate("pkg.m:Holder.render"),),
-        "referenced_names": frozenset(),
-        "class_metrics": (_class("pkg.m:Holder"),),
-    },
+
+def _real_class_liveness_pair(
+    target: str, with_source: str, without_source: str
+) -> Fixture:
+    """Shared rule-3 shape for a mechanism keyed off a REAL class walk's
+    ``ClassMetrics``, not a hand-built one: run the walk, pull the
+    definition and class facts a producer actually derived, and ask
+    ``classify_liveness`` the same question the hand-built fixtures asked --
+    of facts a producer derived, never facts a keyword argument declared.
+    Shared by ``self_dispatch`` and ``override_decorator_evidence``: both
+    read a real ``Holder.render`` off a real walk and differ only in which
+    construct the source carries.
+    """
+
+    def observe(root: Path, source: str) -> bool:
+        metrics = _metrics(root, {"pkg/__init__.py": "\n", "pkg/m.py": source})
+        walked = metrics["pkg/m.py"]
+        candidate = next(c for c in walked.dead_candidates if c.qualname == target)
+        return _is_live(
+            {
+                "definitions": (candidate,),
+                "referenced_names": frozenset(),
+                "class_metrics": walked.class_metrics,
+            }
+        )
+
+    def observe_pair(root: Path) -> tuple[bool, bool]:
+        return (
+            observe(root / "with", with_source),
+            observe(root / "without", without_source),
+        )
+
+    return observe_pair
+
+
+_FIXTURES["self_dispatch"] = _real_class_liveness_pair(
+    "pkg.m:Holder.render",
+    """
+    class Holder:
+        def caller(self):
+            return self.render()
+
+        def render(self):
+            return 1
+    """,
+    """
+    class Holder:
+        def caller(self):
+            return 1
+
+        def render(self):
+            return 1
+    """,
 )
 
 
@@ -964,10 +1025,25 @@ def _override_inputs(evidenced: frozenset[str]) -> Inputs:
     }
 
 
-_FIXTURES["override_decorator_evidence"] = _classify_pair(
-    _is_live,
-    _override_inputs(frozenset({"pkg.m:Holder.render"})),
-    _override_inputs(frozenset()),
+_FIXTURES["override_decorator_evidence"] = _real_class_liveness_pair(
+    "pkg.m:Holder.render",
+    """
+    import vendor
+
+
+    class Holder(vendor.Base):
+        @override
+        def render(self):
+            return 1
+    """,
+    """
+    import vendor
+
+
+    class Holder(vendor.Base):
+        def render(self):
+            return 1
+    """,
 )
 
 
@@ -1840,23 +1916,39 @@ _NEUTRALIZATION_LADDER: Final = ("substitute", "arity", "empty", "noop")
 
 #: Mechanisms whose declared producer this battery CANNOT reach, measured
 #: rather than assumed: the mutation is installed, the fixture runs, and the
-#: producer is called zero times.  Their fixtures go through ``_classify_pair``,
-#: which hands ``classify_liveness`` inputs built by hand, so what they pin is
-#: the CONSUMER's reading of a fact - never the producer that is supposed to
-#: derive it.  A survivor here is therefore INCONCLUSIVE, not vestigial: the
-#: mechanisms do matter, and what is unpinned is the link from the declared
-#: producer to the mechanism.  Rules 2 and 3 are never joined - rule 2 asks
-#: whether the producer resolves and rule 3 asks whether the fixture is causal,
-#: and nothing asks whether the fixture exercises the producer rule 2 named.
+#: producer is called zero times.  A fixture in this state goes through
+#: ``_classify_pair``, which hands ``classify_liveness`` inputs built by hand,
+#: so what it pins is the CONSUMER's reading of a fact - never the producer
+#: that is supposed to derive it.  A survivor here is therefore INCONCLUSIVE,
+#: not vestigial: the mechanism does matter, and what is unpinned is the link
+#: from the declared producer to the mechanism.  Rules 2 and 3 are never
+#: joined by construction - rule 2 asks whether the producer resolves and
+#: rule 3 asks whether the fixture is causal, and nothing asks whether the
+#: fixture exercises the producer rule 2 named.
+#:
+#: ``dead_code_directive``, ``self_dispatch`` and ``override_decorator_evidence``
+#: closed this way once: measured on ``5f35a50f``, all three reached
+#: ``classify_liveness`` only through hand-built keyword arguments
+#: (``suppressed_rules=(...)``, ``self_dispatched_methods=frozenset({...})``,
+#: ``decorator_evidenced_methods=evidenced``) and their declared producers
+#: were called zero times.  Closed by giving each a fixture that runs the REAL
+#: walk instead - ``_real_suppression_pair`` / ``_real_class_liveness_pair``
+#: write actual source (an inline ``# codeclone: ignore[dead-code]`` comment,
+#: a real ``self.render()`` call, a real ``@override`` decorator) through
+#: ``_metrics`` / ``_candidates``, so the declared producer
+#: (``bind_suppressions_to_declarations``, ``_self_dispatched_methods``,
+#: ``_collect_decorator_evidenced_methods``) is the thing that derives the
+#: fact the fixture then asks ``classify_liveness`` about.  All three now
+#: measure ``killed`` under every strategy in ``_NEUTRALIZATION_LADDER`` that
+#: reaches them.  This is not the same exit as a parked mechanism: nothing
+#: about ``classify_liveness``'s own verdict changed, only which fixture is
+#: evidence for which producer.
 #:
 #: This is a RATCHET on a known structural gap, not a licence: a fifth
 #: mechanism arriving here reds, and closing the gap empties the set.
 PRODUCER_UNREACHED_BY_ITS_FIXTURE: Final[frozenset[str]] = frozenset(
     {
         "bare_name_reference",
-        "dead_code_directive",
-        "override_decorator_evidence",
-        "self_dispatch",
     }
 )
 
