@@ -548,9 +548,19 @@ def test_migrate_1_7_to_1_8_renames_the_rung_column_and_keeps_every_value(
                 " created_at_utc, updated_at_utc, created_by, schema_version)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    f"mem-{index}", "proj-legacy", f"key-{index}", "risk_note",
-                    "active", rung, "system", "analysis", f"statement {index}",
-                    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "test", "1.7",
+                    f"mem-{index}",
+                    "proj-legacy",
+                    f"key-{index}",
+                    "risk_note",
+                    "active",
+                    rung,
+                    "system",
+                    "analysis",
+                    f"statement {index}",
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:00:00Z",
+                    "test",
+                    "1.7",
                 ),
             )
         set_meta(conn, "schema_version", "1.7")

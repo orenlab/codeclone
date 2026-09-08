@@ -3710,9 +3710,7 @@ def _collect_nested_definitions(
                 local_top_level_names=local_top_level_names,
                 hook_marker_aliases=hook_marker_aliases,
                 overload_aliases=non_runtime_decorator_aliases,
-                proven_roots=proven_roots_for(
-                    proven_decorator_roots, declaration.path
-                ),
+                proven_roots=proven_roots_for(proven_decorator_roots, declaration.path),
             ):
                 live_root_reason = LIVENESS_EXTERNAL_DECORATOR
             if declaration.kind == "method":

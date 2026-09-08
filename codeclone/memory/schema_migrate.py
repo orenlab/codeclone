@@ -385,8 +385,7 @@ def _migrate_1_7_to_1_8(conn: sqlite3.Connection) -> None:
     }
     if "epistemic_rung" not in existing and "confidence" in existing:
         conn.execute(
-            "ALTER TABLE memory_records "
-            "RENAME COLUMN confidence TO epistemic_rung"
+            "ALTER TABLE memory_records RENAME COLUMN confidence TO epistemic_rung"
         )
     _record_schema_migration(conn, "1.8")
 
