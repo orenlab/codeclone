@@ -568,7 +568,11 @@ def test_migrate_1_7_to_1_8_renames_the_rung_column_and_keeps_every_value(
 
         migrate_memory_schema(conn)
 
-        assert get_meta(conn, "schema_version") == "1.8"
+        # migrate_memory_schema always lands at the current contract version
+        # (now 1.9, past this step's own 1.7 -> 1.8 rung rename), never at a
+        # hardcoded intermediate; the assertions below still pin that specific
+        # leg of the chain.
+        assert get_meta(conn, "schema_version") == "1.9"
         columns = {
             str(row[1])
             for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()

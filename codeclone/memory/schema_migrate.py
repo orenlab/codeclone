@@ -79,7 +79,7 @@ def migrate_memory_schema(conn: sqlite3.Connection) -> None:
     if current == "1.1":
         _migrate_1_1_to_1_2(conn)
         current = "1.2"
-    later = {"1.3", "1.4", "1.5", "1.6", "1.7", "1.8"}
+    later = {"1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9"}
     if current == "1.2" and ENGINEERING_MEMORY_SCHEMA_VERSION in later:
         _migrate_1_2_to_1_3(conn)
         current = "1.3"
@@ -91,18 +91,27 @@ def migrate_memory_schema(conn: sqlite3.Connection) -> None:
         "1.6",
         "1.7",
         "1.8",
+        "1.9",
     }:
         _migrate_1_4_to_1_5(conn)
         current = "1.5"
-    if current == "1.5" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.6", "1.7", "1.8"}:
+    if current == "1.5" and ENGINEERING_MEMORY_SCHEMA_VERSION in {
+        "1.6",
+        "1.7",
+        "1.8",
+        "1.9",
+    }:
         _migrate_1_5_to_1_6(conn)
         current = "1.6"
-    if current == "1.6" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.7", "1.8"}:
+    if current == "1.6" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.7", "1.8", "1.9"}:
         _migrate_1_6_to_1_7(conn)
         current = "1.7"
-    if current == "1.7" and ENGINEERING_MEMORY_SCHEMA_VERSION == "1.8":
+    if current == "1.7" and ENGINEERING_MEMORY_SCHEMA_VERSION in {"1.8", "1.9"}:
         _migrate_1_7_to_1_8(conn)
         current = "1.8"
+    if current == "1.8" and ENGINEERING_MEMORY_SCHEMA_VERSION == "1.9":
+        _migrate_1_8_to_1_9(conn)
+        current = "1.9"
     if current == ENGINEERING_MEMORY_SCHEMA_VERSION:
         return
     msg = (
@@ -388,6 +397,43 @@ def _migrate_1_7_to_1_8(conn: sqlite3.Connection) -> None:
             "ALTER TABLE memory_records RENAME COLUMN confidence TO epistemic_rung"
         )
     _record_schema_migration(conn, "1.8")
+
+
+def _migrate_1_8_to_1_9(conn: sqlite3.Connection) -> None:
+    """Add lease + fencing columns to ``memory_projection_jobs``.
+
+    Replaces OS-PID liveness as the authority for reclaiming a running
+    projection job with a renew-or-expire lease plus a fencing token -- the
+    same one hold-deadline law already used by the canonical run-store lease
+    (``codeclone.canonical.store.acquire_run_lease``) and the workspace-intent
+    lease (``codeclone.workspace_intent.lifecycle.is_lease_expired``), both of
+    which decide through ``codeclone.models.deadline_passed``. A PID can be a
+    zombie, be reused by the OS, belong to a live-but-hung worker, or simply
+    outlive the process that used to own it -- none of that is authority to
+    keep or reclaim a job; only the lease is.
+
+    A bare ``ALTER TABLE`` per column, same shape as the 1.6 -> 1.7 migration
+    that added ``flush_claimed_by``: pre-existing rows get NULL lease columns,
+    not a recreate, so no job history is lost. A 'running' row still on NULL
+    lease columns after this migration (only possible for a claim already
+    in flight at the moment of upgrade) falls back to its own
+    ``started_at_utc`` plus the caller's configured timeout -- see
+    ``_projection_job_lease_deadline`` in ``codeclone/memory/jobs/store.py`` --
+    which is exactly the deadline that claim already had before the upgrade,
+    so it is neither killed early nor trusted forever.
+    """
+    for column, ddl_type in (
+        ("lease_token", "TEXT"),
+        ("lease_renewed_at_utc", "TEXT"),
+        ("lease_seconds", "INTEGER"),
+    ):
+        _add_column_if_missing(
+            conn,
+            table="memory_projection_jobs",
+            column=column,
+            ddl_type=ddl_type,
+        )
+    _record_schema_migration(conn, "1.9")
 
 
 __all__ = ["migrate_memory_schema", "reconcile_memory_record_schema_versions"]

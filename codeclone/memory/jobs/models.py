@@ -39,6 +39,14 @@ class ProjectionJobRecord:
     # slot for this pending job (None when no flush is scheduled). See
     # try_claim_flush_slot in store.py.
     flush_claimed_by: str | None = None
+    # Fencing token + renew-or-expire lease for a 'running' claim. None for a
+    # job that has never been claimed, has already reached a terminal status,
+    # or predates the 1.9 schema migration. Authority to keep or reclaim the
+    # job lives here, never in claimed_by's PID -- see
+    # _reclaim_stale_running_jobs and complete_projection_job in store.py.
+    lease_token: str | None = None
+    lease_renewed_at_utc: str | None = None
+    lease_seconds: int | None = None
 
 
 __all__ = [

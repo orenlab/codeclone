@@ -23,7 +23,7 @@ Engineering Memory migration bridges schema versions across CodeClone releases a
 
 | Contract | Value | Scope |
 |----------|-------|-------|
-| `ENGINEERING_MEMORY_SCHEMA_VERSION` | 1.8 | Memory store schema; bumped on column/table changes |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION` | 1.9 | Memory store schema; bumped on column/table changes |
 | `MEMORY_PROJECTION_VERSION` | memory-v1 | Retrieval projection interpretation layer |
 | `TRAJECTORY_PROJECTION_VERSION` | trajectory-v3 | Trajectory evidence indexing; v1 deprecated |
 | `EXPERIENCE_DISTILLATION_VERSION` | experience-v1 | Experience aggregation and ranking semantics |

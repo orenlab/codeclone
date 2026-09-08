@@ -60,7 +60,7 @@ The four core tiers:
 
 2. **Structural controller**: Pre-edit intent declaration, workspace liveness checking, scope verification. Single active intent per MCP session; eviction on new `start_controlled_change` without prior `finish`. No memory of prior intents across restart.
 
-3. **Engineering Memory**: Durable SQLite store (`ENGINEERING_MEMORY_SCHEMA_VERSION=1.8`), never disk-anchored. Staleness pegged to commit sha, not inventory membership. Synchronous=FULL for table, NORMAL for ephemeral intent/audit tables.
+3. **Engineering Memory**: Durable SQLite store (`ENGINEERING_MEMORY_SCHEMA_VERSION=1.9`), never disk-anchored. Staleness pegged to commit sha, not inventory membership. Synchronous=FULL for table, NORMAL for ephemeral intent/audit tables.
 
 4. **Persistence**: Immutable baseline (5 MB ceiling), cache (50 MB), and report outputs. Served by analysis engine; never mutated by controller or memory.
 

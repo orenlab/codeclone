@@ -16,7 +16,7 @@ IDE integrations route CodeClone analysis into VS Code, JetBrains IDEs (PyCharm,
 | Contract | Value | Role |
 |----------|-------|------|
 | `IDE_GOVERNANCE_PROTOCOL_VERSION` | `3` | MCP handshake and governance-state serialization format for all IDE surfaces |
-| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `1.8` | Memory record and trajectory schema used by VS Code and JetBrains bulk-governance workflows |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION` | `1.9` | Memory record and trajectory schema used by VS Code and JetBrains bulk-governance workflows |
 | `TRAJECTORY_PROJECTION_VERSION` | `trajectory-v3` | Episode and patch-trail format for IDE patch-visualization UI |
 | Extension entry point | `McpLauncher` (JetBrains), `runtime.js` (VS Code) | MCP process spawning and lifecycle management per IDE |
 
@@ -75,4 +75,4 @@ Run integration tests:
 | VS Code coverage path normalization requirement | `extensions/vscode-codeclone/src/runtime.js` | path_only: file exists; exact behavior and repo-relative enforcement not independently verified |
 | Memory bulk-governance stale-record dispatch | `extensions/vscode-codeclone/src/memoryController.js` | path_only: file exists; `records_by_status` key enumeration not verified in test or declaration |
 | IDE_GOVERNANCE_PROTOCOL_VERSION contract | `codeclone/contracts/__init__.py` | supported: constant defined as `3` in authoritative location |
-| ENGINEERING_MEMORY_SCHEMA_VERSION | `codeclone/contracts/__init__.py` | supported: constant defined as `1.8` |
+| ENGINEERING_MEMORY_SCHEMA_VERSION | `codeclone/contracts/__init__.py` | supported: constant defined as `1.9` |

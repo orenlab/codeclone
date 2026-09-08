@@ -99,17 +99,33 @@ def test_worker_run_once_without_pending_job(tmp_path: Path) -> None:
         assert payload["status"] == "nothing_to_do"
 
 
-def test_projection_job_pid_alive_and_reclaim_paths(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from codeclone.memory.jobs import store as job_store
-    from codeclone.memory.jobs.store import _pid_alive, _reclaim_stale_running_jobs
+def test_pid_alive_is_a_raw_os_probe(tmp_path: Path) -> None:
+    """_pid_alive is still a real utility (try_claim_flush_slot's delayed-flush
+    slot gate uses it, see test_try_claim_flush_slot_lifecycle in
+    test_memory_jobs_coverage.py), but it is no longer consulted for
+    running-job reclamation -- see
+    test_reclaim_never_consults_pid_alive in test_memory_projection_job_lease.py
+    for that proof.
+    """
+    from codeclone.memory.jobs.store import _pid_alive
 
     assert _pid_alive(None) is False
     assert _pid_alive("not-a-pid@host") is False
     assert _pid_alive("0@host") is False
     assert _pid_alive(f"{__import__('os').getpid()}@host") is True
+
+
+def test_reclaim_falls_back_to_started_at_for_a_legacy_row_without_a_lease(
+    tmp_path: Path,
+) -> None:
+    """A 'running' row with no lease columns populated (inserted directly, as
+    a pre-1.9 row or a row that never went through claim_next_projection_job
+    would be) is judged by started_at_utc plus the caller's timeout -- the
+    exact pre-lease deadline -- never by asking the OS about claimed_by's
+    PID. An unparsable started_at_utc has no readable deadline at all and is
+    immediately reclaimable (the missing-deadline-is-a-passed-deadline law).
+    """
+    from codeclone.memory.jobs.store import _reclaim_stale_running_jobs
 
     with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
         config = resolve_memory_config(root)
@@ -132,22 +148,17 @@ def test_projection_job_pid_alive_and_reclaim_paths(
                 ),
             )
             conn.commit()
-            # The claimant's death is declared, not inherited from the pid
-            # space: nothing reserves 999999, so reading it off the kernel
-            # would make this reclaim assertion a property of the machine.
-            monkeypatch.setattr(
-                job_store, "_pid_alive", lambda token: token != "999999@dead"
-            )
             _reclaim_stale_running_jobs(
                 conn,
                 project_id=project.id,
                 running_timeout_seconds=1,
             )
             row = conn.execute(
-                "SELECT status FROM memory_projection_jobs WHERE id=?",
+                "SELECT status, error_message FROM memory_projection_jobs WHERE id=?",
                 ("job-stale",),
             ).fetchone()
         finally:
             conn.close()
         assert row is not None
         assert str(row[0]) == "failed"
+        assert str(row[1]) == "stale_running_reclaimed"

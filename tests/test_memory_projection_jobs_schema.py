@@ -93,3 +93,67 @@ def test_memory_schema_migrates_1_6_to_1_7_adds_flush_claimed_by(
         assert migration is not None
     finally:
         conn.close()
+
+
+_LEASE_COLUMNS = frozenset({"lease_token", "lease_renewed_at_utc", "lease_seconds"})
+
+
+def test_fresh_projection_jobs_table_has_lease_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        assert _columns(conn, "memory_projection_jobs") >= _LEASE_COLUMNS
+    finally:
+        conn.close()
+
+
+def test_memory_schema_migrates_1_8_to_1_9_adds_lease_columns(
+    tmp_path: Path,
+) -> None:
+    """Forward migration on a live 1.8 store, not a recreate: the table and
+    its existing rows survive, and only the three lease columns are added
+    (mirrors test_memory_schema_migrates_1_6_to_1_7_adds_flush_claimed_by,
+    which pins the same _add_column_if_missing idiom for flush_claimed_by).
+    """
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        for column in _LEASE_COLUMNS:
+            conn.execute(f"ALTER TABLE memory_projection_jobs DROP COLUMN {column}")
+        # A 1.8 store can have a genuinely in-flight running job at the
+        # moment of upgrade; the migration must not drop it.
+        conn.execute(
+            "INSERT INTO memory_projection_jobs("
+            "id, project_id, job_kind, status, trigger, requested_at_utc, "
+            "started_at_utc, claimed_by, attempt, stimulus_json"
+            ") VALUES ('job-preexisting', 'proj-1', 'projection_bundle', "
+            "'running', 'cli', '2026-01-01T00:00:00Z', "
+            "'2026-01-01T00:00:00Z', '1@host', 1, '{}')"
+        )
+        set_meta(conn, "schema_version", "1.8")
+        conn.commit()
+        assert _columns(conn, "memory_projection_jobs").isdisjoint(_LEASE_COLUMNS)
+
+        ensure_schema(conn)
+
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+        assert _columns(conn, "memory_projection_jobs") >= _LEASE_COLUMNS
+        migration = conn.execute(
+            "SELECT version FROM memory_schema_migrations WHERE version='1.9'"
+        ).fetchone()
+        assert migration is not None
+        # The pre-existing row survived the migration, with NULL lease
+        # columns (a bare ALTER TABLE, not a recreate).
+        row = conn.execute(
+            "SELECT status, lease_token, lease_renewed_at_utc, lease_seconds "
+            "FROM memory_projection_jobs WHERE id='job-preexisting'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "running"
+        assert row[1] is None
+        assert row[2] is None
+        assert row[3] is None
+    finally:
+        conn.close()

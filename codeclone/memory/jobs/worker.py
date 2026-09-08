@@ -246,6 +246,10 @@ def run_projection_jobs_once(
     from .staleness import parse_stimulus_json
 
     stimulus = parse_stimulus_json(claimed.stimulus_json)
+    # claim_next_projection_job mints a fresh lease_token on every claim; a
+    # claimed record is never returned without one.
+    assert claimed.lease_token is not None
+    lease_token = claimed.lease_token
     try:
         final_status, result, error = run_projection_job(
             store,
@@ -257,12 +261,15 @@ def run_projection_jobs_once(
             emit_bootstrap_span=emit_bootstrap_span,
         )
     except Exception as exc:
-        complete_projection_job(
+        completed = complete_projection_job(
             conn,
             job_id=claimed.id,
+            lease_token=lease_token,
             status="failed",
             error_message=str(exc),
         )
+        if not completed:
+            return _fenced_out_result(claimed.id)
         return ProjectionWorkerResult(
             status="failed",
             job_id=claimed.id,
@@ -270,13 +277,16 @@ def run_projection_jobs_once(
             trajectory_status=None,
             semantic_status=None,
         )
-    complete_projection_job(
+    completed = complete_projection_job(
         conn,
         job_id=claimed.id,
+        lease_token=lease_token,
         status=final_status,
         result=result,
         error_message=error,
     )
+    if not completed:
+        return _fenced_out_result(claimed.id)
     return ProjectionWorkerResult(
         status=final_status,
         job_id=claimed.id,
@@ -284,6 +294,20 @@ def run_projection_jobs_once(
         trajectory_status=_block_status(result, "trajectory"),
         semantic_status=_block_status(result, "semantic"),
         experience_status=_block_status(result, "experience"),
+    )
+
+
+def _fenced_out_result(job_id: str) -> ProjectionWorkerResult:
+    """This worker's lease had already lapsed and been reassigned by the time
+    it tried to publish an outcome (see complete_projection_job's fencing
+    contract): its result is void, and it must not retry the write.
+    """
+    return ProjectionWorkerResult(
+        status="fenced_out",
+        job_id=job_id,
+        reason="lease_fenced_out",
+        trajectory_status=None,
+        semantic_status=None,
     )
 
 

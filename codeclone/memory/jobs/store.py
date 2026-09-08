@@ -12,8 +12,10 @@ import sqlite3
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
+from ...models import deadline_passed
 from ...report.meta import current_report_timestamp_utc
 from ...utils.json_io import json_text
 from ..models import MemoryProject
@@ -119,6 +121,11 @@ def _row_to_record(row: sqlite3.Row) -> ProjectionJobRecord:
         result_json=row["result_json"],
         error_message=row["error_message"],
         flush_claimed_by=row["flush_claimed_by"],
+        lease_token=row["lease_token"],
+        lease_renewed_at_utc=row["lease_renewed_at_utc"],
+        lease_seconds=(
+            int(row["lease_seconds"]) if row["lease_seconds"] is not None else None
+        ),
     )
 
 
@@ -179,6 +186,18 @@ def enqueue_projection_job(
 
 
 def _pid_alive(token: str | None) -> bool:
+    """Raw OS-PID liveness probe: True iff ``os.kill(pid, 0)`` succeeds.
+
+    Telemetry-grade only. ``os.kill(pid, 0)`` succeeds on an unreaped zombie
+    (the PID entry survives until the parent calls ``wait()``), can hit a PID
+    the OS has since reused, and says nothing about whether a live process is
+    hung. None of that is authority to keep or reclaim a running projection
+    job -- see :func:`_reclaim_stale_running_jobs` and
+    :func:`complete_projection_job`, which decide through the lease instead
+    and never call this function. The one remaining caller is
+    :func:`try_claim_flush_slot`'s delayed-flush single-slot gate, a distinct,
+    narrower mechanism (documented there) that this change does not touch.
+    """
     if not token:
         return False
     head = token.split("@", 1)[0]
@@ -194,41 +213,105 @@ def _pid_alive(token: str | None) -> bool:
     return True
 
 
+def _new_lease_token() -> str:
+    """A fresh, unguessable fencing token for one lease grant.
+
+    Minted on every claim -- a first claim and a reclaim-and-reassign alike --
+    so a worker that presents a stale token in :func:`complete_projection_job`
+    is provably not the current owner, never merely unlucky in a race.
+    """
+    return f"lease-{uuid.uuid4().hex}"
+
+
+def _projection_job_lease_deadline(
+    *,
+    lease_renewed_at_utc: object,
+    lease_seconds: object,
+    started_at_utc: object,
+    fallback_timeout_seconds: int,
+) -> datetime | None:
+    """The deadline past which a 'running' claim is reclaimable.
+
+    A row carrying lease fields -- every claim made by
+    :func:`claim_next_projection_job` from the 1.9 schema onward -- is judged
+    purely by its own lease: last renewal plus the TTL granted at that
+    renewal. A claiming worker's OS PID is never read here: a PID can be a
+    zombie, be reused by the OS, belong to a live-but-hung worker, or simply
+    outlive the process that used to own it, so it is never authority to
+    continue holding the job.
+
+    A row still missing lease fields -- possible only for a claim already in
+    flight at the moment of the 1.8 -> 1.9 upgrade -- falls back to its own
+    ``started_at_utc`` plus the caller's configured timeout: exactly the
+    deadline that claim already had before the upgrade, so it is neither
+    killed early nor trusted forever by the migration.
+
+    Returns None when no deadline can be read at all (both the lease and the
+    legacy anchor are absent, or the anchor timestamp is unparsable); the
+    caller decides that case through :func:`codeclone.models.deadline_passed`,
+    whose law is that a deadline that cannot be read has already passed --
+    collectable, never immortal. The same law and the same function decide
+    the canonical run-store lease sweep and the workspace-intent lease.
+    """
+    anchor: object
+    ttl: int
+    if lease_renewed_at_utc is not None and isinstance(lease_seconds, int):
+        anchor, ttl = lease_renewed_at_utc, lease_seconds
+    elif started_at_utc is not None:
+        anchor, ttl = started_at_utc, fallback_timeout_seconds
+    else:
+        return None
+    try:
+        renewed_at = datetime.fromisoformat(str(anchor).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if renewed_at.tzinfo is None:
+        renewed_at = renewed_at.replace(tzinfo=timezone.utc)
+    return renewed_at + timedelta(seconds=max(1, ttl))
+
+
 def _reclaim_stale_running_jobs(
     conn: sqlite3.Connection,
     *,
     project_id: str,
     running_timeout_seconds: int,
 ) -> None:
+    """Fail every running job whose lease has expired.
+
+    Authority to keep running is the lease alone, decided by
+    :func:`_projection_job_lease_deadline` and
+    :func:`codeclone.models.deadline_passed` -- the same one hold-deadline
+    law the canonical run-store lease sweep and the workspace-intent lease
+    already use. A claiming worker's PID is never consulted: see
+    :func:`_pid_alive`'s docstring for why a PID cannot serve as authority
+    here. ``lease_token`` is cleared on reclaim so a worker that wakes up
+    after losing its lease is fenced out of :func:`complete_projection_job`
+    instead of silently overwriting whatever ran next (see that function's
+    docstring for the fencing contract).
+    """
     rows = conn.execute(
-        "SELECT id, claimed_by, started_at_utc FROM memory_projection_jobs "
-        "WHERE project_id=? AND status='running'",
+        "SELECT id, started_at_utc, lease_renewed_at_utc, lease_seconds "
+        "FROM memory_projection_jobs WHERE project_id=? AND status='running'",
         (project_id,),
     ).fetchall()
     if not rows:
         return
     now = current_report_timestamp_utc()
+    now_dt = datetime.now(timezone.utc)
     for row in rows:
         job_id = str(row[0])
-        claimed_by = row[1]
-        started_at = row[2]
-        stale = not _pid_alive(claimed_by)
-        if not stale and started_at:
-            # Timestamp ordering is ISO-8601 UTC; lexicographic compare is safe.
-            from datetime import datetime, timedelta, timezone
-
-            try:
-                started = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            except ValueError:
-                stale = True
-            else:
-                deadline = started + timedelta(seconds=max(1, running_timeout_seconds))
-                stale = datetime.now(timezone.utc) >= deadline
-        if not stale:
+        deadline = _projection_job_lease_deadline(
+            started_at_utc=row[1],
+            lease_renewed_at_utc=row[2],
+            lease_seconds=row[3],
+            fallback_timeout_seconds=running_timeout_seconds,
+        )
+        if not deadline_passed(deadline, now_dt):
             continue
         conn.execute(
             "UPDATE memory_projection_jobs "
-            "SET status='failed', finished_at_utc=?, error_message=? "
+            "SET status='failed', finished_at_utc=?, error_message=?, "
+            "lease_token=NULL "
             "WHERE id=?",
             (now, "stale_running_reclaimed", job_id),
         )
@@ -315,6 +398,16 @@ def claim_next_projection_job(
     claimed_by: str,
     running_timeout_seconds: int,
 ) -> ProjectionJobRecord | None:
+    """Claim the next pending job, granting it a fresh lease.
+
+    ``running_timeout_seconds`` is the lease TTL granted to this claim
+    (``lease_seconds``), renewed from ``now`` (``lease_renewed_at_utc``); a
+    fresh, unguessable ``lease_token`` is minted for every claim, including a
+    reclaim-and-reassign, so a superseded worker can be told apart from the
+    current owner in :func:`complete_projection_job`. ``claimed_by`` (PID@host)
+    is still recorded for diagnostics/receipts, but the OS PID it carries is
+    never read back for authority -- see :func:`_pid_alive`'s docstring.
+    """
     _use_row_factory(conn)
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -341,11 +434,21 @@ def claim_next_projection_job(
             return None
         now = current_report_timestamp_utc()
         attempt = int(row["attempt"]) + 1
+        lease_token = _new_lease_token()
         conn.execute(
             "UPDATE memory_projection_jobs "
-            "SET status='running', started_at_utc=?, claimed_by=?, attempt=? "
+            "SET status='running', started_at_utc=?, claimed_by=?, attempt=?, "
+            "lease_token=?, lease_renewed_at_utc=?, lease_seconds=? "
             "WHERE id=?",
-            (now, claimed_by, attempt, row["id"]),
+            (
+                now,
+                claimed_by,
+                attempt,
+                lease_token,
+                now,
+                running_timeout_seconds,
+                row["id"],
+            ),
         )
         conn.execute("COMMIT")
     except sqlite3.Error:
@@ -363,19 +466,39 @@ def complete_projection_job(
     conn: sqlite3.Connection,
     *,
     job_id: str,
+    lease_token: str,
     status: ProjectionJobStatus,
     result: Mapping[str, object] | None = None,
     error_message: str | None = None,
-) -> None:
+) -> bool:
+    """Finalize a claimed job, fencing out a superseded owner.
+
+    Fencing is mandatory, not optional: the write applies only when
+    ``lease_token`` still matches the job's current lease. A lease alone
+    would be more dangerous than the PID check it replaces, because a
+    worker that merely hung (rather than died) can wake up after its lease
+    expired and try to publish a result for work that was already
+    reassigned -- the fencing token is what forbids that write, even though
+    reclaiming the lease is what permitted the reassignment.
+
+    Returns True when this call's token matched and the outcome was written;
+    False when the caller has been fenced out (its lease already expired and
+    :func:`_reclaim_stale_running_jobs` cleared ``lease_token``, or a new
+    owner has since claimed and possibly already completed the job) -- the
+    caller no longer holds authority to write an outcome and MUST NOT retry
+    the write or treat the in-memory result as applied.
+    """
     now = current_report_timestamp_utc()
     result_json = json_text(result, sort_keys=True) if result is not None else None
-    conn.execute(
+    cursor = conn.execute(
         "UPDATE memory_projection_jobs "
-        "SET status=?, finished_at_utc=?, result_json=?, error_message=? "
-        "WHERE id=?",
-        (status, now, result_json, error_message, job_id),
+        "SET status=?, finished_at_utc=?, result_json=?, error_message=?, "
+        "lease_token=NULL "
+        "WHERE id=? AND lease_token=?",
+        (status, now, result_json, error_message, job_id, lease_token),
     )
     conn.commit()
+    return cursor.rowcount == 1
 
 
 def list_projection_jobs(

@@ -792,7 +792,7 @@ SUPPRESSED_CONTAINER_PATH: Final[tuple[str, ...]] = (
 # DESIGN_METRICS_ALGORITHM_REVISION "2"; the refusal to diff 1.2 values against
 # current ones is delivered by the lane revision, not by this constant.
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.3"
-ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.8"
+ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.9"
 # Semantic retrieval index. Derived, rebuildable sidecar — NOT
 # covered by ENGINEERING_MEMORY_SCHEMA_VERSION. Bump to invalidate the index
 # on an incompatible projection/row-format change (forces a rebuild, not a

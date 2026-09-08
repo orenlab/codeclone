@@ -22,7 +22,7 @@ The release process expects these version and threshold contracts:
 | `REPORT_SCHEMA_VERSION` | 3.4 | Report payload structure |
 | `BASELINE_FINGERPRINT_VERSION` | 3 | Clone-detection fingerprint logic version |
 | `CACHE_VERSION` | 4.2 | Analysis cache compatibility |
-| `ENGINEERING_MEMORY_SCHEMA_VERSION` | 1.8 | Memory store schema |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION` | 1.9 | Memory store schema |
 
 All artifacts must match these versions before release. Do not upgrade versions within a release; version changes require explicit contract amendment.
 

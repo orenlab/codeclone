@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS memory_projection_jobs (
     result_json       TEXT,
     error_message     TEXT,
     flush_claimed_by  TEXT,
+    lease_token           TEXT,
+    lease_renewed_at_utc  TEXT,
+    lease_seconds         INTEGER,
     FOREIGN KEY(project_id) REFERENCES memory_projects(id)
 )
 """

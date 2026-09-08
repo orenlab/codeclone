@@ -19,7 +19,7 @@ The surface provides four MCP tools:
 - **query_engineering_memory**: mode-based inspection (search, get, for_path, trajectories, drafts, stale, etc.)
 - **get_memory_projection_page**: pagination for omitted tail results
 
-Schema version: `ENGINEERING_MEMORY_SCHEMA_VERSION="1.8"` (contract constant in `codeclone/contracts/__init__.py`).
+Schema version: `ENGINEERING_MEMORY_SCHEMA_VERSION="1.9"` (contract constant in `codeclone/contracts/__init__.py`).
 
 ## Contracts
 

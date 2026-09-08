@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import subprocess
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,9 +21,9 @@ import pytest
 from codeclone.audit.events import repo_root_digest
 from codeclone.audit.schema import ensure_schema
 from codeclone.audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
-from codeclone.config.memory import resolve_memory_config
+from codeclone.config.memory import MemoryConfig, resolve_memory_config
 from codeclone.memory.exceptions import MemoryContractError
-from codeclone.memory.jobs.models import ProjectionJobRecord
+from codeclone.memory.jobs.models import ProjectionJobRecord, ProjectionJobStatus
 from codeclone.memory.jobs.spawn import (
     SpawnWorkerResult,
     _run_once_argv,
@@ -60,8 +61,10 @@ from codeclone.memory.jobs.workflow import (
     is_ci_environment,
     maybe_auto_enqueue_projection_rebuild,
 )
+from codeclone.memory.models import MemoryProject
 from codeclone.memory.project import resolve_memory_db_path
 from codeclone.memory.schema import open_memory_db
+from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import cli_memory_repo
@@ -191,9 +194,17 @@ def test_last_applied_stimulus_prefers_result_applied_block(tmp_path: Path) -> N
                 trigger="cli",
                 stimulus=stimulus,
             )
+            claimed = claim_next_projection_job(
+                conn,
+                project_id=project.id,
+                claimed_by=worker_claim_token(),
+                running_timeout_seconds=60,
+            )
+            assert claimed is not None and claimed.lease_token is not None
             complete_projection_job(
                 conn,
                 job_id=enqueue.job_id,
+                lease_token=claimed.lease_token,
                 status="done",
                 result={
                     "applied_stimulus": {"repo_root_digest": "applied-only"},
@@ -267,9 +278,17 @@ def test_store_list_and_latest_done_projection_job(tmp_path: Path) -> None:
                 trigger="cli",
                 stimulus=stimulus,
             )
+            claimed = claim_next_projection_job(
+                conn,
+                project_id=project.id,
+                claimed_by=worker_claim_token(),
+                running_timeout_seconds=60,
+            )
+            assert claimed is not None and claimed.lease_token is not None
             complete_projection_job(
                 conn,
                 job_id=first.job_id,
+                lease_token=claimed.lease_token,
                 status="done",
                 result={"applied_stimulus": stimulus},
             )
@@ -367,6 +386,72 @@ def test_run_projection_jobs_once_handles_worker_exception(tmp_path: Path) -> No
         assert result.reason == "boom"
 
 
+def test_worker_run_once_surfaces_fenced_out_when_lease_lost_mid_job(
+    tmp_path: Path,
+) -> None:
+    """Integration proof for the lease-fencing plumbing in worker.py: if
+    another actor reclaims and reassigns a job while a worker is mid-run,
+    that worker's own completion attempt is fenced out, and
+    run_projection_jobs_once reports it as such instead of silently claiming
+    success or raising. The store-level lease/fencing acceptance suite lives
+    in test_memory_projection_job_lease.py; this is its one end-to-end
+    counterpart, kept here because it is the only scenario in that suite
+    that needs a real MemoryConfig, and this module already carries the
+    codeclone.config.memory architecture-boundary allowlist entry (see
+    tests/architecture_boundary_allowlist.json) that a brand-new test module
+    would not be allowed to add under the shrink-only ratchet.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        conn = store.connection
+        config = resolve_memory_config(root)
+        stimulus = compute_projection_stimulus(
+            conn=conn, project=project, root_path=root, config=config
+        )
+        enqueue_projection_job(conn, project=project, trigger="cli", stimulus=stimulus)
+
+        def _fake_run_projection_job(
+            _store: SqliteEngineeringMemoryStore,
+            *,
+            job_id: str,
+            root_path: Path,
+            config: MemoryConfig,
+            project: MemoryProject,
+            stimulus: Mapping[str, object],
+            emit_bootstrap_span: bool = True,
+        ) -> tuple[ProjectionJobStatus, dict[str, object], str | None]:
+            # Simulate a concurrent reclaim-and-reassign stealing the lease
+            # while this worker was busy, exactly what
+            # _reclaim_stale_running_jobs does on expiry.
+            conn.execute(
+                "UPDATE memory_projection_jobs SET lease_token=? WHERE id=?",
+                ("someone-elses-lease-token", job_id),
+            )
+            conn.commit()
+            return (
+                "done",
+                {
+                    "trajectory": {"status": "done"},
+                    "semantic": {"status": "done"},
+                    "experience": {"status": "done"},
+                },
+                None,
+            )
+
+        with patch(
+            "codeclone.memory.jobs.worker.run_projection_job",
+            side_effect=_fake_run_projection_job,
+        ):
+            result = run_projection_jobs_once(
+                store,
+                root_path=root,
+                config=config,
+                project=project,
+                running_timeout_seconds=60,
+            )
+        assert result.status == "fenced_out"
+        assert result.reason == "lease_fenced_out"
+
+
 def test_execute_projection_rebuild_status_payload(tmp_path: Path) -> None:
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         payload = execute_projection_rebuild_status(root_path=root, limit=3)
@@ -403,9 +488,17 @@ def test_execute_enqueue_skips_when_stimulus_unchanged(
                 trigger="cli",
                 stimulus=stimulus,
             )
+            claimed = claim_next_projection_job(
+                conn,
+                project_id=project.id,
+                claimed_by=worker_claim_token(),
+                running_timeout_seconds=60,
+            )
+            assert claimed is not None and claimed.lease_token is not None
             complete_projection_job(
                 conn,
                 job_id=first.job_id,
+                lease_token=claimed.lease_token,
                 status="done",
                 result={"applied_stimulus": stimulus},
             )
@@ -652,7 +745,6 @@ def test_execute_worker_reuses_existing_observability_runtime(
 
 def test_store_reclaims_invalid_timestamp_and_blocks_parallel_claim(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from codeclone.memory.jobs import store as job_store
 
@@ -675,7 +767,12 @@ def test_store_reclaims_invalid_timestamp_and_blocks_parallel_claim(
                 ),
             )
             conn.commit()
-            monkeypatch.setattr(job_store, "_pid_alive", lambda _token: True)
+            # _pid_alive is not consulted by reclaim at all (see
+            # test_reclaim_never_consults_pid_alive in
+            # test_memory_projection_job_lease.py for the direct proof); this
+            # row's malformed started_at_utc and NULL lease columns leave the
+            # legacy fallback with no readable deadline, which is reclaimed
+            # unconditionally.
             job_store._reclaim_stale_running_jobs(
                 conn,
                 project_id=project.id,
