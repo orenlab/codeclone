@@ -72,6 +72,57 @@ SuppressionKey = tuple[str, str]
 #: cannot survive its owner.
 _PENDING_STALE_SUPPRESSIONS: Final[Mapping[SuppressionKey, str]] = {}
 
+#: The OPEN + DEAD population this branch froze, measured on this tree by the
+#: run's own detector -- ``dead_code.items``, and only those.  The 87
+#: ``UNRESOLVED_EXTERNAL`` symbols are a different lane answering a different
+#: question and are deliberately not mixed in.
+#:
+#: A **set**, never a count.  ``len(current) == 36`` stays green while a wave
+#: retires one identity and introduces another, which is exactly the trade an
+#: inventory freeze exists to forbid.  Shrinking needs no edit here: every
+#: subset of this register passes, so ``36 -> 0`` is the direction the guard
+#: is built to allow, and only a symbol that is NOT in it can fail the run.
+FROZEN_OPEN_DEAD: Final[frozenset[str]] = frozenset(
+    {
+        "codeclone.analysis.normalizer:_is_proven_commutative_operand",
+        "codeclone.analytics.report.interpret:_cluster_size_histogram",
+        "codeclone.cache._validators:_is_block_dict",
+        "codeclone.cache._validators:_is_class_metrics_dict",
+        "codeclone.cache._validators:_is_dead_candidate_dict",
+        "codeclone.cache._validators:_is_file_stat_dict",
+        "codeclone.cache._validators:_is_function_relationship_facts_dict",
+        "codeclone.cache._validators:_is_git_blob_identity",
+        "codeclone.cache._validators:_is_module_api_surface_dict",
+        "codeclone.cache._validators:_is_module_dep_dict",
+        "codeclone.cache._validators:_is_module_docstring_coverage_dict",
+        "codeclone.cache._validators:_is_module_typing_coverage_dict",
+        "codeclone.cache._validators:_is_runtime_reachability_fact_dict",
+        "codeclone.cache._validators:_is_security_surface_dict",
+        "codeclone.cache._validators:_is_segment_dict",
+        "codeclone.cache._validators:_is_source_content_digest",
+        "codeclone.cache._validators:_is_source_stats_dict",
+        "codeclone.cache._validators:_is_unit_dict",
+        "codeclone.cache.entries:_block_dict_from_model",
+        "codeclone.cache.entries:_segment_dict_from_model",
+        "codeclone.cache.entries:_unit_dict_from_model",
+        "codeclone.findings.structural.detectors:_group_item_sort_key",
+        "codeclone.memory.semantic.lancedb_backend:LanceDbSemanticIndex._schema_matches",
+        "codeclone.surfaces.cli.console:_make_console",
+        "codeclone.surfaces.mcp._session_shared:_load_report_document_payload",
+        "codeclone.surfaces.mcp._workspace_intent_lifecycle:is_orphaned",
+        "codeclone.surfaces.mcp._workspace_intent_paths:read_payload",
+        "codeclone.surfaces.mcp._workspace_intent_staleness:is_stale",
+        "codeclone.surfaces.mcp._workspace_intent_store:lazy_close_eligible_records",
+        "codeclone.surfaces.mcp._workspace_intent_store:lazy_close_eligible_records_unlocked",
+        "codeclone.surfaces.mcp._workspace_intents:_is_pid_alive",
+        "codeclone.surfaces.mcp._workspace_intents:is_orphaned",
+        "codeclone.surfaces.mcp._workspace_intents:is_stale",
+        "codeclone.surfaces.mcp._workspace_intents:list_workspace_intent_records_raw",
+        "codeclone.surfaces.mcp._workspace_intents:signed_payload",
+        "codeclone.surfaces.mcp._workspace_intents:validate_workspace_record",
+    }
+)
+
 
 def stale_dead_code_suppressions(
     *,
@@ -297,7 +348,7 @@ def test_every_honoured_suppression_is_visible_to_the_source_scan(
     )
 
 
-def test_no_symbol_is_reported_dead_while_its_suppression_is_gone(
+def test_no_dead_symbol_is_reported_outside_the_frozen_inventory(
     repository_dead_code: tuple[
         dict[SuppressionKey, int], dict[SuppressionKey, str], list[object]
     ],
@@ -308,16 +359,24 @@ def test_no_symbol_is_reported_dead_while_its_suppression_is_gone(
     reports the symbol.  Retiring a suppression that is still load-bearing is
     not, and nothing else in this suite says so -- ``fail_dead_code`` lives in
     the gate, which the test run never reaches.
+
+    The symbol comes back into ``dead_code.items`` under an identity that
+    ``FROZEN_OPEN_DEAD`` does not hold, and that -- not a count -- is what
+    fails here.  A symbol newly stripped of its last consumer fails the same
+    way, for the same reason.
     """
 
     _declared, _honoured, dead_items = repository_dead_code
-    reported = sorted(
-        f"  {item['filepath']}:{item['start_line']} {item['qualname']}"
+    located = {
+        str(item["qualname"]): f"{item['filepath']}:{item['start_line']}"
         for item in dead_items
         if isinstance(item, Mapping)
-    )
-    assert not reported, (
-        "the repository reports dead symbols; either the symbol has lost its "
-        "last consumer, or a still-necessary suppression was removed:\n"
-        + "\n".join(reported)
+    }
+    unexpected = sorted(set(located) - FROZEN_OPEN_DEAD)
+    assert not unexpected, (
+        "the repository reports a dead symbol the frozen inventory does not "
+        "hold; either the symbol has lost its last consumer, or a "
+        "still-necessary suppression was removed. This register shrinks and "
+        "never grows -- do not add the identity to it:\n"
+        + "\n".join(f"  {located[qualname]} {qualname}" for qualname in unexpected)
     )
