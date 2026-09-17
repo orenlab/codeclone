@@ -223,6 +223,39 @@ def test_memory_render_status_without_type_breakdown(
     assert "records_by_type" not in out
 
 
+def test_memory_render_status_names_an_unrecognized_store(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The plain renderer tells the reader the file is not a store -- neither
+    "create one" (it exists) nor "migrate it" (it has no schema to migrate)."""
+    status = MemoryStatusReport(
+        db_path=Path("/tmp/repo/.codeclone/memory/engineering_memory.sqlite3"),
+        schema_version=None,
+        project_id=None,
+        project_root="/tmp/repo",
+        backend="sqlite",
+        git_available=False,
+        git_branch=None,
+        git_head=None,
+        last_analysis_fingerprint=None,
+        last_init_run_id=None,
+        record_count=0,
+        records_by_type={},
+        records_by_status={},
+        state="unrecognized",
+    )
+    console = PlainConsole()
+    with patch.object(memory_render, "supports_rich_console", return_value=False):
+        memory_render.render_status_report(console=console, report=status)
+    out = capsys.readouterr().out
+    assert "unrecognized" in out
+    assert "not an Engineering Memory store" in out
+    # Not the other two remedies, and only where it is: no schema row of
+    # ours, found or supported, and no counts.
+    for absent in ("memory migrate", "memory init", "schema", "records"):
+        assert absent not in out, absent
+
+
 def test_memory_render_init_dry_run_skips_empty_count_maps(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

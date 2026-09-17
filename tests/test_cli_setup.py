@@ -51,7 +51,11 @@ from codeclone.surfaces.cli.setup.wizard import WizardPrompts, run_setup_wizard
 from codeclone.surfaces.cli.types import PrinterLike
 from codeclone.ui_messages import setup as setup_ui
 from codeclone.utils.json_io import json_text
-from tests.memory_fixtures import root_with_old_engineering_memory_store
+from tests.memory_fixtures import (
+    memory_project_db_paths,
+    root_with_foreign_sqlite_at_memory_store_path,
+    root_with_old_engineering_memory_store,
+)
 from tests.test_cli_inprocess import _write_current_python_baseline
 
 if TYPE_CHECKING:
@@ -3268,6 +3272,36 @@ def test_setup_status_reports_a_missing_memory_store_as_absent(
     assert "probe:memory:schema:incompatible" not in cast("list[str]", row["evidence"])
     assert str(row["reason"]) == setup_ui.REASON_MEMORY_MISSING
     assert row["_evidence_backed"] is False
+
+
+def test_setup_status_reports_a_foreign_database_as_unrecognized(
+    tmp_path: Path,
+) -> None:
+    """A SQLite file that is not a store is a fourth fact: ``unrecognized``.
+
+    Not "not created yet" (the file is there), not "incompatible" (it has no
+    schema version), and -- measured before this state existed -- not
+    ``ready``: ``setup status`` initialized the memory schema inside the
+    foreign file and reported it ready. A readiness read does not get to
+    write into a database it does not recognize.
+    """
+    root = root_with_foreign_sqlite_at_memory_store_path(tmp_path)
+    _project, db_path = memory_project_db_paths(root)
+    before = db_path.read_bytes()
+
+    row = _memory_capability_row(root)
+
+    assert row["runtime"] == "unavailable"
+    assert row["configuration"] == "configured"
+    assert "probe:memory:store:unrecognized" in cast("list[str]", row["evidence"])
+    assert str(row["reason"]) == setup_ui.REASON_MEMORY_UNRECOGNIZED
+    assert str(row["recommended_action"]) == setup_ui.ACTION_MEMORY_UNRECOGNIZED
+    assert row["_evidence_backed"] is False
+    # And the CLI renders the whole report rather than failing.
+    assert setup_main(["status", "--root", str(root)]) == int(ExitCode.SUCCESS)
+    assert db_path.read_bytes() == before, (
+        "setup status must not initialize a foreign database"
+    )
 
 
 def test_setup_probe_semantic_retrieval_with_store_present(

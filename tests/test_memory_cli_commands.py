@@ -19,6 +19,7 @@ from .memory_fixtures import (
     cli_memory_repo,
     git_repo_with_cached_report,
     memory_project_db_paths,
+    root_with_foreign_sqlite_at_memory_store_path,
     root_with_old_engineering_memory_store,
 )
 
@@ -229,3 +230,24 @@ def test_memory_cli_migrate_on_missing_store_reports_cleanly(tmp_path: Path) -> 
     root.mkdir()
     code = memory_main(["migrate", "--root", str(root)])
     assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_memory_cli_status_on_a_foreign_database_reports_cleanly_and_leaves_it_alone(
+    tmp_path: Path,
+) -> None:
+    """``codeclone memory status`` on a SQLite file that is not a store: a
+    non-zero, rendered diagnostic, and not one byte written into the file.
+
+    Measured before this pin: the read initialized the memory schema inside
+    the foreign database and exited 0 with the store reported ``ready``.
+    """
+    root = root_with_foreign_sqlite_at_memory_store_path(tmp_path)
+    _project, db_path = memory_project_db_paths(root)
+    before = db_path.read_bytes()
+
+    code = memory_main(["status", "--root", str(root)])
+
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert db_path.read_bytes() == before, (
+        "status must not initialize a foreign database"
+    )

@@ -23,6 +23,7 @@ from codeclone.memory.exceptions import (
     MemorySchemaAuthorityError,
     MemorySchemaError,
     MemorySchemaMigrationInProgressError,
+    MemorySchemaUnrecognizedError,
 )
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import (
@@ -50,6 +51,8 @@ from codeclone.memory.sqlite_store import (
     migrate_memory_db_authoritative,
 )
 from codeclone.report.meta import current_report_timestamp_utc
+
+from .memory_fixtures import foreign_sqlite_database
 
 
 def _memory_record(
@@ -896,6 +899,110 @@ def test_build_memory_status_report_never_mutates_a_mismatched_store(
 
     after = hashlib.sha256(db_path.read_bytes()).hexdigest()
     assert after == before
+
+
+def test_open_memory_db_refuses_a_foreign_database_without_touching_it(
+    tmp_path: Path,
+) -> None:
+    """A present SQLite file that is not a store is refused BEFORE any
+    read-write open.
+
+    ``open_sqlite_db`` switches a file to WAL ahead of ``ensure_schema``, so a
+    refusal coming from the schema check would already have rewritten the
+    header of somebody else's database. The byte hash is therefore the
+    witness that the file was never opened read-write; the exception type is
+    the witness that the refusal is the typed one a status read maps to
+    ``unrecognized`` rather than a generic schema error.
+    """
+    db_path = tmp_path / "somebody_elses.sqlite3"
+    foreign_sqlite_database(db_path)
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    with pytest.raises(MemorySchemaUnrecognizedError):
+        open_memory_db(db_path)
+
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
+
+
+def test_open_memory_db_still_initializes_an_empty_database_file(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: a file with no tables at all is a brand-new store.
+
+    ``sqlite3.connect`` creates an empty file long before any schema exists,
+    and an interrupted first init can leave one behind. Refusing it as
+    foreign would make the store impossible to create; the discriminator is
+    "holds tables of its own", never "the file exists".
+    """
+    db_path = tmp_path / "memory.sqlite3"
+    db_path.touch()
+    assert db_path.stat().st_size == 0
+
+    conn = open_memory_db(db_path)
+    try:
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+def test_ensure_schema_refuses_a_foreign_database_on_a_raw_connection(
+    tmp_path: Path,
+) -> None:
+    """The schema layer itself will not initialize into a foreign database.
+
+    ``open_memory_db`` refuses before opening; a caller holding a raw
+    connection (``ensure_schema`` is public) meets the same decision: the
+    ``schema_version is None`` branch means "initialize" only for a database
+    with no tables of its own.
+    """
+    db_path = tmp_path / "somebody_elses.sqlite3"
+    foreign_sqlite_database(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        with pytest.raises(MemorySchemaUnrecognizedError):
+            ensure_schema(conn)
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+    assert tables == {"somebody_elses"}
+
+
+def test_status_report_calls_a_foreign_database_unrecognized(tmp_path: Path) -> None:
+    """Present, readable as SQLite, not a store: ``unrecognized``.
+
+    Neither ``absent`` (the file is there), nor ``incompatible`` (there is no
+    schema version to be incompatible with), nor ``ready``: before this
+    state, the status read initialized a schema inside the foreign file and
+    called it ready.
+    """
+    db_path = tmp_path / "somebody_elses.sqlite3"
+    foreign_sqlite_database(db_path)
+
+    facts = _status_report_facts(tmp_path, db_path)
+
+    assert facts == ("unrecognized", None, ENGINEERING_MEMORY_SCHEMA_VERSION, True)
+
+
+def test_build_memory_status_report_never_initializes_a_foreign_database(
+    tmp_path: Path,
+) -> None:
+    """Status is a read; a read leaves somebody else's file byte-for-byte alone.
+
+    Measured before this pin: ``build_memory_status_report`` on a SQLite file
+    without ``memory_meta`` created the whole memory schema inside it and
+    reported the store ``ready`` -- a status command mutating persistent
+    state it does not own.
+    """
+    db_path = tmp_path / "somebody_elses.sqlite3"
+    foreign_sqlite_database(db_path)
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    _status_report_facts(tmp_path, db_path)
+
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
 
 
 def test_migrate_memory_db_authoritative_initializes_a_brand_new_store(

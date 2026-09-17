@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote
 
 from .. import __version__
 from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
@@ -15,7 +16,11 @@ from ..report.meta import current_report_timestamp_utc
 from ..utils.sqlite_store import (
     initialize_schema_v1,
 )
-from .exceptions import MemorySchemaAuthorityError, MemorySchemaError
+from .exceptions import (
+    MemorySchemaAuthorityError,
+    MemorySchemaError,
+    MemorySchemaUnrecognizedError,
+)
 from .schema_experience import (
     EXPERIENCE_DDL_STATEMENTS,
     EXPERIENCE_INDEX_SQL,
@@ -242,8 +247,15 @@ def open_memory_db(path: Path, *, allow_migration: bool = False) -> sqlite3.Conn
     (``codeclone.memory.sqlite_store.migrate_memory_db_authoritative``, or
     an equivalent explicit caller) -- never from an ordinary read, write,
     or status path.
+
+    A present file that is not a store at all (a SQLite database with tables
+    of its own and no ``memory_meta``) is refused with
+    ``MemorySchemaUnrecognizedError`` BEFORE the read-write open, so it is not
+    initialized into and not touched -- see ``_refuse_unrecognized_store``.
     """
     from ..observability.sqlite_access import open_instrumented_sqlite_db
+
+    _refuse_unrecognized_store(path)
 
     def _ensure(conn: sqlite3.Connection) -> None:
         ensure_schema(conn, allow_migration=allow_migration)
@@ -254,6 +266,57 @@ def open_memory_db(path: Path, *, allow_migration: bool = False) -> sqlite3.Conn
         foreign_keys=True,
         synchronous="FULL",
     )
+
+
+def _holds_foreign_tables(conn: sqlite3.Connection) -> bool:
+    """Whether *conn* is a database with tables of its own and no ``memory_meta``.
+
+    The one predicate behind "may this database be initialized as a store":
+    an EMPTY database (no tables at all -- a file ``sqlite3.connect`` just
+    created, or one an interrupted first init left behind) may; a database
+    already holding somebody's tables may not. A ``memory_meta`` table means
+    the store is ours, and then its VERSION decides, never this predicate.
+    """
+    names = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    return bool(names) and MEMORY_META_TABLE not in names
+
+
+def _unrecognized_message(where: str) -> str:
+    return (
+        f"{where} is not an Engineering Memory store: it is a SQLite database "
+        f"with tables of its own and no {MEMORY_META_TABLE!r} table. codeclone "
+        "does not initialize or migrate a database it does not recognize; move "
+        "the file aside or configure a different memory store path. The file "
+        "was not modified."
+    )
+
+
+def _refuse_unrecognized_store(path: Path) -> None:
+    """Refuse a present file that is not a store BEFORE any read-write open.
+
+    ``open_sqlite_db`` issues ``PRAGMA journal_mode=WAL`` ahead of
+    ``ensure_schema``, and moving a rollback-journal file to WAL rewrites its
+    header -- so a refusal raised from the schema check would already have
+    altered somebody else's database. The look is therefore taken here,
+    through a read-only URI, and only for a path that exists: a missing path
+    is created as before, and an existing EMPTY database is a brand-new store
+    and initializes as it always has.
+    """
+    if not path.is_file():
+        return
+    uri = f"file:{quote(str(path.resolve()), safe='/')}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        foreign = _holds_foreign_tables(conn)
+    finally:
+        conn.close()
+    if foreign:
+        raise MemorySchemaUnrecognizedError(
+            _unrecognized_message(f"The file at {path}")
+        )
 
 
 def open_memory_db_readonly(path: Path) -> sqlite3.Connection:
@@ -271,9 +334,12 @@ def open_memory_db_readonly(path: Path) -> sqlite3.Connection:
 def ensure_schema(conn: sqlite3.Connection, *, allow_migration: bool = False) -> None:
     """Bring *conn* to ``ENGINEERING_MEMORY_SCHEMA_VERSION``, or refuse.
 
-    Creating a brand new store (no ``schema_version`` meta row yet) is
-    initialization, not migration, and always proceeds -- there is no
-    existing schema for anyone else to be relying on. Changing an EXISTING
+    Creating a brand new store (no ``schema_version`` meta row yet, and no
+    tables of anybody's) is initialization, not migration, and always
+    proceeds -- there is no existing schema for anyone else to be relying
+    on. A database that already holds tables and no ``memory_meta`` is not
+    a brand new store but somebody else's database, and is refused with
+    ``MemorySchemaUnrecognizedError`` instead. Changing an EXISTING
     store's version is a privileged mutation: without ``allow_migration``
     this raises ``MemorySchemaAuthorityError`` and leaves the store
     byte-for-byte unchanged, in EITHER direction (this checkout's code
@@ -284,6 +350,10 @@ def ensure_schema(conn: sqlite3.Connection, *, allow_migration: bool = False) ->
     """
     current = get_meta(conn, "schema_version")
     if current is None:
+        if _holds_foreign_tables(conn):
+            raise MemorySchemaUnrecognizedError(
+                _unrecognized_message("The opened database")
+            )
         create_schema_v1(conn)
         return
     from .schema_migrate import reconcile_memory_record_schema_versions
@@ -350,6 +420,7 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
 __all__ = [
     "MemorySchemaAuthorityError",
     "MemorySchemaError",
+    "MemorySchemaUnrecognizedError",
     "create_schema_v1",
     "create_trajectory_schema",
     "ensure_schema",

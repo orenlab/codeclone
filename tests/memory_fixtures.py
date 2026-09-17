@@ -267,6 +267,38 @@ def stamp_engineering_memory_schema_version(db_path: Path, *, version: str) -> N
         conn.close()
 
 
+def foreign_sqlite_database(db_path: Path) -> None:
+    """Put a SQLite database that is NOT an engineering-memory store at *db_path*.
+
+    One table of somebody else's and no ``memory_meta``: the shape a status
+    read must report as ``unrecognized`` and must never initialize into.
+    Written through a bare connection in SQLite's default rollback-journal
+    mode on purpose -- any read-write open by codeclone switches the file to
+    WAL and rewrites its header, so a byte hash taken before such an open is
+    the witness that no read-write open happened at all.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE somebody_elses (x INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def root_with_foreign_sqlite_at_memory_store_path(tmp_path: Path) -> Path:
+    """A ``tmp_path``-rooted repo whose memory-store path holds a foreign database.
+
+    The CLI-surface counterpart of ``foreign_sqlite_database``: the file sits
+    exactly where ``resolve_memory_db_path`` sends every status read.
+    """
+    root = tmp_path / "repo"
+    root.mkdir(exist_ok=True)
+    _project, db_path = memory_project_db_paths(root)
+    foreign_sqlite_database(db_path)
+    return root
+
+
 def unfit_run_refusal(root: Path) -> UnfitAnalysisRunError:
     """The exact refusal a memory init raises for a run that measured nothing.
 

@@ -12,12 +12,12 @@ from pathlib import Path
 from typing import Literal
 
 from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
-from .exceptions import MemorySchemaError
+from .exceptions import MemorySchemaError, MemorySchemaUnrecognizedError
 from .project import GitProvenance, read_git_provenance, resolve_project_identity
 from .schema_meta import get_meta
 from .sqlite_store import SqliteEngineeringMemoryStore
 
-#: What this checkout can say about the engineering-memory store, as three
+#: What this checkout can say about the engineering-memory store, as four
 #: mutually exclusive facts rather than one boolean plus an exception.
 #:
 #: ``absent``       -- no store file at ``db_path``; nothing was ever created.
@@ -25,14 +25,20 @@ from .sqlite_store import SqliteEngineeringMemoryStore
 #: ``incompatible`` -- store present, but its on-disk schema is not the one
 #: this executable supports, and opening it here carries no authority to
 #: migrate it (see ``codeclone.memory.schema.ensure_schema``).
+#: ``unrecognized`` -- a file is present at ``db_path`` and it is not an
+#: engineering-memory store: a SQLite database with tables of its own and no
+#: ``memory_meta``. Nothing to migrate, nothing to read, and -- measured
+#: before this state existed -- the one shape a status read used to
+#: initialize a schema INTO and then call ``ready``.
 #:
-#: ``incompatible`` is deliberately NOT folded into ``absent``: a store that
-#: exists and holds records, reported as "not created yet", sends the reader
-#: to ``codeclone memory init`` when the real remediation is
-#: ``codeclone memory migrate`` (or a checkout whose version matches). The
-#: discriminator is this field, never a nullable value whose ``None`` would
-#: have to mean several different things at once.
-MemoryStoreState = Literal["absent", "ready", "incompatible"]
+#: ``incompatible`` and ``unrecognized`` are deliberately NOT folded into
+#: ``absent``: a store that exists and holds records, reported as "not
+#: created yet", sends the reader to ``codeclone memory init`` when the real
+#: remediation is ``codeclone memory migrate`` (or a checkout whose version
+#: matches) -- or, for a file that is not a store, moving it out of the way.
+#: The discriminator is this field, never a nullable value whose ``None``
+#: would have to mean several different things at once.
+MemoryStoreState = Literal["absent", "ready", "incompatible", "unrecognized"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,8 +119,9 @@ def _unusable_store_report(
 ) -> MemoryStatusReport:
     """A report for a store this checkout cannot read records out of.
 
-    Shared by the two such states -- ``absent`` and ``incompatible`` -- so
-    the only difference between them is the state each caller names, and the
+    Shared by the three such states -- ``absent``, ``incompatible`` and
+    ``unrecognized`` -- so the only difference between them is the state
+    each caller names, and the
     counts stay zero because nothing was counted, not because the store was
     measured and found empty.
     """
@@ -146,8 +153,9 @@ def build_memory_status_report(
 
     Never raises for a schema this checkout cannot open, and never migrates
     one: such a store comes back as ``state="incompatible"`` carrying both
-    schema versions. Status is a read, and a read has no migration
-    authority.
+    schema versions. A file that is not a store at all comes back as
+    ``state="unrecognized"`` and is never opened read-write. Status is a
+    read, and a read has neither migration nor initialization authority.
     """
     resolved_root = root_path.resolve()
     project = resolve_project_identity(resolved_root)
@@ -165,6 +173,21 @@ def build_memory_status_report(
 
     try:
         store = SqliteEngineeringMemoryStore(db_path)
+    except MemorySchemaUnrecognizedError:
+        # Present and readable as SQLite, but not a store: no schema version
+        # to report, nothing to migrate, and nothing was written -- the
+        # refusal is decided before any read-write open. Must be caught
+        # ahead of its base class, or it would be laundered into a version
+        # mismatch that names no version.
+        return _unusable_store_report(
+            state="unrecognized",
+            db_path=db_path,
+            schema_version=None,
+            project_id=project.id,
+            project_root=str(resolved_root),
+            backend=backend,
+            git=git,
+        )
     except MemorySchemaError:
         # The store is present and this checkout may not read it. Calling it
         # absent would send the reader to `memory init` and silently deny

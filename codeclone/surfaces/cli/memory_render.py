@@ -519,15 +519,17 @@ def _memory_store_unusable_line(report: MemoryStatusReport) -> str | None:
     """The one-line diagnostic for a store no records can be read from.
 
     ``None`` means exactly one thing -- the store is readable, so the record
-    breakdown below it is real. The two unusable states get different lines
-    on purpose: "create one" and "migrate the one you have" are different
-    instructions, and printing the first for the second is the confusion
-    this state split exists to prevent.
+    breakdown below it is real. The three unusable states get different
+    lines on purpose: "create one", "migrate the one you have" and "that
+    file is not a store" are different instructions, and printing one for
+    another is the confusion this state split exists to prevent.
     """
     if report.state == "absent":
         return _memory_db_missing_line(report)
     if report.state == "incompatible":
         return _memory_db_incompatible_line(report)
+    if report.state == "unrecognized":
+        return _memory_db_unrecognized_line(report)
     return None
 
 
@@ -553,6 +555,18 @@ def _memory_db_incompatible_line(report: MemoryStatusReport) -> str:
     )
 
 
+def _memory_db_unrecognized_line(report: MemoryStatusReport) -> str:
+    return (
+        f"  [warning]{ui.GLYPH_WARN} "
+        + ui.esc(
+            f"The file at {report.db_path} is not an Engineering Memory store "
+            "(a SQLite database without memory_meta); it was not read and not "
+            "modified. Move it aside, or configure a different memory store path."
+        )
+        + "[/warning]"
+    )
+
+
 def _status_rows(report: MemoryStatusReport) -> tuple[tuple[str, str], ...]:
     located = (
         ("root", str(report.project_root)),
@@ -564,6 +578,10 @@ def _status_rows(report: MemoryStatusReport) -> tuple[tuple[str, str], ...]:
         # Schema, fingerprint, last run and record count are properties of a
         # database; for one that does not exist there is nothing to report
         # but where it would live.
+        return located
+    if report.state == "unrecognized":
+        # A file is there and it is not a store: no schema of ours to name,
+        # found or supported. Where it is, is the whole fact.
         return located
     if report.state == "incompatible":
         # Two versions, not one: which schema is on disk and which one this

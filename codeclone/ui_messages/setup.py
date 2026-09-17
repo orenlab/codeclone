@@ -159,6 +159,17 @@ ACTION_MEMORY_MIGRATE: Final = (
     "Run codeclone memory migrate from an authoritative checkout, or use a "
     "codeclone whose version matches the store."
 )
+#: Fourth state: a file is at the store path and it is not a store -- a SQLite
+#: database with tables of its own and no memory_meta. Neither "create one"
+#: nor "migrate it" applies, and codeclone will not write into it.
+REASON_MEMORY_UNRECOGNIZED: Final = (
+    "Engineering Memory store path holds a SQLite database that is not an "
+    "Engineering Memory store"
+)
+ACTION_MEMORY_UNRECOGNIZED: Final = (
+    "Move that file aside or configure a different memory store path; "
+    "codeclone does not initialize or migrate a database it does not recognize."
+)
 REASON_SEMANTIC_OPTIONAL: Final = "Requires semantic optional extras"
 REASON_SEMANTIC_NO_STORE: Final = (
     "Semantic packages installed but no Engineering Memory store to index"
@@ -203,6 +214,7 @@ MATURITY_RELEASE: Final = "release_ready"
 __all__ = [
     "ACTION_FIX_PYPROJECT",
     "ACTION_MEMORY_MIGRATE",
+    "ACTION_MEMORY_UNRECOGNIZED",
     "AVAILABILITY_LABELS",
     "CAPABILITY_LABELS",
     "GROUP_LABELS",
@@ -238,6 +250,7 @@ __all__ = [
     "REASON_MEMORY_EMPTY",
     "REASON_MEMORY_INCOMPATIBLE",
     "REASON_MEMORY_MISSING",
+    "REASON_MEMORY_UNRECOGNIZED",
     "REASON_NOT_APPLICABLE",
     "REASON_OPTIONAL_EXTRA_MISSING",
     "REASON_PRE_COMMIT_MISSING",

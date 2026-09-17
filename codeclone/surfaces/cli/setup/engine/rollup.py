@@ -305,6 +305,13 @@ def _describe_engineering_memory(
     if readiness == "ready":
         return ("", "")
     report = ctx.memory_report
+    if report is not None and report.state == "unrecognized":
+        # Neither "not created yet" nor "migrate it": the file at the store
+        # path is not a store, and codeclone will not write into it.
+        return (
+            setup_ui.REASON_MEMORY_UNRECOGNIZED,
+            setup_ui.ACTION_MEMORY_UNRECOGNIZED,
+        )
     if report is not None and report.state == "incompatible":
         # Name both versions. "Store exists but is empty" and "store has not
         # been created" are the two answers this state must never collapse

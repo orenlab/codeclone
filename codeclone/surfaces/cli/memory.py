@@ -614,6 +614,12 @@ def _render_status(*, console: PrinterLike, root_path: Path) -> int:
         # asked for this store's contents did not get it. The store itself
         # was not touched.
         return int(ExitCode.CONTRACT_ERROR)
+    if report.state == "unrecognized":
+        # The file at the store path is not a store this codeclone recognizes.
+        # Rendered as a diagnostic above; exits non-zero because the contents
+        # asked for were not read; and the file was neither initialized into
+        # nor otherwise touched.
+        return int(ExitCode.CONTRACT_ERROR)
     return int(ExitCode.SUCCESS)
 
 

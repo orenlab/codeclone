@@ -378,6 +378,17 @@ def _probe_engineering_memory(ctx: DiscoverContext) -> CapabilityAxes:
             runtime="unavailable",
             evidence=[*evidence, "probe:memory:schema:incompatible"],
         )
+    if report.state == "unrecognized":
+        # A file is at the configured store path and it is not a store.
+        # "unconfigured" would send the reader to `memory init`, which must
+        # not write into somebody else's database either; the path is
+        # configured, and what is unavailable is a store to read from it.
+        return CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="unavailable",
+            evidence=[*evidence, "probe:memory:store:unrecognized"],
+        )
     # Store present and readable: verified only when it holds records.
     runtime: RuntimeAxis = "verified" if report.record_count > 0 else "not_verified"
     return CapabilityAxes(
