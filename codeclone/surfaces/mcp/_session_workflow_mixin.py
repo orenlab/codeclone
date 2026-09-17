@@ -55,7 +55,7 @@ from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_intent_mixin import _MCPSessionIntentMixin
-from ._session_memory_mixin import _MCPSessionMemoryMixin
+from ._session_memory_mixin import MemorySchemaError, _MCPSessionMemoryMixin
 from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import (
@@ -89,6 +89,20 @@ _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
 )
 
 _FINISH_REDUCIBLE_LANES: Final[tuple[str, ...]] = ("receipt_content", "patch_trail")
+
+#: Typed reason for a finish that verified cleanly and then could not complete
+#: its memory side effects because the engineering memory store's schema is not
+#: the one this executable implements.  It is a refusal, not an advisory: the
+#: intent is deliberately NOT cleared, and a retry on the same ``intent_id``
+#: after `codeclone memory migrate` finishes the cycle.
+_FINISH_MEMORY_SCHEMA_REASON: Final = "memory_schema_incompatible"
+_FINISH_MEMORY_SCHEMA_NEXT: Final = (
+    "Migrate or match the engineering memory schema (`codeclone memory migrate` "
+    "from an authoritative checkout, or run a codeclone whose version matches "
+    "the store), then call finish_controlled_change again on the same "
+    "intent_id. The intent was NOT cleared and no memory candidates were "
+    "proposed."
+)
 
 
 def _intent_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionIntentMixin:
@@ -809,9 +823,64 @@ class _MCPSessionWorkflowMixin:
             except MCPServiceContractError as exc:
                 receipt_error = str(exc)
 
-        # 9. Auto-clear (only on accepted, only if receipt didn't fail)
+        # 9. Memory side effects — the LAST fallible operations this finish's
+        # success depends on, and therefore the last that run BEFORE authority
+        # is released.  Measured 2026-09-08: with the clear first, an
+        # engineering memory store this checkout cannot open raised out of
+        # finish after the intent row was already gone, and two intents were
+        # lost that way — control-plane state loss, heavier than the schema
+        # drift that caused it.  Ordering is the fix; the refusal below is
+        # typed; neither of them pretends the memory proposal succeeded.
+        accepted = verify_status in _ACCEPTED_STATUSES
+        try:
+            memory_hook, projection_hook = self._finish_memory_hooks(
+                record=record,
+                verify_payload=verify_payload,
+                receipt_payload=receipt_payload,
+                patch_trail_payload=patch_trail_payload,
+                resolved_files=resolved_files,
+                claims_text=claims_text,
+                review_text=review_text,
+                propose_memory=propose_memory,
+                accepted=accepted,
+            )
+        except MemorySchemaError as exc:
+            # The row must carry the fate this response names, exactly as the
+            # non-accepted verification path does: "recover me", not "editing
+            # normally". The intent survives, addressable by the same id.
+            update_workspace_intent_status(
+                root=record.root,
+                pid=self._agent_pid,
+                start_epoch=self._agent_start_epoch,
+                intent_id=intent_id,
+                new_status=WorkspaceIntentLifecycle.NEEDS_RECOVERY.value,
+            )
+            return _budgeted_finish_response(
+                {
+                    "intent_id": intent_id,
+                    "status": PatchContractStatus.UNVERIFIED.value,
+                    "reason": _FINISH_MEMORY_SCHEMA_REASON,
+                    "scope_check": check_payload,
+                    "verification": verify_payload,
+                    "claims": claims_payload,
+                    "receipt": receipt_payload,
+                    "patch_trail": patch_trail_payload,
+                    "intent_cleared": False,
+                    "workspace_hygiene_after": workspace_hygiene_after,
+                    "memory_error": {
+                        "error": _FINISH_MEMORY_SCHEMA_REASON,
+                        "message": str(exc),
+                    },
+                    "user_action_required": True,
+                    "next_step": _FINISH_MEMORY_SCHEMA_NEXT,
+                    "message": str(exc),
+                }
+            )
+
+        # 10. Auto-clear — only on accepted, and only once every fallible step
+        # this finish depends on (receipt, memory side effects) has completed.
         intent_cleared = False
-        if auto_clear and verify_status in _ACCEPTED_STATUSES and receipt_error is None:
+        if auto_clear and accepted and receipt_error is None:
             intent_session._clear_change_intent(intent_id=intent_id)
             intent_cleared = True
 
@@ -875,9 +944,41 @@ class _MCPSessionWorkflowMixin:
             result["unverified_paths"] = unverified_advisory
         if isinstance(health_regression_advisory, dict):
             result["health_regression_advisory"] = health_regression_advisory
-        if propose_memory and verify_status in _ACCEPTED_STATUSES:
+        # Already computed in step 9, before the clear: merged here only.
+        if memory_hook:
+            result.update(memory_hook)
+        if projection_hook is not None:
+            result["projection_rebuild"] = projection_hook
+        return _budgeted_finish_response(result)
+
+    def _finish_memory_hooks(
+        self,
+        *,
+        record: MCPRunRecord,
+        verify_payload: dict[str, object],
+        receipt_payload: dict[str, object] | None,
+        patch_trail_payload: dict[str, object],
+        resolved_files: Sequence[str],
+        claims_text: str | None,
+        review_text: str | None,
+        propose_memory: bool,
+        accepted: bool,
+    ) -> tuple[dict[str, object], dict[str, object] | None]:
+        """Run this finish's memory side effects, or raise.
+
+        Both hooks open the engineering memory store, so both raise
+        ``MemorySchemaError`` when that store's schema is not the one this
+        executable implements.  They are grouped here to give the caller
+        exactly ONE fallible region to run before it releases the intent.
+        Nothing is caught here on purpose: a caller that swallowed this would
+        be reporting a memory proposal that never happened.
+        """
+        if not accepted:
+            return {}, None
+        memory_session = _memory_session(self)
+        memory_hook: dict[str, object] = {}
+        if propose_memory:
             profile = verify_payload.get("verification_profile")
-            memory_session = _memory_session(self)
             memory_hook = memory_session.finish_propose_memory(
                 root_path=record.root,
                 changed_files=resolved_files,
@@ -890,16 +991,10 @@ class _MCPSessionWorkflowMixin:
                     run_id=record.run_id,
                 ),
             )
-            if memory_hook:
-                result.update(memory_hook)
-        if verify_status in _ACCEPTED_STATUSES:
-            memory_session = _memory_session(self)
-            projection_hook = memory_session.maybe_auto_enqueue_projection_rebuild(
-                root_path=record.root
-            )
-            if projection_hook is not None:
-                result["projection_rebuild"] = projection_hook
-        return _budgeted_finish_response(result)
+        projection_hook = memory_session.maybe_auto_enqueue_projection_rebuild(
+            root_path=record.root
+        )
+        return memory_hook, projection_hook
 
     def _finish_patch_trail(
         self,

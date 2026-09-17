@@ -6,15 +6,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import codeclone.memory.schema as schema_module
 from codeclone.contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
-from codeclone.memory.exceptions import MemorySchemaError
+from codeclone.memory import schema_migrate
+from codeclone.memory.exceptions import (
+    MemorySchemaAuthorityError,
+    MemorySchemaError,
+    MemorySchemaMigrationInProgressError,
+)
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import (
     MemoryRecord,
@@ -29,8 +38,17 @@ from codeclone.memory.schema import (
     open_memory_db,
 )
 from codeclone.memory.schema_meta import set_meta
-from codeclone.memory.schema_migrate import migrate_memory_schema
-from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+from codeclone.memory.schema_migrate import (
+    MemorySchemaMigrationOutcome,
+    acquire_schema_migration_lease,
+    migrate_memory_schema,
+    migrate_memory_schema_authoritative,
+    release_schema_migration_lease,
+)
+from codeclone.memory.sqlite_store import (
+    SqliteEngineeringMemoryStore,
+    migrate_memory_db_authoritative,
+)
 from codeclone.report.meta import current_report_timestamp_utc
 
 
@@ -213,13 +231,16 @@ def test_create_schema_v1_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_ensure_schema_migrates_1_0_to_1_1(tmp_path: Path) -> None:
+    """``allow_migration=True`` is what an authoritative caller passes;
+    see test_ensure_schema_default_refuses_older_store_without_mutating for
+    the (now default) refusal this same fixture hits without the flag."""
     db_path = tmp_path / "memory.sqlite3"
     conn = sqlite3.connect(db_path)
     try:
         create_schema_v1(conn)
         set_meta(conn, "schema_version", "1.0")
         conn.commit()
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         row = conn.execute(
             "SELECT name FROM sqlite_master WHERE name='memory_records_fts'"
@@ -245,7 +266,9 @@ def test_ensure_schema_reconciles_supported_legacy_record_rows(
         set_meta(conn, "schema_version", "1.6")
         conn.commit()
 
-        ensure_schema(conn)
+        # First call needs authority (1.6 -> current); second is already at
+        # current and takes the no-authority-needed fast path either way.
+        ensure_schema(conn, allow_migration=True)
         ensure_schema(conn)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
@@ -443,6 +466,14 @@ def test_record_schema_reconcile_rolls_back_on_unexpected_failure(
 
 
 def test_ensure_schema_rejects_unsupported_version(tmp_path: Path) -> None:
+    """With authority granted, a version the migration chain cannot reach
+    (newer than anything ``migrate_memory_schema`` knows how to walk to)
+    still fails -- authority is not a bypass of the chain's own ceiling.
+
+    Without authority the SAME fixture is refused earlier, by
+    ``MemorySchemaAuthorityError``, before ``migrate_memory_schema`` is even
+    consulted; see test_ensure_schema_default_refuses_newer_store_too.
+    """
     db_path = tmp_path / "memory.sqlite3"
     conn = open_memory_db(db_path)
     try:
@@ -452,7 +483,7 @@ def test_ensure_schema_rejects_unsupported_version(tmp_path: Path) -> None:
         )
         conn.commit()
         with pytest.raises(MemorySchemaError, match="Unsupported engineering memory"):
-            ensure_schema(conn)
+            ensure_schema(conn, allow_migration=True)
     finally:
         conn.close()
 
@@ -491,7 +522,7 @@ def test_ensure_schema_raises_on_unsupported_version(tmp_path: Path) -> None:
             ),
             pytest.raises(MemorySchemaError, match="Unsupported engineering memory"),
         ):
-            ensure_schema(conn)
+            ensure_schema(conn, allow_migration=True)
     finally:
         conn.close()
 
@@ -605,5 +636,442 @@ def test_fresh_store_has_no_column_named_confidence(tmp_path: Path) -> None:
         }
         assert "epistemic_rung" in columns
         assert "confidence" not in columns
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration authority: acceptance battery for the maintainer's seven cases.
+#
+#   A. non-authoritative checkout opens an older store -> NO migration
+#   B. explicit authoritative migration -> migration allowed exactly once
+#   C/D covered structurally in the delivery report (out of this file's
+#      scope: the finish-path intent-loss mechanism lives in
+#      codeclone/surfaces/mcp/_session_*, which this patch does not touch).
+#   F. a mere read or status operation never mutates the schema
+#
+# Direction-B (store newer than this checkout's code) is pinned alongside
+# direction-A so a regression to a "current < target only" guard -- which
+# would silently let the OTHER direction through -- reds under a dedicated
+# test, per the mutation-discipline "comprehensive = both boundaries" rule.
+# ---------------------------------------------------------------------------
+
+
+def _old_store(tmp_path: Path, *, version: str) -> Path:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        set_meta(conn, "schema_version", version)
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
+
+
+def _old_store_primed_through_open_memory_db(tmp_path: Path, *, version: str) -> Path:
+    """Same shape as ``_old_store``, but for tests whose "before" hash must
+    be taken through ``open_memory_db``/``SqliteEngineeringMemoryStore``.
+
+    ``open_sqlite_db`` sets ``PRAGMA journal_mode=WAL`` on every open; going
+    from SQLite's default rollback-journal mode to WAL rewrites the file
+    header regardless of schema content, which would make a naive
+    before/after hash comparison see a "mutation" that has nothing to do
+    with migration authority. Priming through a real ``open_memory_db``
+    call first (then downgrading the meta version with a bare connection,
+    which does not touch journal mode) isolates the hash comparison to
+    exactly what the REFUSED call itself does.
+    """
+    db_path = tmp_path / "memory.sqlite3"
+    open_memory_db(db_path).close()
+    conn = sqlite3.connect(db_path)
+    try:
+        set_meta(conn, "schema_version", version)
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
+
+
+def _status_report_facts(
+    tmp_path: Path, db_path: Path
+) -> tuple[str, str | None, str, bool]:
+    """The four facts every store-state test reads, from the REAL producer.
+
+    Returns ``(state, schema_version, supported_schema_version, db_exists)``
+    out of ``build_memory_status_report`` -- the single call behind both
+    ``codeclone memory status`` and ``codeclone setup status``. Shared by the
+    three tests that each point that one producer at a different store shape,
+    so what differs between them is the store and the fact asserted, not the
+    call. Returning the facts rather than the report keeps the annotation free
+    of a module-level ``codeclone.memory.status_report`` import, which this
+    file has never carried (see ``tests/test_architecture.py``'s shrink-only
+    ``test_import:r4->r2p`` ratchet).
+    """
+    from codeclone.memory.status_report import build_memory_status_report
+
+    root = tmp_path / "repo"
+    root.mkdir(exist_ok=True)
+    report = build_memory_status_report(root_path=root, db_path=db_path)
+    return (
+        report.state,
+        report.schema_version,
+        report.supported_schema_version,
+        report.db_exists,
+    )
+
+
+def test_ensure_schema_default_refuses_older_store_without_mutating(
+    tmp_path: Path,
+) -> None:
+    """Case A. Store behind this checkout's code: refused, zero mutation.
+
+    The byte-for-byte hash (not just the meta row) is the mutation witness:
+    a refusal that touched an unrelated page, or bumped SQLite's own
+    change-counter via an aborted write, would still show here.
+    """
+    db_path = _old_store(tmp_path, version="1.7")
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        with pytest.raises(MemorySchemaAuthorityError) as excinfo:
+            ensure_schema(conn)
+        assert "1.7" in str(excinfo.value)
+        assert ENGINEERING_MEMORY_SCHEMA_VERSION in str(excinfo.value)
+    finally:
+        conn.close()
+
+    after = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    assert after == before, "a refused open must not change a single byte"
+
+
+def test_ensure_schema_default_refuses_newer_store_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Case A, other boundary: this checkout's code older than the store.
+
+    Simulated by lowering the module-level target the SAME way an older
+    installed codeclone would carry a lower constant; the store is built at
+    the real current version by ``create_schema_v1`` (unpatched), so this is
+    a genuine "store ahead of code" shape, not a synthetic version string.
+    A guard written as ``current < target`` (instead of ``!=``) would pass
+    test_ensure_schema_default_refuses_older_store_without_mutating while
+    silently missing this direction -- this test is what reds that mutant.
+    """
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)  # stamps the REAL current version, e.g. 1.9
+    finally:
+        conn.close()
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(schema_module, "ENGINEERING_MEMORY_SCHEMA_VERSION", "1.8")
+    conn = sqlite3.connect(db_path)
+    try:
+        with pytest.raises(MemorySchemaAuthorityError) as excinfo:
+            ensure_schema(conn)
+        assert "1.8" in str(excinfo.value)
+    finally:
+        conn.close()
+
+    after = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    assert after == before, "a refused open must not change a single byte"
+
+
+def test_allow_migration_true_is_the_positive_control_for_the_refusal(
+    tmp_path: Path,
+) -> None:
+    """Probe Validity Law positive control for the two tests above: the
+    IDENTICAL fixture that gets refused by default proceeds to completion
+    when authority is granted, proving the refusal is what stood in the
+    way -- not an unrelated failure the default-refusal tests would pass
+    for the wrong reason (e.g. a broken connection or a typo'd version).
+    """
+    db_path = _old_store(tmp_path, version="1.7")
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_schema(conn, allow_migration=True)
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+def test_open_memory_db_default_refuses_and_allow_migration_true_migrates(
+    tmp_path: Path,
+) -> None:
+    """The public entry point (not the lower ``ensure_schema`` helper)
+    carries the same contract end to end."""
+    db_path = _old_store_primed_through_open_memory_db(tmp_path, version="1.7")
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    with pytest.raises(MemorySchemaAuthorityError):
+        open_memory_db(db_path)
+    after = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    assert after == before
+
+    conn = open_memory_db(db_path, allow_migration=True)
+    try:
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+def test_sqlite_engineering_memory_store_default_never_mutates_a_mismatched_store(
+    tmp_path: Path,
+) -> None:
+    """Case F, the real read-path proxy.
+
+    ``SqliteEngineeringMemoryStore(path)`` with no ``allow_migration`` is
+    EXACTLY what ``codeclone/memory/status_report.py::build_memory_status_report``
+    (``codeclone memory status`` / ``codeclone setup status``) and
+    ``codeclone/surfaces/mcp/_session_memory_mixin.py::_open_memory_store``
+    (every MCP memory-retrieval tool: get_relevant_memory,
+    query_engineering_memory, ...) call -- same class, same single
+    positional argument, same default. Proving the constructor never
+    mutates on a mismatch is proving those two real surfaces never do,
+    without needing to boot a full MCP session or CLI process.
+    """
+    db_path = _old_store_primed_through_open_memory_db(tmp_path, version="1.7")
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    with pytest.raises(MemorySchemaAuthorityError):
+        SqliteEngineeringMemoryStore(db_path)
+
+    after = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    assert after == before
+
+
+def test_status_report_calls_a_present_unreadable_store_incompatible(
+    tmp_path: Path,
+) -> None:
+    """A store that exists and cannot be opened is ``incompatible``.
+
+    Not ``absent``: calling it absent would report a store that may be full of
+    records as "never created", and send the reader to ``memory init`` when the
+    remediation is ``memory migrate``. The mismatch that produces this state is
+    real (an on-disk 1.7 against this checkout's version), and both versions
+    have to survive into the report or the diagnostic says nothing actionable.
+    """
+    db_path = _old_store_primed_through_open_memory_db(tmp_path, version="1.7")
+
+    facts = _status_report_facts(tmp_path, db_path)
+
+    # db_exists is derived from state, so the store IS there: it must not deny it.
+    assert facts == ("incompatible", "1.7", ENGINEERING_MEMORY_SCHEMA_VERSION, True)
+
+
+def test_status_report_calls_a_missing_store_absent(tmp_path: Path) -> None:
+    """No file, no store: ``absent``, and never ``incompatible``.
+
+    The opposite boundary of the test above. An absent store reported as
+    incompatible would send the reader to ``memory migrate`` for a store that
+    was never created, and would claim a schema mismatch that no file exhibits.
+    """
+    db_path = tmp_path / "not-created.sqlite3"
+    assert not db_path.exists()
+
+    state, found, _supported, exists = _status_report_facts(tmp_path, db_path)
+
+    assert (state, found, exists) == ("absent", None, False)
+
+
+def test_build_memory_status_report_never_mutates_a_mismatched_store(
+    tmp_path: Path,
+) -> None:
+    """Case F, exercised through the actual producer behind both
+    ``codeclone memory status`` and ``codeclone setup status`` -- not a
+    synthetic stand-in for it.
+
+    The report now answers instead of raising (see the two state tests above),
+    so what is pinned here is the part that never changed: describing a store
+    this checkout cannot read leaves that store byte-for-byte alone.
+    """
+    db_path = _old_store_primed_through_open_memory_db(tmp_path, version="1.7")
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    state, *_rest = _status_report_facts(tmp_path, db_path)
+    assert state == "incompatible"
+
+    after = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    assert after == before
+
+
+def test_migrate_memory_db_authoritative_initializes_a_brand_new_store(
+    tmp_path: Path,
+) -> None:
+    """Initialization is not migration and needs no lease: a brand new
+    store is created directly, same as any ordinary first open."""
+    db_path = tmp_path / "memory.sqlite3"
+    outcome = migrate_memory_db_authoritative(db_path)
+    assert outcome.migrated is False
+    assert outcome.from_version is None
+    assert outcome.to_version == ENGINEERING_MEMORY_SCHEMA_VERSION
+    conn = sqlite3.connect(db_path)
+    try:
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+def test_migrate_memory_db_authoritative_migrates_an_existing_store(
+    tmp_path: Path,
+) -> None:
+    db_path = _old_store(tmp_path, version="1.7")
+    outcome = migrate_memory_db_authoritative(db_path)
+    assert outcome.migrated is True
+    assert outcome.from_version == "1.7"
+    assert outcome.to_version == ENGINEERING_MEMORY_SCHEMA_VERSION
+
+    # Idempotent: a second authoritative call on an already-current store
+    # reports honestly that it did nothing.
+    outcome2 = migrate_memory_db_authoritative(db_path)
+    assert outcome2.migrated is False
+    assert outcome2.from_version == ENGINEERING_MEMORY_SCHEMA_VERSION
+
+
+def test_acquire_schema_migration_lease_refuses_while_a_live_grant_is_held(
+    tmp_path: Path,
+) -> None:
+    """Direct mechanism proof: a second acquire on a LIVE (unexpired) grant
+    is refused; the SAME store with the grant released or expired accepts
+    a new one. Both directions of the guard, one test each."""
+    db_path = _old_store(tmp_path, version="1.7")
+    conn_a = sqlite3.connect(db_path)
+    conn_b = sqlite3.connect(db_path)
+    try:
+        token_a = acquire_schema_migration_lease(conn_a, holder="A", ttl_seconds=30)
+        assert token_a is not None
+
+        # Positive control: the identical call from a second connection,
+        # while A's grant is live, must be refused -- proving the refusal
+        # observed below is the fencing check, not some unrelated failure.
+        refused = acquire_schema_migration_lease(conn_b, holder="B", ttl_seconds=30)
+        assert refused is None
+
+        assert release_schema_migration_lease(conn_a, token=token_a) is True
+
+        # Permitted-path control: once released, a fresh acquire succeeds.
+        token_b = acquire_schema_migration_lease(conn_b, holder="B", ttl_seconds=30)
+        assert token_b is not None
+        assert token_b != token_a
+    finally:
+        conn_a.close()
+        conn_b.close()
+
+
+def test_expired_lease_is_reclaimable_and_stale_release_is_fenced(
+    tmp_path: Path,
+) -> None:
+    """A crashed authoritative caller's grant is reclaimable once its TTL
+    passes (never wedges the store); its late release must NOT be able to
+    clear whoever holds the CURRENT grant (fencing on release, not just
+    acquire) -- mutated the other way (an unconditional DELETE), this test
+    reds: D would then be able to acquire while C's lease is still live."""
+    db_path = _old_store(tmp_path, version="1.7")
+    conn_a = sqlite3.connect(db_path)
+    conn_c = sqlite3.connect(db_path)
+    conn_d = sqlite3.connect(db_path)
+    try:
+        token_a = acquire_schema_migration_lease(conn_a, holder="A", ttl_seconds=1)
+        assert token_a is not None
+        time.sleep(1.2)
+
+        token_c = acquire_schema_migration_lease(conn_c, holder="C", ttl_seconds=30)
+        assert token_c is not None, "an expired grant must be reclaimable"
+
+        stale_release = release_schema_migration_lease(conn_a, token=token_a)
+        assert stale_release is False, "a stale release must report failure"
+
+        # Fencing proof: C's lease must still be live -- D is refused.
+        token_d = acquire_schema_migration_lease(conn_d, holder="D", ttl_seconds=30)
+        assert token_d is None, "A's stale release corrupted C's live grant"
+    finally:
+        conn_a.close()
+        conn_c.close()
+        conn_d.close()
+
+
+def test_concurrent_authoritative_migration_is_exactly_once_with_typed_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The maintainer's concurrency claim, proven with real OS threads and
+    real separate sqlite3 connections against one file -- not by reading
+    the acquire/release code and reasoning about it.
+
+    ``migrate_memory_schema`` is widened (via monkeypatch, same idiom as
+    test_record_schema_reconcile_rolls_back_on_unexpected_failure above) to
+    hold the lease for 0.3s so the barrier-released contenders reliably
+    overlap the winner's window instead of trickling through sequentially;
+    the mutual exclusion itself is unmodified production code (SQLite's own
+    ``BEGIN IMMEDIATE`` write lock plus the meta-table fencing check).
+
+    Asserts BOTH halves the maintainer named: exactly one migration NOT
+    two-or-zero, and at least one typed refusal NOT a silent no-op -- a
+    mutant that let two threads both migrate, or that resolved the race
+    with no refusal ever observed, reds here.
+    """
+    db_path = _old_store(tmp_path, version="1.7")
+
+    original_migrate = schema_migrate.migrate_memory_schema
+
+    def slow_migrate(conn: sqlite3.Connection) -> None:
+        time.sleep(0.3)
+        original_migrate(conn)
+
+    monkeypatch.setattr(schema_migrate, "migrate_memory_schema", slow_migrate)
+
+    thread_count = 6
+    barrier = threading.Barrier(thread_count)
+    outcomes: list[object] = [None] * thread_count
+
+    def attempt(index: int) -> None:
+        conn = sqlite3.connect(db_path)
+        try:
+            barrier.wait(timeout=5)
+            try:
+                outcomes[index] = migrate_memory_schema_authoritative(
+                    conn, holder=f"thread-{index}", ttl_seconds=30
+                )
+            except MemorySchemaMigrationInProgressError as exc:
+                outcomes[index] = exc
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive(), "a contender thread hung"
+
+    migrated = [
+        outcome
+        for outcome in outcomes
+        if isinstance(outcome, MemorySchemaMigrationOutcome) and outcome.migrated
+    ]
+    refusals = [
+        outcome
+        for outcome in outcomes
+        if isinstance(outcome, MemorySchemaMigrationInProgressError)
+    ]
+    assert outcomes.count(None) == 0, "every contender must have a recorded outcome"
+    assert len(migrated) == 1, f"expected exactly one migration, saw {outcomes!r}"
+    assert len(refusals) >= 1, (
+        "expected at least one typed refusal -- no real overlap was observed, "
+        f"outcomes={outcomes!r}"
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+        migration_rows = conn.execute(
+            "SELECT version FROM memory_schema_migrations"
+        ).fetchall()
+        versions = [row[0] for row in migration_rows]
+        assert len(versions) == len(set(versions)), (
+            "duplicate migration-step rows indicate the chain ran twice"
+        )
     finally:
         conn.close()

@@ -15,7 +15,7 @@ from ..report.meta import current_report_timestamp_utc
 from ..utils.sqlite_store import (
     initialize_schema_v1,
 )
-from .exceptions import MemorySchemaError
+from .exceptions import MemorySchemaAuthorityError, MemorySchemaError
 from .schema_experience import (
     EXPERIENCE_DDL_STATEMENTS,
     EXPERIENCE_INDEX_SQL,
@@ -229,12 +229,28 @@ _INDEX_SQL = (
 )
 
 
-def open_memory_db(path: Path) -> sqlite3.Connection:
+def open_memory_db(path: Path, *, allow_migration: bool = False) -> sqlite3.Connection:
+    """Open (creating if absent) the engineering-memory store at *path*.
+
+    ``allow_migration`` defaults to False: opening a store whose on-disk
+    ``schema_version`` differs from ``ENGINEERING_MEMORY_SCHEMA_VERSION`` in
+    EITHER direction raises ``MemorySchemaAuthorityError`` instead of
+    silently changing it -- see ``ensure_schema``. Initializing a brand new
+    store is unaffected either way; only an EXISTING store's version change
+    needs authority. Pass ``allow_migration=True`` only from the one
+    sanctioned authoritative entry point
+    (``codeclone.memory.sqlite_store.migrate_memory_db_authoritative``, or
+    an equivalent explicit caller) -- never from an ordinary read, write,
+    or status path.
+    """
     from ..observability.sqlite_access import open_instrumented_sqlite_db
+
+    def _ensure(conn: sqlite3.Connection) -> None:
+        ensure_schema(conn, allow_migration=allow_migration)
 
     return open_instrumented_sqlite_db(
         path,
-        ensure_schema=ensure_schema,
+        ensure_schema=_ensure,
         foreign_keys=True,
         synchronous="FULL",
     )
@@ -252,7 +268,20 @@ def open_memory_db_readonly(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
+def ensure_schema(conn: sqlite3.Connection, *, allow_migration: bool = False) -> None:
+    """Bring *conn* to ``ENGINEERING_MEMORY_SCHEMA_VERSION``, or refuse.
+
+    Creating a brand new store (no ``schema_version`` meta row yet) is
+    initialization, not migration, and always proceeds -- there is no
+    existing schema for anyone else to be relying on. Changing an EXISTING
+    store's version is a privileged mutation: without ``allow_migration``
+    this raises ``MemorySchemaAuthorityError`` and leaves the store
+    byte-for-byte unchanged, in EITHER direction (this checkout's code
+    ahead of the store, or behind it) -- "whoever opened SQLite first"
+    is no longer authority to migrate anything. See
+    ``codeclone.memory.schema_migrate.migrate_memory_schema_authoritative``
+    for the one sanctioned way to actually change an existing store.
+    """
     current = get_meta(conn, "schema_version")
     if current is None:
         create_schema_v1(conn)
@@ -260,9 +289,21 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     from .schema_migrate import reconcile_memory_record_schema_versions
 
     if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
-        from .schema_migrate import migrate_memory_schema
+        if not allow_migration:
+            raise MemorySchemaAuthorityError(
+                "Engineering memory schema is "
+                f"{current!r} on disk; this checkout expects "
+                f"{ENGINEERING_MEMORY_SCHEMA_VERSION!r}. Opening here would "
+                "change an EXISTING store's schema, which only an explicit "
+                "authoritative migration may do -- run `codeclone memory "
+                "migrate` (or "
+                "codeclone.memory.sqlite_store.migrate_memory_db_authoritative) "
+                "from one checkout, or use a codeclone checkout whose "
+                "version matches this store. The store was not modified."
+            )
+        from .schema_migrate import migrate_memory_schema_authoritative
 
-        migrate_memory_schema(conn)
+        migrate_memory_schema_authoritative(conn)
         current = get_meta(conn, "schema_version")
     if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
         raise MemorySchemaError(
@@ -307,6 +348,7 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
 
 
 __all__ = [
+    "MemorySchemaAuthorityError",
     "MemorySchemaError",
     "create_schema_v1",
     "create_trajectory_schema",

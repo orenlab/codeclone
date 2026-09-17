@@ -6,10 +6,16 @@
 
 from __future__ import annotations
 
+import os
+import socket
 import sqlite3
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Final
 
 import orjson
 
+from ..models import MemorySchemaMigrationOutcome, deadline_passed
 from ..report.meta import current_report_timestamp_utc
 from .enums import (
     validate_memory_epistemic_rung,
@@ -18,10 +24,17 @@ from .enums import (
     validate_memory_record_type,
     validate_memory_status,
 )
-from .exceptions import MemorySchemaError
+from .exceptions import MemorySchemaError, MemorySchemaMigrationInProgressError
 from .models import MemoryRecord, validate_memory_record
 from .schema_fts import CREATE_MEMORY_RECORDS_FTS_SQL
-from .schema_meta import get_meta, set_meta
+from .schema_meta import MEMORY_META_TABLE, get_meta, set_meta
+
+#: Meta-table key carrying the schema-migration lease (see
+#: ``acquire_schema_migration_lease``). Lives in ``memory_meta``, present
+#: since schema 1.0 -- before any versioned migration ever runs -- so no new
+#: table and no schema bump are needed to gate migration authority.
+_SCHEMA_MIGRATION_LEASE_META_KEY: Final = "schema_migration_lease"
+DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS: Final[int] = 120
 
 _SUPPORTED_LEGACY_RECORD_SCHEMA_VERSIONS = (
     "1.0",
@@ -63,6 +76,201 @@ _RECORD_COLUMNS = (
     "verified_at_commit",
     "schema_version",
 )
+
+
+def _default_migration_holder() -> str:
+    """Diagnostic-only label for who asked for the lease.
+
+    Never read back for authority -- see ``acquire_schema_migration_lease``.
+    """
+    return f"{os.getpid()}@{socket.gethostname()}"
+
+
+def _new_migration_lease_token() -> str:
+    """A fresh, unguessable fencing token for one migration-lease grant."""
+    return f"schema-migration-{uuid.uuid4().hex}"
+
+
+def _migration_lease_deadline(payload: object) -> datetime | None:
+    """The deadline past which a stored migration-lease grant is stale.
+
+    Mirrors ``codeclone.memory.jobs.store._projection_job_lease_deadline``:
+    anchor (``acquired_at_utc``) plus the TTL granted at that anchor,
+    decided by ``codeclone.models.deadline_passed`` -- never by the
+    recorded holder's OS PID. Returns ``None`` (an already-passed deadline,
+    per that law) when the payload cannot be parsed at all.
+    """
+    grant: dict[str, object] = payload if isinstance(payload, dict) else {}
+    ttl = grant.get("ttl_seconds")
+    if isinstance(ttl, bool) or not isinstance(ttl, int):
+        return None
+    try:
+        acquired = datetime.fromisoformat(
+            str(grant["acquired_at_utc"]).replace("Z", "+00:00")
+        )
+    except (KeyError, ValueError):
+        return None
+    if acquired.tzinfo is None:
+        acquired = acquired.replace(tzinfo=timezone.utc)
+    return acquired + timedelta(seconds=max(1, ttl))
+
+
+def acquire_schema_migration_lease(
+    conn: sqlite3.Connection,
+    *,
+    holder: str,
+    ttl_seconds: int = DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS,
+) -> str | None:
+    """Grant exclusive authority to migrate this store's schema.
+
+    Same ownership law as ``codeclone.canonical.store.acquire_run_lease``
+    and the ``memory_projection_jobs`` lease
+    (``codeclone.memory.jobs.store.claim_next_projection_job``): a
+    positive-TTL grant with an unguessable fencing token, decided purely by
+    :func:`codeclone.models.deadline_passed`. ``holder`` (pid@host) is
+    recorded for diagnostics only and is never read back for authority --
+    a live process, a zombie, and a reused PID all read the same lease row
+    the same way.
+
+    ``BEGIN IMMEDIATE`` takes SQLite's write lock before this reads the
+    existing grant, so the read-check-write is atomic against any other
+    connection racing the same call on the same file: two concurrent
+    callers cannot both observe "no live grant" and both proceed.
+
+    Returns the fencing token on success. Returns ``None`` when a live
+    grant is already held by a different token -- the caller MUST treat
+    that as a typed refusal, never as "already migrated" (the store may
+    still be behind; ask again once the current holder finishes or its
+    lease expires).
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            f"SELECT value FROM {MEMORY_META_TABLE} WHERE key=?",
+            (_SCHEMA_MIGRATION_LEASE_META_KEY,),
+        ).fetchone()
+        if row is not None:
+            try:
+                existing = orjson.loads(row[0])
+            except orjson.JSONDecodeError:
+                existing = None
+            if not deadline_passed(
+                _migration_lease_deadline(existing), datetime.now(timezone.utc)
+            ):
+                conn.execute("COMMIT")
+                return None
+        token = _new_migration_lease_token()
+        payload = orjson.dumps(
+            {
+                "token": token,
+                "holder": holder,
+                "acquired_at_utc": current_report_timestamp_utc(),
+                "ttl_seconds": ttl_seconds,
+            }
+        ).decode("utf-8")
+        conn.execute(
+            f"INSERT INTO {MEMORY_META_TABLE}(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (_SCHEMA_MIGRATION_LEASE_META_KEY, payload),
+        )
+        conn.execute("COMMIT")
+        return token
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def release_schema_migration_lease(conn: sqlite3.Connection, *, token: str) -> bool:
+    """Clear the migration lease iff *token* still holds it (fencing).
+
+    False, never raised, when the lease already expired and was reclaimed
+    by a new holder, or was already released -- both ordinary outcomes a
+    caller that finished late (or twice) must expect. Fencing here is what
+    stops a late/duplicate release from destroying a DIFFERENT holder's
+    live grant.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            f"SELECT value FROM {MEMORY_META_TABLE} WHERE key=?",
+            (_SCHEMA_MIGRATION_LEASE_META_KEY,),
+        ).fetchone()
+        if row is None:
+            conn.execute("COMMIT")
+            return False
+        try:
+            existing = orjson.loads(row[0])
+        except orjson.JSONDecodeError:
+            existing = None
+        if not isinstance(existing, dict) or existing.get("token") != token:
+            conn.execute("COMMIT")
+            return False
+        conn.execute(
+            f"DELETE FROM {MEMORY_META_TABLE} WHERE key=?",
+            (_SCHEMA_MIGRATION_LEASE_META_KEY,),
+        )
+        conn.execute("COMMIT")
+        return True
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def migrate_memory_schema_authoritative(
+    conn: sqlite3.Connection,
+    *,
+    holder: str | None = None,
+    ttl_seconds: int = DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS,
+) -> MemorySchemaMigrationOutcome:
+    """The one sanctioned way to change an EXISTING store's schema version.
+
+    Never called implicitly by opening the store for ordinary read or
+    write -- see ``codeclone.memory.schema.ensure_schema``'s
+    ``allow_migration`` gate, which raises
+    ``MemorySchemaAuthorityError`` instead of reaching here unless the
+    caller opted in. A brand new store (no ``schema_version`` meta row
+    yet) is initialization, not migration, and is not this function's
+    concern -- ``ensure_schema`` handles it before ``allow_migration`` is
+    even consulted.
+
+    Acquires :func:`acquire_schema_migration_lease`; raises
+    :class:`MemorySchemaMigrationInProgressError` (a typed refusal, zero
+    mutation) when a live grant is already held elsewhere. Otherwise
+    re-reads the version UNDER the lease (so a caller that wins the lease
+    after someone else already finished correctly reports ``migrated``
+    False rather than falsely claiming credit), runs the existing
+    :func:`migrate_memory_schema` chain unchanged, and releases the lease
+    in a ``finally`` so a raised exception from the chain itself never
+    leaves the lease dangling for its own TTL.
+    """
+    from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
+
+    probe = get_meta(conn, "schema_version")
+    if probe is None or probe == ENGINEERING_MEMORY_SCHEMA_VERSION:
+        return MemorySchemaMigrationOutcome(
+            from_version=probe,
+            to_version=ENGINEERING_MEMORY_SCHEMA_VERSION,
+            migrated=False,
+        )
+    token = acquire_schema_migration_lease(
+        conn, holder=holder or _default_migration_holder(), ttl_seconds=ttl_seconds
+    )
+    if token is None:
+        raise MemorySchemaMigrationInProgressError(
+            "Engineering memory schema migration is already in progress "
+            "(another process holds the migration lease); retry shortly."
+        )
+    try:
+        before = get_meta(conn, "schema_version")
+        migrate_memory_schema(conn)
+        after = get_meta(conn, "schema_version")
+        return MemorySchemaMigrationOutcome(
+            from_version=before,
+            to_version=ENGINEERING_MEMORY_SCHEMA_VERSION,
+            migrated=before != after,
+        )
+    finally:
+        release_schema_migration_lease(conn, token=token)
 
 
 def migrate_memory_schema(conn: sqlite3.Connection) -> None:
@@ -436,4 +644,12 @@ def _migrate_1_8_to_1_9(conn: sqlite3.Connection) -> None:
     _record_schema_migration(conn, "1.9")
 
 
-__all__ = ["migrate_memory_schema", "reconcile_memory_record_schema_versions"]
+__all__ = [
+    "DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS",
+    "MemorySchemaMigrationOutcome",
+    "acquire_schema_migration_lease",
+    "migrate_memory_schema",
+    "migrate_memory_schema_authoritative",
+    "reconcile_memory_record_schema_versions",
+    "release_schema_migration_lease",
+]

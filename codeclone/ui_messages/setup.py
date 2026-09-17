@@ -148,6 +148,17 @@ REASON_ANALYSIS_INVALID_CONFIG: Final = (
 REASON_ANALYSIS_UNCONFIGURED: Final = "No [tool.codeclone] section in pyproject.toml"
 REASON_MEMORY_EMPTY: Final = "Engineering Memory store exists but has no records yet"
 REASON_MEMORY_MISSING: Final = "Engineering Memory store has not been created yet"
+#: Third state, and neither of the two above: the store is present, may be
+#: full, and this executable cannot open it. Carries both versions because
+#: "which schema" is the whole remediation.
+REASON_MEMORY_INCOMPATIBLE: Final = (
+    "Engineering Memory store exists but its schema {found} is not the "
+    "{supported} this codeclone implements"
+)
+ACTION_MEMORY_MIGRATE: Final = (
+    "Run codeclone memory migrate from an authoritative checkout, or use a "
+    "codeclone whose version matches the store."
+)
 REASON_SEMANTIC_OPTIONAL: Final = "Requires semantic optional extras"
 REASON_SEMANTIC_NO_STORE: Final = (
     "Semantic packages installed but no Engineering Memory store to index"
@@ -191,6 +202,7 @@ MATURITY_RELEASE: Final = "release_ready"
 
 __all__ = [
     "ACTION_FIX_PYPROJECT",
+    "ACTION_MEMORY_MIGRATE",
     "AVAILABILITY_LABELS",
     "CAPABILITY_LABELS",
     "GROUP_LABELS",
@@ -224,6 +236,7 @@ __all__ = [
     "REASON_GITHUB_WORKFLOW_UNREADABLE",
     "REASON_MCP_INSTALLED_NOT_VERIFIED",
     "REASON_MEMORY_EMPTY",
+    "REASON_MEMORY_INCOMPATIBLE",
     "REASON_MEMORY_MISSING",
     "REASON_NOT_APPLICABLE",
     "REASON_OPTIONAL_EXTRA_MISSING",

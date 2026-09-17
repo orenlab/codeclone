@@ -57,7 +57,7 @@ def test_memory_schema_migrates_1_1_to_1_2_trajectory_tables(tmp_path: Path) -> 
         set_meta(conn, "schema_version", "1.1")
         conn.commit()
 
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         assert _table_exists(conn, "memory_trajectories")
@@ -78,7 +78,7 @@ def test_memory_schema_migrates_1_3_to_1_4_patch_trails(tmp_path: Path) -> None:
         set_meta(conn, "schema_version", "1.3")
         conn.commit()
 
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         assert _table_exists(conn, "memory_trajectory_patch_trails")
@@ -98,7 +98,7 @@ def test_memory_schema_migrates_1_4_to_1_5_quality_score(tmp_path: Path) -> None
         set_meta(conn, "schema_version", "1.4")
         conn.commit()
 
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         columns = {

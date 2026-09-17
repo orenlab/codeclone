@@ -6270,3 +6270,20 @@ def validate_abstention_witness(state: ReachabilityState, witness: str) -> str:
             f"witnesses {sorted(witnessed)}"
         )
     return witness
+
+
+@dataclass(frozen=True, slots=True)
+class MemorySchemaMigrationOutcome:
+    """Result of one Engineering Memory authoritative schema-migration
+    attempt (``codeclone.memory.schema_migrate.migrate_memory_schema_authoritative``).
+
+    ``migrated`` is attributed to the call that produced this outcome, not
+    to the store's history overall: a caller that wins the migration lease
+    after another process already finished the work reports ``migrated``
+    False with ``from_version`` equal to ``to_version`` -- it did nothing,
+    even though the store as a whole changed version before it looked.
+    """
+
+    from_version: str | None
+    to_version: str
+    migrated: bool

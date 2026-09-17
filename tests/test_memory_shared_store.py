@@ -32,17 +32,29 @@ Named residual holes (documented, not papered over):
 
 from __future__ import annotations
 
+import hashlib
 import os
+import sqlite3
 import subprocess
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from codeclone.memory.application import resolve_memory_application_context
+from codeclone.contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
+from codeclone.memory.application import (
+    MemoryApplicationContext,
+    resolve_memory_application_context,
+)
+from codeclone.memory.exceptions import MemorySchemaAuthorityError
 from codeclone.memory.models import MemoryQuery
 from codeclone.memory.project import compute_project_id
-from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+from codeclone.memory.schema import get_meta, open_memory_db
+from codeclone.memory.schema_meta import set_meta
+from codeclone.memory.sqlite_store import (
+    SqliteEngineeringMemoryStore,
+    migrate_memory_db_authoritative,
+)
 from codeclone.utils.repo_identity import (
     classify_repository_checkout,
     resolve_repository_anchor_root,
@@ -80,6 +92,24 @@ def _mark_git_dir(path: Path) -> None:
     (path / "config").write_text("[core]\n", encoding="utf-8")
 
 
+def _worktree_and_main_contexts(
+    tmp_path: Path,
+) -> tuple[MemoryApplicationContext, MemoryApplicationContext]:
+    """A linked worktree and its main checkout, each as a memory context.
+
+    Worktree first, because every caller's subject is what the WORKTREE sees;
+    the main context is the reference it gets compared against. Extracted so
+    the shared-store topology is built exactly one way in this module and each
+    test differs only in what it then does to the shared file.
+    """
+    main_root = _make_committed_repo(tmp_path / "main")
+    worktree = _add_worktree(main_root, tmp_path / "wt")
+    return (
+        resolve_memory_application_context(worktree),
+        resolve_memory_application_context(main_root),
+    )
+
+
 def test_repo_identity_linked_worktree_resolves_main_checkout(
     tmp_path: Path,
 ) -> None:
@@ -99,11 +129,7 @@ def test_linked_worktree_resolves_same_store_file(tmp_path: Path) -> None:
     (``os.path.samefile``), not by string equality.
     """
 
-    main_root = _make_committed_repo(tmp_path / "main")
-    worktree = _add_worktree(main_root, tmp_path / "wt")
-
-    main_context = resolve_memory_application_context(main_root)
-    worktree_context = resolve_memory_application_context(worktree)
+    worktree_context, main_context = _worktree_and_main_contexts(tmp_path)
 
     main_context.db_path.parent.mkdir(parents=True, exist_ok=True)
     main_context.db_path.touch()
@@ -117,11 +143,7 @@ def test_worktree_write_visible_from_main_root_through_store_layer(
 ) -> None:
     """Write-at-worktree -> read-at-main round trip through the real store."""
 
-    main_root = _make_committed_repo(tmp_path / "main")
-    worktree = _add_worktree(main_root, tmp_path / "wt")
-
-    worktree_context = resolve_memory_application_context(worktree)
-    main_context = resolve_memory_application_context(main_root)
+    worktree_context, main_context = _worktree_and_main_contexts(tmp_path)
     assert worktree_context.project.id == main_context.project.id
 
     store = SqliteEngineeringMemoryStore(worktree_context.db_path)
@@ -142,6 +164,93 @@ def test_worktree_write_visible_from_main_root_through_store_layer(
     finally:
         reader.close()
     assert any(row.statement == "pkg.worktree_written module" for row in rows)
+
+
+def test_worktree_opening_a_behind_shared_store_refuses_without_mutating(
+    tmp_path: Path,
+) -> None:
+    """The actual reference incidents (2026-09-07, 2026-09-08), reproduced
+    and shown fixed.
+
+    Both measured incidents were one checkout (a linked worktree, in both
+    cases) opening the shared store -- resolved to the MAIN checkout's file
+    via ``codeclone.utils.repo_identity`` -- at a schema behind its own
+    code's expectation, and that open SILENTLY migrating the shared file.
+    Reproducing the identical topology here (real ``git worktree``, real
+    shared-store resolution, real ``SqliteEngineeringMemoryStore``) and
+    proving the open now refuses instead is the closest this suite gets to
+    replaying the incident itself.
+
+    Follows the SAME journal-mode priming as
+    ``_old_store_primed_through_open_memory_db`` in test_memory_schema.py:
+    the shared store is put through one real ``open_memory_db`` call before
+    its version is rolled back, so the byte-hash comparison below is not
+    contaminated by the unrelated ``PRAGMA journal_mode=WAL`` a bare
+    ``sqlite3.connect``-created file would otherwise trigger on first open.
+    """
+    worktree_context, main_context = _worktree_and_main_contexts(tmp_path)
+    shared_db_path = worktree_context.db_path
+
+    # Prime (creates at current version, sets WAL mode), then roll the
+    # shared store back to simulate "main checkout landed code with a lower
+    # schema than a sibling worktree already wrote" -- exactly the shape of
+    # both reference incidents.
+    open_memory_db(shared_db_path).close()
+    assert os.path.samefile(worktree_context.db_path, main_context.db_path), (
+        "fixture sanity: both roots must resolve the SAME physical file "
+        "for this to be the incident shape"
+    )
+    conn = sqlite3.connect(shared_db_path)
+    try:
+        set_meta(conn, "schema_version", "1.7")
+        conn.commit()
+    finally:
+        conn.close()
+    before_hash = hashlib.sha256(shared_db_path.read_bytes()).hexdigest()
+
+    # The worktree's ordinary open -- exactly what codeclone memory status,
+    # codeclone setup status, and every MCP memory-retrieval tool do --
+    # must refuse, not silently migrate the file every sibling checkout
+    # shares.
+    with pytest.raises(MemorySchemaAuthorityError):
+        SqliteEngineeringMemoryStore(worktree_context.db_path)
+
+    after_hash = hashlib.sha256(shared_db_path.read_bytes()).hexdigest()
+    assert after_hash == before_hash, (
+        "opening the shared store from the worktree mutated it -- this IS "
+        "the reference incident, reproduced"
+    )
+
+    # The main checkout observes the identical refusal against the SAME
+    # file (it is the same file, proven by inode elsewhere in this module)
+    # -- the defect was never about WHICH checkout opens it, only about
+    # opening implicitly migrating at all.
+    with pytest.raises(MemorySchemaAuthorityError):
+        SqliteEngineeringMemoryStore(main_context.db_path)
+
+    # Recovery: an explicit authoritative migration (run once, from
+    # whichever checkout) fixes it for every checkout that shares the file,
+    # and afterward an ordinary open from either root works normally again.
+    outcome = migrate_memory_db_authoritative(shared_db_path)
+    assert outcome.migrated is True
+    assert outcome.from_version == "1.7"
+
+    worktree_reader = SqliteEngineeringMemoryStore(worktree_context.db_path)
+    try:
+        assert (
+            get_meta(worktree_reader.connection, "schema_version")
+            == ENGINEERING_MEMORY_SCHEMA_VERSION
+        )
+    finally:
+        worktree_reader.close()
+    main_reader = SqliteEngineeringMemoryStore(main_context.db_path)
+    try:
+        assert (
+            get_meta(main_reader.connection, "schema_version")
+            == ENGINEERING_MEMORY_SCHEMA_VERSION
+        )
+    finally:
+        main_reader.close()
 
 
 def test_project_id_shared_across_worktrees(tmp_path: Path) -> None:

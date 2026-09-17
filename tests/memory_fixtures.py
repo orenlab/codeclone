@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -37,6 +38,8 @@ from codeclone.memory.project import (
     resolve_memory_db_path,
     resolve_project_identity,
 )
+from codeclone.memory.schema import open_memory_db
+from codeclone.memory.schema_meta import set_meta
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.models import BaselineContainerV3, TrustVector
 from codeclone.report.meta import current_report_timestamp_utc
@@ -216,6 +219,52 @@ def memory_project_db_paths(root: Path) -> tuple[MemoryProject, Path]:
         msg = f"memory db path must stay under test root: {db_path}"
         raise ValueError(msg)
     return project, db_path
+
+
+def root_with_old_engineering_memory_store(tmp_path: Path, *, version: str) -> Path:
+    """A ``tmp_path``-rooted repo whose engineering-memory store is stamped
+    at *version* instead of the current schema -- the fixture shape shared
+    by every migration-authority test that needs a genuinely mismatched,
+    on-disk store rather than a synthetic stand-in.
+
+    Primed through one real ``open_memory_db`` call before the version is
+    rolled back: ``open_sqlite_db`` issues ``PRAGMA journal_mode=WAL`` on
+    every open, and switching a file from SQLite's default rollback-journal
+    mode to WAL rewrites its header regardless of schema content. Without
+    this priming step, a before/after byte-hash comparison across a refused
+    re-open would see that unrelated pragma effect and mistake it for a
+    migration that never happened.
+
+    Lives here rather than in a ``test_*.py`` file on purpose: this helper
+    reaches into ``codeclone.memory.schema``/``schema_meta`` directly, and a
+    CLI-surface test file whose own imports already pull in
+    ``codeclone.surfaces.*`` cannot add those two r2p edges itself without
+    tripping ``tests/test_architecture.py``'s shrink-only boundary ratchet
+    (``test_import:r4->r2p``) -- this module is not a ``test_*.py`` file and
+    is not scanned by that ratchet at all.
+    """
+    root = tmp_path / "repo"
+    root.mkdir(exist_ok=True)
+    _project, db_path = memory_project_db_paths(root)
+    open_memory_db(db_path).close()
+    stamp_engineering_memory_schema_version(db_path, version=version)
+    return root
+
+
+def stamp_engineering_memory_schema_version(db_path: Path, *, version: str) -> None:
+    """Record *version* as the on-disk schema version of the store at *db_path*.
+
+    The one way these tests produce a genuinely mismatched store: the meta row
+    every open reads, written directly, with no migration involved. Shared by
+    the fixtures that need a whole repo (above) and by the tests that already
+    have a live store and only need its recorded version moved.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        set_meta(conn, "schema_version", version)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def unfit_run_refusal(root: Path) -> UnfitAnalysisRunError:

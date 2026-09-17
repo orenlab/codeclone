@@ -15,7 +15,7 @@ import types
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +24,7 @@ from codeclone.audit.events import EVENT_PATCH_VERIFIED, AuditEvent, repo_root_d
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.config.pyproject_loader import load_pyproject_config
 from codeclone.config.pyproject_writer import PyprojectWriterError
-from codeclone.contracts import ExitCode
+from codeclone.contracts import ENGINEERING_MEMORY_SCHEMA_VERSION, ExitCode
 from codeclone.surfaces.cli.console import PlainConsole
 from codeclone.surfaces.cli.setup import render as setup_render
 from codeclone.surfaces.cli.setup.engine.apply import _ready_actions, apply_setup_plan
@@ -49,8 +49,13 @@ from codeclone.surfaces.cli.setup.engine.rollup import (
 from codeclone.surfaces.cli.setup.main import setup_main
 from codeclone.surfaces.cli.setup.wizard import WizardPrompts, run_setup_wizard
 from codeclone.surfaces.cli.types import PrinterLike
+from codeclone.ui_messages import setup as setup_ui
 from codeclone.utils.json_io import json_text
+from tests.memory_fixtures import root_with_old_engineering_memory_store
 from tests.test_cli_inprocess import _write_current_python_baseline
+
+if TYPE_CHECKING:
+    from codeclone.memory.status_report import MemoryStoreState
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _GOLDEN_SNAPSHOT = (
@@ -2727,7 +2732,7 @@ def test_setup_rollup_guidance_branches(tmp_path: Path) -> None:
                 record_count=0,
                 records_by_type={},
                 records_by_status={},
-                db_exists=True,
+                state="ready",
             ),
         ),
     )
@@ -2767,7 +2772,7 @@ def test_setup_rollup_guidance_branches(tmp_path: Path) -> None:
                 record_count=1,
                 records_by_type={"module_role": 1},
                 records_by_status={"active": 1},
-                db_exists=True,
+                state="ready",
             ),
         ),
     )
@@ -3156,7 +3161,9 @@ def test_setup_render_rich_and_plain_capability_reason_branches() -> None:
         )
 
 
-def _memory_report_stub(root: Path, *, db_exists: bool, record_count: int) -> object:
+def _memory_report_stub(
+    root: Path, *, state: MemoryStoreState, record_count: int
+) -> object:
     from codeclone.memory.status_report import MemoryStatusReport
 
     return MemoryStatusReport(
@@ -3173,7 +3180,7 @@ def _memory_report_stub(root: Path, *, db_exists: bool, record_count: int) -> ob
         record_count=record_count,
         records_by_type={},
         records_by_status={},
-        db_exists=db_exists,
+        state=state,
     )
 
 
@@ -3187,7 +3194,7 @@ def test_setup_probe_engineering_memory_verified_by_records(
     populated = dc_replace(
         _empty_discover_context(tmp_path),
         memory_report=cast(
-            "Any", _memory_report_stub(tmp_path, db_exists=True, record_count=3)
+            "Any", _memory_report_stub(tmp_path, state="ready", record_count=3)
         ),
     )
     axes = discover_mod._probe_engineering_memory(populated)
@@ -3198,12 +3205,69 @@ def test_setup_probe_engineering_memory_verified_by_records(
     empty_store = dc_replace(
         _empty_discover_context(tmp_path),
         memory_report=cast(
-            "Any", _memory_report_stub(tmp_path, db_exists=True, record_count=0)
+            "Any", _memory_report_stub(tmp_path, state="ready", record_count=0)
         ),
     )
     assert discover_mod._probe_engineering_memory(empty_store).runtime == (
         "not_verified"
     )
+
+
+def _memory_capability_row(root: Path) -> dict[str, object]:
+    snapshot = build_setup_snapshot(root)
+    capabilities = cast("list[dict[str, object]]", snapshot["capabilities"])
+    row = next(c for c in capabilities if c["id"] == "engineering_memory")
+    maturity = cast("dict[str, object]", snapshot["maturity"])
+    return {**row, "_evidence_backed": maturity["evidence_backed"]}
+
+
+def test_setup_status_reports_an_incompatible_memory_store_as_a_diagnostic(
+    tmp_path: Path,
+) -> None:
+    """A store this codeclone cannot open is a fact, not a crash.
+
+    Before this state existed, ``build_setup_snapshot`` raised out of
+    ``discover.py`` and ``setup_main`` reported the whole readiness report as
+    an internal error -- every other capability row lost to one unreadable
+    store. The row must now name both schema versions, and must NOT read as
+    "store has not been created yet".
+    """
+    root = root_with_old_engineering_memory_store(tmp_path, version="1.7")
+
+    row = _memory_capability_row(root)
+
+    assert row["runtime"] == "unavailable"
+    assert row["configuration"] == "configured"
+    assert "probe:memory:schema:incompatible" in cast("list[str]", row["evidence"])
+    reason = str(row["reason"])
+    assert "1.7" in reason and ENGINEERING_MEMORY_SCHEMA_VERSION in reason
+    assert setup_ui.REASON_MEMORY_MISSING not in reason
+    assert "memory migrate" in str(row["recommended_action"])
+    # An unreadable store backs no evidence, however many records it holds.
+    assert row["_evidence_backed"] is False
+    # And the CLI renders the whole report rather than failing.
+    assert setup_main(["status", "--root", str(root)]) == int(ExitCode.SUCCESS)
+
+
+def test_setup_status_reports_a_missing_memory_store_as_absent(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary: no store is still "not created yet".
+
+    Reporting an absent store as incompatible would tell the reader to migrate
+    a file that does not exist, and would claim a schema mismatch nothing
+    exhibits.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    row = _memory_capability_row(root)
+
+    assert row["runtime"] == "not_verified"
+    assert row["configuration"] == "unconfigured"
+    assert "probe:memory:schema:incompatible" not in cast("list[str]", row["evidence"])
+    assert str(row["reason"]) == setup_ui.REASON_MEMORY_MISSING
+    assert row["_evidence_backed"] is False
 
 
 def test_setup_probe_semantic_retrieval_with_store_present(
@@ -3223,7 +3287,7 @@ def test_setup_probe_semantic_retrieval_with_store_present(
     ctx = dc_replace(
         _empty_discover_context(tmp_path),
         memory_report=cast(
-            "Any", _memory_report_stub(tmp_path, db_exists=True, record_count=1)
+            "Any", _memory_report_stub(tmp_path, state="ready", record_count=1)
         ),
     )
     axes = discover_mod._probe_semantic_retrieval(ctx)

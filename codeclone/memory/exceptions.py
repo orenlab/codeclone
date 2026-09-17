@@ -15,6 +15,35 @@ class MemorySchemaError(MemoryError):
     """Raised for unsupported or corrupt engineering memory database schemas."""
 
 
+class MemorySchemaAuthorityError(MemorySchemaError):
+    """Raised when opening the store would need to change an EXISTING schema
+    version and the caller carries no migration authority.
+
+    Covers both directions: this checkout's code is newer than the on-disk
+    store (a forward migration would be needed) and this checkout's code is
+    older than the on-disk store (no migration path runs backward). Either
+    way the store is left byte-for-byte unchanged -- initializing a brand
+    new store (no prior ``schema_version``) is unaffected and always
+    allowed, since there is no existing schema to change. See
+    ``codeclone.memory.schema_migrate.migrate_memory_schema_authoritative``
+    for the one sanctioned way to change an existing store's version.
+    """
+
+
+class MemorySchemaMigrationInProgressError(MemorySchemaError):
+    """Raised when an authoritative migration attempt loses the migration
+    lease race to another live holder.
+
+    Same ownership law as ``codeclone.canonical.store.acquire_run_lease``
+    and the ``memory_projection_jobs`` lease
+    (``codeclone.memory.jobs.store``): a positive-TTL grant with a fencing
+    token, decided by ``codeclone.models.deadline_passed``. The refused
+    caller performed no mutation; the winner is still migrating, has
+    already finished, or crashed and will be reclaimable once its lease
+    expires.
+    """
+
+
 class MemoryContractError(MemoryError):
     """Raised when memory record or config contracts are violated."""
 
@@ -59,7 +88,9 @@ __all__ = [
     "MemoryContractError",
     "MemoryError",
     "MemoryInitLockError",
+    "MemorySchemaAuthorityError",
     "MemorySchemaError",
+    "MemorySchemaMigrationInProgressError",
     "MemorySemanticUnavailableError",
     "SemanticChunkingInvariantError",
     "UnfitAnalysisRunError",

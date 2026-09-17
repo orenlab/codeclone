@@ -79,7 +79,7 @@ def build_setup_snapshot_from_context(ctx: DiscoverContext) -> dict[str, object]
         "capabilities": capabilities,
         "maturity": compute_maturity(
             {str(item["id"]): item for item in capabilities},
-            memory_db_exists=_memory_db_exists(ctx),
+            memory_store_readable=_memory_store_readable(ctx),
         ),
     }
 
@@ -360,14 +360,25 @@ def _probe_engineering_memory(ctx: DiscoverContext) -> CapabilityAxes:
             runtime="not_verified",
             evidence=evidence,
         )
-    if not report.db_exists:
+    if report.state == "absent":
         return CapabilityAxes(
             installation="installed",
             configuration="unconfigured",
             runtime="not_verified",
             evidence=evidence,
         )
-    # Store present: verified only when it actually holds records.
+    if report.state == "incompatible":
+        # The store is present and configured; what is unavailable is this
+        # executable's ability to read it. Calling that "unconfigured" would
+        # launder a real store into "never created" and send the reader to
+        # `memory init` instead of `memory migrate`.
+        return CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="unavailable",
+            evidence=[*evidence, "probe:memory:schema:incompatible"],
+        )
+    # Store present and readable: verified only when it holds records.
     runtime: RuntimeAxis = "verified" if report.record_count > 0 else "not_verified"
     return CapabilityAxes(
         installation="installed",
@@ -720,9 +731,15 @@ def _safe_read_text(path: Path) -> tuple[str | None, bool]:
         return None, True
 
 
-def _memory_db_exists(ctx: DiscoverContext) -> bool:
+def _memory_store_readable(ctx: DiscoverContext) -> bool:
+    """Whether the memory store can actually be read, not merely found.
+
+    A present-but-incompatible store backs no evidence: the file is there
+    and this executable cannot read one record out of it, so the maturity
+    rollup must not count it. See ``MemoryStoreState``.
+    """
     report = ctx.memory_report
-    return bool(report is not None and report.db_exists)
+    return bool(report is not None and report.state == "ready")
 
 
 __all__ = [

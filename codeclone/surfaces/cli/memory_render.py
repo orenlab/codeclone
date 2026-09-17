@@ -369,8 +369,9 @@ def _render_status_report_rich(
     for label, value in _status_rows(report):
         meta.add_row(label, value)
     console.print(meta)
-    if not report.db_exists:
-        console.print(_memory_db_missing_line(report))
+    unusable = _memory_store_unusable_line(report)
+    if unusable is not None:
+        console.print(unusable)
         return
     if report.records_by_type:
         type_table = table_cls(box=box.SIMPLE, show_header=True, header_style="bold")
@@ -504,13 +505,30 @@ def _render_status_report_plain(
     console.print("Engineering Memory status")
     for label, value in _status_rows(report):
         console.print(f"  {label + ':':18} {value}")
-    if not report.db_exists:
-        console.print(_memory_db_missing_line(report))
+    unusable = _memory_store_unusable_line(report)
+    if unusable is not None:
+        console.print(unusable)
         return
     if report.records_by_type:
         console.print("  records_by_type:")
         for key, count in sorted(report.records_by_type.items()):
             console.print(f"    {key}: {count}")
+
+
+def _memory_store_unusable_line(report: MemoryStatusReport) -> str | None:
+    """The one-line diagnostic for a store no records can be read from.
+
+    ``None`` means exactly one thing -- the store is readable, so the record
+    breakdown below it is real. The two unusable states get different lines
+    on purpose: "create one" and "migrate the one you have" are different
+    instructions, and printing the first for the second is the confusion
+    this state split exists to prevent.
+    """
+    if report.state == "absent":
+        return _memory_db_missing_line(report)
+    if report.state == "incompatible":
+        return _memory_db_incompatible_line(report)
+    return None
 
 
 def _memory_db_missing_line(report: MemoryStatusReport) -> str:
@@ -521,21 +539,44 @@ def _memory_db_missing_line(report: MemoryStatusReport) -> str:
     )
 
 
-def _status_rows(report: MemoryStatusReport) -> tuple[tuple[str, str], ...]:
-    if not report.db_exists:
-        # Schema, fingerprint, last run and record count are properties of a
-        # database; for one that does not exist there is nothing to report
-        # but where it would live.
-        return (
-            ("root", str(report.project_root)),
-            ("backend", report.backend),
-            ("db", str(report.db_path)),
-        )
+def _memory_db_incompatible_line(report: MemoryStatusReport) -> str:
+    found = report.schema_version or "unreadable"
     return (
+        f"  [warning]{ui.GLYPH_WARN} "
+        + ui.esc(
+            f"Store schema {found} is not the {report.supported_schema_version} "
+            "this codeclone implements; it was not read and not modified. "
+            "Run `codeclone memory migrate` from an authoritative checkout, "
+            "or use a codeclone whose version matches the store."
+        )
+        + "[/warning]"
+    )
+
+
+def _status_rows(report: MemoryStatusReport) -> tuple[tuple[str, str], ...]:
+    located = (
         ("root", str(report.project_root)),
         ("backend", report.backend),
         ("db", str(report.db_path)),
-        ("db_exists", str(report.db_exists)),
+        ("state", report.state),
+    )
+    if report.state == "absent":
+        # Schema, fingerprint, last run and record count are properties of a
+        # database; for one that does not exist there is nothing to report
+        # but where it would live.
+        return located
+    if report.state == "incompatible":
+        # Two versions, not one: which schema is on disk and which one this
+        # executable implements. A single "schema" row here would read as
+        # the version this codeclone can serve, which is the opposite of
+        # what happened.
+        return (
+            *located,
+            ("found_schema", report.schema_version or "unreadable"),
+            ("supported_schema", report.supported_schema_version),
+        )
+    return (
+        *located,
         ("schema", report.schema_version or "n/a"),
         ("project_id", report.project_id or "n/a"),
         ("analysis_fp", report.last_analysis_fingerprint or "n/a"),

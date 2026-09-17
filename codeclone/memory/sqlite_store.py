@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
+from ..models import MemorySchemaMigrationOutcome
 from ..report.meta import current_report_timestamp_utc
 from ..utils.iterutils import chunked
 from .enums import (
@@ -38,6 +39,7 @@ from .enums import (
     validate_memory_record_type,
     validate_memory_status,
 )
+from .exceptions import MemorySchemaError
 from .experience.models import Experience
 from .locks import memory_init_lock
 from .models import (
@@ -63,7 +65,7 @@ from .models import (
     validate_memory_revision,
     validate_memory_subject,
 )
-from .schema import get_meta, open_memory_db, set_meta
+from .schema import create_schema_v1, get_meta, open_memory_db, set_meta
 from .search_index import (
     SearchMatchMode,
     build_search_text,
@@ -131,10 +133,22 @@ def _literal_from_row(
 
 
 class SqliteEngineeringMemoryStore:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, allow_migration: bool = False) -> None:
+        """Open (or create) the engineering-memory store at *db_path*.
+
+        ``allow_migration`` defaults to False, matching ``open_memory_db``:
+        opening an EXISTING store whose on-disk schema differs from
+        ``ENGINEERING_MEMORY_SCHEMA_VERSION`` refuses with
+        ``MemorySchemaAuthorityError`` rather than migrating it. Every
+        caller across the codebase -- CLI status, ingest, MCP retrieval and
+        finish, jobs, rebuild workflows -- opens with the safe default; only
+        the explicit authoritative migration entry point
+        (``codeclone.memory.schema.migrate_memory_db_authoritative`` / the
+        ``codeclone memory migrate`` CLI verb) passes True.
+        """
         self._db_path = db_path
         self._closed = False
-        self._conn = open_memory_db(db_path)
+        self._conn = open_memory_db(db_path, allow_migration=allow_migration)
         self._conn.row_factory = sqlite3.Row
 
     @property
@@ -1669,6 +1683,66 @@ def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
             schema_version=str(row["schema_version"]),
         )
     )
+
+
+def migrate_memory_db_authoritative(
+    path: Path,
+    *,
+    holder: str | None = None,
+    ttl_seconds: int | None = None,
+) -> MemorySchemaMigrationOutcome:
+    """Explicit, authoritative entry point: change an EXISTING store's
+    schema at *path*, or initialize a brand new one.
+
+    This is the ONLY sanctioned way to raise an existing store's version --
+    every ordinary open (``open_memory_db`` / ``SqliteEngineeringMemoryStore``
+    without ``allow_migration=True``) refuses instead. Intended callers are
+    the ``codeclone memory migrate`` CLI verb and, in future, an equivalent
+    explicit MCP action -- never an implicit open on a read or write path.
+
+    Concurrency: safe to call from multiple processes against the same
+    *path* at once. Exactly one caller performs the migration; every other
+    concurrent caller either observes the work already done (``migrated``
+    False, no error) or is refused with
+    ``MemorySchemaMigrationInProgressError`` while the winner is still
+    working -- see ``codeclone.memory.schema_migrate.acquire_schema_migration_lease``.
+    """
+    from .schema_migrate import (
+        DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS,
+        migrate_memory_schema_authoritative,
+        reconcile_memory_record_schema_versions,
+    )
+
+    conn = sqlite3.connect(str(path), timeout=5.0)
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+        current = get_meta(conn, "schema_version")
+        if current is None:
+            create_schema_v1(conn)
+            return MemorySchemaMigrationOutcome(
+                from_version=None,
+                to_version=ENGINEERING_MEMORY_SCHEMA_VERSION,
+                migrated=False,
+            )
+        outcome = migrate_memory_schema_authoritative(
+            conn,
+            holder=holder,
+            ttl_seconds=(
+                ttl_seconds
+                if ttl_seconds is not None
+                else DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS
+            ),
+        )
+        current = get_meta(conn, "schema_version")
+        if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
+            raise MemorySchemaError(
+                "Unsupported engineering memory schema version: "
+                f"{current!r}. Expected {ENGINEERING_MEMORY_SCHEMA_VERSION!r}."
+            )
+        reconcile_memory_record_schema_versions(conn)
+        return outcome
+    finally:
+        conn.close()
 
 
 __all__ = ["SqliteEngineeringMemoryStore"]

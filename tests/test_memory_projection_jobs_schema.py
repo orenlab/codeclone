@@ -47,7 +47,7 @@ def test_memory_schema_migrates_1_2_to_1_3_projection_jobs(tmp_path: Path) -> No
         set_meta(conn, "schema_version", "1.2")
         conn.commit()
 
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         assert _table_exists(conn, "memory_projection_jobs")
@@ -83,7 +83,7 @@ def test_memory_schema_migrates_1_6_to_1_7_adds_flush_claimed_by(
         conn.commit()
         assert "flush_claimed_by" not in _columns(conn, "memory_projection_jobs")
 
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         assert "flush_claimed_by" in _columns(conn, "memory_projection_jobs")
@@ -136,7 +136,7 @@ def test_memory_schema_migrates_1_8_to_1_9_adds_lease_columns(
         conn.commit()
         assert _columns(conn, "memory_projection_jobs").isdisjoint(_LEASE_COLUMNS)
 
-        ensure_schema(conn)
+        ensure_schema(conn, allow_migration=True)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
         assert _columns(conn, "memory_projection_jobs") >= _LEASE_COLUMNS

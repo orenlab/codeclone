@@ -68,7 +68,7 @@ def finalize_capabilities(
 def compute_maturity(
     capabilities: dict[str, dict[str, object]],
     *,
-    memory_db_exists: bool,
+    memory_store_readable: bool,
 ) -> dict[str, bool]:
     def readiness(cap_id: str) -> str:
         return str(capabilities[cap_id]["readiness"])
@@ -77,8 +77,10 @@ def compute_maturity(
         "connected": readiness("analysis") != "blocked",
         "governed": readiness("controlled_change") in {"ready", "optional"}
         and readiness("audit_and_intents") != "blocked",
+        # Readable, not merely present: a store whose schema this executable
+        # cannot open backs no evidence, however many records it holds.
         "evidence_backed": readiness("engineering_memory") in {"ready", "attention"}
-        and memory_db_exists,
+        and memory_store_readable,
         "team_ready": all(
             readiness(cap_id) != "blocked"
             for cap_id in (
@@ -303,7 +305,19 @@ def _describe_engineering_memory(
     if readiness == "ready":
         return ("", "")
     report = ctx.memory_report
-    if report is not None and report.db_exists:
+    if report is not None and report.state == "incompatible":
+        # Name both versions. "Store exists but is empty" and "store has not
+        # been created" are the two answers this state must never collapse
+        # into: the store exists, may be full, and simply cannot be opened
+        # by this executable.
+        return (
+            setup_ui.REASON_MEMORY_INCOMPATIBLE.format(
+                found=report.schema_version or "unreadable",
+                supported=report.supported_schema_version,
+            ),
+            setup_ui.ACTION_MEMORY_MIGRATE,
+        )
+    if report is not None and report.state == "ready":
         return (
             setup_ui.REASON_MEMORY_EMPTY,
             "Record engineering memory via governed MCP changes to populate the store.",

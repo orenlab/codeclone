@@ -61,7 +61,7 @@ def test_memory_render_plain_console_paths(capsys: pytest.CaptureFixture[str]) -
         record_count=1,
         records_by_type={"module_role": 1},
         records_by_status={"active": 1},
-        db_exists=True,
+        state="ready",
     )
     coverage = ScopeCoverageReport(
         scope_paths=("pkg/mod.py", "pkg/missing.py"),
@@ -214,7 +214,7 @@ def test_memory_render_status_without_type_breakdown(
         record_count=0,
         records_by_type={},
         records_by_status={},
-        db_exists=True,
+        state="ready",
     )
     console = PlainConsole()
     with patch.object(memory_render, "supports_rich_console", return_value=False):

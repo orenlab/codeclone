@@ -23,6 +23,7 @@ from ...memory.enums import MemoryRecordType, validate_memory_record_type
 from ...memory.exceptions import (
     MemoryCapacityError,
     MemoryContractError,
+    MemorySchemaError,
 )
 from ...memory.ide_governance import (
     IdeGovernanceSessionState,
@@ -1366,4 +1367,17 @@ def _memory_lane_base_cursors(
     return cursors
 
 
-__all__ = ["_MCPSessionMemoryMixin"]
+#: ``MemorySchemaError`` is re-exported deliberately, not incidentally.
+#: This module IS the MCP session's memory boundary: every store this
+#: session opens is opened from here, so a store whose schema this
+#: executable cannot read surfaces as this exception out of
+#: ``finish_propose_memory`` and ``maybe_auto_enqueue_projection_rebuild``.
+#: ``_session_workflow_mixin`` must catch that exact type to turn it into a
+#: typed finish refusal, and it imports the name from here rather than from
+#: ``codeclone.memory.exceptions`` directly: ``codeclone.surfaces`` is ring
+#: r4 and ``codeclone.memory`` is r2p, and the boundary ratchet in
+#: ``tests/test_architecture.py`` is shrink-only -- adding that second
+#: r4->r2p edge was measured to fail
+#: ``test_phase39s_architecture_boundary_ratchet``. This module already owns
+#: the edge because it already owns the boundary.
+__all__ = ["MemorySchemaError", "_MCPSessionMemoryMixin"]

@@ -6,15 +6,21 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-from codeclone.contracts import ExitCode
+from codeclone.contracts import ENGINEERING_MEMORY_SCHEMA_VERSION, ExitCode
 from codeclone.memory.governance import record_candidate
 from codeclone.surfaces.cli.memory import memory_main
 
-from .memory_fixtures import cli_memory_repo, git_repo_with_cached_report
+from .memory_fixtures import (
+    cli_memory_repo,
+    git_repo_with_cached_report,
+    memory_project_db_paths,
+    root_with_old_engineering_memory_store,
+)
 
 
 def test_memory_main_rejects_missing_root(tmp_path: Path) -> None:
@@ -174,3 +180,52 @@ def test_memory_cli_for_path_missing_db(tmp_path: Path) -> None:
 def test_memory_cli_missing_subcommand_returns_contract_error() -> None:
     with pytest.raises(SystemExit):
         memory_main([])
+
+
+def test_memory_cli_status_on_mismatched_store_reports_cleanly(
+    tmp_path: Path,
+) -> None:
+    """``codeclone memory status`` must not crash with a raw traceback, and
+    must not migrate, when the store is behind this codeclone's schema --
+    one of the maintainer's three named real read-path surfaces."""
+    root = root_with_old_engineering_memory_store(tmp_path, version="1.7")
+    _project, db_path = memory_project_db_paths(root)
+    before = db_path.read_bytes()
+
+    code = memory_main(["status", "--root", str(root)])
+
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert db_path.read_bytes() == before, "status must not mutate a mismatched store"
+
+
+def test_memory_cli_migrate_on_mismatched_store_migrates_exactly_once(
+    tmp_path: Path,
+) -> None:
+    root = root_with_old_engineering_memory_store(tmp_path, version="1.7")
+    _project, db_path = memory_project_db_paths(root)
+
+    code = memory_main(["migrate", "--root", str(root)])
+    assert code == int(ExitCode.SUCCESS)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT value FROM memory_meta WHERE key='schema_version'"
+        ).fetchone()
+        assert row == (ENGINEERING_MEMORY_SCHEMA_VERSION,)
+    finally:
+        conn.close()
+
+    # status now succeeds normally against the migrated store.
+    assert memory_main(["status", "--root", str(root)]) == int(ExitCode.SUCCESS)
+
+    # A second migrate on an already-current store is a clean no-op, not an
+    # error -- the CLI verb is safe to run defensively / repeatedly.
+    assert memory_main(["migrate", "--root", str(root)]) == int(ExitCode.SUCCESS)
+
+
+def test_memory_cli_migrate_on_missing_store_reports_cleanly(tmp_path: Path) -> None:
+    root = tmp_path / "empty"
+    root.mkdir()
+    code = memory_main(["migrate", "--root", str(root)])
+    assert code == int(ExitCode.CONTRACT_ERROR)

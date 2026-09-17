@@ -26,6 +26,7 @@ from ...memory.application import (
 from ...memory.embedding import EmbeddingProvider, resolve_embedding_provider
 from ...memory.exceptions import (
     MemoryContractError,
+    MemorySchemaError,
     MemorySemanticUnavailableError,
     UnfitAnalysisRunError,
 )
@@ -53,7 +54,10 @@ from ...memory.semantic.rebuild_workflow import (
     RebuildSemanticIndexUnavailablePayload,
     execute_semantic_projection_probe,
 )
-from ...memory.sqlite_store import SqliteEngineeringMemoryStore
+from ...memory.sqlite_store import (
+    SqliteEngineeringMemoryStore,
+    migrate_memory_db_authoritative,
+)
 from ...memory.status_report import build_memory_status_report
 from ...memory.trajectory.cli_render import (
     render_projection_run,
@@ -204,6 +208,8 @@ def _dispatch_memory_command(
         return _render_status(console=console, root_path=root_path)
     if args.command == "init":
         return _run_init(console=console, root_path=root_path, args=args)
+    if args.command == "migrate":
+        return _run_migrate(console=console, root_path=root_path)
     if args.command == "for-path":
         return _run_for_path(console=console, root_path=root_path, args=args)
     if args.command == "search":
@@ -324,6 +330,16 @@ _MEMORY_COMMANDS: tuple[CommandDeclaration, ...] = (
         ),
     ),
     ("status", "Show engineering memory status.", ()),
+    (
+        "migrate",
+        (
+            "Explicitly migrate the engineering memory schema to the "
+            "version this codeclone expects. The only sanctioned way to "
+            "change an EXISTING store's schema; a plain status/search/read "
+            "never does this."
+        ),
+        (),
+    ),
     (
         "for-path",
         "List memory records linked to a source path.",
@@ -589,6 +605,39 @@ def _render_status(*, console: PrinterLike, root_path: Path) -> int:
         backend=config.backend,
     )
     render_status_report(console=console, report=report)
+    if report.state == "incompatible":
+        # The store exists and this checkout may not open it for read
+        # without either matching its schema or explicit migration
+        # authority (see codeclone.memory.schema.ensure_schema). It is
+        # rendered as a diagnostic above -- both schema versions and the
+        # remediation -- and still exits non-zero, because a caller that
+        # asked for this store's contents did not get it. The store itself
+        # was not touched.
+        return int(ExitCode.CONTRACT_ERROR)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_migrate(*, console: PrinterLike, root_path: Path) -> int:
+    config = resolve_memory_config(root_path)
+    db_path = resolve_memory_db_path(root_path, config)
+    if not db_path.exists():
+        console.print(ui.fmt_memory_db_not_found(error=FileNotFoundError(str(db_path))))
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        outcome = migrate_memory_db_authoritative(db_path)
+    except MemorySchemaError as exc:
+        console.print(str(exc))
+        return int(ExitCode.CONTRACT_ERROR)
+    if outcome.migrated:
+        console.print(
+            f"Migrated engineering memory schema at {db_path} "
+            f"from {outcome.from_version!r} to {outcome.to_version!r}."
+        )
+    else:
+        console.print(
+            f"Engineering memory schema at {db_path} is already "
+            f"{outcome.to_version!r}; nothing to migrate."
+        )
     return int(ExitCode.SUCCESS)
 
 
