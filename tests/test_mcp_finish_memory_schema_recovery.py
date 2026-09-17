@@ -220,6 +220,76 @@ def test_finish_with_unreadable_memory_store_is_a_typed_refusal(
         assert needle in str(haystack), f"{needle!r} missing from {haystack!r}"
 
 
+def test_refusal_payload_reports_a_lost_intent_as_cleared(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``intent_cleared`` in a refusal is a measurement of the session, not a
+    constant.
+
+    Measured 2026-09-10 (audit mutant s06): with the auto-clear misordered
+    ahead of the fallible memory hooks, the intent was really gone and the
+    refusal still said ``intent_cleared: False`` -- the literal could not tell
+    a kept intent from a lost one, and only the durability test could. Here
+    the memory hook itself destroys the intent before refusing, which is what
+    a misordered clear looks like from inside the refusal path; the payload
+    must then say what the session says: the intent is gone.
+    """
+    service, intent_id = _finishable_service(
+        tmp_path, monkeypatch, run_id="memlost112345678", digest="mem-lost-digest"
+    )
+
+    def _lose_then_refuse(**_: object) -> dict[str, object]:
+        service._clear_change_intent(intent_id=intent_id)
+        return _schema_refusal()
+
+    monkeypatch.setattr(service, "finish_propose_memory", _lose_then_refuse)
+
+    finished = _finish(service, intent_id)
+
+    assert finished["reason"] == _REASON
+    # The fact, read back from the session; the payload must agree with it.
+    with pytest.raises(MCPServiceContractError):
+        service.manage_change_intent(action="get", intent_id=intent_id)
+    assert finished["intent_cleared"] is True
+
+
+def test_hygiene_blocked_finish_keeps_the_intent_and_says_so(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The measured field at the one refusal site no other test reads it from.
+
+    A finish blocked by workspace hygiene refuses before verification and
+    keeps the intent; ``intent_cleared`` must report that as a measurement
+    of the session, exactly as the memory-schema site above does, so the
+    field means the same thing in every refusal ``finish`` can return.
+    """
+    service, intent_id = _finishable_service(
+        tmp_path, monkeypatch, run_id="memhygiene1234567", digest="mem-hyg-digest"
+    )
+    blocked = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("README.md",),
+        dirty_paths_in_scope=("README.md",),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(),
+        blocks_edit=True,
+        unacknowledged_dirty_in_scope=("README.md",),
+        blocks_finish=True,
+    )
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod, "finish_hygiene_check", lambda **_: blocked
+    )
+
+    finished = _finish(service, intent_id)
+
+    assert finished["reason"] == "workspace_hygiene"
+    reachable = service.manage_change_intent(action="get", intent_id=intent_id)
+    assert reachable["intent_id"] == intent_id
+    assert finished["intent_cleared"] is False
+
+
 def test_refused_finish_marks_the_registry_row_needs_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

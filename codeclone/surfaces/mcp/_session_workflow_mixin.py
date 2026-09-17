@@ -591,7 +591,7 @@ class _MCPSessionWorkflowMixin:
                     "verification": None,
                     "claims": None,
                     "receipt": None,
-                    "intent_cleared": False,
+                    "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
                     "user_action_required": False,
                     "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
                     "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
@@ -653,7 +653,7 @@ class _MCPSessionWorkflowMixin:
                     "verification": None,
                     "claims": None,
                     "receipt": None,
-                    "intent_cleared": False,
+                    "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
                     "user_action_required": True,
                     "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
                     "workspace_hygiene_after": workspace_hygiene_after,
@@ -688,7 +688,7 @@ class _MCPSessionWorkflowMixin:
                     "verification": None,
                     "claims": None,
                     "receipt": None,
-                    "intent_cleared": False,
+                    "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
                     "user_action_required": True,
                     "next_step": workflow_msgs.FINISH_DIGEST_MISMATCH_NEXT,
                     "message": workflow_msgs.FINISH_DIGEST_MISMATCH,
@@ -716,7 +716,7 @@ class _MCPSessionWorkflowMixin:
                         patch_verify_audit_sequence=None,
                         patch_trail_detail=patch_trail_detail,
                     ),
-                    "intent_cleared": False,
+                    "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
                     "user_action_required": True,
                     "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
                     "message": workflow_msgs.FINISH_SCOPE_VIOLATION,
@@ -759,6 +759,7 @@ class _MCPSessionWorkflowMixin:
                 intent_id=intent_id,
                 new_status=WorkspaceIntentLifecycle.NEEDS_RECOVERY.value,
             )
+            intent_cleared = self._intent_cleared_fact(intent_id=intent_id)
             return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
@@ -769,11 +770,11 @@ class _MCPSessionWorkflowMixin:
                     "claims": None,
                     "receipt": None,
                     "patch_trail": patch_trail_payload,
-                    "intent_cleared": False,
+                    "intent_cleared": intent_cleared,
                     "workspace_hygiene_after": workspace_hygiene_after,
                     "summary": _finish_summary(
                         status=verify_status,
-                        intent_cleared=False,
+                        intent_cleared=intent_cleared,
                         check_payload=check_payload,
                         verify_payload=verify_payload,
                         claims_payload=None,
@@ -865,7 +866,7 @@ class _MCPSessionWorkflowMixin:
                     "claims": claims_payload,
                     "receipt": receipt_payload,
                     "patch_trail": patch_trail_payload,
-                    "intent_cleared": False,
+                    "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
                     "workspace_hygiene_after": workspace_hygiene_after,
                     "memory_error": {
                         "error": _FINISH_MEMORY_SCHEMA_REASON,
@@ -1180,6 +1181,21 @@ class _MCPSessionWorkflowMixin:
             budget_would_fail=(isinstance(gate, dict) and bool(gate.get("would_fail"))),
             continuing_own_wip=continuing_own_wip,
         )
+
+    def _intent_cleared_fact(self, *, intent_id: str) -> bool:
+        """Whether *intent_id* is no longer held by this session: measured.
+
+        Every refusal payload used to write ``"intent_cleared": False`` as a
+        literal. Measured 2026-09-10 (audit mutant s06): with the auto-clear
+        misordered ahead of the fallible memory hooks the intent was really
+        gone and the payload still said ``False`` -- the field could not tell
+        a kept intent from a lost one, so only the durability test could. It
+        now reads the same authority ``_clear_change_intent`` mutates first,
+        under the same lock, so a refusal that lost the intent says so.
+        """
+        intent_session = _intent_session(self)
+        with intent_session._state_lock:
+            return intent_id not in intent_session._active_intents
 
     @staticmethod
     def _finish_message(
