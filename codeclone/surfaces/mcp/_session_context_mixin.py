@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol, TypeGuard, cast
 
+from ...api.run_store_serving import ServedRunSlices
 from ...utils.payload_narrow import is_payload_dict, is_record_mapping
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
@@ -42,6 +43,7 @@ from ._implementation_context_pages import (
     context_projection_page,
 )
 from ._intent import IntentRecord, IntentStatus
+from ._run_store_serving import served_slices
 from ._session_finding_mixin import _StateLock
 from ._session_shared import (
     CodeCloneMCPRunStore,
@@ -362,12 +364,68 @@ def _implementation_context_page_response(
 
 @dataclass(frozen=True, slots=True)
 class _ContextSubject:
+    """What one implementation-context request is about.
+
+    ``slices`` is that request's ONE resolved ``ServedRunSlices``.  It rides
+    on the subject rather than being threaded as a separate parameter so
+    there is a single object answering "which run facts is this response
+    built from", and so every consumer downstream reads that object instead
+    of resolving the store again.
+    """
+
     paths: tuple[str, ...]
     symbols: tuple[str, ...]
     resolved_symbols: tuple[dict[str, object], ...]
     unresolved_symbols: tuple[str, ...]
     resolved_from: str
     source_summary: dict[str, object]
+    slices: ServedRunSlices
+
+
+def _context_subject_from_explicit(
+    *,
+    record: MCPRunRecord,
+    slices: ServedRunSlices,
+    paths: tuple[str, ...],
+    symbols: tuple[str, ...],
+) -> _ContextSubject:
+    """The subject for an explicit ``paths=`` / ``symbols=`` request.
+
+    A module-level function, not a method: it reads no session state, and
+    naming ``ServedRunSlices`` inside the mixin class would make the resolved
+    value a collaborator of the request router rather than of the subject
+    that carries it.
+
+    The symbol resolution below is the FIRST of this request's two consumers
+    of ``slices``; the projection is the second.
+    """
+    resolved_symbols, unresolved_symbols = resolve_context_symbols(
+        record,
+        symbols,
+        slices=slices,
+    )
+    symbol_paths = {
+        str(item["path"])
+        for item in resolved_symbols
+        if str(item.get("path", "")).strip()
+    }
+    effective_paths = tuple(sorted({*paths, *symbol_paths}))
+    resolved_from = (
+        "explicit_mixed"
+        if paths and symbols
+        else "explicit_symbols"
+        if symbols
+        else "explicit_paths"
+    )
+    return _ContextSubject(
+        paths=effective_paths,
+        symbols=symbols,
+        resolved_symbols=resolved_symbols,
+        unresolved_symbols=unresolved_symbols,
+        resolved_from=resolved_from,
+        source_summary=_subject_source_summary(effective_paths),
+        slices=slices,
+    )
 
 
 class _ContextSessionDependencies(Protocol):
@@ -517,6 +575,7 @@ class _MCPSessionContextMixin:
 
         payload = build_implementation_context(
             record=record,
+            slices=subject.slices,
             paths=subject.paths,
             symbols=subject.symbols,
             subject_resolved_from=subject.resolved_from,
@@ -774,6 +833,16 @@ class _MCPSessionContextMixin:
         intent: IntentRecord | None,
         changed_scope: bool,
     ) -> _ContextSubject | None:
+        """Resolve what this request is about, and the slices it reads.
+
+        ONE store resolution for the whole request, and it happens here.
+        Resolving per consumer would multiply the per-request
+        ``run_store_serving_*`` rollout counters and leave the context
+        artifact digest binding facts from a DIFFERENT read than the response
+        was built from.  The ``query=`` shape returns before this method is
+        reached; ``search_graph`` owns its own single resolution.
+        """
+        slices, _serving = served_slices(record)
         explicit_paths = self._normalize_context_paths(
             root_path=root_path,
             paths=paths or (),
@@ -782,8 +851,9 @@ class _MCPSessionContextMixin:
             sorted({symbol.strip() for symbol in symbols or () if symbol.strip()})
         )
         if explicit_paths or explicit_symbols:
-            return self._context_subject_from_explicit(
+            return _context_subject_from_explicit(
                 record=record,
+                slices=slices,
                 paths=explicit_paths,
                 symbols=explicit_symbols,
             )
@@ -799,6 +869,7 @@ class _MCPSessionContextMixin:
                 unresolved_symbols=(),
                 resolved_from="intent_scope",
                 source_summary=_subject_source_summary(intent_paths),
+                slices=slices,
             )
         snapshot = collect_dirty_snapshot(root_path)
         if not snapshot.paths:
@@ -825,39 +896,7 @@ class _MCPSessionContextMixin:
                 "omitted": max(0, len(ranked_paths) - len(normalized_paths)),
                 "git_available": snapshot.git_available,
             },
-        )
-
-    @staticmethod
-    def _context_subject_from_explicit(
-        *,
-        record: MCPRunRecord,
-        paths: tuple[str, ...],
-        symbols: tuple[str, ...],
-    ) -> _ContextSubject:
-        resolved_symbols, unresolved_symbols = resolve_context_symbols(
-            record,
-            symbols,
-        )
-        symbol_paths = {
-            str(item["path"])
-            for item in resolved_symbols
-            if str(item.get("path", "")).strip()
-        }
-        effective_paths = tuple(sorted({*paths, *symbol_paths}))
-        resolved_from = (
-            "explicit_mixed"
-            if paths and symbols
-            else "explicit_symbols"
-            if symbols
-            else "explicit_paths"
-        )
-        return _ContextSubject(
-            paths=effective_paths,
-            symbols=symbols,
-            resolved_symbols=resolved_symbols,
-            unresolved_symbols=unresolved_symbols,
-            resolved_from=resolved_from,
-            source_summary=_subject_source_summary(effective_paths),
+            slices=slices,
         )
 
     @staticmethod

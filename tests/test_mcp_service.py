@@ -70,6 +70,7 @@ from codeclone.contracts import (
 )
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import FileStat, LaneTrust, MetricsDiff
+from codeclone.surfaces.mcp._run_store_serving import memory_slices
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
     _BufferConsole,
@@ -2177,6 +2178,7 @@ def test_implementation_context_safety_overflow_is_explicit(tmp_path: Path) -> N
 
     payload = mcp_context_projection_mod.build_implementation_context(
         record=record,
+        slices=memory_slices(record),
         paths=(),
         symbols=(),
         subject_resolved_from="changed_scope",
@@ -16007,6 +16009,7 @@ def test_implementation_context_build_payload_reports_unavailable_and_review(
     record = _dummy_run_record(tmp_path, "ctx-review")
     payload = mod.build_implementation_context(
         record=record,
+        slices=memory_slices(record),
         paths=("pkg/mod.py",),
         symbols=(),
         subject_resolved_from="explicit",
@@ -16138,6 +16141,7 @@ def test_implementation_context_baseline_sensitive_and_contract_role(
     budget = mod._EntryBudget(limit=20, remaining=20)
     contracts = mod._project_contracts(
         record=record,
+        slices=memory_slices(record),
         subject_paths=("pkg/mod.py",),
         subject_qualnames=frozenset({"pkg.target:save"}),
         memory_result={
@@ -16153,7 +16157,7 @@ def test_implementation_context_baseline_sensitive_and_contract_role(
     )
     assert "persistence_path_callers" in contracts
 
-    surface = mod._unit_location_index(record)
+    surface = mod._unit_location_index(record, slices=memory_slices(record))
     assert surface == ()
 
 

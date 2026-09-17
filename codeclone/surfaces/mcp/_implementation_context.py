@@ -17,6 +17,7 @@ from typing import Final, cast
 import orjson
 
 from ...api.finding_groups import iter_finding_groups
+from ...api.run_store_serving import ServedRunSlices
 from ...models import RelationshipRecord
 from ...paths import classify_source_kind
 from ...utils.coerce import as_mapping as _as_mapping
@@ -170,12 +171,20 @@ _CALL_CONTEXT_LANES: Final[
 
 
 def _relationship_indexes(
-    record: MCPRunRecord,
+    slices: ServedRunSlices,
 ) -> tuple[dict[str, list[RelationshipRecord]], dict[str, list[RelationshipRecord]]]:
-    """Forward (by source) and reverse (by resolved target) relationship indexes."""
+    """Forward (by source) and reverse (by resolved target) relationship indexes.
+
+    Reads the request's ONE resolved ``ServedRunSlices`` -- the run store's
+    answer when this execution published one the record agrees with, and the
+    record's own memory otherwise -- rather than ``record.relationship_facts``
+    directly, so this is not a second, silently divergent reader of the same
+    fact.  The value is threaded in rather than resolved here: one request
+    resolves the store once, in ``_resolve_context_subject``.
+    """
     by_source: dict[str, list[RelationshipRecord]] = {}
     by_target: dict[str, list[RelationshipRecord]] = {}
-    for facts in record.relationship_facts:
+    for facts in slices.relationship_facts:
         for relation in facts.relationships:
             by_source.setdefault(relation.source_qualname, []).append(relation)
             if relation.target_qualname is not None:
@@ -255,6 +264,7 @@ def _collect_relationship_rows(
 def _project_call_context(
     *,
     record: MCPRunRecord,
+    slices: ServedRunSlices,
     subject_qualnames: frozenset[str],
     include_set: frozenset[Facet],
     budget: _EntryBudget,
@@ -265,7 +275,7 @@ def _project_call_context(
     are a separate lane that never feeds production liveness (D11). Unresolved
     calls are emitted as observations (target=null) alongside callees.
     """
-    by_source, by_target = _relationship_indexes(record)
+    by_source, by_target = _relationship_indexes(slices)
     call_context: dict[str, object] = {}
     for (
         facet,
@@ -298,6 +308,7 @@ def _project_call_context(
 def _subject_qualnames(
     record: MCPRunRecord,
     *,
+    slices: ServedRunSlices,
     paths: Sequence[str],
     resolved_symbols: Sequence[Mapping[str, object]],
     resolved_from: str,
@@ -311,7 +322,7 @@ def _subject_qualnames(
     if resolved_from == "explicit_symbols":
         return frozenset(qualnames)
     path_set = frozenset(paths)
-    for row in _unit_location_index(record):
+    for row in _unit_location_index(record, slices=slices):
         if str(row["path"]) in path_set:
             qualnames.add(str(row["qualname"]))
     return frozenset(qualnames)
@@ -324,8 +335,19 @@ def _call_graph_status(record: MCPRunRecord) -> tuple[str, list[str]]:
     return ("partial" if failed else "complete"), failed
 
 
-def _relationship_digest_records(record: MCPRunRecord) -> list[dict[str, object]]:
-    """Canonical relationship rows for the artifact digest (expression excluded)."""
+def _relationship_digest_records(
+    record: MCPRunRecord,
+    *,
+    slices: ServedRunSlices,
+) -> list[dict[str, object]]:
+    """Canonical relationship rows for the artifact digest (expression excluded).
+
+    Reads the request's ONE resolved ``ServedRunSlices`` (see
+    ``_relationship_indexes``): the artifact digest must bind the same facts
+    the response was built from -- the SAME resolved object, not a second read
+    that merely hopes to agree with it.  The record is still needed for its
+    root: relationship paths are absolute in the slice and repo-relative here.
+    """
     rows: list[dict[str, object]] = [
         {
             "relation_kind": relation.relation_kind,
@@ -337,7 +359,7 @@ def _relationship_digest_records(record: MCPRunRecord) -> list[dict[str, object]
             "line": relation.line,
             "resolution_rule": relation.resolution_rule,
         }
-        for facts in record.relationship_facts
+        for facts in slices.relationship_facts
         for relation in facts.relationships
     ]
     rows.sort(
@@ -387,6 +409,7 @@ def _contract_path_role(records: Sequence[Mapping[str, object]]) -> str | None:
 def _project_contracts(
     *,
     record: MCPRunRecord,
+    slices: ServedRunSlices,
     subject_paths: Sequence[str],
     subject_qualnames: frozenset[str],
     memory_result: Mapping[str, object] | None,
@@ -417,7 +440,7 @@ def _project_contracts(
         if facet in include_set:
             _attach_bounded(contracts, key=facet, items=items, budget=budget)
     role = _contract_path_role(records)
-    _, by_target = _relationship_indexes(record)
+    _, by_target = _relationship_indexes(slices)
     for facet, facet_role in _CONTRACT_PATH_FACET_ROLES.items():
         if facet not in include_set:
             continue
@@ -448,6 +471,7 @@ def _project_contracts(
 def build_implementation_context(
     *,
     record: MCPRunRecord,
+    slices: ServedRunSlices,
     paths: Sequence[str],
     symbols: Sequence[str],
     subject_resolved_from: str,
@@ -464,7 +488,20 @@ def build_implementation_context(
     change_control: Mapping[str, object] | None,
     projection_sink: Callable[[ContextProjectionArtifact], None] | None = None,
 ) -> dict[str, object]:
-    """Build the path-owned implementation-context response."""
+    """Build the path-owned implementation-context response.
+
+    ``slices`` is the ONE ``ServedRunSlices`` this request resolved.  The
+    caller resolves it, because ``resolve_context_symbols`` runs earlier in
+    the same request and has to read the same object; every consumer below
+    takes it as a parameter and none of them resolves again.  Two reasons,
+    both load-bearing:
+
+    * the ``run_store_serving_*`` counters are a per-request rollout
+      instrument, and one consumer resolving per call site multiplies them;
+    * ``_context_artifact_digest`` binds the facts the response was built
+      from.  Independent resolutions could only be *hoped* to agree; one
+      threaded value makes the digest's promise structural.
+    """
     normalized_paths = tuple(sorted(set(paths)))
     normalized_symbols = tuple(sorted(set(symbols)))
     normalized_resolved_symbols = tuple(
@@ -511,6 +548,7 @@ def build_implementation_context(
     dependency_rows = _dependency_rows(record)
     context_artifact_digest = _context_artifact_digest(
         record=record,
+        slices=slices,
         dependency_rows=dependency_rows,
     )
     request_projection = _context_request_projection(
@@ -643,18 +681,21 @@ def build_implementation_context(
     call_graph_status, failed_files = _call_graph_status(record)
     subject_qualnames = _subject_qualnames(
         record,
+        slices=slices,
         paths=normalized_paths,
         resolved_symbols=normalized_resolved_symbols,
         resolved_from=subject_resolved_from,
     )
     call_context = _project_call_context(
         record=record,
+        slices=slices,
         subject_qualnames=subject_qualnames,
         include_set=include_set,
         budget=entry_budget,
     )
     contracts = _project_contracts(
         record=record,
+        slices=slices,
         subject_paths=normalized_paths,
         subject_qualnames=subject_qualnames,
         memory_result=memory_result,
@@ -880,11 +921,20 @@ def build_unit_location_inventory(
 def resolve_context_symbols(
     record: MCPRunRecord,
     symbols: Sequence[str],
+    *,
+    slices: ServedRunSlices,
 ) -> tuple[tuple[dict[str, object], ...], tuple[str, ...]]:
-    """Resolve exact qualnames against the off-report Unit/API location index."""
+    """Resolve exact qualnames against the off-report Unit/API location index.
+
+    ``slices`` is REQUIRED, not defaulted: this entry and
+    ``build_implementation_context`` both run inside one
+    ``get_implementation_context`` request, and a default here would be a
+    second, silently independent resolution of the same store -- which is
+    what the caller resolving once and threading the value exists to prevent.
+    """
     requested = tuple(sorted({symbol.strip() for symbol in symbols if symbol.strip()}))
     by_qualname: dict[str, list[dict[str, object]]] = {}
-    for row in _unit_location_index(record):
+    for row in _unit_location_index(record, slices=slices):
         by_qualname.setdefault(str(row["qualname"]), []).append(row)
     resolved_rows: list[dict[str, object]] = []
     for symbol in requested:
@@ -1518,6 +1568,7 @@ def _module_path_index(record: MCPRunRecord) -> dict[str, str]:
 def _context_artifact_digest(
     *,
     record: MCPRunRecord,
+    slices: ServedRunSlices,
     dependency_rows: Sequence[Mapping[str, object]],
 ) -> str:
     del dependency_rows
@@ -1550,9 +1601,9 @@ def _context_artifact_digest(
                     "path": str(row["path"]),
                     "start_line": _as_int(row["start_line"]),
                 }
-                for row in _unit_location_index(record)
+                for row in _unit_location_index(record, slices=slices)
             ],
-            "relationship_records": _relationship_digest_records(record),
+            "relationship_records": _relationship_digest_records(record, slices=slices),
         }
     )
 
@@ -1597,9 +1648,20 @@ def _report_families(record: MCPRunRecord) -> Mapping[str, object]:
 
 def _unit_location_index(
     record: MCPRunRecord,
+    *,
+    slices: ServedRunSlices,
 ) -> tuple[dict[str, object], ...]:
+    """The off-report unit index, plus the report's own api_surface rows.
+
+    The unit half comes from the request's ONE resolved ``ServedRunSlices``
+    (see ``_relationship_indexes``): ``ServedUnitLocation`` and
+    ``MCPUnitLocation`` are field-identical, so the merge below is unchanged.
+    The api_surface half stays on ``record.served_report`` -- it is not one of
+    the three off-report slices the resolver expresses, which is why this
+    function still takes the record.
+    """
     rows: dict[tuple[str, str, int], dict[str, object]] = {}
-    for location in record.unit_inventory:
+    for location in slices.unit_inventory:
         key = (location.qualname, location.path, location.start_line)
         rows[key] = {
             "qualname": location.qualname,
