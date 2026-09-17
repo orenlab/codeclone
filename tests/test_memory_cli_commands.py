@@ -20,6 +20,7 @@ from .memory_fixtures import (
     git_repo_with_cached_report,
     memory_project_db_paths,
     root_with_foreign_sqlite_at_memory_store_path,
+    root_with_not_a_database_at_memory_store_path,
     root_with_old_engineering_memory_store,
 )
 
@@ -251,3 +252,22 @@ def test_memory_cli_status_on_a_foreign_database_reports_cleanly_and_leaves_it_a
     assert db_path.read_bytes() == before, (
         "status must not initialize a foreign database"
     )
+
+
+def test_memory_cli_status_on_a_file_that_is_not_a_database_reports_cleanly(
+    tmp_path: Path,
+) -> None:
+    """``codeclone memory status`` on corrupt bytes: a rendered non-zero
+    diagnostic, no raw ``sqlite3.DatabaseError`` traceback, file untouched.
+
+    Measured before this pin: the exception escaped ``memory_main`` unwrapped
+    (``dispatch_subcommand`` runs ahead of the CLI's error envelope).
+    """
+    root = root_with_not_a_database_at_memory_store_path(tmp_path)
+    _project, db_path = memory_project_db_paths(root)
+    before = db_path.read_bytes()
+
+    code = memory_main(["status", "--root", str(root)])
+
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert db_path.read_bytes() == before

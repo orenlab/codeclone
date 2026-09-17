@@ -52,7 +52,7 @@ from codeclone.memory.sqlite_store import (
 )
 from codeclone.report.meta import current_report_timestamp_utc
 
-from .memory_fixtures import foreign_sqlite_database
+from .memory_fixtures import foreign_sqlite_database, not_a_database_file
 
 
 def _memory_record(
@@ -1003,6 +1003,63 @@ def test_build_memory_status_report_never_initializes_a_foreign_database(
     _status_report_facts(tmp_path, db_path)
 
     assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
+
+
+def test_open_memory_db_refuses_a_file_that_is_not_a_database_without_touching_it(
+    tmp_path: Path,
+) -> None:
+    """Corrupt bytes at the store path are a typed refusal, not a leaked
+    ``sqlite3.DatabaseError`` -- and, as with a foreign database, the file is
+    never opened read-write, so it is left byte-for-byte alone."""
+    db_path = tmp_path / "corrupt.sqlite3"
+    not_a_database_file(db_path)
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    with pytest.raises(MemorySchemaUnrecognizedError) as excinfo:
+        open_memory_db(db_path)
+
+    assert "cannot read it as a database" in str(excinfo.value)
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
+
+
+def test_open_memory_db_does_not_call_a_locked_database_unrecognized(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary of the corrupt-file mapping: only "not a
+    database" and "corrupt image" become ``unrecognized``.
+
+    A file another connection holds an exclusive lock on is perfectly
+    readable once released; calling it "not a store" would send the reader
+    to move a real store aside. SQLite's own result code, not the message,
+    is the discriminator, and a busy database keeps the error it always had.
+    """
+    db_path = tmp_path / "somebody_elses.sqlite3"
+    foreign_sqlite_database(db_path)
+    holder = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        holder.execute("BEGIN EXCLUSIVE")
+        with pytest.raises(sqlite3.OperationalError):
+            open_memory_db(db_path)
+    finally:
+        holder.close()
+
+
+def test_status_report_calls_a_file_that_is_not_a_database_unrecognized(
+    tmp_path: Path,
+) -> None:
+    """Present and unreadable by SQLite itself: ``unrecognized``, answered.
+
+    The same state as a foreign database, because the remediation is the
+    same -- codeclone will not write into it, move it aside -- and neither
+    ``incompatible`` (no schema version exists to compare) nor an exception
+    out of a status read.
+    """
+    db_path = tmp_path / "corrupt.sqlite3"
+    not_a_database_file(db_path)
+
+    facts = _status_report_facts(tmp_path, db_path)
+
+    assert facts == ("unrecognized", None, ENGINEERING_MEMORY_SCHEMA_VERSION, True)
 
 
 def test_migrate_memory_db_authoritative_initializes_a_brand_new_store(

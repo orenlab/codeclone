@@ -284,13 +284,33 @@ def _holds_foreign_tables(conn: sqlite3.Connection) -> bool:
     return bool(names) and MEMORY_META_TABLE not in names
 
 
-def _unrecognized_message(where: str) -> str:
+_FOREIGN_DATABASE = (
+    f"it is a SQLite database with tables of its own and no {MEMORY_META_TABLE!r} table"
+)
+_NOT_A_DATABASE = "SQLite cannot read it as a database at all"
+
+
+def _is_not_a_database(exc: sqlite3.DatabaseError) -> bool:
+    """Whether *exc* says the file is not a readable database at all.
+
+    CPython raises SQLite's ``SQLITE_NOTADB`` ("file is not a database") and
+    ``SQLITE_CORRUPT`` ("database disk image is malformed") as the plain
+    ``DatabaseError`` class; busy, locked, unreadable and cannot-open
+    conditions arrive as ``OperationalError``. The class is the discriminator
+    -- ``sqlite_errorcode`` only exists from Python 3.11 and this package
+    supports 3.10 -- and an environmental error propagates exactly as it did
+    from the read-write open, because it says nothing about the file's
+    nature.
+    """
+    return type(exc) is sqlite3.DatabaseError
+
+
+def _unrecognized_message(where: str, why: str) -> str:
     return (
-        f"{where} is not an Engineering Memory store: it is a SQLite database "
-        f"with tables of its own and no {MEMORY_META_TABLE!r} table. codeclone "
-        "does not initialize or migrate a database it does not recognize; move "
-        "the file aside or configure a different memory store path. The file "
-        "was not modified."
+        f"{where} is not an Engineering Memory store: {why}. codeclone does not "
+        "initialize or migrate a database it does not recognize; move the file "
+        "aside or configure a different memory store path. The file was not "
+        "modified."
     )
 
 
@@ -303,19 +323,28 @@ def _refuse_unrecognized_store(path: Path) -> None:
     altered somebody else's database. The look is therefore taken here,
     through a read-only URI, and only for a path that exists: a missing path
     is created as before, and an existing EMPTY database is a brand-new store
-    and initializes as it always has.
+    and initializes as it always has. A file SQLite cannot read as a database
+    at all (corrupt, or never a database) is refused the same typed way: the
+    open is lazy, so this look is where its first page is read.
     """
     if not path.is_file():
         return
+    where = f"The file at {path}"
     uri = f"file:{quote(str(path.resolve()), safe='/')}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     try:
         foreign = _holds_foreign_tables(conn)
+    except sqlite3.DatabaseError as exc:
+        if not _is_not_a_database(exc):
+            raise
+        raise MemorySchemaUnrecognizedError(
+            _unrecognized_message(where, _NOT_A_DATABASE)
+        ) from exc
     finally:
         conn.close()
     if foreign:
         raise MemorySchemaUnrecognizedError(
-            _unrecognized_message(f"The file at {path}")
+            _unrecognized_message(where, _FOREIGN_DATABASE)
         )
 
 
@@ -352,7 +381,7 @@ def ensure_schema(conn: sqlite3.Connection, *, allow_migration: bool = False) ->
     if current is None:
         if _holds_foreign_tables(conn):
             raise MemorySchemaUnrecognizedError(
-                _unrecognized_message("The opened database")
+                _unrecognized_message("The opened database", _FOREIGN_DATABASE)
             )
         create_schema_v1(conn)
         return

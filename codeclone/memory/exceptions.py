@@ -32,11 +32,13 @@ class MemorySchemaAuthorityError(MemorySchemaError):
 
 class MemorySchemaUnrecognizedError(MemorySchemaError):
     """Raised when the file at the store path is not an engineering-memory
-    store: a SQLite database holding tables of its own and no ``memory_meta``.
+    store: a SQLite database holding tables of its own and no ``memory_meta``,
+    or bytes SQLite cannot read as a database at all.
 
     Not a version mismatch -- there is no schema version to be incompatible
     with -- and not a brand-new store either: a database that already holds
-    somebody's tables is not codeclone's to initialize into. The refusal is
+    somebody's tables is not codeclone's to initialize into, and a corrupt or
+    non-database file is nobody's to initialize into. The refusal is
     decided before any read-write open (``open_memory_db`` looks through a
     read-only URI first), so the file is left byte-for-byte unchanged;
     ``ensure_schema`` reaches the same decision for a caller that already

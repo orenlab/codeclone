@@ -160,11 +160,11 @@ ACTION_MEMORY_MIGRATE: Final = (
     "codeclone whose version matches the store."
 )
 #: Fourth state: a file is at the store path and it is not a store -- a SQLite
-#: database with tables of its own and no memory_meta. Neither "create one"
-#: nor "migrate it" applies, and codeclone will not write into it.
+#: database with tables of its own and no memory_meta, or bytes SQLite cannot
+#: read as a database at all. Neither "create one" nor "migrate it" applies,
+#: and codeclone will not write into it.
 REASON_MEMORY_UNRECOGNIZED: Final = (
-    "Engineering Memory store path holds a SQLite database that is not an "
-    "Engineering Memory store"
+    "Engineering Memory store path holds a file that is not an Engineering Memory store"
 )
 ACTION_MEMORY_UNRECOGNIZED: Final = (
     "Move that file aside or configure a different memory store path; "

@@ -54,6 +54,7 @@ from codeclone.utils.json_io import json_text
 from tests.memory_fixtures import (
     memory_project_db_paths,
     root_with_foreign_sqlite_at_memory_store_path,
+    root_with_not_a_database_at_memory_store_path,
     root_with_old_engineering_memory_store,
 )
 from tests.test_cli_inprocess import _write_current_python_baseline
@@ -3274,18 +3275,32 @@ def test_setup_status_reports_a_missing_memory_store_as_absent(
     assert row["_evidence_backed"] is False
 
 
-def test_setup_status_reports_a_foreign_database_as_unrecognized(
+@pytest.mark.parametrize(
+    "make_root",
+    [
+        root_with_foreign_sqlite_at_memory_store_path,
+        root_with_not_a_database_at_memory_store_path,
+    ],
+    ids=["foreign-sqlite", "not-a-database"],
+)
+def test_setup_status_reports_a_file_that_is_not_a_store_as_unrecognized(
     tmp_path: Path,
+    make_root: Callable[[Path], Path],
 ) -> None:
-    """A SQLite file that is not a store is a fourth fact: ``unrecognized``.
+    """A file at the store path that is not a store is a fourth fact:
+    ``unrecognized`` -- and it costs one capability row, not the report.
 
-    Not "not created yet" (the file is there), not "incompatible" (it has no
-    schema version), and -- measured before this state existed -- not
-    ``ready``: ``setup status`` initialized the memory schema inside the
-    foreign file and reported it ready. A readiness read does not get to
-    write into a database it does not recognize.
+    Two shapes, one state. A SQLite database with tables of its own and no
+    memory_meta: measured before this state existed, ``setup status``
+    initialized the memory schema inside it and reported the store ready.
+    Bytes SQLite cannot read as a database: measured, ``build_setup_snapshot``
+    raised ``sqlite3.DatabaseError`` out of the memory probe and
+    ``setup_main`` answered ``Setup failed: file is not a database`` with
+    exit 5 -- every other readiness row lost to one unreadable file. Neither
+    is "not created yet" (the file is there) nor "incompatible" (no schema
+    version exists), and a readiness read does not get to write into either.
     """
-    root = root_with_foreign_sqlite_at_memory_store_path(tmp_path)
+    root = make_root(tmp_path)
     _project, db_path = memory_project_db_paths(root)
     before = db_path.read_bytes()
 
@@ -3300,7 +3315,7 @@ def test_setup_status_reports_a_foreign_database_as_unrecognized(
     # And the CLI renders the whole report rather than failing.
     assert setup_main(["status", "--root", str(root)]) == int(ExitCode.SUCCESS)
     assert db_path.read_bytes() == before, (
-        "setup status must not initialize a foreign database"
+        "setup status must not write into a file it does not recognize"
     )
 
 

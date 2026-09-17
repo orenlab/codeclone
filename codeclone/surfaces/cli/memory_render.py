@@ -560,8 +560,9 @@ def _memory_db_unrecognized_line(report: MemoryStatusReport) -> str:
         f"  [warning]{ui.GLYPH_WARN} "
         + ui.esc(
             f"The file at {report.db_path} is not an Engineering Memory store "
-            "(a SQLite database without memory_meta); it was not read and not "
-            "modified. Move it aside, or configure a different memory store path."
+            "(not a SQLite database, or one without memory_meta); it was not "
+            "read and not modified. Move it aside, or configure a different "
+            "memory store path."
         )
         + "[/warning]"
     )

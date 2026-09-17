@@ -286,6 +286,28 @@ def foreign_sqlite_database(db_path: Path) -> None:
         conn.close()
 
 
+def not_a_database_file(db_path: Path) -> None:
+    """Put bytes that are not a SQLite database at *db_path*.
+
+    The corrupt-store shape: present, unreadable by SQLite itself. Measured
+    before the ``unrecognized`` state covered it, a status read leaked
+    ``sqlite3.DatabaseError: file is not a database`` -- a raw traceback out
+    of ``memory status`` and an internal error that cost ``setup status`` its
+    whole readiness report.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"not a sqlite database at all, just bytes\n" * 8)
+
+
+def root_with_not_a_database_at_memory_store_path(tmp_path: Path) -> Path:
+    """A ``tmp_path``-rooted repo whose memory-store path holds corrupt bytes."""
+    root = tmp_path / "repo"
+    root.mkdir(exist_ok=True)
+    _project, db_path = memory_project_db_paths(root)
+    not_a_database_file(db_path)
+    return root
+
+
 def root_with_foreign_sqlite_at_memory_store_path(tmp_path: Path) -> Path:
     """A ``tmp_path``-rooted repo whose memory-store path holds a foreign database.
 
