@@ -59,12 +59,18 @@ provenance says where the facts came from, not which facts they are, so it
 moves neither ``context_artifact_digest`` nor ``context_projection_digest``.
 The pins at the end hold that on the causal states the door really produces
 -- store-backed, memory by design, a store that went missing, and a divergent
-shadow read.
+shadow read -- and on every SUBJECT shape: the projection at the response
+root is shared, so the explicit ``paths=`` / ``symbols=`` pins say nothing
+about what the ``changed_scope`` (default) and ``intent_scope`` subjects
+carry; a memory literal in either of those two branches survived the full
+suite until the last two pins reached them.
 """
 
 from __future__ import annotations
 
 import copy
+import os
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -702,3 +708,103 @@ def test_a_divergent_answer_names_divergence_and_moves_no_identity_digest(
     for digest in ("context_artifact_digest", "context_projection_digest"):
         assert served_analysis[digest] == divergent_analysis[digest], digest
     assert _without_provenance(served) == _without_provenance(divergent)
+
+
+# -- the default and intent shapes carry the same outcome ------------------
+#
+# ``_resolve_context_subject`` builds the subject in three branches and every
+# branch hands ``serving`` to the shared projection.  The explicit pins above
+# reach only the first; the controller's mutant -- a memory literal in place
+# of ``serving`` in the ``changed_scope`` branch, with the slices left correct
+# -- survived 9571 tests.  These two pins reach the other two branches.
+
+
+def _git_seed(root: Path) -> None:
+    """Make ``root`` a committed repository, so the dirty snapshot is real.
+
+    ``collect_dirty_snapshot`` reads ``git status --porcelain``; without a
+    repository it answers ``git_available=False`` and the default shape ends
+    in ``no_current_work``.  A committed seed makes a later edit show as
+    `` M``, which is the input the ``changed_scope`` branch consumes.
+    """
+    subprocess.run(
+        ["git", "init", "--quiet"], cwd=root, check=True, capture_output=True
+    )
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "seed"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@e.com",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@e.com",
+        },
+    )
+
+
+def _assert_subject_served(
+    answer: dict[str, object], *, resolved_from: str, store_run_id: str
+) -> None:
+    """The subject came from ``resolved_from`` over ``pkg/callee.py`` and
+    its ``serving`` is the published run's served outcome."""
+    assert answer["status"] == "ok"
+    subject = answer["subject"]
+    assert isinstance(subject, dict)
+    assert subject["resolved_from"] == resolved_from
+    assert subject["paths"] == ["pkg/callee.py"]
+    assert answer["serving"] == _served_block(store_run_id)
+
+
+def test_the_default_shape_carries_the_outcome_of_its_own_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No paths, no symbols, no query: the subject is the dirty tree, and
+    ``serving`` is the outcome of the SAME resolution that built the answer.
+
+    Mutation target: ``serving=serving`` in the ``changed_scope`` branch of
+    ``_resolve_context_subject``.  The dirty snapshot is real -- ``git
+    status`` over a committed seed with one edited module -- so the request
+    reaches that branch rather than a monkeypatched stand-in for it.
+    """
+    service, root, record, _summary, _slices = _served_run(tmp_path, monkeypatch)
+    store_run_id = _published_store_run_id(record)
+    _git_seed(root)
+    callee = root / "pkg" / "callee.py"
+    callee.write_text(callee.read_text("utf-8") + "# edited\n", "utf-8")
+    _assert_subject_served(
+        service.get_implementation_context(root=str(root)),
+        resolved_from="changed_scope",
+        store_run_id=store_run_id,
+    )
+
+
+def test_the_intent_scope_shape_carries_the_outcome_of_its_own_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An active intent and no explicit subject: the subject is the intent's
+    allowed files, the record is the intent's bound run, and ``serving`` is
+    that run's resolution.
+
+    Mutation target: ``serving=serving`` in the ``intent_scope`` branch of
+    ``_resolve_context_subject`` -- the twin of the branch above, which the
+    explicit pins cannot see either.
+    """
+    service, root, record, _summary, _slices = _served_run(tmp_path, monkeypatch)
+    store_run_id = _published_store_run_id(record)
+    started = service.start_controlled_change(
+        root=str(root),
+        scope={"allowed_files": ["pkg/callee.py"]},
+        intent="pin the intent_scope provenance",
+    )
+    assert started["status"] == "active", started
+    _assert_subject_served(
+        service.get_implementation_context(
+            root=str(root), intent_id=str(started["intent_id"])
+        ),
+        resolved_from="intent_scope",
+        store_run_id=store_run_id,
+    )
