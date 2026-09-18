@@ -587,6 +587,7 @@ class MCPSession(
             warnings=warnings,
             failures=failures,
             analysis_started_at_utc=analysis_started_at_utc,
+            scope_source=discovery_result.scope_source or "",
             report_generated_at_utc=report_generated_at_utc,
             code_digest=str(process_code_provenance().get("code_digest", "")),
             run_snapshot_link=run_snapshot_link,

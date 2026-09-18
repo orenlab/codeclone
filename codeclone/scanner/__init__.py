@@ -96,8 +96,9 @@ def _is_included_python_file(
     file_path: Path,
     excludes_set: set[str],
     rootp: Path,
+    include_stubs: bool = False,
 ) -> bool:
-    if not has_python_suffix(file_path.name):
+    if not has_python_suffix(file_path.name, include_stubs=include_stubs):
         return False
     if any(part in excludes_set for part in file_path.parts):
         return False
@@ -116,14 +117,16 @@ def _walk_file_candidate(
     filename: str,
     excludes_set: set[str],
     rootp: Path,
+    include_stubs: bool = False,
 ) -> str | None:
-    if not has_python_suffix(filename):
+    if not has_python_suffix(filename, include_stubs=include_stubs):
         return None
     file_path = os.path.join(dirpath, filename)
     if os.path.islink(file_path) and not _is_included_python_file(
         file_path=Path(file_path),
         excludes_set=excludes_set,
         rootp=rootp,
+        include_stubs=include_stubs,
     ):
         return None
     return file_path
@@ -143,23 +146,14 @@ def iter_py_files(
     yield from candidates
 
 
-def discover_python_files(
-    root: str,
-    *,
-    hard_excludes: tuple[str, ...] = HARD_SAFETY_EXCLUDES,
-    max_files: int = 100_000,
-) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
-    """Return raw safe Python-file facts from exactly one filesystem walk.
+def validate_scan_root(root: str) -> Path:
+    """Resolve ``root`` and refuse what no population source may read.
 
-    The caller owns analysis filtering. The second result counts hard-pruned
-    directories and escaping/unresolvable Python symlinks without traversing
-    excluded trees.
-
-    The third result names the directories the walk could not read. Without
-    it the walk was silent by construction: :func:`os.walk` ignores errors
-    unless it is handed an ``onerror`` callback, so an unreadable subtree was
-    not merely uncounted — it did not exist for the tool at all, and the run
-    reported a complete analysis of a tree it had only partly seen.
+    One owner for the three refusals every source shares: the path must
+    exist and resolve, it must be a directory, and it must not lie under a
+    sensitive system prefix. The tree walk and the git-derived population
+    both validate through here before asking anything of the filesystem or
+    of git.
     """
 
     try:
@@ -171,7 +165,32 @@ def discover_python_files(
         raise ValidationError(f"Root must be a directory: {root}")
 
     _ensure_not_sensitive_root(rootp=rootp, root_arg=root)
+    return rootp
 
+
+def discover_python_files(
+    root: str,
+    *,
+    hard_excludes: tuple[str, ...] = HARD_SAFETY_EXCLUDES,
+    max_files: int = 100_000,
+    include_stubs: bool = False,
+) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
+    """Return raw safe Python-file facts from exactly one filesystem walk.
+
+    The caller owns analysis filtering. The second result counts hard-pruned
+    directories and escaping/unresolvable Python symlinks without traversing
+    excluded trees. ``include_stubs`` admits ``.pyi`` files as candidates for
+    a caller that partitions them itself; the default keeps stubs invisible,
+    as every walker before the population owner saw them.
+
+    The third result names the directories the walk could not read. Without
+    it the walk was silent by construction: :func:`os.walk` ignores errors
+    unless it is handed an ``onerror`` callback, so an unreadable subtree was
+    not merely uncounted — it did not exist for the tool at all, and the run
+    reported a complete analysis of a tree it had only partly seen.
+    """
+
+    rootp = validate_scan_root(root)
     excludes_set = set(hard_excludes)
 
     # Keep legacy behavior only when the requested root directory itself is excluded
@@ -203,9 +222,10 @@ def discover_python_files(
                 filename=filename,
                 excludes_set=excludes_set,
                 rootp=rootp,
+                include_stubs=include_stubs,
             )
             if candidate is None:
-                if has_python_suffix(filename):
+                if has_python_suffix(filename, include_stubs=include_stubs):
                     hard_excluded += 1
                 continue
             candidates.append(candidate)

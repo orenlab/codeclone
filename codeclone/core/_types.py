@@ -17,7 +17,7 @@ import orjson
 
 from ..analysis.normalizer import NormalizationConfig
 from ..cache.projection import SegmentReportProjection
-from ..contracts import DEFAULT_PROCESSES
+from ..contracts import DEFAULT_PROCESSES, ScopeFallbackReason, ScopeSource
 from ..models import (
     BlockUnit,
     ClassMetrics,
@@ -132,6 +132,12 @@ class DiscoveryResult:
     # The function-local population of every cache hit (liveness policy v5),
     # in its own channel beside the candidates it must never be mistaken for.
     cached_nested_definitions: tuple[NestedDefinition, ...] = ()
+    # Provenance of the population above: how the owner obtained it. ``None``
+    # is "not recorded" -- only test fixtures build this result by hand; the
+    # producer always writes both. Never part of any digest: the same
+    # population from either source is one identity.
+    scope_source: ScopeSource | None = None
+    scope_fallback_reason: ScopeFallbackReason | None = None
 
 
 @dataclass(frozen=True, slots=True)

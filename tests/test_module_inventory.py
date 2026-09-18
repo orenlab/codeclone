@@ -24,6 +24,7 @@ import codeclone.core.parallelism as parallelism_module
 import codeclone.core.worker as worker_module
 import codeclone.paths.module_identity.inventory as inventory_module
 import codeclone.paths.module_identity.manifest as manifest_module
+import codeclone.paths.population as population_module
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache.reuse import source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
@@ -218,7 +219,11 @@ def test_registry_build_has_one_bounded_span_and_one_discovery_walk(
     real_discover = discover_python_files
 
     def _discover_once(
-        root: str, *, hard_excludes: tuple[str, ...], max_files: int
+        root: str,
+        *,
+        hard_excludes: tuple[str, ...],
+        max_files: int,
+        include_stubs: bool,
     ) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
         nonlocal walks
         walks += 1
@@ -226,6 +231,7 @@ def test_registry_build_has_one_bounded_span_and_one_discovery_walk(
             root,
             hard_excludes=hard_excludes,
             max_files=max_files,
+            include_stubs=include_stubs,
         )
 
     monkeypatch.setattr(inventory_module, "span", _recording_span_factory(recorded))
@@ -234,7 +240,9 @@ def test_registry_build_has_one_bounded_span_and_one_discovery_walk(
         "span",
         _recording_span_factory(manifest_recorded),
     )
-    monkeypatch.setattr(inventory_module, "discover_python_files", _discover_once)
+    # The walk is the population owner's fallback; a tree outside any
+    # repository takes it, and the owner must take it exactly once.
+    monkeypatch.setattr(population_module, "discover_python_files", _discover_once)
 
     registry = build_module_registry(root=tmp_path)
 

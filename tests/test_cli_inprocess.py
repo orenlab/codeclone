@@ -1024,8 +1024,8 @@ def test_cli_cache_not_shared_between_projects(
     legacy_cache.write_text("{}", "utf-8")
 
     monkeypatch.setattr(
-        "codeclone.paths.module_identity.inventory.discover_python_files",
-        lambda _root, *, hard_excludes, max_files: ((), 0, ()),
+        "codeclone.paths.population.discover_python_files",
+        lambda _root, *, hard_excludes, max_files, include_stubs: ((), 0, ()),
     )
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root2), "--no-progress"])
@@ -4345,13 +4345,12 @@ def test_cli_scan_failed_is_internal_error(
         *,
         hard_excludes: tuple[str, ...],
         max_files: int,
+        include_stubs: bool,
     ) -> tuple[tuple[str, ...], int]:
-        del hard_excludes, max_files
+        del hard_excludes, max_files, include_stubs
         raise RuntimeError("scan failed")
 
-    monkeypatch.setattr(
-        "codeclone.paths.module_identity.inventory.discover_python_files", _boom
-    )
+    monkeypatch.setattr("codeclone.paths.population.discover_python_files", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 5
@@ -4369,13 +4368,12 @@ def test_cli_scan_oserror_is_contract_error(
         *,
         hard_excludes: tuple[str, ...],
         max_files: int,
+        include_stubs: bool,
     ) -> tuple[tuple[str, ...], int]:
-        del hard_excludes, max_files
+        del hard_excludes, max_files, include_stubs
         raise OSError("scan denied")
 
-    monkeypatch.setattr(
-        "codeclone.paths.module_identity.inventory.discover_python_files", _boom
-    )
+    monkeypatch.setattr("codeclone.paths.population.discover_python_files", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 2

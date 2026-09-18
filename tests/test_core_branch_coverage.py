@@ -1360,12 +1360,13 @@ def _discover_with_single_cached_entry(
         *,
         hard_excludes: tuple[str, ...],
         max_files: int,
+        include_stubs: bool,
     ) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
-        del hard_excludes, max_files
+        del hard_excludes, max_files, include_stubs
         return (filepath,), 0, ()
 
     monkeypatch.setattr(
-        "codeclone.paths.module_identity.inventory.discover_python_files",
+        "codeclone.paths.population.discover_python_files",
         _discover_python_files,
     )
     monkeypatch.setattr(core_discovery, "file_stat_signature", lambda _path: stat)

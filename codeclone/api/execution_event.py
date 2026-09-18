@@ -206,6 +206,10 @@ class ExecutionEvent:
     failures: tuple[str, ...] = ()
     #: Provenance, kept beside the witnesses and never inside them.
     analysis_started_at_utc: str = ""
+    #: How this execution's population was obtained (a ``ScopeSource``), or
+    #: ``""`` on a record made before provenance was carried. The drift
+    #: projection reads it to refuse comparing populations of different owners.
+    scope_source: str = ""
     report_generated_at_utc: str = ""
     code_digest: str = ""
     #: The outcome of publishing this execution's analysis snapshot (ruling

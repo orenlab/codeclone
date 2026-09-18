@@ -1070,6 +1070,23 @@ ObservedPopulation = Literal[
     "unmeasured",
 ]
 
+#: How a run's source population was obtained. ``git`` is the default owner:
+#: tracked files that exist plus untracked files git does not ignore, pruned by
+#: the hard-safety names. ``filesystem_fallback`` is the tree walk taken when
+#: git could not answer, and it always carries a ``ScopeFallbackReason``.
+#: Provenance explains a population and never keys one: the same population
+#: from either source is one identity (registry digest, analysis scope, run).
+ScopeSource = Literal["git", "filesystem_fallback"]
+
+#: Why the walk stood in for git, one closed reason per refusal shape.
+#: ``None`` on a population whose ``scope_source`` is ``git``.
+ScopeFallbackReason = Literal[
+    "git_unavailable",  # git could not be launched, or did not answer at all
+    "not_a_repository",  # rev-parse refused, or answered anything but "true"
+    "git_listing_failed",  # ls-files: OSError, non-zero exit, or timeout
+    "git_listing_unparseable",  # ls-files answered, but not NUL-framed
+]
+
 #: The states over which a health number exists at all. Derived once, here,
 #: because four states collapse to this binary question at every presenting
 #: surface, and a surface that re-derives it from ``score is None`` reads the
@@ -1301,6 +1318,8 @@ __all__ = [
     "WIRE_VERSION",
     "ExitCode",
     "ObservedPopulation",
+    "ScopeFallbackReason",
+    "ScopeSource",
     "cli_help_epilog",
     "population_universe_observed",
 ]

@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_valida
 
 # The four-state population contract lives in the dependency-free contract
 # ring, because the r4 surfaces that decide on it may not import this module.
-from .contracts import ObservedPopulation
+from .contracts import ObservedPopulation, ScopeFallbackReason, ScopeSource
 
 DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
 DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
@@ -1640,6 +1640,58 @@ class GitWorkspaceSnapshot:
         paths = tuple(entry.path for entry in self.entries)
         if paths != tuple(sorted(set(paths))):
             raise ValueError("git workspace snapshot paths must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitWorkspaceListing:
+    """What ``git ls-files -z --cached --others --exclude-standard`` answered.
+
+    ``paths`` are root-relative POSIX names exactly as git printed them --
+    sorted, unique, decoded with ``surrogateescape`` -- and unfiltered: the
+    population owner decides what is a source unit. ``available`` is false
+    exactly when a typed ``fallback_reason`` names why git could not answer;
+    an empty listing from a live repository is an answer, not a refusal.
+    """
+
+    available: bool
+    paths: tuple[str, ...]
+    fallback_reason: ScopeFallbackReason | None
+
+    def __post_init__(self) -> None:
+        if self.available != (self.fallback_reason is None):
+            raise ValueError("a git listing is available exactly when it has no reason")
+        if self.paths != tuple(sorted(set(self.paths))):
+            raise ValueError("git listing paths must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SourcePopulation:
+    """The source units one run reads, and how they were obtained.
+
+    ``paths`` and ``stub_paths`` are absolute, sorted and disjoint: the ``.py``
+    units the inventory registers, and the ``.pyi`` stubs it never does (a
+    stub resolves to the module its ``.py`` twin already owns). ``hard_excluded``
+    and ``unreadable`` are diagnostics of the source that produced the
+    population -- git counts files, the walk counts directories -- and
+    ``scope_source`` with ``fallback_reason`` is provenance. None of them is
+    identity: the module registry digest, the analysis scope digest and the
+    run id are functions of the units alone.
+    """
+
+    root: str
+    paths: tuple[str, ...]
+    stub_paths: tuple[str, ...]
+    hard_excluded: int
+    unreadable: tuple[str, ...]
+    scope_source: ScopeSource
+    fallback_reason: ScopeFallbackReason | None
+
+    def __post_init__(self) -> None:
+        if (self.scope_source == "git") != (self.fallback_reason is None):
+            raise ValueError("a fallback reason rides exactly the fallback source")
+        for name, values in (("paths", self.paths), ("stub_paths", self.stub_paths)):
+            if values != tuple(sorted(set(values))):
+                raise ValueError(f"source population {name} must be sorted and unique")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

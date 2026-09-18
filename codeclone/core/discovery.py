@@ -43,6 +43,7 @@ from ..models import (
 from ..observability import SpanHandle, span
 from ..paths.git_snapshot import collect_git_content_snapshot
 from ..paths.module_identity.inventory import build_module_registry
+from ..paths.population import derive_source_population
 from ..paths.worktree_topology import nested_worktree_warnings
 from ._types import (
     BootstrapResult,
@@ -297,9 +298,13 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         else (".",)
     )
     unreadable_paths: list[str] = []
+    # One derivation of the population per run: the registry freezes it, the
+    # result below carries how it was obtained.
+    population = derive_source_population(boot.root)
     module_registry = build_module_registry(
         root=boot.root,
         source_roots=source_roots,
+        population=population,
         on_unreadable_path=unreadable_paths.append,
     )
     cache.bind_module_registry(module_registry)
@@ -623,6 +628,8 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         files_to_process=tuple(files_to_process),
         skipped_warnings=tuple(sorted(skipped_warnings)),
         module_registry=module_registry,
+        scope_source=population.scope_source,
+        scope_fallback_reason=population.fallback_reason,
         cached_structural_findings=tuple(cached_sf),
         cached_function_relationship_facts=tuple(
             sorted(cached_relationship_facts, key=lambda facts: facts.source_qualname)

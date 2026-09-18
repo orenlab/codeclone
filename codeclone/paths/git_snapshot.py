@@ -14,8 +14,9 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
+from ..contracts import ScopeFallbackReason
 from ..models import (
     DigestObject,
     GitBlobIdentity,
@@ -27,6 +28,7 @@ from ..models import (
     GitStatusEntry,
     GitStatusEntryInput,
     GitTrackedContent,
+    GitWorkspaceListing,
     GitWorkspaceSnapshot,
 )
 from ..observability import record_counter, span
@@ -103,6 +105,99 @@ def git_repository_available(root: Path) -> bool:
         timeout=10,
     )
     return output is not None and output.strip().lower() == "true"
+
+
+_GIT_LS_FILES_ARGS: Final = (
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+)
+
+#: The shape of one git refusal, before a caller says what it means.
+_GitRefusal = Literal["os_error", "nonzero_exit", "timeout"]
+
+
+def _run_git_bytes_or_reason(
+    root: Path,
+    args: Sequence[str],
+    *,
+    timeout: int,
+) -> tuple[bytes | None, _GitRefusal | None]:
+    """Run git and keep the shape of a refusal instead of collapsing it.
+
+    ``_run_git_text`` and ``_run_git_bytes`` answer ``None`` for every failure
+    because their readers only need "unavailable". The population owner must
+    tell a missing binary from a directory outside any repository from a
+    listing that timed out, so this is the one place the three shapes
+    survive. Same span policy as the text path: an existing span name when
+    the subcommand has one, none otherwise.
+    """
+    with _git_subprocess_span(args):
+        try:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except OSError:
+            return None, "os_error"
+        except subprocess.CalledProcessError:
+            return None, "nonzero_exit"
+        except subprocess.TimeoutExpired:
+            return None, "timeout"
+    stdout = completed.stdout
+    return (stdout if isinstance(stdout, bytes) else None), None
+
+
+def _nul_framed_paths(output: bytes) -> tuple[str, ...] | None:
+    """Decode one ``-z`` listing, or ``None`` when it is not NUL-framed."""
+    if not output:
+        return ()
+    if not output.endswith(b"\0"):
+        return None
+    names = {
+        frame.decode("utf-8", "surrogateescape")
+        for frame in output[:-1].split(b"\0")
+        if frame
+    }
+    return tuple(sorted(names))
+
+
+def _refused_listing(reason: ScopeFallbackReason) -> GitWorkspaceListing:
+    return GitWorkspaceListing(available=False, paths=(), fallback_reason=reason)
+
+
+def list_git_workspace_paths(root: Path) -> GitWorkspaceListing:
+    """Ask git for the workspace population of ``root``, unfiltered.
+
+    Tracked entries (``--cached``: a file git tracks stays listed after a
+    later ignore rule matches it, and a tracked file deleted from the tree is
+    still printed) plus untracked entries git does not ignore (``--others
+    --exclude-standard``). Paths come back relative to ``root`` because git
+    prints them relative to its cwd. Every refusal is typed (scope contract,
+    table A); a rev-parse that times out counts as git not answering, and an
+    empty listing from a live repository is an answer, not a refusal.
+    """
+    probe, refusal = _run_git_bytes_or_reason(
+        root,
+        ["rev-parse", "--is-inside-work-tree"],
+        timeout=10,
+    )
+    if refusal in ("os_error", "timeout"):
+        return _refused_listing("git_unavailable")
+    if refusal is not None or probe is None or probe.strip().lower() != b"true":
+        return _refused_listing("not_a_repository")
+    output, refusal = _run_git_bytes_or_reason(root, _GIT_LS_FILES_ARGS, timeout=30)
+    if refusal is not None:
+        return _refused_listing("git_listing_failed")
+    paths = _nul_framed_paths(output) if output is not None else None
+    if paths is None:
+        return _refused_listing("git_listing_unparseable")
+    return GitWorkspaceListing(available=True, paths=paths, fallback_reason=None)
 
 
 def _status_entries(output: str) -> tuple[GitStatusEntry, ...] | None:
@@ -558,4 +653,5 @@ __all__ = [
     "dirty_entry_digest",
     "git_diff_bytes",
     "git_repository_available",
+    "list_git_workspace_paths",
 ]

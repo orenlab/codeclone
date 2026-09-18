@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Literal
 
 from ...api.execution_event import DirtyEntryWitness, DirtySnapshotWitness
+from ...api.population import derive_source_population
 from ...cache.store import file_stat_signature
 from ...contracts.errors import ValidationError
 from ...models import FileStat
-from ...scanner import iter_py_files
 from ._session_shared import MCPRunRecord
 from ._workspace_hygiene import collect_dirty_snapshot
 
@@ -103,7 +103,10 @@ def compute_drift(
 
     selected_paths = _selected_paths(paths)
     manifest_paths = frozenset(manifest)
-    current_paths = _current_source_paths(record.root)
+    current_paths = _current_source_paths(
+        record.root,
+        recorded_scope_source=record.execution.scope_source,
+    )
     topology_known = current_paths is not None
     current_source_paths = current_paths or frozenset()
 
@@ -184,15 +187,35 @@ def compute_drift(
     )
 
 
-def _current_source_paths(root: Path) -> frozenset[str] | None:
+def _current_source_paths(
+    root: Path,
+    *,
+    recorded_scope_source: str = "",
+) -> frozenset[str] | None:
+    """The population as the analysis owner derives it now, or ``None``.
+
+    One owner, one derivation rule: a second walk with its own exclusion
+    list could not see that an untracked file is gitignored, so it reported
+    it as added on every run, and it pruned names the analysis never did.
+
+    ``None`` is "topology unknown": the owner could not derive a population,
+    or it derived one from a different source than the recorded run -- git
+    against a fallback walk, or the reverse (scope contract, table G) --
+    where added/deleted would be an artefact of the two sources' ignore
+    rules and not of the tree. A record without provenance is compared by
+    today's owner.
+    """
     try:
-        return frozenset(
-            relative_path
-            for filepath in iter_py_files(str(root))
-            if (relative_path := _repo_relative_path(root, filepath)) is not None
-        )
+        population = derive_source_population(root)
     except (OSError, RuntimeError, ValidationError):
         return None
+    if recorded_scope_source and population.scope_source != recorded_scope_source:
+        return None
+    return frozenset(
+        relative_path
+        for filepath in population.paths
+        if (relative_path := _repo_relative_path(root, filepath)) is not None
+    )
 
 
 def _repo_relative_path(root: Path, filepath: str) -> str | None:

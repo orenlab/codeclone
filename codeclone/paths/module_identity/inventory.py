@@ -26,9 +26,10 @@ from ...models import (
     ModuleRegistryHandle,
     PackagePrefix,
     ResolvedSourceIdentity,
+    SourcePopulation,
 )
 from ...observability import span
-from ...scanner import HARD_SAFETY_EXCLUDES, discover_python_files
+from ..population import derive_source_population
 from .manifest import ModuleIdentityCollisionError, build_module_identity_manifest
 from .resolver import normalize_import_mounts
 
@@ -275,10 +276,16 @@ def build_module_registry(
     analysis_excludes: tuple[str, ...] = DEFAULT_ANALYSIS_EXCLUDES,
     max_files: int = 100_000,
     on_unreadable_path: Callable[[str], None] | None = None,
+    population: SourcePopulation | None = None,
 ) -> ModuleRegistryHandle:
-    """Build the complete inventory and analyzed subset from one safe walk.
+    """Build the complete inventory and analyzed subset from one population.
 
-    ``on_unreadable_path`` receives every directory the walk could not read.
+    ``population`` is the run's source population when the caller already
+    derived it (the pipeline derives it once and carries its provenance);
+    otherwise the population owner derives it here, so a bare ``root=`` call
+    still performs exactly one derivation and no second walk.
+
+    ``on_unreadable_path`` receives every path the source could not read.
     It is a side channel rather than a field on the returned handle because
     the handle is serialized whole into the source-observation digest: a
     permission fault is a property of one run, and putting it in the registry
@@ -287,11 +294,14 @@ def build_module_registry(
     """
 
     with span(name="registry.build") as registry_span:
-        paths, hard_excluded, unreadable_paths = discover_python_files(
-            str(root),
-            hard_excludes=HARD_SAFETY_EXCLUDES,
-            max_files=max_files,
+        source_population = (
+            population
+            if population is not None
+            else derive_source_population(root, max_files=max_files)
         )
+        paths = source_population.paths
+        hard_excluded = source_population.hard_excluded
+        unreadable_paths = source_population.unreadable
         if on_unreadable_path is not None:
             for unreadable_path in unreadable_paths:
                 on_unreadable_path(unreadable_path)

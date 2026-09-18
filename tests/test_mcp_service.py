@@ -2822,7 +2822,7 @@ def test_workspace_drift_marks_missing_files_when_topology_unknown(
     monkeypatch.setattr(
         mcp_workspace_drift_mod,
         "_current_source_paths",
-        lambda _root: None,
+        lambda _root, **_kwargs: None,
     )
 
     def _raise(_path: str) -> object:
@@ -2840,7 +2840,7 @@ def test_workspace_drift_helpers_cover_discovery_and_relative_paths(
 ) -> None:
     monkeypatch.setattr(
         mcp_workspace_drift_mod,
-        "iter_py_files",
+        "derive_source_population",
         lambda _root: (_ for _ in ()).throw(OSError("discovery failed")),
     )
     assert mcp_workspace_drift_mod._current_source_paths(tmp_path) is None
@@ -2888,6 +2888,118 @@ def test_workspace_drift_reports_fresh_when_manifest_matches(
     assert drift.status == "fresh"
     assert drift.drifted_files == ()
     assert file_stat_signature(str(module)) == manifest["pkg/mod.py"]
+
+
+def test_workspace_drift_reads_the_population_owner_not_a_second_walk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The drift population is derived by the analysis population owner.
+
+    A second walk with its own exclusion list is blind twice: it cannot see
+    that an untracked ``.py`` is gitignored, so every run reports it as an
+    added file, and it prunes names the analysis walk does not. One owner,
+    one derivation rule, so the only thing the two populations may differ by
+    is the moment they were taken.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "drift@example.invalid"),
+        ("config", "user.name", "drift"),
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    pkg = root / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    (root / ".gitignore").write_text("pkg/generated.py\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    (pkg / "generated.py").write_text("y = 2\n", encoding="utf-8")
+    manifest = mcp_workspace_drift_mod.build_run_manifest(
+        root=root,
+        filepaths=[str(pkg / "__init__.py"), str(pkg / "mod.py")],
+    )
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(),
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "collect_dirty_snapshot",
+        lambda _root: snapshot,
+    )
+    record = _with_execution(
+        _dummy_run_record(root, "drift-owner"),
+        manifest=manifest,
+        dirty_snapshot=snapshot,
+    )
+
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+
+    assert drift.added_files == ()
+    assert drift.deleted_files == ()
+    assert drift.status == "fresh"
+
+
+def test_workspace_drift_is_unknown_when_the_population_source_changed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Table G: populations from different owners are not comparable.
+
+    A run recorded from git compared against a fallback walk (or the
+    reverse) would report the gitignored files as topology drift; the
+    honest verdict is ``unknown``. A record without provenance -- a run
+    made before the field existed -- is compared by today's owner.
+    """
+    from codeclone.models import SourcePopulation
+
+    pkg, manifest = _workspace_drift_pkg(tmp_path, (("mod.py", "x = 1\n"),))
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=False,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(),
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "collect_dirty_snapshot",
+        lambda _root: snapshot,
+    )
+    record = _with_execution(
+        _dummy_run_record(tmp_path, "drift-source"),
+        manifest=manifest,
+        dirty_snapshot=snapshot,
+        scope_source="git",
+    )
+    fallback = SourcePopulation(
+        root=str(tmp_path),
+        paths=(str(pkg / "mod.py"),),
+        stub_paths=(),
+        hard_excluded=0,
+        unreadable=(),
+        scope_source="filesystem_fallback",
+        fallback_reason="not_a_repository",
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "derive_source_population",
+        lambda _root: fallback,
+    )
+
+    assert mcp_workspace_drift_mod.compute_drift(record).status == "unknown"
+    legacy = _with_execution(record, scope_source="")
+    assert mcp_workspace_drift_mod.compute_drift(legacy).status == "fresh"
+    same_source = _with_execution(record, scope_source="filesystem_fallback")
+    assert mcp_workspace_drift_mod.compute_drift(same_source).status == "fresh"
 
 
 def test_graph_search_match_tier_prefix_and_substring() -> None:
