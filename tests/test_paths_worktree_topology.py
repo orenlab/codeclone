@@ -26,7 +26,12 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.models import GitCheckoutTopology, NestedWorktreeReport
+import codeclone.paths.population as population_mod
+from codeclone.models import (
+    GitCheckoutTopology,
+    GitWorkspaceListing,
+    NestedWorktreeReport,
+)
 from codeclone.paths.worktree_topology import (
     NESTED_WORKTREE_WARNING_MARKER,
     nested_worktree_warnings,
@@ -470,10 +475,16 @@ def test_common_git_dir_is_compared_resolved_not_lexically(
 # ── phase-1 boundary: nothing is excluded from the run ──
 
 
-def test_detection_does_not_change_the_source_universe(
+def test_the_git_derived_population_leaves_the_nested_worktree_copy_out(
     nested_worktree_tree: tuple[Path, Path],
 ) -> None:
-    """The wave adds a warning. It must not quietly start losing sources."""
+    """The population owner asks git, and git never lists a nested linked
+    worktree's files: it prints the directory as one entry. The copy is
+    therefore not a source unit of this run -- not trimmed (the fallback walk
+    still admits it, and that question is open), simply never listed -- and
+    the run loses nothing it should have read. The warning still rides the
+    run: ``test_discovery_carries_the_warning_to_the_run`` pins it.
+    """
 
     main, nested = nested_worktree_tree
     boot = analysis_boot(main, min_loc=1, min_stmt=1, skip_metrics=True)
@@ -486,6 +497,47 @@ def test_detection_does_not_change_the_source_universe(
     )
 
     analysed = {Path(path).resolve() for path in discovery.all_file_paths}
+    assert discovery.scope_source == "git"
+    assert (main / "pkg" / "mod.py").resolve() in analysed
+    assert (nested / "pkg" / "mod.py").resolve() not in analysed
+    assert discovery.files_skipped == 0
+
+
+def test_the_fallback_walk_still_admits_the_nested_worktree_copy(
+    nested_worktree_tree: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other producer, same tree, differing only in source.
+
+    The fallback walk has no listing to consult, so the copy stays
+    discoverable under today's walk semantics -- until an independently
+    ratified safety rule says otherwise (M7). Pinned so that the git arm
+    above is read as a difference between two producers, not as trimming.
+    """
+
+    main, nested = nested_worktree_tree
+    monkeypatch.setattr(
+        population_mod,
+        "list_git_workspace_paths",
+        lambda _root: GitWorkspaceListing(
+            available=False,
+            paths=(),
+            fallback_reason="git_listing_failed",
+        ),
+    )
+    boot = analysis_boot(main, min_loc=1, min_stmt=1, skip_metrics=True)
+
+    _cache, discovery, _processing = discover_and_process(
+        boot,
+        main / "cache.json",
+        root=main,
+        warm=False,
+    )
+
+    analysed = {Path(path).resolve() for path in discovery.all_file_paths}
+    assert discovery.scope_source == "filesystem_fallback"
+    assert discovery.scope_fallback_reason == "git_listing_failed"
+    assert (main / "pkg" / "mod.py").resolve() in analysed
     assert (nested / "pkg" / "mod.py").resolve() in analysed
     assert discovery.files_skipped == 0
 
