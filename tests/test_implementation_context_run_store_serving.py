@@ -49,6 +49,17 @@ record's memory (``_agrees``), so mutating the on-disk store can never make
 the served answer *move* -- it forces fallback instead.  A store-mutation
 reverse probe is structurally vacuous here, which is why the isolated pins
 thread the value in directly.
+
+**One provenance projection**, the same contract as ``search_graph``.  The
+resolution above yields a ``RunStoreServingOutcome`` beside the slices, and
+the explicit ``paths=`` / ``symbols=`` answer carries that one outcome at its
+root as ``serving`` -- the verbatim ``as_payload()`` of the outcome whose
+slices built the answer, never a second resolution and never a digest input:
+provenance says where the facts came from, not which facts they are, so it
+moves neither ``context_artifact_digest`` nor ``context_projection_digest``.
+The pins at the end hold that on the causal states the door really produces
+-- store-backed, memory by design, a store that went missing, and a divergent
+shadow read.
 """
 
 from __future__ import annotations
@@ -316,6 +327,18 @@ def _served_run(
     return service, root, record, summary, slices
 
 
+def _published_store_run_id(record: MCPRunRecord) -> str:
+    """The store run this execution published under -- asserted, not assumed."""
+    link = record.execution.run_snapshot_link
+    assert link is not None and link.store_run_id, link
+    return link.store_run_id
+
+
+def _served_block(store_run_id: str) -> dict[str, object]:
+    """The provenance block a store-backed answer carries, verbatim."""
+    return {"source": "run_store", "reason": "served", "store_run_id": store_run_id}
+
+
 def test_one_request_resolves_the_run_store_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -460,6 +483,25 @@ def _without_run_identity_digests(payload: dict[str, object]) -> dict[str, objec
     return clone
 
 
+def _without_provenance(payload: dict[str, object]) -> dict[str, object]:
+    """Strip ``serving`` and the two envelope fields that follow it.
+
+    ``context_governance.estimated`` is a byte estimate over the whole
+    response and ``context_governance.response.projection_digest`` a digest
+    over it, so both legitimately move with the provenance block -- exactly
+    as they do for ``search_graph``.  Everything else is the answer.
+    """
+    clone = copy.deepcopy(payload)
+    clone.pop("serving", None)
+    governance = clone.get("context_governance")
+    if isinstance(governance, dict):
+        governance.pop("estimated", None)
+        response = governance.get("response")
+        if isinstance(response, dict):
+            response.pop("projection_digest", None)
+    return clone
+
+
 def test_paths_shape_is_served_from_the_run_store_and_matches_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -490,8 +532,7 @@ def test_paths_shape_is_served_from_the_run_store_and_matches_memory(
         tmp_path, monkeypatch
     )
     assert memory_summary["run_id"] == store_summary["run_id"]
-    link = store_record.execution.run_snapshot_link
-    assert link is not None and link.store_run_id, link
+    store_run_id = _published_store_run_id(store_record)
 
     memory_answer = memory_service.get_implementation_context(
         root=str(tmp_path / "memory"), paths=["pkg/callee.py"], include=["callers"]
@@ -504,6 +545,160 @@ def test_paths_shape_is_served_from_the_run_store_and_matches_memory(
     assert isinstance(call_context, dict)
     assert call_context["callers"], "the population must contain a caller"
 
-    assert _without_run_identity_digests(store_answer) == _without_run_identity_digests(
-        memory_answer
+    # The provenance block is the one block that legitimately differs, and
+    # it says exactly what each service is: memory by design here, the
+    # store there.
+    assert memory_answer["serving"] == {
+        "source": "memory",
+        "reason": "not_published",
+        "detail": "disabled",
+    }
+    assert store_answer["serving"] == _served_block(store_run_id)
+    assert _without_provenance(
+        _without_run_identity_digests(store_answer)
+    ) == _without_provenance(_without_run_identity_digests(memory_answer))
+
+
+# -- the resolver's outcome reaches the explicit answer ---------------------
+#
+# ``_resolve_context_subject`` is the one place the explicit shapes resolve
+# the store, and it used to keep only the slices and drop the
+# ``RunStoreServingOutcome`` beside them, so a ``paths=`` / ``symbols=``
+# answer could not say whether it was store-backed.  ``search_graph``
+# projects its one outcome as ``serving`` at the response root; these pins
+# hold the explicit shapes to the same contract: the SAME outcome, from the
+# SAME resolution that built the answer, projected verbatim.
+
+_EXPLICIT_SHAPES: dict[str, dict[str, object]] = {
+    "paths": {"paths": ["pkg/callee.py"], "include": ["callers"]},
+    "symbols": {"symbols": ["pkg.callee:target"], "include": ["callers"]},
+}
+
+
+def test_explicit_shapes_carry_the_store_backed_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Store-backed: ``serving`` is the door's served outcome, verbatim.
+
+    Mutation target: the projection of ``serving`` into the built payload.
+    Substitute any memory-shaped literal for it and this reddens; the
+    memory pins below redden on the opposite substitution, so each direction
+    of a wrong answer has a test of its own.  A ``subject_not_found`` answer
+    read the same slices to resolve nothing, so it carries the same block.
+    """
+    service, root, record, _summary, _slices = _served_run(tmp_path, monkeypatch)
+    served = _served_block(_published_store_run_id(record))
+    for label, kwargs in _EXPLICIT_SHAPES.items():
+        answer = service.get_implementation_context(root=str(root), **kwargs)
+        assert answer["status"] == "ok", label
+        assert answer["serving"] == served, label
+    missing = service.get_implementation_context(
+        root=str(root), symbols=["pkg.callee:absent"]
     )
+    assert missing["status"] == "subject_not_found"
+    assert missing["serving"] == served
+
+
+def test_explicit_shapes_say_memory_by_design_when_nothing_was_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Memory by design: the rollout is off, and the answer says so.
+
+    ``not_published`` with the publication outcome -- the block the
+    ``query=`` shape already reports -- so an off rollout is stated and
+    never mistaken for a store that fell back.
+    """
+    for key in (
+        "CODECLONE_RUN_STORE_ENABLED",
+        "CODECLONE_RUN_STORE_FORCE",
+        "CODECLONE_RUN_STORE_PATH",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    root = tmp_path / "memory"
+    _write_two_file_corpus(root)
+    service = CodeCloneMCPService(history_limit=2)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root), respect_pyproject=False, min_loc=1, min_stmt=1
+        )
+    )
+    for label, kwargs in _EXPLICIT_SHAPES.items():
+        answer = service.get_implementation_context(root=str(root), **kwargs)
+        assert answer["status"] == "ok", label
+        assert answer["serving"] == {
+            "source": "memory",
+            "reason": "not_published",
+            "detail": "disabled",
+        }, label
+
+
+def test_explicit_shapes_name_the_fallback_when_the_store_is_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real fallback, not by design: the published store file is removed.
+
+    The door refuses with ``store_absent`` before touching the filesystem,
+    memory answers, and the provenance names the gate that closed together
+    with the ``store_run_id`` the execution published under -- a lost store
+    is distinguishable from a rollout that was never on.
+    """
+    service, root, record, _summary, _slices = _served_run(tmp_path, monkeypatch)
+    store_run_id = _published_store_run_id(record)
+    (tmp_path / "runs.sqlite3").unlink()
+    for label, kwargs in _EXPLICIT_SHAPES.items():
+        answer = service.get_implementation_context(root=str(root), **kwargs)
+        assert answer["status"] == "ok", label
+        serving = answer["serving"]
+        assert isinstance(serving, dict), label
+        assert serving["source"] == "memory", label
+        assert serving["reason"] == "store_absent", label
+        assert serving["store_run_id"] == store_run_id, label
+        assert str(serving["detail"]).startswith("there is no run store at"), label
+        call_context = answer["call_context"]
+        assert isinstance(call_context, dict) and call_context["callers"], label
+
+
+def test_a_divergent_answer_names_divergence_and_moves_no_identity_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shadow read's verdict reaches the explicit shapes, and provenance
+    is not identity.
+
+    A store answer that disagrees with the record's is never served: memory
+    is, and ``serving`` says ``divergent``.  The facts served are then the
+    same facts the store-backed call served (the store agreed with memory
+    there), so ``context_artifact_digest`` and ``context_projection_digest``
+    -- the identity of the resolved subject -- are equal across the two
+    answers while ``serving`` differs.  Mutation target: bind ``serving``
+    into the payload BEFORE the projection digest is taken, and the two
+    digests part.
+    """
+    service, root, record, _summary, stored = _served_run(tmp_path, monkeypatch)
+    store_run_id = _published_store_run_id(record)
+    kwargs = _EXPLICIT_SHAPES["paths"]
+    served = service.get_implementation_context(root=str(root), **kwargs)
+    assert served["status"] == "ok"
+    assert served["serving"] == _served_block(store_run_id)
+    disagreeing = replace(stored, unit_inventory=())
+
+    def diverging_door(
+        *, root: Path, link: object
+    ) -> tuple[ServedRunSlices, RunStoreServingOutcome]:
+        return disagreeing, RunStoreServingOutcome(
+            source="run_store", reason="served", store_run_id=store_run_id
+        )
+
+    monkeypatch.setattr(run_store_serving_mod, "read_run_store_slices", diverging_door)
+    divergent = service.get_implementation_context(root=str(root), **kwargs)
+    assert divergent["status"] == "ok"
+    assert divergent["serving"] == {
+        "source": "memory",
+        "reason": "divergent",
+        "store_run_id": store_run_id,
+    }
+    served_analysis = served["analysis"]
+    divergent_analysis = divergent["analysis"]
+    assert isinstance(served_analysis, dict) and isinstance(divergent_analysis, dict)
+    for digest in ("context_artifact_digest", "context_projection_digest"):
+        assert served_analysis[digest] == divergent_analysis[digest], digest
+    assert _without_provenance(served) == _without_provenance(divergent)

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol, TypeGuard, cast
 
-from ...api.run_store_serving import ServedRunSlices
+from ...api.run_store_serving import RunStoreServingOutcome, ServedRunSlices
 from ...utils.payload_narrow import is_payload_dict, is_record_mapping
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
@@ -366,11 +366,12 @@ def _implementation_context_page_response(
 class _ContextSubject:
     """What one implementation-context request is about.
 
-    ``slices`` is that request's ONE resolved ``ServedRunSlices``.  It rides
-    on the subject rather than being threaded as a separate parameter so
-    there is a single object answering "which run facts is this response
-    built from", and so every consumer downstream reads that object instead
-    of resolving the store again.
+    ``slices`` is that request's ONE resolved ``ServedRunSlices``, and
+    ``serving`` is where that same resolution said they came from.  They
+    ride on the subject together rather than being threaded as separate
+    parameters so there is a single object answering "which run facts is
+    this response built from, and from where", and so every consumer
+    downstream reads that object instead of resolving the store again.
     """
 
     paths: tuple[str, ...]
@@ -380,12 +381,14 @@ class _ContextSubject:
     resolved_from: str
     source_summary: dict[str, object]
     slices: ServedRunSlices
+    serving: RunStoreServingOutcome
 
 
 def _context_subject_from_explicit(
     *,
     record: MCPRunRecord,
     slices: ServedRunSlices,
+    serving: RunStoreServingOutcome,
     paths: tuple[str, ...],
     symbols: tuple[str, ...],
 ) -> _ContextSubject:
@@ -425,6 +428,7 @@ def _context_subject_from_explicit(
         resolved_from=resolved_from,
         source_summary=_subject_source_summary(effective_paths),
         slices=slices,
+        serving=serving,
     )
 
 
@@ -601,6 +605,13 @@ class _MCPSessionContextMixin:
                 self._context_projection_pages[artifact.context_projection_digest] = (
                     artifact
                 )
+        # Where the facts came from: the ONE outcome resolved beside
+        # ``subject.slices``, projected at the root as ``search_graph``
+        # projects its own.  Attached AFTER the builder bound the digests,
+        # by construction: provenance says where the facts came from, not
+        # which facts they are, so it is an input to no digest and to no
+        # facet page.
+        payload["serving"] = subject.serving.as_payload()
         return _budgeted_implementation_context_response(
             payload,
             detail_level=detail_level,
@@ -841,8 +852,13 @@ class _MCPSessionContextMixin:
         artifact digest binding facts from a DIFFERENT read than the response
         was built from.  The ``query=`` shape returns before this method is
         reached; ``search_graph`` owns its own single resolution.
+
+        The outcome beside the slices rides on the subject too: it is what
+        the response publishes as ``serving`` -- the contract
+        ``search_graph`` already carries -- and resolving again to obtain
+        it would be the very duplication this method exists to prevent.
         """
-        slices, _serving = served_slices(record)
+        slices, serving = served_slices(record)
         explicit_paths = self._normalize_context_paths(
             root_path=root_path,
             paths=paths or (),
@@ -854,6 +870,7 @@ class _MCPSessionContextMixin:
             return _context_subject_from_explicit(
                 record=record,
                 slices=slices,
+                serving=serving,
                 paths=explicit_paths,
                 symbols=explicit_symbols,
             )
@@ -870,6 +887,7 @@ class _MCPSessionContextMixin:
                 resolved_from="intent_scope",
                 source_summary=_subject_source_summary(intent_paths),
                 slices=slices,
+                serving=serving,
             )
         snapshot = collect_dirty_snapshot(root_path)
         if not snapshot.paths:
@@ -897,6 +915,7 @@ class _MCPSessionContextMixin:
                 "git_available": snapshot.git_available,
             },
             slices=slices,
+            serving=serving,
         )
 
     @staticmethod
