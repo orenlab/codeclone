@@ -48,6 +48,25 @@ from codeclone.contracts import CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISIO
 from tests.test_canonical_roundtrip import fixture_model
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "run_store_generation_1"
+_MANIFEST_NAME = "provenance.json"
+# The revision-1 build left exactly these artifacts behind, and this module
+# consumes every one of them: ``runs.sqlite3`` is opened as a store,
+# ``run.wire.json`` is decoded, ``run.envelope.json`` is verified.  The
+# manifest cannot witness its own bytes, so it is not a member of the set.
+_MANIFESTED_ARTIFACTS = frozenset(
+    {"run.envelope.json", "run.wire.json", "runs.sqlite3"}
+)
+
+
+def _artifacts_the_manifest_does_not_own(
+    directory: Path, recorded: dict[str, str]
+) -> tuple[frozenset[str], frozenset[str]]:
+    """(files carrying no digest, digests naming no file) for one directory."""
+    on_disk = frozenset(
+        entry.name for entry in directory.iterdir() if entry.name != _MANIFEST_NAME
+    )
+    named = frozenset(recorded)
+    return on_disk - named, named - on_disk
 
 
 @pytest.fixture(scope="module")
@@ -83,6 +102,32 @@ def test_the_artifacts_are_the_ones_the_revision_one_build_produced(
         objects = connection.execute("SELECT count(*) FROM objects").fetchone()[0]
     assert witness["canonical_model"] == "1" and witness["canonical_wire"] == "0"
     assert objects > 0 and objects == provenance["objects"]
+
+
+def test_the_provenance_manifest_owns_every_revision_one_artifact(
+    provenance: dict[str, object], tmp_path: Path
+) -> None:
+    """Completeness, not one more assert on one name: the manifest is a closed
+    world over the fixture directory, so an artifact dropped in without a
+    digest — or a digest quietly dropped from the manifest — reds here, and the
+    set it owns is exactly the set this module consumes."""
+    recorded = cast("dict[str, str]", provenance["sha256"])
+    assert _artifacts_the_manifest_does_not_own(_FIXTURES, recorded) == (
+        frozenset(),
+        frozenset(),
+    )
+    assert frozenset(recorded) == _MANIFESTED_ARTIFACTS
+    # The closed world is what carries the proof, so show an input that trips
+    # it: a mutant that drops a file INTO the fixture directory cannot be
+    # written as an edit to a tracked file, and a pin no input reaches is
+    # theatre.
+    intruder = tmp_path / "run_store_generation_1"
+    shutil.copytree(_FIXTURES, intruder)
+    (intruder / "extra.json").write_text("{}", encoding="utf-8")
+    assert _artifacts_the_manifest_does_not_own(intruder, recorded) == (
+        frozenset({"extra.json"}),
+        frozenset(),
+    )
 
 
 def test_a_generation_one_store_is_refused_at_open_with_its_migration_path(
