@@ -132,7 +132,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
     assert "start_controlled_change" in str(server.instructions)
     assert "finish_controlled_change" in str(server.instructions)
-    assert ".codeclone/intents/" in str(server.instructions)
+    assert "intent_registry_backend" in str(server.instructions)
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
@@ -266,7 +266,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "not NLP" in str(tools["validate_review_claims"].description)
     assert "list_workspace" in str(tools["manage_change_intent"].description)
     assert "recover" in str(tools["manage_change_intent"].description)
-    assert ".codeclone/intents/" in str(tools["manage_change_intent"].description)
+    assert "intent_registry_backend" in str(tools["manage_change_intent"].description)
     assert "compact adds anti_patterns" in str(tools["help"].description)
     assert "change_control, trust_boundaries, engineering_memory" in str(
         tools["help"].description

@@ -494,7 +494,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "Multi-agent: manage_change_intent(list_workspace|renew|recover|"
-                "gc_workspace) — registry is advisory under .codeclone/intents/."
+                "gc_workspace) — registry is advisory; its backend and path come "
+                "from [tool.codeclone] intent_registry_backend / "
+                "intent_registry_path, and list_workspace reports the resolved "
+                "registry_backend and registry_storage."
             ),
             (
                 "Finish: changed_files XOR diff_ref; after_run_id when "
@@ -646,8 +649,9 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "paths (privileged)."
             ),
             (
-                "Workspace intents under .codeclone/intents/ are "
-                "advisory same-UID coordination, not signed proof."
+                "Workspace intents in the configured registry ([tool.codeclone] "
+                "intent_registry_backend: file or sqlite) are advisory same-UID "
+                "coordination, not signed proof."
             ),
             (
                 "Cache signatures and baseline payload_sha256 detect "

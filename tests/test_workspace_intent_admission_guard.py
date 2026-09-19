@@ -493,12 +493,20 @@ def test_the_admission_reason_table_is_closed() -> None:
 
     reason = intent_msgs.WORKSPACE_INTENT_INCOMPATIBLE
     assert intent_msgs.workspace_admission_message(reason)
-    assert intent_msgs.workspace_admission_next_step(reason)
+    assert intent_msgs.workspace_admission_next_step(
+        reason,
+        registry_backend="sqlite",
+        registry_storage=".codeclone/db/intents.sqlite3",
+    )
 
     with pytest.raises(KeyError):
         intent_msgs.workspace_admission_message("not_a_real_reason")
     with pytest.raises(KeyError):
-        intent_msgs.workspace_admission_next_step("not_a_real_reason")
+        intent_msgs.workspace_admission_next_step(
+            "not_a_real_reason",
+            registry_backend="sqlite",
+            registry_storage=".codeclone/db/intents.sqlite3",
+        )
 
 
 def test_listing_names_the_unreadable_row(

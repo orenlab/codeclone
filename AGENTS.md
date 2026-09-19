@@ -186,7 +186,7 @@ MUST be disclosed in the pull request.
 | `codeclone.baseline.json`                      | trusted comparison snapshot for baseline-aware CI |
 | `.codeclone/db/cache.sqlite3`                  | integrity-checked optimization — never truth      |
 | `.codeclone/report.{html,json,md,sarif,txt}`   | deterministic projections of the canonical report |
-| `.codeclone/intents/` or a configured registry | workspace coordination state                      |
+| `.codeclone/db/intents.sqlite3`                | workspace coordination state (the configured `sqlite` intent registry; the default `file` backend keeps a directory under `.codeclone/` instead) |
 | `.codeclone/db/audit.sqlite3`                  | optional passive controller evidence              |
 | `.codeclone/memory/engineering_memory.sqlite3` | governed Engineering Memory                       |
 | `.codeclone/memory/semantic_index.lance`       | optional semantic sidecar                         |

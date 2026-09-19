@@ -125,14 +125,27 @@ UNREADABLE_REGISTRY_RECORD_MESSAGES: Final[dict[str, str]] = {
     ),
 }
 
+# The next step names the registry the ROOT resolves to, never a path of its
+# own. The file backend keeps a directory and the sqlite backend one database,
+# and which one a root has is configuration (``[tool.codeclone]
+# intent_registry_backend`` / ``intent_registry_path``). The two values are
+# handed in by the call site, which holds the root, out of the same
+# ``intent_registry_summary`` that ``list_workspace`` reports -- one producer,
+# one spelling for the operator. "By hand" stays because no action of this
+# build removes a row it cannot read: ``recover`` refuses it,
+# ``reset_workspace`` cannot find it, ``clear`` is session-local and
+# ``gc_workspace`` retains it. The tool path is ``finish`` or ``clear`` from
+# the build that wrote the row.
 UNREADABLE_REGISTRY_RECORD_NEXT_STEPS: Final[dict[str, str]] = {
     "registry_record_unreadable_by_this_build": (
         "Do not edit under this intent from this server. Inspect the record "
         "with manage_change_intent(action='list_workspace', root=...) from "
         "the build that wrote it and finish or clear it there. If that build "
         "is gone and the user confirms the scope is abandoned, remove the "
-        "row from .codeclone/intents/ by hand, then analyze_repository and "
-        "start_controlled_change to declare again."
+        "row by hand from this root's workspace intent registry -- the "
+        "{registry_backend} backend at {registry_storage}, as configured by "
+        "[tool.codeclone] intent_registry_backend / intent_registry_path -- "
+        "then analyze_repository and start_controlled_change to declare again."
     ),
 }
 
@@ -141,8 +154,16 @@ def unreadable_registry_record_message(reason: str) -> str:
     return UNREADABLE_REGISTRY_RECORD_MESSAGES[reason]
 
 
-def unreadable_registry_record_next_step(reason: str) -> str:
-    return UNREADABLE_REGISTRY_RECORD_NEXT_STEPS[reason]
+def unreadable_registry_record_next_step(
+    reason: str,
+    *,
+    registry_backend: str,
+    registry_storage: str,
+) -> str:
+    return UNREADABLE_REGISTRY_RECORD_NEXT_STEPS[reason].format(
+        registry_backend=registry_backend,
+        registry_storage=registry_storage,
+    )
 
 
 # ── refusing to speak for a registry this build cannot fully read ───────────
@@ -171,14 +192,19 @@ WORKSPACE_ADMISSION_MESSAGES: Final[dict[str, str]] = {
     ),
 }
 
+# Same rule as UNREADABLE_REGISTRY_RECORD_NEXT_STEPS: the registry is named by
+# the values the call site resolves for the root, never by a path of its own.
 WORKSPACE_ADMISSION_NEXT_STEPS: Final[dict[str, str]] = {
     WORKSPACE_INTENT_INCOMPATIBLE: (
         "Inspect the registry with manage_change_intent(action='list_workspace', "
         "root=...) — the unreadable ids are listed there. Finish or clear each "
         "one from the build that wrote it. If that build is gone and the user "
-        "confirms the scope is abandoned, remove the row from .codeclone/intents/ "
-        "by hand, then start_controlled_change again. Read-only analysis, "
-        "listing, and finishing an intent you already hold stay available."
+        "confirms the scope is abandoned, remove the row by hand from this "
+        "root's workspace intent registry — the {registry_backend} backend at "
+        "{registry_storage}, as configured by [tool.codeclone] "
+        "intent_registry_backend / intent_registry_path — then "
+        "start_controlled_change again. Read-only analysis, listing, and "
+        "finishing an intent you already hold stay available."
     ),
 }
 
@@ -187,5 +213,13 @@ def workspace_admission_message(reason: str) -> str:
     return WORKSPACE_ADMISSION_MESSAGES[reason]
 
 
-def workspace_admission_next_step(reason: str) -> str:
-    return WORKSPACE_ADMISSION_NEXT_STEPS[reason]
+def workspace_admission_next_step(
+    reason: str,
+    *,
+    registry_backend: str,
+    registry_storage: str,
+) -> str:
+    return WORKSPACE_ADMISSION_NEXT_STEPS[reason].format(
+        registry_backend=registry_backend,
+        registry_storage=registry_storage,
+    )

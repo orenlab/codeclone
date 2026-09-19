@@ -393,8 +393,10 @@ MANAGE_CHANGE_INTENT: Final = (
     "'gc_workspace' to clean stale registry files, 'recover' to "
     "explicitly reclaim a recoverable intent, and 'reset_workspace' for "
     "interrupted-session recovery. In-memory intent state remains "
-    "session-local; workspace coordination state is ephemeral under "
-    ".codeclone/intents/."
+    "session-local; workspace coordination state is ephemeral in the "
+    "configured workspace intent registry ([tool.codeclone] "
+    "intent_registry_backend / intent_registry_path; 'list_workspace' "
+    "reports the resolved registry_backend and registry_storage)."
 )
 
 CLEAR_SESSION_RUNS: Final = (

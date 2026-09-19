@@ -1203,12 +1203,23 @@ class _MCPSessionIntentMixin:
             # rows this build cannot model, so "no intent found" would blame
             # the operator for a record that is sitting right there.
             if read.kind is WorkspaceDocumentReadKind.INCOMPATIBLE:
+                from ...config.intent_registry import intent_registry_summary
+
                 reason = WorkspaceDocumentReadKind.INCOMPATIBLE.value
+                # The registry this root resolves to, from the producer
+                # list_workspace already reports -- the row to remove by hand
+                # is named where it is, not under a directory this root may
+                # not have.
+                registry = intent_registry_summary(root_path)
                 return self._recovery_rejected(
                     intent_id=intent_id,
                     reason=reason,
                     message=intent_msgs.unreadable_registry_record_message(reason),
-                    next_step=intent_msgs.unreadable_registry_record_next_step(reason),
+                    next_step=intent_msgs.unreadable_registry_record_next_step(
+                        reason,
+                        registry_backend=registry["registry_backend"],
+                        registry_storage=registry["registry_storage"],
+                    ),
                 )
             return self._recovery_rejected(
                 intent_id=intent_id,
@@ -1873,7 +1884,12 @@ def workspace_admission_refusal(
     unreadable = sorted(unreadable_workspace_intent_ids(root=root))
     if not unreadable:
         return None
+    from ...config.intent_registry import intent_registry_summary
+
     reason = intent_msgs.WORKSPACE_INTENT_INCOMPATIBLE
+    # Same producer as list_workspace: the refusal names the registry this
+    # root resolves to, in the spelling the listing already uses.
+    registry = intent_registry_summary(root)
     return {
         "status": "blocked",
         "operation": operation,
@@ -1882,7 +1898,11 @@ def workspace_admission_refusal(
         "user_action_required": True,
         "unreadable_workspace_intent_ids": unreadable,
         "message": intent_msgs.workspace_admission_message(reason),
-        "next_step": intent_msgs.workspace_admission_next_step(reason),
+        "next_step": intent_msgs.workspace_admission_next_step(
+            reason,
+            registry_backend=registry["registry_backend"],
+            registry_storage=registry["registry_storage"],
+        ),
     }
 
 

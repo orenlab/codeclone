@@ -489,10 +489,18 @@ def test_the_unreadable_reason_table_is_closed() -> None:
 
     reason = "registry_record_unreadable_by_this_build"
     assert intent_msgs.unreadable_registry_record_message(reason)
-    assert intent_msgs.unreadable_registry_record_next_step(reason)
+    assert intent_msgs.unreadable_registry_record_next_step(
+        reason,
+        registry_backend="sqlite",
+        registry_storage=".codeclone/db/intents.sqlite3",
+    )
 
     with pytest.raises(KeyError):
-        intent_msgs.unreadable_registry_record_next_step("not_a_real_reason")
+        intent_msgs.unreadable_registry_record_next_step(
+            "not_a_real_reason",
+            registry_backend="sqlite",
+            registry_storage=".codeclone/db/intents.sqlite3",
+        )
     with pytest.raises(KeyError):
         intent_msgs.unreadable_registry_record_message("not_a_real_reason")
 
