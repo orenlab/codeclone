@@ -5,7 +5,13 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-merge-conflict
+      # Byte witnesses of the revision-1 run-store build (commit f117a8ad).
+      # Both files are owned by sha256 in that build's provenance.json, and
+      # test_canonical_generation_refusal holds the manifest to the whole
+      # artifact set, so a trailing newline reds there.  The fixer abstains
+      # here rather than silently rewriting evidence it cannot re-sign.
       - id: end-of-file-fixer
+        exclude: ^tests/fixtures/run_store_generation_1/run\.(envelope|wire)\.json$
       - id: trailing-whitespace
       - id: check-toml
       - id: check-yaml
