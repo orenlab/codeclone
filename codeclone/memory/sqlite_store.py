@@ -65,7 +65,13 @@ from .models import (
     validate_memory_revision,
     validate_memory_subject,
 )
-from .schema import create_schema_v1, get_meta, open_memory_db, set_meta
+from .schema import (
+    create_schema_v1,
+    get_meta,
+    open_memory_db,
+    refuse_unrecognized_store,
+    set_meta,
+)
 from .search_index import (
     SearchMatchMode,
     build_search_text,
@@ -1706,6 +1712,15 @@ def migrate_memory_db_authoritative(
     False, no error) or is refused with
     ``MemorySchemaMigrationInProgressError`` while the winner is still
     working -- see ``codeclone.memory.schema_migrate.acquire_schema_migration_lease``.
+
+    A present file that is not a store -- a SQLite database with tables of
+    its own and no ``memory_meta``, or bytes SQLite cannot read as a database
+    -- is refused with ``MemorySchemaUnrecognizedError`` BEFORE any read-write
+    connect, through the same read-only look ``open_memory_db`` takes
+    (``codeclone.memory.schema.refuse_unrecognized_store``), and is left
+    byte-for-byte unchanged. Migration authority raises an EXISTING store's
+    version; it does not make a store out of a file that has none. A missing
+    path and an existing EMPTY database initialize as before.
     """
     from .schema_migrate import (
         DEFAULT_SCHEMA_MIGRATION_LEASE_TTL_SECONDS,
@@ -1713,6 +1728,7 @@ def migrate_memory_db_authoritative(
         reconcile_memory_record_schema_versions,
     )
 
+    refuse_unrecognized_store(path)
     conn = sqlite3.connect(str(path), timeout=5.0)
     try:
         conn.execute("PRAGMA busy_timeout=5000")

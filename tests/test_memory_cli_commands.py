@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,8 +19,10 @@ from codeclone.surfaces.cli.memory import memory_main
 
 from .memory_fixtures import (
     cli_memory_repo,
+    foreign_sqlite_database,
     git_repo_with_cached_report,
     memory_project_db_paths,
+    not_a_database_file,
     root_with_foreign_sqlite_at_memory_store_path,
     root_with_not_a_database_at_memory_store_path,
     root_with_old_engineering_memory_store,
@@ -231,6 +235,43 @@ def test_memory_cli_migrate_on_missing_store_reports_cleanly(tmp_path: Path) -> 
     root.mkdir()
     code = memory_main(["migrate", "--root", str(root)])
     assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+@pytest.mark.parametrize(
+    "put_file",
+    [foreign_sqlite_database, not_a_database_file],
+    ids=["foreign-sqlite", "not-a-database"],
+)
+def test_memory_cli_migrate_on_a_file_that_is_not_a_store_refuses_and_leaves_it_alone(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    put_file: Callable[[Path], None],
+) -> None:
+    """``codeclone memory migrate`` on a file at the store path that is not a
+    store: a rendered, typed refusal, a non-zero exit, no traceback, and not
+    one byte written into the file.
+
+    Measured before this pin: on a foreign SQLite database the verb wrote the
+    whole store schema into it and exited 0 -- the door returned
+    ``migrated=False`` for a file it had just made a store of, so the verb
+    took the "nothing to migrate" branch; on bytes that are not a database
+    it escaped ``memory_main`` with a raw ``sqlite3.DatabaseError``.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    _project, db_path = memory_project_db_paths(root)
+    put_file(db_path)
+    untouched = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    code = memory_main(["migrate", "--root", str(root)])
+    out, err = capsys.readouterr()
+
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert "is not an Engineering Memory store" in out
+    assert "Traceback" not in out + err
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == untouched, (
+        "migrate must not write into a file it does not recognize"
+    )
 
 
 def test_memory_cli_status_on_a_foreign_database_reports_cleanly_and_leaves_it_alone(

@@ -251,11 +251,11 @@ def open_memory_db(path: Path, *, allow_migration: bool = False) -> sqlite3.Conn
     A present file that is not a store at all (a SQLite database with tables
     of its own and no ``memory_meta``) is refused with
     ``MemorySchemaUnrecognizedError`` BEFORE the read-write open, so it is not
-    initialized into and not touched -- see ``_refuse_unrecognized_store``.
+    initialized into and not touched -- see ``refuse_unrecognized_store``.
     """
     from ..observability.sqlite_access import open_instrumented_sqlite_db
 
-    _refuse_unrecognized_store(path)
+    refuse_unrecognized_store(path)
 
     def _ensure(conn: sqlite3.Connection) -> None:
         ensure_schema(conn, allow_migration=allow_migration)
@@ -314,7 +314,7 @@ def _unrecognized_message(where: str, why: str) -> str:
     )
 
 
-def _refuse_unrecognized_store(path: Path) -> None:
+def refuse_unrecognized_store(path: Path) -> None:
     """Refuse a present file that is not a store BEFORE any read-write open.
 
     ``open_sqlite_db`` issues ``PRAGMA journal_mode=WAL`` ahead of
@@ -326,6 +326,12 @@ def _refuse_unrecognized_store(path: Path) -> None:
     and initializes as it always has. A file SQLite cannot read as a database
     at all (corrupt, or never a database) is refused the same typed way: the
     open is lazy, so this look is where its first page is read.
+
+    Every door that may initialize a store takes this look first: the
+    ordinary ``open_memory_db`` and the authoritative
+    ``codeclone.memory.sqlite_store.migrate_memory_db_authoritative``.
+    Authority to change an EXISTING store's version is not authority to turn
+    an arbitrary file into a store because it holds no ``schema_version``.
     """
     if not path.is_file():
         return
@@ -456,6 +462,7 @@ __all__ = [
     "get_meta",
     "open_memory_db",
     "open_memory_db_readonly",
+    "refuse_unrecognized_store",
     "set_meta",
     "validate_schema_readonly",
 ]

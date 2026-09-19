@@ -10,8 +10,11 @@ import hashlib
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
+from os import PathLike
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -1093,6 +1096,123 @@ def test_migrate_memory_db_authoritative_migrates_an_existing_store(
     outcome2 = migrate_memory_db_authoritative(db_path)
     assert outcome2.migrated is False
     assert outcome2.from_version == ENGINEERING_MEMORY_SCHEMA_VERSION
+
+
+@pytest.mark.parametrize(
+    ("put_file", "why"),
+    [
+        (foreign_sqlite_database, "tables of its own"),
+        (not_a_database_file, "cannot read it as a database"),
+    ],
+    ids=["foreign-sqlite", "not-a-database"],
+)
+def test_migrate_door_refuses_a_file_that_is_not_a_store_without_touching_it(
+    tmp_path: Path,
+    put_file: Callable[[Path], None],
+    why: str,
+) -> None:
+    """The authoritative migration door classifies the file read-only BEFORE
+    any read-write connect, exactly as ``open_memory_db`` does.
+
+    Measured before this pin: on a foreign SQLite database the door read
+    ``schema_version`` as ``None``, took that for "brand new" and wrote the
+    whole store schema into somebody else's database (26 tables added,
+    ``migrated=False`` returned); on bytes that are not a database it leaked
+    a raw ``sqlite3.DatabaseError``. Authority to migrate an EXISTING store
+    is not authority to turn an arbitrary file into one: both shapes are the
+    same typed refusal the ordinary open gives, and the byte hash is the
+    witness that the file was never written to.
+    """
+    db_path = tmp_path / "at_the_store_path.sqlite3"
+    put_file(db_path)
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    with pytest.raises(MemorySchemaUnrecognizedError) as excinfo:
+        migrate_memory_db_authoritative(db_path)
+
+    assert why in str(excinfo.value)
+    assert "The file was not modified" in str(excinfo.value)
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
+    assert sorted(db_path.parent.iterdir()) == [db_path], (
+        "no journal or WAL sidecar may appear next to a refused file"
+    )
+
+
+@pytest.mark.parametrize(
+    "put_file",
+    [foreign_sqlite_database, not_a_database_file],
+    ids=["foreign-sqlite", "not-a-database"],
+)
+def test_migrate_door_opens_no_read_write_connection_to_a_refused_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    put_file: Callable[[Path], None],
+) -> None:
+    """Read-only classification comes BEFORE the read-write connect, not
+    merely before the first write.
+
+    A byte hash cannot see this ordering in this door: a bare
+    ``sqlite3.connect`` is lazy and ``PRAGMA busy_timeout`` touches no page,
+    so a peek placed after the connect leaves the file byte-identical today
+    and would silently stop doing so the day the door gains a WAL pragma
+    like ``open_sqlite_db`` has. The witness is therefore every connection
+    SQLite was asked to open for the refused file: each one must be a
+    ``mode=ro`` URI, and there must be at least one, or the look never
+    reached the file.
+    """
+    db_path = tmp_path / "at_the_store_path.sqlite3"
+    put_file(db_path)
+    real_connect = sqlite3.connect
+    opened: list[tuple[str, bool]] = []
+
+    def spy(
+        database: str | bytes | PathLike[str] | PathLike[bytes],
+        *args: Any,
+        **kwargs: Any,
+    ) -> sqlite3.Connection:
+        target = str(database)
+        read_only = (
+            bool(kwargs.get("uri"))
+            and target.startswith("file:")
+            and "mode=ro" in target
+        )
+        opened.append((target, read_only))
+        conn: sqlite3.Connection = real_connect(database, *args, **kwargs)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", spy)
+
+    with pytest.raises(MemorySchemaUnrecognizedError):
+        migrate_memory_db_authoritative(db_path)
+
+    assert opened, "the read-only look never reached the file"
+    assert all(db_path.name in target for target, _read_only in opened)
+    assert [read_only for _target, read_only in opened] == [True] * len(opened), (
+        f"a read-write connection was opened to a refused file: {opened!r}"
+    )
+
+
+def test_migrate_door_still_initializes_an_empty_database_file(
+    tmp_path: Path,
+) -> None:
+    """The opposite boundary of the refusal: a present file with no tables at
+    all is a brand-new store, and the door initializes it exactly as it does
+    a missing path -- the discriminator is "holds tables of its own", never
+    "the file exists"."""
+    db_path = tmp_path / "memory.sqlite3"
+    db_path.touch()
+    assert db_path.stat().st_size == 0
+
+    outcome = migrate_memory_db_authoritative(db_path)
+
+    assert outcome.migrated is False
+    assert outcome.from_version is None
+    assert outcome.to_version == ENGINEERING_MEMORY_SCHEMA_VERSION
+    conn = sqlite3.connect(db_path)
+    try:
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+    finally:
+        conn.close()
 
 
 def test_acquire_schema_migration_lease_refuses_while_a_live_grant_is_held(
