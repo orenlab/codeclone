@@ -156,6 +156,18 @@ _MODEL_CONTRACTS: tuple[
         "travel together",
     ),
     (
+        "report_address_without_its_scope_receipt",
+        _link(report_run_identity="r"),
+        _link(report_run_identity="r", analysis_scope_digest=_DIGEST),
+        "travel together",
+    ),
+    (
+        "scope_receipt_without_either_address",
+        _link(analysis_scope_digest=_DIGEST),
+        _link(),
+        "travel together",
+    ),
+    (
         "resolution_state_outside_the_vocabulary",
         _resolution(state="mystery"),
         _resolution(),

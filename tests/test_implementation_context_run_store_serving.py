@@ -540,9 +540,20 @@ def test_paths_shape_is_served_from_the_run_store_and_matches_memory(
     assert memory_summary["run_id"] == store_summary["run_id"]
     store_run_id = _published_store_run_id(store_record)
 
+    # The memory service is asked with the rollout OFF again.  Left on, the
+    # store's identity bridge (the production read edge) would answer this
+    # record's report identity out of the run the OTHER service published,
+    # and "memory by design" would no longer describe the request being made.
+    for key in (
+        "CODECLONE_RUN_STORE_ENABLED",
+        "CODECLONE_RUN_STORE_FORCE",
+        "CODECLONE_RUN_STORE_PATH",
+    ):
+        monkeypatch.delenv(key, raising=False)
     memory_answer = memory_service.get_implementation_context(
         root=str(tmp_path / "memory"), paths=["pkg/callee.py"], include=["callers"]
     )
+    _enable_store(monkeypatch, store=tmp_path / "runs.sqlite3")
     store_answer = store_service.get_implementation_context(
         root=str(store_root), paths=["pkg/callee.py"], include=["callers"]
     )

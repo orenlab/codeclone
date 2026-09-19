@@ -2120,6 +2120,11 @@ class RunSnapshotLink:
     no document, and the default flag-off run leaves a document with no
     snapshot.  ``state`` says which of those happened; it never says
     "unknown".
+
+    Whichever half is stated brings the scope receipt.  That is what lets a
+    process holding only the REPORT half -- every process but the one that
+    published -- complete the relation against the store's persisted index
+    and check the edge it finds there, instead of trusting it.
     """
 
     state: str
@@ -2129,7 +2134,14 @@ class RunSnapshotLink:
     outcome: str
     #: Store domain -- an analysis state id.  Empty iff nothing was stored.
     store_run_id: str = ""
-    #: The shared evidence: the store's scope receipt for that record.
+    #: The shared evidence: the scope receipt.  On a stored link it is the
+    #: store's own receipt for that record; on a link that evaluated a
+    #: document but stored nothing it is the receipt the document
+    #: re-derives.  Either half brings it, because it is what the OTHER
+    #: half is checked against: the serving door completes a report half
+    #: against the store's index with it (the production read edge), and
+    #: an edge found there without it could only be trusted, never proven.
+    #: Empty iff neither half is stated.
     analysis_scope_digest: str = ""
     #: Report domain -- the evaluated run identity.  Empty iff no document
     #: was produced.
@@ -2146,8 +2158,11 @@ class RunSnapshotLink:
             raise ValueError("an unpublished bridge carries no store address")
         if self.state == RUN_SNAPSHOT_LINK_UNEVALUATED and evaluated:
             raise ValueError("an unevaluated bridge carries no report address")
-        if stored != bool(self.analysis_scope_digest):
-            raise ValueError("a store address and its scope receipt travel together")
+        if bool(self.analysis_scope_digest) != (stored or evaluated):
+            raise ValueError(
+                "an address and its scope receipt travel together: a stored or "
+                "an evaluated half brings its receipt, and nothing else does"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

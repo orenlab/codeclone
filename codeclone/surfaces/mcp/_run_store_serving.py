@@ -11,9 +11,11 @@ with equivalence -> store-backed serving -> default ON``.  This module is
 the shadow read and the store-backed serving in one decision, and every
 branch of it is a counter:
 
-* the execution published a run, the store answered, and the answer AGREES
-  with what the record still holds in memory — the store's slices are
-  served (``run_store_serving_store_backed``);
+* the record names a store run — its own publication, or the store's
+  persisted index answering its report identity (the identity bridge, the
+  road every process but the publisher takes) — the store answered, and the
+  answer AGREES with what the record still holds in memory — the store's
+  slices are served (``run_store_serving_store_backed``);
 * the store answered and DISAGREES — memory is served and the divergence is
   counted (``run_store_serving_divergent``); the store never wins an
   argument with the producer's own answer, and a rollout is real only while

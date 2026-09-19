@@ -312,6 +312,16 @@ def test_the_door_serves_a_published_run_out_of_the_store(
 def test_the_door_answers_memory_by_design_when_nothing_was_published(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Memory by design has two shapes, and a third that is NOT it.
+
+    A record with no bridge at all (``None``) is memory by design whatever
+    the rollout says; a record holding the report half is memory by design
+    while the rollout names no store.  Once it does, the report half is a
+    question for the store's index -- the production read edge, pinned in
+    ``tests/test_run_store_identity_bridge_read_edge.py`` -- and an answer
+    of ``not_published`` there would be the session-local silence the edge
+    exists to replace.
+    """
     _enable(monkeypatch, tmp_path / "runs.sqlite3")
     slices, outcome = read_run_store_slices(root=tmp_path, link=None)
     assert slices is None
@@ -319,15 +329,22 @@ def test_the_door_answers_memory_by_design_when_nothing_was_published(
         SERVING_SOURCE_MEMORY,
         SERVING_REASON_NOT_PUBLISHED,
     )
+    assert not (tmp_path / "runs.sqlite3").exists()
+    _disable(monkeypatch)
     unpublished = RunSnapshotLink(
         state=RUN_SNAPSHOT_LINK_UNPUBLISHED,
         outcome=RUN_SNAPSHOT_PUBLICATION_DISABLED,
         report_run_identity="1" * 64,
+        analysis_scope_digest="2" * 64,
     )
     _slices, outcome = read_run_store_slices(root=tmp_path, link=unpublished)
     assert outcome.reason == SERVING_REASON_NOT_PUBLISHED
     assert outcome.detail == RUN_SNAPSHOT_PUBLICATION_DISABLED
     assert SERVING_REASON_NOT_PUBLISHED in MEMORY_BY_DESIGN_REASONS
+    _enable(monkeypatch, tmp_path / "runs.sqlite3")
+    _slices, outcome = read_run_store_slices(root=tmp_path, link=unpublished)
+    assert outcome.reason == SERVING_REASON_STORE_ABSENT
+    assert outcome.reason not in MEMORY_BY_DESIGN_REASONS
     assert not (tmp_path / "runs.sqlite3").exists()
 
 

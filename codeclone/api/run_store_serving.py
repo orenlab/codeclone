@@ -26,6 +26,17 @@ here, from the same resolver the publish path used
 flag turned off after an execution published makes the surface serve from
 memory with ``store_disabled`` — nobody reads a store the rollout does not
 name.
+
+**Two roads name the store run, and the answer says which.**  The record
+of the execution that published carries the store address in RAM (the
+publication lane).  Every other process holds only the report half of the
+relation — the evaluated identity and the scope receipt its own document
+re-derives — and the door completes it against the store's persisted index
+(``run_report_links``, the identity bridge), holding the edge it finds to
+that receipt.  A served answer that came over the bridge says so in
+``detail``; a wrong, ambiguous or missing edge fails closed with a reason
+this vocabulary already has, and nothing is ever looked up "by a similar
+scope".
 """
 
 from __future__ import annotations
@@ -37,6 +48,7 @@ from typing import Final
 from ..canonical.errors import (
     UNKNOWN_RUN_STORE_ABSENT,
     CanonicalModelError,
+    RunReportLinkError,
     StoreCompatibilityError,
     StoreIntegrityError,
     UnknownRunError,
@@ -47,7 +59,7 @@ from ..canonical.serving import (
     read_served_run_slices,
 )
 from ..canonical.store import RunStore
-from ..core.canonical_snapshot import resolve_run_store_config
+from ..core.canonical_snapshot import resolve_run_store_config, verified_linked_run
 from ..models import RunSnapshotLink
 
 SERVING_SOURCE_RUN_STORE: Final = "run_store"
@@ -81,6 +93,13 @@ SERVING_REASONS: Final[tuple[str, ...]] = (
     SERVING_REASON_STORE_DISABLED,
     SERVING_REASON_UNEXPRESSIBLE,
 )
+
+#: ``serving.detail`` on a store-backed answer whose run the record did NOT
+#: name: the report half of the relation (identity and scope receipt) was
+#: completed against the store's persisted index.  A publication-lane answer
+#: carries no detail, so the two roads to ``served`` stay distinguishable in
+#: the payload without a second reason word.
+SERVING_DETAIL_IDENTITY_BRIDGE: Final = "identity_bridge"
 
 #: The reasons under which memory is the RIGHT answer rather than a fallback:
 #: nothing was published for this execution, or the rollout is off.  Every
@@ -135,57 +154,109 @@ def read_run_store_slices(
 ) -> tuple[ServedRunSlices | None, RunStoreServingOutcome]:
     """The store's answer for one execution, or a typed reason for none.
 
-    ``link`` is the execution's own publication witness: an execution that
-    stored nothing has no run to read, and that is ``not_published`` — the
-    memory answer by design, not a fallback.  The store is opened with
-    ``create=False``: a read must never bring a store into existence to
-    answer that it holds nothing.
+    ``link`` is the execution's bridge witness, and it names the store run
+    on one of two roads:
+
+    * the PUBLICATION lane -- this execution published, the link carries
+      the store address, and the store is read at it;
+    * the IDENTITY BRIDGE -- the link carries only the report half (the
+      evaluated identity and the scope receipt its document re-derives:
+      the shape every process but the publisher holds), and the store's
+      persisted index is asked which published run answers that identity.
+      The edge must carry the receipt the link holds, or it is refused
+      (``integrity``, as is a second edge for one identity); no edge is
+      ``run_not_published``, and no run is ever chosen by a similar scope.
+
+    A ``None`` link is a record that stated no bridge at all, and a report
+    half under a rollout that names no store is memory by design: nobody
+    reads a store the rollout does not name.  The store is opened with
+    ``create=False`` -- a read must never bring a store into existence to
+    answer that it holds nothing -- and ONCE per call: the edge and the rows
+    it addresses are read on one handle, so a run swept between two opens
+    cannot turn a verified edge into a wrong answer.
     """
-    if link is None or not link.store_run_id:
-        return _memory(
-            SERVING_REASON_NOT_PUBLISHED,
-            detail="" if link is None else link.outcome,
-        )
+    if link is None:
+        return _memory(SERVING_REASON_NOT_PUBLISHED)
     config = resolve_run_store_config(root=root)
     if not config.enabled or config.path is None:
-        return _memory(SERVING_REASON_STORE_DISABLED, store_run_id=link.store_run_id)
+        if link.store_run_id:
+            return _memory(
+                SERVING_REASON_STORE_DISABLED, store_run_id=link.store_run_id
+            )
+        return _memory(SERVING_REASON_NOT_PUBLISHED, detail=link.outcome)
+    if not link.store_run_id and not link.report_run_identity:
+        # Unevaluated and unstored: no half to complete, nothing to read.
+        return _memory(SERVING_REASON_NOT_PUBLISHED, detail=link.outcome)
+    return _store_answer(config.path, root=root, link=link)
+
+
+def _store_answer(
+    path: Path, *, root: Path, link: RunSnapshotLink
+) -> tuple[ServedRunSlices | None, RunStoreServingOutcome]:
+    """One store open, one answer: at the record's address, or over the bridge."""
+    store_run_id = link.store_run_id
+    detail = ""
     try:
-        with RunStore(config.path, create=False) as store:
-            slices = read_served_run_slices(store, link.store_run_id, root=root)
+        with RunStore(path, create=False) as store:
+            if not store_run_id:
+                edge = verified_linked_run(
+                    store,
+                    report_run_identity=link.report_run_identity,
+                    analysis_scope_digest=link.analysis_scope_digest,
+                )
+                if edge is None:
+                    return _memory(
+                        SERVING_REASON_RUN_NOT_PUBLISHED,
+                        detail=(
+                            "no published run of this store answers report "
+                            f"{link.report_run_identity[:12]}"
+                        ),
+                    )
+                store_run_id = edge.run_id
+                detail = SERVING_DETAIL_IDENTITY_BRIDGE
+            slices = read_served_run_slices(store, store_run_id, root=root)
     except UnknownRunError as refusal:
         reason = (
             SERVING_REASON_STORE_ABSENT
             if refusal.reason == UNKNOWN_RUN_STORE_ABSENT
             else SERVING_REASON_RUN_NOT_PUBLISHED
         )
-        return _memory(reason, store_run_id=link.store_run_id, detail=str(refusal))
+        return _memory(reason, store_run_id=store_run_id, detail=str(refusal))
+    except RunReportLinkError as refusal:
+        # The persisted index cannot be trusted for this identity: two edges,
+        # or an edge whose run carries another scope receipt.  An index row
+        # that fails its own evidence is the class a stored row that fails
+        # its digest belongs to, and it gets the same word.
+        return _memory(SERVING_REASON_INTEGRITY, detail=str(refusal))
     except StoreCompatibilityError as refusal:
         return _memory(
             SERVING_REASON_INCOMPATIBLE_GENERATION,
-            store_run_id=link.store_run_id,
+            store_run_id=store_run_id,
             detail=str(refusal),
         )
     except StoreIntegrityError as refusal:
         return _memory(
             SERVING_REASON_INTEGRITY,
-            store_run_id=link.store_run_id,
+            store_run_id=store_run_id,
             detail=str(refusal),
         )
     except CanonicalModelError as refusal:
         return _memory(
             SERVING_REASON_UNEXPRESSIBLE,
-            store_run_id=link.store_run_id,
+            store_run_id=store_run_id,
             detail=str(refusal),
         )
     return slices, RunStoreServingOutcome(
         source=SERVING_SOURCE_RUN_STORE,
         reason=SERVING_REASON_SERVED,
-        store_run_id=link.store_run_id,
+        store_run_id=store_run_id,
+        detail=detail,
     )
 
 
 __all__ = [
     "MEMORY_BY_DESIGN_REASONS",
+    "SERVING_DETAIL_IDENTITY_BRIDGE",
     "SERVING_REASONS",
     "SERVING_REASON_DIVERGENT",
     "SERVING_REASON_INCOMPATIBLE_GENERATION",

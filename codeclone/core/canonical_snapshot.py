@@ -42,7 +42,7 @@ import os
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 # Reached through the OWNING submodules, never through the package door:
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
@@ -177,6 +177,9 @@ RENAMED_STRUCTURE_FAMILY = "renamed_structure"
 #: inadmissible cases: partial, clones-only and truncated; the clones-only
 #: one is carried by ``analysis_mode``, the other two by these states.
 _TRUNCATING_STATES = frozenset({"truncated", "unavailable"})
+
+if TYPE_CHECKING:
+    from ..canonical.store import RunReportEdge, RunStore
 
 
 class ProducerSnapshotUnavailable(RuntimeError):
@@ -1368,9 +1371,12 @@ def report_scope_receipt(report_document: Mapping[str, object]) -> str:
     a single-package corpus agrees and a corpus with one skipped file does
     not.  ``analysis_scope`` matched the store's set exactly, row for row.
 
-    The store import is deferred for the reason the publish path defers it:
-    a disabled rollout must never pull sqlite in, and this function is
-    called on runs that stored nothing.
+    The store import is deferred so that importing this module never
+    imports the store.  The CALL reaches it on every evaluated run, the
+    flag-off default included, because the receipt is the report half of
+    the bridge and travels on every evaluated link (``RunSnapshotLink``);
+    measured 2026-09-19: 4 ms for the store module and 1.4 ms for
+    ``sqlite3``, and no file is touched -- an import is not an open.
     """
 
     from ..canonical.store import analysis_scope_digest
@@ -1417,10 +1423,17 @@ def bridge_run_snapshot(
             return RunSnapshotLink(
                 state=RUN_SNAPSHOT_LINK_UNEVALUATED, outcome=publication.outcome
             )
+        # The report half, whole: the identity AND the receipt this document
+        # re-derives.  A process holding only this half -- every process but
+        # the publisher -- completes the relation against the store's index
+        # with it (the production read edge, ``api.run_store_serving``); a
+        # half without its receipt could only trust an edge found there.
+        identity = _report_run_identity_or_refuse(report_document)
         return RunSnapshotLink(
             state=RUN_SNAPSHOT_LINK_UNPUBLISHED,
             outcome=publication.outcome,
-            report_run_identity=_report_run_identity_or_refuse(report_document),
+            analysis_scope_digest=report_scope_receipt(report_document),
+            report_run_identity=identity,
         )
     if report_document is None:
         return RunSnapshotLink(
@@ -1485,6 +1498,45 @@ def persist_run_snapshot_link(*, store_path: Path, link: RunSnapshotLink) -> boo
     return True
 
 
+def verified_linked_run(
+    store: RunStore,
+    *,
+    report_run_identity: str,
+    analysis_scope_digest: str,
+) -> RunReportEdge | None:
+    """The store's edge for one report identity, made to prove itself.
+
+    ONE owner of the read-side witness law, shared by the library resolver
+    below and by the serving door (``codeclone.api.run_store_serving``),
+    which is how a fresh process -- holding only the report half of the
+    relation -- completes it: the edge is found by identity, and the run
+    row it addresses must carry the scope receipt the holder re-derived.
+    An edge that addressed the wrong row would otherwise hand back a valid
+    model of a different tree with every endpoint check agreeing.
+
+    ``None`` is the measured ``unlinked`` state.  Two edges for one identity
+    (the store's own refusal) and a disagreeing witness are refusals, never
+    choices, and both narrow to ``RunReportLinkError`` so one ``except``
+    holds the whole relation.  The store is the caller's and stays open:
+    the edge and the rows it addresses are read on one handle, never two.
+    """
+
+    from ..canonical.store import linked_run
+
+    edge = linked_run(store, report_run_identity=report_run_identity)
+    if edge is None:
+        return None
+    if not hmac.compare_digest(edge.analysis_scope_digest, analysis_scope_digest):
+        raise RunSnapshotBridgeError(
+            f"the stored edge for report {report_run_identity[:12]} addresses "
+            f"run {edge.run_id[:12]} over scope "
+            f"{edge.analysis_scope_digest[:12]}, and this document re-derives "
+            f"scope {analysis_scope_digest[:12]}: refusing the pair rather "
+            "than looking for a run that fits better"
+        )
+    return edge
+
+
 def resolve_run_snapshot_link(
     *, config: RunStoreConfig, report_document: Mapping[str, object]
 ) -> RunSnapshotResolution:
@@ -1511,7 +1563,7 @@ def resolve_run_snapshot_link(
             "asked which analysis backs this document"
         )
 
-    from ..canonical.store import RunStore, linked_run, runs_over_scope
+    from ..canonical.store import RunStore, runs_over_scope
 
     # One owner for "is there a store at this path": the non-creating open
     # answers it, and a second answer spelled here is how the two would
@@ -1529,19 +1581,13 @@ def resolve_run_snapshot_link(
     with store:
         identity = _report_run_identity_or_refuse(report_document)
         scope = report_scope_receipt(report_document)
-        edge = linked_run(store, report_run_identity=identity)
+        edge = verified_linked_run(
+            store, report_run_identity=identity, analysis_scope_digest=scope
+        )
         candidates = (
             () if edge is not None else runs_over_scope(store, scope_digest=scope)
         )
     if edge is not None:
-        if not hmac.compare_digest(edge.analysis_scope_digest, scope):
-            raise RunSnapshotBridgeError(
-                f"the stored edge for report {identity[:12]} addresses run "
-                f"{edge.run_id[:12]} over scope "
-                f"{edge.analysis_scope_digest[:12]}, and this document "
-                f"re-derives scope {scope[:12]}: refusing the pair rather "
-                "than looking for a run that fits better"
-            )
         return RunSnapshotResolution(
             state=RUN_SNAPSHOT_RESOLUTION_RESOLVED,
             lane=RUN_SNAPSHOT_LANE_STORED,
@@ -1590,4 +1636,5 @@ __all__ = [
     "report_scope_receipt",
     "resolve_run_snapshot_link",
     "resolve_run_store_config",
+    "verified_linked_run",
 ]

@@ -225,17 +225,26 @@ def test_bridge_refuses_a_report_that_carries_no_identity() -> None:
 
 
 def test_bridge_expresses_the_unpublished_zero() -> None:
-    """A report with no snapshot behind it: the flag-off default."""
+    """A report with no snapshot behind it: the flag-off default.
 
+    The zero still carries the REPORT half whole: the identity and the
+    scope receipt the document re-derives.  That receipt is what a process
+    holding only this link brings to the store's index to complete the
+    relation another process published (the production read edge), and a
+    link without it could only ever be trusted, never checked.
+    """
+
+    document = _document(_PATHS, "e" * 64)
     link = bridge_run_snapshot(
         publication=RunSnapshotPublication(
             outcome=RUN_SNAPSHOT_PUBLICATION_DISABLED, admissible=False
         ),
-        report_document=_document(_PATHS, "e" * 64),
+        report_document=document,
     )
     assert link.state == RUN_SNAPSHOT_LINK_UNPUBLISHED
     assert link.store_run_id == ""
     assert link.report_run_identity == "e" * 64
+    assert link.analysis_scope_digest == report_scope_receipt(document)
 
 
 def test_bridge_expresses_the_unevaluated_zero() -> None:

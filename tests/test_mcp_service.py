@@ -20830,11 +20830,16 @@ def test_mcp_service_store_backed_and_memory_answers_are_the_same_answer(
     )
     assert memory_summary["run_id"] == store_summary["run_id"]
     for query in ("logging", "getLogger", "make_logger", "os.path", "pkg"):
+        # Each memory request is made with the rollout OFF: left on, the
+        # store's identity bridge (the production read edge) would serve this
+        # record's report identity out of the run the store service published.
+        _forget_run_store(monkeypatch)
         memory = memory_service.get_implementation_context(
             root=str(tmp_path / "memory"),
             run_id=str(memory_summary["run_id"]),
             query=query,
         )
+        _enable_run_store(monkeypatch, tmp_path / "runs.sqlite3")
         stored = store_service.get_implementation_context(
             root=str(tmp_path / "store"),
             run_id=str(store_summary["run_id"]),
