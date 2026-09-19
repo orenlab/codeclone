@@ -18,7 +18,7 @@ from .types import CLIArgsLike
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ...core._types import AnalysisResult
+    from ...core._types import AnalysisResult, DiscoveryResult
     from ...core._types import ProcessingResult as PipelineProcessingResult
     from .baseline_state import CloneBaselineState, MetricsBaselineState
 
@@ -35,6 +35,7 @@ def build_cli_report_meta(
     cache_path: Path,
     cache_status: CacheStatus,
     cache_schema_version: str | None,
+    discovery_result: DiscoveryResult,
     processing_result: PipelineProcessingResult,
     metrics_baseline_path: Path,
     metrics_baseline_state: MetricsBaselineState,
@@ -63,6 +64,8 @@ def build_cli_report_meta(
         health_score=(project_metrics.health.total if project_metrics else None),
         health_grade=(project_metrics.health.grade if project_metrics else None),
         analysis_mode=("clones_only" if args.skip_metrics else "full"),
+        scope_source=discovery_result.scope_source,
+        scope_fallback_reason=discovery_result.scope_fallback_reason,
         metrics_computed=_report_meta.computed_metric_families(
             metrics_payload=analysis_result.metrics_payload,
             skip_dependencies=args.skip_dependencies,

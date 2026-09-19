@@ -441,6 +441,8 @@ class MCPSession(
                 else None
             ),
             analysis_mode=request.analysis_mode,
+            scope_source=discovery_result.scope_source,
+            scope_fallback_reason=discovery_result.scope_fallback_reason,
             metrics_computed=_computed_metric_families(
                 metrics_payload=analysis_result.metrics_payload,
                 api_surface=bool(getattr(args, "api_surface", False)),

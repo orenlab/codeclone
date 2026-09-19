@@ -715,7 +715,7 @@ CACHE_VERSION: Final = "4.2"
 # LIVENESS_POLICY_VERSION moves "4" -> "5" with this change and owns the
 # analysis generation; baseline schema, cache generation, module identity and
 # the semantic identity generation stay where they are.
-REPORT_SCHEMA_VERSION: Final = "3.4"
+REPORT_SCHEMA_VERSION: Final = "3.5"
 # The clone vocabulary of the report wire: what the document calls the family
 # and what a clone group calls its kind. These are facts about the payload, not
 # a layer's opinion about it, and they live here because of who has to read

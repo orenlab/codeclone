@@ -888,6 +888,10 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         + f"{format_meta_text_value(meta_payload.get('python_tag'))}",
         proj.TEXT_META_ANALYSIS_MODE
         + f"{format_meta_text_value(meta_payload.get('analysis_mode'))}",
+        proj.TEXT_META_SCOPE_SOURCE
+        + f"{format_meta_text_value(meta_payload.get('scope_source'))}",
+        proj.TEXT_META_SCOPE_FALLBACK_REASON
+        + f"{format_meta_text_value(meta_payload.get('scope_fallback_reason'))}",
         proj.TEXT_META_REPORT_MODE
         + f"{format_meta_text_value(meta_payload.get('report_mode'))}",
         proj.TEXT_META_REPORT_GENERATED

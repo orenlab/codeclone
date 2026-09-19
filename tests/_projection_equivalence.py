@@ -84,6 +84,7 @@ from codeclone.contracts.schemas import ReportMeta
 from codeclone.core._types import (
     AnalysisResult,
     BootstrapResult,
+    DiscoveryResult,
     OutputPaths,
     ProcessingResult,
 )
@@ -365,6 +366,7 @@ def _probe_report_meta(
     root: Path,
     *,
     boot: BootstrapResult,
+    discovery: DiscoveryResult,
     processing: ProcessingResult,
     result: AnalysisResult,
 ) -> ReportMeta:
@@ -404,6 +406,8 @@ def _probe_report_meta(
             result.project_metrics.health.grade if result.project_metrics else None
         ),
         analysis_mode="clones_only" if args.skip_metrics else "full",
+        scope_source=discovery.scope_source,
+        scope_fallback_reason=discovery.scope_fallback_reason,
         metrics_computed=computed_metric_families(
             metrics_payload=result.metrics_payload,
             skip_dependencies=args.skip_dependencies,
@@ -454,7 +458,11 @@ def build_probe_document(root: Path) -> dict[str, object]:
         processing=processing,
         analysis=result,
         report_meta=_probe_report_meta(
-            root, boot=boot, processing=processing, result=result
+            root,
+            boot=boot,
+            discovery=discovery,
+            processing=processing,
+            result=result,
         ),
         new_func=None,
         new_block=None,

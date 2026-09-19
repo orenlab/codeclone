@@ -964,6 +964,8 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
             "resultScopeNote": sarif_msgs.SARIF_RESULT_SCOPE_NOTE,
             "analysisMode": analysis_mode,
             "reportMode": _text(meta.get("report_mode")),
+            "scopeSource": _text(meta.get("scope_source")),
+            "scopeFallbackReason": _text(meta.get("scope_fallback_reason")),
             "canonicalDigestSha256": _text(
                 _as_mapping(
                     _as_mapping(

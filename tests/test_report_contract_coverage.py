@@ -3974,8 +3974,11 @@ def test_both_novelty_writers_answer_the_same_word(
 #: 3.2 -> 3.3 moved for another reason (RULING 2026-09-01: the dead-code
 #: ``unresolved`` lane and ``world_contract``); the vocabulary is unchanged and
 #: is recorded here against the new version, as the pin asks.
+#: 3.4 -> 3.5 moved for the additive ``meta.scope_source`` /
+#: ``meta.scope_fallback_reason`` provenance keys; the members are unchanged
+#: and are recorded here against the new version, as the pin asks.
 _NOVELTY_REASON_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.4",
+    "3.5",
     (
         "comparison_unavailable",
         "entity_not_compared",

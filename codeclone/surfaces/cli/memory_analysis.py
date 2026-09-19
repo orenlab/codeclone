@@ -203,6 +203,7 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
         cache_path=cli_runtime.resolve_report_cache_path(cache_path),
         cache_status=cache_status,
         cache_schema_version=cache_schema_version,
+        discovery_result=discovery_result,
         processing_result=processing_result,
         metrics_baseline_path=baseline_inputs.metrics_baseline_path,
         metrics_baseline_state=metrics_baseline_state,

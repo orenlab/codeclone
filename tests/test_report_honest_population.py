@@ -889,8 +889,11 @@ def test_population_rides_every_surface_even_when_measured() -> None:
 #: 3.2 -> 3.3 moved for another reason (RULING 2026-09-01: the dead-code
 #: ``unresolved`` lane and ``world_contract``); the members are unchanged and
 #: are recorded here against the new version, as the pin asks.
+#: 3.4 -> 3.5 moved for the additive ``meta.scope_source`` /
+#: ``meta.scope_fallback_reason`` provenance keys; the members are unchanged
+#: and are recorded here against the new version, as the pin asks.
 _POPULATION_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.4",
+    "3.5",
     ("complete_empty", "complete_nonempty", "partial", "unmeasured"),
 )
 

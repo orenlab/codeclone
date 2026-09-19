@@ -182,6 +182,8 @@ def _build_meta_payload(
         "python_tag": str(meta.get("python_tag", "")),
         "analysis_mode": str(meta.get("analysis_mode", "full") or "full"),
         "report_mode": str(meta.get("report_mode", "full") or "full"),
+        "scope_source": _optional_str(meta.get("scope_source")),
+        "scope_fallback_reason": _optional_str(meta.get("scope_fallback_reason")),
         "computed_metric_families": metrics_computed,
         "analysis_thresholds": _design_findings_thresholds_payload(meta),
         "baseline": {

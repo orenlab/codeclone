@@ -262,6 +262,8 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Python", _meta_pick(meta.get("python_version"))),
         ("Python tag", python_tag_value),
         ("Analysis mode", _meta_pick(meta.get("analysis_mode"))),
+        ("Scope source", _meta_pick(meta.get("scope_source"))),
+        ("Scope fallback reason", _meta_pick(meta.get("scope_fallback_reason"))),
         (
             "Clone thresholds",
             _clone_thresholds_text(_as_mapping(meta.get("analysis_profile"))),
@@ -386,6 +388,8 @@ def render_meta_panel(ctx: ReportContext) -> str:
             "data-python-version": meta.get("python_version"),
             "data-python-tag": python_tag_value,
             "data-analysis-mode": meta.get("analysis_mode"),
+            "data-scope-source": meta.get("scope_source"),
+            "data-scope-fallback-reason": meta.get("scope_fallback_reason"),
             "data-report-mode": report_mode_value,
             "data-report-generated-at-utc": ctx.report_generated_at,
             "data-metrics-computed": metrics_csv,
@@ -587,6 +591,15 @@ def render_meta_panel(ctx: ReportContext) -> str:
     analysis_mode = str(_meta_pick(meta.get("analysis_mode")) or "")
     if analysis_mode:
         badges.append(_prov_badge("Mode", analysis_mode, "neutral"))
+    # The source of the population is a fact of this run, read off ``meta``:
+    # git is the owner, the walk stood in for it and says so in amber.
+    scope_source = str(_meta_pick(meta.get("scope_source")) or "")
+    if scope_source:
+        badges.append(
+            _prov_badge(
+                "Scope", scope_source, "neutral" if scope_source == "git" else "amber"
+            )
+        )
     if _mbl_verified is True:
         badges.append(_prov_badge("Metrics baseline", "verified", "green"))
     elif _mbl_loaded is True and _mbl_verified is not True:

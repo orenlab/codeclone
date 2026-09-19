@@ -16,6 +16,8 @@ from ..contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    ScopeFallbackReason,
+    ScopeSource,
 )
 from ..contracts.schemas import ReportMeta
 
@@ -92,6 +94,8 @@ def build_report_meta(
     health_score: int | None,
     health_grade: str | None,
     analysis_mode: str,
+    scope_source: ScopeSource | None,
+    scope_fallback_reason: ScopeFallbackReason | None,
     metrics_computed: tuple[str, ...],
     min_loc: int,
     min_stmt: int,
@@ -144,6 +148,8 @@ def build_report_meta(
         "health_score": health_score,
         "health_grade": health_grade,
         "analysis_mode": analysis_mode,
+        "scope_source": scope_source,
+        "scope_fallback_reason": scope_fallback_reason,
         "metrics_computed": list(metrics_computed),
         "analysis_profile": {
             "min_loc": min_loc,

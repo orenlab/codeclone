@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from . import ScopeFallbackReason, ScopeSource
+
 
 class AnalysisProfile(TypedDict):
     min_loc: int
@@ -38,6 +40,9 @@ class ReportMeta(TypedDict):
       (e.g. "cp314")
     - baseline_*: values loaded from baseline metadata for audit/provenance
     - cache_*: cache status/provenance for run transparency
+    - scope_source / scope_fallback_reason: how the source population was
+      obtained (``git``, or the walk with its typed reason); provenance that
+      explains the population and keys no identity
     """
 
     codeclone_version: str
@@ -69,6 +74,8 @@ class ReportMeta(TypedDict):
     health_score: int | None
     health_grade: str | None
     analysis_mode: str
+    scope_source: ScopeSource | None
+    scope_fallback_reason: ScopeFallbackReason | None
     metrics_computed: list[str]
     analysis_profile: AnalysisProfileMeta
     design_complexity_threshold: int

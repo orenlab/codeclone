@@ -342,6 +342,11 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
         f"- {md_msgs.MD_PROJECT_LABEL}: {_text(meta.get('project_name'))}",
         f"- {md_msgs.MD_ANALYSIS_MODE_LABEL}: {_text(meta.get('analysis_mode'))}",
+        f"- {md_msgs.MD_SCOPE_SOURCE_LABEL}: {_text(meta.get('scope_source'))}",
+        (
+            f"- {md_msgs.MD_SCOPE_FALLBACK_REASON_LABEL}: "
+            f"{_text(meta.get('scope_fallback_reason'))}"
+        ),
         f"- {md_msgs.MD_REPORT_MODE_LABEL}: {_text(meta.get('report_mode'))}",
         (
             f"- {md_msgs.MD_GENERATED_BY_LABEL}: "

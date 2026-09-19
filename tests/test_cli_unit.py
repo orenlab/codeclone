@@ -2255,7 +2255,12 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
         cli,
         "_run_analysis_stages",
         lambda **_kwargs: (
-            SimpleNamespace(files_found=1, cache_hits=0),
+            SimpleNamespace(
+                files_found=1,
+                cache_hits=0,
+                scope_source="git",
+                scope_fallback_reason=None,
+            ),
             SimpleNamespace(
                 files_analyzed=1,
                 files_skipped=0,
