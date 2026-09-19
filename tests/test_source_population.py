@@ -28,6 +28,8 @@ from codeclone.baseline.container_digest import compute_analysis_scope_digest
 from codeclone.cache.reuse import source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.models import (
+    CacheEntryV3,
+    CacheReuseDecision,
     ContentIdentityVerdict,
     GitWorkspaceListing,
     ModuleRegistryHandle,
@@ -81,6 +83,28 @@ def _init_repository(root: Path) -> None:
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "population@example.invalid")
     _git(root, "config", "user.name", "population")
+
+
+def _content_hit_decision(
+    cache: Cache, source: Path, entry: CacheEntryV3
+) -> CacheReuseDecision:
+    """Ask the lanes about a file whose own bytes are a proven hit.
+
+    Both boundaries of decision 7 ask this same question and must differ only
+    in the answer, so the question is written once.
+    """
+
+    return cache.reuse_decision(
+        runtime_path=str(source),
+        content=ContentIdentityVerdict(
+            hit=True,
+            reason="digest_hit",
+            git_fallback_reason=None,
+            digest_verify_cost_us=0,
+            stat_fast_reject=False,
+        ),
+        entry=entry,
+    )
 
 
 def _analyzed_paths(registry: ModuleRegistryHandle) -> frozenset[str]:
@@ -196,17 +220,7 @@ def test_gitignore_edit_that_keeps_the_population_keeps_the_dependent_lane(
 
     assert after.digest == before.digest
     cache.bind_module_registry(after)
-    decision = cache.reuse_decision(
-        runtime_path=str(source),
-        content=ContentIdentityVerdict(
-            hit=True,
-            reason="digest_hit",
-            git_fallback_reason=None,
-            digest_verify_cost_us=0,
-            stat_fast_reject=False,
-        ),
-        entry=entry,
-    )
+    decision = _content_hit_decision(cache, source, entry)
     assert decision.neutral.reason == "hit"
     assert decision.dependent.reason == "hit"
 
@@ -279,6 +293,85 @@ def test_git_population_edges_are_measured_on_the_real_listing(
     assert not any("inner.py" in path for path in population.paths)
     assert population.hard_excluded == 2
     assert population.unreadable == ()
+
+
+# --- pin 3: tracked outlives a later ignore rule that matches it ---
+
+
+def test_tracked_file_stays_in_population_after_matching_ignore(
+    population_tree: Path,
+) -> None:
+    """``--cached`` is the whole answer: the index outranks a later rule.
+
+    A file git tracks stays a source unit when ``.gitignore`` grows a pattern
+    that matches it, because git keeps listing it and the tool never asks a
+    second question about ignore state. The complementary boundary -- an
+    untracked ignored file is not a unit -- is pinned by
+    ``test_untracked_unignored_python_is_in_the_git_population``.
+    """
+
+    root = population_tree
+    tracked_then_ignored = _TRACKED[2]
+    # Probe validity: the distinguishing case is real. ``--no-index`` is what
+    # makes check-ignore answer about the rules instead of about the index
+    # (git 2.54 answers rc 1 for a tracked path without it), so rc 0 here is
+    # the proof that a rule does match the file this pin keeps.
+    assert _git_rc(root, "check-ignore", "-q", "--no-index", tracked_then_ignored) == 0
+    listing = list_git_workspace_paths(root)
+    assert listing.available is True
+    assert tracked_then_ignored in listing.paths
+
+    population = derive_source_population(root)
+
+    assert population.scope_source == "git"
+    assert str(root / tracked_then_ignored) in population.paths
+    registry = build_module_registry(root=root)
+    assert registry.entries_by_path[tracked_then_ignored].analyzed is True
+
+
+# --- pin 4: a population change cannot be served from the dependent lane ---
+
+
+def test_population_change_from_ignore_state_cannot_reuse_the_dependent_lane(
+    population_tree: Path,
+    tmp_path: Path,
+) -> None:
+    """The far boundary of decision 7, against pin 1b's near one.
+
+    ``pkg/tracked.py`` does not move: its bytes, its module identity and its
+    binding context are the same before and after. Only the population moves,
+    because one ignore rule removed another file from it. The neutral lane
+    still serves that file and the manifest-keyed lane must not, or a run
+    would read units computed against an inventory that no longer exists.
+    """
+
+    root = population_tree
+    source = root / "pkg" / "tracked.py"
+    before = build_module_registry(root=root)
+    assert _UNTRACKED_VISIBLE in _analyzed_paths(before)
+    cache = Cache(tmp_path / "cache.json", root=root)
+    cache.bind_module_registry(before)
+    cache.put_file_entry(
+        str(source),
+        file_stat_signature(str(source)),
+        [],
+        [],
+        [],
+        source_content_digest=source_content_digest(source.read_bytes()),
+    )
+    entry = cache.get_file_entry(str(source))
+    assert entry is not None
+
+    with (root / ".gitignore").open("a", encoding="utf-8") as handle:
+        handle.write(f"{_UNTRACKED_VISIBLE}\n")
+    after = build_module_registry(root=root)
+    assert _UNTRACKED_VISIBLE not in _analyzed_paths(after)
+    assert after.digest != before.digest
+
+    cache.bind_module_registry(after)
+    decision = _content_hit_decision(cache, source, entry)
+    assert decision.neutral.reason == "hit"
+    assert decision.dependent.reason == "dependent_profile_mismatch"
 
 
 # --- P-prov (I1): the same population from either source is one identity ---
