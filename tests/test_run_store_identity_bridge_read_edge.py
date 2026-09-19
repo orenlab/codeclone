@@ -316,6 +316,18 @@ def _bridge_subject(
     return store, service, record
 
 
+def _enabled_report_half(
+    publisher: _Publisher, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[MCPRunRecord, Any]:
+    """Process B's record and its report half, with the rollout naming B's
+    private copy of A's store: the door-level subject of the pins below."""
+    store, _service, record = _bridge_subject(publisher, tmp_path, monkeypatch)
+    link = record.execution.run_snapshot_link
+    assert link is not None
+    _enable_store(monkeypatch, store=store)
+    return record, link
+
+
 class _StoreOpenMeter:
     """Every ``RunStore`` construction, counted on the class object.
 
@@ -341,6 +353,21 @@ class _StoreOpenMeter:
             real(inner, *args, **kwargs)
 
         monkeypatch.setattr(store_class, "__init__", counting)
+
+
+class _SqliteConnectMeter:
+    """Every ``sqlite3.connect`` the process makes, counted at the module
+    attribute the store's connection owner resolves at call time."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.connects = 0
+        real = sqlite3.connect
+
+        def counting(*args: Any, **kwargs: Any) -> Any:
+            self.connects += 1
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(sqlite3, "connect", counting)
 
 
 def _served_over_the_bridge(store_run_id: str) -> dict[str, object]:
@@ -502,10 +529,7 @@ def test_a_substituted_receipt_on_the_report_half_is_refused_closed(
 ) -> None:
     """The other side of the same witness: the edge is right, the holder's
     receipt is not.  Refused at the door, before any family is read."""
-    store, _service, record = _bridge_subject(publisher, tmp_path, monkeypatch)
-    link = record.execution.run_snapshot_link
-    assert link is not None
-    _enable_store(monkeypatch, store=store)
+    record, link = _enabled_report_half(publisher, tmp_path, monkeypatch)
     opens = _StoreOpenMeter(monkeypatch)
     slices, outcome = read_run_store_slices(
         root=record.root, link=replace(link, analysis_scope_digest="f" * 64)
@@ -645,6 +669,47 @@ def test_a_record_with_no_bridge_at_all_is_memory_by_design(
     assert slices is None
     assert (outcome.reason, outcome.detail) == (SERVING_REASON_NOT_PUBLISHED, "")
     assert opens.opens == 0
+
+
+def test_a_link_that_states_neither_half_opens_no_store(
+    publisher: _Publisher, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither a store address nor a report identity: nothing to complete.
+
+    Two shapes the model admits (``RunSnapshotLink.__post_init__``): the
+    ``unevaluated`` link a gate-only run leaves when nothing was stored (what
+    ``bridge_run_snapshot`` states for ``report_document=None`` under a
+    disabled rollout), and a bare ``unpublished`` link.  Each carries its
+    outcome and nothing else.  Under an ENABLED rollout, with a store that
+    exists and holds runs, both stay memory by design -- ``not_published``
+    with the outcome as detail -- and the store is never opened: a link with
+    no report half is not a question for the index, and an index asked with
+    an empty identity would answer ``run_not_published`` for a reason that
+    is not the record's.  Mutation target: the branch in
+    ``read_run_store_slices`` that returns before ``_store_answer``.
+    """
+    record, report_half = _enabled_report_half(publisher, tmp_path, monkeypatch)
+    opens = _StoreOpenMeter(monkeypatch)
+    connects = _SqliteConnectMeter(monkeypatch)
+    for state in ("unevaluated", "unpublished"):
+        neither = replace(
+            report_half, state=state, report_run_identity="", analysis_scope_digest=""
+        )
+        assert (neither.store_run_id, neither.report_run_identity) == ("", "")
+        slices, outcome = read_run_store_slices(root=record.root, link=neither)
+        assert slices is None, state
+        assert outcome == RunStoreServingOutcome(
+            source=SERVING_SOURCE_MEMORY,
+            reason=SERVING_REASON_NOT_PUBLISHED,
+            detail=neither.outcome,
+        ), state
+        assert (opens.opens, connects.connects) == (0, 0), state
+    # Positive control on the SAME causal path: the report half DOES open
+    # the store through the door, and both meters see that one open.
+    slices, outcome = read_run_store_slices(root=record.root, link=report_half)
+    assert slices is not None and outcome.reason == SERVING_REASON_SERVED
+    assert opens.opens == 1
+    assert connects.connects >= 1
 
 
 def test_the_resolver_compares_a_bridged_answer_with_memory(
