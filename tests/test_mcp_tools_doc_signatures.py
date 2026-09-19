@@ -78,12 +78,13 @@ What is *not* inspected here, measured rather than assumed:
   schema does not own. They are recognised and skipped: a name that is
   neither an accepted parameter anywhere nor a live default value is
   outside this guard's jurisdiction.
-- Fenced code blocks. The reference page publishes 5 multi-line calls
+- Fenced code blocks. The reference page publishes its multi-line calls
   inside `````python`` fences; a backtick-keyed matcher cannot read them
   and a regex cannot parse a multi-line call with dict and list literals
   without inventing argument tokens. The census below excludes fenced
-  lines on both sides so it reports a real number, and those 5 calls
-  remain unguarded for parameter correctness.
+  lines on both sides so it reports a real number. Those calls, and the
+  response keys the examples read, are held by
+  ``tests/test_mcp_tools_doc_body.py``, which reads the fences with ``ast``.
 """
 
 from __future__ import annotations

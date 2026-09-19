@@ -10,7 +10,7 @@ source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 
 CodeClone exposes structural analysis and change control through MCP (Model Context Protocol) tools. These tools enable AI assistants and agents to analyze Python repositories deterministically, manage edit scopes, and verify changes against architectural contracts.
 
-All MCP tools require an absolute repository root path. Relative paths like `'.'` are rejected. MCP respects cache policy settings (`reuse` or `off`); analysis runs are registered as the latest session-local run when complete.
+All MCP tools require an absolute repository root path. Relative paths like `'.'` are rejected. The analysis cache is operator configuration read from `[tool.codeclone]` in `pyproject.toml`, not a per-call option; analysis runs are registered as the latest session-local run when complete.
 
 The server is started with the `codeclone-mcp` launcher — see the
 [CLI reference](cli.md) for its transports and options.
@@ -44,7 +44,7 @@ graph LR
 ### Analysis Tools
 
 **`analyze_repository(root)`**
-Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns metrics, findings, and artifact locations. Use as the first step in any workflow. The analysis cache is not a per-call option: its location and size limit come from `[tool.codeclone]` in `pyproject.toml`, and the MCP reads that cache without ever writing it.
+Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns the `run_id`, a `health` block with `score`, `grade` and per-dimension scores, finding and inventory counts, and baseline and cache state; it writes no report files. Use as the first step in any workflow. The analysis cache is not a per-call option: its location and size limit come from `[tool.codeclone]` in `pyproject.toml`. The MCP writes the cache its own analysis produced only inside CodeClone's service directories (`.codeclone/` in the analysed repository and the per-user cache directory); a cache configured outside them is read and never written.
 
 **`analyze_changed_paths(root, changed_paths | git_diff_ref)`**
 Analyze only changed files from an explicit `changed_paths` list or a `git_diff_ref` revision (mutually exclusive). Faster than full analysis for PR-style review. Response includes a `next_tool` hint suggesting which inspection tool to use.
@@ -58,7 +58,7 @@ Return a compact snapshot of a stored run (latest or specified by 8-char short i
 Retrieve one bounded canonical report section by name; `section` defaults to `meta`. Sections: `meta`, `inventory` (file registry), `findings` (grouped by family when specified), `metrics`, `metrics_detail` (with pagination), `changed`, `derived`, `module_map`, `integrity`. The whole report document is not served over MCP — the withdrawn `all` section answers with a typed refusal (`status: "unsupported_section"`) that names the bounded sections and the on-disk route. The `codeclone://latest/report.json` and `codeclone://runs/{run_id}/report.json` resources served that same whole document and are withdrawn with it: neither is registered any more, and reading either URI answers with a typed refusal (`status: "removed_resource"`) naming the same routes. For the full document, generate it with `codeclone <root> --json .codeclone/report.json` and read the file.
 
 **`get_implementation_context(root, paths, symbols, include, ...)`**
-Return deterministic, bounded implementation context for explicit repo-relative `paths` or `module:symbol` qualnames (via `symbols`) from an existing run. Projects module dependencies, API surfaces, callers, blast radius, cache origin, and workspace freshness. Does not authorize edits or re-analyze. With `query`, searches definitions, call/reference targets and imports and states where the searched slices came from under `serving`: `source` is `run_store` when this execution published its analysis to the enabled run store and the store's answer agreed with the record's, and `memory` otherwise, with a typed `reason` (`served`, `not_published`, `store_disabled`, `store_absent`, `run_not_published`, `incompatible_generation`, `integrity`, `unexpressible`, `divergent`).
+Return deterministic, bounded implementation context for explicit repo-relative `paths` or `module:symbol` qualnames (via `symbols`) from an existing run. Projects module dependencies, API surfaces, callers, blast radius, cache origin, and workspace freshness. Does not authorize edits or re-analyze. With `query`, searches definitions, call/reference targets and imports. Every answer — the explicit `paths` and `symbols` shapes, the `query` search, and a `subject_not_found` miss alike — states where its slices came from under `serving`: `source` is `run_store` when this execution published its analysis to the enabled run store and the store's answer agreed with the record's, and `memory` otherwise, with a typed `reason` (`served`, `not_published`, `store_disabled`, `store_absent`, `run_not_published`, `incompatible_generation`, `integrity`, `unexpressible`, `divergent`).
 
 **`get_implementation_context_page(root, run_id, context_projection_digest, facet, ...)`**
 Fetch an exact implementation-context facet page (e.g., `public_surface`, `callers`, `trajectories`) from the session-local projection artifact. Requires the `context_projection_digest` returned by `get_implementation_context`.
@@ -110,13 +110,13 @@ Return actionable remediation guidance for a single finding. Returns `status="no
 ### Engineering Memory Tools
 
 **`get_relevant_memory(root, scope, intent_id, ...)`**
-Return ranked, evidence-linked engineering memory for the declared edit scope. Read-only; does not mutate the memory database.
+Return ranked, evidence-linked engineering memory for the declared edit scope. Reads memory records without changing them; when the root has no memory store yet, the default `mcp_sync_policy` (`bootstrap_if_missing`, set under `[tool.codeclone.memory]`) creates one from the latest MCP run and reports that under `memory_sync`.
 
 **`manage_engineering_memory(root, action, ...)`**
 Engineering memory governance for agents. Actions: `refresh_from_run`, `record_candidate`, `promote_experience`, `validate_claims`, `propose_from_receipt`, `rebuild_semantic_index`, `rebuild_trajectories`, `enqueue_projection_rebuild`, `projection_rebuild_status`, `run_projection_jobs_once`. Approve, reject, and archive are not available to agents.
 
 **`query_engineering_memory(root, mode, ...)`**
-Mode-based engineering memory inspection router. Modes include `search`, `get`, `for_path`, `for_symbol`, `stale`, `drafts`, `coverage`, `status`, `trajectory_status`, `trajectory_search`, `trajectory_get`, `experience_get`, `trajectory_anomalies`, `trajectory_agents`, and `trajectory_dashboard`. Read-only.
+Mode-based engineering memory inspection router. Modes include `search`, `get`, `for_path`, `for_symbol`, `stale`, `drafts`, `coverage`, `status`, `trajectory_status`, `trajectory_search`, `trajectory_get`, `experience_get`, `trajectory_anomalies`, `trajectory_agents`, and `trajectory_dashboard`. Reads memory without changing records; a missing store is bootstrapped the same way as for `get_relevant_memory`.
 
 **`get_memory_projection_page(root, cursor, ...)`**
 Return an exact page for a `get_relevant_memory` omitted tail using the digest-bound cursor returned in that response. Fails closed if the underlying memory projection no longer matches the cursor identity.
@@ -170,11 +170,11 @@ Read-only sectioned diagnostics over CodeClone's own runtime telemetry (not part
 
 ### Inputs
 
-All tools accept an absolute repository root (required for most tools). Analysis tools accept a cache policy: `reuse` (use cached results if fresh) or `off` (ignore cache). Change-control tools require an existing analysis run and declare a `scope` dict specifying affected file patterns. Inspection tools take a `run_id` (8-char short id or full digest, or `latest` for the session-local run).
+All tools accept an absolute repository root (required for most tools). No tool accepts a cache policy: the cache location and size limit are read from `[tool.codeclone]` in `pyproject.toml`, and a call that still passes `cache_policy` is refused by name rather than silently ignored. Change-control tools require an existing analysis run and declare a `scope` dict specifying affected file patterns. Inspection tools take a `run_id` (8-char short id or full digest, as returned by `analyze_repository`); omit it to read the latest session-local run.
 
 ### Outputs
 
-Analysis tools return a `run_id`, artifact locations (JSON, HTML, SARIF), and canonical result structures. Change-control tools return an `intent_id` for pairing `start` and `finish` calls. Inspection tools return structured data: summaries (JSON), sections (paginated results), or implementation-context projections. All responses include a `next_tool` hint when appropriate.
+Analysis tools return a `run_id`, a `health` block with `score`, `grade` and per-dimension scores, finding and inventory counts, and baseline and cache state; they write no report files — generate JSON, HTML or SARIF artifacts with the CLI. Change-control tools return an `intent_id` for pairing `start` and `finish` calls. Inspection tools return structured data: summaries (JSON), sections (paginated results), or implementation-context projections. All responses include a `next_tool` hint when appropriate.
 
 ## Error behavior
 
@@ -182,7 +182,7 @@ Analysis tools return a `run_id`, artifact locations (JSON, HTML, SARIF), and ca
 |-----------|----------|
 | Absolute root not provided | Rejected at validation; no tool execution |
 | No analysis run exists | `start_controlled_change` returns `status: "needs_analysis"` |
-| Concurrent intent exists | `start_controlled_change` returns `status: "queued"` |
+| Concurrent intent overlaps the scope | `start_controlled_change` returns `status: "blocked"` with the `concurrent_intents` list and a `next_step`; called with `on_conflict="queue"` it returns `status: "queued"` instead |
 | Scope already dirty | `start_controlled_change` may return `status: "blocked"` unless recovery flag is set |
 | Missing after-run evidence | `finish_controlled_change` returns `status: "unverified"` with `next_step` hint |
 | Scope mismatch on finish | `finish_controlled_change` returns `status: "violated"` with details |
@@ -196,8 +196,8 @@ If a step cannot proceed, the response includes `next_step` and/or `user_action_
 ```python
 result = analyze_repository(root="/absolute/path/to/repo")
 print(f"Run ID: {result['run_id']}")
-print(f"Health: {result['health_score']}")
-print(f"Report: {result['artifacts']['report_path']}")
+print(f"Health: {result['health']['score']} ({result['health']['grade']})")
+print(f"Findings: {result['findings']['total']}, new: {result['findings']['new']}")
 ```
 
 ### Declare a change intent and get blast radius
@@ -216,18 +216,19 @@ print(f"Blast radius: {intent['blast_radius']}")
 ### Get production hotspots
 
 ```python
-triage = get_production_triage(run_id="latest")
-for hotspot in triage["hotspots"]:
-    print(f"{hotspot['path']}: {hotspot['issue']}")
+triage = get_production_triage(run_id=result["run_id"])
+for hotspot in triage["top_hotspots"]["items"]:
+    print(f"{hotspot['id']} {hotspot['kind']}: {hotspot['locations']}")
 ```
 
 ### Finish a controlled change
 
 ```python
+after = analyze_repository(root="/absolute/path/to/repo")
 receipt = finish_controlled_change(
-    intent_id="abcd1234",
+    intent_id=intent["intent_id"],
     changed_files=["src/services/auth.py"],
-    after_run_id="run_xyz789",
+    after_run_id=after["run_id"],
 )
 print(f"Status: {receipt['status']}")
 print(f"Scope check: {receipt['scope_check']['status']}")
