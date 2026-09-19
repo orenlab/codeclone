@@ -1323,6 +1323,11 @@ def _handle_status_mode(
         "project_root": report.project_root,
         "backend": report.backend,
         "db_path": str(report.db_path),
+        # The report's one discriminator, projected as-is: absent /
+        # unrecognized / incompatible / ready. ``db_exists`` below is the
+        # report's own derivation from it, so the two cannot disagree here
+        # any more than they can on the report.
+        "state": report.state,
         "db_exists": report.db_exists,
         "record_count": report.record_count,
         "records_by_type": report.records_by_type,
