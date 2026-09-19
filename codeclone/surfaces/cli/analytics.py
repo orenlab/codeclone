@@ -214,7 +214,15 @@ def _add_clustering_controls(parser: argparse.ArgumentParser) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codeclone analytics")
-    sub = parser.add_subparsers(dest="command", required=True)
+    # argparse renders a subparsers action as the brace list of every command
+    # it holds -- once inside the usage line, once as the heading of the
+    # positional section -- and that list is a single unbreakable token, so no
+    # wrapping width folds it. Eight commands made it 101 columns, past the 80
+    # the rest of the CLI is held to (``ui_messages.CLI_LAYOUT_MAX_WIDTH``).
+    # The metavar answers "what goes here" as well as the brace list did, and
+    # leaves the inventory to the rows below, which carry each command's help
+    # text anyway. Nothing is dropped from the screen; one token is renamed.
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
     snapshot = _command(
         sub, "snapshot", help_text="Build an immutable intent corpus snapshot."

@@ -575,7 +575,12 @@ _MEMORY_COMMAND_GROUPS: tuple[
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codeclone memory")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    # The same unbreakable brace list as ``analytics`` (see the note there),
+    # and worse for having fifteen entries: 153 columns in the usage line and
+    # 127 in the positional heading, against the 80 the rest of the CLI is
+    # held to (``ui_messages.CLI_LAYOUT_MAX_WIDTH``). The metavar replaces the
+    # token; the command rows below still list every one of them with its help.
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     build_root_commands(
         subparsers,
         root_help=_MEMORY_ROOT_HELP,

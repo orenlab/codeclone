@@ -1,0 +1,28 @@
+usage: codeclone memory [-h] COMMAND ...
+
+positional arguments:
+  COMMAND
+    init               Initialize engineering memory.
+    status             Show engineering memory status.
+    migrate            Explicitly migrate the engineering memory schema to the
+                       version this codeclone expects. The only sanctioned way
+                       to change an EXISTING store's schema; a plain
+                       status/search/read never does this.
+    for-path           List memory records linked to a source path.
+    search             Search engineering memory records by keyword.
+    stale              List stale engineering memory records.
+    vacuum             Purge expired stale/draft/rejected/archived records.
+    coverage           Show memory coverage for repo-relative paths.
+    review-candidates  List draft memory candidates awaiting review.
+    approve            Approve a draft memory record.
+    reject             Reject a draft memory record.
+    archive            Archive an active memory record.
+    semantic           Semantic retrieval index (status / rebuild / search).
+    trajectory         Trajectory projections and analytics (status / rebuild
+                       / list / search / show / agents / anomalies / dashboard
+                       / export).
+    jobs               Projection rebuild jobs (status / enqueue / run-once /
+                       list).
+
+options:
+  -h, --help           show this help message and exit

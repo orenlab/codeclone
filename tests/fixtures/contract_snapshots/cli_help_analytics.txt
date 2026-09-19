@@ -1,0 +1,15 @@
+usage: codeclone analytics [-h] COMMAND ...
+
+positional arguments:
+  COMMAND
+    snapshot      Build an immutable intent corpus snapshot.
+    embed         Generate analytics embeddings for a snapshot.
+    cluster       Cluster an embedded snapshot.
+    build         Snapshot, embed, and cluster end-to-end.
+    clusters      List clustering runs for a snapshot.
+    cluster-show  Export one clustering run as JSON.
+    outliers      Show noise cluster assignments.
+    profiles      Inspect the analytics profile registry.
+
+options:
+  -h, --help      show this help message and exit

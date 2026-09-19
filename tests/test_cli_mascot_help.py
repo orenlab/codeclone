@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.abc
 import importlib.machinery
 import inspect
@@ -16,6 +17,7 @@ import os
 import re
 import sys
 from collections.abc import Callable, Sequence
+from functools import partial
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -26,6 +28,7 @@ from codeclone.config.argparse_builder import build_parser
 from codeclone.contracts import ExitCode, cli_help_epilog
 from codeclone.surfaces.cli import workflow as cli_workflow
 from codeclone.surfaces.cli.console import PlainConsole, make_query_console
+from codeclone.surfaces.cli.subcommands import dispatch_subcommand
 from codeclone.surfaces.cli.ui import help_tour as help_tour_mod
 from codeclone.surfaces.cli.ui.help_presenter import (
     interactive_help_requested,
@@ -912,21 +915,89 @@ def _help_text() -> str:
     return buffer.getvalue()
 
 
-def test_no_help_line_leaves_the_cli_layout_grid() -> None:
-    """The screen fits the width the rest of the CLI is already held to.
+def _subcommand_help_text(name: str) -> str:
+    """One subcommand screen, taken by the path the console script takes.
 
-    ``CLI_LAYOUT_MAX_WIDTH`` is read, not restated: raise or lower the owner
-    and this pin follows it, which a literal 80 here would not. Before this,
-    55 lines ran past it and the widest was 213 columns, so at a default
-    terminal the two-column grid folded back to column zero on every one.
+    Through ``dispatch_subcommand`` rather than each module's ``_build_parser``:
+    three of the four surfaces have such a factory and ``baseline`` does not --
+    its parser is built inside the handler -- so a pin sourced from factories
+    would silently cover three screens while claiming four.
     """
 
-    over = [
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer), pytest.raises(SystemExit) as exc:
+        dispatch_subcommand(["codeclone", name, "--help"])
+
+    assert exc.value.code == 0, exc.value.code
+    text = buffer.getvalue()
+    assert text.startswith(f"usage: codeclone {name}"), text[:120]
+    return text
+
+
+def _rows_past_the_grid(text: str) -> list[tuple[int, int]]:
+    """``(line number, width)`` for every row wider than the grid allows."""
+
+    return [
         (number, len(line))
-        for number, line in enumerate(_help_text().splitlines(), start=1)
+        for number, line in enumerate(text.splitlines(), start=1)
         if len(line) > ui_messages.CLI_LAYOUT_MAX_WIDTH
     ]
+
+
+_HELP_SCREENS: tuple[tuple[str, Callable[[], str]], ...] = (
+    ("root", _help_text),
+    *(
+        (name, partial(_subcommand_help_text, name))
+        for name in ("analytics", "baseline", "memory", "setup")
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "screen", [pytest.param(render, id=name) for name, render in _HELP_SCREENS]
+)
+def test_no_help_line_leaves_the_cli_layout_grid(
+    monkeypatch: pytest.MonkeyPatch,
+    screen: Callable[[], str],
+) -> None:
+    """Every help screen fits the width the rest of the CLI is already held to.
+
+    ``CLI_LAYOUT_MAX_WIDTH`` is read, not restated: raise or lower the owner
+    and this pin follows it, which a literal 80 here would not. On the root
+    screen 55 lines ran past it and the widest was 213 columns; on the
+    subcommand screens the overflow was one unbreakable token rather than
+    prose -- ``analytics`` one row of 101, ``memory`` two of 153 and 127, both
+    the ``{a,b,c}`` choice list argparse prints when a subparsers action has no
+    metavar. ``setup`` (78) and ``baseline`` (78) already fitted and are here to
+    keep fitting.
+
+    ``COLUMNS`` is pinned because argparse takes its wrapping width from
+    ``shutil.get_terminal_size()``, which reads the *original* stdout: under
+    captured pytest that falls back to 80, but under ``-s`` at a wide terminal
+    it does not, and the same code would then be measured against a different
+    grid.
+    """
+
+    monkeypatch.setenv("COLUMNS", str(ui_messages.CLI_LAYOUT_MAX_WIDTH))
+
+    over = _rows_past_the_grid(screen())
     assert not over, over
+
+
+def test_the_grid_pin_can_see_a_row_that_leaves_it() -> None:
+    """Probe validity: the detector must red on a row past the grid.
+
+    Every screen above fits, so the pin stays green for any threshold at or
+    above the widest row it measures -- raise the comparison to 100 and all
+    five pass while nothing is being held. This row is 90 columns: past the
+    grid, and narrower than either overflow the fix removed (101 and 153), so
+    it is the constant itself that decides, not the screens.
+    """
+
+    row = "  --flag".ljust(24) + "x" * 66
+    assert len(row) == 90
+
+    assert _rows_past_the_grid(f"usage: codeclone\n{row}\n") == [(2, 90)]
 
 
 def _option_section_lines() -> list[str]:
