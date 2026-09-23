@@ -128,6 +128,8 @@ uv tool install "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
+`codeclone mcp` runs the same server with the same arguments, for catalog and `uvx` launches: `uvx --with "codeclone[mcp]" codeclone mcp --transport stdio`.
+
 The MCP server is read-only by contract: it never mutates source files,
 baselines, cache, or repository state.
 

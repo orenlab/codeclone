@@ -230,6 +230,8 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http
 ```
 
+`codeclone mcp` runs the same server with the same arguments, for catalog and `uvx` launches: `uvx --with "codeclone[mcp]" codeclone mcp --transport stdio`.
+
 > [!WARNING]
 > Analysis tools require an absolute repository root. Relative roots such as `.` are rejected.
 > Keep `stdio` as the default transport for local IDE and agent clients; HTTP exposure beyond
