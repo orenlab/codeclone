@@ -132,7 +132,7 @@ def _client_argv(items: object) -> list[str]:
     return argv
 
 
-def test_server_json_launches_the_mcp_subcommand_with_the_mcp_extra() -> None:
+def test_server_json_launches_the_mcp_flag_with_the_mcp_extra() -> None:
     project = _project()
     package = _server_package()
 
@@ -141,7 +141,7 @@ def test_server_json_launches_the_mcp_subcommand_with_the_mcp_extra() -> None:
         ("named", "--with", f"{project['name']}[mcp]=={project['version']}"),
     ]
     assert _typed_arguments(package["packageArguments"]) == [
-        ("positional", None, "mcp"),
+        ("positional", None, "--mcp"),
         ("named", "--transport", "stdio"),
     ]
     assert "mcp" in _mapping(project["optional-dependencies"])
@@ -181,7 +181,7 @@ def test_server_json_client_command_reaches_the_mcp_server_main(
         "--with",
         f"{project['name']}[mcp]=={project['version']}",
         tool,
-        "mcp",
+        "--mcp",
         "--transport",
         "stdio",
     ]
