@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.3] - 2026-09-23
+
+`2.0.3` is a distribution patch release: it lists CodeClone in the official MCP
+Registry and on Glama, ships a pre-commit hook manifest, and hardens the release
+workflow. Analysis behavior is unchanged.
+
+### Enhancements
+
+- Add `server.json` for the official MCP Registry
+  (`io.github.orenlab/codeclone`, PyPI package `codeclone`, stdio
+  `codeclone-mcp` from the `mcp` extra) and the `mcp-name` ownership marker in
+  the PyPI and GitHub READMEs.
+- Add `glama.json` with the Glama maintainer record.
+- Add `.pre-commit-hooks.yaml`, so `repo: https://github.com/orenlab/codeclone`
+  with `rev: v2.0.3` provides the `codeclone` hook.
+
+### Internal
+
+- Publish `server.json` to the MCP Registry after the PyPI release, using a
+  checksum-verified `mcp-publisher` and GitHub OIDC login.
+- Pin every action in the publish workflow to a full commit SHA and pin `build`
+  and `twine` to their locked versions.
+- Refresh the CI dependency locks after byte-level verification of every
+  package.
+- Bump the Python package and composite GitHub Action default install version to
+  `2.0.3`.
+
 ## [2.0.2] - 2026-05-19
 
 `2.0.2` is a focused patch release for VS Code extension packaging metadata,
