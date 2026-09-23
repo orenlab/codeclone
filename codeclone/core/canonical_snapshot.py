@@ -42,7 +42,8 @@ import os
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
+from uuid import uuid4
 
 # Reached through the OWNING submodules, never through the package door:
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
@@ -128,6 +129,7 @@ from ..models import (
     ApiSymbolObservation,
     DeadCodeObservation,
     FunctionRelationshipFacts,
+    GcJobReport,
     IntegerObservation,
     ModuleDep,
     ModuleRegistryHandle,
@@ -1302,6 +1304,14 @@ def _publish_enabled(
             target=target,
             expected_generation=0 if head is None else head.generation,
         )
+        # The store grows here and nowhere else, so this is where it is
+        # collected: on the publishing handle, after the commit.  The owner
+        # answers every failure of its own as a typed receipt, so nothing it
+        # does can turn a STORED publication into the containment's
+        # ``failed``.
+        in_flight_lease, collection = _collect_after_publication(
+            store, run_id=receipt.run_id
+        )
     if receipt.head_advanced:
         outcome = (
             RUN_SNAPSHOT_PUBLICATION_PUBLISHED
@@ -1325,7 +1335,125 @@ def _publish_enabled(
         run_id=receipt.run_id,
         generation=receipt.generation,
         analysis_scope_digest=receipt.analysis_scope_digest,
+        collection=collection,
+        in_flight_lease=in_flight_lease,
     )
+
+
+# ---------------------------------------------------------------------------
+# The GC owner (RULING-2026-08-24 §8; backend ruling 2026-09-18)
+# ---------------------------------------------------------------------------
+#
+# The substrate -- the §8 roots, the leases, the fenced sweep, the physical
+# release -- lives in ``canonical.store`` and had no production caller.  Its
+# owner is the publication, for the reason the ruling makes GC a precondition
+# of always-on publish at all: publishing is the only thing that grows the
+# store, so a store collected where it grows stays bounded without an
+# operator remembering a verb.  An explicit verb would leave an always-on
+# store unbounded for every user who never runs it.
+#
+# The two numbers below are the owner's operational policy, injected into the
+# job exactly as ``RunStoreGcJob`` asks for (the substrate stays policy-free).
+
+#: Generations of every head target kept as the retained-history root.  The
+#: smallest window in which that root is not the head root: with one, the
+#: only history row a sweep keeps is the head's own, and W4 §8's
+#: retained-history class would exist in production and hold nothing.  With
+#: two, the generation a publication superseded stays readable through one
+#: more publication -- a reader that resolved the head just before it moved
+#: is not racing the collector.
+_PUBLICATION_RETAIN_HISTORY: Final = 2
+
+#: The in-flight lease kind of the store's closed vocabulary: an operation in
+#: progress, which is exactly what a publisher is until its bridge is stated.
+_IN_FLIGHT_LEASE_KIND: Final = "active"
+
+#: The deadline of an in-flight lease nobody released.  The publisher releases
+#: it explicitly once its bridge is stated; the deadline is only the backstop
+#: for a publisher that died first.  The two ways to miss are not symmetric --
+#: a deadline shorter than a live report build reopens the window the lease
+#: closes, a longer one leaves a dead publisher's one run on disk a while
+#: longer -- so it errs long, and stops at one day.
+_IN_FLIGHT_LEASE_SECONDS: Final = 24 * 60 * 60
+
+
+def _refused_collection(job: str, stage: str, error: Exception) -> GcJobReport:
+    """One spelling of the owner's typed refusal: stage, cause, no claims."""
+    return GcJobReport.refused(
+        job=job, refusal=f"{stage}: {type(error).__name__}: {error}"
+    )
+
+
+def _collect_after_publication(
+    store: RunStore, *, run_id: str
+) -> tuple[str, GcJobReport]:
+    """Sweep the store once after a stored publication; say what happened.
+
+    Two steps, each fail-closed on its own.  The publisher first roots its
+    own run with an in-flight lease: a run that lost the head race is
+    neither head nor history, and this very sweep would otherwise take the
+    run the bridge is about to address.  Then ``RunStoreGcJob`` sweeps under
+    the owner's retention policy.
+
+    Every failure of either step -- the lease's or the sweep's ``BEGIN
+    IMMEDIATE`` not obtained, the store generation moved, anything else the
+    substrate raises -- becomes a claim-free refusal receipt.  It may not
+    escape: the publication behind it is STORED, and the containment it
+    would land in answers ``failed``, which says nothing was.  A refused
+    lease also means no sweep, so a publication is never counted as swept
+    by a sweep that did not run.  ``BaseException`` is not contained, for
+    the same reason the publication boundary does not contain it.
+
+    Returns the granted lease id (empty when none was) and the receipt.
+    """
+
+    from ..canonical.store import RunStoreGcJob, acquire_run_lease
+
+    job = RunStoreGcJob(store=store, retain_history=_PUBLICATION_RETAIN_HISTORY)
+    lease_id = f"publication:{os.getpid()}:{uuid4().hex}"
+    try:
+        acquire_run_lease(
+            store,
+            run_id,
+            kind=_IN_FLIGHT_LEASE_KIND,
+            lease_id=lease_id,
+            ttl_seconds=_IN_FLIGHT_LEASE_SECONDS,
+        )
+    except Exception as refusal:
+        return "", _refused_collection(job.name, "in-flight lease not granted", refusal)
+    try:
+        return lease_id, job.collect()
+    except Exception as failure:
+        return lease_id, _refused_collection(job.name, "sweep not completed", failure)
+
+
+def release_publication_lease(
+    *, config: RunStoreConfig, publication: RunSnapshotPublication
+) -> bool:
+    """End a publisher's in-flight operation: clear its lease root.
+
+    Called once the identity bridge has been stated, which is the last thing
+    the publisher does with its run.  From here the run stays exactly as
+    rooted as the store says -- head, history, an operator's retention, a
+    reader's lease -- or it is garbage for the next sweep.
+
+    ``False`` when there is nothing to release (the rollout is off, nothing
+    was stored, the lease was never granted) or when the store refuses the
+    release.  The refusal is contained on purpose: the lease's own deadline
+    dissolves it anyway, and ending an in-flight operation late may not fail
+    the analysis that finished it.  No store is opened when there is nothing
+    to release, so a disabled rollout never touches sqlite from here.
+    """
+
+    if config.path is None or not publication.in_flight_lease:
+        return False
+    from ..canonical.store import RunStore, release_run_lease
+
+    try:
+        with RunStore(config.path, create=False) as store:
+            return release_run_lease(store, publication.in_flight_lease)
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1633,6 +1761,7 @@ __all__ = [
     "producer_state",
     "profile_head_target",
     "publish_run_snapshot",
+    "release_publication_lease",
     "report_scope_receipt",
     "resolve_run_snapshot_link",
     "resolve_run_store_config",

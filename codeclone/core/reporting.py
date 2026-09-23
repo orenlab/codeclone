@@ -52,6 +52,7 @@ from .canonical_snapshot import (
     bridge_run_snapshot,
     persist_run_snapshot_link,
     publish_run_snapshot,
+    release_publication_lease,
     resolve_run_store_config,
 )
 from .metrics_payload import _enrich_metrics_report_payload
@@ -619,6 +620,11 @@ def report(
         persist_run_snapshot_link(
             store_path=run_store_config.path, link=run_snapshot_link
         )
+    # The bridge was the publisher's last use of its run, so its in-flight
+    # lease ends here; from now on the run is exactly as rooted as the store
+    # says.  A run that ends before this line leaves the lease to its own
+    # deadline, which is what the deadline is for.
+    release_publication_lease(config=run_store_config, publication=publication)
     return ReportArtifacts(
         html=contents["html"],
         json=contents["json"],

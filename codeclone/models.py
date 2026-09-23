@@ -2071,6 +2071,18 @@ class RunSnapshotPublication:
     #: a contained failure without its reason is a silence with a name on
     #: it, which is the one thing worse than the crash it replaced.
     reason: str = ""
+    #: The GC owner's receipt for the sweep that followed this publication:
+    #: what was collected, what was held and why, or -- claim-free -- why the
+    #: substrate refused.  It rides the publication witness because the
+    #: publication is the one place the store grows, and a sweep whose answer
+    #: travelled nowhere would be the silent GC the protocol forbids.
+    collection: GcJobReport | None = None
+    #: The lease that roots the published run while its publisher is still in
+    #: flight -- until the identity bridge is stated -- and nothing else.  A
+    #: run that lost the head race is neither head nor history, so without it
+    #: any sweep between the commit and the bridge takes the very run the
+    #: bridge is about to address.  Empty when no lease was granted.
+    in_flight_lease: str = ""
 
     def __post_init__(self) -> None:
         if self.outcome not in RUN_SNAPSHOT_PUBLICATION_OUTCOMES:
@@ -2082,12 +2094,22 @@ class RunSnapshotPublication:
                 raise ValueError("an unstored publication carries no store receipt")
             if self.analysis_scope_digest:
                 raise ValueError("an unstored publication carries no scope receipt")
+            if self.collection is not None or self.in_flight_lease:
+                raise ValueError(
+                    "an unstored publication was never swept after: it carries "
+                    "no collection receipt and no in-flight lease"
+                )
         elif not self.target or not self.run_id:
             raise ValueError("a stored publication must carry its target and run id")
         elif not self.analysis_scope_digest:
             # Without it the bridge could only assert the pair; with it the
             # pair is checkable from the two artifacts alone.
             raise ValueError("a stored publication must carry its scope receipt")
+        if self.in_flight_lease and self.collection is None:
+            raise ValueError(
+                "an in-flight lease is granted only by the collection owner, "
+                "and its receipt travels with it"
+            )
         if (self.outcome in RUN_SNAPSHOT_PUBLICATION_REASONED) != bool(self.reason):
             raise ValueError(
                 "a refusal and a contained failure each carry their reason, "
