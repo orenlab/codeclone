@@ -194,6 +194,16 @@ Gate details: [Metrics and quality gates](https://orenlab.github.io/codeclone/bo
 
 ```yaml
 repos:
+  - repo: https://github.com/orenlab/codeclone
+    rev: v2.0.3
+    hooks:
+      - id: codeclone
+```
+
+To run the CodeClone already installed in your environment instead:
+
+```yaml
+repos:
   - repo: local
     hooks:
       - id: codeclone
