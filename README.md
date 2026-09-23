@@ -319,7 +319,7 @@ Top-level keys: `report_schema_version`, `meta`, `inventory`, `findings`, `metri
 {
   "report_schema_version": "2.11",
   "meta": {
-    "codeclone_version": "2.0.2",
+    "codeclone_version": "2.0.3",
     "project_name": "...",
     "scan_root": ".",
     "...": "..."

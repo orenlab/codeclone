@@ -10,7 +10,7 @@ Compact structural layouts for baseline/cache/report contracts in the current
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.2" },
+    "generator": { "name": "codeclone", "version": "2.0.3" },
     "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp314",
@@ -61,7 +61,7 @@ Notes:
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.2" },
+    "generator": { "name": "codeclone", "version": "2.0.3" },
     "schema_version": "1.2",
     "python_tag": "cp314",
     "created_at": "2026-03-11T00:00:00Z",
@@ -157,7 +157,7 @@ Notes:
 {
   "report_schema_version": "2.11",
   "meta": {
-    "codeclone_version": "2.0.2",
+    "codeclone_version": "2.0.3",
     "project_name": "codeclone",
     "scan_root": ".",
     "analysis_mode": "full",
@@ -516,7 +516,7 @@ Notes:
       "tool": {
         "driver": {
           "name": "codeclone",
-          "version": "2.0.2",
+          "version": "2.0.3",
           "rules": [
             {
               "id": "CCLONE001",
