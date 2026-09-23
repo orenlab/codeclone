@@ -200,3 +200,33 @@ def test_codeclone_mcp_word_analyses_a_directory_named_mcp(
 
     assert word[1] == str(package.resolve())
     assert word == path
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [[".", "--mcp"], ["--no-progress", "--mcp", "--transport", "stdio"]],
+    ids=["after-the-root", "after-an-option"],
+)
+def test_codeclone_mcp_flag_launches_the_server_only_as_the_first_argument(
+    argv: list[str],
+) -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    result = subprocess.run(
+        [sys.executable, "-c", _IMPORT_PROBE, *argv],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=_REPO_ROOT,
+        timeout=120,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    probe = json.loads(result.stdout)
+    assert (probe["code"], probe["server_modules"], probe["mcp_modules"]) == (2, [], [])
+    assert result.stderr.startswith("usage: codeclone [")
+    assert result.stderr.splitlines()[-1].startswith(
+        "CONTRACT ERROR: unrecognized arguments: --mcp"
+    )
