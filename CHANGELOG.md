@@ -27,6 +27,7 @@ workflow. Analysis behavior is unchanged.
   checksum-verified `mcp-publisher` and GitHub OIDC login.
 - Pin every action in the publish workflow to a full commit SHA and pin `build`
   and `twine` to their locked versions.
+- Pin every GitHub Action in the workflows and the composite action to exact commits.
 - Refresh the dependency locks to byte-verified releases: 7 Python packages in
   `uv.lock` and 8 npm packages in the VS Code extension lock; declared
   dependency ranges are unchanged.

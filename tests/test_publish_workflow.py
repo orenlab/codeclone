@@ -11,8 +11,26 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PUBLISH_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "publish.yml"
+_ACTION_FILES = (
+    ".github/actions/codeclone/action.yml",
+    ".github/workflows/benchmark.yml",
+    ".github/workflows/codeclone.yml",
+    ".github/workflows/docs.yml",
+    ".github/workflows/publish.yml",
+    ".github/workflows/tests.yml",
+)
+_ACTION_FILE_PATTERNS = (
+    ".github/actions/*/action.yml",
+    ".github/actions/*/action.yaml",
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+)
+_LOCAL_ACTION_PREFIX = "./"
+_ACTION_METADATA_NAMES = ("action.yml", "action.yaml")
 _USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s+(?P<ref>\S+)(?P<comment>.*)$")
 _FULL_SHA_REF = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
 _RELEASE_COMMENT = re.compile(r"^ # v\d+\.\d+\.\d+$")
@@ -35,22 +53,43 @@ def _locked_versions() -> dict[str, str]:
     }
 
 
-def test_publish_workflow_pins_every_action_to_a_full_commit_sha() -> None:
+def _is_pinned(ref: str, comment: str) -> bool:
+    if ref.startswith(_LOCAL_ACTION_PREFIX):
+        # A local action runs from the checked-out commit itself and takes no
+        # ref: that commit pins it, provided the commit carries the action.
+        action_dir = _REPO_ROOT / ref
+        return any((action_dir / name).is_file() for name in _ACTION_METADATA_NAMES)
+    return (
+        _FULL_SHA_REF.match(ref) is not None
+        and _RELEASE_COMMENT.match(comment) is not None
+    )
+
+
+def test_pinned_action_files_cover_every_workflow_and_composite_action() -> None:
+    discovered = sorted(
+        path.relative_to(_REPO_ROOT).as_posix()
+        for pattern in _ACTION_FILE_PATTERNS
+        for path in _REPO_ROOT.glob(pattern)
+    )
+
+    assert discovered == list(_ACTION_FILES)
+
+
+@pytest.mark.parametrize("relative_path", _ACTION_FILES)
+def test_every_action_is_pinned_to_a_full_commit_sha(relative_path: str) -> None:
     uses_lines = [
         line
-        for line in _PUBLISH_WORKFLOW.read_text(encoding="utf-8").splitlines()
+        for line in (_REPO_ROOT / relative_path)
+        .read_text(encoding="utf-8")
+        .splitlines()
         if "uses:" in line
     ]
-    assert uses_lines, "the publish workflow declares no actions"
+    assert uses_lines, f"{relative_path} declares no actions"
 
     unpinned = []
     for line in uses_lines:
         match = _USES_LINE.match(line)
-        if (
-            match is None
-            or _FULL_SHA_REF.match(match.group("ref")) is None
-            or _RELEASE_COMMENT.match(match.group("comment")) is None
-        ):
+        if match is None or not _is_pinned(match.group("ref"), match.group("comment")):
             unpinned.append(line.strip())
 
     assert unpinned == []
