@@ -120,6 +120,8 @@ Report contract: <https://orenlab.github.io/codeclone/book/08-report/>
 
 ## MCP and Native Clients
 
+<!-- mcp-name: io.github.orenlab/codeclone -->
+
 ```bash
 uv tool install "codeclone[mcp]"
 

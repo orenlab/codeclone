@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.orenlab/codeclone",
+  "title": "CodeClone",
+  "description": "A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents",
+  "version": "2.0.3",
+  "websiteUrl": "https://orenlab.github.io/codeclone/",
+  "repository": {
+    "url": "https://github.com/orenlab/codeclone",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "codeclone",
+      "version": "2.0.3",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--from",
+          "value": "codeclone[mcp]==2.0.3",
+          "description": "Install CodeClone with the mcp extra that carries the MCP server dependencies."
+        },
+        {
+          "type": "positional",
+          "value": "codeclone-mcp",
+          "description": "Run the codeclone-mcp entry point rather than the codeclone CLI."
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
