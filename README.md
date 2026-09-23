@@ -200,6 +200,8 @@ repos:
       - id: codeclone
 ```
 
+The hook runs `codeclone . --ci`, which exits with code `2` unless a trusted `codeclone.baseline.json` is in the repository root: create it with `codeclone . --update-baseline` on the same Python minor version as the hook's interpreter (pin it with `language_version`), because a baseline records its interpreter tag (for example `cp314`) and is untrusted under any other tag.
+
 To run the CodeClone already installed in your environment instead:
 
 ```yaml
@@ -230,7 +232,7 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http
 ```
 
-`codeclone mcp` runs the same server with the same arguments, for catalog and `uvx` launches: `uvx --with "codeclone[mcp]" codeclone mcp --transport stdio`.
+`codeclone --mcp` runs the same server with the same arguments, for catalog and `uvx` launches: `uvx --with "codeclone[mcp]" codeclone --mcp --transport stdio`.
 
 > [!WARNING]
 > Analysis tools require an absolute repository root. Relative roots such as `.` are rejected.

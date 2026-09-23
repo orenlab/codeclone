@@ -10,12 +10,13 @@ workflow. Analysis behavior is unchanged.
 
 - Add `server.json` for the official MCP Registry
   (`io.github.orenlab/codeclone`, PyPI package `codeclone`, stdio
-  `codeclone mcp` with the `mcp` extra) and the `mcp-name` ownership marker in
+  `codeclone --mcp` with the `mcp` extra) and the `mcp-name` ownership marker in
   the PyPI and GitHub READMEs.
-- Add `codeclone mcp`, a link to `codeclone-mcp`: it passes its arguments to
-  the same server entry point and, without the `mcp` extra, refuses with the
-  same install hint and exit code `2`. The registry entry launches it as
-  `uvx --with 'codeclone[mcp]==2.0.3' codeclone@2.0.3 mcp --transport stdio`.
+- Add the `codeclone --mcp` flag, a link to `codeclone-mcp`: it passes the
+  arguments that follow it to the same server entry point and, without the
+  `mcp` extra, refuses with the same install hint and exit code `2`. The
+  registry entry launches it as
+  `uvx --with 'codeclone[mcp]==2.0.3' codeclone@2.0.3 --mcp --transport stdio`.
 - Add `glama.json` with the Glama maintainer record.
 - Add `.pre-commit-hooks.yaml`, so `repo: https://github.com/orenlab/codeclone`
   with `rev: v2.0.3` provides the `codeclone` hook.
