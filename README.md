@@ -207,6 +207,8 @@ repos:
 
 ## MCP Control Surface
 
+<!-- mcp-name: io.github.orenlab/codeclone -->
+
 Triage-first MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI.
 Read-only by contract: never mutates source, baselines, or repo state.
 

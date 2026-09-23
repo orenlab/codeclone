@@ -1,0 +1,1 @@
+{"$id":"https://glama.ai/mcp/schemas/server.json","$schema":"http://json-schema.org/draft-07/schema#","properties":{"maintainers":{"description":"GitHub usernames that have permission to maintain the server","items":{"description":"GitHub username","type":"string"},"type":"array","uniqueItems":true}},"required":["maintainers"],"type":"object"}
