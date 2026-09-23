@@ -281,6 +281,16 @@ def _lease_rows(store: RunStore) -> list[tuple[str, str]]:
     ]
 
 
+def _linked_edges(store: RunStore, run_id: str) -> int:
+    """Identity-bridge edges persisted for one run."""
+    row = store._connection.execute(
+        "SELECT COUNT(*) FROM run_report_links l JOIN runs r "
+        "ON r.run_pk = l.run_pk WHERE r.run_id = ?",
+        (run_id,),
+    ).fetchone()
+    return int(row[0])
+
+
 # -- reachability: when, and how many times ----------------------------------
 
 
@@ -479,12 +489,9 @@ def test_a_run_that_lost_the_head_race_is_held_until_its_bridge_is_written(
     assert lost.collection == _receipt(candidates=1, held={GC_HOLD_LEASE: 1})
     assert foreign == [_receipt(candidates=1, held={GC_HOLD_LEASE: 1})]
     with corpus.open() as store:
-        linked = store._connection.execute(
-            "SELECT COUNT(*) FROM run_report_links l JOIN runs r "
-            "ON r.run_pk = l.run_pk WHERE r.run_id = ?",
-            (lost.run_id,),
-        ).fetchone()[0]
-        assert linked == 1, "the bridge of the lost run was not persisted"
+        assert _linked_edges(store, lost.run_id) == 1, (
+            "the bridge of the lost run was not persisted"
+        )
         assert _lease_rows(store) == [], "the in-flight lease outlived its report"
 
     corpus.publish("b")
@@ -494,6 +501,63 @@ def test_a_run_that_lost_the_head_race_is_held_until_its_bridge_is_written(
         collected=1,
         objects_collected=meters.sweeps[-1].before.exclusive_objects[lost.run_id],
     )
+
+
+def test_the_bridge_is_written_under_the_lease_and_only_then_released(
+    corpus: _Corpus, meters: _Meters, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The in-flight window ends in one order: bridge first, release second.
+
+    Two readings of that order, on a run that lost the head race (so the
+    lease is the only thing rooting it).  At the bridge write the store is
+    read: the publisher's lease must still hold the run.  The release is
+    then followed, inside the same call, by a foreign collector: the moment
+    the lease goes the lost run is garbage, so that sweep collects it -- and
+    it reads, before sweeping, that the edge was already written.  Release
+    before the bridge and the collector takes the run first, and the bridge
+    is left addressing a row that no longer exists.
+    """
+    held_at_bridge: list[bool] = []
+    linked_at_release: list[int] = []
+    foreign: list[GcJobReport] = []
+
+    def lease_held() -> bool:
+        lease = meters.last_publication().in_flight_lease
+        with corpus.open() as store:
+            return lease in {lease_id for lease_id, _kind in _lease_rows(store)}
+
+    def watched_bridge_write(*, store_path: Path, link: RunSnapshotLink) -> bool:
+        held_at_bridge.append(lease_held())
+        return persist_run_snapshot_link(store_path=store_path, link=link)
+
+    def release_then_collect(
+        *, config: RunStoreConfig, publication: RunSnapshotPublication
+    ) -> bool:
+        released = release_publication_lease(config=config, publication=publication)
+        with corpus.open() as other:
+            linked_at_release.append(_linked_edges(other, publication.run_id))
+            foreign.append(RunStoreGcJob(store=other, retain_history=2).collect())
+        return released
+
+    with monkeypatch.context() as patch:
+        patch.setattr(RunStore, "head", _stale_head)
+        patch.setattr(
+            reporting_module, "persist_run_snapshot_link", watched_bridge_write
+        )
+        patch.setattr(
+            reporting_module, "release_publication_lease", release_then_collect
+        )
+        corpus.publish("a")
+    lost = meters.last_publication()
+    assert lost.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT
+    assert held_at_bridge == [True], "the bridge was written after the lease went"
+    assert linked_at_release == [1], "the lease went before the bridge was written"
+    assert [report.collected_count(GC_COLLECT_UNREACHABLE) for report in foreign] == [
+        1
+    ], "the release did not leave the lost run to the collector"
+    with corpus.open() as store:
+        assert lost.run_id not in _run_ids(store)
+        assert _lease_rows(store) == []
 
 
 def test_an_unreleased_in_flight_lease_dissolves_one_day_after_its_grant(
