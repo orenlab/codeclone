@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
@@ -985,8 +985,8 @@ def _host_is_loopback(host: str) -> bool:
         return False
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
     if (
         args.transport == "streamable-http"
         and not args.allow_remote

@@ -18,14 +18,22 @@
       "runtimeArguments": [
         {
           "type": "named",
-          "name": "--from",
+          "name": "--with",
           "value": "codeclone[mcp]==2.0.3",
-          "description": "Install CodeClone with the mcp extra that carries the MCP server dependencies."
-        },
+          "description": "Install the mcp extra that carries the MCP server dependencies."
+        }
+      ],
+      "packageArguments": [
         {
           "type": "positional",
-          "value": "codeclone-mcp",
-          "description": "Run the codeclone-mcp entry point rather than the codeclone CLI."
+          "value": "mcp",
+          "description": "Run the MCP server, the same server as the codeclone-mcp command."
+        },
+        {
+          "type": "named",
+          "name": "--transport",
+          "value": "stdio",
+          "description": "Serve MCP over stdio."
         }
       ],
       "transport": {

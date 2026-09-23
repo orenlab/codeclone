@@ -543,6 +543,11 @@ def _main_impl() -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from ..mcp.server import main as mcp_main
+
+        mcp_main(sys.argv[2:])
+        return
     try:
         _main_impl()
     except SystemExit:
