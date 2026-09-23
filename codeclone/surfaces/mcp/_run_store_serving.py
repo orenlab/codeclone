@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Which slices ``search_graph`` serves: the run store's, or the memory's.
+"""What a served answer is built from: the run store's facts, or the memory's.
 
 The rollout contract (ruling 2026-09-05): ``store default OFF -> shadow read
 with equivalence -> store-backed serving -> default ON``.  This module is
@@ -30,23 +30,41 @@ holds, while it still holds them: through the T2 rollout the record keeps
 its slices, so the shadow read costs one bounded store read and one tuple
 comparison per query, and buys a runtime witness that the store-backed
 answer is the producer's answer.
+
+Two readings go through that one decision (:func:`_shadow_read`), each with
+its own memory side and its own agreement: the three slices of
+``search_graph`` / ``get_implementation_context``, and the authority
+candidate rows ``check_authority(section="candidates")`` pages.  The
+candidates' memory is the sealed document's own rows, and their agreement
+is the WIRE: a page serializes each row with its key order and JSON types,
+so two rows Python calls equal (``True == 1``, one dict against the same
+dict with its keys reordered) are two different pages, and the store's
+answer is served only when it is byte for byte the document's.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import replace
+from typing import TypeVar
 
 from ...api.run_store_serving import (
     MEMORY_BY_DESIGN_REASONS,
     SERVING_REASON_DIVERGENT,
     SERVING_SOURCE_MEMORY,
     RunStoreServingOutcome,
+    ServedAuthorityCandidates,
     ServedRunSlices,
     ServedUnitLocation,
+    read_run_store_authority_candidates,
     read_run_store_slices,
 )
 from ...observability import record_counter
+from ._authority_candidates import authority_candidate_items
 from ._session_shared import MCPRunRecord
+
+_ServedT = TypeVar("_ServedT")
 
 
 def memory_slices(record: MCPRunRecord) -> ServedRunSlices:
@@ -76,21 +94,21 @@ def _agrees(stored: ServedRunSlices, memory: ServedRunSlices) -> bool:
     )
 
 
-def served_slices(
-    record: MCPRunRecord,
-) -> tuple[ServedRunSlices, RunStoreServingOutcome]:
-    """The slices to serve for one record, and where they came from."""
-    memory = memory_slices(record)
-    stored, outcome = read_run_store_slices(
-        root=record.root, link=record.execution.run_snapshot_link
-    )
+def _shadow_read(
+    memory: _ServedT,
+    answer: tuple[_ServedT | None, RunStoreServingOutcome],
+    *,
+    agrees: Callable[[_ServedT, _ServedT], bool],
+) -> tuple[_ServedT, RunStoreServingOutcome]:
+    """The one serving decision, whatever was read: see the module docstring."""
+    stored, outcome = answer
     if stored is None:
         if outcome.reason in MEMORY_BY_DESIGN_REASONS:
             record_counter("run_store_serving_memory")
         else:
             record_counter("run_store_serving_fallback")
         return memory, outcome
-    if not _agrees(stored, memory):
+    if not agrees(stored, memory):
         record_counter("run_store_serving_divergent")
         return memory, replace(
             outcome, source=SERVING_SOURCE_MEMORY, reason=SERVING_REASON_DIVERGENT
@@ -99,4 +117,56 @@ def served_slices(
     return stored, outcome
 
 
-__all__ = ["memory_slices", "served_slices"]
+def served_slices(
+    record: MCPRunRecord,
+) -> tuple[ServedRunSlices, RunStoreServingOutcome]:
+    """The slices to serve for one record, and where they came from."""
+    memory = memory_slices(record)
+    return _shadow_read(
+        memory,
+        read_run_store_slices(
+            root=record.root, link=record.execution.run_snapshot_link
+        ),
+        agrees=_agrees,
+    )
+
+
+def memory_authority_candidates(record: MCPRunRecord) -> ServedAuthorityCandidates:
+    """The candidate rows the record's sealed document ranked, as served."""
+    return ServedAuthorityCandidates(
+        run_id=record.run_id,
+        items=authority_candidate_items(record.served_report),
+    )
+
+
+def _candidates_wire(served: ServedAuthorityCandidates) -> str:
+    return json.dumps([dict(item) for item in served.items], ensure_ascii=False)
+
+
+def _candidates_agree(
+    stored: ServedAuthorityCandidates, memory: ServedAuthorityCandidates
+) -> bool:
+    """Byte for byte on the wire: row order, key order, values, JSON types."""
+    return _candidates_wire(stored) == _candidates_wire(memory)
+
+
+def served_authority_candidates(
+    record: MCPRunRecord,
+) -> tuple[ServedAuthorityCandidates, RunStoreServingOutcome]:
+    """The candidate rows to page for one record, and where they came from."""
+    memory = memory_authority_candidates(record)
+    return _shadow_read(
+        memory,
+        read_run_store_authority_candidates(
+            root=record.root, link=record.execution.run_snapshot_link
+        ),
+        agrees=_candidates_agree,
+    )
+
+
+__all__ = [
+    "memory_authority_candidates",
+    "memory_slices",
+    "served_authority_candidates",
+    "served_slices",
+]

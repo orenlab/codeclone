@@ -37,13 +37,24 @@ that receipt.  A served answer that came over the bridge says so in
 ``detail``; a wrong, ambiguous or missing edge fails closed with a reason
 this vocabulary already has, and nothing is ever looked up "by a similar
 scope".
+
+**One road, two readings.**  What is read at the end of the road is the
+only thing that differs between the door's two operations: the three
+served slices (``search_graph``, ``get_implementation_context``) and the
+authority candidate rows (``check_authority(section="candidates")``).  The
+gates, the two roads, the one store open and the refusal vocabulary are
+written once, in :func:`_read_published`, and both operations are that
+function with a different reader -- so a consumer that moves onto the store
+cannot bring a second resolution with its own idea of what ``served``
+means.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, TypeVar
 
 from ..canonical.errors import (
     UNKNOWN_RUN_STORE_ABSENT,
@@ -54,13 +65,17 @@ from ..canonical.errors import (
     UnknownRunError,
 )
 from ..canonical.serving import (
+    ServedAuthorityCandidates,
     ServedRunSlices,
     ServedUnitLocation,
+    read_served_authority_candidates,
     read_served_run_slices,
 )
 from ..canonical.store import RunStore
 from ..core.canonical_snapshot import resolve_run_store_config, verified_linked_run
 from ..models import RunSnapshotLink
+
+_ReadT = TypeVar("_ReadT")
 
 SERVING_SOURCE_RUN_STORE: Final = "run_store"
 SERVING_SOURCE_MEMORY: Final = "memory"
@@ -175,6 +190,35 @@ def read_run_store_slices(
     it addresses are read on one handle, so a run swept between two opens
     cannot turn a verified edge into a wrong answer.
     """
+
+    def read(store: RunStore, store_run_id: str) -> ServedRunSlices:
+        return read_served_run_slices(store, store_run_id, root=root)
+
+    return _read_published(root=root, link=link, read=read)
+
+
+def read_run_store_authority_candidates(
+    *, root: Path, link: RunSnapshotLink | None
+) -> tuple[ServedAuthorityCandidates | None, RunStoreServingOutcome]:
+    """The store's candidate rows for one execution, or a typed reason for none.
+
+    The same gates, the same two roads and the same one store open as
+    :func:`read_run_store_slices` -- only the reading differs.  A run that
+    did not MEASURE its authority candidates (the semantic lane did not run
+    to completion) is refused ``unexpressible``: its candidate family is
+    empty in the store, and an empty family the run never measured is not
+    an answer of "no candidates".
+    """
+    return _read_published(root=root, link=link, read=read_served_authority_candidates)
+
+
+def _read_published(
+    *,
+    root: Path,
+    link: RunSnapshotLink | None,
+    read: Callable[[RunStore, str], _ReadT],
+) -> tuple[_ReadT | None, RunStoreServingOutcome]:
+    """The gates, then one store answer through ``read``, or a typed reason."""
     if link is None:
         return _memory(SERVING_REASON_NOT_PUBLISHED)
     config = resolve_run_store_config(root=root)
@@ -187,12 +231,15 @@ def read_run_store_slices(
     if not link.store_run_id and not link.report_run_identity:
         # Unevaluated and unstored: no half to complete, nothing to read.
         return _memory(SERVING_REASON_NOT_PUBLISHED, detail=link.outcome)
-    return _store_answer(config.path, root=root, link=link)
+    return _store_answer(config.path, link=link, read=read)
 
 
 def _store_answer(
-    path: Path, *, root: Path, link: RunSnapshotLink
-) -> tuple[ServedRunSlices | None, RunStoreServingOutcome]:
+    path: Path,
+    *,
+    link: RunSnapshotLink,
+    read: Callable[[RunStore, str], _ReadT],
+) -> tuple[_ReadT | None, RunStoreServingOutcome]:
     """One store open, one answer: at the record's address, or over the bridge."""
     store_run_id = link.store_run_id
     detail = ""
@@ -214,7 +261,7 @@ def _store_answer(
                     )
                 store_run_id = edge.run_id
                 detail = SERVING_DETAIL_IDENTITY_BRIDGE
-            slices = read_served_run_slices(store, store_run_id, root=root)
+            answer = read(store, store_run_id)
     except UnknownRunError as refusal:
         reason = (
             SERVING_REASON_STORE_ABSENT
@@ -246,7 +293,7 @@ def _store_answer(
             store_run_id=store_run_id,
             detail=str(refusal),
         )
-    return slices, RunStoreServingOutcome(
+    return answer, RunStoreServingOutcome(
         source=SERVING_SOURCE_RUN_STORE,
         reason=SERVING_REASON_SERVED,
         store_run_id=store_run_id,
@@ -271,7 +318,9 @@ __all__ = [
     "SERVING_SOURCE_MEMORY",
     "SERVING_SOURCE_RUN_STORE",
     "RunStoreServingOutcome",
+    "ServedAuthorityCandidates",
     "ServedRunSlices",
     "ServedUnitLocation",
+    "read_run_store_authority_candidates",
     "read_run_store_slices",
 ]

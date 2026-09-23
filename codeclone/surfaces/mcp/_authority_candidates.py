@@ -14,7 +14,13 @@ identity digest of the population it was cut from and the digest of the request
 that cut it, recomputed on every call and refused when it no longer matches.
 
 The report document is the ordering authority: candidates arrive already ranked
-by the document builder, and this module never re-sorts them.
+by the document builder, and this module never re-sorts them.  A page cut from
+the run store's rows (``_run_store_serving.served_authority_candidates``) is
+cut from rows the resolver already proved byte-identical to the document's, so
+the pager takes the ranked ROWS, never the document: both sources page through
+one function, :func:`authority_candidate_page`, and a cursor cut from one is
+honoured by the other.  Reading the rows out of a document is
+:func:`authority_candidate_items`, a separate step.
 """
 
 from __future__ import annotations
@@ -157,7 +163,7 @@ def _cursor_payload(
 
 def authority_candidate_page(
     *,
-    report_document: Mapping[str, object],
+    items: Sequence[Mapping[str, object]],
     run_id: str,
     cursor: str | None = None,
     page_size: int = DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE,
@@ -165,13 +171,16 @@ def authority_candidate_page(
 ) -> dict[str, object]:
     """Return one bounded page and the cursor that continues it.
 
+    ``items`` are the candidate rows already in the document builder's order
+    (:func:`authority_candidate_items`, or the run store's rows the resolver
+    proved identical to them); nothing here re-sorts them.
+
     Fail-closed by recompute: the identity of the population and of the request
     are derived again on every call and compared with the cursor. A run that
     moved under a held cursor is refused rather than answered from a stale
     offset.
     """
 
-    items = authority_candidate_items(report_document)
     total = len(items)
     identity = _identity_digest(items)
     request = _request_digest(run_id=run_id, section=section)

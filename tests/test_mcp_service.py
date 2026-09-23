@@ -18080,26 +18080,27 @@ def test_authority_candidate_cursor_refuses_another_request(tmp_path: Path) -> N
 
     from codeclone.surfaces.mcp._authority_candidates import (
         AuthorityCandidateCursorError,
+        authority_candidate_items,
         authority_candidate_page,
     )
 
-    document = _authority_candidate_document(60)
-    first = authority_candidate_page(
-        report_document=document, run_id="run-alpha", cursor=None
-    )
+    items = authority_candidate_items(_authority_candidate_document(60))
+    first = authority_candidate_page(items=items, run_id="run-alpha", cursor=None)
     cursor = cast("str", cast("dict[str, object]", first["continuation"])["cursor"])
 
     with pytest.raises(AuthorityCandidateCursorError):
-        authority_candidate_page(
-            report_document=document, run_id="run-beta", cursor=cursor
-        )
+        authority_candidate_page(items=items, run_id="run-beta", cursor=cursor)
 
 
 def test_authority_candidate_last_page_offers_no_cursor(tmp_path: Path) -> None:
-    from codeclone.surfaces.mcp._authority_candidates import authority_candidate_page
+    from codeclone.surfaces.mcp._authority_candidates import (
+        authority_candidate_items,
+        authority_candidate_page,
+    )
 
     page = authority_candidate_page(
-        report_document=_authority_candidate_document(5), run_id="run-alpha"
+        items=authority_candidate_items(_authority_candidate_document(5)),
+        run_id="run-alpha",
     )
 
     continuation = cast("dict[str, object]", page["continuation"])

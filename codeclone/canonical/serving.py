@@ -36,6 +36,16 @@ pure function of the served value's public fields, and each is pinned
 ORDER-SENSITIVELY against the live producer's own tuple on the serving
 corpus and on the self-repository, so a drift on either side reddens the
 measurement instead of hiding in a set comparison.
+
+**The authority candidates** are read here too, for the one report section
+the surface pages rather than slices (``check_authority`` with
+``section="candidates"``).  Their projection is NOT spelled here: the
+published row -- its class-B ``candidate_id`` and ``score``, the group
+conclusions the stored authority graph settles, the document builder's key
+and row order -- has one owner, ``canonical.authority_projection``, and
+this module only hands it the four families it needs, read bounded.  What
+this module adds is the witness the families cannot carry: whether the run
+MEASURED them at all.
 """
 
 from __future__ import annotations
@@ -43,8 +53,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
+from codeclone.canonical.authority_projection import candidate_rows_from_families
+from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
     FileId,
     ImportTarget,
@@ -60,12 +72,17 @@ from codeclone.canonical.model import (
     relationship_resolution_status,
 )
 from codeclone.canonical.store import (
+    FAMILY_ANALYSIS_POPULATION,
+    FAMILY_CANDIDATE,
     FAMILY_FILE_MODULE,
+    FAMILY_GRAPH_NODE,
     FAMILY_IMPORT_OBSERVATION,
     FAMILY_RELATIONSHIP_OBSERVATION,
+    FAMILY_SEMANTIC_EDGE,
     FAMILY_UNIT_SPAN,
     RunStore,
 )
+from codeclone.contracts.report_identity import PRODUCER_STATE_COMPLETE
 from codeclone.models import (
     DependencyBinding,
     DependencyMechanism,
@@ -279,10 +296,80 @@ def read_served_run_slices(
     )
 
 
+#: The producer family whose execution state witnesses the six authority
+#: families: the metric-registry name the analysis population records it
+#: under (``core.canonical_snapshot.producer_execution_population``).
+AUTHORITY_PRODUCER_FAMILY: Final = "semantic_authority"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedAuthorityCandidates:
+    """One run's authority candidates, as ``check_authority`` pages them.
+
+    ``items`` are the published candidate rows -- every column, in the
+    document builder's key order and candidate order -- and ``run_id``
+    names the store run they were read from.
+    """
+
+    run_id: str
+    items: tuple[Mapping[str, object], ...]
+
+
+def _require_measured_authority(store: RunStore, run_id: str) -> None:
+    """Refuse a candidate family the run never measured.
+
+    A canonical row family carries no "absent" marker: a run whose semantic
+    lane did not execute is published with six EMPTY authority families,
+    and the only witness that tells that emptiness from a measured one is
+    the run's execution population.  A read that skipped it would serve
+    "no candidates" for a population nobody looked at -- absence of
+    execution projected into a zero, which the population law forbids.
+    Only ``complete`` is a measurement; every other state, and a run that
+    carries no population record at all, is refused typed.
+    """
+    states = {
+        family: state
+        for population in store.read_family(run_id, FAMILY_ANALYSIS_POPULATION)
+        for family, state in population.producer_states
+    }
+    state = states.get(AUTHORITY_PRODUCER_FAMILY, "unwitnessed")
+    if state != PRODUCER_STATE_COMPLETE:
+        raise CanonicalModelError(
+            f"run {run_id[:12]} carries no measured authority candidate "
+            f"population: producer {AUTHORITY_PRODUCER_FAMILY} is {state}"
+        )
+
+
+def read_served_authority_candidates(
+    store: RunStore, run_id: str
+) -> ServedAuthorityCandidates:
+    """Read one run's candidate rows, bounded, and project them.
+
+    The execution witness first, then the four families the one owner of
+    the reconstruction needs (``canonical.authority_projection``): the
+    candidate natural keys, the authority graph's nodes and edges that
+    settle the group conclusions, and the FILE-MODULE relation that heads
+    the producer keys.  Never :meth:`RunStore.read_run`.  A run the store
+    does not hold refuses typed from the first read (``UnknownRunError``);
+    a population that was not measured refuses as unexpressible.
+    """
+    _require_measured_authority(store, run_id)
+    items = candidate_rows_from_families(
+        candidates=store.read_family(run_id, FAMILY_CANDIDATE),
+        graph_nodes=store.read_family(run_id, FAMILY_GRAPH_NODE),
+        semantic_edges=store.read_family(run_id, FAMILY_SEMANTIC_EDGE),
+        file_modules=store.read_family(run_id, FAMILY_FILE_MODULE),
+    )
+    return ServedAuthorityCandidates(run_id=run_id, items=items)
+
+
 __all__ = [
+    "AUTHORITY_PRODUCER_FAMILY",
+    "ServedAuthorityCandidates",
     "ServedRunSlices",
     "ServedUnitLocation",
     "module_dep_order_key",
+    "read_served_authority_candidates",
     "read_served_run_slices",
     "relationship_record_order_key",
 ]

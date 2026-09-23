@@ -99,7 +99,7 @@ Narrower alternatives to `list_findings` when only one finding family is needed,
 Return clone / cohesion / complexity / coupling / dead-code findings respectively.
 
 **`check_authority`**
-Return active canonical semantic-authority violation findings for one run, with deterministic ordering and bounded detail. See [Semantic authority governance](../concepts/semantic-authority.md).
+Return active canonical semantic-authority violation findings for one run, with deterministic ordering and bounded detail. The discovery candidates are reached only as digest-bound pages under `section="candidates"`, and every candidate page states where its rows came from under `serving` — the provenance block `get_implementation_context` carries, with the run store's rows served only when they are byte for byte the report's own. See [Semantic authority governance](../concepts/semantic-authority.md).
 
 **`get_finding(finding_id, detail_level)`**
 Return a single canonical finding group by short or full id. Unknown ids return a structured `status="not_found"` response instead of an error.

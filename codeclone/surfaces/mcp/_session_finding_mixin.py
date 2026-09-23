@@ -23,6 +23,7 @@ from ._authority_candidates import (
     AuthorityCandidateCursorError,
     authority_candidate_page,
 )
+from ._run_store_serving import served_authority_candidates
 from ._session_shared import (
     _CHECK_TO_DIMENSION,
     _CONFIDENCE_WEIGHT,
@@ -2064,16 +2065,24 @@ class _MCPSessionFindingMixin:
         if validated_section == "candidates":
             # Discovery is unbounded by nature, so it is never returned whole:
             # the population is reachable only through digest-bound pages.
+            # ONE run-store resolution per request: the rows the page is cut
+            # from and the ``serving`` it states are that one answer.
+            candidates, serving = served_authority_candidates(record)
             try:
                 page = authority_candidate_page(
-                    report_document=record.served_report,
+                    items=candidates.items,
                     run_id=record.run_id,
                     cursor=cursor,
                     page_size=page_size,
                 )
             except AuthorityCandidateCursorError as exc:
                 raise MCPServiceContractError(str(exc)) from exc
-            return {"check": "authority", "run_id": record.run_id, **page}
+            return {
+                "check": "authority",
+                "run_id": record.run_id,
+                **page,
+                "serving": serving.as_payload(),
+            }
         findings = self._query_findings(
             record=record,
             family="authority",

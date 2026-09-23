@@ -76,7 +76,7 @@ per-function location table.  With that, ``authority.violations`` joins
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Final
 
 from codeclone.canonical.authority_identity import (
@@ -91,6 +91,9 @@ from codeclone.canonical.identity import ProducerRoot, SourceLocation, SymbolId
 from codeclone.canonical.model import (
     CandidateRow,
     CanonicalModel,
+    FileModuleRelation,
+    GraphNodeRow,
+    SemanticEdge,
     SinkRoleRow,
     ViolationRow,
 )
@@ -157,19 +160,39 @@ class _AuthorityGraphView:
 
     def __init__(self, model: CanonicalModel) -> None:
         facts = model.facts.analysis
-        self._signature = {
-            node.function: node.effect_signature for node in facts.graph_nodes
-        }
-        self._resolution = {
-            node.function: node.resolution_state for node in facts.graph_nodes
-        }
-        self._roots = {node.function: node.root_set for node in facts.graph_nodes}
+        self._settle(facts.graph_nodes, facts.semantic_edges)
+
+    @classmethod
+    def of_families(
+        cls,
+        graph_nodes: Iterable[GraphNodeRow],
+        semantic_edges: Iterable[SemanticEdge],
+    ) -> _AuthorityGraphView:
+        """The same view over the two families alone, read bounded.
+
+        A serving reader holds the families it read, never a model: a
+        model assembled around two families would present the nineteen it
+        did not read as measured empty.  The view needs exactly these two.
+        """
+
+        view = cls.__new__(cls)
+        view._settle(graph_nodes, semantic_edges)
+        return view
+
+    def _settle(
+        self,
+        graph_nodes: Iterable[GraphNodeRow],
+        semantic_edges: Iterable[SemanticEdge],
+    ) -> None:
+        nodes = tuple(graph_nodes)
+        self._signature = {node.function: node.effect_signature for node in nodes}
+        self._resolution = {node.function: node.resolution_state for node in nodes}
+        self._roots = {node.function: node.root_set for node in nodes}
         self._unresolved = {
-            node.function: node.resolution_state == "unavailable"
-            for node in facts.graph_nodes
+            node.function: node.resolution_state == "unavailable" for node in nodes
         }
         edges: dict[SymbolId, list[SymbolId]] = {}
-        for edge in facts.semantic_edges:
+        for edge in semantic_edges:
             edges.setdefault(edge.source, []).append(edge.target)
         self._edges = edges
 
@@ -337,17 +360,39 @@ def candidate_projection_rows(
     """Rebuild the published candidate rows from canonical facts alone."""
 
     facts = model.facts.analysis
-    graph = _AuthorityGraphView(model)
+    return candidate_rows_from_families(
+        candidates=facts.candidates,
+        graph_nodes=facts.graph_nodes,
+        semantic_edges=facts.semantic_edges,
+        file_modules=model.file_modules,
+    )
+
+
+def candidate_rows_from_families(
+    *,
+    candidates: Iterable[CandidateRow],
+    graph_nodes: Iterable[GraphNodeRow],
+    semantic_edges: Iterable[SemanticEdge],
+    file_modules: Iterable[FileModuleRelation],
+) -> tuple[dict[str, object], ...]:
+    """The published candidate rows from the four families they need.
+
+    The one reconstruction, whichever reader holds the facts: the model
+    path above hands its families in, and a bounded store read hands in the
+    same four families read one at a time (``canonical.serving``), so the
+    served page and the equivalence acceptance cannot be answered by two
+    spellings of one projection.
+    """
+
+    rows = tuple(candidates)
+    graph = _AuthorityGraphView.of_families(graph_nodes, semantic_edges)
     legacy = legacy_symbol_keys(
-        {producer for row in facts.candidates for producer in row.producer_set},
-        model.file_modules,
+        {producer for row in rows for producer in row.producer_set},
+        frozenset(file_modules),
     )
     return tuple(
         sorted(
-            (
-                _candidate_row(row, graph=graph, legacy=legacy)
-                for row in facts.candidates
-            ),
+            (_candidate_row(row, graph=graph, legacy=legacy) for row in rows),
             key=_document_order,
         )
     )
@@ -565,6 +610,7 @@ __all__ = [
     "VIOLATION_ROW_PROJECTION_CONTRACT",
     "VIOLATION_UNPROJECTED_COLUMNS",
     "candidate_projection_rows",
+    "candidate_rows_from_families",
     "producer_source_kind",
     "sink_projection_rows",
     "violation_projection_rows",

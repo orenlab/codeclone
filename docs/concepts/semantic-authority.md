@@ -93,6 +93,15 @@ population it was cut from, so a cursor from another projection, another
 ordering, or a changed run is refused rather than silently resumed against
 different data.
 
+Every candidate page says where its rows came from under `serving`, the same
+provenance block `get_implementation_context` carries. With the run store
+enabled, the rows are rebuilt from the stored run and served only when they are
+byte for byte the report's own rows; any disagreement is answered from the
+report and named `divergent`. A run whose semantic lane did not complete stored
+no candidate population, and the store says so (`unexpressible`) rather than
+answering with an empty list. The page, the cursor and the population digest
+are the same whichever source served them.
+
 ## Gating
 
 `--fail-on-authority-violation` exits 3 when a governed contract has a violation.

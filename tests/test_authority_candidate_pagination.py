@@ -47,7 +47,7 @@ def _walk(
     cursor: str | None = None
     while True:
         page = authority_candidate_page(
-            report_document=document,
+            items=authority_candidate_items(document),
             run_id=run_id,
             cursor=cursor,
             page_size=page_size,
@@ -66,7 +66,7 @@ def _first_page_cursor(document: dict[str, object], *, run_id: str) -> str:
     """The continuation cut from the first single-row page of ``document``."""
 
     first = authority_candidate_page(
-        report_document=document, run_id=run_id, page_size=1
+        items=authority_candidate_items(document), run_id=run_id, page_size=1
     )
     continuation = first["continuation"]
     assert isinstance(continuation, dict)
@@ -119,10 +119,16 @@ def test_a_cursor_cut_from_the_report_still_opens_the_rebuilt_page(
     cursor = _first_page_cursor(document, run_id=run_id)
 
     from_report = authority_candidate_page(
-        report_document=document, run_id=run_id, cursor=cursor, page_size=1
+        items=authority_candidate_items(document),
+        run_id=run_id,
+        cursor=cursor,
+        page_size=1,
     )
     from_store = authority_candidate_page(
-        report_document=rebuilt, run_id=run_id, cursor=cursor, page_size=1
+        items=authority_candidate_items(rebuilt),
+        run_id=run_id,
+        cursor=cursor,
+        page_size=1,
     )
     assert orjson.dumps(from_store) == orjson.dumps(from_report)
 
@@ -150,5 +156,8 @@ def test_a_cursor_from_another_population_is_refused_by_both_documents(
         ][1:]
         with pytest.raises(AuthorityCandidateCursorError, match="no longer matches"):
             authority_candidate_page(
-                report_document=moved, run_id=run_id, cursor=cursor, page_size=1
+                items=authority_candidate_items(moved),
+                run_id=run_id,
+                cursor=cursor,
+                page_size=1,
             )
