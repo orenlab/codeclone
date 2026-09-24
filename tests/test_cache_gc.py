@@ -31,6 +31,7 @@ from codeclone.models import (
     GC_COLLECT_REASONS,
     GC_HOLD_REASONS,
     GC_HOLD_RETAINED,
+    GcJobReport,
 )
 from tests._cache_store_fixtures import (
     break_identity_checksum,
@@ -152,6 +153,81 @@ def test_the_size_bound_evicts_and_says_it_was_the_budget(tmp_path: Path) -> Non
 
     assert dict(report.detail)["evicted_for_budget"] > 0  # type: ignore[attr-defined]
     assert dict(report.detail)["expired_by_ttl"] == 0  # type: ignore[attr-defined]
+
+
+def _store_of_equal_rows(tmp_path: Path) -> Path:
+    """The cold store, every row declaring the same 100 content bytes.
+
+    Equal sizes make the budget arithmetic readable off the test: three rows
+    are 300 bytes, and the eviction order is ``alpha``, ``beta``, ``gamma``.
+    """
+
+    cache_path = _cold_store(tmp_path)
+    for wire_path in _MODULES:
+        set_identity_column(cache_path, wire_path, "neutral_bytes", 100)
+        set_identity_column(cache_path, wire_path, "dependent_bytes", 0)
+    return cache_path
+
+
+def test_the_budget_stops_evicting_once_the_store_fits(tmp_path: Path) -> None:
+    """Oldest first, and only until the bound holds -- not the whole backlog.
+
+    300 bytes against a 200-byte bound is one row too many. Taking ``alpha``
+    lands exactly on the bound, which fits: the comparison is inclusive.
+    """
+
+    cache_path = _store_of_equal_rows(tmp_path)
+
+    report = _sweep(cache_path, max_bytes=200)
+
+    assert dict(report.detail)["evicted_for_budget"] == 1  # type: ignore[attr-defined]
+    assert set(read_identity_columns(cache_path)) == {"beta.py", "gamma.py"}
+
+
+def _budget_sweep_over_a_corrupt_row(tmp_path: Path) -> tuple[GcJobReport, set[str]]:
+    """``alpha`` is corrupt and 100 bytes of a 300-byte store bound at 250."""
+
+    cache_path = _store_of_equal_rows(tmp_path)
+    break_identity_checksum(cache_path, "alpha.py")
+    report = _sweep(cache_path, max_bytes=250)
+    assert isinstance(report, GcJobReport)
+    return report, set(read_identity_columns(cache_path))
+
+
+def test_a_row_doomed_for_two_reasons_is_collected_once(tmp_path: Path) -> None:
+    """The budget skips a row the sweep already took, so no row counts twice.
+
+    Every row that left the store is attributed to exactly one reason; the
+    report cannot even be built otherwise, because it must balance.
+    """
+
+    report, remaining = _budget_sweep_over_a_corrupt_row(tmp_path)
+
+    collected = dict(report.collected)
+    assert collected[GC_COLLECT_CORRUPT] == 1
+    assert sum(collected.values()) == len(_MODULES) - len(remaining)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "DEFECT (coverage-push-gate wave, 2026-09-24): _evict_to_budget skips "
+        "rows already doomed without subtracting their bytes, so it evicts a "
+        "healthy row to pay for bytes the same sweep is already freeing"
+    ),
+)
+def test_a_row_already_doomed_pays_its_own_bytes_toward_the_budget(
+    tmp_path: Path,
+) -> None:
+    """Deleting the corrupt row alone brings 300 bytes to 200, inside 250.
+
+    So nothing healthy has to go. Measured on the current code: ``beta`` is
+    evicted as well, and the next run re-analyses a file whose entry was fine.
+    """
+
+    _report, remaining = _budget_sweep_over_a_corrupt_row(tmp_path)
+
+    assert remaining == {"beta.py", "gamma.py"}
 
 
 def test_the_sweep_never_takes_the_current_generation(tmp_path: Path) -> None:
