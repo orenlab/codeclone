@@ -136,11 +136,11 @@ than through the import-time gate.
 
 ## Commands
 
-Five subcommand trees sit in front of the analysis parser: `setup`,
-`analytics`, `baseline`, `memory`, and `observability`. They are dispatched
-before the analysis options are parsed, so each tree owns its own parser and
-prints its own help. `codeclone --help` lists the five trees but not their
-verbs; to see the verbs of one tree, ask that tree:
+Six subcommand trees sit in front of the analysis parser: `setup`,
+`analytics`, `baseline`, `memory`, `observability`, and `run-store`. They are
+dispatched before the analysis options are parsed, so each tree owns its own
+parser and prints its own help. `codeclone --help` lists the six trees but not
+their verbs; to see the verbs of one tree, ask that tree:
 
 ```bash
 codeclone <command> --help
@@ -397,6 +397,37 @@ codeclone observability trace --html trace.html
 For the trace contract and what the store retains, see
 [Platform observability](observability.md).
 
+### `run-store [subcommand]`
+
+Migrate the run store schema to this version.
+
+The run store is CodeClone's service database of analysis runs. Opening an
+existing store never changes its schema: when a store written by an earlier
+build lacks a table or an index this build declares, every reader and every
+publisher refuses to open it, leaves the file exactly as it was, and names the
+one command below with the store's path. A store written by another
+generation (a different stored witness) is refused as before and is not
+migrated by this command either.
+
+**Subcommands:**
+- `migrate`: Add the tables and indexes this codeclone declares and the store lacks
+
+#### `run-store migrate`
+
+**Options:**
+- `--path PATH` (required): Run store file to migrate (the path a refusal names)
+
+The command reads the store's witness first, under the store's write lock. It
+adds only the missing tables and indexes; the witness, the storage revision and
+every stored run are unchanged. It prints what it added and exits 0, or says
+the schema is already complete and exits 0 without writing. A path that holds
+no store, and a store of another generation, are refused with the same message
+an open would print, exit 2, and are not written.
+
+```bash
+codeclone run-store migrate --path .codeclone/db/runs.sqlite3
+```
+
 ## `codeclone-mcp` (MCP server launcher)
 
 Installing `codeclone[mcp]` adds a second console script, `codeclone-mcp`,
@@ -413,7 +444,7 @@ codeclone-mcp
 | `--host HOST` | Bind host for `streamable-http`. Default: `127.0.0.1` |
 | `--port PORT` | Bind port for `streamable-http`. Default: `8000` |
 | `--allow-remote` | Allow binding `streamable-http` to a non-loopback host. HTTP always requires `CODECLONE_MCP_AUTH_TOKEN` |
-| `--history-limit N` | In-memory analysis runs retained by the server (1–10). Default: `4` |
+| `--history-limit N` | In-memory analysis runs retained by the server (2–10; a change-control cycle holds two runs). Default: `4` |
 | `--json-response` | JSON responses for `streamable-http`. Default: enabled |
 | `--stateless-http` | Stateless Streamable HTTP mode. Default: enabled |
 | `--debug` | FastMCP debug mode. Default: disabled |

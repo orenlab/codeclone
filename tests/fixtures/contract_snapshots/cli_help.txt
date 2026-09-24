@@ -12,6 +12,7 @@ Commands (run `codeclone <command> --help` for each tree's verbs):
   baseline              Manage the native baseline publication state.
   memory                Query and curate engineering memory.
   observability         Inspect recorded runtime traces (maintainer only).
+  run-store             Migrate the run store schema to this version.
   setup                 Initialize or inspect repository readiness.
 
 Target:
