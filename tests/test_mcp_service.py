@@ -5263,28 +5263,31 @@ def test_mcp_service_production_triage_decorates_only_returned_hotspots(
 
 def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
     first_root, second_root = _two_clone_fixture_roots(tmp_path)
+    third_root = tmp_path / "third"
+    third_root.mkdir()
+    _write_clone_fixture(third_root)
     # Identical trees now hash identically whatever the directory is named, so the
-    # two runs must differ by content for eviction to be observable at all.
+    # runs must differ by content for eviction to be observable at all.
     second_root.joinpath("pkg", "extra.py").write_text(
         "def gamma(value: int) -> int:\n    return value * 2\n",
         "utf-8",
     )
-    service = CodeCloneMCPService(history_limit=1)
-
-    first = service.analyze_repository(
-        MCPAnalysisRequest(
-            root=str(first_root),
-            respect_pyproject=False,
-        )
+    third_root.joinpath("pkg", "extra.py").write_text(
+        "def delta(value: int) -> int:\n    return value * 3\n",
+        "utf-8",
     )
-    second = service.analyze_repository(
-        MCPAnalysisRequest(
-            root=str(second_root),
-            respect_pyproject=False,
+    # The smallest history the server accepts: two runs, the third evicts.
+    service = CodeCloneMCPService(history_limit=2)
+
+    first, second, third = (
+        service.analyze_repository(
+            MCPAnalysisRequest(root=str(root), respect_pyproject=False)
         )
+        for root in (first_root, second_root, third_root)
     )
 
-    assert service.get_run_summary()["run_id"] == second["run_id"]
+    assert service.get_run_summary()["run_id"] == third["run_id"]
+    assert service.get_run_summary(str(second["run_id"]))["run_id"] == second["run_id"]
     with pytest.raises(MCPRunNotFoundError):
         service.get_run_summary(str(first["run_id"]))
 
@@ -6100,26 +6103,33 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     with pytest.raises(MCPServiceError):
         mcp_shared_mod._load_report_document_payload("[]")
 
-    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=2)
     first = _dummy_run_record(tmp_path, "first")
     second = _dummy_run_record(tmp_path, "second")
+    third = _dummy_run_record(tmp_path, "third")
     assert store.register(first) is first
     assert store.resolve_any_root().run_id == "first"
     store.register(second)
-    assert tuple(record.run_id for record in store.records()) == ("second",)
+    store.register(third)
+    assert tuple(record.run_id for record in store.records()) == ("second", "third")
     with pytest.raises(MCPRunNotFoundError):
         store.resolve_any_root("first")
 
-    pinned_store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    pinned_store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=2)
     pinned_store.register(first)
     pinned_store.pin_execution(first.execution.execution_event_id)
     pinned_store.register(second)
+    pinned_store.register(third)
     assert tuple(record.run_id for record in pinned_store.records()) == (
         "first",
         "second",
+        "third",
     )
     pinned_store.unpin("first", root=tmp_path)
-    assert tuple(record.run_id for record in pinned_store.records()) == ("second",)
+    assert tuple(record.run_id for record in pinned_store.records()) == (
+        "second",
+        "third",
+    )
     with pytest.raises(ValueError):
         mcp_shared_mod.CodeCloneMCPRunStore(history_limit=11)
 
@@ -7228,7 +7238,7 @@ def test_mcp_service_patch_contract_renews_workspace_intent_lease(
 def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
     tmp_path: Path,
 ) -> None:
-    service = CodeCloneMCPService(history_limit=1)
+    service = CodeCloneMCPService(history_limit=2)
     record = _blast_radius_run_record(tmp_path)
     service._runs.register(record)
 
@@ -7262,6 +7272,9 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
 
     service._runs.register(
         _blast_radius_run_record(tmp_path, run_id="fedcba9876543210")
+    )
+    service._runs.register(
+        _blast_radius_run_record(tmp_path, run_id="0123456789abcdef")
     )
     service._prune_session_state()
     assert intent_id in service._active_intents
@@ -18117,7 +18130,8 @@ def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
     on the record -- the one genuinely unbounded retention path in the server.
     """
 
-    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    history_limit = mcp_shared_mod.MIN_MCP_HISTORY_LIMIT
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=history_limit)
     pinned: list[str] = []
     for index in range(mcp_shared_mod.MAX_PINNED_MCP_RUNS + 3):
         run_id = f"run-{index:03d}"
@@ -18126,7 +18140,7 @@ def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
         pinned.append(run_id)
 
     retained = tuple(record.run_id for record in store.records())
-    assert len(retained) <= mcp_shared_mod.MAX_PINNED_MCP_RUNS + 1, (
+    assert len(retained) <= mcp_shared_mod.MAX_PINNED_MCP_RUNS + history_limit, (
         f"pinned runs grew without bound: {len(retained)} retained"
     )
     # The newest pins survive; the oldest abandoned ones are released.
@@ -18137,7 +18151,9 @@ def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
 def test_pinning_keeps_the_most_recent_pins_protected(tmp_path: Path) -> None:
     """Bounding pins must not evict a live intent's run under the LRU."""
 
-    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    store = mcp_shared_mod.CodeCloneMCPRunStore(
+        history_limit=mcp_shared_mod.MIN_MCP_HISTORY_LIMIT
+    )
     active = store.register(_dummy_run_record(tmp_path, "active"))
     store.pin_execution(active.execution.execution_event_id)
     for index in range(6):

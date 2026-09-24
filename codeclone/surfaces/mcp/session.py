@@ -61,6 +61,7 @@ from ._session_shared import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
     MAX_MCP_HISTORY_LIMIT,
+    MIN_MCP_HISTORY_LIMIT,
     AnalysisMode,
     CacheStatus,
     CodeCloneMCPRunStore,
@@ -140,6 +141,7 @@ def _reachable_qualnames(project_metrics: object) -> frozenset[str]:
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
     "MAX_MCP_HISTORY_LIMIT",
+    "MIN_MCP_HISTORY_LIMIT",
     "AnalysisMode",
     "DetailLevel",
     "MCPAnalysisRequest",

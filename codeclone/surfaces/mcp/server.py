@@ -189,6 +189,7 @@ from .service import CodeCloneMCPService
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
     MAX_MCP_HISTORY_LIMIT,
+    MIN_MCP_HISTORY_LIMIT,
     AnalysisMode,
     MCPAnalysisRequest,
     MCPGateRequest,
@@ -1619,7 +1620,8 @@ def _history_limit_arg(value: str) -> int:
         parsed = int(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"history limit must be an integer between 1 and {MAX_MCP_HISTORY_LIMIT}."
+            "history limit must be an integer between "
+            f"{MIN_MCP_HISTORY_LIMIT} and {MAX_MCP_HISTORY_LIMIT}."
         ) from exc
     try:
         return _validated_history_limit(parsed)
@@ -1667,7 +1669,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MCP_HISTORY_LIMIT,
         help=(
             "Maximum number of in-memory analysis runs retained by the server "
-            f"(1-{MAX_MCP_HISTORY_LIMIT}, default: {DEFAULT_MCP_HISTORY_LIMIT})."
+            f"({MIN_MCP_HISTORY_LIMIT}-{MAX_MCP_HISTORY_LIMIT}, "
+            f"default: {DEFAULT_MCP_HISTORY_LIMIT})."
         ),
     )
     parser.add_argument(

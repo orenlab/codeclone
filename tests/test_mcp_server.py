@@ -26,6 +26,7 @@ from codeclone.surfaces.mcp.messages.patch_contract import (
     next_step_hint,
 )
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
+from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests.memory_fixtures import (
     mcp_refusal_next_steps,
@@ -911,6 +912,37 @@ def test_mcp_server_parser_rejects_excessive_history_limit() -> None:
     parser = mcp_server.build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["--history-limit", "11"])
+
+
+def test_mcp_server_refuses_a_run_history_shorter_than_two(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The lower bound is 2 (ruling 2026-09-23): a change-control cycle holds
+    two runs at once, its before-run and its after-run, and a history of one
+    evicts the run the cycle verifies against.  Refused the way the server
+    refuses every bad flag -- exit 2, nothing on stdout, the reason and the
+    usable range on stderr -- and by the same owner for every entry, the
+    flag and a programmatic ``history_limit`` alike."""
+    parser = mcp_server.build_parser()
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as caught:
+        parser.parse_args(["--history-limit", "1"])
+    out, err = capsys.readouterr()
+    assert (caught.value.code, out) == (2, "")
+    assert "argument --history-limit: history_limit must be between 2 and 10" in err
+    assert "before-run and its after-run" in err
+    with pytest.raises(ValueError, match="history_limit must be between 2 and 10"):
+        CodeCloneMCPService(history_limit=1)
+
+
+def test_mcp_server_accepts_a_run_history_of_two() -> None:
+    """The other side of the same bound: 2 is the smallest history a
+    change-control cycle can run in, and it is accepted on every entry."""
+    assert (
+        mcp_server.build_parser().parse_args(["--history-limit", "2"]).history_limit
+        == 2
+    )
+    assert CodeCloneMCPService(history_limit=2)._runs._history_limit == 2
 
 
 def test_mcp_server_main_rejects_non_loopback_host_without_opt_in(

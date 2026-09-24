@@ -288,6 +288,10 @@ _VALID_HELP_TOPICS = frozenset(
 )
 _VALID_HELP_DETAILS = frozenset({"compact", "normal"})
 DEFAULT_MCP_HISTORY_LIMIT = 4
+# The smallest run history a change-control cycle can work in (ruling
+# 2026-09-23): a cycle holds two runs at once, its before-run and its
+# after-run, and a history of one evicts the run it verifies against.
+MIN_MCP_HISTORY_LIMIT = 2
 MAX_MCP_HISTORY_LIMIT = 10
 # Pinned runs are exempt from the history LRU, so without a ceiling an intent
 # left behind on a failure path retains its whole run for the life of the
@@ -578,9 +582,14 @@ def _load_report_document_payload(report_json: str) -> dict[str, object]:
 
 
 def _validated_history_limit(history_limit: int) -> int:
-    if not 1 <= history_limit <= MAX_MCP_HISTORY_LIMIT:
+    """The one owner of the run-history bounds, for every entry to them."""
+    if not MIN_MCP_HISTORY_LIMIT <= history_limit <= MAX_MCP_HISTORY_LIMIT:
         raise ValueError(
-            f"history_limit must be between 1 and {MAX_MCP_HISTORY_LIMIT}."
+            f"history_limit must be between {MIN_MCP_HISTORY_LIMIT} and "
+            f"{MAX_MCP_HISTORY_LIMIT}: a change-control cycle holds its "
+            "before-run and its after-run at once, so a shorter history evicts "
+            f"the run it verifies against; pass {MIN_MCP_HISTORY_LIMIT} or more "
+            f"(default {DEFAULT_MCP_HISTORY_LIMIT})."
         )
     return history_limit
 
@@ -1183,6 +1192,7 @@ __all__ = [
     "FAMILY_DEAD_CODE",
     "FAMILY_DESIGN",
     "FAMILY_STRUCTURAL",
+    "MIN_MCP_HISTORY_LIMIT",
     "REMOVED_REPORT_SECTIONS",
     "REMOVED_RESOURCE_SUFFIXES",
     "REPORT_SCHEMA_VERSION",
