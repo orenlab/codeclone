@@ -276,6 +276,13 @@ def _store_answer(
         # its digest belongs to, and it gets the same word.
         return _memory(SERVING_REASON_INTEGRITY, detail=str(refusal))
     except StoreCompatibilityError as refusal:
+        # Also the incomplete-schema refusal (``StoreSchemaIncompleteError``
+        # narrows this class): a store of this generation that lacks a table
+        # or an index this build declares cannot be opened as it stands, the
+        # same question a foreign witness answers, and nothing in it is
+        # corrupt -- so ``incompatible_generation``, never ``integrity``.  The
+        # detail carries the refusal's own words, the one command that
+        # completes the store included; the door runs it for nobody.
         return _memory(
             SERVING_REASON_INCOMPATIBLE_GENERATION,
             store_run_id=store_run_id,

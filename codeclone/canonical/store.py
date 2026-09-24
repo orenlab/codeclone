@@ -71,11 +71,12 @@ import json
 import sqlite3
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Generic, Protocol, TypeVar
+from urllib.parse import quote
 
 from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.codec import (
@@ -98,6 +99,7 @@ from codeclone.canonical.errors import (
     StoreCompatibilityError,
     StoreFenceError,
     StoreIntegrityError,
+    StoreSchemaIncompleteError,
     UnknownRunError,
 )
 from codeclone.canonical.export import (
@@ -318,6 +320,30 @@ CREATE TABLE IF NOT EXISTS run_report_links (
     PRIMARY KEY (report_run_identity, run_pk)
 ) WITHOUT ROWID;
 """
+
+# Secondary indexes, created after every table they cover.  Like the tables
+# they are executed in exactly two places -- the transaction that creates a
+# NEW store together with its witness, and the explicit migration verb
+# (:func:`migrate_store_schema`) -- and never by an open of an existing file:
+# an open reads the witness first and refuses a schema it finds incomplete
+# (ruling 2026-09-23: one logic, no variants; a read that writes is a
+# mutation on read).  An index holds no row and answers no read differently,
+# and the witness compares layer revisions, never schema text, so adding one
+# moves no storage revision: a store written without it is completed by the
+# verb and keeps its witness, its epoch and every run.
+_INDEXES: Final[tuple[str, ...]] = (
+    # ``run_members.object_pk`` is the child key of the foreign key into
+    # ``objects``, and the sweep deletes parents.  The table's key leads with
+    # ``run_pk``, so without this index every collected object cost one full
+    # scan of ``run_members`` for its foreign-key check, and the sweep's
+    # ``NOT IN (SELECT object_pk FROM run_members)`` built a transient copy
+    # of the column.  Measured on one self-repository store (3 runs, 921k
+    # memberships, 1495 objects collected): 1.397e9 -> 2.03e7 VM
+    # instructions per sweep.  Every member read keeps its plan (its
+    # ``run_pk`` equality still leads through the primary key) and its
+    # ``ORDER BY``.
+    "CREATE INDEX IF NOT EXISTS idx_run_members_object ON run_members(object_pk)",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1961,8 +1987,32 @@ def _contract_epoch() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _open_witness(cursor: sqlite3.Cursor, *, path: str) -> tuple[int, str, str]:
-    """Create-or-verify the layered witness; returns the fence triple.
+def _write_witness(cursor: sqlite3.Cursor) -> tuple[int, str, str]:
+    """Write the layered witness of a store being CREATED; returns its fence.
+
+    Called only from the creation transaction, after the DDL and before its
+    ``COMMIT``: a new store and its witness become visible together or not
+    at all, so no file of this build ever holds a schema without a witness.
+    """
+    for layer, revision, role in _WITNESS_LAYERS:
+        cursor.execute(
+            "INSERT INTO witness (layer, revision, role) VALUES (?, ?, ?)",
+            (layer, revision, role),
+        )
+    epoch = _contract_epoch()
+    cursor.execute(
+        "INSERT INTO store_meta "
+        "(id, store_epoch, storage_schema_revision, contract_epoch) "
+        "VALUES (1, 1, ?, ?)",
+        (STORAGE_SCHEMA_REVISION, epoch),
+    )
+    return (1, STORAGE_SCHEMA_REVISION, epoch)
+
+
+def _verify_witness(
+    cursor: sqlite3.Cursor, objects: frozenset[tuple[str, str]], *, path: str
+) -> tuple[int, str, str]:
+    """Verify the witness of an EXISTING store; returns the fence triple.
 
     Law 7: an existing store whose witness is not this process's declared
     generation is refused, never reinterpreted.  The refusal names every
@@ -1973,28 +2023,25 @@ def _open_witness(cursor: sqlite3.Cursor, *, path: str) -> tuple[int, str, str]:
     "diverging layers: [...]" alone told them nothing about which side was
     which (measured 2026-09-07 on the first real generation-1 store opened
     by the revision-2 build).
+
+    A file that holds schema objects and no witness states no generation at
+    all, so every declared layer diverges from ``None``.  It is refused the
+    same way: writing a witness into it would be creating a store inside a
+    file that already holds somebody's schema.
     """
-    meta = cursor.execute(
-        "SELECT store_epoch, storage_schema_revision, contract_epoch "
-        "FROM store_meta WHERE id = 1"
-    ).fetchone()
-    if meta is None:
-        for layer, revision, role in _WITNESS_LAYERS:
-            cursor.execute(
-                "INSERT INTO witness (layer, revision, role) VALUES (?, ?, ?)",
-                (layer, revision, role),
+    meta = None
+    stored: dict[str, str] = {}
+    if {("table", "store_meta"), ("table", "witness")} <= objects:
+        meta = cursor.execute(
+            "SELECT store_epoch, storage_schema_revision, contract_epoch "
+            "FROM store_meta WHERE id = 1"
+        ).fetchone()
+        if meta is not None:
+            stored = dict(
+                cursor.execute("SELECT layer, revision FROM witness ORDER BY layer")
             )
-        epoch = _contract_epoch()
-        cursor.execute(
-            "INSERT INTO store_meta "
-            "(id, store_epoch, storage_schema_revision, contract_epoch) "
-            "VALUES (1, 1, ?, ?)",
-            (STORAGE_SCHEMA_REVISION, epoch),
-        )
-        return (1, STORAGE_SCHEMA_REVISION, epoch)
-    stored = dict(cursor.execute("SELECT layer, revision FROM witness ORDER BY layer"))
     declared = {layer: revision for layer, revision, _role in _WITNESS_LAYERS}
-    if stored != declared:
+    if meta is None or stored != declared:
         diverging = tuple(
             (layer, stored.get(layer), declared.get(layer))
             for layer in sorted(set(stored) | set(declared))
@@ -2012,6 +2059,126 @@ def _open_witness(cursor: sqlite3.Cursor, *, path: str) -> tuple[int, str, str]:
             path=path,
         )
     return (int(meta[0]), str(meta[1]), str(meta[2]))
+
+
+def _schema_objects(cursor: sqlite3.Cursor) -> frozenset[tuple[str, str]]:
+    """The named tables and indexes a database holds, as ``(type, name)``.
+
+    SQLite's own objects (``sqlite_sequence``, the automatic index behind a
+    ``UNIQUE`` or composite ``PRIMARY KEY``) are declared by no DDL of this
+    store and are left out, so the set compares with the declared one.
+    """
+    return frozenset(
+        (str(kind), str(name))
+        for kind, name in cursor.execute(
+            "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')"
+        )
+        if not str(name).startswith("sqlite_")
+    )
+
+
+def _declared_schema_objects() -> frozenset[tuple[str, str]]:
+    """Every object the creation DDL makes, read back off SQLite itself.
+
+    Mechanical, not listed: the one DDL step runs against an in-memory
+    database and the objects it made are the required set.  A table or an
+    index added to ``_SCHEMA``/``_INDEXES`` is therefore required of every
+    opened store by the same edit, and no second spelling of the names
+    exists to drift from the statements.  Derived on every call (0.15 ms,
+    measured 2026-09-23) rather than cached: a cache would pin the answer
+    of whichever declaration was in force at the first call.
+    """
+    with closing(sqlite3.connect(":memory:")) as scratch:
+        cursor = scratch.cursor()
+        _create_schema(cursor)
+        return _schema_objects(cursor)
+
+
+def _missing_objects(
+    objects: frozenset[tuple[str, str]],
+) -> tuple[tuple[str, str], ...]:
+    """The declared objects a file lacks, in one deterministic order."""
+    return tuple(sorted(_declared_schema_objects() - objects))
+
+
+def _holds_no_schema(cursor: sqlite3.Cursor) -> bool:
+    """Whether the file is an EMPTY database -- no object of anybody's.
+
+    Such a file is where a store is created: a path SQLite has just made
+    for this process, or one a creation that died before its ``COMMIT``
+    left behind (the DDL and the witness share that transaction, so it
+    left nothing).  A file holding any object at all is not empty and is
+    judged by its witness.
+    """
+    row = cursor.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    return int(row[0]) == 0
+
+
+def _decide_open(
+    cursor: sqlite3.Cursor, *, path: str, create: bool
+) -> tuple[int, str, str] | None:
+    """The one decision an open takes over a file, before it writes anything.
+
+    ``None``: the file is empty and the caller may create a store in it.
+    A fence triple: the file is a store of this generation whose schema is
+    complete.  Everything else is refused, witness FIRST -- a file of
+    another generation is named as such even when its schema is also
+    short -- and then completeness, so a store of this generation that
+    lacks a table or an index this build declares is refused with the one
+    command that adds them, and is left as it was: an open never migrates.
+
+    Taken twice by every open of an existing file, on the same function: by
+    the look that precedes the connection owner (whose pragmas would
+    otherwise be the first writes) and again under the write lock, where it
+    decides for real.
+    """
+    if _holds_no_schema(cursor):
+        if not create:
+            raise UnknownRunError(
+                f"there is no run store at {path} (the file holds no schema)",
+                reason=UNKNOWN_RUN_STORE_ABSENT,
+            )
+        return None
+    objects = _schema_objects(cursor)
+    fence = _verify_witness(cursor, objects, path=path)
+    missing = _missing_objects(objects)
+    if missing:
+        raise StoreSchemaIncompleteError(path=path, missing=missing)
+    return fence
+
+
+def _look_before_opening(path: str, *, create: bool) -> bool:
+    """Refuse an existing file on its own witness and schema before any write;
+    ``True`` when it holds no schema at all and a store will be created in it.
+
+    The shared connection owner issues ``PRAGMA journal_mode=WAL`` before a
+    single statement of this store runs, and moving a rollback-journal file
+    to WAL rewrites its header -- so a refusal decided only after the owner
+    opened the file would already have written it.  The decision is
+    therefore taken here first (A10, the memory store's look before the
+    read-write open), on a connection that issues no pragma but
+    ``query_only`` and reads inside one snapshot.
+
+    The URI is ``mode=rw`` and not ``mode=ro`` on purpose, measured
+    2026-09-23 on a copy of the generation-1 store: a ``mode=ro``
+    connection to a WAL file creates ``-wal`` and ``-shm`` beside it and
+    cannot remove them on close, while a read-write connection that wrote
+    nothing removes them as the last one out -- the directory is left
+    exactly as it was found.  ``query_only`` makes every write statement
+    fail inside SQLite itself.
+    """
+    uri = f"file:{quote(str(Path(path).resolve()), safe='/')}?mode=rw"
+    with closing(
+        sqlite3.connect(uri, uri=True, isolation_level=None, timeout=5.0)
+    ) as look:
+        look.execute("PRAGMA query_only=ON")
+        cursor = look.cursor()
+        cursor.execute("BEGIN")
+        try:
+            return _decide_open(cursor, path=path, create=create) is None
+        finally:
+            if look.in_transaction:
+                cursor.execute("ROLLBACK")
 
 
 def _fence_guard(cursor: sqlite3.Cursor, fence: tuple[int, str, str]) -> None:
@@ -2671,17 +2838,80 @@ class RunReportEdge:
     analysis_scope_digest: str
 
 
-def _ensure_schema(connection: sqlite3.Connection) -> None:
-    """Idempotent DDL of the store, run by the shared connection owner.
+def _create_schema(cursor: sqlite3.Cursor) -> None:
+    """The store's DDL: every table, then every index over them.
 
-    DDL statements are not implicitly transacted by the sqlite3 module, so
-    the CREATEs run in autocommit; the witness handshake that follows in
-    ``RunStore._initialize`` gets its own immediate transaction.
-    (``executescript`` would commit an open transaction — never used here.)
+    Executed in exactly two places: the transaction that creates a NEW
+    store together with its witness (:meth:`RunStore._initialize`), and the
+    explicit migration verb (:func:`migrate_store_schema`).  Never by an
+    open of an existing file.  ``IF NOT EXISTS`` keeps it idempotent for a
+    creator that lost the race to a concurrent one.  (``executescript``
+    would commit an open transaction -- never used here.)
     """
-    for statement in _SCHEMA.split(";"):
+    for statement in (*_SCHEMA.split(";"), *_INDEXES):
         if statement.strip():
-            connection.execute(statement)
+            cursor.execute(statement)
+
+
+def _leave_the_schema_to_the_witness(connection: sqlite3.Connection) -> None:
+    """The connection owner's schema step, deliberately empty for this store.
+
+    The owner runs its schema callback in autocommit, BEFORE this store has
+    read a witness -- the one place from which DDL would write into every
+    file it is handed, a store of another generation included (measured
+    2026-09-23: an index created there reached a refused generation-1 file).
+    The store's DDL runs only inside its own creation transaction and in
+    the migration verb.
+    """
+    del connection
+
+
+def migrate_store_schema(path: str | Path) -> tuple[tuple[str, str], ...]:
+    """The one explicit DDL on an existing store: add what this build
+    declares and the file lacks.  Returns the ``(type, name)`` objects it
+    added, sorted -- empty when the schema was already complete.
+
+    The authority an open does not have (ruling 2026-09-23): an open
+    refuses an incomplete schema and names this step.  It changes nothing else: the
+    witness, the store epoch, the storage revision and every run stay as
+    they were, because a declared object this build adds holds no row and
+    answers no read differently.
+
+    Everything is decided under ONE write lock on a connection that issues
+    no pragma, so nothing is written before the witness is read: a missing
+    path or an empty file holds no store and is refused as absent, a file
+    of another generation -- or one that states no generation at all -- is
+    refused exactly as an open refuses it, and a complete schema commits an
+    empty transaction.  Only then does the DDL run, in the same
+    transaction.
+    """
+    target = str(path)
+    if not Path(target).exists():
+        raise UnknownRunError(
+            f"there is no run store at {target}", reason=UNKNOWN_RUN_STORE_ABSENT
+        )
+    uri = f"file:{quote(str(Path(target).resolve()), safe='/')}?mode=rw"
+    with closing(
+        sqlite3.connect(uri, uri=True, isolation_level=None, timeout=5.0)
+    ) as connection:
+        cursor = connection.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            if _holds_no_schema(cursor):
+                raise UnknownRunError(
+                    f"there is no run store at {target} (the file holds no schema)",
+                    reason=UNKNOWN_RUN_STORE_ABSENT,
+                )
+            objects = _schema_objects(cursor)
+            _verify_witness(cursor, objects, path=target)
+            missing = _missing_objects(objects)
+            if missing:
+                _create_schema(cursor)
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+    return missing
 
 
 class RunStore:
@@ -2697,7 +2927,13 @@ class RunStore:
         # already written by the time any read verb could refuse.  Measured
         # before this guard: 69632 bytes and eleven tables of schema left
         # behind by a lookup that correctly answered "unknown run".
-        if not create and not Path(self._path).exists():
+        #
+        # An EXISTING file is judged before the connection owner touches it:
+        # its witness first, then its schema (:func:`_look_before_opening`).
+        fresh = True
+        if Path(self._path).exists():
+            fresh = _look_before_opening(self._path, create=create)
+        elif not create:
             raise UnknownRunError(
                 f"there is no run store at {self._path}",
                 reason=UNKNOWN_RUN_STORE_ABSENT,
@@ -2712,15 +2948,27 @@ class RunStore:
         # asked here because this is a store whose runs are SWEPT: without
         # it the sweep's deletions only reach the freelist, so a store that
         # collected eleven runs of twelve keeps every page it ever grew.
+        # It is asked only of a file that holds no schema yet -- the one
+        # occasion the mode can still be chosen.  Measured 2026-09-23: on an
+        # existing incremental store the pragma rewrites the header (change
+        # counter +1) on EVERY open, readers included, before any witness
+        # is read -- a write on read that decided nothing.
         self._connection = open_sqlite_db(
             Path(self._path),
-            ensure_schema=_ensure_schema,
+            ensure_schema=_leave_the_schema_to_the_witness,
             foreign_keys=True,
             synchronous="FULL",
-            auto_vacuum="INCREMENTAL",
+            auto_vacuum="INCREMENTAL" if fresh else None,
         )
         self._fence: tuple[int, str, str] = (0, "", "")
-        self._initialize()
+        try:
+            self._initialize(create=create)
+        except BaseException:
+            # A refused open hands back no handle, so it keeps no connection
+            # either: left to the garbage collector, the refused file kept
+            # its ``-wal``/``-shm`` beside it for as long as the object lived.
+            self._connection.close()
+            raise
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -2740,14 +2988,19 @@ class RunStore:
 
     # -- open-time witness (law 7) ----------------------------------------
 
-    def _initialize(self) -> None:
-        # The DDL already ran inside the shared connection owner
-        # (``_ensure_schema``); only the witness handshake remains, in its
-        # own immediate transaction.
+    def _initialize(self, *, create: bool) -> None:
+        # One immediate transaction decides the open under the write lock:
+        # an empty file becomes a store -- DDL and witness together, visible
+        # together or not at all -- and any other file is verified by the
+        # same decision the look before the connection owner took, because
+        # the file may have changed between the two.
         cursor = self._connection.cursor()
         cursor.execute("BEGIN IMMEDIATE")
         try:
-            fence = _open_witness(cursor, path=self._path)
+            fence = _decide_open(cursor, path=self._path, create=create)
+            if fence is None:
+                _create_schema(cursor)
+                fence = _write_witness(cursor)
             cursor.execute("COMMIT")
         except BaseException:
             cursor.execute("ROLLBACK")
@@ -3569,6 +3822,7 @@ __all__ = [
     "export_run",
     "link_run_report",
     "linked_run",
+    "migrate_store_schema",
     "release_retained_run",
     "release_run_lease",
     "retain_run",

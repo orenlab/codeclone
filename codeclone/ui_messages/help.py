@@ -268,6 +268,13 @@ HELP_MASCOT_TAGLINE = (
 )
 HELP_TOUR_INTERRUPTED = "Tour ended. `codeclone --help` lists every flag."
 HELP_BASELINE_COMMAND = "Manage the native baseline publication state."
+HELP_RUN_STORE_COMMAND = "Migrate the run store schema to this version."
+HELP_RUN_STORE_MIGRATE = (
+    "Add the tables and indexes this codeclone declares and\n"
+    "the store lacks. The only command that changes an\n"
+    "existing store's schema; an open never does."
+)
+HELP_RUN_STORE_MIGRATE_PATH = "Run store file to migrate (the path a refusal names)."
 
 #: The subcommand trees ``codeclone --help`` names, with the summary shown
 #: beside each. The CLI dispatches five of them, and until this table existed
@@ -298,6 +305,7 @@ HELP_COMMANDS: tuple[tuple[str, str], ...] = (
     ("baseline", HELP_BASELINE_COMMAND),
     ("memory", "Query and curate engineering memory."),
     ("observability", "Inspect recorded runtime traces (maintainer only)."),
+    ("run-store", HELP_RUN_STORE_COMMAND),
     ("setup", "Initialize or inspect repository readiness."),
 )
 HELP_COMMANDS_TITLE = (

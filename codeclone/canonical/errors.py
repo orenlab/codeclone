@@ -24,6 +24,7 @@ Distinct failure surfaces, never conflated:
 
 from __future__ import annotations
 
+import shlex
 from typing import Final
 
 
@@ -117,6 +118,51 @@ class StoreCompatibilityError(RunStoreError):
         self.diverging = diverging
         self.path = path
         self.next_step = STORE_GENERATION_NEXT_STEP
+
+
+#: The one command that adds what an existing store's schema lacks -- the
+#: explicit migration verb, the only DDL an existing store ever receives.
+#: Spelled once, here, so the refusal at ``open`` names exactly the command
+#: the CLI routes (``tests/test_run_store_ddl_authority.py`` runs the
+#: command a refusal spells).
+STORE_SCHEMA_MIGRATE_COMMAND: Final = "codeclone run-store migrate --path {path}"
+
+
+class StoreSchemaIncompleteError(StoreCompatibilityError):
+    """Refusal at ``open``: the store is of this generation -- its witness
+    matches -- but lacks a table or an index this build declares.
+
+    Opening an existing store never changes its schema (ruling 2026-09-23:
+    a read that writes is a mutation on read), so the file is left as it was
+    and the refusal names the one command that adds what is missing:
+    ``missing`` carries the ``(type, name)`` objects, ``next_step`` the
+    command with this store's path.  It narrows the compatibility refusal
+    because that is what it answers -- whether this process may open this
+    container as it stands -- and every door that already answers that
+    refusal answers this one the same way, with the command in its detail.
+    ``diverging`` is empty: no witness layer diverges.
+    """
+
+    __slots__ = ("missing",)
+
+    def __init__(self, *, path: str, missing: tuple[tuple[str, str], ...]) -> None:
+        command = STORE_SCHEMA_MIGRATE_COMMAND.format(path=shlex.quote(path))
+        next_step = (
+            f"run `{command}` to add them; it adds only the missing objects, "
+            "and the witness, the storage revision and every stored run stay "
+            "as they are"
+        )
+        spelled = ", ".join(f"{kind} {name}" for kind, name in missing)
+        RunStoreError.__init__(
+            self,
+            f"run store schema at {path} is incomplete: missing {spelled}. "
+            "Opening an existing store never changes its schema; the file was "
+            f"not modified. next_step: {next_step}.",
+        )
+        self.diverging = ()
+        self.path = path
+        self.next_step = next_step
+        self.missing = missing
 
 
 class StoreFenceError(RunStoreError):

@@ -45,6 +45,7 @@ from codeclone.canonical import (
     verify_export_artifact,
 )
 from codeclone.contracts import CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISION
+from tests._run_store_schema_evidence import byte_state
 from tests.test_canonical_roundtrip import fixture_model
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "run_store_generation_1"
@@ -135,13 +136,24 @@ def test_a_generation_one_store_is_refused_at_open_with_its_migration_path(
 ) -> None:
     """Law 7 on a real file: refused before a single address is read, naming
     each diverging layer with BOTH revisions, the refused path and the one
-    step a reader can take.  The file is left as it was."""
+    step a reader can take.  The file is left as it was -- its ``-wal`` and
+    ``-shm`` and its journal mode included, measured before any other
+    connection touches it."""
     store = tmp_path / "runs.sqlite3"
     shutil.copy(_FIXTURES / "runs.sqlite3", store)
-    before = hashlib.sha256(store.read_bytes()).hexdigest()
+    before = byte_state(store)
+    assert (before["-wal"], before["-shm"], before["journal"]) == (
+        None,
+        None,
+        b"\x02\x02",
+    )
     with pytest.raises(StoreCompatibilityError) as caught:
         RunStore(store, create=False)
+    assert byte_state(store) == before
     refusal = caught.value
+    # Witness first: the generation-1 store also lacks this build's index,
+    # and it is named for its generation, never for its schema.
+    assert type(refusal) is StoreCompatibilityError
     assert refusal.diverging == (
         ("canonical_model", "1", "2"),
         ("canonical_wire", "0", "1"),
@@ -162,7 +174,6 @@ def test_a_generation_one_store_is_refused_at_open_with_its_migration_path(
             "module_identity": "2",
             "storage_schema": "1",
         }
-    assert hashlib.sha256(store.read_bytes()).hexdigest() == before
     # Positive control on the same door: a store THIS build writes opens.
     with RunStore(tmp_path / "current.sqlite3") as current:
         current.write_full_run(

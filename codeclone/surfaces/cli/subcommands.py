@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
@@ -79,12 +80,43 @@ def _run_baseline(argv: list[str]) -> int:
     return int(ExitCode.SUCCESS)
 
 
+def _run_run_store(argv: list[str]) -> int:
+    """``codeclone run-store migrate --path PATH``: the run store's one
+    explicit schema migration -- the command an open's refusal names."""
+    parser = argparse.ArgumentParser(
+        prog="codeclone run-store",
+        description=ui.HELP_RUN_STORE_COMMAND,
+    )
+    actions = parser.add_subparsers(dest="action", required=True)
+    migrate = actions.add_parser("migrate", help=ui.HELP_RUN_STORE_MIGRATE)
+    migrate.add_argument("--path", required=True, help=ui.HELP_RUN_STORE_MIGRATE_PATH)
+    args = parser.parse_args(argv)
+    target = Path(args.path).expanduser()
+    from ...api.run_store_migration import RunStoreError, migrate_run_store_schema
+
+    try:
+        added = migrate_run_store_schema(target)
+    except (RunStoreError, sqlite3.DatabaseError) as refusal:
+        print(refusal)
+        return int(ExitCode.CONTRACT_ERROR)
+    if not added:
+        print(f"Run store schema at {target} is complete; nothing to migrate.")
+        return int(ExitCode.SUCCESS)
+    spelled = ", ".join(f"{kind} {name}" for kind, name in added)
+    print(
+        f"Run store schema at {target}: added {spelled}. The witness, the "
+        "storage revision and every stored run are unchanged."
+    )
+    return int(ExitCode.SUCCESS)
+
+
 _SUBCOMMAND_HANDLERS: dict[str, Callable[[list[str]], int]] = {
     "setup": _run_setup,
     "analytics": _run_analytics,
     "baseline": _run_baseline,
     "memory": _run_memory,
     "observability": _run_observability,
+    "run-store": _run_run_store,
 }
 
 
