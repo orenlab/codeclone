@@ -18,7 +18,15 @@ generation, a corrupted row, a stored row the projection cannot express:
 each is a REASON the caller can branch on and count, and each is the
 producer's own typed refusal underneath — nothing here classifies an
 arbitrary exception.  A defect that is none of those propagates raw, as a
-defect should.
+defect should.  What is NOT a defect, and was measured escaping as one
+(storage audit RS-04, 2026-09-24): a store another process holds the write
+lock on, a read-only medium, a file at the store path that SQLite cannot
+read as a database, a member stored under the wrong storage class.  The
+store classifies those itself now (``StoreUnavailableError``,
+``StoreIntegrityError``) and this door answers them like every other
+refusal — the transient ones as ``store_unavailable``, the byte faults as
+``integrity`` — because a shadow read that holds the memory answer has no
+business taking the tool down over a lock.
 
 **The rollout flag stays the kill switch.**  The store path is resolved
 here, from the same resolver the publish path used
@@ -62,6 +70,7 @@ from ..canonical.errors import (
     RunReportLinkError,
     StoreCompatibilityError,
     StoreIntegrityError,
+    StoreUnavailableError,
     UnknownRunError,
 )
 from ..canonical.serving import (
@@ -92,6 +101,11 @@ SERVING_REASON_SERVED: Final = "served"
 SERVING_REASON_NOT_PUBLISHED: Final = "not_published"
 SERVING_REASON_STORE_DISABLED: Final = "store_disabled"
 SERVING_REASON_STORE_ABSENT: Final = "store_absent"
+#: The store is there and is this generation, and SQLite could not serve it
+#: NOW: a held lock, a read-only medium, an I/O fault.  A fallback the
+#: surface counts — never memory by design — and the one reason that says
+#: "try again" rather than "regenerate" or "delete".
+SERVING_REASON_STORE_UNAVAILABLE: Final = "store_unavailable"
 SERVING_REASON_RUN_NOT_PUBLISHED: Final = "run_not_published"
 SERVING_REASON_INCOMPATIBLE_GENERATION: Final = "incompatible_generation"
 SERVING_REASON_INTEGRITY: Final = "integrity"
@@ -106,6 +120,7 @@ SERVING_REASONS: Final[tuple[str, ...]] = (
     SERVING_REASON_SERVED,
     SERVING_REASON_STORE_ABSENT,
     SERVING_REASON_STORE_DISABLED,
+    SERVING_REASON_STORE_UNAVAILABLE,
     SERVING_REASON_UNEXPRESSIBLE,
 )
 
@@ -289,8 +304,22 @@ def _store_answer(
             detail=str(refusal),
         )
     except StoreIntegrityError as refusal:
+        # A stored row that fails its digest, a file SQLite cannot read as a
+        # database, a member under the wrong storage class: all statements
+        # about the BYTES at the store path, all one word.
         return _memory(
             SERVING_REASON_INTEGRITY,
+            store_run_id=store_run_id,
+            detail=str(refusal),
+        )
+    except StoreUnavailableError as refusal:
+        # The bytes are fine and so is the generation; SQLite could not
+        # serve them at this moment (another process's write lock, a
+        # read-only medium, an I/O fault).  Neither ``integrity`` nor
+        # ``incompatible_generation`` would be true, and the memory answer
+        # the surface holds is the right answer to give right now.
+        return _memory(
+            SERVING_REASON_STORE_UNAVAILABLE,
             store_run_id=store_run_id,
             detail=str(refusal),
         )
@@ -320,6 +349,7 @@ __all__ = [
     "SERVING_REASON_SERVED",
     "SERVING_REASON_STORE_ABSENT",
     "SERVING_REASON_STORE_DISABLED",
+    "SERVING_REASON_STORE_UNAVAILABLE",
     "SERVING_REASON_UNEXPRESSIBLE",
     "SERVING_SOURCES",
     "SERVING_SOURCE_MEMORY",

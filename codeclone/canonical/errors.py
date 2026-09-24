@@ -173,12 +173,47 @@ class StoreFenceError(RunStoreError):
 
 
 class StoreIntegrityError(RunStoreError):
-    """Stored bytes disagree with their own content address or digests.
+    """Stored bytes disagree with their own content address or digests --
+    or the file cannot be read as the store it claims to be.
 
     Raised on read when an object's payload no longer hashes to its
-    ``object_id`` or a run's membership/identity digests do not recompute.
-    Corruption is loud, never a silently different projection.
+    ``object_id`` or a run's membership/identity digests do not recompute;
+    and, since the storage audit of 2026-09-24 (RS-04), when SQLite itself
+    cannot read the file as a database (``file is not a database``, a
+    malformed image) or a member is stored under a storage class that is
+    not BLOB.  Every one of those is a statement about the BYTES at the
+    store path, which is what separates it from
+    :class:`StoreUnavailableError` (the bytes are fine, SQLite cannot serve
+    them now) and from :class:`StoreCompatibilityError` (the bytes are a
+    store of another generation).  Corruption is loud, never a silently
+    different projection -- and never a raw ``sqlite3`` exception out of a
+    serving door that holds a memory answer.
     """
+
+
+class StoreUnavailableError(RunStoreError):
+    """SQLite could not serve the store NOW: a held lock, a read-only
+    medium, an I/O fault (``sqlite3.OperationalError``).
+
+    Nothing about the bytes is in question and nothing about the generation:
+    the same open a moment later may succeed.  Measured by the storage audit
+    (RS-04, 2026-09-24): a reader meeting another process's ``BEGIN
+    IMMEDIATE`` waited out the busy timeout and then took the MCP call down
+    with the raw exception, although the surface behind the door already
+    held the memory answer.  Carries the ``path`` of the store and the
+    fault's own words, and chains the ``sqlite3`` error as its cause.
+    """
+
+    __slots__ = ("path",)
+
+    def __init__(self, *, path: str, fault: BaseException) -> None:
+        super().__init__(
+            f"run store at {path} is unavailable to this process right now "
+            f"({type(fault).__name__}: {fault}); the store's bytes and "
+            "generation are not in question, so the same open may succeed "
+            "once the lock, medium or I/O fault clears"
+        )
+        self.path = path
 
 
 #: Machine-readable reasons a run lookup cannot be answered.  Stable

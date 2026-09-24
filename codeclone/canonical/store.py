@@ -100,6 +100,7 @@ from codeclone.canonical.errors import (
     StoreFenceError,
     StoreIntegrityError,
     StoreSchemaIncompleteError,
+    StoreUnavailableError,
     UnknownRunError,
 )
 from codeclone.canonical.export import (
@@ -2181,6 +2182,65 @@ def _look_before_opening(path: str, *, create: bool) -> bool:
                 cursor.execute("ROLLBACK")
 
 
+@contextmanager
+def _typed_sqlite_faults(path: str) -> Iterator[None]:
+    """Turn the raw ``sqlite3`` faults of an open or a read into the store's
+    own typed refusals (storage audit RS-04, 2026-09-24).
+
+    Two classes, decided by what SQLite says about the file and nothing
+    else.  ``OperationalError`` is the environment -- a lock another process
+    holds, a read-only medium, an I/O fault -- and becomes
+    :class:`StoreUnavailableError`: the bytes and the generation are fine
+    and the same call may succeed a moment later.  Every other
+    ``DatabaseError`` is the bytes -- ``file is not a database``, a malformed
+    image -- and becomes :class:`StoreIntegrityError`, the word a stored
+    row that fails its own digest already gets.  The store's own typed
+    refusals pass through untouched: they are not ``sqlite3`` errors.
+
+    The one owner of that classification, so the serving door classifies
+    nothing on its own and a reader that meets the fault outside the door
+    (the bridge, a CLI verb) gets the same typed answer.  The chained cause
+    is the raw fault, for whoever needs SQLite's own words.
+    """
+    try:
+        yield
+    except sqlite3.OperationalError as fault:
+        raise StoreUnavailableError(path=path, fault=fault) from fault
+    except sqlite3.DatabaseError as fault:
+        raise StoreIntegrityError(
+            f"run store at {path} cannot be read as a SQLite database "
+            f"({type(fault).__name__}: {fault})"
+        ) from fault
+
+
+def _member_payload(object_id_value: object, payload: object) -> bytes:
+    """The stored payload of one member, as the BLOB the schema declares.
+
+    SQLite stores what it is handed: a row whose payload arrived as TEXT is
+    the same bytes under a storage class the reader cannot hash (measured
+    by the storage audit, RS-04: ``TypeError: string argument without an
+    encoding`` out of ``bytes()``, one serial-type bit away from a healthy
+    row).  A member that is not a BLOB is a member whose bytes cannot be
+    proven, and that is an integrity refusal, never a raw ``TypeError``.
+    """
+    if isinstance(payload, bytes):
+        return payload
+    raise StoreIntegrityError(
+        f"object {str(object_id_value)[:12]}… payload is stored as "
+        f"{_STORAGE_CLASS.get(type(payload), type(payload).__name__)}, not "
+        "BLOB; its bytes cannot be proven against their content address"
+    )
+
+
+#: SQLite's own name for the storage class a Python value came back as.
+_STORAGE_CLASS: Final[dict[type, str]] = {
+    str: "TEXT",
+    int: "INTEGER",
+    float: "REAL",
+    type(None): "NULL",
+}
+
+
 def _fence_guard(cursor: sqlite3.Cursor, fence: tuple[int, str, str]) -> None:
     """Refuse the mutation when the store generation moved under the handle
     (brief §4.2: fencing on every mutation, not only at open)."""
@@ -2264,7 +2324,10 @@ def _verify_staged_membership(
         (run_pk,),
     ):
         stored_id = str(object_id_value)
-        if _object_id(namespace, str(family), bytes(payload)) != stored_id:
+        if (
+            _object_id(namespace, str(family), _member_payload(stored_id, payload))
+            != stored_id
+        ):
             raise StoreIntegrityError(
                 f"staged object {stored_id[:12]}… does not hash to its "
                 "content address; publish refused"
@@ -2391,7 +2454,11 @@ def _reconstruct_run(
                 f"run {run_id!r} carries unknown family {family_name!r}"
             )
         _decode_member_object(
-            namespace, str(object_id_value), family_name, bytes(payload), collected
+            namespace,
+            str(object_id_value),
+            family_name,
+            _member_payload(object_id_value, payload),
+            collected,
         )
         object_ids.append(str(object_id_value))
     model = _collected_model(collected)
@@ -2493,7 +2560,9 @@ def _scan_run_family(
         _MEMBER_FAMILY_SQL, (run_pk, family)
     ):
         stored_id = str(object_id_value)
-        _decode_member_object(namespace, stored_id, family, bytes(payload), into)
+        _decode_member_object(
+            namespace, stored_id, family, _member_payload(stored_id, payload), into
+        )
         object_ids.append(stored_id)
 
 
@@ -2931,13 +3000,20 @@ class RunStore:
         # An EXISTING file is judged before the connection owner touches it:
         # its witness first, then its schema (:func:`_look_before_opening`).
         fresh = True
-        if Path(self._path).exists():
-            fresh = _look_before_opening(self._path, create=create)
-        elif not create:
-            raise UnknownRunError(
-                f"there is no run store at {self._path}",
-                reason=UNKNOWN_RUN_STORE_ABSENT,
-            )
+        # Every ``sqlite3`` fault of the open -- the look, the connection
+        # owner's pragmas, the witness transaction -- leaves this
+        # constructor as the store's own typed refusal (RS-04), never raw.
+        with _typed_sqlite_faults(self._path):
+            if Path(self._path).exists():
+                fresh = _look_before_opening(self._path, create=create)
+            elif not create:
+                raise UnknownRunError(
+                    f"there is no run store at {self._path}",
+                    reason=UNKNOWN_RUN_STORE_ABSENT,
+                )
+            self._open_connection(create=create, fresh=fresh)
+
+    def _open_connection(self, *, create: bool, fresh: bool) -> None:
         # The ratified connection convention (ruling 2026-08-24 §5) arrives
         # through the ONE shared connection owner — WAL and busy_timeout
         # 5000 are the owner's, never restated here.  ``synchronous=FULL``
@@ -3287,17 +3363,18 @@ class RunStore:
         byte on the way; any disagreement is a typed refusal, never a
         silently different model.
         """
-        run_pk, namespace, scope_digest, membership = _published_run_row(
-            self._connection, run_id
-        )
-        return _reconstruct_run(
-            self._connection,
-            run_pk=run_pk,
-            namespace=namespace,
-            scope_digest=scope_digest,
-            membership=membership,
-            run_id=run_id,
-        )
+        with _typed_sqlite_faults(self._path):
+            run_pk, namespace, scope_digest, membership = _published_run_row(
+                self._connection, run_id
+            )
+            return _reconstruct_run(
+                self._connection,
+                run_pk=run_pk,
+                namespace=namespace,
+                scope_digest=scope_digest,
+                membership=membership,
+                run_id=run_id,
+            )
 
     def read_family(
         self, run_id: str, family: StoredFamily[_RowT]
@@ -3357,27 +3434,28 @@ class RunStore:
         between them would otherwise turn a deleted run into an empty
         family — an absent answer presented as a measured one.
         """
-        cursor = self._connection.cursor()
-        cursor.execute("BEGIN")
-        try:
-            run_pk, namespace, _scope_digest, _membership = _published_run_row(
-                self._connection, run_id
-            )
-            collected: dict[str, list[object]] = {}
-            object_ids: list[str] = []
-            _scan_run_family(
-                self._connection,
-                run_pk,
-                namespace,
-                family.family,
-                object_ids,
-                collected,
-            )
-            rows = tuple(family.rows(collected))
-            cursor.execute("COMMIT")
-        except BaseException:
-            cursor.execute("ROLLBACK")
-            raise
+        with _typed_sqlite_faults(self._path):
+            cursor = self._connection.cursor()
+            cursor.execute("BEGIN")
+            try:
+                run_pk, namespace, _scope_digest, _membership = _published_run_row(
+                    self._connection, run_id
+                )
+                collected: dict[str, list[object]] = {}
+                object_ids: list[str] = []
+                _scan_run_family(
+                    self._connection,
+                    run_pk,
+                    namespace,
+                    family.family,
+                    object_ids,
+                    collected,
+                )
+                rows = tuple(family.rows(collected))
+                cursor.execute("COMMIT")
+            except BaseException:
+                cursor.execute("ROLLBACK")
+                raise
         return rows
 
     def project_run(self, run_id: str) -> bytes:
@@ -3567,13 +3645,14 @@ def linked_run(store: RunStore, *, report_run_identity: str) -> RunReportEdge | 
     evaluation cannot descend from two analyses — and taking the first would
     be the silent wrong-row answer this whole owner exists to prevent.
     """
-    rows = store._connection.execute(
-        "SELECT r.run_id, r.analysis_scope_digest FROM run_report_links l "
-        "JOIN runs r ON r.run_pk = l.run_pk "
-        "WHERE l.report_run_identity = ? AND r.published = 1 "
-        "ORDER BY r.run_id",
-        (report_run_identity,),
-    ).fetchall()
+    with _typed_sqlite_faults(store._path):
+        rows = store._connection.execute(
+            "SELECT r.run_id, r.analysis_scope_digest FROM run_report_links l "
+            "JOIN runs r ON r.run_pk = l.run_pk "
+            "WHERE l.report_run_identity = ? AND r.published = 1 "
+            "ORDER BY r.run_id",
+            (report_run_identity,),
+        ).fetchall()
     if not rows:
         return None
     if len(rows) > 1:

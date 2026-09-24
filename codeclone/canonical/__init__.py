@@ -52,6 +52,7 @@ from codeclone.canonical.errors import (
     StoreCompatibilityError,
     StoreFenceError,
     StoreIntegrityError,
+    StoreUnavailableError,
     UnknownRunError,
     WireDecodeError,
 )
@@ -344,6 +345,7 @@ __all__ = [
     "StoreCompatibilityError",
     "StoreFenceError",
     "StoreIntegrityError",
+    "StoreUnavailableError",
     "StoredFamily",
     "SymbolId",
     "UnitSpanRow",
