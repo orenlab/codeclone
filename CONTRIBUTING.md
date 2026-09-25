@@ -136,12 +136,15 @@ Such changes often require design-level discussion and may be staged across vers
 
 CodeClone maintains several versioned schema contracts:
 
-| Schema           | Current version | Owner                               |
-|------------------|-----------------|-------------------------------------|
-| Baseline         | `2.1`           | `codeclone/baseline.py`             |
-| Report           | `2.11`          | `codeclone/report/json_contract.py` |
-| Cache            | `2.8`           | `codeclone/cache_io.py`             |
-| Metrics baseline | `1.2`           | `codeclone/metrics_baseline.py`     |
+| Schema           | Current version | Owner                                    |
+|------------------|-----------------|------------------------------------------|
+| Baseline         | `2.1`           | `codeclone/baseline/clone_baseline.py`   |
+| Report           | `2.11`          | `codeclone/report/document/builder.py`   |
+| Cache            | `2.8`           | `codeclone/cache/store.py`               |
+| Metrics baseline | `1.2`           | `codeclone/baseline/metrics_baseline.py` |
+
+The version constants live in `codeclone/contracts/__init__.py`; the Owner column names the module
+that writes that version into its artifact.
 
 Any change to schema shape or semantics requires version review, documentation, and tests.
 
