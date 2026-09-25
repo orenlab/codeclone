@@ -67,6 +67,21 @@ from dataclasses import dataclass, field, fields, replace
 from itertools import chain, pairwise
 from typing import TypeVar
 
+from codeclone.canonical.analysis_rows import (
+    COVERAGE_JOIN_INVALID,
+    CloneItemRow,
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+)
 from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
@@ -511,33 +526,9 @@ class RelationshipObservationRow:
             )
 
 
-@dataclass(frozen=True, slots=True)
-class CloneItemRow:
-    """One member of an emitted clone group: the unit and its span.
-
-    The span IS part of the member's identity — the corpus's block group
-    carries an intra-function pair (one SYMBOL, two spans), so group arity
-    and item identity are different measurements and a span-blind member
-    would silently collapse the pair.  Per-kind item metrics (``loc``,
-    ``fingerprint``, ``size``, ``segment_hash``…) stay with the legacy
-    document for a later wave — the wave subset decides what is carried
-    (the candidate-scoring precedent).
-    """
-
-    symbol: SymbolId
-    start_line: int
-    end_line: int
-
-    def __post_init__(self) -> None:
-        if isinstance(self.start_line, bool) or self.start_line < 1:
-            raise CanonicalModelError(
-                f"clone item start line must be a positive int: {self.start_line!r}"
-            )
-        if isinstance(self.end_line, bool) or self.end_line < self.start_line:
-            raise CanonicalModelError(
-                "clone item end line must be an int not before its start: "
-                f"{self.end_line!r}"
-            )
+# ``CloneItemRow`` lives in ``codeclone.canonical.analysis_rows`` since E1:
+# the suppressed clone family shares the member shape, and one row type
+# keeps the member law in one spelling.  The name stays importable here.
 
 
 @dataclass(frozen=True, slots=True)
@@ -1253,6 +1244,26 @@ class AnalysisFacts:
     adoption_counts: frozenset[AdoptionCountRow] = field(default_factory=frozenset)
     security_surfaces: frozenset[SecuritySurfaceRow] = field(default_factory=frozenset)
     unit_spans: frozenset[UnitSpanRow] = field(default_factory=frozenset)
+    # Canonical epoch E1 (2026-09-25): the published finding groups, the
+    # overloaded-module facts and the external coverage join, each the
+    # population the document publishes (``codeclone.canonical.analysis_rows``).
+    suppressed_clone_groups: frozenset[SuppressedCloneGroupRow] = field(
+        default_factory=frozenset
+    )
+    structural_groups: frozenset[StructuralGroupRow] = field(default_factory=frozenset)
+    dead_symbol_groups: frozenset[DeadSymbolGroupRow] = field(default_factory=frozenset)
+    unreachable_statement_groups: frozenset[UnreachableStatementRow] = field(
+        default_factory=frozenset
+    )
+    complexity_hotspots: frozenset[ComplexityHotspotRow] = field(
+        default_factory=frozenset
+    )
+    coupling_hotspots: frozenset[CouplingHotspotRow] = field(default_factory=frozenset)
+    cohesion_hotspots: frozenset[CohesionHotspotRow] = field(default_factory=frozenset)
+    overloaded_modules: frozenset[OverloadedModuleRow] = field(
+        default_factory=frozenset
+    )
+    coverage_units: frozenset[CoverageUnitRow] = field(default_factory=frozenset)
     # F9: one record per analysis snapshot; None is the absent record —
     # never an all-zero fake (zero is measured in this family).
     run_scalars: RunScalars | None = None
@@ -1260,6 +1271,11 @@ class AnalysisFacts:
     # the absent record — a legacy document that never declared what it
     # computed stays honestly unwitnessed, never fabricated.
     analysis_population: AnalysisPopulation | None = None
+    # E1: the coverage join's own record (None: the run was handed no
+    # coverage report) and the dead-code population counters (None: the
+    # dead-code lane never ran, the clones-only mode).
+    coverage_join: CoverageJoinRecord | None = None
+    dead_code_summary: DeadCodeSummaryRecord | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1583,8 +1599,33 @@ class _DomainClosure:
 #: row types widens to ``object``, and reaching ``.symbol`` off ``object`` is
 #: the untyped hole this repository refuses.
 _SymbolCarrier = (
-    SinkRoleRow | CouplingCohesionRow | ApiSymbolRow | RiskObservationRow | UnitSpanRow
+    SinkRoleRow
+    | CouplingCohesionRow
+    | ApiSymbolRow
+    | RiskObservationRow
+    | UnitSpanRow
+    | DeadSymbolGroupRow
+    | UnreachableStatementRow
+    | ComplexityHotspotRow
+    | CouplingHotspotRow
+    | CohesionHotspotRow
+    | CoverageUnitRow
 )
+
+
+def _close_epoch_one_domains(closure: _DomainClosure, facts: AnalysisFacts) -> None:
+    """Stage 1 for the E1 families that contribute identity through
+    something other than one ``symbol`` column: the member sites of the
+    suppressed and structural groups, and the FILE of an overloaded module.
+    (The six site-keyed families ride the shared ``symbol`` loop below.)"""
+    for suppressed_group in facts.suppressed_clone_groups:
+        for item in suppressed_group.items:
+            closure.see_symbol(item.symbol)
+    for structural_group in facts.structural_groups:
+        for site in structural_group.occurrences:
+            closure.see_symbol(site.symbol)
+    for overloaded in facts.overloaded_modules:
+        closure.files.add(overloaded.file)
 
 
 def _close_domains(model: CanonicalModel) -> _DomainClosure:
@@ -1621,12 +1662,13 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
     for group in facts.clone_groups:
         for item in group.items:
             closure.see_symbol(item.symbol)
+    _close_epoch_one_domains(closure, facts)
     for dead_observation in facts.dead_code_observations:
         closure.see_dead_code_entity(dead_observation.entity)
     for violation in facts.violations:
         closure.see_violation(violation)
-    # Five families contribute identity through ONE ``symbol`` column and
-    # nothing else, so they share one loop.  Spelling them as five identical
+    # Eleven families contribute identity through ONE ``symbol`` column and
+    # nothing else, so they share one loop.  Spelling them as identical
     # loops made this function's branch count grow with the family list --
     # measured when ``unit_spans`` landed and pushed it over the complexity
     # threshold -- while the closure it computes never differed.
@@ -1636,6 +1678,12 @@ def _close_domains(model: CanonicalModel) -> _DomainClosure:
         facts.api_symbols,
         facts.risk_observations,
         facts.unit_spans,
+        facts.dead_symbol_groups,
+        facts.unreachable_statement_groups,
+        facts.complexity_hotspots,
+        facts.coupling_hotspots,
+        facts.cohesion_hotspots,
+        facts.coverage_units,
     )
     for symbol_row in symbol_rows:
         closure.see_symbol(symbol_row.symbol)
@@ -1722,6 +1770,86 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
         "unit_spans.key",
         lambda row: (canonical_key(row.symbol), row.start_line),
     )
+    _prove_epoch_one_keys(facts)
+
+
+#: The E1 families keyed by the declaration site ``(SYMBOL, start_line)``:
+#: the ``unit_spans`` key, for the same measured reason — different
+#: declarations share one qualname, and the document's own identities
+#: (``dead_code:{qualname}``, ``design:{category}:{qualname}``) are blind
+#: to them.
+_SiteKeyed = (
+    DeadSymbolGroupRow
+    | UnreachableStatementRow
+    | ComplexityHotspotRow
+    | CouplingHotspotRow
+    | CohesionHotspotRow
+    | CoverageUnitRow
+)
+
+
+def _site_key(row: _SiteKeyed) -> tuple[object, ...]:
+    return (canonical_key(row.symbol), row.start_line)
+
+
+def _prove_epoch_one_keys(facts: AnalysisFacts) -> None:
+    """Stage 2 for the E1 families: the producer's own group keys, the
+    declaration-site key, and the FILE key of the overloaded modules."""
+    _unique_by_key(
+        facts.suppressed_clone_groups,
+        "suppressed_clone_groups.key",
+        lambda row: (row.clone_kind.encode("utf-8"), row.group_key.encode("utf-8")),
+    )
+    _unique_by_key(
+        facts.structural_groups,
+        "structural_groups.key",
+        lambda row: (
+            row.finding_kind.encode("utf-8"),
+            row.finding_key.encode("utf-8"),
+        ),
+    )
+    # Six call sites rather than a loop over a table: the roundtrip pin
+    # reads every ``_unique_by_key`` site off the fact house by name, so
+    # the family each key proves stays visible to it.
+    _unique_by_key(facts.dead_symbol_groups, "dead_symbol_groups.key", _site_key)
+    _unique_by_key(
+        facts.unreachable_statement_groups,
+        "unreachable_statement_groups.key",
+        _site_key,
+    )
+    _unique_by_key(facts.complexity_hotspots, "complexity_hotspots.key", _site_key)
+    _unique_by_key(facts.coupling_hotspots, "coupling_hotspots.key", _site_key)
+    _unique_by_key(facts.cohesion_hotspots, "cohesion_hotspots.key", _site_key)
+    _unique_by_key(facts.coverage_units, "coverage_units.key", _site_key)
+    _unique_by_key(
+        facts.overloaded_modules,
+        "overloaded_modules.file",
+        lambda row: canonical_key(row.file),
+    )
+
+
+def _prove_coverage_join(facts: AnalysisFacts) -> None:
+    """Stage 2-quater: coverage units belong to a readable coverage join.
+
+    A unit row without the join record would be an observation of a report
+    the run never had, and a unit under an ``invalid`` join would be a
+    measurement the producer says it could not make — both are refused,
+    never dropped.  The converse is legitimate: a readable report may map
+    no unit at all.
+    """
+    if not facts.coverage_units:
+        return
+    record = facts.coverage_join
+    if record is None:
+        raise CanonicalModelError(
+            "coverage units carried without a coverage join record: the run "
+            "was handed no coverage report to measure them from"
+        )
+    if record.status == COVERAGE_JOIN_INVALID:
+        raise CanonicalModelError(
+            "coverage units carried under an invalid coverage join: the "
+            "producer measured nothing from an unreadable report"
+        )
 
 
 def _prove_entity_consistency(facts: AnalysisFacts) -> None:
@@ -1787,6 +1915,7 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     _prove_logical_keys(model.facts.analysis)
     _prove_entity_consistency(model.facts.analysis)
     _prove_occurrence_relations(model.facts.analysis)
+    _prove_coverage_join(model.facts.analysis)
     _prove_function_roles(model.facts.analysis)
     return replace(
         model,

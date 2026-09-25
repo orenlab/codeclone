@@ -523,6 +523,135 @@ def legacy_document() -> dict[str, Any]:
                     "summary": {"items": len(security_items)},
                     "items": security_items,
                 },
+                # E1 (A4): two producer rows, keyed by FILE — one candidate
+                # with every column distinct, one non-candidate at zero;
+                # ``module`` is the registry projection the oracle never
+                # reads.
+                "overloaded_modules": {
+                    "items": [
+                        {
+                            "module": "pkg.mod",
+                            "relative_path": "pkg/mod.py",
+                            "source_kind": "production",
+                            "loc": 3556,
+                            "functions": 160,
+                            "methods": 5,
+                            "classes": 3,
+                            "callable_count": 165,
+                            "complexity_total": 554,
+                            "complexity_max": 16,
+                            "fan_in": 2,
+                            "fan_out": 28,
+                            "total_deps": 30,
+                            "import_edges": 88,
+                            "reimport_edges": 60,
+                            "reimport_ratio": 0.6818,
+                            "instability": 1.0,
+                            "hub_balance": 0.0625,
+                            "size_score": 0.9976,
+                            "dependency_score": 0.9992,
+                            "shape_score": 0.9928,
+                            "score": 0.9972,
+                            "candidate_status": "candidate",
+                            "candidate_reasons": [
+                                "size_pressure",
+                                "dependency_pressure",
+                            ],
+                        },
+                        {
+                            "module": "scripts/tool.py",
+                            "relative_path": "scripts/tool.py",
+                            "source_kind": "other",
+                            "loc": 0,
+                            "functions": 0,
+                            "methods": 0,
+                            "classes": 0,
+                            "callable_count": 0,
+                            "complexity_total": 0,
+                            "complexity_max": 0,
+                            "fan_in": 0,
+                            "fan_out": 0,
+                            "total_deps": 0,
+                            "import_edges": 0,
+                            "reimport_edges": 0,
+                            "reimport_ratio": 0.0,
+                            "instability": 0.0,
+                            "hub_balance": 0.0,
+                            "size_score": 0.0,
+                            "dependency_score": 0.0,
+                            "shape_score": 0.0,
+                            "score": 0.0,
+                            "candidate_status": "non_candidate",
+                            "candidate_reasons": [],
+                        },
+                    ]
+                },
+                # E1 (A7): the lane's counters as the gate reads them; the
+                # lists beside them are not read by the oracle.
+                "dead_code": {
+                    "summary": {
+                        "total": 2,
+                        "high_confidence": 1,
+                        "suppressed": 2,
+                        "unresolved_external_override": 16,
+                        "unresolved": 85,
+                        "unresolved_internal": 559,
+                        "candidates": 18621,
+                        "nested_candidates": 1309,
+                        "world_contract": "open",
+                        "unreachable_statements": 1,
+                        "live_roots": 37,
+                    },
+                    "items": [],
+                },
+                # E1 (A5): the external join — present, so the record is
+                # present; all three unit statuses on the wire.
+                "coverage_join": {
+                    "summary": {
+                        "status": "ok",
+                        "source": "coverage.xml",
+                        "files": 2,
+                        "units": 3,
+                        "measured_units": 1,
+                        "overall_executable_lines": 12,
+                        "overall_covered_lines": 9,
+                        "overall_permille": 750,
+                        "missing_from_report_units": 1,
+                        "coverage_hotspots": 0,
+                        "scope_gap_hotspots": 0,
+                        "hotspot_threshold_percent": 50,
+                        "invalid_reason": None,
+                    },
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "qualname": "pkg.mod:make",
+                            "start_line": 10,
+                            "end_line": 24,
+                            "executable_lines": 12,
+                            "covered_lines": 9,
+                            "coverage_status": "measured",
+                        },
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "qualname": "pkg.mod:make",
+                            "start_line": 40,
+                            "end_line": 40,
+                            "executable_lines": 0,
+                            "covered_lines": 0,
+                            "coverage_status": "no_executable_lines",
+                        },
+                        {
+                            "relative_path": "scripts/tool.py",
+                            "qualname": "scripts/tool.py:run",
+                            "start_line": 5,
+                            "end_line": 31,
+                            "executable_lines": 0,
+                            "covered_lines": 0,
+                            "coverage_status": "missing_from_report",
+                        },
+                    ],
+                },
                 "complexity": {
                     "items_truncated": False,
                     "items": [
@@ -617,6 +746,15 @@ def legacy_document() -> dict[str, Any]:
                             {
                                 "clone_kind": "function",
                                 "facts": {"group_key": "ffff|20-39"},
+                                # E1 (A1): the suppressor's provenance, as
+                                # the document publishes it — patterns in
+                                # the producer's order, not sorted.
+                                "suppression_rule": "golden_fixture",
+                                "suppression_source": "project_config",
+                                "matched_patterns": [
+                                    "tests/fixtures/golden_*",
+                                    "tests/fixtures/extra_*",
+                                ],
                                 "items": [
                                     {
                                         "relative_path": "pkg/mod.py",
@@ -636,7 +774,189 @@ def legacy_document() -> dict[str, Any]:
                         "blocks": [],
                         "segments": [],
                     },
-                }
+                },
+                # E1 (A2): the grouped findings verbatim from the document
+                # builder's shape — the oracle reads the group, its
+                # ``items[0]`` site and its ``facts``/``signature.debug``.
+                "structural": {
+                    "groups": [
+                        {
+                            "id": "structural:duplicated_branches:k1",
+                            "kind": "duplicated_branches",
+                            "category": "duplicated_branches",
+                            "signature": {
+                                "version": "1",
+                                "stable": {},
+                                "debug": {"calls": "2", "stmt_seq": "Continue"},
+                            },
+                            "items": [
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 5,
+                                    "end_line": 9,
+                                },
+                                {
+                                    "relative_path": "scripts/tool.py",
+                                    "qualname": "scripts/tool.py:run",
+                                    "start_line": 7,
+                                    "end_line": 11,
+                                },
+                            ],
+                            "facts": {"occurrence_count": 2},
+                        },
+                        {
+                            # the same KEY STRING under another kind
+                            "id": "structural:clone_cohort_drift:k1",
+                            "kind": "clone_cohort_drift",
+                            "category": "clone_cohort_drift",
+                            "signature": {
+                                "version": "1",
+                                "stable": {},
+                                "debug": {"cohort_id": "c1"},
+                            },
+                            "items": [
+                                {
+                                    "relative_path": "pkg/other.py",
+                                    "qualname": "pkg.other:helper",
+                                    "start_line": 2,
+                                    "end_line": 4,
+                                }
+                            ],
+                            "facts": {"cohort_id": "c1"},
+                        },
+                    ]
+                },
+                "dead_code": {
+                    "groups": [
+                        {
+                            "id": "dead_code:pkg.mod:make",
+                            "kind": "unused_symbol",
+                            "category": "function",
+                            "items": [
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 10,
+                                    "end_line": 24,
+                                }
+                            ],
+                            "facts": {
+                                "kind": "function",
+                                "confidence": "high",
+                                "reason": "unreferenced",
+                                "test_reference_sources": [],
+                            },
+                        },
+                        {
+                            # the same qualname at its second site
+                            "id": "dead_code:pkg.mod:make",
+                            "kind": "unused_symbol",
+                            "category": "function",
+                            "items": [
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 40,
+                                    "end_line": 40,
+                                }
+                            ],
+                            "facts": {
+                                "kind": "function",
+                                "confidence": "medium",
+                                "reason": "test_only_reference",
+                                "test_reference_sources": ["tests.test_mod:test_make"],
+                            },
+                        },
+                        {
+                            "id": "dead_code:scripts/tool.py:run#20-22",
+                            "kind": "unreachable_statement",
+                            "category": "unreachable_statement",
+                            "items": [
+                                {
+                                    "relative_path": "scripts/tool.py",
+                                    "qualname": "scripts/tool.py:run",
+                                    "start_line": 20,
+                                    "end_line": 22,
+                                }
+                            ],
+                            "facts": {
+                                "reason": "after_terminator",
+                                "confidence": "high",
+                                "statement_count": 2,
+                                "policy_version": "1",
+                            },
+                        },
+                    ]
+                },
+                "design": {
+                    "groups": [
+                        {
+                            "id": "design:complexity:pkg.mod:make",
+                            "category": "complexity",
+                            "kind": "function_hotspot",
+                            "items": [
+                                {
+                                    "relative_path": "pkg/mod.py",
+                                    "qualname": "pkg.mod:make",
+                                    "start_line": 10,
+                                    "end_line": 24,
+                                    "cyclomatic_complexity": 41,
+                                    "nesting_depth": 4,
+                                    "risk": "high",
+                                }
+                            ],
+                            "facts": {"cyclomatic_complexity": 41, "nesting_depth": 4},
+                        },
+                        {
+                            "id": "design:coupling:pkg.other:Helper",
+                            "category": "coupling",
+                            "kind": "class_hotspot",
+                            "items": [
+                                {
+                                    "relative_path": "pkg/other.py",
+                                    "qualname": "pkg.other:Helper",
+                                    "start_line": 30,
+                                    "end_line": 60,
+                                    "cbo": 6,
+                                    "risk": "medium",
+                                    "coupled_classes": ["Token", "Writer"],
+                                }
+                            ],
+                            "facts": {"cbo": 6, "coupled_classes": ["Token", "Writer"]},
+                        },
+                        {
+                            "id": "design:cohesion:pkg.other:Helper",
+                            "category": "cohesion",
+                            "kind": "class_hotspot",
+                            "items": [
+                                {
+                                    "relative_path": "pkg/other.py",
+                                    "qualname": "pkg.other:Helper",
+                                    "start_line": 30,
+                                    "end_line": 60,
+                                    "lcom4": 3,
+                                    "risk": "high",
+                                    "method_count": 4,
+                                    "instance_var_count": 1,
+                                }
+                            ],
+                            "facts": {
+                                "lcom4": 3,
+                                "method_count": 4,
+                                "instance_var_count": 1,
+                            },
+                        },
+                        {
+                            # projected families: never read by the oracle
+                            "id": "design:dependency:pkg.mod -> pkg.other",
+                            "category": "dependency",
+                            "kind": "import_cycle",
+                            "items": [],
+                            "facts": {},
+                        },
+                    ]
+                },
             }
         },
         # F9: the document's inventory scalars verbatim (values pairwise

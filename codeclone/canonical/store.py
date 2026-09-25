@@ -78,6 +78,23 @@ from types import TracebackType
 from typing import Final, Generic, Protocol, TypeVar
 from urllib.parse import quote
 
+from codeclone.canonical.analysis_rows import (
+    OVERLOADED_MODULE_COUNTERS,
+    OVERLOADED_MODULE_SCORES,
+    CloneItemRow,
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+    overloaded_module_row,
+)
 from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.codec import (
     WirePlan,
@@ -151,7 +168,6 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
-    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
@@ -188,6 +204,7 @@ from codeclone.contracts import (
     SOURCE_KIND_POLICY_VERSION,
     STATEMENT_REACHABILITY_POLICY_VERSION,
     STORAGE_SCHEMA_REVISION,
+    STRUCTURAL_FINDINGS_CATALOG_VERSION,
 )
 from codeclone.models import (
     GC_COLLECT_UNREACHABLE,
@@ -934,6 +951,7 @@ def _observation_model_rows(
             },
         )
     yield from _revision_two_model_rows(facts)
+    yield from _epoch_one_model_rows(facts)
     if facts.run_scalars is not None:
         # F9: exactly one record per snapshot — a run-level fact, no rows.
         yield ("run_scalar", dict(sorted(asdict(facts.run_scalars).items())))
@@ -950,6 +968,167 @@ def _observation_model_rows(
                 "producer_states": [
                     [family, state] for family, state in record.producer_states
                 ],
+            },
+        )
+
+
+def _member_values(items: frozenset[CloneItemRow]) -> list[list[object]]:
+    """The sorted ``[path, qualname, start, end]`` member cells — the
+    clone-item storage cell, shared by every E1 family that stores sites."""
+    return sorted(
+        [*_symbol_value(item.symbol), item.start_line, item.end_line] for item in items
+    )
+
+
+_SiteRow = (
+    DeadSymbolGroupRow
+    | UnreachableStatementRow
+    | ComplexityHotspotRow
+    | CouplingHotspotRow
+    | CohesionHotspotRow
+    | CoverageUnitRow
+)
+
+
+def _site_order(row: _SiteRow) -> tuple[object, ...]:
+    return (canonical_key(row.symbol), row.start_line)
+
+
+def _epoch_one_model_rows(
+    facts: AnalysisFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """Storage rows of the canonical epoch E1 families.
+
+    Split out for the reason the two walks before it were: the row walk
+    stays a walk.  Row order here is the same insurance as everywhere in
+    this walk (see :func:`_model_rows`) — the content address owns
+    determinism.
+    """
+    for suppressed in sorted(
+        facts.suppressed_clone_groups, key=lambda row: (row.clone_kind, row.group_key)
+    ):
+        yield (
+            "suppressed_clone_group",
+            {
+                "clone_kind": suppressed.clone_kind,
+                "group_key": suppressed.group_key,
+                "items": _member_values(suppressed.items),
+                "matched_patterns": list(suppressed.matched_patterns),
+                "suppression_rule": suppressed.suppression_rule,
+                "suppression_source": suppressed.suppression_source,
+            },
+        )
+    for structural in sorted(
+        facts.structural_groups, key=lambda row: (row.finding_kind, row.finding_key)
+    ):
+        yield (
+            "structural_group",
+            {
+                "finding_key": structural.finding_key,
+                "finding_kind": structural.finding_kind,
+                "occurrences": _member_values(structural.occurrences),
+                "signature": [list(pair) for pair in structural.signature],
+            },
+        )
+    for dead_symbol in sorted(facts.dead_symbol_groups, key=_site_order):
+        yield (
+            "dead_symbol_group",
+            {
+                "candidate_kind": dead_symbol.candidate_kind,
+                "confidence": dead_symbol.confidence,
+                "end_line": dead_symbol.end_line,
+                "reason": dead_symbol.reason,
+                "start_line": dead_symbol.start_line,
+                "symbol": _symbol_value(dead_symbol.symbol),
+                "test_reference_sources": list(dead_symbol.test_reference_sources),
+            },
+        )
+    for region in sorted(facts.unreachable_statement_groups, key=_site_order):
+        yield (
+            "unreachable_statement_group",
+            {
+                "end_line": region.end_line,
+                "reason": region.reason,
+                "start_line": region.start_line,
+                "statement_count": region.statement_count,
+                "symbol": _symbol_value(region.symbol),
+            },
+        )
+    yield from _design_hotspot_model_rows(facts)
+    for overloaded in sorted(
+        facts.overloaded_modules, key=lambda row: canonical_key(row.file)
+    ):
+        cells: dict[str, object] = {
+            counter: getattr(overloaded, counter)
+            for counter in OVERLOADED_MODULE_COUNTERS
+        }
+        cells.update(
+            (score, getattr(overloaded, score)) for score in OVERLOADED_MODULE_SCORES
+        )
+        cells["candidate_reasons"] = list(overloaded.candidate_reasons)
+        cells["candidate_status"] = overloaded.candidate_status
+        cells["file"] = overloaded.file.path
+        cells["source_kind"] = overloaded.source_kind
+        yield ("overloaded_module", cells)
+    for unit in sorted(facts.coverage_units, key=_site_order):
+        yield (
+            "coverage_unit",
+            {
+                "coverage_status": unit.coverage_status,
+                "covered_lines": unit.covered_lines,
+                "end_line": unit.end_line,
+                "executable_lines": unit.executable_lines,
+                "start_line": unit.start_line,
+                "symbol": _symbol_value(unit.symbol),
+            },
+        )
+    if facts.coverage_join is not None:
+        # A5: exactly one record per run — present iff a report was handed.
+        yield ("coverage_join", dict(sorted(asdict(facts.coverage_join).items())))
+    if facts.dead_code_summary is not None:
+        # A7: exactly one record per run — present iff the lane ran.
+        yield (
+            "dead_code_summary",
+            dict(sorted(asdict(facts.dead_code_summary).items())),
+        )
+
+
+def _design_hotspot_model_rows(
+    facts: AnalysisFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """Storage rows of the three design hotspot families."""
+    for complexity in sorted(facts.complexity_hotspots, key=_site_order):
+        yield (
+            "complexity_hotspot",
+            {
+                "cyclomatic_complexity": complexity.cyclomatic_complexity,
+                "end_line": complexity.end_line,
+                "nesting_depth": complexity.nesting_depth,
+                "start_line": complexity.start_line,
+                "symbol": _symbol_value(complexity.symbol),
+            },
+        )
+    for coupling in sorted(facts.coupling_hotspots, key=_site_order):
+        yield (
+            "coupling_hotspot",
+            {
+                "cbo": coupling.cbo,
+                "coupled_classes": list(coupling.coupled_classes),
+                "end_line": coupling.end_line,
+                "start_line": coupling.start_line,
+                "symbol": _symbol_value(coupling.symbol),
+            },
+        )
+    for cohesion in sorted(facts.cohesion_hotspots, key=_site_order):
+        yield (
+            "cohesion_hotspot",
+            {
+                "end_line": cohesion.end_line,
+                "instance_var_count": cohesion.instance_var_count,
+                "lcom4": cohesion.lcom4,
+                "method_count": cohesion.method_count,
+                "start_line": cohesion.start_line,
+                "symbol": _symbol_value(cohesion.symbol),
             },
         )
 
@@ -1519,6 +1698,192 @@ def _decode_relationship_observation_row(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Canonical epoch E1 row decoders: shape guards only — every family law
+# (vocabularies, floors, the coverage and dead-symbol contracts) has exactly
+# one owner, the row class, whose refusal ``_collect_row`` wraps into a
+# typed integrity error.  A second spelling here would be the G2 drift.
+# ---------------------------------------------------------------------------
+
+
+def _decode_member_values(value: object, where: str) -> frozenset[CloneItemRow]:
+    if not isinstance(value, list):
+        raise StoreIntegrityError(f"{where}: stored members are not an array")
+    return frozenset(_decode_clone_item_value(item, where) for item in value)
+
+
+def _decode_stored_pairs_of_str(
+    value: object, where: str
+) -> tuple[tuple[str, str], ...]:
+    pairs: list[tuple[str, str]] = []
+    for key, item in _decode_stored_pairs(value, where):
+        if not isinstance(item, str):
+            raise StoreIntegrityError(f"{where}: stored pair value is not a string")
+        pairs.append((key, item))
+    return tuple(pairs)
+
+
+def _require_float(row: Mapping[str, object], key: str, where: str) -> float:
+    value = _require_field(row, key, where)
+    if isinstance(value, bool) or not isinstance(value, float):
+        raise StoreIntegrityError(f"{where}: stored field {key!r} is not a float")
+    return value
+
+
+def _decode_suppressed_clone_group_row(
+    row: Mapping[str, object], where: str
+) -> SuppressedCloneGroupRow:
+    return SuppressedCloneGroupRow(
+        clone_kind=_require_str(row, "clone_kind", where),
+        group_key=_require_str(row, "group_key", where),
+        items=_decode_member_values(_require_field(row, "items", where), where),
+        suppression_rule=_require_str(row, "suppression_rule", where),
+        suppression_source=_require_str(row, "suppression_source", where),
+        matched_patterns=tuple(_require_str_list(row, "matched_patterns", where)),
+    )
+
+
+def _decode_structural_group_row(
+    row: Mapping[str, object], where: str
+) -> StructuralGroupRow:
+    return StructuralGroupRow(
+        finding_kind=_require_str(row, "finding_kind", where),
+        finding_key=_require_str(row, "finding_key", where),
+        signature=_decode_stored_pairs_of_str(
+            _require_field(row, "signature", where), f"{where}.signature"
+        ),
+        occurrences=_decode_member_values(
+            _require_field(row, "occurrences", where), where
+        ),
+    )
+
+
+def _decode_dead_symbol_group_row(
+    row: Mapping[str, object], where: str
+) -> DeadSymbolGroupRow:
+    return DeadSymbolGroupRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        candidate_kind=_require_str(row, "candidate_kind", where),
+        confidence=_require_str(row, "confidence", where),
+        reason=_require_str(row, "reason", where),
+        test_reference_sources=tuple(
+            _require_str_list(row, "test_reference_sources", where)
+        ),
+    )
+
+
+def _decode_unreachable_statement_row(
+    row: Mapping[str, object], where: str
+) -> UnreachableStatementRow:
+    return UnreachableStatementRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        reason=_require_str(row, "reason", where),
+        statement_count=_require_line(row, "statement_count", where),
+    )
+
+
+def _decode_complexity_hotspot_row(
+    row: Mapping[str, object], where: str
+) -> ComplexityHotspotRow:
+    return ComplexityHotspotRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        cyclomatic_complexity=_require_line(row, "cyclomatic_complexity", where),
+        nesting_depth=_require_line(row, "nesting_depth", where),
+    )
+
+
+def _decode_coupling_hotspot_row(
+    row: Mapping[str, object], where: str
+) -> CouplingHotspotRow:
+    return CouplingHotspotRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        cbo=_require_line(row, "cbo", where),
+        coupled_classes=tuple(_require_str_list(row, "coupled_classes", where)),
+    )
+
+
+def _decode_cohesion_hotspot_row(
+    row: Mapping[str, object], where: str
+) -> CohesionHotspotRow:
+    return CohesionHotspotRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        lcom4=_require_line(row, "lcom4", where),
+        method_count=_require_line(row, "method_count", where),
+        instance_var_count=_require_line(row, "instance_var_count", where),
+    )
+
+
+def _decode_overloaded_module_row(
+    row: Mapping[str, object], where: str
+) -> OverloadedModuleRow:
+    counters = {
+        name: _require_line(row, name, where) for name in OVERLOADED_MODULE_COUNTERS
+    }
+    scores = {
+        name: _require_float(row, name, where) for name in OVERLOADED_MODULE_SCORES
+    }
+    return overloaded_module_row(
+        file=FileId(_require_str(row, "file", where)),
+        source_kind=_require_str(row, "source_kind", where),
+        candidate_status=_require_str(row, "candidate_status", where),
+        candidate_reasons=tuple(_require_str_list(row, "candidate_reasons", where)),
+        counters=counters,
+        scores=scores,
+    )
+
+
+def _decode_coverage_unit_row(row: Mapping[str, object], where: str) -> CoverageUnitRow:
+    return CoverageUnitRow(
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        end_line=_require_line(row, "end_line", where),
+        executable_lines=_require_line(row, "executable_lines", where),
+        covered_lines=_require_line(row, "covered_lines", where),
+        coverage_status=_require_str(row, "coverage_status", where),
+    )
+
+
+def _decode_coverage_join_row(
+    row: Mapping[str, object], where: str
+) -> CoverageJoinRecord:
+    return CoverageJoinRecord(
+        status=_require_str(row, "status", where),
+        source=_require_str(row, "source", where),
+        files=_require_line(row, "files", where),
+        hotspot_threshold_percent=_require_line(
+            row, "hotspot_threshold_percent", where
+        ),
+        invalid_reason=_require_optional_str(row, "invalid_reason", where),
+    )
+
+
+def _decode_dead_code_summary_row(
+    row: Mapping[str, object], where: str
+) -> DeadCodeSummaryRecord:
+    return DeadCodeSummaryRecord(
+        suppressed=_require_line(row, "suppressed", where),
+        unresolved=_require_line(row, "unresolved", where),
+        unresolved_internal=_require_line(row, "unresolved_internal", where),
+        unresolved_external_override=_require_line(
+            row, "unresolved_external_override", where
+        ),
+        candidates=_require_line(row, "candidates", where),
+        nested_candidates=_require_line(row, "nested_candidates", where),
+        live_roots=_require_line(row, "live_roots", where),
+        world_contract=_require_str(row, "world_contract", where),
+    )
+
+
 class _FamilyEntry(Protocol):
     """The registry's erased face — what a caller still needs from an entry
     once the row type has done its work at declaration time."""
@@ -1796,6 +2161,91 @@ FAMILY_VIOLATION: Final = StoredFamily(
     decode=_decode_violation_row,
     row_type=ViolationRow,
 )
+# Canonical epoch E1 (2026-09-25).  Each family takes the namespace of the
+# contract that gives its content meaning, so a policy or algorithm bump
+# never lets these facts silently share content addresses.
+# A1: the suppressed population shares the emitted family's grouping key,
+# whose meaning is the clone fingerprint generation.
+FAMILY_SUPPRESSED_CLONE_GROUP: Final = StoredFamily(
+    family="suppressed_clone_group",
+    namespace=f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}",
+    decode=_decode_suppressed_clone_group_row,
+    row_type=SuppressedCloneGroupRow,
+)
+# A2: the structural detectors' catalog owns the kinds and the signatures.
+FAMILY_STRUCTURAL_GROUP: Final = StoredFamily(
+    family="structural_group",
+    namespace=f"structural_findings:{STRUCTURAL_FINDINGS_CATALOG_VERSION}",
+    decode=_decode_structural_group_row,
+    row_type=StructuralGroupRow,
+)
+# A2: a dead-symbol verdict is the liveness policy's; an unreachable region
+# is the statement-reachability policy's — one owner each, unlike the F4
+# observation lane that carries both meanings under one family.
+FAMILY_DEAD_SYMBOL_GROUP: Final = StoredFamily(
+    family="dead_symbol_group",
+    namespace=f"liveness:{LIVENESS_POLICY_VERSION}",
+    decode=_decode_dead_symbol_group_row,
+    row_type=DeadSymbolGroupRow,
+)
+FAMILY_UNREACHABLE_STATEMENT_GROUP: Final = StoredFamily(
+    family="unreachable_statement_group",
+    namespace=f"statement_reachability:{STATEMENT_REACHABILITY_POLICY_VERSION}",
+    decode=_decode_unreachable_statement_row,
+    row_type=UnreachableStatementRow,
+)
+# A2 (design): the complexity verdict rides the complexity revision, the
+# two class verdicts the design-metrics revision (the Wave D split).
+FAMILY_COMPLEXITY_HOTSPOT: Final = StoredFamily(
+    family="complexity_hotspot",
+    namespace=f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}",
+    decode=_decode_complexity_hotspot_row,
+    row_type=ComplexityHotspotRow,
+)
+FAMILY_COUPLING_HOTSPOT: Final = StoredFamily(
+    family="coupling_hotspot",
+    namespace=f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}",
+    decode=_decode_coupling_hotspot_row,
+    row_type=CouplingHotspotRow,
+)
+FAMILY_COHESION_HOTSPOT: Final = StoredFamily(
+    family="cohesion_hotspot",
+    namespace=f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}",
+    decode=_decode_cohesion_hotspot_row,
+    row_type=CohesionHotspotRow,
+)
+# A4: no algorithm revision of its own exists for the overloaded-modules
+# producer, so the family takes the canonical-model namespace; the stored
+# source-kind verdict adds its policy owner (the F10 two-owner precedent).
+FAMILY_OVERLOADED_MODULE: Final = StoredFamily(
+    family="overloaded_module",
+    namespace=(
+        f"canonical_model:{CANONICAL_MODEL_REVISION}"
+        f":source_kind:{SOURCE_KIND_POLICY_VERSION}"
+    ),
+    decode=_decode_overloaded_module_row,
+    row_type=OverloadedModuleRow,
+)
+# A5: the external join has no revision constant of its own.
+FAMILY_COVERAGE_UNIT: Final = StoredFamily(
+    family="coverage_unit",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_coverage_unit_row,
+    row_type=CoverageUnitRow,
+)
+FAMILY_COVERAGE_JOIN: Final = StoredFamily(
+    family="coverage_join",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_coverage_join_row,
+    row_type=CoverageJoinRecord,
+)
+# A7: the counters are the liveness lane's own.
+FAMILY_DEAD_CODE_SUMMARY: Final = StoredFamily(
+    family="dead_code_summary",
+    namespace=f"liveness:{LIVENESS_POLICY_VERSION}",
+    decode=_decode_dead_code_summary_row,
+    row_type=DeadCodeSummaryRecord,
+)
 
 _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_ADOPTION_COUNT,
@@ -1824,6 +2274,17 @@ _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_SEMANTIC_EDGE,
     FAMILY_SINK_ROLE,
     FAMILY_VIOLATION,
+    FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_STRUCTURAL_GROUP,
+    FAMILY_DEAD_SYMBOL_GROUP,
+    FAMILY_UNREACHABLE_STATEMENT_GROUP,
+    FAMILY_COMPLEXITY_HOTSPOT,
+    FAMILY_COUPLING_HOTSPOT,
+    FAMILY_COHESION_HOTSPOT,
+    FAMILY_OVERLOADED_MODULE,
+    FAMILY_COVERAGE_UNIT,
+    FAMILY_COVERAGE_JOIN,
+    FAMILY_DEAD_CODE_SUMMARY,
 )
 
 # Derived, never restated: the reader dispatch and the content address read
@@ -1850,24 +2311,25 @@ def _collect_row(
         raise StoreIntegrityError(f"{where}: {error}") from error
 
 
+def _single_record(
+    entry: StoredFamily[_RowT], collected: Mapping[str, list[object]]
+) -> _RowT | None:
+    """ONE record per analysis snapshot, or its typed absence.
+
+    The F9 law, shared by every record family: two stored records are a
+    writer defect, refused loudly, never last-reader-silenced.
+    """
+    rows = entry.rows(collected)
+    if len(rows) > 1:
+        raise StoreIntegrityError(
+            f"run carries more than one {entry.family} record; the family "
+            "is one record per analysis snapshot"
+        )
+    return rows[0] if rows else None
+
+
 def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
     """Assemble decoded family rows into one canonical model."""
-    run_scalar_rows = FAMILY_RUN_SCALAR.rows(collected)
-    if len(run_scalar_rows) > 1:
-        # F9 law: ONE record per analysis snapshot — two stored records are
-        # a writer defect, refused loudly, never last-reader-silenced.
-        raise StoreIntegrityError(
-            "run carries more than one run_scalars record; the family is "
-            "one record per analysis snapshot"
-        )
-    population_rows = FAMILY_ANALYSIS_POPULATION.rows(collected)
-    if len(population_rows) > 1:
-        # RULING-2026-08-31 §3: a singleton authority — two stored records
-        # are a writer defect, refused loudly, never last-reader-silenced.
-        raise StoreIntegrityError(
-            "run carries more than one analysis_population record; the "
-            "family is one record per analysis snapshot"
-        )
     return CanonicalModel(
         files=frozenset(FAMILY_FILE.rows(collected)),
         modules=frozenset(FAMILY_MODULE.rows(collected)),
@@ -1906,8 +2368,27 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 unit_spans=frozenset(FAMILY_UNIT_SPAN.rows(collected)),
                 adoption_counts=frozenset(FAMILY_ADOPTION_COUNT.rows(collected)),
                 security_surfaces=frozenset(FAMILY_SECURITY_SURFACE.rows(collected)),
-                run_scalars=run_scalar_rows[0] if run_scalar_rows else None,
-                analysis_population=(population_rows[0] if population_rows else None),
+                suppressed_clone_groups=frozenset(
+                    FAMILY_SUPPRESSED_CLONE_GROUP.rows(collected)
+                ),
+                structural_groups=frozenset(FAMILY_STRUCTURAL_GROUP.rows(collected)),
+                dead_symbol_groups=frozenset(FAMILY_DEAD_SYMBOL_GROUP.rows(collected)),
+                unreachable_statement_groups=frozenset(
+                    FAMILY_UNREACHABLE_STATEMENT_GROUP.rows(collected)
+                ),
+                complexity_hotspots=frozenset(
+                    FAMILY_COMPLEXITY_HOTSPOT.rows(collected)
+                ),
+                coupling_hotspots=frozenset(FAMILY_COUPLING_HOTSPOT.rows(collected)),
+                cohesion_hotspots=frozenset(FAMILY_COHESION_HOTSPOT.rows(collected)),
+                overloaded_modules=frozenset(FAMILY_OVERLOADED_MODULE.rows(collected)),
+                coverage_units=frozenset(FAMILY_COVERAGE_UNIT.rows(collected)),
+                run_scalars=_single_record(FAMILY_RUN_SCALAR, collected),
+                analysis_population=_single_record(
+                    FAMILY_ANALYSIS_POPULATION, collected
+                ),
+                coverage_join=_single_record(FAMILY_COVERAGE_JOIN, collected),
+                dead_code_summary=_single_record(FAMILY_DEAD_CODE_SUMMARY, collected),
             )
         ),
         coupled_sets=frozenset(FAMILY_COUPLED_SET.rows(collected)),
@@ -2495,22 +2976,33 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "api_symbols": "api_symbol",
     "candidates": "candidate",
     "clone_groups": "clone_group",
+    "cohesion_hotspots": "cohesion_hotspot",
+    "complexity_hotspots": "complexity_hotspot",
     "contracts": "contract",
     "coupling_cohesion_observations": "coupling_cohesion_observation",
+    "coupling_hotspots": "coupling_hotspot",
+    "coverage_join": "coverage_join",
+    "coverage_units": "coverage_unit",
     "dead_code_observations": "dead_code_observation",
+    "dead_code_summary": "dead_code_summary",
+    "dead_symbol_groups": "dead_symbol_group",
     "dependency_cycles": "dependency_cycle",
     "dependency_occurrences": "dependency_occurrence",
     "dependency_relations": "dependency_relation",
     "file_modules": "file_module",
     "graph_nodes": "graph_node",
     "import_observations": "import_observation",
+    "overloaded_modules": "overloaded_module",
     "relationship_observations": "relationship_observation",
     "risk_observations": "risk_observation",
     "run_scalars": "run_scalar",
     "security_surfaces": "security_surface",
     "semantic_edges": "semantic_edge",
     "sink_roles": "sink_role",
+    "structural_groups": "structural_group",
+    "suppressed_clone_groups": "suppressed_clone_group",
     "unit_spans": "unit_span",
+    "unreachable_statement_groups": "unreachable_statement_group",
     "violations": "violation",
 }
 
@@ -3868,10 +4360,17 @@ __all__ = [
     "FAMILY_API_SYMBOL",
     "FAMILY_CANDIDATE",
     "FAMILY_CLONE_GROUP",
+    "FAMILY_COHESION_HOTSPOT",
+    "FAMILY_COMPLEXITY_HOTSPOT",
     "FAMILY_CONTRACT",
     "FAMILY_COUPLED_SET",
     "FAMILY_COUPLING_COHESION",
+    "FAMILY_COUPLING_HOTSPOT",
+    "FAMILY_COVERAGE_JOIN",
+    "FAMILY_COVERAGE_UNIT",
     "FAMILY_DEAD_CODE_OBSERVATION",
+    "FAMILY_DEAD_CODE_SUMMARY",
+    "FAMILY_DEAD_SYMBOL_GROUP",
     "FAMILY_DEPENDENCY_CYCLE",
     "FAMILY_DEPENDENCY_OCCURRENCE",
     "FAMILY_DEPENDENCY_RELATION",
@@ -3880,13 +4379,17 @@ __all__ = [
     "FAMILY_GRAPH_NODE",
     "FAMILY_IMPORT_OBSERVATION",
     "FAMILY_MODULE",
+    "FAMILY_OVERLOADED_MODULE",
     "FAMILY_RELATIONSHIP_OBSERVATION",
     "FAMILY_RISK_OBSERVATION",
     "FAMILY_RUN_SCALAR",
     "FAMILY_SECURITY_SURFACE",
     "FAMILY_SEMANTIC_EDGE",
     "FAMILY_SINK_ROLE",
+    "FAMILY_STRUCTURAL_GROUP",
+    "FAMILY_SUPPRESSED_CLONE_GROUP",
     "FAMILY_UNIT_SPAN",
+    "FAMILY_UNREACHABLE_STATEMENT_GROUP",
     "FAMILY_VIOLATION",
     "HeadState",
     "PublishReceipt",

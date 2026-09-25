@@ -172,22 +172,40 @@ FAMILY_SEMANTIC_GRAMMAR: Final[Mapping[str, FamilyGrammar]] = {
     "api_symbols": FamilyGrammar("normalized_fact"),
     "candidates": FamilyGrammar("normalized_fact"),
     "clone_groups": FamilyGrammar("normalized_finding"),
+    # Canonical epoch E1 (2026-09-25): the three design hotspot families
+    # are the document's grouped design findings, classified once by the
+    # producer under the run's own thresholds.
+    "cohesion_hotspots": FamilyGrammar("normalized_finding"),
+    "complexity_hotspots": FamilyGrammar("normalized_finding"),
     "contracts": FamilyGrammar("normalized_fact"),
     "coupling_cohesion_observations": FamilyGrammar("normalized_fact"),
+    "coupling_hotspots": FamilyGrammar("normalized_finding"),
+    # E1: the external Cobertura join — a §4 "external observation", the
+    # one production whose facts come from outside the analyzed source.
+    "coverage_join": FamilyGrammar("external_observation"),
+    "coverage_units": FamilyGrammar("external_observation"),
     "dead_code_observations": FamilyGrammar("normalized_finding"),
+    # E1: the dead-code lane's population counters — the §4 "run
+    # population" production, the ``run_scalars`` shape.
+    "dead_code_summary": FamilyGrammar("run_population"),
+    "dead_symbol_groups": FamilyGrammar("normalized_finding"),
     "dependency_cycles": FamilyGrammar("normalized_fact"),
     "dependency_occurrences": FamilyGrammar("normalized_fact"),
     "dependency_relations": FamilyGrammar("normalized_fact"),
     "file_modules": FamilyGrammar("normalized_fact"),
     "graph_nodes": FamilyGrammar("normalized_fact"),
     "import_observations": FamilyGrammar("normalized_fact"),
+    "overloaded_modules": FamilyGrammar("normalized_fact"),
     "relationship_observations": FamilyGrammar("normalized_fact"),
     "risk_observations": FamilyGrammar("normalized_fact"),
     "run_scalars": FamilyGrammar("run_population"),
     "security_surfaces": FamilyGrammar("normalized_fact"),
     "semantic_edges": FamilyGrammar("normalized_fact"),
     "sink_roles": FamilyGrammar("normalized_fact"),
+    "structural_groups": FamilyGrammar("normalized_finding"),
+    "suppressed_clone_groups": FamilyGrammar("normalized_finding"),
     "unit_spans": FamilyGrammar("normalized_fact"),
+    "unreachable_statement_groups": FamilyGrammar("normalized_finding"),
     "violations": FamilyGrammar("normalized_finding"),
 }
 

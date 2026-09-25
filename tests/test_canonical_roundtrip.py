@@ -81,6 +81,19 @@ from codeclone.canonical import (
     wire_fact_family_order,
 )
 from codeclone.canonical import model as canonical_model
+from codeclone.canonical.analysis_rows import (
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+)
 from codeclone.canonical.model import _unique_by_key
 
 
@@ -633,6 +646,238 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             ("security_surfaces", "complete"),
         ),
     )
+    # Canonical epoch E1 (2026-09-25): the eleven published-population
+    # families, each populated with the shape that distinguishes it.
+    # A1: one SUPPRESSED group beside the emitted ones — its key string
+    # collides with nothing emitted, its patterns are deliberately NOT in
+    # sorted order (a producer order is a fact), and its members share
+    # symbols with the emitted family without being members of it.
+    suppressed_clone_groups = [
+        SuppressedCloneGroupRow(
+            clone_kind="function",
+            group_key="ffff|20-39",
+            items=frozenset({CloneItemRow(sa, 30, 45), CloneItemRow(sb, 3, 18)}),
+            suppression_rule="golden_fixture",
+            suppression_source="project_config",
+            matched_patterns=("tests/fixtures/golden_*", "tests/fixtures/extra_*"),
+        )
+    ]
+    # A2: two structural groups sharing one KEY STRING under two kinds
+    # (the kind is a key component), one with two occurrences in two
+    # files and one on the separator-collision file.
+    structural_groups = [
+        StructuralGroupRow(
+            finding_kind="duplicated_branches",
+            finding_key="k1",
+            signature=(("calls", "2"), ("stmt_seq", "Continue")),
+            occurrences=frozenset({CloneItemRow(sa, 5, 9), CloneItemRow(sb, 7, 11)}),
+        ),
+        StructuralGroupRow(
+            finding_kind="clone_cohort_drift",
+            finding_key="k1",
+            signature=(("cohort_id", "c1"),),
+            occurrences=frozenset({CloneItemRow(se, 2, 4)}),
+        ),
+    ]
+    # A2: two dead symbols on ONE qualname at two sites (the @overload
+    # discriminator the site key exists for), both reasons, both
+    # confidences, and one on the site floor of the module-less file.
+    dead_symbol_groups = [
+        DeadSymbolGroupRow(
+            symbol=sa,
+            start_line=10,
+            end_line=24,
+            candidate_kind="method",
+            confidence="high",
+            reason="unreferenced",
+            test_reference_sources=(),
+        ),
+        DeadSymbolGroupRow(
+            symbol=sa,
+            start_line=40,
+            end_line=40,
+            candidate_kind="method",
+            confidence="medium",
+            reason="test_only_reference",
+            test_reference_sources=("tests.test_a:test_x",),
+        ),
+        DeadSymbolGroupRow(
+            symbol=se,
+            start_line=1,
+            end_line=1,
+            candidate_kind="function",
+            confidence="high",
+            reason="unreferenced",
+            test_reference_sources=(),
+        ),
+    ]
+    unreachable_statement_groups = [
+        UnreachableStatementRow(
+            symbol=sb,
+            start_line=20,
+            end_line=22,
+            reason="after_terminator",
+            statement_count=2,
+        ),
+        UnreachableStatementRow(
+            symbol=sb,
+            start_line=30,
+            end_line=30,
+            reason="literal_condition",
+            statement_count=1,
+        ),
+    ]
+    # A2 (design): a class symbol referenced by the two class families
+    # only, plus a class referenced by the cohesion family ALONE (the
+    # closure must admit it on that family's word).  Both are named past
+    # every symbol the fixture already carries so that the SYMBOL ordinals
+    # of the wave-1..4 rows — which the codec refusal needles spell by
+    # number — stay where they were: the two new symbols take the tail.
+    sk = SymbolId(fb, "zz_hub")
+    sl = SymbolId(fb, "zz_lone")
+    complexity_hotspots = [
+        ComplexityHotspotRow(
+            symbol=sa,
+            start_line=10,
+            end_line=24,
+            cyclomatic_complexity=41,
+            nesting_depth=4,
+        ),
+        ComplexityHotspotRow(
+            symbol=se,
+            start_line=1,
+            end_line=1,
+            cyclomatic_complexity=12,
+            nesting_depth=0,
+        ),
+    ]
+    coupling_hotspots = [
+        CouplingHotspotRow(
+            symbol=sk,
+            start_line=2,
+            end_line=60,
+            cbo=6,
+            coupled_classes=("Token", "Writer"),
+        )
+    ]
+    cohesion_hotspots = [
+        CohesionHotspotRow(
+            symbol=sk,
+            start_line=2,
+            end_line=60,
+            lcom4=3,
+            method_count=4,
+            instance_var_count=1,
+        ),
+        CohesionHotspotRow(
+            symbol=sl,
+            start_line=5,
+            end_line=9,
+            lcom4=2,
+            method_count=0,
+            instance_var_count=0,
+        ),
+    ]
+    # A4: two modules — a candidate with every counter and score distinct
+    # (a cross-wired column cannot survive) and a non-candidate at zero.
+    overloaded_modules = [
+        OverloadedModuleRow(
+            file=fa,
+            source_kind="production",
+            callable_count=165,
+            classes=3,
+            complexity_max=16,
+            complexity_total=554,
+            fan_in=2,
+            fan_out=28,
+            functions=160,
+            import_edges=88,
+            loc=3556,
+            methods=5,
+            reimport_edges=60,
+            total_deps=30,
+            dependency_score=0.9992,
+            hub_balance=0.0625,
+            instability=1.0,
+            reimport_ratio=0.6818,
+            score=0.9972,
+            shape_score=0.9928,
+            size_score=0.9976,
+            candidate_status="candidate",
+            candidate_reasons=("size_pressure", "dependency_pressure"),
+        ),
+        OverloadedModuleRow(
+            file=fb,
+            source_kind="tests",
+            callable_count=0,
+            classes=0,
+            complexity_max=0,
+            complexity_total=0,
+            fan_in=0,
+            fan_out=0,
+            functions=0,
+            import_edges=0,
+            loc=0,
+            methods=0,
+            reimport_edges=0,
+            total_deps=0,
+            dependency_score=0.0,
+            hub_balance=0.0,
+            instability=0.0,
+            reimport_ratio=0.0,
+            score=0.0,
+            shape_score=0.0,
+            size_score=0.0,
+            candidate_status="non_candidate",
+            candidate_reasons=(),
+        ),
+    ]
+    # A5: all three unit statuses, two sites of one symbol, and the record.
+    coverage_units = [
+        CoverageUnitRow(
+            symbol=sa,
+            start_line=10,
+            end_line=24,
+            executable_lines=12,
+            covered_lines=9,
+            coverage_status="measured",
+        ),
+        CoverageUnitRow(
+            symbol=sa,
+            start_line=40,
+            end_line=40,
+            executable_lines=0,
+            covered_lines=0,
+            coverage_status="no_executable_lines",
+        ),
+        CoverageUnitRow(
+            symbol=se,
+            start_line=1,
+            end_line=1,
+            executable_lines=0,
+            covered_lines=0,
+            coverage_status="missing_from_report",
+        ),
+    ]
+    coverage_join = CoverageJoinRecord(
+        status="ok",
+        source="coverage.xml",
+        files=2,
+        hotspot_threshold_percent=50,
+        invalid_reason=None,
+    )
+    # A7: the measured self-repository counters @ ebe362d5, pairwise
+    # distinct so a cross-wired counter cannot survive.
+    dead_code_summary = DeadCodeSummaryRecord(
+        suppressed=2,
+        unresolved=85,
+        unresolved_internal=559,
+        unresolved_external_override=16,
+        candidates=18621,
+        nested_candidates=1309,
+        live_roots=37,
+        world_contract="open",
+    )
     coupled = [frozenset({"Token", "AccessToken"}), frozenset({"Token"})]
     if reverse_insertion:
         contracts = list(reversed(contracts))
@@ -654,6 +899,15 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         unit_spans = list(reversed(unit_spans))
         adoption_counts = list(reversed(adoption_counts))
         security_surfaces = list(reversed(security_surfaces))
+        suppressed_clone_groups = list(reversed(suppressed_clone_groups))
+        structural_groups = list(reversed(structural_groups))
+        dead_symbol_groups = list(reversed(dead_symbol_groups))
+        unreachable_statement_groups = list(reversed(unreachable_statement_groups))
+        complexity_hotspots = list(reversed(complexity_hotspots))
+        coupling_hotspots = list(reversed(coupling_hotspots))
+        cohesion_hotspots = list(reversed(cohesion_hotspots))
+        overloaded_modules = list(reversed(overloaded_modules))
+        coverage_units = list(reversed(coverage_units))
         coupled = list(reversed(coupled))
     return CanonicalModel(
         analyzed_files=frozenset({fa, fb}),
@@ -678,8 +932,19 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
             unit_spans=frozenset(unit_spans),
             adoption_counts=frozenset(adoption_counts),
             security_surfaces=frozenset(security_surfaces),
+            suppressed_clone_groups=frozenset(suppressed_clone_groups),
+            structural_groups=frozenset(structural_groups),
+            dead_symbol_groups=frozenset(dead_symbol_groups),
+            unreachable_statement_groups=frozenset(unreachable_statement_groups),
+            complexity_hotspots=frozenset(complexity_hotspots),
+            coupling_hotspots=frozenset(coupling_hotspots),
+            cohesion_hotspots=frozenset(cohesion_hotspots),
+            overloaded_modules=frozenset(overloaded_modules),
+            coverage_units=frozenset(coverage_units),
             run_scalars=run_scalars,
             analysis_population=analysis_population,
+            coverage_join=coverage_join,
+            dead_code_summary=dead_code_summary,
         ),
         coupled_sets=frozenset(coupled),
     )
@@ -790,12 +1055,29 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     every document's bytes and the seal's domain moved with them.  The
     name of this test keeps the generation it was born under; the literal
     is now the wire revision 1 sentinel.
+
+    Canonical epoch E1 (2026-09-25) then replaced that literal deliberately
+    (7987 bytes, sha256 6a944dcd… → 10475 bytes, sha256 14b0d49e…): the
+    draft gained the eleven published-population families —
+    ``suppressed_clone_groups`` (one group, patterns in producer order),
+    ``structural_groups`` (one key string under two kinds),
+    ``dead_symbol_groups`` (two sites of one symbol, both reasons),
+    ``unreachable_statement_groups``, the three design hotspot families
+    (two class symbols at the ordinal tail, one referenced by cohesion
+    alone), ``overloaded_modules`` (a candidate with every column distinct
+    beside a non-candidate at zero, the first FLOAT columns on the wire),
+    ``coverage_units`` (all three statuses) and the two record members
+    ``coverage_join`` and ``dead_code_summary`` — while ``format.wire`` and
+    every ``revisions`` member stayed put: the epoch's constants move once,
+    after E4, by the 2026-09-23 sanction.  Sanity: an unpopulated E1
+    document differs from the revision-1 bytes only by eleven empty
+    members (measured 7987 → 9357 bytes before the fixture grew).
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 7987
+    assert len(payload) == 10475
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "6a944dcd64f2397bbcae693d5b16bdd2d9d69800d38b2911ac5d21653c9dfa46"
+        == "14b0d49e436bfa1c3ffc6c0b14d31ab18ade2c63452e39bf130cd31bc8383b4c"
     )
 
 

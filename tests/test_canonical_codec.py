@@ -89,8 +89,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W02",
         "column order",
-        '"file":[0,0,0,1,1,2,2,2,2],"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz"]',
-        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz"],"file":[0,0,0,1,1,2,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2,2,2],"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz","zz_hub","zz_lone"]',
+        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz","zz_hub","zz_lone"],"file":[0,0,0,1,1,2,2,2,2,2,2]',
     ),
     (
         "W02",
@@ -108,20 +108,20 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W06",
         "NaN literal",
-        '"file":[0,0,0,1,1,2,2,2,2]',
-        '"file":[NaN,0,0,1,1,2,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2,2,2]',
+        '"file":[NaN,0,0,1,1,2,2,2,2,2,2]',
     ),
     (
         "W07",
         "fraction in an integer slot",
-        '"file":[0,0,0,1,1,2,2,2,2]',
-        '"file":[0.5,0,0,1,1,2,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2,2,2]',
+        '"file":[0.5,0,0,1,1,2,2,2,2,2,2]',
     ),
     (
         "W07",
         "integer above 2**31-1",
-        '"file":[0,0,0,1,1,2,2,2,2]',
-        '"file":[2147483648,0,0,1,1,2,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2,2,2]',
+        '"file":[2147483648,0,0,1,1,2,2,2,2,2,2]',
     ),
     (
         "W08",
@@ -139,8 +139,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W10",
         "ordinal beyond its table",
-        '"file":[0,0,0,1,1,2,2,2,2]',
-        '"file":[0,0,0,1,1,2,2,2,9]',
+        '"file":[0,0,0,1,1,2,2,2,2,2,2]',
+        '"file":[0,0,0,1,1,2,2,2,2,2,9]',
     ),
     (
         "W08",
@@ -318,7 +318,7 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         "W10",
         "clone item symbol ordinal beyond the table",
         "[[1,4,16],[4,19,31]]",
-        "[[1,4,16],[9,19,31]]",
+        "[[1,4,16],[99,19,31]]",
     ),
     (
         "W08",
@@ -617,8 +617,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W15",
         "diverging column lengths",
-        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz"]',
-        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper"]',
+        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz","zz_hub","zz_lone"]',
+        '"qualname":["A.maybe","A.run","A.stop","dead_probe","run","Widget.render","clone_only","helper","zz","zz_hub"]',
     ),
     (
         "W16",

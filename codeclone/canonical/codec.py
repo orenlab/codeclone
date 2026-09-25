@@ -62,6 +62,23 @@ from dataclasses import asdict, dataclass
 from itertools import pairwise
 from typing import Any, TypeVar, cast
 
+from codeclone.canonical.analysis_rows import (
+    OVERLOADED_MODULE_COUNTERS,
+    OVERLOADED_MODULE_SCORES,
+    CloneItemRow,
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+    overloaded_module_row,
+)
 from codeclone.canonical.api_identity import signature_variant
 from codeclone.canonical.authority_identity import (
     candidate_handle,
@@ -76,8 +93,12 @@ from codeclone.canonical.identity import (
     API_VISIBILITIES,
     CLONE_KINDS,
     COUPLING_COHESION_DIMENSIONS,
+    COVERAGE_JOIN_STATUSES,
+    COVERAGE_UNIT_STATUSES,
     DEAD_CODE_CANDIDATE_KINDS,
     DEAD_CODE_OBSERVATION_KINDS,
+    DEAD_SYMBOL_CONFIDENCES,
+    DEAD_SYMBOL_REASONS,
     DEPENDENCY_BINDINGS,
     DEPENDENCY_CYCLE_KINDS,
     DOMAIN_TAG_FILE,
@@ -91,6 +112,7 @@ from codeclone.canonical.identity import (
     LIVE_ROOT_REASONS,
     LOCATION_TAG_UNRESOLVED,
     OPERATION_KINDS,
+    OVERLOADED_CANDIDATE_STATUSES,
     PRODUCER_EXECUTION_STATES,
     RELATIONSHIP_KINDS,
     RELATIONSHIP_ORIGIN_LANES,
@@ -105,8 +127,11 @@ from codeclone.canonical.identity import (
     SECURITY_LOCATION_SCOPES,
     SECURITY_SOURCE_KINDS,
     SECURITY_SURFACE_CATEGORIES,
+    STRUCTURAL_FINDING_KINDS,
     TARGET_TAG_UNRESOLVED,
+    UNREACHABLE_REASONS,
     VIOLATION_KINDS,
+    WORLD_CONTRACTS,
     AnalysisFile,
     DependencyEndpoint,
     EffectLabelRoot,
@@ -144,7 +169,6 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
-    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
@@ -399,7 +423,40 @@ def referenced_symbols(facts: AnalysisFacts) -> set[SymbolId]:
     referenced.update(row.symbol for row in facts.risk_observations)
     referenced.update(row.symbol for row in facts.unit_spans)
     referenced.update(_relationship_symbols(facts.relationship_observations))
+    referenced.update(_epoch_one_symbols(facts))
     return referenced
+
+
+def _epoch_one_symbols(facts: AnalysisFacts) -> Iterator[SymbolId]:
+    """The SYMBOL references the canonical epoch E1 families carry: every
+    member site of a suppressed clone group or a structural group, and the
+    one ``symbol`` of each site-keyed row."""
+    for suppressed_group in facts.suppressed_clone_groups:
+        yield from (item.symbol for item in suppressed_group.items)
+    for structural_group in facts.structural_groups:
+        yield from (item.symbol for item in structural_group.occurrences)
+    yield from (row.symbol for row in _site_keyed_rows(facts))
+
+
+def _site_keyed_rows(facts: AnalysisFacts) -> Iterator[_SiteRow]:
+    """The E1 rows whose only identity contribution is one ``symbol``."""
+    yield from facts.dead_symbol_groups
+    yield from facts.unreachable_statement_groups
+    yield from facts.complexity_hotspots
+    yield from facts.coupling_hotspots
+    yield from facts.cohesion_hotspots
+    yield from facts.coverage_units
+
+
+#: The E1 rows keyed by the declaration site ``(SYMBOL, start_line)``.
+_SiteRow = (
+    DeadSymbolGroupRow
+    | UnreachableStatementRow
+    | ComplexityHotspotRow
+    | CouplingHotspotRow
+    | CohesionHotspotRow
+    | CoverageUnitRow
+)
 
 
 def _relationship_symbols(
@@ -1194,6 +1251,212 @@ def _relationship_observation_rows(
     ]
 
 
+def _member_cells(members: Iterable[CloneItemRow], plan: WirePlan) -> list[list[int]]:
+    """The sorted ``[symbol ordinal, start, end]`` cells of a member set —
+    the clone-item cell, shared by every E1 family that carries sites."""
+    return sorted(
+        [plan.symbol_ordinal[item.symbol], item.start_line, item.end_line]
+        for item in members
+    )
+
+
+def _site_order(row: _SiteRow, plan: WirePlan) -> tuple[int, int]:
+    return (plan.symbol_ordinal[row.symbol], row.start_line)
+
+
+def _suppressed_clone_group_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "clone_kind": row.clone_kind,
+            "group_key": row.group_key,
+            "items": _member_cells(row.items, plan),
+            "matched_patterns": list(row.matched_patterns),
+            "suppression_rule": row.suppression_rule,
+            "suppression_source": row.suppression_source,
+        }
+        for row in sorted(
+            facts.suppressed_clone_groups,
+            key=lambda row: (
+                row.clone_kind.encode("utf-8"),
+                row.group_key.encode("utf-8"),
+            ),
+        )
+    ]
+
+
+def _structural_group_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "finding_key": row.finding_key,
+            "finding_kind": row.finding_kind,
+            "occurrences": _member_cells(row.occurrences, plan),
+            "signature": [list(pair) for pair in row.signature],
+        }
+        for row in sorted(
+            facts.structural_groups,
+            key=lambda row: (
+                row.finding_kind.encode("utf-8"),
+                row.finding_key.encode("utf-8"),
+            ),
+        )
+    ]
+
+
+def _dead_symbol_group_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "candidate_kind": row.candidate_kind,
+            "confidence": row.confidence,
+            "end_line": row.end_line,
+            "reason": row.reason,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+            "test_reference_sources": list(row.test_reference_sources),
+        }
+        for row in sorted(
+            facts.dead_symbol_groups, key=lambda row: _site_order(row, plan)
+        )
+    ]
+
+
+def _unreachable_statement_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "end_line": row.end_line,
+            "reason": row.reason,
+            "start_line": row.start_line,
+            "statement_count": row.statement_count,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.unreachable_statement_groups,
+            key=lambda row: _site_order(row, plan),
+        )
+    ]
+
+
+def _complexity_hotspot_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "cyclomatic_complexity": row.cyclomatic_complexity,
+            "end_line": row.end_line,
+            "nesting_depth": row.nesting_depth,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.complexity_hotspots, key=lambda row: _site_order(row, plan)
+        )
+    ]
+
+
+def _coupling_hotspot_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "cbo": row.cbo,
+            "coupled_classes": list(row.coupled_classes),
+            "end_line": row.end_line,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.coupling_hotspots, key=lambda row: _site_order(row, plan)
+        )
+    ]
+
+
+def _cohesion_hotspot_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "end_line": row.end_line,
+            "instance_var_count": row.instance_var_count,
+            "lcom4": row.lcom4,
+            "method_count": row.method_count,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(
+            facts.cohesion_hotspots, key=lambda row: _site_order(row, plan)
+        )
+    ]
+
+
+def _overloaded_module_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for row in sorted(
+        facts.overloaded_modules, key=lambda row: plan.file_ordinal[row.file]
+    ):
+        cells: dict[str, object] = {
+            counter: getattr(row, counter) for counter in OVERLOADED_MODULE_COUNTERS
+        }
+        cells.update((score, getattr(row, score)) for score in OVERLOADED_MODULE_SCORES)
+        cells["candidate_reasons"] = list(row.candidate_reasons)
+        cells["candidate_status"] = row.candidate_status
+        cells["file"] = plan.file_ordinal[row.file]
+        cells["source_kind"] = row.source_kind
+        rows.append(cells)
+    return rows
+
+
+def _coverage_unit_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    return [
+        {
+            "coverage_status": row.coverage_status,
+            "covered_lines": row.covered_lines,
+            "end_line": row.end_line,
+            "executable_lines": row.executable_lines,
+            "start_line": row.start_line,
+            "symbol": plan.symbol_ordinal[row.symbol],
+        }
+        for row in sorted(facts.coverage_units, key=lambda row: _site_order(row, plan))
+    ]
+
+
+def _coverage_join_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    del plan  # a record has no ordinals to resolve
+    record = facts.coverage_join
+    if record is None:
+        return []
+    return [
+        {
+            "files": record.files,
+            "hotspot_threshold_percent": record.hotspot_threshold_percent,
+            "invalid_reason": record.invalid_reason or "",
+            "source": record.source,
+            "status": record.status,
+        }
+    ]
+
+
+def _dead_code_summary_rows(
+    facts: AnalysisFacts, plan: WirePlan
+) -> list[dict[str, object]]:
+    del plan  # a record has no ordinals to resolve
+    if facts.dead_code_summary is None:
+        return []
+    return [asdict(facts.dead_code_summary)]
+
+
 _FAMILY_ROW_BUILDERS: dict[
     str, Callable[[AnalysisFacts, WirePlan], list[dict[str, object]]]
 ] = {
@@ -1202,22 +1465,33 @@ _FAMILY_ROW_BUILDERS: dict[
     "api_symbols": _api_symbol_rows,
     "candidates": _candidate_rows,
     "clone_groups": _clone_group_rows,
+    "cohesion_hotspots": _cohesion_hotspot_rows,
+    "complexity_hotspots": _complexity_hotspot_rows,
     "contracts": _contract_rows,
     "coupling_cohesion_observations": _coupling_cohesion_rows,
+    "coupling_hotspots": _coupling_hotspot_rows,
+    "coverage_join": _coverage_join_rows,
+    "coverage_units": _coverage_unit_rows,
     "dead_code_observations": _dead_code_observation_rows,
+    "dead_code_summary": _dead_code_summary_rows,
+    "dead_symbol_groups": _dead_symbol_group_rows,
     "dependency_cycles": _dependency_cycle_rows,
     "dependency_occurrences": _dependency_occurrence_rows,
     "dependency_relations": _dependency_relation_rows,
     "file_modules": _file_module_rows,
     "graph_nodes": _graph_node_rows,
     "import_observations": _import_observation_rows,
+    "overloaded_modules": _overloaded_module_rows,
     "relationship_observations": _relationship_observation_rows,
     "risk_observations": _risk_observation_rows,
     "run_scalars": _run_scalars_rows,
     "security_surfaces": _security_surface_rows,
     "semantic_edges": _semantic_edge_rows,
     "sink_roles": _sink_role_rows,
+    "structural_groups": _structural_group_rows,
+    "suppressed_clone_groups": _suppressed_clone_group_rows,
     "unit_spans": _unit_span_rows,
+    "unreachable_statement_groups": _unreachable_statement_rows,
     "violations": _violation_rows,
 }
 
@@ -2888,6 +3162,471 @@ def _decode_run_scalars(facts: Mapping[str, object]) -> RunScalars | None:
     return RunScalars(**values)
 
 
+# ---------------------------------------------------------------------------
+# Canonical epoch E1: the finding-group, coverage and overloaded families.
+# ---------------------------------------------------------------------------
+
+_ConstructedT = TypeVar("_ConstructedT")
+
+
+def _construct(
+    where: str, factory: Callable[..., _ConstructedT], *args: object, **kwargs: object
+) -> _ConstructedT:
+    """Build one row through its model law, refusing typed (W18) when the
+    law refuses: a model error must never escape the decoder untyped."""
+    try:
+        return factory(*args, **kwargs)
+    except CanonicalModelError as error:
+        raise _refuse("W18", f"{where}: {error}") from error
+
+
+def _expect_wire_float(value: object, where: str) -> float:
+    """One float cell: finite by the parser's own refusal (W06), typed here.
+
+    An integer lexeme is refused where a float is declared: the writer emits
+    ``repr(float)`` and ``1`` is not the canonical form of ``1.0`` (W24)."""
+    if isinstance(value, bool) or not isinstance(value, float):
+        raise _refuse("W18", f"{where} is not a float lexeme")
+    if value < 0.0:
+        raise _refuse("W07", f"{where} float {value!r} is negative")
+    return value
+
+
+def _decode_site(
+    columns: Mapping[str, list[object]],
+    family: str,
+    index: int,
+    symbols: Sequence[SymbolId],
+) -> tuple[tuple[int, int], SymbolId, int, int]:
+    """The declaration-site columns of one E1 row: ``(symbol, start_line,
+    end_line)`` under the ``unit_spans`` laws (positive site, a range end
+    never before its start), plus the row's canonical order key."""
+    where = f"facts.{family}"
+    ordinal = _expect_ordinal(
+        columns["symbol"][index], len(symbols), f"{where}.symbol[{index}]"
+    )
+    start_line = _expect_wire_int(
+        columns["start_line"][index], f"{where}.start_line[{index}]"
+    )
+    if start_line < 1:
+        raise _refuse("W07", f"{where}.start_line[{index}] is {start_line}, not a site")
+    end_line = _expect_wire_int(
+        columns["end_line"][index], f"{where}.end_line[{index}]"
+    )
+    if end_line < start_line:
+        raise _refuse("W07", f"{where}.end_line[{index}] precedes its start")
+    return (ordinal, start_line), symbols[ordinal], start_line, end_line
+
+
+def _decode_member_cells(
+    value: object, symbols: Sequence[SymbolId], where: str, *, floor: int
+) -> frozenset[CloneItemRow]:
+    """A sorted member-cell list of at least ``floor`` sites."""
+    cells = _expect_list(value, where)
+    if len(cells) < floor:
+        raise _refuse("W18", f"{where} names fewer than {floor} members")
+    decoded = [_decode_clone_item(cell, symbols, where) for cell in cells]
+    _expect_strictly_increasing([key for key, _item in decoded], where)
+    return frozenset(item for _key, item in decoded)
+
+
+def _decode_group_keyed_rows(
+    family: str,
+    facts: Mapping[str, object],
+    kind_column: str,
+    key_column: str,
+    kinds: tuple[str, ...],
+) -> Iterator[tuple[int, str, str, Mapping[str, list[object]]]]:
+    """The producer-keyed E1 families: rows ordered by ``(kind, key)``
+    bytes, the kind a closed vocabulary and the key non-empty."""
+    columns, _flags, row_count = _decode_columns(family, facts[family])
+    keys = []
+    for index in range(row_count):
+        where = f"facts.{family}"
+        kind = _expect_vocabulary(
+            columns[kind_column][index],
+            kinds,
+            f"{where}.{kind_column}[{index}]",
+            kind_column,
+        )
+        key = _expect_string(
+            columns[key_column][index], f"{where}.{key_column}[{index}]"
+        )
+        if not key:
+            raise _refuse("W18", f"{where}.{key_column}[{index}] is empty")
+        keys.append((kind.encode("utf-8"), key.encode("utf-8")))
+        yield index, kind, key, columns
+    _expect_strictly_increasing(keys, f"facts.{family}")
+
+
+def _decode_suppressed_clone_groups(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[SuppressedCloneGroupRow]:
+    rows = []
+    for index, kind, key, columns in _decode_group_keyed_rows(
+        "suppressed_clone_groups", facts, "clone_kind", "group_key", CLONE_KINDS
+    ):
+        where = f"facts.suppressed_clone_groups[{index}]"
+        rows.append(
+            _construct(
+                where,
+                SuppressedCloneGroupRow,
+                clone_kind=kind,
+                group_key=key,
+                items=_decode_member_cells(
+                    columns["items"][index], symbols, f"{where}.items", floor=2
+                ),
+                suppression_rule=_expect_string(
+                    columns["suppression_rule"][index], f"{where}.suppression_rule"
+                ),
+                suppression_source=_expect_string(
+                    columns["suppression_source"][index],
+                    f"{where}.suppression_source",
+                ),
+                matched_patterns=tuple(
+                    _decode_strings(
+                        columns["matched_patterns"][index],
+                        f"{where}.matched_patterns",
+                    )
+                ),
+            )
+        )
+    return frozenset(rows)
+
+
+def _decode_structural_groups(
+    facts: Mapping[str, object], symbols: Sequence[SymbolId]
+) -> frozenset[StructuralGroupRow]:
+    rows = []
+    for index, kind, key, columns in _decode_group_keyed_rows(
+        "structural_groups",
+        facts,
+        "finding_kind",
+        "finding_key",
+        STRUCTURAL_FINDING_KINDS,
+    ):
+        where = f"facts.structural_groups[{index}]"
+        signature = _decode_string_pairs(
+            columns["signature"][index], f"{where}.signature"
+        )
+        _expect_strictly_increasing(
+            [(pair[0].encode("utf-8"),) for pair in signature], f"{where}.signature"
+        )
+        rows.append(
+            _construct(
+                where,
+                StructuralGroupRow,
+                finding_kind=kind,
+                finding_key=key,
+                signature=tuple(signature),
+                occurrences=_decode_member_cells(
+                    columns["occurrences"][index],
+                    symbols,
+                    f"{where}.occurrences",
+                    floor=1,
+                ),
+            )
+        )
+    return frozenset(rows)
+
+
+def _decode_site_rows(
+    family: str,
+    facts: Mapping[str, object],
+    symbols: Sequence[SymbolId],
+    build: Callable[
+        [Mapping[str, list[object]], int, SymbolId, int, int], _ConstructedT
+    ],
+) -> frozenset[_ConstructedT]:
+    """The six site-keyed E1 families through one row walk: decode the
+    site, hand the remaining columns to the family's builder, prove the
+    canonical order."""
+    columns, _flags, row_count = _decode_columns(family, facts[family])
+    rows: list[_ConstructedT] = []
+    keys = []
+    for index in range(row_count):
+        key, symbol, start_line, end_line = _decode_site(
+            columns, family, index, symbols
+        )
+        rows.append(
+            _construct(
+                f"facts.{family}[{index}]",
+                build,
+                columns,
+                index,
+                symbol,
+                start_line,
+                end_line,
+            )
+        )
+        keys.append(key)
+    _expect_strictly_increasing(keys, f"facts.{family}")
+    return frozenset(rows)
+
+
+def _column_int(
+    columns: Mapping[str, list[object]], family: str, name: str, index: int
+) -> int:
+    return _expect_wire_int(columns[name][index], f"facts.{family}.{name}[{index}]")
+
+
+def _column_words(
+    columns: Mapping[str, list[object]],
+    family: str,
+    name: str,
+    index: int,
+    vocabulary: tuple[str, ...],
+) -> str:
+    return _expect_vocabulary(
+        columns[name][index], vocabulary, f"facts.{family}.{name}[{index}]", name
+    )
+
+
+def _dead_symbol_group(
+    columns: Mapping[str, list[object]],
+    index: int,
+    symbol: SymbolId,
+    start_line: int,
+    end_line: int,
+) -> DeadSymbolGroupRow:
+    family = "dead_symbol_groups"
+    return DeadSymbolGroupRow(
+        symbol=symbol,
+        start_line=start_line,
+        end_line=end_line,
+        candidate_kind=_column_words(
+            columns, family, "candidate_kind", index, DEAD_CODE_CANDIDATE_KINDS
+        ),
+        confidence=_column_words(
+            columns, family, "confidence", index, DEAD_SYMBOL_CONFIDENCES
+        ),
+        reason=_column_words(columns, family, "reason", index, DEAD_SYMBOL_REASONS),
+        test_reference_sources=tuple(
+            _decode_strings(
+                columns["test_reference_sources"][index],
+                f"facts.{family}.test_reference_sources[{index}]",
+            )
+        ),
+    )
+
+
+def _unreachable_statement(
+    columns: Mapping[str, list[object]],
+    index: int,
+    symbol: SymbolId,
+    start_line: int,
+    end_line: int,
+) -> UnreachableStatementRow:
+    family = "unreachable_statement_groups"
+    return UnreachableStatementRow(
+        symbol=symbol,
+        start_line=start_line,
+        end_line=end_line,
+        reason=_column_words(columns, family, "reason", index, UNREACHABLE_REASONS),
+        statement_count=_column_int(columns, family, "statement_count", index),
+    )
+
+
+def _complexity_hotspot(
+    columns: Mapping[str, list[object]],
+    index: int,
+    symbol: SymbolId,
+    start_line: int,
+    end_line: int,
+) -> ComplexityHotspotRow:
+    family = "complexity_hotspots"
+    return ComplexityHotspotRow(
+        symbol=symbol,
+        start_line=start_line,
+        end_line=end_line,
+        cyclomatic_complexity=_column_int(
+            columns, family, "cyclomatic_complexity", index
+        ),
+        nesting_depth=_column_int(columns, family, "nesting_depth", index),
+    )
+
+
+def _coupling_hotspot(
+    columns: Mapping[str, list[object]],
+    index: int,
+    symbol: SymbolId,
+    start_line: int,
+    end_line: int,
+) -> CouplingHotspotRow:
+    family = "coupling_hotspots"
+    return CouplingHotspotRow(
+        symbol=symbol,
+        start_line=start_line,
+        end_line=end_line,
+        cbo=_column_int(columns, family, "cbo", index),
+        coupled_classes=tuple(
+            _decode_strings(
+                columns["coupled_classes"][index],
+                f"facts.{family}.coupled_classes[{index}]",
+            )
+        ),
+    )
+
+
+def _cohesion_hotspot(
+    columns: Mapping[str, list[object]],
+    index: int,
+    symbol: SymbolId,
+    start_line: int,
+    end_line: int,
+) -> CohesionHotspotRow:
+    family = "cohesion_hotspots"
+    return CohesionHotspotRow(
+        symbol=symbol,
+        start_line=start_line,
+        end_line=end_line,
+        lcom4=_column_int(columns, family, "lcom4", index),
+        method_count=_column_int(columns, family, "method_count", index),
+        instance_var_count=_column_int(columns, family, "instance_var_count", index),
+    )
+
+
+def _coverage_unit(
+    columns: Mapping[str, list[object]],
+    index: int,
+    symbol: SymbolId,
+    start_line: int,
+    end_line: int,
+) -> CoverageUnitRow:
+    family = "coverage_units"
+    return CoverageUnitRow(
+        symbol=symbol,
+        start_line=start_line,
+        end_line=end_line,
+        executable_lines=_column_int(columns, family, "executable_lines", index),
+        covered_lines=_column_int(columns, family, "covered_lines", index),
+        coverage_status=_column_words(
+            columns, family, "coverage_status", index, COVERAGE_UNIT_STATUSES
+        ),
+    )
+
+
+def _decode_overloaded_modules(
+    facts: Mapping[str, object], files: Sequence[FileId]
+) -> frozenset[OverloadedModuleRow]:
+    family = "overloaded_modules"
+    columns, _flags, row_count = _decode_columns(family, facts[family])
+    rows = []
+    ordinals = []
+    for index in range(row_count):
+        where = f"facts.{family}"
+        ordinal = _expect_ordinal(
+            columns["file"][index], len(files), f"{where}.file[{index}]"
+        )
+        counters = {
+            name: _column_int(columns, family, name, index)
+            for name in OVERLOADED_MODULE_COUNTERS
+        }
+        scores = {
+            name: _expect_wire_float(columns[name][index], f"{where}.{name}[{index}]")
+            for name in OVERLOADED_MODULE_SCORES
+        }
+        rows.append(
+            _construct(
+                f"{where}[{index}]",
+                overloaded_module_row,
+                file=files[ordinal],
+                source_kind=_column_words(
+                    columns, family, "source_kind", index, SECURITY_SOURCE_KINDS
+                ),
+                candidate_status=_column_words(
+                    columns,
+                    family,
+                    "candidate_status",
+                    index,
+                    OVERLOADED_CANDIDATE_STATUSES,
+                ),
+                candidate_reasons=tuple(
+                    _decode_strings(
+                        columns["candidate_reasons"][index],
+                        f"{where}.candidate_reasons[{index}]",
+                    )
+                ),
+                counters=counters,
+                scores=scores,
+            )
+        )
+        ordinals.append((ordinal,))
+    _expect_strictly_increasing(ordinals, f"facts.{family}")
+    return frozenset(rows)
+
+
+def _record_member(
+    family: str, facts: Mapping[str, object]
+) -> Mapping[str, object] | None:
+    """One record wire member (the F9 shape): its declared keys in order,
+    or ``None`` for the empty member — the typed absence."""
+    where = f"facts.{family}"
+    value = facts[family]
+    if not isinstance(value, dict):
+        raise _refuse("W01", f"{where} is not an object")
+    table = cast("dict[str, object]", value)
+    keys = list(table.keys())
+    if not keys:
+        return None
+    declared = list(wire_columns(family))
+    if set(keys) != set(declared):
+        raise _refuse(
+            "W01", f"{where} keys {keys!r} do not match the declared set {declared!r}"
+        )
+    if keys != declared:
+        raise _refuse("W02", f"{where} keys are not in canonical order")
+    return table
+
+
+def _decode_coverage_join(facts: Mapping[str, object]) -> CoverageJoinRecord | None:
+    family = "coverage_join"
+    table = _record_member(family, facts)
+    if table is None:
+        return None
+    where = f"facts.{family}"
+    reason = _expect_string(table["invalid_reason"], f"{where}.invalid_reason")
+    return _construct(
+        where,
+        CoverageJoinRecord,
+        status=_expect_vocabulary(
+            table["status"], COVERAGE_JOIN_STATUSES, f"{where}.status", "status"
+        ),
+        source=_expect_string(table["source"], f"{where}.source"),
+        files=_expect_wire_int(table["files"], f"{where}.files"),
+        hotspot_threshold_percent=_expect_wire_int(
+            table["hotspot_threshold_percent"], f"{where}.hotspot_threshold_percent"
+        ),
+        invalid_reason=reason or None,
+    )
+
+
+def _decode_dead_code_summary(
+    facts: Mapping[str, object],
+) -> DeadCodeSummaryRecord | None:
+    family = "dead_code_summary"
+    table = _record_member(family, facts)
+    if table is None:
+        return None
+    where = f"facts.{family}"
+    counters = {
+        name: _expect_wire_int(table[name], f"{where}.{name}")
+        for name in wire_columns(family)
+        if name != "world_contract"
+    }
+    return _construct(
+        where,
+        DeadCodeSummaryRecord,
+        world_contract=_expect_vocabulary(
+            table["world_contract"],
+            WORLD_CONTRACTS,
+            f"{where}.world_contract",
+            "world_contract",
+        ),
+        **counters,
+    )
+
+
 def _decode_source_location(
     value: object, files: Sequence[FileId], where: str
 ) -> SourceLocation:
@@ -3435,6 +4174,32 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     security_surfaces = _decode_security_surfaces(facts_section, files)
     run_scalars = _decode_run_scalars(facts_section)
     analysis_population = _decode_analysis_population(facts_section)
+    # Canonical epoch E1: every member is decoded BEFORE the seal is
+    # checked, like every member above it, so a malformed E1 cell answers
+    # with its own typed code and never hides behind W23.
+    suppressed_clone_groups = _decode_suppressed_clone_groups(facts_section, symbols)
+    structural_groups = _decode_structural_groups(facts_section, symbols)
+    dead_symbol_groups = _decode_site_rows(
+        "dead_symbol_groups", facts_section, symbols, _dead_symbol_group
+    )
+    unreachable_statement_groups = _decode_site_rows(
+        "unreachable_statement_groups", facts_section, symbols, _unreachable_statement
+    )
+    complexity_hotspots = _decode_site_rows(
+        "complexity_hotspots", facts_section, symbols, _complexity_hotspot
+    )
+    coupling_hotspots = _decode_site_rows(
+        "coupling_hotspots", facts_section, symbols, _coupling_hotspot
+    )
+    cohesion_hotspots = _decode_site_rows(
+        "cohesion_hotspots", facts_section, symbols, _cohesion_hotspot
+    )
+    overloaded_modules = _decode_overloaded_modules(facts_section, files)
+    coverage_units = _decode_site_rows(
+        "coverage_units", facts_section, symbols, _coverage_unit
+    )
+    coverage_join = _decode_coverage_join(facts_section)
+    dead_code_summary = _decode_dead_code_summary(facts_section)
     violations, violation_handles = _decode_violations(
         facts_section,
         symbols,
@@ -3476,8 +4241,19 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
                 unit_spans=unit_spans,
                 adoption_counts=adoption_counts,
                 security_surfaces=security_surfaces,
+                suppressed_clone_groups=suppressed_clone_groups,
+                structural_groups=structural_groups,
+                dead_symbol_groups=dead_symbol_groups,
+                unreachable_statement_groups=unreachable_statement_groups,
+                complexity_hotspots=complexity_hotspots,
+                coupling_hotspots=coupling_hotspots,
+                cohesion_hotspots=cohesion_hotspots,
+                overloaded_modules=overloaded_modules,
+                coverage_units=coverage_units,
                 run_scalars=run_scalars,
                 analysis_population=analysis_population,
+                coverage_join=coverage_join,
+                dead_code_summary=dead_code_summary,
             )
         ),
         coupled_sets=frozenset(

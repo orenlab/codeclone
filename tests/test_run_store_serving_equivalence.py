@@ -71,6 +71,11 @@ from codeclone.canonical import (
     AnalysisFacts,
     CanonicalModel,
     CloneItemRow,
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageUnitRow,
+    DeadSymbolGroupRow,
     DependencyEndpoint,
     DependencyOccurrenceRow,
     FileId,
@@ -80,6 +85,7 @@ from codeclone.canonical import (
     ServedRunSlices,
     SymbolId,
     UnitSpanRow,
+    UnreachableStatementRow,
     read_served_run_slices,
 )
 from codeclone.models import (
@@ -267,7 +273,62 @@ _CLOSING_LINE_FAMILIES: tuple[tuple[type, _ClosingLineReader], ...] = (
             for row in analysis.unit_spans
         ),
     ),
+    # Canonical epoch E1 (2026-09-25): six more families state a closing
+    # line.  Five of them ARE the declaration — a dead symbol, a design
+    # hotspot of any of the three categories, a coverage unit — keyed by
+    # the declaration site exactly as ``unit_spans`` is, so each answers
+    # for the units it carries.  The sixth, an unreachable region, is a
+    # span INSIDE a unit like a security surface: its start is a statement
+    # line, never a declaration, so it answers no served unit.  None of the
+    # six is populated on the serving corpus; each is driven ALONE on the
+    # E1 corpus in ``test_run_store_producer_wiring`` (the reachability
+    # witness the mutation law asks for), and the population test below
+    # names them as the families this corpus is measured to leave empty.
+    (DeadSymbolGroupRow, lambda analysis: _sites(analysis.dead_symbol_groups)),
+    (
+        UnreachableStatementRow,
+        lambda analysis: _sites(analysis.unreachable_statement_groups),
+    ),
+    (ComplexityHotspotRow, lambda analysis: _sites(analysis.complexity_hotspots)),
+    (CouplingHotspotRow, lambda analysis: _sites(analysis.coupling_hotspots)),
+    (CohesionHotspotRow, lambda analysis: _sites(analysis.cohesion_hotspots)),
+    (CoverageUnitRow, lambda analysis: _sites(analysis.coverage_units)),
 )
+
+#: The taught families the serving corpus is measured to leave EMPTY
+#: (2026-09-25): every E1 row type — the corpus carries no dead symbol,
+#: no unreachable region, no hotspot of any category and no coverage
+#: report.  Named here so the population test can state the emptiness
+#: instead of tolerating it, and so a family that starts carrying rows on
+#: this corpus turns that test red and a human decides.
+_E1_CLOSING_LINE_ROW_TYPES: frozenset[str] = frozenset(
+    {
+        "CohesionHotspotRow",
+        "ComplexityHotspotRow",
+        "CouplingHotspotRow",
+        "CoverageUnitRow",
+        "DeadSymbolGroupRow",
+        "UnreachableStatementRow",
+    }
+)
+
+
+_SiteRow = (
+    DeadSymbolGroupRow
+    | UnreachableStatementRow
+    | ComplexityHotspotRow
+    | CouplingHotspotRow
+    | CohesionHotspotRow
+    | CoverageUnitRow
+)
+
+
+def _sites(rows: Iterable[_SiteRow]) -> Iterable[tuple[UnitKey, int]]:
+    """The declaration key and closing line one site-keyed E1 row states."""
+    return (
+        ((row.symbol.file.path, row.symbol.qualname, row.start_line), row.end_line)
+        for row in rows
+    )
 
 
 def _closing_lines_the_canonical_run_states(
@@ -275,11 +336,12 @@ def _closing_lines_the_canonical_run_states(
 ) -> dict[UnitKey, int]:
     """Every closing line ANY canonical family states, by declaration.
 
-    All three families that declare an ``end_line`` are read, through
-    ``_CLOSING_LINE_FAMILIES``, and the completeness ratchet below proves
-    that table is neither short of the model nor ahead of it — so this
-    reader can neither quietly miss a fourth family nor keep a third in an
-    expected set it no longer consults.
+    Every family that declares an ``end_line`` is read, through
+    ``_CLOSING_LINE_FAMILIES`` (three before canonical epoch E1, nine
+    since), and the completeness ratchet below proves that table is
+    neither short of the model nor ahead of it — so this reader can
+    neither quietly miss a tenth family nor keep one in an expected set it
+    no longer consults.
 
     The key carries the first line, so a family answers about a unit only
     when it states that unit's whole span.  That is what makes the join a
@@ -349,7 +411,9 @@ def test_the_closing_line_reader_is_taught_every_row_type_that_declares_one() ->
     teaching the reader fails here, and dropping a family from the reader
     while the literal still names it fails here too.  ``UnitSpanRow`` entered
     both lines together on 2026-09-04; before that day the enumeration was
-    two names long and this file said so.
+    two names long and this file said so.  The six E1 row types entered both
+    lines together on 2026-09-25, each keyed by the declaration site the
+    ``unit_spans`` family established.
     """
     row_types = _canonical_row_types()
     assert len(row_types) > 20, row_types.keys()
@@ -358,7 +422,12 @@ def test_the_closing_line_reader_is_taught_every_row_type_that_declares_one() ->
         for name, row_type in row_types.items()
         if "end_line" in {field.name for field in dataclasses.fields(row_type)}
     }
-    assert declaring == {"CloneItemRow", "SecuritySurfaceRow", "UnitSpanRow"}
+    assert declaring == {
+        "CloneItemRow",
+        "SecuritySurfaceRow",
+        "UnitSpanRow",
+        *_E1_CLOSING_LINE_ROW_TYPES,
+    }
     assert declaring == {row_type.__name__ for row_type, _ in _CLOSING_LINE_FAMILIES}
 
 
@@ -440,10 +509,14 @@ def test_every_taught_closing_line_family_answers_on_this_corpus(
     names.  Two tests, two reds, neither shadowing the other.
     """
     per_family = _closing_lines_by_family(canonical_run)
-    unpopulated = sorted(name for name, rows in per_family.items() if not rows)
-    assert not unpopulated, (
-        f"taught families carrying no row on this corpus: {unpopulated}; the "
-        f"reader's answer cannot distinguish them from families it never read"
+    unpopulated = {name for name, rows in per_family.items() if not rows}
+    # The E1 row types are the families this corpus is MEASURED to leave
+    # empty, stated as such; their reachability is proved alone on the E1
+    # corpus (``test_run_store_producer_wiring``).  Any other empty family,
+    # or an E1 family that starts carrying rows here, is a red to decide.
+    assert unpopulated == _E1_CLOSING_LINE_ROW_TYPES, (
+        f"taught families carrying no row on this corpus: {sorted(unpopulated)}; "
+        f"the reader's answer cannot distinguish them from families it never read"
     )
     stated = _closing_lines_the_canonical_run_states(canonical_run)
     served = _served_units(served_run_store_projection)

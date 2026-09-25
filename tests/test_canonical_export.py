@@ -215,8 +215,16 @@ _TARGET = "worktree-a"
 # revision 1: the run identity joins the ``canonical_model`` analysis layer
 # and the fixture gained two families, so the run id moved; the artifact
 # digest carries the wire revision inside its domain and moved with it.
-_FIXTURE_RUN_ID = "f515ee815e779b3edc5122fadc4b61cef94d6137d983e1d1f3c33930412d7ae7"
-_FIXTURE_ARTIFACT = "abdace474002cd736ef2b1d21641c9efd9bdeb12445ce287490029fea729330d"
+# Moved deliberately on 2026-09-25 with canonical epoch E1: the fixture
+# gained eleven families' rows, so its membership — and with it the run
+# id (f515ee81… → 1f9d2ad9…) — moved, and the projected bytes moved the
+# artifact digest (abdace47… → fd709bd6…).  Measured on the way: with the
+# eleven families landed but the fixture still unpopulated, the run id
+# stayed f515ee81… exactly (an additive family costs an existing run no
+# identity) while the artifact digest already moved (the wire gained
+# eleven empty members) — the movement E4's wire bump exists to declare.
+_FIXTURE_RUN_ID = "1f9d2ad902bec55eb52da26136cbb29dcb4923200443c565e932ecbdc3335aa7"
+_FIXTURE_ARTIFACT = "fd709bd63b60cb5e6fbc71c442ce4056bdb3df72b1c26ded344217cbb8720593"
 # The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
 _RETIRED_LIVENESS_GENERATION = "4"

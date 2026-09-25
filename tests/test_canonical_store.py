@@ -39,6 +39,19 @@ from codeclone.canonical import (
     decode_canonical_json,
     encode_canonical_json,
 )
+from codeclone.canonical.analysis_rows import (
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+)
 from codeclone.canonical.identity import FileId, ModuleId
 from codeclone.canonical.model import (
     AdoptionCountRow,
@@ -1465,6 +1478,19 @@ _EXPECTED_ROW_TYPES: dict[str, type[object]] = {
     "sink_role": SinkRoleRow,
     "unit_span": UnitSpanRow,
     "violation": ViolationRow,
+    # Canonical epoch E1 (2026-09-25): the eleven published-population
+    # families, each spelled here by hand against the store's declaration.
+    "suppressed_clone_group": SuppressedCloneGroupRow,
+    "structural_group": StructuralGroupRow,
+    "dead_symbol_group": DeadSymbolGroupRow,
+    "unreachable_statement_group": UnreachableStatementRow,
+    "complexity_hotspot": ComplexityHotspotRow,
+    "coupling_hotspot": CouplingHotspotRow,
+    "cohesion_hotspot": CohesionHotspotRow,
+    "overloaded_module": OverloadedModuleRow,
+    "coverage_unit": CoverageUnitRow,
+    "coverage_join": CoverageJoinRecord,
+    "dead_code_summary": DeadCodeSummaryRecord,
 }
 
 _STORE_SOURCE = _REPO_ROOT / "codeclone" / "canonical" / "store.py"

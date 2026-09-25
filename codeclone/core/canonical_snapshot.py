@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import hmac
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple
@@ -49,6 +49,24 @@ from uuid import uuid4
 # ``codeclone.canonical.__init__`` re-exports the store AND the legacy
 # ingest oracle, and importing the oracle from a production path would
 # make the test oracle a production dependency (ruling 2026-08-24 §6).
+from ..canonical.analysis_rows import (
+    OVERLOADED_MODULE_COUNTERS,
+    OVERLOADED_MODULE_SCORES,
+    OVERLOADED_SCORE_DECIMALS,
+    CloneItemRow,
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+    overloaded_module_row,
+)
 from ..canonical.errors import (
     RunReportLinkError,
     SemanticGrammarError,
@@ -75,7 +93,6 @@ from ..canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
-    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
@@ -108,6 +125,14 @@ from ..canonical.semantic_grammar import (
     surface_head,
 )
 from ..contracts import observed_population
+from ..findings.group_shapes import (
+    design_thresholds,
+    is_cohesion_hotspot,
+    is_complexity_hotspot,
+    is_coupling_hotspot,
+    sorted_unique_strings,
+)
+from ..findings.structural.detectors import normalize_structural_findings
 from ..metrics.registry import METRIC_FAMILIES
 from ..models import (
     CANONICAL_HEAD_TARGET,
@@ -127,6 +152,7 @@ from ..models import (
     RUN_SNAPSHOT_RESOLUTION_UNLINKED,
     AdoptionCount,
     ApiSymbolObservation,
+    CoverageJoinResult,
     DeadCodeObservation,
     FunctionRelationshipFacts,
     GcJobReport,
@@ -134,6 +160,7 @@ from ..models import (
     ModuleDep,
     ModuleRegistryHandle,
     ObservationBundle,
+    ProjectMetrics,
     RiskObservation,
     RunSnapshotLink,
     RunSnapshotPublication,
@@ -143,7 +170,9 @@ from ..models import (
 )
 from ..observability import SpanHandle, span
 from ..paths.workspace import REL_RUN_STORE_DB_PATH
+from ..report.document._common import contract_path, design_findings_thresholds_payload
 from ..utils.ci import is_ci_environment
+from ..utils.coerce import as_float as _as_float
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
@@ -941,6 +970,34 @@ _CLONE_LANES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _clone_items(
+    items: Sequence[Mapping[str, object]],
+    index: IdentityIndex,
+    *,
+    kind: str,
+    group_key: str,
+) -> frozenset[CloneItemRow]:
+    """The member set of one clone group, emitted or suppressed: identity
+    through the glued qualname, and two members under one identity refused
+    rather than absorbed by the set."""
+    rows = [
+        CloneItemRow(
+            symbol=parse_symbol(
+                index, _as_str(item.get("qualname")), f"{kind} clone item"
+            ),
+            start_line=_as_int(item.get("start_line")),
+            end_line=_as_int(item.get("end_line")),
+        )
+        for item in items
+    ]
+    unique = frozenset(rows)
+    if len(unique) != len(rows):
+        raise ProducerSnapshotUnavailable(
+            f"{kind} clone group {group_key!r} carries two items under one identity"
+        )
+    return unique
+
+
 def _clone_group_rows(
     analysis: AnalysisResult, index: IdentityIndex
 ) -> frozenset[CloneGroupRow]:
@@ -949,27 +1006,308 @@ def _clone_group_rows(
         groups: Mapping[str, Sequence[Mapping[str, object]]] = getattr(
             analysis, attribute
         )
-        for group_key in sorted(groups):
-            items = [
-                CloneItemRow(
-                    symbol=parse_symbol(
-                        index, _as_str(item.get("qualname")), f"{kind} clone item"
-                    ),
-                    start_line=_as_int(item.get("start_line")),
-                    end_line=_as_int(item.get("end_line")),
-                )
-                for item in groups[group_key]
-            ]
-            unique = frozenset(items)
-            if len(unique) != len(items):
-                raise ProducerSnapshotUnavailable(
-                    f"{kind} clone group {group_key!r} carries two items under "
-                    "one identity"
-                )
-            rows.append(
-                CloneGroupRow(clone_kind=kind, group_key=group_key, items=unique)
+        rows.extend(
+            CloneGroupRow(
+                clone_kind=kind,
+                group_key=group_key,
+                items=_clone_items(
+                    groups[group_key], index, kind=kind, group_key=group_key
+                ),
             )
+            for group_key in sorted(groups)
+        )
     return frozenset(rows)
+
+
+# ---------------------------------------------------------------------------
+# Canonical epoch E1: the eleven families, each straight off the producer
+# object the document builder reads — never off the rendered document.
+# ---------------------------------------------------------------------------
+
+
+def _suppressed_clone_group_rows(
+    analysis: AnalysisResult, index: IdentityIndex
+) -> frozenset[SuppressedCloneGroupRow]:
+    """A1: the SUPPRESSED population, from ``analysis.suppressed_clone_groups``
+    — the same carrier the document's suppressed container is built from."""
+    return frozenset(
+        SuppressedCloneGroupRow(
+            clone_kind=group.kind,
+            group_key=group.group_key,
+            items=_clone_items(
+                group.items, index, kind=group.kind, group_key=group.group_key
+            ),
+            suppression_rule=group.suppression_rule,
+            suppression_source=group.suppression_source,
+            matched_patterns=tuple(group.matched_patterns),
+        )
+        for group in analysis.suppressed_clone_groups
+    )
+
+
+def _structural_group_rows(
+    analysis: AnalysisResult, index: IdentityIndex
+) -> frozenset[StructuralGroupRow]:
+    """A2: the detectors' groups through the ONE normalization the document
+    builder applies (``normalize_structural_findings``)."""
+    return frozenset(
+        StructuralGroupRow(
+            finding_kind=group.finding_kind,
+            finding_key=group.finding_key,
+            signature=tuple(
+                (str(key), str(group.signature[key])) for key in sorted(group.signature)
+            ),
+            occurrences=frozenset(
+                CloneItemRow(
+                    symbol=parse_symbol(index, item.qualname, "structural occurrence"),
+                    start_line=item.start,
+                    end_line=item.end,
+                )
+                for item in group.items
+            ),
+        )
+        for group in normalize_structural_findings(analysis.structural_findings)
+    )
+
+
+def _dead_symbol_rows(
+    metrics: ProjectMetrics, index: IdentityIndex
+) -> frozenset[DeadSymbolGroupRow]:
+    """A2: the liveness verdicts, from ``ProjectMetrics.dead_code`` — the
+    carrier the document's unused-symbol groups are built from."""
+    return frozenset(
+        DeadSymbolGroupRow(
+            symbol=parse_symbol(index, item.qualname, "dead symbol"),
+            start_line=item.start_line,
+            end_line=item.end_line,
+            candidate_kind=item.kind,
+            confidence=item.confidence,
+            reason=item.reason,
+            test_reference_sources=tuple(item.test_reference_sources),
+        )
+        for item in metrics.dead_code
+    )
+
+
+def _unreachable_statement_rows(
+    metrics: ProjectMetrics, index: IdentityIndex
+) -> frozenset[UnreachableStatementRow]:
+    return frozenset(
+        UnreachableStatementRow(
+            symbol=parse_symbol(index, item.qualname, "unreachable region"),
+            start_line=item.start_line,
+            end_line=item.end_line,
+            reason=item.reason,
+            statement_count=item.statement_count,
+        )
+        for item in metrics.unreachable_statements
+    )
+
+
+def _metric_rows(
+    payload: Mapping[str, object], family: str, container: str
+) -> Iterator[Mapping[str, object]]:
+    for item in _as_sequence(_family_payload(payload, family).get(container)):
+        yield _as_mapping(item)
+
+
+def _design_hotspot_rows(
+    payload: Mapping[str, object],
+    report_meta: Mapping[str, object],
+    index: IdentityIndex,
+) -> tuple[
+    frozenset[ComplexityHotspotRow],
+    frozenset[CouplingHotspotRow],
+    frozenset[CohesionHotspotRow],
+]:
+    """A2 (design): the producer's rows classified under the run's OWN
+    thresholds through the one predicate owner (``findings.group_shapes``)
+    — the same block and the same predicates the document builder reads.
+    ``functions`` / ``classes`` are the producers' own container names; the
+    document renames them ``items`` on the way out."""
+    thresholds = design_thresholds(
+        design_findings_thresholds_payload(report_meta)["design_findings"]
+    )
+    complexity = frozenset(
+        ComplexityHotspotRow(
+            symbol=parse_symbol(index, _as_str(row.get("qualname")), "complexity"),
+            start_line=_as_int(row.get("start_line")),
+            end_line=_as_int(row.get("end_line")),
+            cyclomatic_complexity=_as_int(row.get("cyclomatic_complexity"), 1),
+            nesting_depth=_as_int(row.get("nesting_depth")),
+        )
+        for row in _metric_rows(payload, "complexity", "functions")
+        if is_complexity_hotspot(
+            _as_int(row.get("cyclomatic_complexity"), 1), thresholds
+        )
+    )
+    coupling = frozenset(
+        CouplingHotspotRow(
+            symbol=parse_symbol(index, _as_str(row.get("qualname")), "coupling"),
+            start_line=_as_int(row.get("start_line")),
+            end_line=_as_int(row.get("end_line")),
+            cbo=_as_int(row.get("cbo")),
+            coupled_classes=tuple(
+                sorted_unique_strings(_as_sequence(row.get("coupled_classes")))
+            ),
+        )
+        for row in _metric_rows(payload, "coupling", "classes")
+        if is_coupling_hotspot(_as_int(row.get("cbo")), thresholds)
+    )
+    cohesion = frozenset(
+        CohesionHotspotRow(
+            symbol=parse_symbol(index, _as_str(row.get("qualname")), "cohesion"),
+            start_line=_as_int(row.get("start_line")),
+            end_line=_as_int(row.get("end_line")),
+            lcom4=_as_int(row.get("lcom4")),
+            method_count=_as_int(row.get("method_count")),
+            instance_var_count=_as_int(row.get("instance_var_count")),
+        )
+        for row in _metric_rows(payload, "cohesion", "classes")
+        if is_cohesion_hotspot(_as_int(row.get("lcom4")), thresholds)
+    )
+    return complexity, coupling, cohesion
+
+
+def _contracted_file(path: object, *, scan_root: str, where: str) -> FileId:
+    """A producer's absolute path as the FILE identity the document
+    publishes, through the document's own path contract."""
+    contracted, _scope, _absolute = contract_path(path, scan_root=scan_root)
+    if not contracted:
+        raise ProducerSnapshotUnavailable(
+            f"{where}: path {path!r} has no contract form"
+        )
+    return FileId(contracted)
+
+
+def _overloaded_module_rows(
+    payload: Mapping[str, object], *, scan_root: str
+) -> frozenset[OverloadedModuleRow]:
+    """A4: the producer's rows, scores at the document's precision."""
+    rows: list[OverloadedModuleRow] = []
+    for row in _metric_rows(payload, "overloaded_modules", "items"):
+        counters = {name: _as_int(row.get(name)) for name in OVERLOADED_MODULE_COUNTERS}
+        scores = {
+            name: round(_as_float(row.get(name)), OVERLOADED_SCORE_DECIMALS)
+            for name in OVERLOADED_MODULE_SCORES
+        }
+        rows.append(
+            overloaded_module_row(
+                file=_contracted_file(
+                    row.get("filepath"), scan_root=scan_root, where="overloaded module"
+                ),
+                source_kind=_as_str(row.get("source_kind")),
+                candidate_status=_as_str(row.get("candidate_status")),
+                candidate_reasons=tuple(
+                    str(reason)
+                    for reason in _as_sequence(row.get("candidate_reasons"))
+                    if str(reason).strip()
+                ),
+                counters=counters,
+                scores=scores,
+            )
+        )
+    return frozenset(rows)
+
+
+def _coverage_join_rows(
+    join: CoverageJoinResult | None, index: IdentityIndex, *, scan_root: str
+) -> tuple[CoverageJoinRecord | None, frozenset[CoverageUnitRow]]:
+    """A5: the join's record and units, from ``analysis.coverage_join`` —
+    ``None`` is the typed absence (no report was handed to the run)."""
+    if join is None:
+        return None, frozenset()
+    contracted, _scope, _absolute = contract_path(
+        join.coverage_xml, scan_root=scan_root
+    )
+    record = CoverageJoinRecord(
+        status=join.status,
+        source=contracted or "",
+        files=join.files,
+        hotspot_threshold_percent=join.hotspot_threshold_percent,
+        invalid_reason=join.invalid_reason,
+    )
+    units = frozenset(
+        CoverageUnitRow(
+            symbol=parse_symbol(index, fact.qualname, "coverage unit"),
+            start_line=fact.start_line,
+            end_line=fact.end_line,
+            executable_lines=fact.executable_lines,
+            covered_lines=fact.covered_lines,
+            coverage_status=fact.coverage_status,
+        )
+        for fact in join.units
+    )
+    return record, units
+
+
+def _dead_code_summary_record(
+    analysis: AnalysisResult, metrics: ProjectMetrics
+) -> DeadCodeSummaryRecord:
+    """A7: the lane's counters off ``ProjectMetrics`` — the carrier the
+    payload's ``dead_code.summary`` is written from."""
+    return DeadCodeSummaryRecord(
+        suppressed=analysis.suppressed_dead_code_items,
+        unresolved=len(metrics.unresolved_reachability),
+        unresolved_internal=len(metrics.unresolved_internal),
+        unresolved_external_override=len(metrics.unresolved_overrides),
+        candidates=metrics.dead_code_candidates,
+        nested_candidates=metrics.dead_code_nested_candidates,
+        live_roots=len(metrics.live_root_reasons),
+        world_contract=metrics.dead_code_world,
+    )
+
+
+#: The metric-backed E1 families of one run, in one fixed order: the two
+#: dead-code group families, the three design hotspot families, the
+#: overloaded modules and the dead-code summary record.  A positional
+#: tuple rather than a carrier class on purpose: a class holding seven row
+#: types is a coupling hotspot by construction, and the only consumer
+#: unpacks it once into the named fields of ``AnalysisFacts``.
+_MetricFamilies = tuple[
+    frozenset[DeadSymbolGroupRow],
+    frozenset[UnreachableStatementRow],
+    frozenset[ComplexityHotspotRow],
+    frozenset[CouplingHotspotRow],
+    frozenset[CohesionHotspotRow],
+    frozenset[OverloadedModuleRow],
+    DeadCodeSummaryRecord | None,
+]
+
+
+def _metric_families(
+    analysis: AnalysisResult,
+    report_meta: Mapping[str, object],
+    index: IdentityIndex,
+    *,
+    scan_root: str,
+) -> _MetricFamilies:
+    """The metric-backed E1 families off the producers.  A run without
+    project metrics (the clones-only mode) leaves them legitimately empty
+    and the summary record absent, and says so through the population
+    witness."""
+    metrics = analysis.project_metrics
+    if metrics is None:
+        return (
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            None,
+        )
+    payload = analysis.metrics_payload or {}
+    complexity, coupling, cohesion = _design_hotspot_rows(payload, report_meta, index)
+    return (
+        _dead_symbol_rows(metrics, index),
+        _unreachable_statement_rows(metrics, index),
+        complexity,
+        coupling,
+        cohesion,
+        _overloaded_module_rows(payload, scan_root=scan_root),
+        _dead_code_summary_record(analysis, metrics),
+    )
 
 
 class _SemanticFamilies(NamedTuple):
@@ -1132,6 +1470,21 @@ def canonical_snapshot_from_producers(
     payload = analysis.metrics_payload or {}
     structural = bundle.structural
     relations, occurrences = _dependency_rows(payload, index)
+    # Canonical epoch E1: the clone-lane and coverage families are built in
+    # every mode; the metric-backed ones only when the metrics ran.
+    scan_root = str(_as_mapping(report_meta).get("scan_root", ""))
+    coverage_join, coverage_units = _coverage_join_rows(
+        analysis.coverage_join, index, scan_root=scan_root
+    )
+    (
+        dead_symbol_groups,
+        unreachable_statement_groups,
+        complexity_hotspots,
+        coupling_hotspots,
+        cohesion_hotspots,
+        overloaded_modules,
+        dead_code_summary,
+    ) = _metric_families(analysis, report_meta, index, scan_root=scan_root)
     facts = AnalysisFacts(
         contracts=semantic.contracts,
         graph_nodes=semantic.graph_nodes,
@@ -1161,8 +1514,19 @@ def canonical_snapshot_from_producers(
         unit_spans=_unit_span_rows(payload, index),
         adoption_counts=_adoption_rows(structural.adoption_counts, index),
         security_surfaces=_security_surface_rows(payload, index),
+        suppressed_clone_groups=_suppressed_clone_group_rows(analysis, index),
+        structural_groups=_structural_group_rows(analysis, index),
+        dead_symbol_groups=dead_symbol_groups,
+        unreachable_statement_groups=unreachable_statement_groups,
+        complexity_hotspots=complexity_hotspots,
+        coupling_hotspots=coupling_hotspots,
+        cohesion_hotspots=cohesion_hotspots,
+        overloaded_modules=overloaded_modules,
+        coverage_units=coverage_units,
         run_scalars=_run_scalars(discovery, processing),
         analysis_population=population,
+        coverage_join=coverage_join,
+        dead_code_summary=dead_code_summary,
     )
     files = frozenset(FileId(path) for path in analyzed)
     return CanonicalModel(

@@ -1250,3 +1250,449 @@ def test_a_lost_head_race_is_a_conflict_and_never_a_completeness_claim(
         heads = list(run_store._connection.execute("SELECT target FROM heads"))
     assert len(stored) == 1, "the run must be stored even when it loses the head"
     assert heads == [], "a stale publisher must not create a head"
+
+
+# -- canonical epoch E1: the eleven published-population families ------------
+
+#: The E1 corpus: one tree that populates EVERY E1 family at once, so the
+#: producer-native builder and the ingest oracle meet on a non-empty row set
+#: per family — a family compared at zero rows proves nothing about its
+#: mapping.  What each file is for: ``pkg/hub.py`` carries a class coupled to
+#: eleven classes (coupling hotspot), a class whose four methods share no
+#: attribute (cohesion hotspot), a twenty-two-branch function (complexity
+#: hotspot, and the coverage hotspot once the report below covers half of
+#: it), an if/elif with two identical loop-and-return bodies (a structural
+#: duplicated-branches group), a function with statements after its return
+#: (an unreachable region), a private function nobody calls and one only the
+#: test suite calls (both dead-symbol reasons); ``tests/fixtures/golden_*``
+#: carry two identical functions under the declared golden-fixture pattern
+#: (a SUPPRESSED clone group, never an emitted one); every module is an
+#: overloaded-modules row; the dead-code lane's counters are the summary.
+_E1_CORPUS: dict[str, str] = {
+    "pyproject.toml": (
+        "[tool.codeclone]\nsemantic_authority = true\n"
+        'golden_fixture_paths = ["tests/fixtures/golden_*"]\n'
+    ),
+    "pkg/__init__.py": "",
+    "pkg/hub.py": '''"""Hub."""
+
+from pkg.parts import A, B, C, D, E, F, G, H, I, J, K
+
+
+class Hub:
+    """Hub."""
+
+    def __init__(self) -> None:
+        self.a = A()
+        self.b = B()
+        self.c = C()
+        self.d = D()
+        self.e = E()
+        self.f = F()
+        self.g = G()
+        self.h = H()
+        self.i = I()
+        self.j = J()
+        self.k = K()
+
+    def total(self) -> int:
+        """Total."""
+        return (
+            self.a.v() + self.b.v() + self.c.v() + self.d.v() + self.e.v()
+            + self.f.v() + self.g.v() + self.h.v() + self.i.v() + self.j.v()
+            + self.k.v()
+        )
+
+
+class Scattered:
+    """Four methods, four attributes, no sharing: lcom4 of four."""
+
+    def one(self) -> int:
+        """One."""
+        self.p = 1
+        return self.p
+
+    def two(self) -> int:
+        """Two."""
+        self.q = 2
+        return self.q
+
+    def three(self) -> int:
+        """Three."""
+        self.r = 3
+        return self.r
+
+    def four(self) -> int:
+        """Four."""
+        self.s = 4
+        return self.s
+
+
+def maze(value: int) -> int:
+    """Twenty-two branches."""
+    total = 0
+    if value > 1:
+        total += 1
+    if value > 2:
+        total += 1
+    if value > 3:
+        total += 1
+    if value > 4:
+        total += 1
+    if value > 5:
+        total += 1
+    if value > 6:
+        total += 1
+    if value > 7:
+        total += 1
+    if value > 8:
+        total += 1
+    if value > 9:
+        total += 1
+    if value > 10:
+        total += 1
+    if value > 11:
+        total += 1
+    if value > 12:
+        total += 1
+    if value > 13:
+        total += 1
+    if value > 14:
+        total += 1
+    if value > 15:
+        total += 1
+    if value > 16:
+        total += 1
+    if value > 17:
+        total += 1
+    if value > 18:
+        total += 1
+    if value > 19:
+        total += 1
+    if value > 20:
+        total += 1
+    if value > 21:
+        total += 1
+    return total
+
+
+def route(kind: str, payload: list[int]) -> str:
+    """Duplicated branches."""
+    if kind == "a":
+        for item in payload:
+            print(item)
+        return "a"
+    elif kind == "b":
+        for item in payload:
+            print(item)
+        return "b"
+    return "c"
+
+
+def stop(value: int) -> int:
+    """Unreachable tail."""
+    return value
+    value += 1
+    return value
+
+
+def _orphan() -> int:
+    """Nobody calls this."""
+    return 1
+
+
+def _tested_helper() -> int:
+    """Referenced from the test suite alone."""
+    return 2
+''',
+    "pkg/parts.py": "".join(
+        f"""class {name}:
+    def v(self) -> int:
+        return {index + 1}
+
+
+"""
+        for index, name in enumerate("ABCDEFGHIJK")
+    ),
+    "tests/__init__.py": "",
+    "tests/test_hub.py": '''"""Tests."""
+
+from pkg.hub import Hub, _tested_helper
+
+
+def test_hub() -> None:
+    assert Hub().total() == 66
+
+
+def test_only() -> None:
+    assert _tested_helper() == 2
+''',
+    "tests/fixtures/golden_a/dup.py": '''"""Golden A."""
+
+
+def sample(values: list[int]) -> int:
+    total = 0
+    for value in values:
+        total += value * 2
+    return total
+''',
+    "tests/fixtures/golden_b/dup.py": '''"""Golden B."""
+
+
+def sample(values: list[int]) -> int:
+    total = 0
+    for value in values:
+        total += value * 2
+    return total
+''',
+}
+
+
+def _e1_coverage_xml(root: Path) -> str:
+    return f"""<?xml version="1.0" ?>
+<coverage version="7.0" line-rate="0.5">
+  <sources><source>{root}</source></sources>
+  <packages><package name="pkg"><classes>
+    <class name="hub.py" filename="pkg/hub.py"><lines>
+      <line number="9" hits="1"/><line number="10" hits="1"/>
+      <line number="11" hits="0"/><line number="25" hits="1"/>
+      <line number="60" hits="0"/><line number="61" hits="0"/>
+      <line number="62" hits="1"/><line number="63" hits="0"/>
+    </lines></class>
+  </classes></package></packages>
+</coverage>
+"""
+
+
+def _write_e1_corpus(root: Path) -> Path:
+    for relative, source in _E1_CORPUS.items():
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source, "utf-8")
+    coverage = root / "coverage.xml"
+    coverage.write_text(_e1_coverage_xml(root), "utf-8")
+    return coverage
+
+
+_E1_ROW_FAMILIES = (
+    "suppressed_clone_groups",
+    "structural_groups",
+    "dead_symbol_groups",
+    "unreachable_statement_groups",
+    "complexity_hotspots",
+    "coupling_hotspots",
+    "cohesion_hotspots",
+    "overloaded_modules",
+    "coverage_units",
+)
+
+
+@pytest.fixture(scope="module")
+def e1_run(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, object], CanonicalModel]:
+    """One enabled full-metrics run over the E1 corpus, with a coverage
+    report, and what it published — shared by the E1 pins below so the
+    corpus cannot fork between them."""
+    from tests.conftest import _run_codeclone_cli
+
+    root = tmp_path_factory.mktemp("e1_corpus").resolve()
+    coverage = _write_e1_corpus(root)
+    store = root / "runs.sqlite3"
+    report_path = root / "report.json"
+    _run_codeclone_cli(
+        [
+            str(root),
+            "--no-progress",
+            "--baseline",
+            str(root / "corpus.baseline.json"),
+            *_FULL_METRICS_ARGS,
+            "--coverage",
+            str(coverage),
+            "--json",
+            str(report_path),
+        ],
+        {
+            "CODECLONE_RUN_STORE_FORCE": "1",
+            "CODECLONE_RUN_STORE_ENABLED": "1",
+            "CODECLONE_RUN_STORE_PATH": str(store),
+        },
+    )
+    document: dict[str, object] = json.loads(report_path.read_text("utf-8"))
+    head = _head(store, CANONICAL_HEAD_TARGET)
+    assert head is not None
+    with RunStore(store) as run_store:
+        return document, run_store.read_run(head.run_id)
+
+
+def test_the_e1_families_agree_between_producer_and_oracle(
+    e1_run: tuple[dict[str, object], CanonicalModel],
+) -> None:
+    """Projection equivalence for the eleven E1 families on a corpus that
+    populates every one of them (measured 2026-09-25: 1/1/2/1/1/1/1/7/26
+    rows and both records), family by family, non-empty first.
+
+    The two readings come from the SAME execution: the CLI rendered the
+    document the oracle reads and published the run the store holds.  A
+    red here is a regression — some E1 fact stopped being stated, or
+    stopped agreeing — never a gap to restore.
+    """
+    document, native = e1_run
+    oracle = canonical_model_from_legacy_document(document)
+    produced = native.facts.analysis
+    expected = oracle.facts.analysis
+    for family in _E1_ROW_FAMILIES:
+        rows = getattr(produced, family)
+        assert rows, f"{family} carries no rows; the comparison would be hollow"
+        assert rows == getattr(expected, family), family
+    assert produced.coverage_join is not None
+    assert produced.coverage_join == expected.coverage_join
+    assert produced.coverage_join.status == "ok"
+    assert produced.dead_code_summary is not None
+    assert produced.dead_code_summary == expected.dead_code_summary
+    # The distinguishing shapes, named: both dead-symbol reasons, a
+    # test-only evidence source, the three coverage statuses.
+    assert {row.reason for row in produced.dead_symbol_groups} == {
+        "unreferenced",
+        "test_only_reference",
+    }
+    assert any(row.test_reference_sources for row in produced.dead_symbol_groups)
+    assert {row.coverage_status for row in produced.coverage_units} == {
+        "measured",
+        "missing_from_report",
+        "no_executable_lines",
+    }
+    # A1: the suppressed group is NOT among the emitted groups.
+    suppressed_keys = {row.group_key for row in produced.suppressed_clone_groups}
+    assert suppressed_keys
+    assert suppressed_keys.isdisjoint(row.group_key for row in produced.clone_groups)
+
+
+def test_the_e1_families_agree_on_the_wiring_corpus(
+    corpus: Path, run_store_cli: RunStoreCorpusRunner
+) -> None:
+    """The same equivalence on the wiring corpus, which populates only two
+    of the eleven (every module is an overloaded row; the dead-code lane
+    always publishes its counters) — stated as such, never as a hollow
+    equality of empties: the empty nine are asserted empty on BOTH sides
+    together with the reason the corpus leaves them so."""
+    _store, document, native = _semantic_run(run_store_cli, corpus)
+    oracle = canonical_model_from_legacy_document(document)
+    produced = native.facts.analysis
+    expected = oracle.facts.analysis
+    assert produced.overloaded_modules
+    assert {row.file.path for row in produced.overloaded_modules} == {
+        path for path in _CORPUS if path.endswith(".py")
+    }
+    assert produced.dead_code_summary is not None
+    for family in _E1_ROW_FAMILIES:
+        assert getattr(produced, family) == getattr(expected, family), family
+    assert produced.coverage_join is None
+    assert expected.coverage_join is None
+    assert produced.dead_code_summary == expected.dead_code_summary
+
+
+def test_every_e1_closing_line_family_answers_alone_on_the_e1_corpus(
+    e1_run: tuple[dict[str, object], CanonicalModel],
+) -> None:
+    """The reachability witness the closing-line ratchet defers to here.
+
+    ``test_run_store_serving_equivalence`` teaches its unit-inventory reader
+    the six E1 row types that declare an ``end_line`` and states that the
+    serving corpus leaves every one of them empty.  Taught is not reached:
+    each of the six is driven ALONE on this corpus and required to carry
+    rows, and each is required to do its own job.  Three state UNIT
+    declarations and state the same closing line ``unit_spans`` states for
+    them (a dead symbol, a complexity hotspot, a coverage unit); two state
+    CLASS declarations, which the unit index never carries, and the two
+    agree with each other about every class they share; the unreachable
+    region starts inside a unit and answers no declaration at all.
+    """
+    from tests.test_run_store_serving_equivalence import (
+        _CLOSING_LINE_FAMILIES,
+        _E1_CLOSING_LINE_ROW_TYPES,
+        UnitKey,
+    )
+
+    _document, native = e1_run
+    analysis = native.facts.analysis
+    spans = {
+        (row.symbol.file.path, row.symbol.qualname, row.start_line): row.end_line
+        for row in analysis.unit_spans
+    }
+    stated_by: dict[str, dict[UnitKey, int]] = {}
+    for row_type, read in _CLOSING_LINE_FAMILIES:
+        if row_type.__name__ not in _E1_CLOSING_LINE_ROW_TYPES:
+            continue
+        stated = dict(read(analysis))
+        assert stated, f"{row_type.__name__} carries no row on the E1 corpus"
+        stated_by[row_type.__name__] = stated
+    assert set(stated_by) == _E1_CLOSING_LINE_ROW_TYPES
+    for name in ("DeadSymbolGroupRow", "ComplexityHotspotRow", "CoverageUnitRow"):
+        assert set(stated_by[name]) <= set(spans), name
+        assert all(spans[key] == end for key, end in stated_by[name].items()), name
+    for name in ("CouplingHotspotRow", "CohesionHotspotRow"):
+        assert not set(stated_by[name]) & set(spans), f"{name} answered a unit"
+    shared = set(stated_by["CouplingHotspotRow"]) & set(stated_by["CohesionHotspotRow"])
+    assert all(
+        stated_by["CouplingHotspotRow"][key] == stated_by["CohesionHotspotRow"][key]
+        for key in shared
+    )
+    assert not set(stated_by["UnreachableStatementRow"]) & set(spans), (
+        "a region answered a declaration"
+    )
+
+
+def test_native_overloaded_scores_are_stored_at_the_published_precision(
+    tmp_path: Path,
+) -> None:
+    """A4: the producer's raw composite score is canonical at the FOUR
+    decimals the document publishes, never at the float the producer
+    computed.  Driven on a synthetic payload row whose raw scores carry
+    six decimals, because the E1 corpus's scores happen to be four-decimal
+    clean already (measured 2026-09-25: the rounding mutant survived that
+    corpus alone) — a rule pinned on a population that cannot distinguish
+    it is no pin at all."""
+    from codeclone.core.canonical_snapshot import _overloaded_module_rows
+
+    root = tmp_path / "root"
+    (root / "pkg").mkdir(parents=True)
+    raw = {
+        "module": "pkg.mod",
+        "filepath": str(root / "pkg" / "mod.py"),
+        "source_kind": "production",
+        "loc": 10,
+        "functions": 1,
+        "methods": 0,
+        "classes": 0,
+        "callable_count": 1,
+        "complexity_total": 3,
+        "complexity_max": 3,
+        "fan_in": 1,
+        "fan_out": 2,
+        "total_deps": 3,
+        "import_edges": 3,
+        "reimport_edges": 1,
+        "reimport_ratio": 0.333333,
+        "instability": 0.666667,
+        "hub_balance": 0.123456,
+        "size_score": 0.000049,
+        "dependency_score": 0.999951,
+        "shape_score": 0.5,
+        "score": 0.98765432,
+        "candidate_status": "ranked_only",
+        "candidate_reasons": ["size_pressure", ""],
+    }
+    payload = {"overloaded_modules": {"items": [raw]}}
+    (row,) = _overloaded_module_rows(payload, scan_root=str(root))
+    assert row.file.path == "pkg/mod.py"
+    assert (
+        row.reimport_ratio,
+        row.instability,
+        row.hub_balance,
+        row.size_score,
+        row.dependency_score,
+        row.shape_score,
+        row.score,
+    ) == (0.3333, 0.6667, 0.1235, 0.0, 1.0, 0.5, 0.9877)
+    assert row.candidate_reasons == ("size_pressure",)

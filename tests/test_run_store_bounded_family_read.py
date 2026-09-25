@@ -605,6 +605,21 @@ _MODEL_ACCESSORS: Final[dict[str, Callable[[CanonicalModel], frozenset[object]]]
     "sink_role": lambda m: m.facts.analysis.sink_roles,
     "unit_span": lambda m: m.facts.analysis.unit_spans,
     "violation": lambda m: m.facts.analysis.violations,
+    # Canonical epoch E1 (2026-09-25): the eleven published-population
+    # families, two of them record families (absent = no row, never a fake).
+    "suppressed_clone_group": lambda m: m.facts.analysis.suppressed_clone_groups,
+    "structural_group": lambda m: m.facts.analysis.structural_groups,
+    "dead_symbol_group": lambda m: m.facts.analysis.dead_symbol_groups,
+    "unreachable_statement_group": (
+        lambda m: m.facts.analysis.unreachable_statement_groups
+    ),
+    "complexity_hotspot": lambda m: m.facts.analysis.complexity_hotspots,
+    "coupling_hotspot": lambda m: m.facts.analysis.coupling_hotspots,
+    "cohesion_hotspot": lambda m: m.facts.analysis.cohesion_hotspots,
+    "overloaded_module": lambda m: m.facts.analysis.overloaded_modules,
+    "coverage_unit": lambda m: m.facts.analysis.coverage_units,
+    "coverage_join": lambda m: _optional(m.facts.analysis.coverage_join),
+    "dead_code_summary": lambda m: _optional(m.facts.analysis.dead_code_summary),
 }
 
 

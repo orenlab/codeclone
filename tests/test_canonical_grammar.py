@@ -61,47 +61,73 @@ _EXPECTED_TIERS: dict[str, str] = {
     "api_symbols": "analysis",
     "candidates": "analysis",
     "clone_groups": "analysis",
+    "cohesion_hotspots": "analysis",
+    "complexity_hotspots": "analysis",
     "contracts": "analysis",
     "coupling_cohesion_observations": "analysis",
+    "coupling_hotspots": "analysis",
+    "coverage_join": "analysis",
+    "coverage_units": "analysis",
     "dead_code_observations": "analysis",
+    "dead_code_summary": "analysis",
+    "dead_symbol_groups": "analysis",
     "dependency_cycles": "analysis",
     "dependency_occurrences": "analysis",
     "dependency_relations": "analysis",
     "file_modules": "analysis",
     "graph_nodes": "analysis",
     "import_observations": "analysis",
+    "overloaded_modules": "analysis",
     "relationship_observations": "analysis",
     "risk_observations": "analysis",
     "run_scalars": "analysis",
     "security_surfaces": "analysis",
     "semantic_edges": "analysis",
     "sink_roles": "analysis",
+    "structural_groups": "analysis",
+    "suppressed_clone_groups": "analysis",
     "unit_spans": "analysis",
+    "unreachable_statement_groups": "analysis",
     "violations": "analysis",
 }
 
+# Canonical epoch E1 (2026-09-25): the eleven published-population
+# families — grouped findings (normalized_finding), the overloaded-module
+# facts (normalized_fact), the external Cobertura join (the §4 external
+# observation production) and the dead-code counters (run population).
 _EXPECTED_KINDS: dict[str, str] = {
     "adoption_counts": "normalized_fact",
     "analysis_population": "run_population",
     "api_symbols": "normalized_fact",
     "candidates": "normalized_fact",
     "clone_groups": "normalized_finding",
+    "cohesion_hotspots": "normalized_finding",
+    "complexity_hotspots": "normalized_finding",
     "contracts": "normalized_fact",
     "coupling_cohesion_observations": "normalized_fact",
+    "coupling_hotspots": "normalized_finding",
+    "coverage_join": "external_observation",
+    "coverage_units": "external_observation",
     "dead_code_observations": "normalized_finding",
+    "dead_code_summary": "run_population",
+    "dead_symbol_groups": "normalized_finding",
     "dependency_cycles": "normalized_fact",
     "dependency_occurrences": "normalized_fact",
     "dependency_relations": "normalized_fact",
     "file_modules": "normalized_fact",
     "graph_nodes": "normalized_fact",
     "import_observations": "normalized_fact",
+    "overloaded_modules": "normalized_fact",
     "relationship_observations": "normalized_fact",
     "risk_observations": "normalized_fact",
     "run_scalars": "run_population",
     "security_surfaces": "normalized_fact",
     "semantic_edges": "normalized_fact",
     "sink_roles": "normalized_fact",
+    "structural_groups": "normalized_finding",
+    "suppressed_clone_groups": "normalized_finding",
     "unit_spans": "normalized_fact",
+    "unreachable_statement_groups": "normalized_finding",
     "violations": "normalized_finding",
 }
 
@@ -449,10 +475,25 @@ def test_the_real_wire_population_passes_the_gate() -> None:
     ``resolution_status`` are representation projections and are not
     counted here because they have no residence).  Two families added
     deliberately, in one migration, by maintainer sanction.
+
+    22 -> 33 families and 118 -> 198 fields with canonical epoch E1
+    (2026-09-25, the first wave of the sanctioned model 2 -> 3 epoch; the
+    revision constants move once, after E4).  Eleven families added
+    deliberately: ``suppressed_clone_groups`` (6), ``structural_groups``
+    (4), ``dead_symbol_groups`` (7), ``unreachable_statement_groups`` (5),
+    ``complexity_hotspots`` (5), ``coupling_hotspots`` (5),
+    ``cohesion_hotspots`` (6), ``overloaded_modules`` (23),
+    ``coverage_units`` (6), ``coverage_join`` (5) and ``dead_code_summary``
+    (8) = 80 stored fields.  The declared-only columns of those families
+    (the derived ``risk`` labels, the coverage sums, the overloaded
+    ``module`` projection) have no residence and are not counted.  Both
+    numbers are re-derived here from the registry the gate reads, never
+    typed from memory: the sum of the parenthesised counts above is the
+    second literal.
     """
     families = _wire_field_names()
-    assert len(families) == 22
-    assert sum(len(fields) for fields in families.values()) == 118
+    assert len(families) == 33
+    assert sum(len(fields) for fields in families.values()) == 118 + 80
     require_analysis_wire_families(families)
 
 

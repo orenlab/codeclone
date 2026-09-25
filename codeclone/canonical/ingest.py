@@ -51,8 +51,31 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from codeclone.canonical.analysis_rows import (
+    OVERLOADED_MODULE_COUNTERS as _OVERLOADED_COUNTERS,
+)
+from codeclone.canonical.analysis_rows import (
+    OVERLOADED_MODULE_SCORES as _OVERLOADED_SCORES,
+)
+from codeclone.canonical.analysis_rows import (
+    CloneItemRow,
+    CohesionHotspotRow,
+    ComplexityHotspotRow,
+    CouplingHotspotRow,
+    CoverageJoinRecord,
+    CoverageUnitRow,
+    DeadCodeSummaryRecord,
+    DeadSymbolGroupRow,
+    OverloadedModuleRow,
+    StructuralGroupRow,
+    SuppressedCloneGroupRow,
+    UnreachableStatementRow,
+    overloaded_module_row,
+)
 from codeclone.canonical.errors import LegacyIngestError
 from codeclone.canonical.identity import (
+    DEAD_SYMBOL_GROUP_KIND,
+    UNREACHABLE_STATEMENT_GROUP_KIND,
     EffectRoot,
     FileId,
     ModuleId,
@@ -69,7 +92,6 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
-    CloneItemRow,
     ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
@@ -369,6 +391,17 @@ def canonical_model_from_legacy_document(
     )
 
     clone_groups = _clone_group_family(document, index)
+    suppressed_clone_groups = _suppressed_clone_group_family(document, index)
+    structural_groups = _structural_group_family(document, index)
+    dead_symbol_groups, unreachable_statement_groups = _dead_code_group_families(
+        document, index
+    )
+    complexity_hotspots, coupling_hotspots, cohesion_hotspots = _design_group_families(
+        document, index
+    )
+    overloaded_modules = _overloaded_module_family(families, index)
+    coverage_join, coverage_units = _coverage_join_family(families, index)
+    dead_code_summary = _dead_code_summary(families)
 
     coupling_rows = _sequence(
         _field(
@@ -470,8 +503,19 @@ def canonical_model_from_legacy_document(
                 unit_spans=unit_spans,
                 adoption_counts=adoption_counts,
                 security_surfaces=security_surfaces,
+                suppressed_clone_groups=suppressed_clone_groups,
+                structural_groups=structural_groups,
+                dead_symbol_groups=dead_symbol_groups,
+                unreachable_statement_groups=unreachable_statement_groups,
+                complexity_hotspots=complexity_hotspots,
+                coupling_hotspots=coupling_hotspots,
+                cohesion_hotspots=cohesion_hotspots,
+                overloaded_modules=overloaded_modules,
+                coverage_units=coverage_units,
                 run_scalars=run_scalars,
                 analysis_population=analysis_population,
+                coverage_join=coverage_join,
+                dead_code_summary=dead_code_summary,
             )
         ),
         coupled_sets=coupled_sets,
@@ -763,15 +807,23 @@ def _clone_group(
     )
 
 
+def _finding_groups(
+    document: Mapping[str, object], family: str
+) -> Mapping[str, object]:
+    """One ``findings.groups.<family>`` container of the document — refused
+    when absent, like every producer container this oracle reads."""
+    findings = _mapping(_field(document, "findings", "document"), "findings")
+    groups = _mapping(_field(findings, "groups", "findings"), "findings.groups")
+    return _mapping(
+        _field(groups, family, "findings.groups"), f"findings.groups.{family}"
+    )
+
+
 def _clone_group_family(
     document: Mapping[str, object], index: IdentityIndex
 ) -> frozenset[CloneGroupRow]:
     """The F8 family from the document's EMITTED clone containers only."""
-    findings = _mapping(_field(document, "findings", "document"), "findings")
-    groups = _mapping(_field(findings, "groups", "findings"), "findings.groups")
-    clones = _mapping(
-        _field(groups, "clones", "findings.groups"), "findings.groups.clones"
-    )
+    clones = _finding_groups(document, "clones")
     return frozenset(
         _clone_group(_mapping(row, f"{kind} clone group"), index, kind)
         for container_key, kind in _CLONE_CONTAINERS
@@ -779,6 +831,349 @@ def _clone_group_family(
             _field(clones, container_key, "findings.groups.clones"),
             f"clones.{container_key}",
         )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Canonical epoch E1: the published finding groups, the overloaded modules,
+# the external coverage join and the dead-code summary, each read from the
+# SAME container the document builder writes — the grouped finding is the
+# family, and the oracle reads it where the document publishes it.
+# ---------------------------------------------------------------------------
+
+
+def _suppressed_clone_group(
+    row: Mapping[str, object], index: IdentityIndex, kind: str
+) -> SuppressedCloneGroupRow:
+    where = f"suppressed {kind} clone group"
+    emitted = _clone_group(row, index, kind)
+    return SuppressedCloneGroupRow(
+        clone_kind=emitted.clone_kind,
+        group_key=emitted.group_key,
+        items=emitted.items,
+        suppression_rule=_string(row, "suppression_rule", where),
+        suppression_source=_string(row, "suppression_source", where),
+        matched_patterns=_string_tuple(
+            _field(row, "matched_patterns", where), f"{where}.matched_patterns"
+        ),
+    )
+
+
+def _suppressed_clone_group_family(
+    document: Mapping[str, object], index: IdentityIndex
+) -> frozenset[SuppressedCloneGroupRow]:
+    """A1: the SUPPRESSED population, from the container the document
+    writes only when at least one group was suppressed — its absence is
+    the measured empty population, never an unknown one."""
+    clones = _finding_groups(document, "clones")
+    if "suppressed" not in clones:
+        return frozenset()
+    suppressed = _mapping(clones["suppressed"], "findings.groups.clones.suppressed")
+    return frozenset(
+        _suppressed_clone_group(_mapping(row, f"suppressed {kind} group"), index, kind)
+        for container_key, kind in _CLONE_CONTAINERS
+        for row in _sequence(
+            _field(suppressed, container_key, "clones.suppressed"),
+            f"clones.suppressed.{container_key}",
+        )
+    )
+
+
+def _group_rows(
+    document: Mapping[str, object], family: str
+) -> list[Mapping[str, object]]:
+    container = _finding_groups(document, family)
+    return [
+        _mapping(row, f"{family} group")
+        for row in _sequence(
+            _field(container, "groups", f"findings.groups.{family}"),
+            f"findings.groups.{family}.groups",
+        )
+    ]
+
+
+def _group_facts(row: Mapping[str, object], where: str) -> Mapping[str, object]:
+    return _mapping(_field(row, "facts", where), f"{where}.facts")
+
+
+def _single_site(
+    row: Mapping[str, object], index: IdentityIndex, where: str
+) -> CloneItemRow:
+    """The one site of a singleton finding group (its ``items[0]``)."""
+    items = _sequence(_field(row, "items", where), f"{where}.items")
+    if len(items) != 1:
+        raise LegacyIngestError(f"{where} is not a singleton group: {len(items)} items")
+    return _clone_item(_mapping(items[0], f"{where} item"), index, f"{where} item")
+
+
+def _structural_group(
+    row: Mapping[str, object], index: IdentityIndex
+) -> StructuralGroupRow:
+    where = "structural group"
+    kind = _string(row, "kind", where)
+    identity = _string(row, "id", where)
+    prefix = f"structural:{kind}:"
+    if not identity.startswith(prefix) or len(identity) == len(prefix):
+        raise LegacyIngestError(
+            f"{where}: id {identity!r} is not spelled from kind {kind!r}"
+        )
+    signature = _mapping(_field(row, "signature", where), f"{where}.signature")
+    debug = _mapping(_field(signature, "debug", where), f"{where}.signature.debug")
+    return StructuralGroupRow(
+        finding_kind=kind,
+        finding_key=identity[len(prefix) :],
+        signature=tuple(
+            (str(key), _string(debug, str(key), f"{where}.signature.debug"))
+            for key in sorted(debug)
+        ),
+        occurrences=frozenset(
+            _clone_item(_mapping(item, f"{where} item"), index, f"{where} item")
+            for item in _sequence(_field(row, "items", where), f"{where}.items")
+        ),
+    )
+
+
+def _structural_group_family(
+    document: Mapping[str, object], index: IdentityIndex
+) -> frozenset[StructuralGroupRow]:
+    return frozenset(
+        _structural_group(row, index) for row in _group_rows(document, "structural")
+    )
+
+
+def _dead_symbol_group(
+    row: Mapping[str, object], index: IdentityIndex
+) -> DeadSymbolGroupRow:
+    where = "dead_code unused_symbol group"
+    site = _single_site(row, index, where)
+    facts = _group_facts(row, where)
+    return DeadSymbolGroupRow(
+        symbol=site.symbol,
+        start_line=site.start_line,
+        end_line=site.end_line,
+        candidate_kind=_string(facts, "kind", f"{where}.facts"),
+        confidence=_string(facts, "confidence", f"{where}.facts"),
+        reason=_string(facts, "reason", f"{where}.facts"),
+        test_reference_sources=_string_tuple(
+            _field(facts, "test_reference_sources", f"{where}.facts"),
+            f"{where}.facts.test_reference_sources",
+        ),
+    )
+
+
+def _unreachable_statement_group(
+    row: Mapping[str, object], index: IdentityIndex
+) -> UnreachableStatementRow:
+    where = "dead_code unreachable_statement group"
+    site = _single_site(row, index, where)
+    facts = _group_facts(row, where)
+    return UnreachableStatementRow(
+        symbol=site.symbol,
+        start_line=site.start_line,
+        end_line=site.end_line,
+        reason=_string(facts, "reason", f"{where}.facts"),
+        statement_count=_lane_int(facts, "statement_count", f"{where}.facts"),
+    )
+
+
+def _dead_code_group_families(
+    document: Mapping[str, object], index: IdentityIndex
+) -> tuple[frozenset[DeadSymbolGroupRow], frozenset[UnreachableStatementRow]]:
+    """A2: the two dead-code group families, told apart by ``kind`` — the
+    discriminator the document's own renderers dispatch on."""
+    dead_symbols: list[DeadSymbolGroupRow] = []
+    regions: list[UnreachableStatementRow] = []
+    for row in _group_rows(document, "dead_code"):
+        kind = _string(row, "kind", "dead_code group")
+        if kind == DEAD_SYMBOL_GROUP_KIND:
+            dead_symbols.append(_dead_symbol_group(row, index))
+        elif kind == UNREACHABLE_STATEMENT_GROUP_KIND:
+            regions.append(_unreachable_statement_group(row, index))
+        else:
+            raise LegacyIngestError(f"dead_code group carries unknown kind {kind!r}")
+    return frozenset(dead_symbols), frozenset(regions)
+
+
+#: The design categories that are stored families; ``dependency`` and
+#: ``coverage`` groups are projected from the families they are derived
+#: from (``dependency_cycles``, ``coverage_units``) and never read here.
+_PROJECTED_DESIGN_CATEGORIES = frozenset({"dependency", "coverage"})
+
+
+def _design_group_families(
+    document: Mapping[str, object], index: IdentityIndex
+) -> tuple[
+    frozenset[ComplexityHotspotRow],
+    frozenset[CouplingHotspotRow],
+    frozenset[CohesionHotspotRow],
+]:
+    """A2 (design): the three hotspot families, told apart by ``category``."""
+    complexity: list[ComplexityHotspotRow] = []
+    coupling: list[CouplingHotspotRow] = []
+    cohesion: list[CohesionHotspotRow] = []
+    for row in _group_rows(document, "design"):
+        category = _string(row, "category", "design group")
+        if category in _PROJECTED_DESIGN_CATEGORIES:
+            continue
+        where = f"design {category} group"
+        site = _single_site(row, index, where)
+        item = _mapping(_sequence(row["items"], where)[0], f"{where} item")
+        if category == "complexity":
+            complexity.append(
+                ComplexityHotspotRow(
+                    symbol=site.symbol,
+                    start_line=site.start_line,
+                    end_line=site.end_line,
+                    cyclomatic_complexity=_lane_int(
+                        item, "cyclomatic_complexity", where
+                    ),
+                    nesting_depth=_lane_int(item, "nesting_depth", where),
+                )
+            )
+        elif category == "coupling":
+            coupling.append(
+                CouplingHotspotRow(
+                    symbol=site.symbol,
+                    start_line=site.start_line,
+                    end_line=site.end_line,
+                    cbo=_lane_int(item, "cbo", where),
+                    coupled_classes=_string_tuple(
+                        _field(item, "coupled_classes", where),
+                        f"{where}.coupled_classes",
+                    ),
+                )
+            )
+        elif category == "cohesion":
+            cohesion.append(
+                CohesionHotspotRow(
+                    symbol=site.symbol,
+                    start_line=site.start_line,
+                    end_line=site.end_line,
+                    lcom4=_lane_int(item, "lcom4", where),
+                    method_count=_lane_int(item, "method_count", where),
+                    instance_var_count=_lane_int(item, "instance_var_count", where),
+                )
+            )
+        else:
+            raise LegacyIngestError(
+                f"design group carries unknown category {category!r}"
+            )
+    return frozenset(complexity), frozenset(coupling), frozenset(cohesion)
+
+
+def _analyzed_file(index: IdentityIndex, path: str, where: str) -> FileId:
+    if path not in index.analyzed_paths:
+        raise LegacyIngestError(
+            f"{where}: {path!r} is not an analyzed path; refusing to guess an identity"
+        )
+    return FileId(path)
+
+
+def _lane_float(row: Mapping[str, object], key: str, where: str) -> float:
+    value = _field(row, key, where)
+    if isinstance(value, bool) or not isinstance(value, float):
+        raise LegacyIngestError(f"{where} {key} is not a float")
+    return value
+
+
+def _overloaded_module(
+    row: Mapping[str, object], index: IdentityIndex
+) -> OverloadedModuleRow:
+    where = "overloaded_modules item"
+    counters = {name: _lane_int(row, name, where) for name in _OVERLOADED_COUNTERS}
+    scores = {name: _lane_float(row, name, where) for name in _OVERLOADED_SCORES}
+    return overloaded_module_row(
+        file=_analyzed_file(index, _string(row, "relative_path", where), where),
+        source_kind=_string(row, "source_kind", where),
+        candidate_status=_string(row, "candidate_status", where),
+        candidate_reasons=_string_tuple(
+            _field(row, "candidate_reasons", where), f"{where}.candidate_reasons"
+        ),
+        counters=counters,
+        scores=scores,
+    )
+
+
+def _overloaded_module_family(
+    families: Mapping[str, object], index: IdentityIndex
+) -> frozenset[OverloadedModuleRow]:
+    container = _mapping(
+        _field(families, "overloaded_modules", "metrics.families"),
+        "metrics.families.overloaded_modules",
+    )
+    return frozenset(
+        _overloaded_module(_mapping(row, "overloaded_modules item"), index)
+        for row in _sequence(
+            _field(container, "items", "metrics.families.overloaded_modules"),
+            "overloaded_modules.items",
+        )
+    )
+
+
+def _coverage_unit(row: Mapping[str, object], index: IdentityIndex) -> CoverageUnitRow:
+    where = "coverage_join item"
+    site = _clone_item(row, index, where)
+    return CoverageUnitRow(
+        symbol=site.symbol,
+        start_line=site.start_line,
+        end_line=site.end_line,
+        executable_lines=_lane_int(row, "executable_lines", where),
+        covered_lines=_lane_int(row, "covered_lines", where),
+        coverage_status=_string(row, "coverage_status", where),
+    )
+
+
+def _coverage_join_family(
+    families: Mapping[str, object], index: IdentityIndex
+) -> tuple[CoverageJoinRecord | None, frozenset[CoverageUnitRow]]:
+    """A5: the join's record and units, from the container the document
+    writes only when the run was handed a report — its absence is the
+    typed absence of the record, never an empty join."""
+    if "coverage_join" not in families:
+        return None, frozenset()
+    container = _mapping(families["coverage_join"], "metrics.families.coverage_join")
+    where = "metrics.families.coverage_join.summary"
+    summary = _mapping(_field(container, "summary", "coverage_join"), where)
+    reason = _field(summary, "invalid_reason", where)
+    if reason is not None and not isinstance(reason, str):
+        raise LegacyIngestError(f"{where}.invalid_reason is not a string")
+    record = CoverageJoinRecord(
+        status=_string(summary, "status", where),
+        source=_string(summary, "source", where),
+        files=_lane_int(summary, "files", where),
+        hotspot_threshold_percent=_lane_int(
+            summary, "hotspot_threshold_percent", where
+        ),
+        invalid_reason=reason,
+    )
+    units = frozenset(
+        _coverage_unit(_mapping(row, "coverage_join item"), index)
+        for row in _sequence(
+            _field(container, "items", "coverage_join"), "coverage_join.items"
+        )
+    )
+    return record, units
+
+
+def _dead_code_summary(families: Mapping[str, object]) -> DeadCodeSummaryRecord:
+    """A7: the dead-code lane's counters, read from the summary the gate
+    and every surface read — never re-measured from the lists beside it."""
+    container = _mapping(
+        _field(families, "dead_code", "metrics.families"), "metrics.families.dead_code"
+    )
+    where = "metrics.families.dead_code.summary"
+    summary = _mapping(_field(container, "summary", "dead_code"), where)
+    return DeadCodeSummaryRecord(
+        suppressed=_lane_int(summary, "suppressed", where),
+        unresolved=_lane_int(summary, "unresolved", where),
+        unresolved_internal=_lane_int(summary, "unresolved_internal", where),
+        unresolved_external_override=_lane_int(
+            summary, "unresolved_external_override", where
+        ),
+        candidates=_lane_int(summary, "candidates", where),
+        nested_candidates=_lane_int(summary, "nested_candidates", where),
+        live_roots=_lane_int(summary, "live_roots", where),
+        world_contract=_string(summary, "world_contract", where),
     )
 
 

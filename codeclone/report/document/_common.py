@@ -169,6 +169,19 @@ def _contract_path(
     return normalized_path, "relative", None
 
 
+#: The public name of the path contract, read by the producer-native
+#: canonical snapshot (``core/canonical_snapshot.py``): the coverage join's
+#: ``source`` and every FILE identity the E1 families carry are spelled
+#: through THIS rule, so the store and the document cannot disagree on how
+#: a path is contracted.  ``core`` already imports this module.
+contract_path = _contract_path
+
+#: The public name of the design-threshold block builder, read by the same
+#: snapshot: the realized thresholds that classify a design hotspot are
+#: spelled once, here, for the document and for the producer-native model.
+design_findings_thresholds_payload = _design_findings_thresholds_payload
+
+
 def _contract_report_location_path(location_path: str, *, scan_root: str) -> str:
     contract_path, _scope, _absolute = _contract_path(
         location_path,
@@ -699,6 +712,8 @@ def _normalize_nested_string_rows(value: object) -> list[list[str]]:
 
 __all__ = [
     "_collect_report_file_list",
+    "contract_path",
+    "design_findings_thresholds_payload",
     "health_verdict_withheld",
     "normalize_structural_findings",
 ]

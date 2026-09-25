@@ -29,12 +29,21 @@ from dataclasses import dataclass
 from typing import Final, get_args
 
 from codeclone.canonical.errors import CanonicalModelError
+from codeclone.domain.findings import (
+    FINDING_KIND_UNREACHABLE_STATEMENT,
+    FINDING_KIND_UNUSED_SYMBOL,
+    STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
+    STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+    STRUCTURAL_KIND_DUPLICATED_BRANCHES,
+)
 from codeclone.models import LIVE_ROOT_REASONS as _LIVE_ROOT_REASONS
 from codeclone.models import RESOLUTION_MECHANISMS as _RESOLUTION_MECHANISMS
 from codeclone.models import DependencyMechanism as _DependencyMechanism
 from codeclone.models import DependencyResolution as _DependencyResolution
 from codeclone.models import RelationshipKind as _RelationshipKind
 from codeclone.models import RelationshipOriginLane as _RelationshipOriginLane
+from codeclone.models import UnreachableReason as _UnreachableReason
+from codeclone.models import WorldContract as _WorldContract
 
 # Contract tag strings (F-3 §7.3). Codes are stable contract strings, never
 # integers and never Python enum order; renaming one is a
@@ -249,6 +258,48 @@ SECURITY_SOURCE_KINDS: Final = ("production", "tests", "fixtures", "other")
 # silent drift on either side is loud, never absorbed.  The wire refuses
 # unknowns (W08); signature meaning is owned by
 # ``api_signature_identity_contract.v1`` (API_SURFACE_SIGNATURE_VERSION).
+# ---------------------------------------------------------------------------
+# Canonical epoch E1 (2026-09-25): the published finding-group families.
+# Each vocabulary is the producer's, mirrored from the constant that owns
+# it (``codeclone.domain.findings``, the models' Literals) and never spelled
+# a second time here; the wire refuses unknowns (W08).
+# ---------------------------------------------------------------------------
+#: The structural finding kinds the detectors emit, sorted.
+STRUCTURAL_FINDING_KINDS: Final = (
+    STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
+    STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+    STRUCTURAL_KIND_DUPLICATED_BRANCHES,
+)
+#: The two published kinds of the dead-code family; each is its own
+#: canonical family (``dead_symbol_groups`` / ``unreachable_statement_groups``)
+#: because the two carry different facts and never share a row shape.
+DEAD_SYMBOL_GROUP_KIND: Final = FINDING_KIND_UNUSED_SYMBOL
+UNREACHABLE_STATEMENT_GROUP_KIND: Final = FINDING_KIND_UNREACHABLE_STATEMENT
+#: The dead-symbol producer's confidence and reason vocabularies
+#: (``models.DeadItem``: ``Literal["high", "medium"]`` and
+#: ``Literal["unreferenced", "test_only_reference"]``), sorted.
+DEAD_SYMBOL_CONFIDENCES: Final = ("high", "medium")
+DEAD_SYMBOL_REASONS: Final = ("test_only_reference", "unreferenced")
+#: The CFG producer's reason vocabulary for an unreachable region.
+UNREACHABLE_REASONS: Final[tuple[str, ...]] = tuple(
+    sorted(get_args(_UnreachableReason))
+)
+#: The world contract the dead-code verdicts of a run were derived under.
+WORLD_CONTRACTS: Final[tuple[str, ...]] = tuple(sorted(get_args(_WorldContract)))
+#: The overloaded-modules producer's candidate verdict vocabulary
+#: (``metrics/overloaded_modules``), sorted.
+OVERLOADED_CANDIDATE_STATUSES: Final = ("candidate", "non_candidate", "ranked_only")
+#: The coverage join's own two vocabularies (``models.CoverageJoinResult``
+#: and ``models.UnitCoverageFact``), sorted.
+COVERAGE_JOIN_STATUSES: Final = ("invalid", "ok")
+COVERAGE_UNIT_STATUSES: Final = (
+    "measured",
+    "missing_from_report",
+    "no_executable_lines",
+)
+#: The measured unit-coverage status that carries executable lines.
+COVERAGE_UNIT_MEASURED: Final = "measured"
+
 API_SYMBOL_KINDS: Final = ("function", "class", "method", "constant")
 API_VISIBILITIES: Final = ("all", "name")
 API_PARAMETER_KINDS: Final = ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg")

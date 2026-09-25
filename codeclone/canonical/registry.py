@@ -305,6 +305,127 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # E1 (2026-09-25): the document's design/cohesion groups — one row per
+    # class the run's cohesion threshold classified a hotspot; key (SYMBOL,
+    # start_line).  The threshold lives in the analysis contract, not here:
+    # the row IS the verdict (the F7 kind precedent).
+    "cohesion_hotspots": (
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "class declaration extent; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "instance_var_count",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "lcom4",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "the cohesion measure the threshold classified; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "method_count",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "risk",
+            CONTRACT_DERIVED,
+            "metrics.cohesion.cohesion_risk",
+            "the risk ladder over lcom4 (COHESION_RISK_* contract "
+            "thresholds); re-derived by the projection, never stored",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "declaration-site discriminator; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "SYMBOL key component (a class, no FUNCTION role)",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1: the document's design/complexity groups — one row per function
+    # the run's complexity threshold classified a hotspot; key (SYMBOL,
+    # start_line).  The measures are the finding's OWN published payload:
+    # the risk lane carries the same numbers as observations of every unit,
+    # this family carries the producer's SELECTION of them under the run's
+    # threshold — a different population, held equal to the lane on every
+    # corpus by the E1 projection pins.
+    "complexity_hotspots": (
+        FieldDeclaration(
+            "cyclomatic_complexity",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "the measure the threshold classified; payload, floor 1",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "declaration extent; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "nesting_depth",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "observed depth (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "risk",
+            CONTRACT_DERIVED,
+            "metrics.complexity.risk_level",
+            "the risk ladder over cyclomatic_complexity "
+            "(COMPLEXITY_RISK_* contract thresholds); never stored",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "declaration-site discriminator; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "complexity_metrics_producer",
+            "SYMBOL key component",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "contracts": (
         FieldDeclaration(
             "effect_signature",
@@ -356,6 +477,272 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "SYMBOL key component (with dimension: 2 091/2 091 at "
             "ratification, 2 379/2 379 @ 95e4210b 2026-08-30 — see the "
             "corpus-ratio note at the head of this module)",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1: the document's design/coupling groups — one row per class the
+    # run's coupling threshold classified a hotspot; key (SYMBOL,
+    # start_line).  ``coupled_classes`` is the per-class attribution the
+    # standalone ``coupled_sets`` value family does not carry.
+    "coupling_hotspots": (
+        FieldDeclaration(
+            "cbo",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "the coupling measure the threshold classified; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "coupled_classes",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "the producer's sorted unique coupled labels; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "class declaration extent; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "risk",
+            CONTRACT_DERIVED,
+            "metrics.coupling.coupling_risk",
+            "the risk ladder over cbo (COUPLING_RISK_* contract "
+            "thresholds); never stored",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "declaration-site discriminator; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "design_metrics_producer",
+            "SYMBOL key component (a class, no FUNCTION role)",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1 (A5): the external Cobertura join — ONE record per run, present
+    # exactly when the run was handed a report (record wire member, the F9
+    # shape; the absent record is the empty member, never a zero fake).
+    # Every count the document publishes beside these that is a sum over
+    # ``coverage_units`` is declared derived and never stored.
+    "coverage_join": (
+        FieldDeclaration(
+            "coverage_hotspots",
+            REPRESENTATION,
+            "metrics.coverage_join.coverage_hotspot",
+            "count of unit rows the one hotspot rule selects; a sum over "
+            "coverage_units, never a column",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "files",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "files the report mapped into the run — a fact of the XML, not "
+            "of the units (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "hotspot_threshold_percent",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "the run's requested threshold; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "invalid_reason",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "why the report could not be read; present exactly when the "
+            "status is invalid (empty wire string spells absence)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "measured_units",
+            REPRESENTATION,
+            "coverage_join_producer",
+            "count of measured unit rows; a sum over coverage_units",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "missing_from_report_units",
+            REPRESENTATION,
+            "coverage_join_producer",
+            "count of unit rows the report never mapped; a sum",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "overall_covered_lines",
+            REPRESENTATION,
+            "coverage_join_producer",
+            "sum of covered_lines over coverage_units",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "overall_executable_lines",
+            REPRESENTATION,
+            "coverage_join_producer",
+            "sum of executable_lines over coverage_units",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "overall_permille",
+            REPRESENTATION,
+            "metrics.coverage_join.permille",
+            "the one coverage ratio over the two overall sums",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "scope_gap_hotspots",
+            REPRESENTATION,
+            "metrics.coverage_join.scope_gap_hotspot",
+            "count of unit rows the one scope-gap rule selects; a sum",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "source",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "the report's path as the document contracts it (in-root "
+            "relative, or the file name of an external path); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "status",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "closed vocabulary (COVERAGE_JOIN_STATUSES); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "units",
+            REPRESENTATION,
+            "coverage_join_producer",
+            "the unit row count; never a column",
+            stored=False,
+            wire=False,
+        ),
+    ),
+    # E1 (A5): one row per unit the join measured against the external
+    # report; key (SYMBOL, start_line).  What the join OBSERVED is stored;
+    # the permille, the two hotspot flags, the complexity and the risk the
+    # document publishes on the item are derived through their owners.
+    "coverage_units": (
+        FieldDeclaration(
+            "coverage_hotspot",
+            REPRESENTATION,
+            "metrics.coverage_join.coverage_hotspot",
+            "the one hotspot rule over risk, status and permille",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "coverage_permille",
+            REPRESENTATION,
+            "metrics.coverage_join.permille",
+            "the one coverage ratio over covered and executable lines",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "coverage_status",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "closed vocabulary (COVERAGE_UNIT_STATUSES); payload bound to "
+            "executable_lines by the model law",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "covered_lines",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "observed count inside the span (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "cyclomatic_complexity",
+            REPRESENTATION,
+            "risk_observations",
+            "the unit's own measure, carried by the risk lane under the "
+            "same declaration key; never a second column",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "declaration extent; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "executable_lines",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "observed count inside the span (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "risk",
+            CONTRACT_DERIVED,
+            "metrics.complexity.risk_level",
+            "the risk ladder over the unit's cyclomatic complexity",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "scope_gap_hotspot",
+            REPRESENTATION,
+            "metrics.coverage_join.scope_gap_hotspot",
+            "the one scope-gap rule over risk and status",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "declaration-site discriminator; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "coverage_join_producer",
+            "SYMBOL key component",
             stored=True,
             wire=True,
         ),
@@ -440,6 +827,167 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             ANALYSIS_FACT,
             "dead_code_producer",
             "sorted unique (key, value) evidence pairs; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1 (A7): the dead-code lane's population counters — ONE record per
+    # run (record wire member, the F9 shape), present exactly when the lane
+    # ran.  Measured NOT derivable from ``dead_code_observations`` (the
+    # abstention lanes are absent from it); the three counters that ARE
+    # derivable from the group families are declared derived.
+    "dead_code_summary": (
+        FieldDeclaration(
+            "candidates",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "the judged module-level population (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "high_confidence",
+            REPRESENTATION,
+            "dead_symbol_groups",
+            "count of dead_symbol_groups rows at high confidence; a sum",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "live_roots",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "observed live-root count (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "nested_candidates",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "the judged function-local population (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "suppressed",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "suppressed dead-symbol count — a population this model does "
+            "not carry as rows (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "total",
+            REPRESENTATION,
+            "dead_symbol_groups",
+            "count of dead_symbol_groups rows; never a column",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "unreachable_statements",
+            REPRESENTATION,
+            "unreachable_statement_groups",
+            "count of unreachable_statement_groups rows; never a column",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "unresolved",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "reachability abstentions (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "unresolved_external_override",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "rule-3 abstentions (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "unresolved_internal",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "internal abstentions, liveness policy v5 (zero is measured)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "world_contract",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (WORLD_CONTRACTS): the world every verdict "
+            "of the run was derived under",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1 (A2): the document's dead_code/unused_symbol groups — the
+    # liveness policy's VERDICT population, one row per published finding;
+    # key (SYMBOL, start_line), the declaration-site key.  Not the
+    # observation lane: measured 36 findings against 19 929 lane rows @
+    # ebe362d5, and the selection is the policy, not a function of the lane.
+    "dead_symbol_groups": (
+        FieldDeclaration(
+            "candidate_kind",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (DEAD_CODE_CANDIDATE_KINDS); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "confidence",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (DEAD_SYMBOL_CONFIDENCES); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "declaration extent; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "reason",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "closed vocabulary (DEAD_SYMBOL_REASONS); payload bound to the "
+            "evidence list by the producer's own contract",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "declaration-site discriminator; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "SYMBOL key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "test_reference_sources",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "sorted unique test references; non-empty exactly for the test-only reason",
             stored=True,
             wire=True,
         ),
@@ -740,6 +1288,210 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # E1 (A4): the overloaded-modules producer's rows, keyed by FILE
+    # (1 247/1 247 unique on path @ ebe362d5, a dated observation).  The
+    # ``module`` column the document publishes is the registry's
+    # FILE-MODULE projection and is never stored (the F7 member_paths
+    # precedent); ``source_kind`` is the stored classification verdict (the
+    # F10 precedent).
+    "overloaded_modules": (
+        FieldDeclaration(
+            "callable_count",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "candidate_reasons",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "the producer's ordered reasons; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "candidate_status",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "closed vocabulary (OVERLOADED_CANDIDATE_STATUSES); the "
+            "producer's verdict, stored as a fact",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "classes",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "complexity_max",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed maximum over the module's units; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "complexity_total",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed sum over the module's units; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "dependency_score",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "fan_in",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "fan_out",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "file",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "FILE key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "functions",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "hub_balance",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "import_edges",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "instability",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "loc",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "methods",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "module",
+            REPRESENTATION,
+            "module_registry",
+            "the file's module, or its path when it has none — the "
+            "registry FILE-MODULE projection, a table and never a column",
+            stored=False,
+            wire=False,
+        ),
+        FieldDeclaration(
+            "reimport_edges",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "reimport_ratio",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "score",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "shape_score",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "size_score",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "composite score at the document's four-decimal precision",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "source_kind",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "classification VERDICT of the one owner "
+            "(SOURCE_KIND_POLICY_VERSION), stored as a fact; closed "
+            "vocabulary (SECURITY_SOURCE_KINDS)",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "total_deps",
+            ANALYSIS_FACT,
+            "overloaded_modules_producer",
+            "observed count (zero is measured); payload",
+            stored=True,
+            wire=True,
+        ),
+    ),
     # Canonical model revision 2: the per-function call/reference records
     # — the served ``relationship_facts`` slice in BOTH resolution states.
     # Key: the observation; ``occurrence_count`` is the one payload field
@@ -832,6 +1584,100 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             "function_relationship_producer",
             "tagged RelationshipTarget: SYMBOL of the run, opaque head:local "
             "outside it, or unresolved_target",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1 (A2): the document's structural finding groups — one row per
+    # group the detectors published; key (finding_kind, finding_key), the
+    # pair the document's ``structural:{kind}:{key}`` identity is spelled
+    # from through ``findings.ids.structural_group_id``.
+    "structural_groups": (
+        FieldDeclaration(
+            "finding_key",
+            ANALYSIS_FACT,
+            "structural_findings_producer",
+            "the detector's own group key; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "finding_kind",
+            ANALYSIS_FACT,
+            "structural_findings_producer",
+            "closed vocabulary (STRUCTURAL_FINDING_KINDS); key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "occurrences",
+            ANALYSIS_FACT,
+            "structural_findings_producer",
+            "member sites (unit and span); at least one",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "signature",
+            ANALYSIS_FACT,
+            "structural_findings_producer",
+            "the detector's raw signature as sorted unique (key, value) "
+            "pairs; the typed stable block and the facts are derived from "
+            "it by findings.group_shapes",
+            stored=True,
+            wire=True,
+        ),
+    ),
+    # E1 (A1): the clone groups the suppression policy took OUT of the
+    # emitted population — a different population from ``clone_groups``
+    # (ruling 2026-08-24 §10), its own family, never mixed in.  Key
+    # (clone_kind, group_key), the emitted family's own.
+    "suppressed_clone_groups": (
+        FieldDeclaration(
+            "clone_kind",
+            ANALYSIS_FACT,
+            "clone_detection_producer",
+            "closed vocabulary (CLONE_KINDS); key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "group_key",
+            ANALYSIS_FACT,
+            "clone_detection_producer",
+            "the producer's fp-v2 grouping key; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "items",
+            ANALYSIS_FACT,
+            "clone_detection_producer",
+            "member identities (unit and span); at least two",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "matched_patterns",
+            ANALYSIS_FACT,
+            "clone_suppression_producer",
+            "the patterns the suppressor matched, in its own order; at least one",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "suppression_rule",
+            ANALYSIS_FACT,
+            "clone_suppression_producer",
+            "the rule that suppressed the group; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "suppression_source",
+            ANALYSIS_FACT,
+            "clone_suppression_producer",
+            "where the rule came from; payload",
             stored=True,
             wire=True,
         ),
@@ -1146,6 +1992,51 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
+    # E1 (A2): the document's dead_code/unreachable_statement groups —
+    # one row per unreachable region the CFG producer published; key
+    # (SYMBOL, start_line).
+    "unreachable_statement_groups": (
+        FieldDeclaration(
+            "end_line",
+            ANALYSIS_FACT,
+            "statement_reachability_producer",
+            "region extent; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "reason",
+            ANALYSIS_FACT,
+            "statement_reachability_producer",
+            "closed vocabulary (UNREACHABLE_REASONS); payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "statement_reachability_producer",
+            "region start; key component",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "statement_count",
+            ANALYSIS_FACT,
+            "statement_reachability_producer",
+            "observed region size, floor 1; payload",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "symbol",
+            ANALYSIS_FACT,
+            "statement_reachability_producer",
+            "SYMBOL key component: the live unit hosting the region",
+            stored=True,
+            wire=True,
+        ),
+    ),
     "violations": (
         FieldDeclaration(
             "authority_status",
@@ -1305,7 +2196,7 @@ RISK_OBSERVATIONS_KEY: Final[tuple[str, ...]] = (
 #: fake entity key is never invented; ruling 2026-08-24 §1).  The absent
 #: record is the empty member.
 RECORD_WIRE_FAMILIES: Final[frozenset[str]] = frozenset(
-    {"analysis_population", "run_scalars"}
+    {"analysis_population", "coverage_join", "dead_code_summary", "run_scalars"}
 )
 
 

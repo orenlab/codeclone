@@ -331,11 +331,16 @@ def test_registry_declares_the_record_families() -> None:
     family stays columnar."""
     from codeclone.canonical import RECORD_WIRE_FAMILIES, is_record_family
 
-    assert frozenset({"analysis_population", "run_scalars"}) == RECORD_WIRE_FAMILIES
-    assert is_record_family("run_scalars")
-    assert is_record_family("analysis_population")
-    assert not is_record_family("dependency_relations")
-    assert not is_record_family("api_symbols")
+    # Canonical epoch E1 added two more one-record-per-run members: the
+    # external coverage join and the dead-code population counters.
+    records = frozenset(
+        {"analysis_population", "coverage_join", "dead_code_summary", "run_scalars"}
+    )
+    assert records == RECORD_WIRE_FAMILIES
+    assert all(is_record_family(family) for family in sorted(records))
+    assert not any(
+        is_record_family(family) for family in ("dependency_relations", "api_symbols")
+    )
 
 
 def test_registry_declares_the_sparse_boolean_columns() -> None:
