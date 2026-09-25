@@ -16,6 +16,8 @@ engine or a second persistence model.
 
 - package extra: `codeclone[mcp]`
 - launcher: `codeclone-mcp`
+- CLI link: `codeclone --mcp`, as the first argument, runs the same server
+  with the arguments that follow it, for catalog and `uvx` launches
 - server wiring: `codeclone/surfaces/mcp/server.py`
 - in-process service/session: `codeclone/surfaces/mcp/service.py`,
   `codeclone/surfaces/mcp/session.py`

@@ -71,6 +71,8 @@ See [Claude Desktop bundle guide](claude-desktop-bundle.md).
 codeclone-mcp --transport stdio
 ```
 
+`codeclone --mcp` runs the same server with the same arguments, for catalog and `uvx` launches: `uvx --with "codeclone[mcp]" codeclone --mcp --transport stdio`.
+
 MCP analysis tools require an absolute repository root. Relative roots such as
 `.` are rejected, because the server process working directory may differ from
 the client workspace. The same absolute-path rule applies to `check_*` tools
