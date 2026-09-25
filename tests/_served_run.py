@@ -23,7 +23,7 @@ re-derived here — a second derivation would be a second dialect of one fact.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from codeclone.canonical.serving import ServedUnitLocation
@@ -51,6 +51,12 @@ class ServedRunStoreProjection:
     unit_inventory: tuple[ServedUnitLocation, ...]
     relationship_facts: tuple[FunctionRelationshipFacts, ...]
     module_imports: tuple[ModuleDep, ...]
+    #: Canonical epoch E1: the two tool answers of that same execution —
+    #: ``get_run_summary`` and ``get_production_triage`` as the surface
+    #: served them — so the r2 shadow pins hold the store's projection
+    #: against the surface's own bytes, not against a document look-alike.
+    run_summary: dict[str, object] = field(default_factory=dict)
+    production_triage: dict[str, object] = field(default_factory=dict)
 
 
 __all__ = ["ServedRunStoreProjection", "ServedUnitLocation"]

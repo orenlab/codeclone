@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 
 def clone_group_id(kind: str, group_key: str) -> str:
     return f"clone:{kind}:{group_key}"
@@ -27,10 +29,22 @@ def authority_group_id(contract_id: str, violation_id: str) -> str:
     return f"authority:{contract_id}:{violation_id}"
 
 
+def dependency_cycle_subject_key(modules: Iterable[str]) -> str:
+    """The identity a dependency cycle is compared and addressed under.
+
+    The producer of the per-entity novelty facts, the design dependency group
+    and the canonical projection must all spell one cycle the same way; this
+    is the one spelling, and ``design_group_id("dependency", …)`` takes it as
+    the subject.
+    """
+    return " -> ".join(str(module) for module in modules)
+
+
 __all__ = [
     "authority_group_id",
     "clone_group_id",
     "dead_code_group_id",
+    "dependency_cycle_subject_key",
     "design_group_id",
     "structural_group_id",
 ]

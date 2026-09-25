@@ -38,6 +38,7 @@ from ...domain.quality import (
 from ...findings.group_shapes import (
     coerced_nonnegative_threshold as _coerced_nonnegative_threshold,
 )
+from ...findings.ids import dependency_cycle_subject_key
 from ...findings.structural.detectors import normalize_structural_findings
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -369,14 +370,11 @@ def health_verdict_withheld(health: Mapping[str, object]) -> bool:
     return state_absent or score_absent
 
 
-def _dependency_cycle_identity(modules: Iterable[str]) -> str:
-    """Identity a dependency cycle is compared under.
-
-    Producer (``_entity_novelty_facts``) and consumer (the dependency design
-    group) must spell one cycle the same way; both call this.
-    """
-
-    return " -> ".join(str(module) for module in modules)
+#: The identity a dependency cycle is compared under.  Producer
+#: (``_entity_novelty_facts``), consumer (the dependency design group) and
+#: the canonical projection all spell one cycle through the one owner in
+#: ``findings.ids``; this is that owner under the name this package reads.
+_dependency_cycle_identity = dependency_cycle_subject_key
 
 
 def _entity_novelty(

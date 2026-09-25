@@ -316,11 +316,8 @@ _RUN_STORE_SERVING_CORPUS = (
 )
 
 
-@pytest.fixture(scope="session")
-def served_run_store_projection(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> ServedRunStoreProjection:
-    """One MCP analysis of the serving corpus, with the run store enabled.
+def _serve_run_store_corpus(root: Path, store_path: Path) -> ServedRunStoreProjection:
+    """One MCP analysis of a materialized tree, with the run store enabled.
 
     The ``r4`` surface is driven HERE and not in the consuming module: the
     consumer compares against the ``r2`` canonical model and has to stay an
@@ -330,9 +327,6 @@ def served_run_store_projection(
     from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
     from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
-    root = tmp_path_factory.mktemp("run_store_serving").resolve()
-    store_path = root.parent / "run_store_serving.sqlite3"
-    _materialize_corpus_tree(_RUN_STORE_SERVING_CORPUS, root)
     monkeypatch = pytest.MonkeyPatch()
     try:
         monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
@@ -345,6 +339,12 @@ def served_run_store_projection(
             MCPAnalysisRequest(root=str(root), analysis_mode="full")
         )
         record = service._runs.resolve_any_root()
+        # Canonical epoch E1: the two tool answers of THIS execution, taken
+        # while the store is still the one the run published into, so the
+        # r2 shadow pins compare the store's projection with the surface's
+        # own bytes.
+        run_summary = service.get_run_summary(root=str(root))
+        production_triage = service.get_production_triage(root=str(root))
     finally:
         monkeypatch.undo()
     # The instrument is proven on before anything is counted: an execution
@@ -370,7 +370,174 @@ def served_run_store_projection(
         ),
         relationship_facts=record.relationship_facts,
         module_imports=record.module_imports,
+        run_summary=run_summary,
+        production_triage=production_triage,
     )
+
+
+@pytest.fixture(scope="session")
+def served_run_store_projection(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> ServedRunStoreProjection:
+    """One MCP analysis of the serving corpus (the fixture tree above)."""
+    root = tmp_path_factory.mktemp("run_store_serving").resolve()
+    store_path = root.parent / "run_store_serving.sqlite3"
+    _materialize_corpus_tree(_RUN_STORE_SERVING_CORPUS, root)
+    return _serve_run_store_corpus(root, store_path)
+
+
+# ---------------------------------------------------------------------------
+# The projection corpus (canonical epoch E1, cycle 4): the tree behind the
+# shadow pins of ``codeclone.canonical.finding_projection`` /
+# ``summary_projection``.  It exists because the serving corpus and the E1
+# corpus carry NONE of three cases the projections have to be measured on
+# (Probe Validity Law, AGENTS.md §17.3):
+#
+#   * a dependency cycle — two modules, so a member order the projection
+#     fails to sort is visible;
+#   * a dynamic load with an OPAQUE argument, the one import observation the
+#     document publishes as a ``dynamic_boundaries`` site;
+#   * a security family with MORE rows than categories, split across
+#     production and tests, so the category count cannot pass as a row
+#     count and the production/tests split is not a constant;
+#   * a clone group of THREE members (measured 2026-09-25: every clone
+#     group of the E1 and serving corpora is a pair, so a projected
+#     ``group_arity`` of a constant 2 survived the battery — the arity has
+#     to be read off the items on a group where the two differ).
+#
+# Inline rather than a fixture directory: the tree is the pin's own input
+# and is read next to the pin that states it.
+# ---------------------------------------------------------------------------
+
+PROJECTION_CORPUS: dict[str, str] = {
+    "pyproject.toml": "[tool.codeclone]\nsemantic_authority = true\n",
+    "pkg/__init__.py": "",
+    "pkg/cyc_a.py": '''"""Cycle A."""
+
+from pkg.cyc_b import b
+
+
+def a() -> int:
+    """A."""
+    return b()
+''',
+    "pkg/cyc_b.py": '''"""Cycle B."""
+
+from pkg.cyc_a import a
+
+
+def b() -> int:
+    """B."""
+    return a()
+''',
+    "pkg/loader.py": '''"""Loader: one dynamic load whose argument is opaque."""
+
+import importlib
+
+
+def load(name: str) -> object:
+    """Load."""
+    return importlib.import_module(name)
+''',
+    "pkg/danger.py": '''"""Danger: two surfaces of ONE category in production."""
+
+
+def run_a(source: str) -> object:
+    """Run A."""
+    return eval(source)
+
+
+def run_b(source: str) -> object:
+    """Run B."""
+    return eval(f"({source})")
+''',
+    "pkg/trio_a.py": '''"""Trio A: one of three identical functions."""
+
+
+def fold(values: list[int]) -> int:
+    """Fold a."""
+    total = 0
+    count = 0
+    for value in values:
+        count += 1
+        if value > 10:
+            total += value * 2
+        elif value > 5:
+            total += value
+        else:
+            total -= 1
+    if count == 0:
+        return -1
+    total += count
+    return total
+''',
+    "pkg/trio_b.py": '''"""Trio B: one of three identical functions."""
+
+
+def fold(values: list[int]) -> int:
+    """Fold b."""
+    total = 0
+    count = 0
+    for value in values:
+        count += 1
+        if value > 10:
+            total += value * 2
+        elif value > 5:
+            total += value
+        else:
+            total -= 1
+    if count == 0:
+        return -1
+    total += count
+    return total
+''',
+    "pkg/trio_c.py": '''"""Trio C: one of three identical functions."""
+
+
+def fold(values: list[int]) -> int:
+    """Fold c."""
+    total = 0
+    count = 0
+    for value in values:
+        count += 1
+        if value > 10:
+            total += value * 2
+        elif value > 5:
+            total += value
+        else:
+            total -= 1
+    if count == 0:
+        return -1
+    total += count
+    return total
+''',
+    "tests/test_danger.py": '''"""One surface of the same category under tests."""
+
+
+def test_run() -> None:
+    assert eval("1 + 1") == 2
+''',
+}
+
+
+def materialize_projection_corpus(root: Path) -> None:
+    """Write the projection corpus tree under ``root``."""
+    for relative, source in PROJECTION_CORPUS.items():
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source, "utf-8")
+
+
+@pytest.fixture(scope="session")
+def served_projection_corpus(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> ServedRunStoreProjection:
+    """One MCP analysis of the projection corpus, with the run store
+    enabled — the second served population of the shadow pins."""
+    root = tmp_path_factory.mktemp("run_store_projection").resolve()
+    store_path = root.parent / "run_store_projection.sqlite3"
+    materialize_projection_corpus(root)
+    return _serve_run_store_corpus(root, store_path)
 
 
 @pytest.fixture(autouse=True)

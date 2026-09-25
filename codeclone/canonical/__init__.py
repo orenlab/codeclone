@@ -77,6 +77,12 @@ from codeclone.canonical.export import (
     canonical_artifact_digest,
     verify_export_artifact,
 )
+from codeclone.canonical.finding_projection import (
+    PROJECTED_FAMILIES,
+    UNPROJECTED_GROUP_KEYS,
+    projected_finding_groups,
+    suppressed_clone_skeletons,
+)
 from codeclone.canonical.grammar import (
     ANALYSIS_TIER,
     ANNOTATION_KINDS,
@@ -272,6 +278,7 @@ __all__ = [
     "LOCATION_TAG_UNRESOLVED",
     "OPERATION_KINDS",
     "PRODUCER_EXECUTION_STATES",
+    "PROJECTED_FAMILIES",
     "RECORD_WIRE_FAMILIES",
     "RELATIONSHIP_KINDS",
     "RELATIONSHIP_ORIGIN_LANES",
@@ -287,6 +294,7 @@ __all__ = [
     "SINK_ROW_PROJECTION_CONTRACT",
     "STORE_GENERATION_NEXT_STEP",
     "TARGET_TAG_UNRESOLVED",
+    "UNPROJECTED_GROUP_KEYS",
     "UNRESOLVED_IMPORT_RESOLUTIONS",
     "VIOLATION_IDENTITY_CONTRACT",
     "VIOLATION_KINDS",
@@ -416,6 +424,7 @@ __all__ = [
     "parse_symbol",
     "parse_symbol_set",
     "producer_source_kind",
+    "projected_finding_groups",
     "read_served_run_slices",
     "relationship_record_order_key",
     "relationship_resolution_status",
@@ -430,6 +439,7 @@ __all__ = [
     "sink_projection_rows",
     "source_location_key",
     "sparse_bool_wire_columns",
+    "suppressed_clone_skeletons",
     "surface_head",
     "tier_of_family",
     "tier_of_kind",
