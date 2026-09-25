@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.3] - 2026-09-23
+## [2.0.3] - 2026-09-27
 
 `2.0.3` is a distribution patch release: it lists CodeClone in the official MCP
 Registry and on Glama, ships a pre-commit hook manifest, and hardens the release
