@@ -103,7 +103,7 @@ Such changes often require design-level discussion and may be staged across vers
 
 ### Baseline contract (v2)
 
-- The baseline schema is versioned (`meta.schema_version`, currently `2.0`).
+- The baseline schema is versioned (`meta.schema_version`, currently `2.1`).
 - Compatibility/trust gates include `schema_version`, `fingerprint_version`, `python_tag`,
   and `meta.generator.name`.
 - Integrity is tamper-evident via `meta.payload_sha256` over canonical payload.
@@ -139,8 +139,8 @@ CodeClone maintains several versioned schema contracts:
 | Schema           | Current version | Owner                               |
 |------------------|-----------------|-------------------------------------|
 | Baseline         | `2.1`           | `codeclone/baseline.py`             |
-| Report           | `2.8`           | `codeclone/report/json_contract.py` |
-| Cache            | `2.4`           | `codeclone/cache_io.py`             |
+| Report           | `2.11`          | `codeclone/report/json_contract.py` |
+| Cache            | `2.8`           | `codeclone/cache_io.py`             |
 | Metrics baseline | `1.2`           | `codeclone/metrics_baseline.py`     |
 
 Any change to schema shape or semantics requires version review, documentation, and tests.
@@ -169,7 +169,8 @@ CodeClone ships a composite GitHub Action (`.github/actions/codeclone/`).
 When contributing to the Action:
 
 - Never inline `${{ inputs.* }}` in shell scripts — pass through `env:` variables.
-- Prefer major-tag pinning for actions (e.g., `actions/setup-python@v5`).
+- Pin every action to a full commit SHA with its release tag in a trailing comment
+  (e.g., `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0`).
 - Add timeouts to all `subprocess.run` calls.
 
 ---
