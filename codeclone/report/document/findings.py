@@ -36,11 +36,11 @@ from ...domain.source_scope import (
     IMPACT_SCOPE_NON_RUNTIME,
     IMPACT_SCOPE_RUNTIME,
 )
+from ...findings.group_shapes import authority_group_facts, authority_location
 from ...findings.ids import authority_group_id
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ..derived import classify_source_kind
 
 if TYPE_CHECKING:
     from ...models import (
@@ -83,19 +83,8 @@ def _build_authority_groups(
             suppressed += 1
             continue
         locations = [
-            {
-                "relative_path": str(location.get("relative_path", "")),
-                "qualname": str(location.get("qualname", "")),
-                "start_line": _as_int(location.get("start_line")),
-                "end_line": _as_int(location.get("end_line")),
-                "source_kind": classify_source_kind(
-                    str(location.get("relative_path", ""))
-                ),
-            }
-            for location in (
-                _as_mapping(raw_location)
-                for raw_location in _as_sequence(violation.get("locations"))
-            )
+            authority_location(_as_mapping(raw_location))
+            for raw_location in _as_sequence(violation.get("locations"))
         ]
         contract_id = str(violation.get("contract_id", ""))
         violation_id = str(violation.get("violation_id", ""))
@@ -129,28 +118,7 @@ def _build_authority_groups(
                     ),
                 },
                 "items": locations,
-                "facts": {
-                    "violation_id": violation_id,
-                    "contract_id": contract_id,
-                    "violation_kind": kind,
-                    "sink_identity": str(violation.get("sink_identity", "")),
-                    "canonical_owner": str(violation.get("canonical_owner", "")),
-                    "authority_status": str(
-                        violation.get("authority_status", "unavailable")
-                    ),
-                    "producer_root_ids": sorted(
-                        str(value)
-                        for value in _as_sequence(violation.get("producer_root_ids"))
-                    ),
-                    "effect_signature": str(violation.get("effect_signature", "")),
-                    "resolution_state": str(
-                        violation.get("resolution_state", "unavailable")
-                    ),
-                    "producers": sorted(
-                        str(value) for value in _as_sequence(violation.get("producers"))
-                    ),
-                    "algorithm_revision": str(violation.get("algorithm_revision", "")),
-                },
+                "facts": authority_group_facts(violation),
             }
         )
     groups.sort(key=lambda group: str(group["id"]))

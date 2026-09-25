@@ -35,6 +35,9 @@ from ...domain.quality import (
     RISK_MEDIUM,
     SEVERITY_RANK,
 )
+from ...findings.group_shapes import (
+    coerced_nonnegative_threshold as _coerced_nonnegative_threshold,
+)
 from ...findings.structural.detectors import normalize_structural_findings
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -77,11 +80,6 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _coerced_nonnegative_threshold(value: object, *, default: int) -> int:
-    threshold = _as_int(value, default)
-    return threshold if threshold >= 0 else default
 
 
 def _design_findings_thresholds_payload(

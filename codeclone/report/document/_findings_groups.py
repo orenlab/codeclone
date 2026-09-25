@@ -18,7 +18,6 @@ from ...contracts import (
     NEAR_MISS_ALGORITHM_REVISION,
     NEAR_MISS_MAX_EDIT_STATEMENTS,
     RENAMED_STRUCTURE_ALGORITHM_REVISION,
-    STATEMENT_REACHABILITY_POLICY_VERSION,
     TIER_STATE_COMPLETE,
     TIER_STATE_DISABLED,
 )
@@ -36,6 +35,13 @@ from ...domain.quality import (
     SEVERITY_CRITICAL,
     SEVERITY_INFO,
     SEVERITY_WARNING,
+)
+from ...findings.group_shapes import (
+    csv_values,
+    dead_symbol_facts,
+    structural_facts,
+    structural_signature,
+    unreachable_statement_facts,
 )
 from ...findings.structural.detectors import normalize_structural_findings
 from ...utils.coerce import as_float as _as_float
@@ -356,141 +362,9 @@ def _structural_group_assessment(
             return severity, _priority(severity, "moderate")
 
 
-def _csv_values(value: object) -> list[str]:
-    raw = str(value).strip()
-    if not raw:
-        return []
-    return sorted({part.strip() for part in raw.split(",") if part.strip()})
-
-
-def _build_structural_signature(
-    finding_kind: str,
-    signature: Mapping[str, str],
-) -> dict[str, object]:
-    debug = {str(key): str(signature[key]) for key in sorted(signature)}
-    match finding_kind:
-        case "clone_guard_exit_divergence":
-            return {
-                "version": "1",
-                "stable": {
-                    "family": "clone_guard_exit_divergence",
-                    "cohort_id": str(signature.get("cohort_id", "")),
-                    "majority_guard_count": _as_int(
-                        signature.get("majority_guard_count")
-                    ),
-                    "majority_guard_terminal_profile": str(
-                        signature.get("majority_guard_terminal_profile", "none")
-                    ),
-                    "majority_terminal_kind": str(
-                        signature.get("majority_terminal_kind", "fallthrough")
-                    ),
-                    "majority_side_effect_before_guard": (
-                        str(signature.get("majority_side_effect_before_guard", "0"))
-                        == "1"
-                    ),
-                },
-                "debug": debug,
-            }
-        case "clone_cohort_drift":
-            return {
-                "version": "1",
-                "stable": {
-                    "family": "clone_cohort_drift",
-                    "cohort_id": str(signature.get("cohort_id", "")),
-                    "drift_fields": _csv_values(signature.get("drift_fields")),
-                    "majority_profile": {
-                        "terminal_kind": str(
-                            signature.get("majority_terminal_kind", "")
-                        ),
-                        "guard_exit_profile": str(
-                            signature.get("majority_guard_exit_profile", "")
-                        ),
-                        "try_finally_profile": str(
-                            signature.get("majority_try_finally_profile", "")
-                        ),
-                        "side_effect_order_profile": str(
-                            signature.get("majority_side_effect_order_profile", "")
-                        ),
-                    },
-                },
-                "debug": debug,
-            }
-        case _:
-            return {
-                "version": "1",
-                "stable": {
-                    "family": "duplicated_branches",
-                    "stmt_shape": str(signature.get("stmt_seq", "")),
-                    "terminal_kind": str(signature.get("terminal", "")),
-                    "control_flow": {
-                        "has_loop": str(signature.get("has_loop", "0")) == "1",
-                        "has_try": str(signature.get("has_try", "0")) == "1",
-                        "nested_if": str(signature.get("nested_if", "0")) == "1",
-                    },
-                },
-                "debug": debug,
-            }
-
-
-def _build_structural_facts(
-    finding_kind: str,
-    signature: Mapping[str, str],
-    *,
-    count: int,
-) -> dict[str, object]:
-    match finding_kind:
-        case "clone_guard_exit_divergence":
-            return {
-                "cohort_id": str(signature.get("cohort_id", "")),
-                "cohort_arity": _as_int(signature.get("cohort_arity")),
-                "divergent_members": _as_int(signature.get("divergent_members"), count),
-                "majority_entry_guard_count": _as_int(
-                    signature.get("majority_guard_count"),
-                ),
-                "majority_guard_terminal_profile": str(
-                    signature.get("majority_guard_terminal_profile", "none")
-                ),
-                "majority_terminal_kind": str(
-                    signature.get("majority_terminal_kind", "fallthrough")
-                ),
-                "majority_side_effect_before_guard": (
-                    str(signature.get("majority_side_effect_before_guard", "0")) == "1"
-                ),
-                "guard_count_values": _csv_values(signature.get("guard_count_values")),
-                "guard_terminal_values": _csv_values(
-                    signature.get("guard_terminal_values"),
-                ),
-                "terminal_values": _csv_values(signature.get("terminal_values")),
-                "side_effect_before_guard_values": _csv_values(
-                    signature.get("side_effect_before_guard_values"),
-                ),
-            }
-        case "clone_cohort_drift":
-            return {
-                "cohort_id": str(signature.get("cohort_id", "")),
-                "cohort_arity": _as_int(signature.get("cohort_arity")),
-                "divergent_members": _as_int(signature.get("divergent_members"), count),
-                "drift_fields": _csv_values(signature.get("drift_fields")),
-                "stable_majority_profile": {
-                    "terminal_kind": str(signature.get("majority_terminal_kind", "")),
-                    "guard_exit_profile": str(
-                        signature.get("majority_guard_exit_profile", "")
-                    ),
-                    "try_finally_profile": str(
-                        signature.get("majority_try_finally_profile", "")
-                    ),
-                    "side_effect_order_profile": str(
-                        signature.get("majority_side_effect_order_profile", "")
-                    ),
-                },
-            }
-        case _:
-            return {
-                "occurrence_count": count,
-                "non_overlapping": True,
-                "call_bucket": _as_int(signature.get("calls", "0")),
-                "raise_bucket": _as_int(signature.get("raises", "0")),
-            }
+#: The name ``tests/test_report_contract_coverage.py`` reads; the owner of the
+#: rule is ``codeclone.findings.group_shapes.csv_values``.
+_csv_values = csv_values
 
 
 def build_near_miss_payload(
@@ -674,7 +548,7 @@ def _build_structural_groups(
                     "files": spread_files,
                     "functions": spread_functions,
                 },
-                "signature": _build_structural_signature(
+                "signature": structural_signature(
                     group.finding_kind,
                     group.signature,
                 ),
@@ -693,7 +567,7 @@ def _build_structural_groups(
                     ],
                     key=_item_sort_key,
                 ),
-                "facts": _build_structural_facts(
+                "facts": structural_facts(
                     group.finding_kind,
                     group.signature,
                     count=len(group.items),
@@ -771,20 +645,12 @@ def _build_dead_code_groups(
                         "end_line": _as_int(item_map.get("end_line")),
                     }
                 ],
-                "facts": {
-                    "kind": str(item_map.get("kind", "unknown")),
-                    "confidence": confidence,
-                    "reason": str(item_map.get("reason", "unreferenced")),
-                    "test_reference_sources": sorted(
-                        {
-                            str(source)
-                            for source in _as_sequence(
-                                item_map.get("test_reference_sources")
-                            )
-                            if str(source)
-                        }
-                    ),
-                },
+                "facts": dead_symbol_facts(
+                    kind=str(item_map.get("kind", "unknown")),
+                    confidence=confidence,
+                    reason=str(item_map.get("reason", "unreferenced")),
+                    test_reference_sources=item_map.get("test_reference_sources"),
+                ),
             }
         )
     groups.extend(_build_unreachable_statement_groups(dead_code, scan_root=scan_root))
@@ -855,12 +721,10 @@ def _build_unreachable_statement_groups(
                         "end_line": end_line,
                     }
                 ],
-                "facts": {
-                    "reason": reason,
-                    "confidence": CONFIDENCE_HIGH,
-                    "statement_count": _as_int(item_map.get("statement_count")),
-                    "policy_version": STATEMENT_REACHABILITY_POLICY_VERSION,
-                },
+                "facts": unreachable_statement_facts(
+                    reason=reason,
+                    statement_count=item_map.get("statement_count"),
+                ),
             }
         )
     return groups

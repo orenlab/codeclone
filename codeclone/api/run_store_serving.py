@@ -227,6 +227,43 @@ def read_run_store_authority_candidates(
     return _read_published(root=root, link=link, read=read_served_authority_candidates)
 
 
+#: The store's own typed refusals and the reason each one is answered with,
+#: in the order a refusal is matched -- the ONE table the door branches on,
+#: so a new refusal class lands here as a row and never as a new clause.
+#:
+#: ``StoreCompatibilityError`` is also the incomplete-schema refusal
+#: (``StoreSchemaIncompleteError`` narrows it): a store of this generation
+#: that lacks a table or an index this build declares cannot be opened as it
+#: stands, the same question a foreign witness answers, and nothing in it is
+#: corrupt -- so ``incompatible_generation``, never ``integrity``; the detail
+#: carries the refusal's own words, the one command that completes the store
+#: included, and the door runs it for nobody.  ``StoreIntegrityError`` is a
+#: stored row that fails its digest, a file SQLite cannot read as a database
+#: or a member under the wrong storage class: all statements about the BYTES
+#: at the store path, all one word.  ``StoreUnavailableError`` is the bytes
+#: and the generation both fine and SQLite unable to serve them at this
+#: moment (another process's write lock, a read-only medium, an I/O fault):
+#: neither ``integrity`` nor ``incompatible_generation`` would be true, and
+#: the memory answer the surface holds is the right one to give right now.
+#: ``CanonicalModelError`` is a stored row the projection cannot express.
+_REFUSAL_REASONS: Final[tuple[tuple[type[Exception], str], ...]] = (
+    (StoreCompatibilityError, SERVING_REASON_INCOMPATIBLE_GENERATION),
+    (StoreIntegrityError, SERVING_REASON_INTEGRITY),
+    (StoreUnavailableError, SERVING_REASON_STORE_UNAVAILABLE),
+    (CanonicalModelError, SERVING_REASON_UNEXPRESSIBLE),
+)
+_STORE_REFUSALS: Final[tuple[type[Exception], ...]] = tuple(
+    refusal for refusal, _reason in _REFUSAL_REASONS
+)
+
+
+def _refusal_reason(refusal: Exception) -> str:
+    """The reason word of one typed store refusal, off the one table."""
+    return next(
+        reason for kind, reason in _REFUSAL_REASONS if isinstance(refusal, kind)
+    )
+
+
 def _read_published(
     *,
     root: Path,
@@ -290,44 +327,9 @@ def _store_answer(
         # that fails its own evidence is the class a stored row that fails
         # its digest belongs to, and it gets the same word.
         return _memory(SERVING_REASON_INTEGRITY, detail=str(refusal))
-    except StoreCompatibilityError as refusal:
-        # Also the incomplete-schema refusal (``StoreSchemaIncompleteError``
-        # narrows this class): a store of this generation that lacks a table
-        # or an index this build declares cannot be opened as it stands, the
-        # same question a foreign witness answers, and nothing in it is
-        # corrupt -- so ``incompatible_generation``, never ``integrity``.  The
-        # detail carries the refusal's own words, the one command that
-        # completes the store included; the door runs it for nobody.
+    except _STORE_REFUSALS as refusal:
         return _memory(
-            SERVING_REASON_INCOMPATIBLE_GENERATION,
-            store_run_id=store_run_id,
-            detail=str(refusal),
-        )
-    except StoreIntegrityError as refusal:
-        # A stored row that fails its digest, a file SQLite cannot read as a
-        # database, a member under the wrong storage class: all statements
-        # about the BYTES at the store path, all one word.
-        return _memory(
-            SERVING_REASON_INTEGRITY,
-            store_run_id=store_run_id,
-            detail=str(refusal),
-        )
-    except StoreUnavailableError as refusal:
-        # The bytes are fine and so is the generation; SQLite could not
-        # serve them at this moment (another process's write lock, a
-        # read-only medium, an I/O fault).  Neither ``integrity`` nor
-        # ``incompatible_generation`` would be true, and the memory answer
-        # the surface holds is the right answer to give right now.
-        return _memory(
-            SERVING_REASON_STORE_UNAVAILABLE,
-            store_run_id=store_run_id,
-            detail=str(refusal),
-        )
-    except CanonicalModelError as refusal:
-        return _memory(
-            SERVING_REASON_UNEXPRESSIBLE,
-            store_run_id=store_run_id,
-            detail=str(refusal),
+            _refusal_reason(refusal), store_run_id=store_run_id, detail=str(refusal)
         )
     return answer, RunStoreServingOutcome(
         source=SERVING_SOURCE_RUN_STORE,

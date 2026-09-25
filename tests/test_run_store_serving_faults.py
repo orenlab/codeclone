@@ -46,6 +46,7 @@ import pytest
 import codeclone.utils.sqlite_store as sqlite_store
 from codeclone.api.run_store_serving import (
     MEMORY_BY_DESIGN_REASONS,
+    SERVING_REASON_INCOMPATIBLE_GENERATION,
     SERVING_REASON_INTEGRITY,
     SERVING_REASON_SERVED,
     SERVING_REASON_STORE_UNAVAILABLE,
@@ -328,3 +329,31 @@ def test_the_bridge_read_names_a_database_fault_as_integrity(
             linked_run(store, report_run_identity="1" * 64)
         assert isinstance(refused.value.__cause__, sqlite3.DatabaseError)
         monkeypatch.undo()
+
+
+# -- a narrowed refusal: the door's table matches by class, not by spelling --
+
+
+def test_a_store_short_of_its_schema_is_answered_incompatible_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``StoreSchemaIncompleteError`` narrows ``StoreCompatibilityError``,
+    and the door's refusal table must answer the narrowed class the way it
+    answers its parent -- ``incompatible_generation`` with the migration verb
+    in the detail -- so a table keyed on exact types cannot pass here."""
+    path = tmp_path / "runs.sqlite3"
+    run_id = _publish(path)
+    _enable(monkeypatch, path)
+    _served, control = read_run_store_slices(root=tmp_path, link=_linked(run_id))
+    assert control.reason == SERVING_REASON_SERVED
+    with sqlite3.connect(path) as raw:
+        raw.execute("DROP INDEX idx_run_members_object")
+        raw.commit()
+    answer, outcome = read_run_store_slices(root=tmp_path, link=_linked(run_id))
+    assert answer is None
+    assert (outcome.source, outcome.reason) == (
+        SERVING_SOURCE_MEMORY,
+        SERVING_REASON_INCOMPATIBLE_GENERATION,
+    )
+    assert "run-store migrate" in outcome.detail
+    assert "idx_run_members_object" in outcome.detail

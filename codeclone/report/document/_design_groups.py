@@ -8,11 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ...contracts import (
-    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
-    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
-    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
-)
 from ...domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -20,8 +15,6 @@ from ...domain.findings import (
     CATEGORY_COVERAGE,
     CATEGORY_DEPENDENCY,
     FAMILY_DESIGN,
-    FINDING_KIND_COVERAGE_HOTSPOT,
-    FINDING_KIND_COVERAGE_SCOPE_GAP,
 )
 from ...domain.quality import (
     CONFIDENCE_HIGH,
@@ -31,20 +24,35 @@ from ...domain.quality import (
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
 )
+from ...findings.group_shapes import (
+    DesignThresholds,
+    cohesion_facts,
+    cohesion_item_data,
+    complexity_facts,
+    complexity_item_data,
+    coupling_facts,
+    coupling_item_data,
+    coverage_facts,
+    coverage_group_kind,
+    coverage_item_data,
+    dependency_cycle_facts,
+    dependency_member_item,
+    is_cohesion_hotspot,
+    is_complexity_hotspot,
+    is_coupling_hotspot,
+    module_classification_path,
+)
+from ...findings.group_shapes import design_thresholds as realized_design_thresholds
 from ...findings.ids import design_group_id
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ..derived import (
-    report_location_from_group_item,
-)
 from ._common import (
     _COVERAGE_JOIN_FAMILY,
     ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
     ENTITY_NOVELTY_DOMAIN_COUPLING,
     ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
-    _coerced_nonnegative_threshold,
     _contract_report_location_path,
     _dependency_cycle_identity,
     _entity_novelty,
@@ -110,12 +118,12 @@ def _design_singleton_group(
 def _complexity_design_group(
     item_map: Mapping[str, object],
     *,
-    threshold: int,
+    thresholds: DesignThresholds,
     scan_root: str,
     entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     cc = _as_int(item_map.get("cyclomatic_complexity"), 1)
-    if cc <= threshold:
+    if not is_complexity_hotspot(cc, thresholds):
         return None
     qualname = str(item_map.get("qualname", ""))
     filepath = str(item_map.get("relative_path", ""))
@@ -130,15 +138,12 @@ def _complexity_design_group(
         start_line=_as_int(item_map.get("start_line")),
         end_line=_as_int(item_map.get("end_line")),
         scan_root=scan_root,
-        item_data={
-            "cyclomatic_complexity": cc,
-            "nesting_depth": nesting_depth,
-            "risk": str(item_map.get("risk", RISK_LOW)),
-        },
-        facts={
-            "cyclomatic_complexity": cc,
-            "nesting_depth": nesting_depth,
-        },
+        item_data=complexity_item_data(
+            cyclomatic_complexity=cc,
+            nesting_depth=nesting_depth,
+            risk=str(item_map.get("risk", RISK_LOW)),
+        ),
+        facts=complexity_facts(cyclomatic_complexity=cc, nesting_depth=nesting_depth),
         novelty_domain=ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
         entity_novelty_facts=entity_novelty_facts,
     )
@@ -147,12 +152,12 @@ def _complexity_design_group(
 def _coupling_design_group(
     item_map: Mapping[str, object],
     *,
-    threshold: int,
+    thresholds: DesignThresholds,
     scan_root: str,
     entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     cbo = _as_int(item_map.get("cbo"))
-    if cbo <= threshold:
+    if not is_coupling_hotspot(cbo, thresholds):
         return None
     qualname = str(item_map.get("qualname", ""))
     filepath = str(item_map.get("relative_path", ""))
@@ -166,15 +171,12 @@ def _coupling_design_group(
         start_line=_as_int(item_map.get("start_line")),
         end_line=_as_int(item_map.get("end_line")),
         scan_root=scan_root,
-        item_data={
-            "cbo": cbo,
-            "risk": str(item_map.get("risk", RISK_LOW)),
-            "coupled_classes": coupled_classes,
-        },
-        facts={
-            "cbo": cbo,
-            "coupled_classes": coupled_classes,
-        },
+        item_data=coupling_item_data(
+            cbo=cbo,
+            risk=str(item_map.get("risk", RISK_LOW)),
+            coupled_classes=coupled_classes,
+        ),
+        facts=coupling_facts(cbo=cbo, coupled_classes=coupled_classes),
         novelty_domain=ENTITY_NOVELTY_DOMAIN_COUPLING,
         entity_novelty_facts=entity_novelty_facts,
     )
@@ -183,11 +185,11 @@ def _coupling_design_group(
 def _cohesion_design_group(
     item_map: Mapping[str, object],
     *,
-    threshold: int,
+    thresholds: DesignThresholds,
     scan_root: str,
 ) -> dict[str, object] | None:
     lcom4 = _as_int(item_map.get("lcom4"))
-    if lcom4 < threshold:
+    if not is_cohesion_hotspot(lcom4, thresholds):
         return None
     qualname = str(item_map.get("qualname", ""))
     filepath = str(item_map.get("relative_path", ""))
@@ -202,32 +204,21 @@ def _cohesion_design_group(
         start_line=_as_int(item_map.get("start_line")),
         end_line=_as_int(item_map.get("end_line")),
         scan_root=scan_root,
-        item_data={
-            "lcom4": lcom4,
-            "risk": str(item_map.get("risk", RISK_LOW)),
-            "method_count": method_count,
-            "instance_var_count": instance_var_count,
-        },
-        facts={
-            "lcom4": lcom4,
-            "method_count": method_count,
-            "instance_var_count": instance_var_count,
-        },
+        item_data=cohesion_item_data(
+            lcom4=lcom4,
+            risk=str(item_map.get("risk", RISK_LOW)),
+            method_count=method_count,
+            instance_var_count=instance_var_count,
+        ),
+        facts=cohesion_facts(
+            lcom4=lcom4,
+            method_count=method_count,
+            instance_var_count=instance_var_count,
+        ),
         # MetricsDiff carries no ``new_low_cohesion_classes`` term, so cohesion
         # has no per-entity baseline answer to report.
         novelty_domain=CATEGORY_COHESION,
     )
-
-
-def _module_classification_path(module: str, member_path: str | None) -> str:
-    """Path used ONLY for source-kind classification, never reported.
-
-    A resolved member classifies by its real file. An unresolved member
-    classifies by its dotted segments spelled as a directory — a segment
-    sequence, not a file claim; no ``.py`` is ever invented for it.
-    """
-
-    return member_path if member_path else module.replace(".", "/")
 
 
 def _dependency_design_group(
@@ -255,36 +246,16 @@ def _dependency_design_group(
     # a warning; an import-time cycle keeps the critical tier.
     kind = str(detail.get("kind", "import_cycle"))
     severity = SEVERITY_CRITICAL if kind == "import_cycle" else SEVERITY_WARNING
-    measured = (
-        "cycle over import-time edges"
-        if kind == "import_cycle"
-        else "cycle only over deferred edges (function-scope, module "
-        "__getattr__, or lazy imports)"
-    )
     cycle_key = _dependency_cycle_identity(modules)
     novelty, novelty_reason = _entity_novelty(
         identity=cycle_key,
         domain=ENTITY_NOVELTY_DOMAIN_DEPENDENCIES,
         entity_novelty_facts=entity_novelty_facts,
     )
-    items: list[dict[str, object]] = []
-    for module, member_path in zip(modules, member_paths, strict=True):
-        item: dict[str, object] = {
-            "module": module,
-            "source_kind": report_location_from_group_item(
-                {
-                    "filepath": _module_classification_path(module, member_path),
-                    "qualname": "",
-                    "start_line": 0,
-                    "end_line": 0,
-                }
-            ).source_kind,
-        }
-        # Path honesty: only a registry-resolved file is ever reported; an
-        # unresolved member keeps its module identity and claims no path.
-        if member_path:
-            item["relative_path"] = member_path
-        items.append(item)
+    items = [
+        dependency_member_item(module=module, member_path=member_path)
+        for module, member_path in zip(modules, member_paths, strict=True)
+    ]
     return {
         "id": design_group_id(CATEGORY_DEPENDENCY, cycle_key),
         "family": FAMILY_DESIGN,
@@ -298,17 +269,14 @@ def _dependency_design_group(
         "novelty_reason": novelty_reason,
         "source_scope": _source_scope_from_filepaths(
             (
-                _module_classification_path(module, member_path)
+                module_classification_path(module, member_path)
                 for module, member_path in zip(modules, member_paths, strict=True)
             ),
             scan_root=scan_root,
         ),
         "spread": {"files": len(modules), "functions": 0},
         "items": items,
-        "facts": {
-            "cycle_length": len(modules),
-            "measured": measured,
-        },
+        "facts": dependency_cycle_facts(kind=kind, cycle_length=len(modules)),
     }
 
 
@@ -336,12 +304,7 @@ def _coverage_design_group(
     executable_lines = _as_int(item_map.get("executable_lines"))
     complexity = _as_int(item_map.get("cyclomatic_complexity"), 1)
     severity = SEVERITY_CRITICAL if risk == "high" else SEVERITY_WARNING
-    if scope_gap_hotspot:
-        kind = FINDING_KIND_COVERAGE_SCOPE_GAP
-        detail = "The supplied coverage.xml did not map to this function's file."
-    else:
-        kind = FINDING_KIND_COVERAGE_HOTSPOT
-        detail = "Joined line coverage is below the configured hotspot threshold."
+    kind, detail = coverage_group_kind(scope_gap_hotspot=scope_gap_hotspot)
     coverage_novelty, coverage_novelty_reason = _entity_novelty(
         identity=subject_key,
         domain=CATEGORY_COVERAGE,
@@ -366,32 +329,32 @@ def _coverage_design_group(
         ),
         "spread": {"files": 1, "functions": 1},
         "items": [
-            {
-                "relative_path": filepath,
-                "qualname": qualname,
-                "start_line": start_line,
-                "end_line": end_line,
-                "risk": risk,
-                "cyclomatic_complexity": complexity,
-                "coverage_permille": coverage_permille,
-                "coverage_status": coverage_status,
-                "covered_lines": covered_lines,
-                "executable_lines": executable_lines,
-                "coverage_hotspot": coverage_hotspot,
-                "scope_gap_hotspot": scope_gap_hotspot,
-            }
+            coverage_item_data(
+                relative_path=filepath,
+                qualname=qualname,
+                start_line=start_line,
+                end_line=end_line,
+                risk=risk,
+                cyclomatic_complexity=complexity,
+                coverage_permille=coverage_permille,
+                coverage_status=coverage_status,
+                covered_lines=covered_lines,
+                executable_lines=executable_lines,
+                coverage_hotspot=coverage_hotspot,
+                scope_gap_hotspot=scope_gap_hotspot,
+            )
         ],
-        "facts": {
-            "coverage_permille": coverage_permille,
-            "hotspot_threshold_percent": threshold_percent,
-            "coverage_status": coverage_status,
-            "covered_lines": covered_lines,
-            "executable_lines": executable_lines,
-            "cyclomatic_complexity": complexity,
-            "coverage_hotspot": coverage_hotspot,
-            "scope_gap_hotspot": scope_gap_hotspot,
-            "detail": detail,
-        },
+        "facts": coverage_facts(
+            coverage_permille=coverage_permille,
+            hotspot_threshold_percent=threshold_percent,
+            coverage_status=coverage_status,
+            covered_lines=covered_lines,
+            executable_lines=executable_lines,
+            cyclomatic_complexity=complexity,
+            coverage_hotspot=coverage_hotspot,
+            scope_gap_hotspot=scope_gap_hotspot,
+            detail=detail,
+        ),
     }
 
 
@@ -403,19 +366,7 @@ def _build_design_groups(
     entity_novelty_facts: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     families = _as_mapping(metrics_payload.get("families"))
-    thresholds = _as_mapping(design_thresholds)
-    complexity_threshold = _coerced_nonnegative_threshold(
-        _as_mapping(thresholds.get(CATEGORY_COMPLEXITY)).get("value"),
-        default=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
-    )
-    coupling_threshold = _coerced_nonnegative_threshold(
-        _as_mapping(thresholds.get(CATEGORY_COUPLING)).get("value"),
-        default=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
-    )
-    cohesion_threshold = _coerced_nonnegative_threshold(
-        _as_mapping(thresholds.get(CATEGORY_COHESION)).get("value"),
-        default=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
-    )
+    thresholds = realized_design_thresholds(design_thresholds)
     coverage_join = _as_mapping(families.get(_COVERAGE_JOIN_FAMILY))
     coverage_threshold = _as_int(
         _as_mapping(coverage_join.get("summary")).get("hotspot_threshold_percent"),
@@ -427,7 +378,7 @@ def _build_design_groups(
     for item in _as_sequence(complexity.get("items")):
         group = _complexity_design_group(
             _as_mapping(item),
-            threshold=complexity_threshold,
+            thresholds=thresholds,
             scan_root=scan_root,
             entity_novelty_facts=entity_novelty_facts,
         )
@@ -438,7 +389,7 @@ def _build_design_groups(
     for item in _as_sequence(coupling.get("items")):
         group = _coupling_design_group(
             _as_mapping(item),
-            threshold=coupling_threshold,
+            thresholds=thresholds,
             scan_root=scan_root,
             entity_novelty_facts=entity_novelty_facts,
         )
@@ -449,7 +400,7 @@ def _build_design_groups(
     for item in _as_sequence(cohesion.get("items")):
         group = _cohesion_design_group(
             _as_mapping(item),
-            threshold=cohesion_threshold,
+            thresholds=thresholds,
             scan_root=scan_root,
         )
         if group is not None:

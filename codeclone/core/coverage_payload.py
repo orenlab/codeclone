@@ -6,14 +6,13 @@
 
 from __future__ import annotations
 
+from ..metrics.coverage_join import coverage_hotspot, permille, scope_gap_hotspot
 from ..models import CoverageJoinResult, ProjectMetrics
 from ..utils.coerce import as_int, as_str
 
-
-def _permille(numerator: int, denominator: int) -> int:
-    if denominator <= 0:
-        return 0
-    return round((1000.0 * float(numerator)) / float(denominator))
+#: The ratio is the coverage join's own; the metrics payload reaches it
+#: under this name, so the name stays while the formula has one owner.
+_permille = permille
 
 
 def _coverage_join_summary(
@@ -63,27 +62,19 @@ def _coverage_join_rows(
                 "covered_lines": fact.covered_lines,
                 "coverage_permille": fact.coverage_permille,
                 "coverage_status": fact.coverage_status,
-                "coverage_hotspot": (
-                    fact.risk in {"medium", "high"}
-                    and fact.coverage_status == "measured"
-                    and (fact.coverage_permille / 10.0)
-                    < float(coverage_join.hotspot_threshold_percent)
+                "coverage_hotspot": coverage_hotspot(
+                    fact=fact,
+                    hotspot_threshold_percent=coverage_join.hotspot_threshold_percent,
                 ),
-                "scope_gap_hotspot": (
-                    fact.risk in {"medium", "high"}
-                    and fact.coverage_status == "missing_from_report"
-                ),
+                "scope_gap_hotspot": scope_gap_hotspot(fact=fact),
                 "coverage_review_item": (
-                    (
-                        fact.risk in {"medium", "high"}
-                        and fact.coverage_status == "measured"
-                        and (fact.coverage_permille / 10.0)
-                        < float(coverage_join.hotspot_threshold_percent)
+                    coverage_hotspot(
+                        fact=fact,
+                        hotspot_threshold_percent=(
+                            coverage_join.hotspot_threshold_percent
+                        ),
                     )
-                    or (
-                        fact.risk in {"medium", "high"}
-                        and fact.coverage_status == "missing_from_report"
-                    )
+                    or scope_gap_hotspot(fact=fact)
                 ),
             }
             for fact in coverage_join.units

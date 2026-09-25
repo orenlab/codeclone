@@ -21,6 +21,9 @@ from ..utils.json_io import BoundedReadError, read_bounded_bytes
 __all__ = [
     "CoverageJoinParseError",
     "build_coverage_join",
+    "coverage_hotspot",
+    "permille",
+    "scope_gap_hotspot",
 ]
 
 _Risk = Literal["low", "medium", "high"]
@@ -48,7 +51,9 @@ class _CoverageReport:
     files: dict[str, _CoverageFileLines]
 
 
-def _permille(numerator: int, denominator: int) -> int:
+def permille(numerator: int, denominator: int) -> int:
+    """The one coverage ratio: covered per thousand executable, zero over an
+    empty denominator (the join's own rounding, shared by every reader)."""
     if denominator <= 0:
         return 0
     return round((1000.0 * float(numerator)) / float(denominator))
@@ -272,7 +277,7 @@ def _unit_coverage_fact(
             for line_number in coverage_file.covered_lines
             if start_line <= line_number <= end_line
         )
-        coverage_permille = _permille(covered_lines, executable_lines)
+        coverage_permille = permille(covered_lines, executable_lines)
         coverage_status = (
             _MEASURED_STATUS if executable_lines > 0 else _NO_EXECUTABLE_LINES_STATUS
         )
@@ -290,11 +295,14 @@ def _unit_coverage_fact(
     )
 
 
-def _is_coverage_hotspot(
+def coverage_hotspot(
     *,
     fact: UnitCoverageFact,
     hotspot_threshold_percent: int,
 ) -> bool:
+    """The one coverage-hotspot rule: a medium/high-risk unit measured below
+    the threshold.  Read by the payload, the document and the canonical
+    projection through this owner and never re-spelled."""
     if fact.risk not in _HOTSPOT_RISKS:
         return False
     if fact.coverage_status != _MEASURED_STATUS:
@@ -302,7 +310,9 @@ def _is_coverage_hotspot(
     return (fact.coverage_permille / 10.0) < float(hotspot_threshold_percent)
 
 
-def _is_scope_gap_hotspot(*, fact: UnitCoverageFact) -> bool:
+def scope_gap_hotspot(*, fact: UnitCoverageFact) -> bool:
+    """The one scope-gap rule: a medium/high-risk unit the coverage report
+    never mapped."""
     return (
         fact.risk in _HOTSPOT_RISKS
         and fact.coverage_status == _MISSING_FROM_REPORT_STATUS
@@ -342,11 +352,11 @@ def build_coverage_join(
         coverage_hotspots=sum(
             1
             for fact in facts
-            if _is_coverage_hotspot(
+            if coverage_hotspot(
                 fact=fact,
                 hotspot_threshold_percent=hotspot_threshold_percent,
             )
         ),
-        scope_gap_hotspots=sum(1 for fact in facts if _is_scope_gap_hotspot(fact=fact)),
+        scope_gap_hotspots=sum(1 for fact in facts if scope_gap_hotspot(fact=fact)),
         units=facts,
     )
