@@ -174,6 +174,7 @@ def test_summarize_metrics_diff_accepts_mapping_payload() -> None:
             "typing_return_permille_delta": -200,
             "docstring_permille_delta": -300,
             "new_api_breaking_changes": 7,
+            "api_signature_changes": 3,
         }
     )
 
@@ -193,6 +194,8 @@ def test_summarize_metrics_diff_accepts_mapping_payload() -> None:
         "docstring_permille_delta": -300,
         "new_api_symbols": 0,
         "api_breaking_changes": 7,
+        # Compatible changes ride beside the breaking count, never inside it.
+        "api_signature_changes": 3,
     }
 
 

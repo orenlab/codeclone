@@ -548,18 +548,21 @@ def fmt_summary_compact_api_surface(
     modules: int,
     added: int,
     breaking: int,
+    changed: int,
     diff_available: bool,
 ) -> str:
     # ``symbols=`` / ``modules=`` are facts of the current run and always
-    # print. ``breaking=`` / ``added=`` are facts about a baseline comparison:
-    # when that comparison never ran there is nothing to print, and printing
-    # the default zeros rendered a withheld run byte-identical to "compared,
-    # clean". The compact line omits the terms; the rich surfaces pronounce
-    # the absence in words — the ratified adoption split.
+    # print. ``breaking=`` / ``changed=`` / ``added=`` are facts about a
+    # baseline comparison: when that comparison never ran there is nothing to
+    # print, and printing the default zeros rendered a withheld run
+    # byte-identical to "compared, clean". The compact line omits the terms;
+    # the rich surfaces pronounce the absence in words — the ratified adoption
+    # split. ``changed=`` counts compatible signature changes and is never
+    # part of ``breaking=``.
     line = f"Public API  symbols={public_symbols}  modules={modules}"
     if not diff_available:
         return line
-    return f"{line}  breaking={breaking}  added={added}"
+    return f"{line}  breaking={breaking}  changed={changed}  added={added}"
 
 
 def fmt_summary_compact_coverage_join(
@@ -816,6 +819,7 @@ def fmt_metrics_api_surface(
     modules: int,
     added: int,
     breaking: int,
+    changed: int,
     diff_available: bool,
 ) -> str:
     parts = [
@@ -827,11 +831,14 @@ def fmt_metrics_api_surface(
         # Silence here rendered a withheld run byte-identical to "compared,
         # clean"; the rich surface pronounces the absence instead.
         parts.append(f"[dim]{_API_SURFACE_DIFF_ABSENCE}[/dim]")
-    elif breaking > 0 or added > 0:
+    elif max(breaking, changed, added) > 0:
+        # ``changed`` is its own word in the neutral style: a compatible
+        # signature change is recorded, never counted or colored as breaking.
         parts.append(
             " / ".join(
                 [
                     f"{_v(breaking, STYLE_COUNT_CRITICAL)} breaking",
+                    f"{_v(changed, STYLE_COUNT_NEUTRAL)} changed",
                     f"{_v(added, STYLE_COUNT_NEUTRAL)} added",
                 ]
             )

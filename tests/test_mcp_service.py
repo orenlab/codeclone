@@ -69,7 +69,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
-from codeclone.models import FileStat, LaneTrust, MetricsDiff
+from codeclone.models import ApiBreakingChange, FileStat, LaneTrust, MetricsDiff
 from codeclone.surfaces.mcp._run_store_serving import memory_slices
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
@@ -5452,6 +5452,45 @@ def test_mcp_service_root_and_helper_contract_errors(
         mcp_helpers_mod._report_digest({})
 
 
+def test_mcp_run_summary_diff_counts_compatible_changes_beside_breaking_ones() -> None:
+    """``get_run_summary``'s diff carries both counts and never folds them.
+
+    One breaking and two compatible changes: distinct numbers, so a surface
+    that summed them or printed one in the other's place reds.
+    """
+
+    def change(
+        name: str, kind: Literal["removed", "signature_changed"]
+    ) -> ApiBreakingChange:
+        return ApiBreakingChange(
+            qualname=f"pkg.mod:{name}",
+            filepath="pkg/mod.py",
+            start_line=1,
+            end_line=1,
+            symbol_kind="function",
+            change_kind=kind,
+            detail=name,
+        )
+
+    metrics_diff = mcp_helpers_mod._metrics_diff_payload(
+        MetricsDiff(
+            new_high_risk_functions=(),
+            new_high_coupling_classes=(),
+            new_cycles=(),
+            new_dead_code=(),
+            health_delta=0,
+            new_api_breaking_changes=(change("gone", "removed"),),
+            new_api_signature_changes=(
+                change("grown", "signature_changed"),
+                change("widened", "signature_changed"),
+            ),
+        )
+    )
+    assert metrics_diff is not None
+    diff = mcp_helpers_mod._summary_diff_payload({"metrics_diff": metrics_diff})
+    assert (diff["api_breaking_changes"], diff["api_signature_changes"]) == (1, 2)
+
+
 def test_mcp_service_helper_filters_and_metrics_payload() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
@@ -5478,6 +5517,7 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
         "docstring_permille_delta": 0,
         "new_api_symbols": 0,
         "api_breaking_changes": 0,
+        "api_signature_changes": 0,
     }
     assert mcp_helpers_mod._metrics_diff_payload(None) is None
 

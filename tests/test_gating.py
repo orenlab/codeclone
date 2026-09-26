@@ -17,6 +17,7 @@ from codeclone.contracts import ObservedPopulation
 from codeclone.core._types import AnalysisResult, BootstrapResult, OutputPaths
 from codeclone.core.reporting import gate as cli_gate
 from codeclone.models import (
+    ApiBreakingChange,
     DeadItem,
     HealthScore,
     LaneTrust,
@@ -36,6 +37,9 @@ from codeclone.report.gates.evaluator import (
     evaluate_gates,
     gate_lane_contract_versions,
     gate_state_from_project_metrics,
+)
+from codeclone.report.gates.evaluator import (
+    _gate_state_from_report_document as gate_state_from_report_document,
 )
 from codeclone.report.messages import gates as gate_msgs
 from codeclone.surfaces.cli.summary import build_metrics_snapshot
@@ -854,6 +858,69 @@ def _report_document() -> dict[str, object]:
             }
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("breaking", "changed", "expected"),
+    [
+        pytest.param(0, 4, 0, id="only-compatible-changes"),
+        pytest.param(2, 4, 2, id="breaking-beside-compatible"),
+    ],
+)
+def test_api_gate_from_a_document_counts_breaking_changes_only(
+    breaking: int, changed: int, expected: int
+) -> None:
+    """The document road of ``fail_on_api_break`` reads ``breaking`` alone.
+
+    ``changed`` counts compatible signature changes; a gate state that added
+    it -- or read it instead -- would fail a build for an optional parameter.
+    """
+
+    document = _report_document()
+    families = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", document["metrics"])["families"],
+    )
+    families["api_surface"] = {"summary": {"breaking": breaking, "changed": changed}}
+
+    state = gate_state_from_report_document(
+        report_document=document,
+        metrics_diff=None,
+    )
+    assert state.api_breaking_changes == expected
+
+
+def test_api_gate_from_a_document_and_its_diff_counts_breaking_changes_only() -> None:
+    """The diff road of the same builder: compatible changes never gate.
+
+    MCP hands the run's own diff beside the document; its compatible
+    ``new_api_signature_changes`` must stay out of ``api_breaking_changes``.
+    """
+
+    compatible = tuple(
+        ApiBreakingChange(
+            qualname=f"pkg.mod:{name}",
+            filepath="pkg/mod.py",
+            start_line=1,
+            end_line=1,
+            symbol_kind="function",
+            change_kind="signature_changed",
+            detail="Added optional parameter limit.",
+        )
+        for name in ("grown", "widened", "extended")
+    )
+    state = gate_state_from_report_document(
+        report_document=_report_document(),
+        metrics_diff=MetricsDiff(
+            new_high_risk_functions=(),
+            new_high_coupling_classes=(),
+            new_cycles=(),
+            new_dead_code=(),
+            health_delta=0,
+            new_api_signature_changes=compatible,
+        ),
+    )
+    assert state.api_breaking_changes == 0
 
 
 def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:

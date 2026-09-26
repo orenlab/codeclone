@@ -125,9 +125,10 @@ REPORT_SEMANTIC_PRODUCERS: Final[tuple[ProducerSpec, ...]] = (
         "activation": "metrics",
         # ``core.api_surface_payload``: the visible public symbols of every
         # module (``record_kind == "symbol"``) and, after the baseline diff,
-        # one ``breaking_change`` row per new breaking change.  The symbol
-        # rows are the api_surface observation lane's statements; the
-        # breaking rows and the summary's ``added`` / ``breaking`` /
+        # one ``breaking_change`` row per new breaking change and one
+        # ``signature_change`` row per new compatible change.  The symbol
+        # rows are the api_surface observation lane's statements; the change
+        # rows and the summary's ``added`` / ``breaking`` / ``changed`` /
         # ``baseline_diff_available`` are comparison-domain (declared below).
         "document_sections": ("metrics.families.api_surface",),
     },
@@ -425,6 +426,7 @@ SCOPED_KEY_CLASSES: Final[Mapping[str, Mapping[tuple[str, str], str]]] = {
         ): KEY_CLASS_COMPARISON,
         ("metrics.families.api_surface", "summary.added"): KEY_CLASS_COMPARISON,
         ("metrics.families.api_surface", "summary.breaking"): KEY_CLASS_COMPARISON,
+        ("metrics.families.api_surface", "summary.changed"): KEY_CLASS_COMPARISON,
     },
     "coverage_adoption": {
         # ``core.metrics_payload`` copies these from the metrics diff.
@@ -591,11 +593,15 @@ SCOPED_ROW_CLASSES: Final[
     Mapping[str, Mapping[tuple[str, str], tuple[str, Mapping[str, str]]]]
 ] = {
     "api_surface": {
-        # ``core.metrics_payload`` appends one ``breaking_change`` row per new
-        # breaking change of the baseline diff to the symbol rows.
+        # ``core.api_surface_payload`` appends one ``breaking_change`` row
+        # per new breaking change and one ``signature_change`` row per new
+        # compatible change of the baseline diff to the symbol rows.
         ("metrics.families.api_surface", "items[]"): (
             "record_kind",
-            {"breaking_change": KEY_CLASS_COMPARISON},
+            {
+                "breaking_change": KEY_CLASS_COMPARISON,
+                "signature_change": KEY_CLASS_COMPARISON,
+            },
         ),
     },
 }

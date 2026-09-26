@@ -1036,6 +1036,11 @@ def _summary_diff_payload(summary: Mapping[str, object]) -> dict[str, object]:
             0,
         ),
         "api_breaking_changes": _as_int(metrics_diff.get("api_breaking_changes", 0), 0),
+        # Compatible signature changes, reported beside the breaking count and
+        # never part of it.
+        "api_signature_changes": _as_int(
+            metrics_diff.get("api_signature_changes", 0), 0
+        ),
         "new_api_symbols": _as_int(metrics_diff.get("new_api_symbols", 0), 0),
     }
 

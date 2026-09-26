@@ -244,6 +244,9 @@ ADOPTION_ENABLE_VIA_FLAG: Final = "--api-surface"
 ADOPTION_PUBLIC_SYMBOLS: Final = "Public symbols"
 ADOPTION_MODULES: Final = "Modules"
 ADOPTION_BREAKING_CHANGES: Final = "Breaking changes"
+# Compatible signature changes (``signature_changed``): recorded against the
+# baseline beside the breaking count and never part of it.
+ADOPTION_CHANGED_SIGNATURES: Final = "Compatible signature changes"
 ADOPTION_ADDED_SYMBOLS: Final = "Added symbols"
 ADOPTION_STRICT_MODE: Final = "Strict mode"
 ADOPTION_STRICT_MODE_ENABLED: Final = "enabled"

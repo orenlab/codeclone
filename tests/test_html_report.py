@@ -2384,6 +2384,51 @@ def test_html_report_api_surface_stays_silent_about_absence_when_compared() -> N
     assert ADOPTION_API_DIFF_UNAVAILABLE not in html
 
 
+def test_html_report_api_card_states_compatible_changes_apart_from_breaks() -> None:
+    """A compatible signature change is its own row, never a breaking one.
+
+    Distinct counts: the breaking row must keep its own number and its warn
+    styling, and the compatible count must sit in its own labelled row.
+    """
+
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["api_surface"] = {
+        "summary": {
+            "enabled": True,
+            "baseline_diff_available": True,
+            "modules": 1,
+            "public_symbols": 9,
+            "added": 5,
+            "breaking": 1,
+            "changed": 3,
+            "strict_types": False,
+        },
+        "items": [],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    assert (
+        '<span class="overview-fact-label">Breaking changes</span>'
+        '<span class="overview-fact-value overview-fact-value--warn">1</span>'
+    ) in html
+    assert (
+        '<span class="overview-fact-label">Compatible signature changes</span>'
+        '<span class="overview-fact-value">3</span>'
+    ) in html
+
+
 def test_html_report_quality_includes_coverage_join_subtab() -> None:
     metrics = _metrics_payload(
         health_score=82,

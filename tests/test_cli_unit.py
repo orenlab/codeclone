@@ -2510,10 +2510,11 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             public_symbols=3,
             modules=2,
             breaking=1,
+            changed=2,
             added=4,
             diff_available=True,
         )
-        == "Public API  symbols=3  modules=2  breaking=1  added=4"
+        == "Public API  symbols=3  modules=2  breaking=1  changed=2  added=4"
     )
     assert (
         ui.fmt_summary_compact_clones(
@@ -2630,10 +2631,13 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         public_symbols=3,
         modules=2,
         breaking=1,
+        changed=2,
         added=4,
         diff_available=True,
     )
-    assert_contains_all(api_surface, "symbols", "modules", "breaking", "added")
+    assert_contains_all(
+        api_surface, "symbols", "modules", "breaking", "changed", "added"
+    )
     coverage_join = ui.fmt_metrics_coverage_join(
         status="ok",
         overall_permille=735,
@@ -3061,7 +3065,11 @@ def _api_surface_analysis_result() -> AnalysisResult:
 
 
 def _api_surface_metrics_diff() -> MetricsDiff:
-    """A computed diff carrying 4 added symbols and 1 breaking change."""
+    """A computed diff: 4 added symbols, 1 breaking and 2 compatible changes.
+
+    Three distinct counts, so a surface that printed one in another's place
+    cannot pass.
+    """
 
     return MetricsDiff(
         new_high_risk_functions=(),
@@ -3086,6 +3094,22 @@ def _api_surface_metrics_diff() -> MetricsDiff:
                 detail="symbol removed",
             ),
         ),
+        new_api_signature_changes=(
+            _api_signature_change("grown", 3),
+            _api_signature_change("widened", 5),
+        ),
+    )
+
+
+def _api_signature_change(name: str, start_line: int) -> ApiBreakingChange:
+    return ApiBreakingChange(
+        qualname=f"pkg.mod:{name}",
+        filepath="pkg/mod.py",
+        start_line=start_line,
+        end_line=start_line,
+        symbol_kind="function",
+        change_kind="signature_changed",
+        detail="Added optional parameter limit.",
     )
 
 
@@ -3114,7 +3138,7 @@ def test_print_metrics_quiet_omits_api_diff_terms_when_comparison_withheld(
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Public API", "symbols=3", "modules=2")
-    assert_contains_none(out, "breaking=", "added=")
+    assert_contains_none(out, "breaking=", "changed=", "added=")
 
 
 def test_print_metrics_quiet_keeps_api_diff_terms_for_an_available_comparison(
@@ -3135,8 +3159,34 @@ def test_print_metrics_quiet_keeps_api_diff_terms_for_an_available_comparison(
     )
     out = capsys.readouterr().out
     assert_contains_all(
-        out, "Public API", "symbols=3", "modules=2", "breaking=1", "added=4"
+        out,
+        "Public API",
+        "symbols=3",
+        "modules=2",
+        "breaking=1",
+        "changed=2",
+        "added=4",
     )
+
+
+def test_print_metrics_rich_api_line_states_each_count_apart(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rich line prints breaking, changed and added as three words."""
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    snapshot = cli_summary.build_metrics_snapshot(
+        analysis_result=_api_surface_analysis_result(),
+        metrics_diff=_api_surface_metrics_diff(),
+        api_surface_diff_available=True,
+    )
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=False,
+        metrics=snapshot,
+    )
+    out = capsys.readouterr().out
+    assert "1 breaking / 2 changed / 4 added" in out
 
 
 def test_metrics_snapshot_transports_api_diff_availability_from_the_owner() -> None:
@@ -3155,6 +3205,35 @@ def test_metrics_snapshot_transports_api_diff_availability_from_the_owner() -> N
             api_surface_diff_available=available,
         )
         assert snapshot.api_surface_diff_available is available
+
+
+@pytest.mark.parametrize(
+    ("available", "expected"),
+    [
+        pytest.param(True, (1, 2, 4), id="compared"),
+        pytest.param(False, (0, 0, 0), id="withheld"),
+    ],
+)
+def test_metrics_snapshot_counts_breaking_and_compatible_changes_apart(
+    available: bool,
+    expected: tuple[int, int, int],
+) -> None:
+    """``breaking`` counts the breaking set, ``changed`` the compatible one.
+
+    Both come from the diff the comparison computed, and neither is a fact
+    when that comparison never ran.
+    """
+
+    snapshot = cli_summary.build_metrics_snapshot(
+        analysis_result=_api_surface_analysis_result(),
+        metrics_diff=_api_surface_metrics_diff(),
+        api_surface_diff_available=available,
+    )
+    assert (
+        snapshot.api_surface_breaking,
+        snapshot.api_surface_changed,
+        snapshot.api_surface_added,
+    ) == expected
 
 
 def test_print_metrics_rich_api_line_pronounces_a_withheld_comparison(

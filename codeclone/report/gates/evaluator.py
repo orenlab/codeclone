@@ -253,6 +253,9 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
                 payload.get("api_breaking_changes"),
                 _as_int(payload.get("new_api_breaking_changes"), 0),
             ),
+            # Compatible changes are reported beside the breaking count and
+            # never folded into it: no gate reads this key.
+            "api_signature_changes": _as_int(payload.get("api_signature_changes"), 0),
         }
 
     new_high_risk_functions = tuple(
@@ -285,6 +288,9 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
     api_breaking_changes = tuple(
         _as_sequence(getattr(metrics_diff, "new_api_breaking_changes", ()))
     )
+    api_signature_changes = tuple(
+        _as_sequence(getattr(metrics_diff, "new_api_signature_changes", ()))
+    )
     new_api_symbols = tuple(_as_sequence(getattr(metrics_diff, "new_api_symbols", ())))
     return {
         "new_high_risk_functions": len(new_high_risk_functions),
@@ -308,6 +314,7 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
         ),
         "new_api_symbols": len(new_api_symbols),
         "api_breaking_changes": len(api_breaking_changes),
+        "api_signature_changes": len(api_signature_changes),
     }
 
 

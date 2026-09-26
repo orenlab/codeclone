@@ -40,7 +40,7 @@ from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
     _api_surface_rows,
     _api_surface_summary,
-    _breaking_api_surface_rows,
+    _enrich_api_surface_payload,
 )
 from .coverage_payload import (
     _coverage_adoption_rows,
@@ -317,33 +317,11 @@ def _enrich_metrics_report_payload(
         coverage_adoption["summary"] = coverage_summary
         enriched["coverage_adoption"] = coverage_adoption
 
-    api_surface = dict(as_mapping(enriched.get("api_surface")))
-    api_summary = dict(as_mapping(api_surface.get("summary")))
-    api_items = list(as_sequence(api_surface.get("items")))
-    if api_summary:
-        api_summary["baseline_diff_available"] = api_surface_diff_available
-        api_summary["added"] = (
-            len(metrics_diff.new_api_symbols)
-            if metrics_diff is not None and api_surface_diff_available
-            else 0
-        )
-        api_summary["breaking"] = (
-            len(metrics_diff.new_api_breaking_changes)
-            if metrics_diff is not None and api_surface_diff_available
-            else 0
-        )
-        api_surface["summary"] = api_summary
-    if (
-        metrics_diff is not None
-        and api_surface_diff_available
-        and metrics_diff.new_api_breaking_changes
-    ):
-        api_items.extend(
-            _breaking_api_surface_rows(metrics_diff.new_api_breaking_changes)
-        )
-    api_surface["items"] = api_items
-    if api_surface:
-        enriched["api_surface"] = api_surface
+    enriched["api_surface"] = _enrich_api_surface_payload(
+        enriched.get("api_surface"),
+        metrics_diff=metrics_diff,
+        diff_available=api_surface_diff_available,
+    )
     return enriched
 
 

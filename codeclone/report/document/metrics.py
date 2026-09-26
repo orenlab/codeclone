@@ -1094,6 +1094,10 @@ def _normalize_metrics_families(
                 "public_symbols": _as_int(api_surface_summary.get("public_symbols")),
                 "added": _as_int(api_surface_summary.get("added")),
                 "breaking": _as_int(api_surface_summary.get("breaking")),
+                # Absent from a document written before the key existed; the
+                # absent count reads as 0 like every other count here, and
+                # ``baseline_diff_available`` still says whether it is a fact.
+                "changed": _as_int(api_surface_summary.get("changed")),
                 "strict_types": bool(api_surface_summary.get("strict_types")),
             },
             "items": api_surface_items,

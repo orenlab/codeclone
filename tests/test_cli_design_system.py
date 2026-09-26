@@ -171,6 +171,7 @@ def _build_catalog() -> dict[str, str]:
             modules=842,
             added=488,
             breaking=22,
+            changed=31,
             diff_available=True,
         ),
         "fmt_summary_compact_api_surface_unavailable": (
@@ -179,6 +180,7 @@ def _build_catalog() -> dict[str, str]:
                 modules=842,
                 added=0,
                 breaking=0,
+                changed=0,
                 diff_available=False,
             )
         ),
@@ -273,6 +275,7 @@ def _build_catalog() -> dict[str, str]:
             modules=842,
             added=488,
             breaking=22,
+            changed=31,
             diff_available=True,
         ),
         "fmt_metrics_api_surface_unavailable": ui.fmt_metrics_api_surface(
@@ -280,6 +283,7 @@ def _build_catalog() -> dict[str, str]:
             modules=842,
             added=0,
             breaking=0,
+            changed=0,
             diff_available=False,
         ),
         "fmt_metrics_coverage_join": ui.fmt_metrics_coverage_join(

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import cast, get_args
+from typing import Literal, cast, get_args
 
 import pytest
 
@@ -704,6 +704,7 @@ def test_build_metrics_report_payload_includes_adoption_and_api_surface_families
         "public_symbols": 1,
         "added": 0,
         "breaking": 0,
+        "changed": 0,
         "strict_types": False,
     }
     assert api_surface["items"] == [
@@ -2208,12 +2209,22 @@ def _api_comparison_published(
         "baseline_diff_available": summary["baseline_diff_available"],
         "added": summary["added"],
         "breaking": summary["breaking"],
-        "breaking_rows": sorted(
-            (str(item.get("qualname")), str(item.get("change_kind")))
-            for item in items
-            if item.get("record_kind") == "breaking_change"
-        ),
+        "changed": summary["changed"],
+        "breaking_rows": _api_change_rows(items, "breaking_change"),
+        "signature_rows": _api_change_rows(items, "signature_change"),
     }
+
+
+def _api_change_rows(
+    items: list[dict[str, object]], record_kind: str
+) -> list[tuple[str, str]]:
+    """``(qualname, change_kind)`` of every published row of one record kind."""
+
+    return sorted(
+        (str(item.get("qualname")), str(item.get("change_kind")))
+        for item in items
+        if item.get("record_kind") == record_kind
+    )
 
 
 def test_api_comparison_is_withheld_on_an_unmeasured_run() -> None:
@@ -2251,7 +2262,9 @@ def test_api_comparison_is_withheld_on_an_unmeasured_run() -> None:
         "baseline_diff_available": False,
         "added": 0,
         "breaking": 0,
+        "changed": 0,
         "breaking_rows": [],
+        "signature_rows": [],
     }
 
 
@@ -2290,7 +2303,9 @@ def test_api_comparison_is_withheld_on_a_truncated_run() -> None:
         "baseline_diff_available": False,
         "added": 0,
         "breaking": 0,
+        "changed": 0,
         "breaking_rows": [],
+        "signature_rows": [],
     }
 
 
@@ -2317,8 +2332,156 @@ def test_api_comparison_survives_on_a_fully_observed_run() -> None:
         "baseline_diff_available": True,
         "added": 0,
         "breaking": 1,
+        "changed": 0,
         "breaking_rows": [("pkg.gone:helper", "removed")],
+        "signature_rows": [],
     }
+
+
+def _grown_run_metrics(*, limit_has_default: bool) -> ProjectMetrics:
+    """The fixture run whose ``pkg.mod:run`` gained a trailing ``limit``."""
+
+    project_metrics = _project_metrics_with_adoption_and_api()
+    assert project_metrics.api_surface is not None
+    (module,) = project_metrics.api_surface.modules
+    run, *rest = module.symbols
+    grown = replace(
+        run,
+        params=(
+            *run.params,
+            ApiParamSpec(
+                name="limit",
+                kind="pos_or_kw",
+                has_default=limit_has_default,
+                annotation_hash="int",
+            ),
+        ),
+    )
+    return replace(
+        project_metrics,
+        api_surface=ApiSurfaceSnapshot(
+            modules=(replace(module, symbols=(grown, *rest)),)
+        ),
+    )
+
+
+def test_api_comparison_publishes_a_compatible_change_beside_the_breaking_set() -> None:
+    """An appended optional parameter is recorded, and is not breaking.
+
+    The edge stays in the report as its own ``signature_change`` row and in
+    ``changed``; ``breaking`` and the ``breaking_change`` rows -- what the gate
+    and every reader counting breaks read -- stay empty.
+    """
+
+    published = _api_comparison_published(
+        _grown_run_metrics(limit_has_default=True),
+        baseline_api=ApiSurfaceSnapshot(
+            modules=(_api_module("pkg.mod", "pkg.mod:run"),)
+        ),
+    )
+
+    assert published == {
+        "baseline_diff_available": True,
+        "added": 0,
+        "breaking": 0,
+        "changed": 1,
+        "breaking_rows": [],
+        "signature_rows": [("pkg.mod:run", "signature_changed")],
+    }
+
+
+def test_api_comparison_keeps_an_appended_required_parameter_breaking() -> None:
+    """The opposite boundary through the same owner: a break stays a break."""
+
+    published = _api_comparison_published(
+        _grown_run_metrics(limit_has_default=False),
+        baseline_api=ApiSurfaceSnapshot(
+            modules=(_api_module("pkg.mod", "pkg.mod:run"),)
+        ),
+    )
+
+    assert published == {
+        "baseline_diff_available": True,
+        "added": 0,
+        "breaking": 1,
+        "changed": 0,
+        "breaking_rows": [("pkg.mod:run", "signature_break")],
+        "signature_rows": [],
+    }
+
+
+def test_enrich_metrics_report_payload_rows_each_change_under_its_own_record_kind() -> (
+    None
+):
+    """Two record kinds, two counts, one row each -- and nothing when withheld."""
+
+    def change(
+        name: str, kind: Literal["removed", "signature_break", "signature_changed"]
+    ) -> ApiBreakingChange:
+        return ApiBreakingChange(
+            qualname=f"pkg.mod:{name}",
+            filepath="pkg/mod.py",
+            start_line=1,
+            end_line=1,
+            symbol_kind="function",
+            change_kind=kind,
+            detail=name,
+        )
+
+    metrics_diff = MetricsDiff(
+        new_high_risk_functions=(),
+        new_high_coupling_classes=(),
+        new_cycles=(),
+        new_dead_code=(),
+        health_delta=0,
+        new_api_breaking_changes=(change("gone", "removed"),),
+        new_api_signature_changes=(
+            change("grown", "signature_changed"),
+            change("widened", "signature_changed"),
+        ),
+    )
+    base_payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
+        project_metrics=_project_metrics_with_adoption_and_api(),
+        units=(),
+        class_metrics=(),
+        suppressed_dead_code=(),
+    )
+
+    def published(available: bool) -> tuple[object, object, list[tuple[str, str, str]]]:
+        payload = _enrich_metrics_report_payload(
+            metrics_payload=base_payload,
+            metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=True,
+            api_surface_diff_available=available,
+        )
+        api_surface = cast("dict[str, object]", payload["api_surface"])
+        summary = cast("dict[str, object]", api_surface["summary"])
+        items = cast("list[dict[str, object]]", api_surface["items"])
+        return (
+            summary["breaking"],
+            summary["changed"],
+            sorted(
+                (
+                    str(item["record_kind"]),
+                    str(item["qualname"]),
+                    str(item["change_kind"]),
+                )
+                for item in items
+                if item.get("record_kind") != "symbol"
+            ),
+        )
+
+    assert published(True) == (
+        1,
+        2,
+        [
+            ("breaking_change", "pkg.mod:gone", "removed"),
+            ("signature_change", "pkg.mod:grown", "signature_changed"),
+            ("signature_change", "pkg.mod:widened", "signature_changed"),
+        ],
+    )
+    assert published(False) == (0, 0, [])
 
 
 def test_api_teardown_still_publishes_on_a_genuinely_emptied_scope() -> None:
@@ -2355,10 +2518,12 @@ def test_api_teardown_still_publishes_on_a_genuinely_emptied_scope() -> None:
         "baseline_diff_available": True,
         "added": 0,
         "breaking": 2,
+        "changed": 0,
         "breaking_rows": [
             ("pkg.mod:run", "removed"),
             ("pkg.unread:helper", "removed"),
         ],
+        "signature_rows": [],
     }
 
 

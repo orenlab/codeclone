@@ -1826,6 +1826,7 @@ def _metrics_only_families() -> dict[str, object]:
                 "public_symbols": 1,
                 "added": 1,
                 "breaking": 1,
+                "changed": 1,
                 "strict_types": False,
                 "baseline_diff_available": True,
             },
@@ -1860,6 +1861,17 @@ def _metrics_only_families() -> dict[str, object]:
                     "symbol_kind": "function",
                     "change_kind": "removed",
                     "detail": "public symbol removed",
+                },
+                {
+                    "record_kind": "signature_change",
+                    "module": "pkg.module",
+                    "filepath": "pkg/module.py",
+                    "qualname": "pkg.module:work",
+                    "start_line": 1,
+                    "end_line": 30,
+                    "symbol_kind": "function",
+                    "change_kind": "signature_changed",
+                    "detail": "Added optional parameter limit.",
                 },
             ],
         },
@@ -2061,10 +2073,15 @@ _SEMANTIC_MEMBER_CENSUS_V3: dict[str, tuple[str, ...]] = {
         "metrics.families.api_surface/items[].start_line => navigation_provenance",
         "metrics.families.api_surface/items[].symbol_kind",
         "metrics.families.api_surface/items[record_kind=breaking_change] => comparison",
+        (
+            "metrics.families.api_surface/items[record_kind=signature_change]"
+            " => comparison"
+        ),
         "metrics.families.api_surface/items_truncated",
         "metrics.families.api_surface/summary.added => comparison",
         "metrics.families.api_surface/summary.baseline_diff_available => comparison",
         "metrics.families.api_surface/summary.breaking => comparison",
+        "metrics.families.api_surface/summary.changed => comparison",
         "metrics.families.api_surface/summary.enabled",
         "metrics.families.api_surface/summary.modules",
         "metrics.families.api_surface/summary.public_symbols",
@@ -3106,6 +3123,13 @@ def test_v3_authority_candidate_level_moves_the_analysis_tier() -> None:
             id="api-summary-breaking",
         ),
         pytest.param(
+            "api_surface",
+            "metrics.families.api_surface.summary",
+            "changed",
+            7,
+            id="api-summary-changed",
+        ),
+        pytest.param(
             "coverage_adoption",
             "metrics.families.coverage_adoption.summary",
             "param_delta",
@@ -3133,15 +3157,17 @@ def test_v3_baseline_derived_statement_moves_only_the_comparison_tier(
     )
 
 
-def test_v3_api_breaking_change_row_is_a_comparison_statement_whole() -> None:
-    """``core.metrics_payload`` interleaves one ``breaking_change`` row per
-    new breaking change with the symbol rows.  The row is routed whole:
-    editing it, or dropping it, moves the comparison tier and never the
-    analysis tier."""
+@pytest.mark.parametrize("record_kind", ["breaking_change", "signature_change"])
+def test_v3_api_change_row_is_a_comparison_statement_whole(record_kind: str) -> None:
+    """``core.api_surface_payload`` interleaves one ``breaking_change`` row per
+    new breaking change, and one ``signature_change`` row per new compatible
+    change, with the symbol rows.  Each row is routed whole: editing it, or
+    dropping it, moves the comparison tier and never the analysis tier -- a
+    compatible change is baseline-derived exactly like a breaking one."""
 
     document = _maximal_document()
     edited = copy.deepcopy(document)
-    _row(edited, "metrics.families.api_surface.items", record_kind="breaking_change")[
+    _row(edited, "metrics.families.api_surface.items", record_kind=record_kind)[
         "detail"
     ] = "signature changed"
     edited = _resealed(edited)
@@ -3158,7 +3184,7 @@ def test_v3_api_breaking_change_row_is_a_comparison_statement_whole() -> None:
     container["items"] = [
         row
         for row in rows
-        if not (isinstance(row, dict) and row.get("record_kind") == "breaking_change")
+        if not (isinstance(row, dict) and row.get("record_kind") == record_kind)
     ]
     dropped = _resealed(dropped)
     _assert_moved(

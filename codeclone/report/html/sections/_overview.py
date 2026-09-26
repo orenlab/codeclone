@@ -24,6 +24,7 @@ from ...messages.overview import (
     ADOPTION_API_DISABLED,
     ADOPTION_API_SURFACE_LABEL,
     ADOPTION_BREAKING_CHANGES,
+    ADOPTION_CHANGED_SIGNATURES,
     ADOPTION_CLUSTER_TITLE,
     ADOPTION_COVERAGE_LABEL,
     ADOPTION_DOCSTRINGS,
@@ -622,6 +623,12 @@ def _api_card_html(api_summary: Mapping[str, object]) -> str:
                 ADOPTION_BREAKING_CHANGES,
                 _format_count(breaking),
                 value_cls="warn" if breaking > 0 else "good",
+            )
+        )
+        rows.append(
+            _fact_row(
+                ADOPTION_CHANGED_SIGNATURES,
+                _format_count(_as_int(api_summary.get("changed"))),
             )
         )
         rows.append(_fact_row(ADOPTION_ADDED_SYMBOLS, _format_count(added)))

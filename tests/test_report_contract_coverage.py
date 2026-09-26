@@ -1718,6 +1718,9 @@ def test_report_contract_includes_canonical_adoption_and_api_surface_families() 
         "public_symbols": 2,
         "added": 1,
         "breaking": 1,
+        # The payload above predates ``changed``: an absent count reads 0,
+        # the same rule every other count of the family follows.
+        "changed": 0,
         "strict_types": False,
     }
     assert (
@@ -1726,6 +1729,68 @@ def test_report_contract_includes_canonical_adoption_and_api_surface_families() 
         api_items[1]["record_kind"],
         api_items[1]["change_kind"],
     ) == ("symbol", "pkg/mod.py", "breaking_change", "removed")
+
+
+def test_report_contract_reads_compatible_signature_changes_apart() -> None:
+    """``changed`` and its ``signature_change`` rows survive the normalizer.
+
+    Distinct counts, so a reader that returned the breaking count as
+    ``changed`` -- or dropped the row kind -- cannot pass.
+    """
+
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "api_surface": {
+                "summary": {
+                    "enabled": True,
+                    "baseline_diff_available": True,
+                    "modules": 1,
+                    "public_symbols": 1,
+                    "added": 0,
+                    "breaking": 1,
+                    "changed": 2,
+                    "strict_types": False,
+                },
+                "items": [
+                    {
+                        "record_kind": "signature_change",
+                        "module": "pkg.mod",
+                        "filepath": "/repo/pkg/mod.py",
+                        "qualname": "pkg.mod:run",
+                        "start_line": 10,
+                        "end_line": 12,
+                        "symbol_kind": "function",
+                        "change_kind": "signature_changed",
+                        "detail": "Added optional parameter limit.",
+                    },
+                ],
+            },
+        },
+    )
+
+    _, api_surface, api_items = _metric_family_payload(payload, "api_surface")
+    api_summary = cast(dict[str, object], api_surface["summary"])
+    assert (api_summary["breaking"], api_summary["changed"]) == (1, 2)
+    assert [
+        (
+            item["record_kind"],
+            item["relative_path"],
+            item["change_kind"],
+            item["detail"],
+        )
+        for item in api_items
+    ] == [
+        (
+            "signature_change",
+            "pkg/mod.py",
+            "signature_changed",
+            "Added optional parameter limit.",
+        )
+    ]
 
 
 def test_report_contract_includes_authority_only_when_opted_in() -> None:

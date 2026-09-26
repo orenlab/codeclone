@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 import string
 
 import pytest
@@ -137,6 +138,7 @@ def test_fmt_metrics_api_surface_includes_breaking_and_added() -> None:
         modules=2,
         added=3,
         breaking=1,
+        changed=0,
         diff_available=True,
     )
     assert "breaking" in text
@@ -149,9 +151,29 @@ def test_fmt_metrics_api_surface_without_delta() -> None:
         modules=3,
         added=0,
         breaking=0,
+        changed=0,
         diff_available=True,
     )
     assert "breaking" not in text
+
+
+def test_fmt_metrics_api_surface_says_changed_as_its_own_word() -> None:
+    """A compatible signature change is a delta of its own, never a break.
+
+    Only ``changed`` is non-zero here, so the line must still print the delta
+    -- and print it as ``changed``, with the breaking count left at 0.
+    """
+
+    text = formatters.fmt_metrics_api_surface(
+        public_symbols=10,
+        modules=3,
+        added=0,
+        breaking=0,
+        changed=2,
+        diff_available=True,
+    )
+    plain = re.sub(r"\[/?[^\]]*\]", "", text)
+    assert "0 breaking / 2 changed / 0 added" in plain
 
 
 def test_fmt_summary_compact_api_surface_omits_diff_terms_when_withheld() -> None:
@@ -162,22 +184,28 @@ def test_fmt_summary_compact_api_surface_omits_diff_terms_when_withheld() -> Non
         modules=2,
         added=0,
         breaking=0,
+        changed=0,
         diff_available=False,
     )
     assert text == "Public API  symbols=3  modules=2"
 
 
 def test_fmt_summary_compact_api_surface_keeps_diff_terms_when_available() -> None:
-    """The opposite boundary: a comparison that ran keeps its terms verbatim."""
+    """The opposite boundary: a comparison that ran keeps its terms verbatim.
+
+    ``changed=`` is a term of its own beside ``breaking=``: distinct counts
+    here, so a line that printed one in the other's place reds.
+    """
 
     text = formatters.fmt_summary_compact_api_surface(
         public_symbols=3,
         modules=2,
         added=4,
         breaking=1,
+        changed=5,
         diff_available=True,
     )
-    assert text == "Public API  symbols=3  modules=2  breaking=1  added=4"
+    assert text == "Public API  symbols=3  modules=2  breaking=1  changed=5  added=4"
 
 
 def test_fmt_metrics_api_surface_pronounces_a_withheld_comparison() -> None:
@@ -188,13 +216,13 @@ def test_fmt_metrics_api_surface_pronounces_a_withheld_comparison() -> None:
         modules=3,
         added=0,
         breaking=0,
+        changed=0,
         diff_available=False,
     )
     # Ownership pin: the expectation is read from the named owner, so the
     # compact line cannot drift apart from its vocabulary.
     assert formatters._API_SURFACE_DIFF_ABSENCE in text
-    assert "breaking" not in text
-    assert "added" not in text
+    assert all(term not in text for term in ("breaking", "changed", "added"))
 
 
 def test_fmt_metrics_api_surface_compared_clean_stays_silent_about_absence() -> None:
@@ -205,6 +233,7 @@ def test_fmt_metrics_api_surface_compared_clean_stays_silent_about_absence() -> 
         modules=3,
         added=0,
         breaking=0,
+        changed=0,
         diff_available=True,
     )
     assert "unavailable" not in text

@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from ..metrics.api_population import visible_api_surface
 from ..models import ApiBreakingChange, ApiSurfaceSnapshot
-from ..utils.coerce import as_int, as_str
+from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
+
+if TYPE_CHECKING:
+    from ..models import MetricsDiff
 
 
 def _api_surface_summary(api_surface: ApiSurfaceSnapshot | None) -> dict[str, object]:
@@ -26,6 +30,7 @@ def _api_surface_summary(api_surface: ApiSurfaceSnapshot | None) -> dict[str, ob
         "public_symbols": sum(len(module.symbols) for module in modules),
         "added": 0,
         "breaking": 0,
+        "changed": 0,
         "strict_types": False,
     }
 
@@ -74,7 +79,50 @@ def _api_surface_rows(
     )
 
 
-def _breaking_api_surface_rows(changes: Sequence[object]) -> list[dict[str, object]]:
+def _enrich_api_surface_payload(
+    api_surface_payload: object,
+    *,
+    metrics_diff: MetricsDiff | None,
+    diff_available: bool,
+) -> dict[str, object]:
+    """The api_surface container with the baseline comparison folded in.
+
+    ``breaking`` counts the changes that break a caller -- ``removed`` and
+    ``signature_break`` -- and is the count the api gate reads; ``changed``
+    counts the compatible ``signature_changed`` changes recorded beside it.
+    Each change also rides ``items`` as one row: ``breaking_change`` keeps
+    its meaning, so a reader counting those rows still counts exactly the
+    breaking set, and a compatible change is its own ``signature_change``
+    record rather than a breaking row that says it is not breaking. None of
+    it is a fact when the comparison never ran, which the summary states
+    through ``baseline_diff_available``.
+    """
+
+    api_surface = dict(as_mapping(api_surface_payload))
+    api_summary = dict(as_mapping(api_surface.get("summary")))
+    compared = metrics_diff if diff_available else None
+    added = compared.new_api_symbols if compared is not None else ()
+    breaking = compared.new_api_breaking_changes if compared is not None else ()
+    changed = compared.new_api_signature_changes if compared is not None else ()
+    if api_summary:
+        api_summary["baseline_diff_available"] = diff_available
+        api_summary["added"] = len(added)
+        api_summary["breaking"] = len(breaking)
+        api_summary["changed"] = len(changed)
+        api_surface["summary"] = api_summary
+    api_surface["items"] = [
+        *as_sequence(api_surface.get("items")),
+        *_api_change_rows(breaking, record_kind="breaking_change"),
+        *_api_change_rows(changed, record_kind="signature_change"),
+    ]
+    return api_surface
+
+
+def _api_change_rows(
+    changes: Sequence[object],
+    *,
+    record_kind: str,
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for change in changes:
         if not isinstance(change, ApiBreakingChange):
@@ -82,7 +130,7 @@ def _breaking_api_surface_rows(changes: Sequence[object]) -> list[dict[str, obje
         module_name, _, _local_name = change.qualname.partition(":")
         rows.append(
             {
-                "record_kind": "breaking_change",
+                "record_kind": record_kind,
                 "module": module_name,
                 "filepath": change.filepath,
                 "qualname": change.qualname,
