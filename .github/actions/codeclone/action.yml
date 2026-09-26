@@ -128,7 +128,7 @@ runs:
   using: composite
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: ${{ inputs.python-version }}
         cache: pip
@@ -231,7 +231,7 @@ runs:
     - name: Upload SARIF
       if: ${{ always() && inputs.sarif == 'true' && steps.analysis.outputs.sarif-exists == 'true' }}
       continue-on-error: true
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3.38.2
       with:
         sarif_file: ${{ steps.analysis.outputs.sarif-path }}
         category: codeclone
@@ -240,7 +240,7 @@ runs:
       id: post-pr-comment
       if: ${{ always() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' && steps.render-pr-comment.outputs.comment-exists == 'true' }}
       continue-on-error: true
-      uses: actions/github-script@v7
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
       env:
         COMMENT_BODY_PATH: ${{ steps.render-pr-comment.outputs.comment-body-path }}
         COMMENT_MARKER: "<!-- codeclone-report -->"
