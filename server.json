@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.orenlab/codeclone",
   "title": "CodeClone",
-  "description": "A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents",
+  "description": "Structural Change Controller for AI-assisted Python: baseline-aware, deterministic, built for CI",
   "version": "2.1.0a2",
   "websiteUrl": "https://orenlab.github.io/codeclone/",
   "repository": {

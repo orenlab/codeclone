@@ -111,6 +111,25 @@ def test_server_json_tracks_the_released_package() -> None:
     assert "fileSha256" not in package
 
 
+def _server_description() -> str:
+    return str(_json_object(_REPO_ROOT / "server.json")["description"])
+
+
+def test_server_json_description_fits_the_registry_limit() -> None:
+    # The limit is read from the published schema, not restated here, and it
+    # is held without jsonschema, which the schema-validation test skips on.
+    schema = _json_object(_FIXTURES / "server.schema.2025-12-11.json")
+    server_detail = _mapping(_mapping(schema["definitions"])["ServerDetail"])
+    limit = _mapping(_mapping(server_detail["properties"])["description"])["maxLength"]
+
+    assert isinstance(limit, int)
+    assert len(_server_description()) <= limit
+
+
+def test_server_json_description_leads_with_the_product_name() -> None:
+    assert _server_description().startswith("Structural Change Controller")
+
+
 def _typed_arguments(items: object) -> list[tuple[object, object, object]]:
     return [
         (_mapping(item)["type"], _mapping(item).get("name"), _mapping(item)["value"])

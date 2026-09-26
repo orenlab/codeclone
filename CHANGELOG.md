@@ -33,6 +33,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 
 ### Changed
 
+- MCP Registry `server.json` `description` leads with the product name: "Structural Change Controller for AI-assisted Python: baseline-aware, deterministic, built for CI" (96 of the schema's 100 characters); the PyPI summary is unchanged.
 - Run identity generation `3` (`REPORT_SEMANTIC_IDENTITY_VERSION`, `integrity.semantic_identity_version`): each analysis assertion has one family digest (`novelty` moves to a new `comparison` tier of `integrity.semantic.family_digests`; `api_surface`/`coverage_adoption`/`overloaded_modules`/`security_surfaces`/`semantic_authority` added; `integrity.semantic.population` gains `observed`); every `run_id` moves once; generation-2 documents still verify.
 - Baselines work across CPython versions: `meta.python_tag` is signed provenance (noted by the CLI), not trust; only `baseline_scope_id` condemns a container.
 - Liveness policy `5` (`LIVENESS_POLICY_VERSION`): `as`-same-name re-exports (not under `TYPE_CHECKING`) and proven pluggy `@hookspec`/`@hookimpl` are live roots; `__all__` alone is exposure, not use (dead under `--dead-code-world closed`, `unresolved` under `open`: `declared_reexport:<module>`/`module_getattr:<module>`).
