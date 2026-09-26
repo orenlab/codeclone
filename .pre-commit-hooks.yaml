@@ -1,0 +1,8 @@
+- id: codeclone
+  name: CodeClone
+  description: Baseline-aware structural review of Python code; fails on new clones and quality regressions.
+  entry: codeclone
+  language: python
+  args: [".", "--ci"]
+  pass_filenames: false
+  types: [python]

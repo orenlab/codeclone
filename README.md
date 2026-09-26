@@ -194,6 +194,21 @@ Use CodeClone in GitHub Actions:
     pr-comment: "true"
 ```
 
+Or run it as a pre-commit hook:
+
+```yaml
+repos:
+  - repo: https://github.com/orenlab/codeclone
+    rev: v2.1.0a2
+    hooks:
+      - id: codeclone
+```
+
+The hook runs `codeclone . --ci`, which exits with code `2` unless the repository root holds a trusted
+`codeclone.baseline.json`: set `baseline_scope_id` under `[tool.codeclone]`, then create the baseline once with
+`codeclone . --update-baseline`. The hook's Python version does not have to match the one that created the baseline: the
+interpreter tag a baseline records is provenance, not a trust condition.
+
 CI can reject newly introduced clones, metric regressions, API breaks, and coverage regressions without requiring the
 existing repository to be clean first.
 
