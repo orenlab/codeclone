@@ -3580,8 +3580,8 @@ def test_setup_apply_json_and_explicit_plan_id(
 
 
 # ---------------------------------------------------------------------------
-# ``codeclone setup`` writes ``baseline_scope_id`` and keeps the baseline path
-# relative.
+# ``codeclone setup`` writes ``baseline_scope_id``, keeps the baseline path
+# relative, and shows payload text in its rich output literally.
 # ---------------------------------------------------------------------------
 
 _CODECLONE_CLI: tuple[str, ...] = (sys.executable, "-m", "codeclone.main")
@@ -3621,6 +3621,23 @@ def _flat(text: str) -> str:
     """Collapse the console's line wrapping so a sentence can be matched."""
 
     return " ".join(text.split())
+
+
+def _wide_console() -> PrinterLike:
+    """The production console class, wide enough that no cell wraps."""
+
+    from codeclone.surfaces.cli.console import make_query_console
+
+    return make_query_console(no_color=True, width=400)
+
+
+def _output_line(output: str, marker: str) -> str:
+    return next(line for line in output.splitlines() if marker in line)
+
+
+def _plan_output(root: Path, capsys: pytest.CaptureFixture[str]) -> str:
+    setup_render.render_setup_plan(console=_wide_console(), plan=build_setup_plan(root))
+    return capsys.readouterr().out
 
 
 def test_setup_plan_proposes_a_canonical_scope_id_and_a_relative_baseline(
@@ -3842,3 +3859,112 @@ def test_merge_treats_an_equivalent_absolute_baseline_as_satisfied(
 
     assert result.changed_keys == ()
     assert pyproject.read_text(encoding="utf-8") == before
+
+
+def test_setup_status_cli_shows_the_tool_codeclone_table_name(tmp_path: Path) -> None:
+    root = _project_without_codeclone_section(tmp_path / "project")
+
+    status = _run_codeclone("setup", "status", "--root", str(root), cwd=tmp_path)
+
+    assert status.returncode == 0, status.stderr
+    assert "[tool.codeclone]" in status.stdout
+    assert "No  section" not in status.stdout
+
+
+def test_setup_plan_cli_diff_shows_table_headers(tmp_path: Path) -> None:
+    root = _project_without_codeclone_section(tmp_path / "project")
+
+    shown = _run_codeclone("setup", "plan", "--root", str(root), cwd=tmp_path)
+
+    assert shown.returncode == 0, shown.stderr
+    assert " [project]" in shown.stdout
+    assert "+[tool.codeclone]" in shown.stdout
+
+
+def test_setup_status_rich_shows_reason_and_next_step_literally(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _project_without_codeclone_section(tmp_path)
+
+    setup_render.render_setup_status(
+        console=_wide_console(), snapshot=build_setup_snapshot(tmp_path)
+    )
+
+    row = _output_line(capsys.readouterr().out, "Repository analysis")
+    assert "No [tool.codeclone] section in pyproject.toml" in row
+    assert "Add a [tool.codeclone] section to pyproject.toml." in row
+
+
+def test_setup_doctor_rich_shows_cause_and_action_literally(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _project_without_codeclone_section(tmp_path)
+
+    setup_render.render_setup_doctor(
+        console=_wide_console(), snapshot=build_setup_snapshot(tmp_path)
+    )
+
+    out = capsys.readouterr().out
+    assert "cause=No [tool.codeclone] section in pyproject.toml" in out
+    assert "action=Add a [tool.codeclone] section to pyproject.toml." in out
+
+
+def test_setup_capability_table_rich_shows_reason_literally(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _project_without_codeclone_section(tmp_path)
+    rows = [
+        item
+        for item in setup_render.snapshot_capabilities(build_setup_snapshot(tmp_path))
+        if item.get("id") == "analysis"
+    ]
+
+    setup_render.render_setup_capability_table(_wide_console(), rows)
+
+    row = _output_line(capsys.readouterr().out, "Repository analysis")
+    assert "No [tool.codeclone] section in pyproject.toml" in row
+
+
+def test_setup_plan_rich_shows_diff_and_blocker_literally(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clean = _project_without_codeclone_section(tmp_path / "clean")
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "pyproject.toml").write_text(
+        '[tool.codeclone]\nbaseline_scope_id = "nope"\n', encoding="utf-8"
+    )
+
+    diff_out = _plan_output(clean, capsys)
+    blocker_out = _plan_output(broken, capsys)
+
+    assert " [project]" in diff_out
+    assert "+[tool.codeclone]" in diff_out
+    assert "invalid_pyproject: Invalid baseline_scope_id under [tool.codeclone]" in (
+        blocker_out
+    )
+
+
+def test_setup_rich_headers_show_a_bracketed_root_literally(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _project_without_codeclone_section(tmp_path / "repo[demo]")
+
+    setup_render.render_setup_status(
+        console=_wide_console(), snapshot=build_setup_snapshot(root)
+    )
+    status_out = capsys.readouterr().out
+    plan_out = _plan_output(root, capsys)
+
+    assert f"Root: {root.resolve()}" in status_out
+    assert f"Root: {root.resolve()}" in plan_out

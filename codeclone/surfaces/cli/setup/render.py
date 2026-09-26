@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, TypeGuard
 
 from ....ui_messages import setup as setup_ui
 from ....ui_messages.runtime import HINT_SCOPE_ID_FOOTER, HINT_SCOPE_ID_KEY_LINE
-from ....ui_messages.styling import fmt_bool
+from ....ui_messages.styling import esc, fmt_bool
 from ..console import rich_panel_symbols, supports_rich_console
 from ..types import PrinterLike
 from .engine.capabilities import GROUP_ORDER
@@ -59,7 +59,7 @@ def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
         rule_cls(title="Readiness", style="dim", characters="\u2500"),
     )
     console.print(
-        f"  [dim]Root:[/dim] {snapshot.get('root')}  "
+        f"  [dim]Root:[/dim] {esc(snapshot.get('root'))}  "
         f"[dim]Python:[/dim] {runtime.get('python_tag')}  "
         f"[dim]CodeClone:[/dim] {runtime.get('codeclone_version')}  "
         f"[dim]{setup_ui.SETUP_STATUS_BASE_LABEL}:[/dim] {install.get('base')}"
@@ -96,15 +96,15 @@ def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
                 str(row.get("label", "")),
                 _availability_label(row.get("availability")),
                 str(row.get("readiness", "")),
-                str(row.get("reason", "")) or "-",
-                str(row.get("recommended_action", "")) or "-",
+                esc(str(row.get("reason", "")) or "-"),
+                esc(str(row.get("recommended_action", "")) or "-"),
             )
         console.print(table)
         console.print()
 
 
 def _render_doctor_rich(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
-    _, panel_cls, rule_cls, _table_cls, _ = rich_panel_symbols()
+    _, panel_cls, rule_cls, _table_cls, text_cls = rich_panel_symbols()
     _render_status_rich(console, snapshot)
     console.print(
         rule_cls(
@@ -116,7 +116,7 @@ def _render_doctor_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
     for row in _capabilities(snapshot):
         console.print(
             panel_cls(
-                _doctor_body(row),
+                text_cls(_doctor_body(row)),
                 title=str(row.get("label", row.get("id", ""))),
             )
         )
@@ -177,7 +177,7 @@ def _availability_label(availability: object) -> str:
 
 
 def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:
-    _, panel_cls, rule_cls, table_cls, _ = rich_panel_symbols()
+    _, panel_cls, rule_cls, table_cls, text_cls = rich_panel_symbols()
     _print_setup_rich_header(
         console,
         title=setup_ui.SETUP_PLAN_TITLE,
@@ -195,7 +195,8 @@ def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:
         console.print(setup_ui.SETUP_PLAN_BLOCKED)
         for blocker in blockers:
             if isinstance(blocker, Mapping):
-                console.print(f"  - {blocker.get('kind')}: {blocker.get('reason', '')}")
+                reason = esc(blocker.get("reason", ""))
+                console.print(f"  - {blocker.get('kind')}: {reason}")
         console.print()
 
     actions = _plan_actions(plan)
@@ -219,7 +220,7 @@ def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:
         if not diff:
             continue
         title = f"{action.get('kind')} → {action.get('path')}"
-        console.print(panel_cls(diff.rstrip(), title=title))
+        console.print(panel_cls(text_cls(diff.rstrip()), title=title))
 
 
 def _render_plan_plain(console: PrinterLike, plan: Mapping[str, object]) -> None:
@@ -314,7 +315,7 @@ def _print_setup_rich_header(
         rule_cls(title=rule_title, style="dim", characters="\u2500"),
     )
     console.print(
-        f"  [dim]Root:[/dim] {root}  "
+        f"  [dim]Root:[/dim] {esc(root)}  "
         f"[dim]Status:[/dim] {status}  "
         f"[dim]Plan id:[/dim] {plan_id}"
     )
@@ -391,7 +392,7 @@ def render_setup_capability_table(
             table.add_row(
                 str(row.get("label", "")),
                 str(row.get("readiness", "")),
-                reason or "-",
+                esc(reason or "-"),
             )
         console.print(table)
         return
