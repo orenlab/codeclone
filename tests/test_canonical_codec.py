@@ -738,8 +738,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W02",
         "run_scalars keys out of canonical order",
-        '"run_scalars":{"classes":7,"files_analyzed":2,',
-        '"run_scalars":{"files_analyzed":2,"classes":7,',
+        '"run_scalars":{"classes":7,"files_found":3,',
+        '"run_scalars":{"files_found":3,"classes":7,',
     ),
     (
         "W18",

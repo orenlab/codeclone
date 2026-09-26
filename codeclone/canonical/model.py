@@ -1101,12 +1101,19 @@ class RunScalars:
     population; zero is a MEASURED value here (a run with zero classes is a
     fact), unlike the F2 floor where the producer drops zero rows.
     Strictly derivable values are deliberately NOT included (later derived).
+
+    ``files_observed`` is ONE number on purpose: how many of the found files
+    this run read, parsed fresh or served off the cache alike.  How those
+    split between the two is execution provenance -- the report keeps it
+    (``inventory.files.analyzed`` / ``.cached``) and its own identity law
+    refuses to let it reach a digest -- and a snapshot that stored the split
+    gave one tree two store runs, a cold one and a warm one, under one report
+    identity (DET-01, measured 2026-09-25).
     """
 
     classes: int
-    files_analyzed: int
-    files_cached: int
     files_found: int
+    files_observed: int
     files_skipped: int
     functions: int
     methods: int

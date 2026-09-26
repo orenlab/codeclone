@@ -485,13 +485,15 @@ def profile_head_target(population: AnalysisPopulation) -> str:
 
 
 def _run_scalars(
-    discovery: DiscoveryResult, processing: ProcessingResult
+    discovery: DiscoveryResult, processing: ProcessingResult, analysis: AnalysisResult
 ) -> RunScalars:
+    # ``files_observed`` is the pipeline's one owner of the sum -- the value
+    # the population state and health already read -- never re-added here:
+    # the parsed/cached split is provenance and never enters the snapshot.
     return RunScalars(
         classes=processing.analyzed_classes + discovery.cached_classes,
-        files_analyzed=processing.files_analyzed,
-        files_cached=discovery.cache_hits,
         files_found=discovery.files_found,
+        files_observed=analysis.files_analyzed_or_cached,
         files_skipped=processing.files_skipped,
         functions=processing.analyzed_functions + discovery.cached_functions,
         methods=processing.analyzed_methods + discovery.cached_methods,
@@ -1523,7 +1525,7 @@ def canonical_snapshot_from_producers(
         cohesion_hotspots=cohesion_hotspots,
         overloaded_modules=overloaded_modules,
         coverage_units=coverage_units,
-        run_scalars=_run_scalars(discovery, processing),
+        run_scalars=_run_scalars(discovery, processing, analysis),
         analysis_population=population,
         coverage_join=coverage_join,
         dead_code_summary=dead_code_summary,

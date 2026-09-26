@@ -44,6 +44,7 @@ from __future__ import annotations
 import ast
 import sqlite3
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import orjson
@@ -51,7 +52,7 @@ import pytest
 
 from codeclone.cache.projection import runtime_filepath_from_wire
 from codeclone.cache.store import Cache
-from codeclone.canonical.model import CanonicalModel
+from codeclone.canonical.model import CanonicalModel, RunScalars
 from codeclone.canonical.store import RunStore
 from codeclone.contracts import DEFAULT_CACHE_PATH
 from codeclone.core._types import AnalysisResult, DiscoveryResult, ProcessingResult
@@ -135,6 +136,29 @@ _CONTAINMENT_DISCOVERY, _CONTAINMENT_ANALYSIS = _producers(
 )
 
 
+def _processing(*, files_analyzed: int) -> ProcessingResult:
+    """A real processing result that parsed ``files_analyzed`` files and
+    produced nothing else, for pins on what the builder does with counts."""
+
+    return ProcessingResult(
+        units=(),
+        blocks=(),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        files_analyzed=files_analyzed,
+        files_skipped=0,
+        analyzed_lines=0,
+        analyzed_functions=0,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+
+
 _SOURCE_CONTENT_DIGEST = DigestObject(
     domain="codeclone.source-content.v1",
     algorithm="sha256",
@@ -173,9 +197,15 @@ def test_a_warm_cache_publishes_the_same_security_surfaces_as_a_cold_one(
     """
     cold_store = corpus / "cold.sqlite3"
     warm_store = corpus / "warm.sqlite3"
+    cold_json = corpus.parent / "cold.json"
+    warm_json = corpus.parent / "warm.json"
 
-    run_store_cli(corpus, *_FULL_METRICS_ARGS, store=cold_store)
-    run_store_cli(corpus, *_FULL_METRICS_ARGS, store=warm_store)
+    run_store_cli(
+        corpus, *_FULL_METRICS_ARGS, "--json", str(cold_json), store=cold_store
+    )
+    run_store_cli(
+        corpus, *_FULL_METRICS_ARGS, "--json", str(warm_json), store=warm_store
+    )
 
     cold = _published(cold_store)
     warm = _published(warm_store)
@@ -183,12 +213,12 @@ def test_a_warm_cache_publishes_the_same_security_surfaces_as_a_cold_one(
     # The instrument is proven on before anything is compared: the second
     # run has to have actually reused the cache, and the first must not
     # have. Without this the equality could hold because neither run ever
-    # touched the lane under test.
-    cold_scalars = cold.facts.analysis.run_scalars
-    warm_scalars = warm.facts.analysis.run_scalars
-    assert cold_scalars is not None and warm_scalars is not None
-    assert cold_scalars.files_cached == 0
-    assert warm_scalars.files_cached > 0
+    # touched the lane under test.  The parsed/cached split is read off the
+    # report, which keeps it as provenance; the store holds only the sum.
+    cold_files = orjson.loads(cold_json.read_bytes())["inventory"]["files"]
+    warm_files = orjson.loads(warm_json.read_bytes())["inventory"]["files"]
+    assert cold_files["cached"] == 0
+    assert warm_files["cached"] > 0
 
     surfaces = cold.facts.analysis.security_surfaces
     assert surfaces, "the corpus carries no security surface; the pin is hollow"
@@ -743,23 +773,7 @@ def test_the_snapshot_the_builder_hands_the_store_carries_that_population() -> N
     )
     model = canonical_snapshot_from_producers(
         discovery=discovery,
-        processing=ProcessingResult(
-            units=(),
-            blocks=(),
-            segments=(),
-            class_metrics=(),
-            module_deps=(),
-            dead_candidates=(),
-            referenced_names=frozenset(),
-            files_analyzed=1,
-            files_skipped=0,
-            analyzed_lines=0,
-            analyzed_functions=0,
-            analyzed_methods=0,
-            analyzed_classes=0,
-            failed_files=(),
-            source_read_failures=(),
-        ),
+        processing=_processing(files_analyzed=1),
         analysis=analysis,
         report_meta={"analysis_mode": "full", "metrics_computed": []},
         population=producer_execution_population(
@@ -770,3 +784,45 @@ def test_the_snapshot_the_builder_hands_the_store_carries_that_population() -> N
     )
 
     assert model.facts.analysis.analysis_population is not None
+
+
+_FULL_RUN_META: dict[str, object] = {"analysis_mode": "full", "metrics_computed": []}
+
+
+def _stored_scalars(*, files_found: int, analyzed: int, cached: int) -> RunScalars:
+    """The run scalar the real builder hands the store for one split."""
+
+    discovery, analysis = _producers(
+        files_found=files_found,
+        files_analyzed=analyzed + cached,
+        near_miss=False,
+        renamed=False,
+    )
+    discovery = replace(discovery, cache_hits=cached)
+    model = canonical_snapshot_from_producers(
+        discovery=discovery,
+        processing=_processing(files_analyzed=analyzed),
+        analysis=analysis,
+        report_meta=_FULL_RUN_META,
+        population=producer_execution_population(
+            discovery=discovery, analysis=analysis, report_meta=_FULL_RUN_META
+        ),
+    )
+    scalars = model.facts.analysis.run_scalars
+    assert scalars is not None
+    return scalars
+
+
+def test_the_stored_run_scalar_is_the_observed_sum_whatever_the_split() -> None:
+    """Seven files observed out of nine found, read three ways.
+
+    The found population is deliberately LARGER than the observed one, so a
+    carrier that stored the found count would not pass by coincidence, and
+    the mixed split is uneven, so neither addend equals the sum.
+    """
+
+    cold = _stored_scalars(files_found=9, analyzed=7, cached=0)
+    warm = _stored_scalars(files_found=9, analyzed=0, cached=7)
+    mixed = _stored_scalars(files_found=9, analyzed=4, cached=3)
+    assert cold == warm == mixed
+    assert mixed.files_observed == 7

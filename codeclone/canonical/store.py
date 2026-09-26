@@ -1620,9 +1620,8 @@ def _decode_analysis_population_row(
 def _decode_run_scalar_row(row: Mapping[str, object], where: str) -> RunScalars:
     return RunScalars(
         classes=_require_line(row, "classes", where),
-        files_analyzed=_require_line(row, "files_analyzed", where),
-        files_cached=_require_line(row, "files_cached", where),
         files_found=_require_line(row, "files_found", where),
+        files_observed=_require_line(row, "files_observed", where),
         files_skipped=_require_line(row, "files_skipped", where),
         functions=_require_line(row, "functions", where),
         methods=_require_line(row, "methods", where),

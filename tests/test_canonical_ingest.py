@@ -1001,9 +1001,9 @@ def test_ingest_builds_the_measured_families() -> None:
     assert len(facts.analysis.api_symbols) == 3
     assert facts.analysis.run_scalars == RunScalars(
         classes=7,
-        files_analyzed=2,
-        files_cached=1,
         files_found=3,
+        # the document's analyzed=2 / cached=1 split enters as its sum
+        files_observed=3,
         files_skipped=0,
         functions=41,
         methods=13,

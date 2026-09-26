@@ -624,12 +624,12 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
     # F9 (wave 4): ONE run-scalars record per analysis snapshot — never a
     # table, no invented entity key.  Values pairwise distinct so a
     # cross-wired producer mapping cannot survive, and one zero: zero is a
-    # MEASURED value here (unlike the F2 floor).
+    # MEASURED value here (unlike the F2 floor).  ``files_observed`` is the
+    # parsed-plus-cached sum; the split is provenance and has no field.
     run_scalars = RunScalars(
         classes=7,
-        files_analyzed=2,
-        files_cached=1,
         files_found=3,
+        files_observed=2,
         files_skipped=0,
         functions=41,
         methods=13,
@@ -1072,12 +1072,22 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     after E4, by the 2026-09-23 sanction.  Sanity: an unpopulated E1
     document differs from the revision-1 bytes only by eleven empty
     members (measured 7987 → 9357 bytes before the fixture grew).
+
+    The run-identity preimage fix (DET-01, 2026-09-26, inside the same
+    epoch window, no constant moved) then replaced that literal
+    deliberately (10475 bytes, sha256 14b0d49e… → 10458 bytes, sha256
+    d33cfae6…): the ``run_scalars`` record dropped its parsed/cached split
+    (``files_analyzed`` / ``files_cached``, provenance that gave one tree a
+    cold and a warm store run) for the one ``files_observed`` sum.  Measured
+    as the ONLY cause: re-spelling that one member of the new bytes back to
+    the old two fields and re-sealing reproduces 10475 bytes and 14b0d49e…
+    exactly.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 10475
+    assert len(payload) == 10458
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "14b0d49e436bfa1c3ffc6c0b14d31ab18ade2c63452e39bf130cd31bc8383b4c"
+        == "d33cfae67368db253f095a0789b3cf129558d8977514abceb9d07e2e5996eb06"
     )
 
 
@@ -1632,9 +1642,8 @@ def test_run_scalars_record_survives_the_round_trip() -> None:
     assert record is not None
     assert record == RunScalars(
         classes=7,
-        files_analyzed=2,
-        files_cached=1,
         files_found=3,
+        files_observed=2,
         files_skipped=0,
         functions=41,
         methods=13,
@@ -1679,9 +1688,8 @@ def test_run_scalars_wire_member_is_one_record_object() -> None:
 def test_run_scalars_refuses_non_scalar_values(field_name: str, value: object) -> None:
     values: dict[str, object] = {
         "classes": 7,
-        "files_analyzed": 2,
-        "files_cached": 1,
         "files_found": 3,
+        "files_observed": 2,
         "files_skipped": 0,
         "functions": 41,
         "methods": 13,

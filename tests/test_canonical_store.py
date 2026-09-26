@@ -977,8 +977,8 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         # F9 shape guard: a non-int scalar is refused by the store
         (
             "run_scalar",
-            b'{"classes":"7","files_analyzed":2,"files_cached":1,'
-            b'"files_found":3,"files_skipped":0,"functions":41,"methods":13,'
+            b'{"classes":"7","files_found":3,"files_observed":2,'
+            b'"files_skipped":0,"functions":41,"methods":13,'
             b'"parsed_lines":905,"source_io_skipped":4,'
             b'"unsupported_construct_skipped":5}',
             "'classes' is not an int",
@@ -986,8 +986,8 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         # F9 model law through the store wrapper: a negative scalar
         (
             "run_scalar",
-            b'{"classes":-7,"files_analyzed":2,"files_cached":1,'
-            b'"files_found":3,"files_skipped":0,"functions":41,"methods":13,'
+            b'{"classes":-7,"files_found":3,"files_observed":2,'
+            b'"files_skipped":0,"functions":41,"methods":13,'
             b'"parsed_lines":905,"source_io_skipped":4,'
             b'"unsupported_construct_skipped":5}',
             "run scalar classes",
@@ -1117,9 +1117,8 @@ def test_two_run_scalar_records_in_one_run_are_refused(tmp_path: Path) -> None:
     second = _payload_bytes(
         {
             "classes": 8,
-            "files_analyzed": 2,
-            "files_cached": 1,
             "files_found": 3,
+            "files_observed": 2,
             "files_skipped": 0,
             "functions": 41,
             "methods": 13,

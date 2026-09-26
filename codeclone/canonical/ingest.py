@@ -1439,16 +1439,20 @@ def _run_scalars(document: Mapping[str, object]) -> RunScalars:
 
     Only the observed scalar counters enter the record (ruling 2026-08-24
     §1: strictly derivable values stay out); the witness lists and the file
-    registry beside them are identity/witness state, not run scalars.
+    registry beside them are identity/witness state, not run scalars.  The
+    document's ``analyzed`` / ``cached`` pair enters as its sum: the split is
+    the document's execution provenance, the sum is the observed fact.
     """
     inventory = _mapping(_field(document, "inventory", "document"), "inventory")
     files_section = _mapping(_field(inventory, "files", "inventory"), "inventory.files")
     code_section = _mapping(_field(inventory, "code", "inventory"), "inventory.code")
     return RunScalars(
         classes=_inventory_scalar(code_section, "classes", "inventory.code"),
-        files_analyzed=_inventory_scalar(files_section, "analyzed", "inventory.files"),
-        files_cached=_inventory_scalar(files_section, "cached", "inventory.files"),
         files_found=_inventory_scalar(files_section, "total_found", "inventory.files"),
+        files_observed=(
+            _inventory_scalar(files_section, "analyzed", "inventory.files")
+            + _inventory_scalar(files_section, "cached", "inventory.files")
+        ),
         files_skipped=_inventory_scalar(files_section, "skipped", "inventory.files"),
         functions=_inventory_scalar(code_section, "functions", "inventory.code"),
         methods=_inventory_scalar(code_section, "methods", "inventory.code"),

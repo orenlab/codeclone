@@ -223,8 +223,15 @@ _TARGET = "worktree-a"
 # stayed f515ee81… exactly (an additive family costs an existing run no
 # identity) while the artifact digest already moved (the wire gained
 # eleven empty members) — the movement E4's wire bump exists to declare.
-_FIXTURE_RUN_ID = "1f9d2ad902bec55eb52da26136cbb29dcb4923200443c565e932ecbdc3335aa7"
-_FIXTURE_ARTIFACT = "fd709bd63b60cb5e6fbc71c442ce4056bdb3df72b1c26ded344217cbb8720593"
+# Moved deliberately on 2026-09-26 by the run-identity preimage fix (DET-01,
+# same epoch window, no constant moved): the fixture's one run_scalar object
+# stores the ``files_observed`` sum instead of the parsed/cached split, so
+# its content address, the membership and the run id moved (1f9d2ad9… →
+# 65f9a170…), and the projected bytes moved the artifact digest (fd709bd6… →
+# ce9413ba…).  The split was cache-state provenance: it gave one tree a cold
+# and a warm store run under one report identity.
+_FIXTURE_RUN_ID = "65f9a17086657049628577c719c1887e511b14704bbad01805f03d5a57195475"
+_FIXTURE_ARTIFACT = "ce9413baead70324b75c92fdb236980b0b199f413a03618ce1b9ab27c9e66dc2"
 # The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
 _RETIRED_LIVENESS_GENERATION = "4"

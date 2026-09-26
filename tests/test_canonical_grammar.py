@@ -490,10 +490,16 @@ def test_the_real_wire_population_passes_the_gate() -> None:
     numbers are re-derived here from the registry the gate reads, never
     typed from memory: the sum of the parenthesised counts above is the
     second literal.
+
+    198 -> 197 fields with the run-identity preimage fix (DET-01,
+    2026-09-26, same epoch window, no constant moved): ``run_scalars``
+    traded its parsed/cached split (``files_analyzed``, ``files_cached``)
+    for the one ``files_observed`` sum, so one family lost one field and no
+    family was added or removed.
     """
     families = _wire_field_names()
     assert len(families) == 33
-    assert sum(len(fields) for fields in families.values()) == 118 + 80
+    assert sum(len(fields) for fields in families.values()) == 118 + 80 - 1
     require_analysis_wire_families(families)
 
 
