@@ -784,7 +784,7 @@ def test_the_inventory_filter_drops_reads_that_are_not_document_reads(
     """The scanner anchors on a name; a local mapping shares that name.
 
     ``_authority_candidates`` builds a cursor ``payload`` and reads
-    ``offset`` and ``ordering_version`` out of it. Those are not report
+    ``next_offset`` and ``ordering_version`` out of it. Those are not report
     reads, and the section filter -- measured off a real document, never
     listed by hand -- removes them without anyone judging a variable name.
     """
@@ -794,11 +794,11 @@ def test_the_inventory_filter_drops_reads_that_are_not_document_reads(
     )
     sections = document_sections(corpus.document)
     unfiltered = consumer_reads(
-        module="probe", source=source, sections=sections | {"offset"}
+        module="probe", source=source, sections=sections | {"next_offset"}
     )
     filtered = consumer_reads(module="probe", source=source, sections=sections)
-    assert "offset" in unfiltered.paths
-    assert "offset" not in filtered.paths
+    assert "next_offset" in unfiltered.paths
+    assert "next_offset" not in filtered.paths
     assert "metrics.families.semantic_authority.items" in filtered.paths
 
 

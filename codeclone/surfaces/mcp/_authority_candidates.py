@@ -9,9 +9,13 @@
 Discovery proposes on the scale of a whole tree: thousands of candidates for a
 repository this size. MCP therefore never serves the population, only pages of
 it, under the same continuation contract the memory projection pages use --
-cursor carrying the projection kind, the ordering version, the offset, the
-identity digest of the population it was cut from and the digest of the request
-that cut it, recomputed on every call and refused when it no longer matches.
+cursor carrying the projection kind, the ordering version, the position of
+the first row it has not served yet, the identity digest of the population it
+was cut from and the digest of the request that cut it, recomputed on every call
+and refused when it no longer matches.  The position is a row, not a page: the
+page size may change between calls without repeating or skipping a row, as it
+may for the memory projection pages, ``get_implementation_context_page`` and
+``list_findings``.
 
 The report document is the ordering authority: candidates arrive already ranked
 by the document builder, and this module never re-sorts them.  A page cut from
@@ -31,7 +35,6 @@ from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from typing import Final
 
-from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 
@@ -139,7 +142,7 @@ def decode_authority_candidate_cursor(cursor: str) -> Mapping[str, object]:
 
 def _cursor_payload(
     *,
-    offset: int,
+    next_offset: int,
     total: int,
     identity: Mapping[str, str],
     request: Mapping[str, str],
@@ -152,13 +155,32 @@ def _cursor_payload(
         "ordering_version": AUTHORITY_CANDIDATE_ORDERING_VERSION,
         "run_id": run_id,
         "section": section,
-        "offset": offset,
+        "next_offset": next_offset,
         "total": total,
         "lane_identity_digest": dict(identity),
         "request_digest": dict(request),
     }
     payload["cursor_digest"] = _digest(payload)
     return payload
+
+
+def _resume_position(payload: Mapping[str, object], *, total: int) -> int:
+    """The first row the cursor has not served, or a refusal.
+
+    A minted cursor always names a row strictly inside the population: the
+    page that cut it served at least one row and left at least one.  Anything
+    else -- including the ``offset`` of the page a cursor was cut FROM, the
+    shape this pager minted before the position became a row -- was not
+    produced by this contract and is refused rather than resumed.
+    """
+
+    position = payload.get("next_offset")
+    if type(position) is not int or not 0 < position < total:
+        raise AuthorityCandidateCursorError(
+            "authority candidate cursor names no resume position this pager "
+            "cut; request the first page again"
+        )
+    return position
 
 
 def authority_candidate_page(
@@ -178,7 +200,8 @@ def authority_candidate_page(
     Fail-closed by recompute: the identity of the population and of the request
     are derived again on every call and compared with the cursor. A run that
     moved under a held cursor is refused rather than answered from a stale
-    offset.
+    offset.  The cursor resumes at the row after the last one it served,
+    whatever ``page_size`` the next call asks for.
     """
 
     total = len(items)
@@ -201,7 +224,7 @@ def authority_candidate_page(
             raise AuthorityCandidateCursorError(
                 "authority candidate cursor was cut for another request"
             )
-        offset = max(0, _as_int(payload.get("offset")) + bounded_size)
+        offset = _resume_position(payload, total=total)
 
     page_items = [dict(item) for item in items[offset : offset + bounded_size]]
     next_offset = offset + len(page_items)
@@ -219,7 +242,7 @@ def authority_candidate_page(
     if next_offset < total:
         continuation["cursor"] = _encode_cursor(
             _cursor_payload(
-                offset=offset,
+                next_offset=next_offset,
                 total=total,
                 identity=identity,
                 request=request,

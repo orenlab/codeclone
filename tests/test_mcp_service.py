@@ -18121,6 +18121,163 @@ def test_authority_candidate_last_page_offers_no_cursor(tmp_path: Path) -> None:
     assert "cursor" not in continuation
 
 
+def _candidate_rows(page: Mapping[str, object]) -> list[int]:
+    """The ranked positions of one page's rows (``cand-NNNN`` is row NNNN)."""
+
+    items = cast("list[dict[str, object]]", page["items"])
+    return [int(str(item["candidate_id"]).removeprefix("cand-")) for item in items]
+
+
+def _candidate_page_two(
+    tmp_path: Path, *, page_size: int
+) -> tuple[list[int], dict[str, object]]:
+    """Page one at size 5 of 25 candidates, then its cursor at ``page_size``."""
+
+    service = _authority_candidate_service(tmp_path, count=25)
+    first = service.check_authority(
+        run_id="authoritycandidates01", section="candidates", page_size=5
+    )
+    assert _candidate_rows(first) == [0, 1, 2, 3, 4]
+    cursor = cast("str", cast("dict[str, object]", first["continuation"])["cursor"])
+    second = service.check_authority(
+        run_id="authoritycandidates01",
+        section="candidates",
+        cursor=cursor,
+        page_size=page_size,
+    )
+    return _candidate_rows(second), cast("dict[str, object]", second["continuation"])
+
+
+def test_check_authority_candidate_cursor_repeats_no_row_when_the_page_shrinks(
+    tmp_path: Path,
+) -> None:
+    """DET-04, the shrinking boundary: page two resumes at row 5, not 3.
+
+    The cursor used to keep the offset of the page it was cut FROM and add
+    the size of the NEXT request, so a smaller second page re-served rows 3
+    and 4 the client already held.
+    """
+
+    rows, continuation = _candidate_page_two(tmp_path, page_size=3)
+    assert rows == [5, 6, 7]
+    assert continuation["offset"] == 5
+    assert continuation["omitted"] == 17
+
+
+def test_check_authority_candidate_cursor_skips_no_row_when_the_page_grows(
+    tmp_path: Path,
+) -> None:
+    """DET-04, the growing boundary: rows 5-9 are served, not lost for good."""
+
+    rows, continuation = _candidate_page_two(tmp_path, page_size=10)
+    assert rows == list(range(5, 15))
+    assert continuation["offset"] == 5
+    assert continuation["omitted"] == 10
+
+
+def test_check_authority_candidate_walk_serves_each_row_once_across_page_sizes(
+    tmp_path: Path,
+) -> None:
+    """A cursor walk whose page size changes on every call.
+
+    The sizes sum to 26 over 25 rows, so an honest walk ends inside the
+    tuple; each page must start exactly where the rows served so far end.
+    """
+
+    service = _authority_candidate_service(tmp_path, count=25)
+    served: list[int] = []
+    cursor: str | None = None
+    for page_size in (5, 3, 10, 1, 7):
+        page = service.check_authority(
+            run_id="authoritycandidates01",
+            section="candidates",
+            cursor=cursor,
+            page_size=page_size,
+        )
+        continuation = cast("dict[str, object]", page["continuation"])
+        assert continuation["offset"] == len(served)
+        served.extend(_candidate_rows(page))
+        cursor = cast("str | None", continuation.get("cursor"))
+        if cursor is None:
+            break
+    assert cursor is None
+    assert served == list(range(25))
+
+
+def _recut_authority_candidate_cursor(cursor: str, **fields: object) -> str:
+    """Re-encode ``cursor`` with ``fields`` set; a ``None`` value drops the key."""
+
+    padding = "=" * (-len(cursor) % 4)
+    payload = json.loads(base64.urlsafe_b64decode(cursor + padding))
+    for key, value in fields.items():
+        if value is None:
+            payload.pop(key, None)
+        else:
+            payload[key] = value
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _authority_candidate_first_cursor() -> tuple[tuple[Mapping[str, object], ...], str]:
+    """25 candidate rows and the cursor their size-5 first page cut."""
+
+    from codeclone.surfaces.mcp._authority_candidates import (
+        authority_candidate_items,
+        authority_candidate_page,
+    )
+
+    items = authority_candidate_items(_authority_candidate_document(25))
+    first = authority_candidate_page(items=items, run_id="run-alpha", page_size=5)
+    cursor = cast("str", cast("dict[str, object]", first["continuation"])["cursor"])
+    return items, cursor
+
+
+def test_authority_candidate_cursor_cut_by_the_offset_pager_is_refused() -> None:
+    """A cursor that names the page it was cut FROM is not a resume position.
+
+    That is the shape the pager minted before DET-04 (``offset``, no
+    ``next_offset``). Read as a position it re-serves the page the client
+    already holds, so it is refused, typed. Page two's (``offset`` 5) is
+    used: page one's offset 0 would fall to the bounds check and prove
+    nothing about this branch.
+    """
+
+    from codeclone.surfaces.mcp._authority_candidates import (
+        AuthorityCandidateCursorError,
+        authority_candidate_page,
+    )
+
+    items, cursor = _authority_candidate_first_cursor()
+    legacy = _recut_authority_candidate_cursor(cursor, next_offset=None, offset=5)
+
+    with pytest.raises(AuthorityCandidateCursorError, match="resume position"):
+        authority_candidate_page(
+            items=items, run_id="run-alpha", cursor=legacy, page_size=5
+        )
+
+
+@pytest.mark.parametrize(
+    "position", [0, 25, True], ids=["first_row", "past_the_last_row", "boolean"]
+)
+def test_authority_candidate_cursor_refuses_a_position_no_page_could_cut(
+    position: object,
+) -> None:
+    """A minted cursor always resumes strictly inside the population."""
+
+    from codeclone.surfaces.mcp._authority_candidates import (
+        AuthorityCandidateCursorError,
+        authority_candidate_page,
+    )
+
+    items, cursor = _authority_candidate_first_cursor()
+    tampered = _recut_authority_candidate_cursor(cursor, next_offset=position)
+
+    with pytest.raises(AuthorityCandidateCursorError, match="resume position"):
+        authority_candidate_page(
+            items=items, run_id="run-alpha", cursor=tampered, page_size=5
+        )
+
+
 def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
     """Pins must not be an unbounded retention path.
 
