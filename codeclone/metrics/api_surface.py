@@ -50,6 +50,9 @@ _API_SIGNATURE_DOMAIN: Final = b"ccapi1:sig\x00"
 _SIGNATURE_BREAK: Final = "signature_break"
 _SIGNATURE_CHANGED: Final = "signature_changed"
 _POSITIONAL_PARAM_KINDS: Final = frozenset({"pos_only", "pos_or_kw"})
+#: How a signature spells ``*args`` / ``**kwargs``. A caller never names
+#: either, so renaming one leaves every call binding as before.
+_VARIADIC_PREFIXES: Final[Mapping[str, str]] = {"vararg": "*", "kwarg": "**"}
 
 _ApiVerdict = tuple[Literal["signature_break", "signature_changed"], str]
 
@@ -61,14 +64,17 @@ _ApiVerdict = tuple[Literal["signature_break", "signature_changed"], str]
 #: parameters are matched by name, so an insertion surfaces there as
 #: ``Inserted parameter X before Y``, never here.
 #:
-#: A call that bound before still binds after an optional ``pos_or_kw``
-#: appended to the positional block, an optional keyword-only parameter
-#: anywhere in the keyword block, or a new ``*args`` / ``**kwargs``:
-#: ``signature_changed``. A parameter without a default breaks every call
-#: that omits it, and a positional-only one is classified as a shift of the
-#: positional slots even with a default: ``signature_break``. A collected
-#: ``*args`` / ``**kwargs`` never carries a default; its ``True`` rows keep
-#: the table total rather than leaving a hand-built snapshot to a KeyError.
+#: A call that bound before still binds after an optional positional
+#: parameter -- ``pos_or_kw`` or ``pos_only`` -- appended to the positional
+#: block, an optional keyword-only parameter anywhere in the keyword block, or
+#: a new ``*args`` / ``**kwargs``: ``signature_changed``. A parameter without
+#: a default breaks every call that omits it: ``signature_break``. The one
+#: exception to a compatible row is a ``*args`` the baseline already had: an
+#: optional positional parameter now stands in front of it and takes the
+#: first value that used to flow into it (``_added_parameter_verdict``). A
+#: collected ``*args`` / ``**kwargs`` never carries a default; its ``True``
+#: rows keep the table total rather than leaving a hand-built snapshot to a
+#: KeyError.
 _ADDED_PARAMETER_VERDICTS: Final[
     Mapping[
         tuple[str, bool], tuple[Literal["signature_break", "signature_changed"], str]
@@ -76,8 +82,8 @@ _ADDED_PARAMETER_VERDICTS: Final[
 ] = {
     ("pos_only", False): (_SIGNATURE_BREAK, "Added required parameter {name}."),
     ("pos_only", True): (
-        _SIGNATURE_BREAK,
-        "Added positional-only parameter {name}.",
+        _SIGNATURE_CHANGED,
+        "Added optional positional-only parameter {name}.",
     ),
     ("pos_or_kw", False): (_SIGNATURE_BREAK, "Added required parameter {name}."),
     ("pos_or_kw", True): (_SIGNATURE_CHANGED, "Added optional parameter {name}."),
@@ -611,6 +617,7 @@ def _parameter_verdicts(
         current=current,
         baseline_names=baseline_names,
     )
+    kept_varargs = _kept_varargs(baseline=baseline, current=current)
     matched: set[int] = set()
     verdicts: list[_ApiVerdict] = []
     for param, index in zip(baseline, counterparts, strict=True):
@@ -620,6 +627,8 @@ def _parameter_verdicts(
                 _missing_parameter_verdict(
                     param,
                     moved=None if index is None else current[index],
+                    kept_varargs=kept_varargs,
+                    strict_types=strict_types,
                 )
             )
         else:
@@ -639,11 +648,28 @@ def _parameter_verdicts(
         if index is not None:
             matched.add(index)
     verdicts.extend(
-        _added_parameter_verdict(param)
+        _added_parameter_verdict(param, kept_varargs=kept_varargs)
         for index, param in enumerate(current)
         if index not in matched
     )
     return verdicts
+
+
+def _kept_varargs(
+    *,
+    baseline: tuple[ApiParamSpec, ...],
+    current: tuple[ApiParamSpec, ...],
+) -> str | None:
+    """The current name of a ``*args`` the baseline already had, or ``None``.
+
+    Before the change, positional values past the named parameters flowed
+    into it; a positional parameter standing in front of it now takes the
+    first of them, so a call that bound before binds differently.
+    """
+
+    if not any(param.kind == "vararg" for param in baseline):
+        return None
+    return next((param.name for param in current if param.kind == "vararg"), None)
 
 
 def _parameter_slots(
@@ -743,13 +769,50 @@ def _missing_parameter_verdict(
     param: ApiParamSpec,
     *,
     moved: ApiParamSpec | None,
+    kept_varargs: str | None,
+    strict_types: bool,
 ) -> _ApiVerdict:
+    """A baseline parameter no current slot holds: removed, or found by name."""
+
     if moved is None:
         return (_SIGNATURE_BREAK, f"Removed parameter {param.name}.")
-    return (
+    return _widened_keyword_verdict(
+        param,
+        moved,
+        kept_varargs=kept_varargs,
+        strict_types=strict_types,
+    ) or (
         _SIGNATURE_BREAK,
         f"Changed parameter kind for {param.name} from {param.kind} to {moved.kind}.",
     )
+
+
+def _widened_keyword_verdict(
+    param: ApiParamSpec,
+    moved: ApiParamSpec,
+    *,
+    kept_varargs: str | None,
+    strict_types: bool,
+) -> _ApiVerdict | None:
+    """A keyword-only parameter that became positional-or-keyword, else ``None``.
+
+    The one compatible change of kind: every keyword call binds as before,
+    and a positional value reaches the parameter only where a call used to
+    fail -- unless a ``*args`` the baseline already had collected that value.
+    """
+
+    if (param.kind, moved.kind) != ("kw_only", "pos_or_kw"):
+        return None
+    if kept_varargs is not None:
+        return (
+            _SIGNATURE_BREAK,
+            f"Moved parameter {param.name} before *{kept_varargs}.",
+        )
+    return _binding_verdict(
+        baseline_param=param,
+        current_param=moved,
+        strict_types=strict_types,
+    ) or (_SIGNATURE_CHANGED, f"Parameter {param.name} accepts positional calls.")
 
 
 def _counterpart_verdict(
@@ -775,11 +838,52 @@ def _counterpart_verdict(
             f"Changed parameter kind for {baseline_param.name} "
             f"from {baseline_param.kind} to {current_param.kind}.",
         )
+    renamed: _ApiVerdict | None = None
     if baseline_param.kind != "pos_only" and baseline_param.name != current_param.name:
+        renamed = _rename_verdict(baseline_param, current_param)
+    if renamed is not None and renamed[0] == _SIGNATURE_BREAK:
+        return renamed
+    return (
+        _binding_verdict(
+            baseline_param=baseline_param,
+            current_param=current_param,
+            strict_types=strict_types,
+        )
+        or renamed
+    )
+
+
+def _rename_verdict(
+    baseline_param: ApiParamSpec,
+    current_param: ApiParamSpec,
+) -> _ApiVerdict:
+    """A renamed ``*args`` / ``**kwargs`` is compatible; any other rename breaks.
+
+    A keyword call names a keyword-reachable parameter, so renaming one fails
+    that call. Nothing names ``*args`` or ``**kwargs``: the values they
+    collect arrive exactly as before.
+    """
+
+    prefix = _VARIADIC_PREFIXES.get(baseline_param.kind)
+    if prefix is None:
         return (
             _SIGNATURE_BREAK,
             f"Renamed public parameter {baseline_param.name} to {current_param.name}.",
         )
+    return (
+        _SIGNATURE_CHANGED,
+        f"Renamed {prefix}{baseline_param.name} to {prefix}{current_param.name}.",
+    )
+
+
+def _binding_verdict(
+    *,
+    baseline_param: ApiParamSpec,
+    current_param: ApiParamSpec,
+    strict_types: bool,
+) -> _ApiVerdict | None:
+    """What still breaks once a caller reaches the same parameter."""
+
     if baseline_param.has_default and not current_param.has_default:
         return (_SIGNATURE_BREAK, f"Parameter {baseline_param.name} became required.")
     if strict_types and baseline_param.annotation_hash != current_param.annotation_hash:
@@ -790,6 +894,41 @@ def _counterpart_verdict(
     return None
 
 
-def _added_parameter_verdict(param: ApiParamSpec) -> _ApiVerdict:
+def _added_parameter_verdict(
+    param: ApiParamSpec,
+    *,
+    kept_varargs: str | None,
+) -> _ApiVerdict:
+    return _insertion_before_varargs_verdict(
+        param,
+        kept_varargs=kept_varargs,
+    ) or _table_verdict(param)
+
+
+def _table_verdict(param: ApiParamSpec) -> _ApiVerdict:
     change_kind, template = _ADDED_PARAMETER_VERDICTS[(param.kind, param.has_default)]
     return change_kind, template.format(name=param.name)
+
+
+def _insertion_before_varargs_verdict(
+    param: ApiParamSpec,
+    *,
+    kept_varargs: str | None,
+) -> _ApiVerdict | None:
+    """An optional positional parameter in front of a ``*args`` the baseline had.
+
+    The table calls it compatible; the first positional value that used to
+    flow into ``*args`` lands in it now. A required one keeps the table's
+    ``Added required parameter`` reason.
+    """
+
+    if (
+        kept_varargs is None
+        or not param.has_default
+        or param.kind not in _POSITIONAL_PARAM_KINDS
+    ):
+        return None
+    return (
+        _SIGNATURE_BREAK,
+        f"Inserted parameter {param.name} before *{kept_varargs}.",
+    )

@@ -431,14 +431,14 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
         params=baseline_typed.params,
         returns_hash="str",
     )
+    # A keyword-only parameter that also takes a positional value binds
+    # every call it bound before (the reverse direction is the table's
+    # ``parameter-kind-changed`` row).
     assert api_surface_mod._signature_change_verdict(
         baseline_symbol=baseline_param,
         current_symbol=current_param_kind,
         strict_types=False,
-    ) == (
-        "signature_break",
-        "Changed parameter kind for value from kw_only to pos_or_kw.",
-    )
+    ) == ("signature_changed", "Parameter value accepts positional calls.")
     assert api_surface_mod._signature_change_verdict(
         baseline_symbol=baseline_typed,
         current_symbol=current_param_type,
@@ -528,12 +528,12 @@ def _signature_snapshot(source: str) -> ApiSurfaceSnapshot:
 
 
 def _recorded_change(
-    baseline_source: str, current_source: str
+    baseline_source: str, current_source: str, *, strict_types: bool = False
 ) -> tuple[str, str] | None:
     added, changes = compare_api_surfaces(
         baseline=_signature_snapshot(baseline_source),
         current=_signature_snapshot(current_source),
-        strict_types=False,
+        strict_types=strict_types,
     )
     assert added == ()
     if not changes:
@@ -571,6 +571,62 @@ _SIGNATURE_DECISION_TABLE: tuple[tuple[str, str, str, tuple[str, str] | None], .
         "def run(a, **kwargs): ...",
         (_CHANGED, "Added **kwargs."),
     ),
+    # The maintainer's caller-compatibility ruling (2026-09-26): what an
+    # existing call binds to decides, never what introspection sees.
+    (
+        "positional-only-with-default-appended",
+        "def run(a, /): ...",
+        "def run(a, x=1, /): ...",
+        (_CHANGED, "Added optional positional-only parameter x."),
+    ),
+    (
+        "positional-only-with-default-opens-the-positional-block",
+        "def run(*, k): ...",
+        "def run(x=1, /, *, k): ...",
+        (_CHANGED, "Added optional positional-only parameter x."),
+    ),
+    (
+        "optional-positional-with-new-varargs",
+        "def run(a): ...",
+        "def run(a, b=None, *args): ...",
+        (_CHANGED, "Added optional parameter b."),
+    ),
+    (
+        "optional-keyword-only-after-varargs",
+        "def run(a, *args): ...",
+        "def run(a, *args, k=None): ...",
+        (_CHANGED, "Added optional keyword-only parameter k."),
+    ),
+    (
+        "optional-keyword-only-before-kwargs",
+        "def run(a, **kwargs): ...",
+        "def run(a, *, k=None, **kwargs): ...",
+        (_CHANGED, "Added optional keyword-only parameter k."),
+    ),
+    (
+        "keyword-only-became-positional",
+        "def run(a, *, x=1): ...",
+        "def run(a, x=1): ...",
+        (_CHANGED, "Parameter x accepts positional calls."),
+    ),
+    (
+        "required-keyword-only-became-positional",
+        "def run(a, *, x): ...",
+        "def run(a, x): ...",
+        (_CHANGED, "Parameter x accepts positional calls."),
+    ),
+    (
+        "kwargs-renamed",
+        "def run(a, **kwargs): ...",
+        "def run(a, **options): ...",
+        (_CHANGED, "Renamed **kwargs to **options."),
+    ),
+    (
+        "varargs-renamed",
+        "def run(a, *args): ...",
+        "def run(a, *rest): ...",
+        (_CHANGED, "Renamed *args to *rest."),
+    ),
     # A call that bound before fails or binds differently: breaking.
     (
         "required-positional-appended",
@@ -591,16 +647,34 @@ _SIGNATURE_DECISION_TABLE: tuple[tuple[str, str, str, tuple[str, str] | None], .
         (_BREAK, "Added required parameter x."),
     ),
     (
-        "positional-only-with-default-appended",
-        "def run(a, /): ...",
-        "def run(a, x=1, /): ...",
-        (_BREAK, "Added positional-only parameter x."),
-    ),
-    (
         "positional-only-with-default-inserted",
         "def run(a, /, b=None): ...",
         "def run(a, x=1, /, b=None): ...",
         (_BREAK, "Added positional-only parameter x."),
+    ),
+    (
+        "optional-positional-inserted-before-varargs",
+        "def run(a, *args): ...",
+        "def run(a, b=None, *args): ...",
+        (_BREAK, "Inserted parameter b before *args."),
+    ),
+    (
+        "optional-positional-only-inserted-before-varargs",
+        "def run(a, /, *args): ...",
+        "def run(a, b=None, /, *args): ...",
+        (_BREAK, "Inserted parameter b before *args."),
+    ),
+    (
+        "required-positional-before-varargs-keeps-its-detail",
+        "def run(a, *args): ...",
+        "def run(a, b, *args): ...",
+        (_BREAK, "Added required parameter b."),
+    ),
+    (
+        "varargs-renamed-with-an-insertion-before-it",
+        "def run(a, *args): ...",
+        "def run(a, b=None, *rest): ...",
+        (_BREAK, "Inserted parameter b before *rest."),
     ),
     (
         "optional-inserted-before-a-positional",
@@ -633,6 +707,30 @@ _SIGNATURE_DECISION_TABLE: tuple[tuple[str, str, str, tuple[str, str] | None], .
         (_BREAK, "Changed parameter kind for b from pos_or_kw to kw_only."),
     ),
     (
+        "positional-became-positional-only",
+        "def run(a, b): ...",
+        "def run(a, b, /): ...",
+        (_BREAK, "Changed parameter kind for a from pos_or_kw to pos_only."),
+    ),
+    (
+        "keyword-only-became-positional-only",
+        "def run(*, x=1): ...",
+        "def run(x=1, /): ...",
+        (_BREAK, "Changed parameter kind for x from kw_only to pos_only."),
+    ),
+    (
+        "keyword-only-moved-before-varargs",
+        "def run(a, *args, x=1): ...",
+        "def run(a, x=1, *args): ...",
+        (_BREAK, "Moved parameter x before *args."),
+    ),
+    (
+        "keyword-only-became-positional-and-required",
+        "def run(a, *, x=1): ...",
+        "def run(a, x): ...",
+        (_BREAK, "Parameter x became required."),
+    ),
+    (
         "positional-only-became-positional",
         "def run(a, /): ...",
         "def run(a): ...",
@@ -649,6 +747,18 @@ _SIGNATURE_DECISION_TABLE: tuple[tuple[str, str, str, tuple[str, str] | None], .
         "def run(*, x): ...",
         "def run(*, y): ...",
         (_BREAK, "Renamed public parameter x to y."),
+    ),
+    (
+        "renamed-and-required-reports-the-rename",
+        "def run(a, b=1): ...",
+        "def run(a, c): ...",
+        (_BREAK, "Renamed public parameter b to c."),
+    ),
+    (
+        "keyword-only-named-kwargs-renamed",
+        "def run(a, *, kwargs=None): ...",
+        "def run(a, *, options=None): ...",
+        (_BREAK, "Renamed public parameter kwargs to options."),
     ),
     (
         "default-dropped",
@@ -691,6 +801,63 @@ def test_signature_change_decision_table(
     assert _recorded_change(baseline_source, current_source) == expected
 
 
+#: Under ``strict_types`` a compatible reshaping -- a renamed ``*args`` /
+#: ``**kwargs``, a keyword-only parameter that became positional -- still
+#: yields to an annotation that changed with it, and stays compatible when the
+#: annotation is kept.
+_STRICT_SIGNATURE_DECISION_TABLE: tuple[
+    tuple[str, str, str, tuple[str, str] | None], ...
+] = (
+    (
+        "kwargs-renamed-annotation-changed",
+        "def run(a, **kwargs: int): ...",
+        "def run(a, **options: str): ...",
+        (_BREAK, "Changed type annotation for parameter kwargs."),
+    ),
+    (
+        "kwargs-renamed-annotation-kept",
+        "def run(a, **kwargs: int): ...",
+        "def run(a, **options: int): ...",
+        (_CHANGED, "Renamed **kwargs to **options."),
+    ),
+    (
+        "varargs-renamed-annotation-changed",
+        "def run(*args: int): ...",
+        "def run(*rest: str): ...",
+        (_BREAK, "Changed type annotation for parameter args."),
+    ),
+    (
+        "keyword-only-became-positional-annotation-changed",
+        "def run(a, *, x: int = 1): ...",
+        "def run(a, x: str = 1): ...",
+        (_BREAK, "Changed type annotation for parameter x."),
+    ),
+    (
+        "keyword-only-became-positional-annotation-kept",
+        "def run(a, *, x: int = 1): ...",
+        "def run(a, x: int = 1): ...",
+        (_CHANGED, "Parameter x accepts positional calls."),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("baseline_source", "current_source", "expected"),
+    [
+        pytest.param(baseline, current, expected, id=row_id)
+        for row_id, baseline, current, expected in _STRICT_SIGNATURE_DECISION_TABLE
+    ],
+)
+def test_strict_signature_change_decision_table(
+    baseline_source: str,
+    current_source: str,
+    expected: tuple[str, str] | None,
+) -> None:
+    assert (
+        _recorded_change(baseline_source, current_source, strict_types=True) == expected
+    )
+
+
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [
@@ -723,6 +890,29 @@ def test_added_variadic_parameter_with_a_default_flag_stays_compatible(
         )
         == expected
     )
+
+
+def test_parameter_reasons_see_varargs_only_where_the_signature_keeps_one() -> None:
+    """A ``*args`` the current signature dropped stands in front of nothing.
+
+    The removal breaks and is the reported reason; the optional parameter
+    appended beside it is named for what it is, not as an insertion before a
+    ``*args`` that no longer exists.
+    """
+
+    def params(source: str) -> tuple[ApiParamSpec, ...]:
+        node = ast.parse(source).body[0]
+        assert isinstance(node, ast.FunctionDef)
+        return api_surface_mod._parameter_specs(node=node, is_method=False)
+
+    assert api_surface_mod._parameter_verdicts(
+        baseline=params("def run(a, *args): ..."),
+        current=params("def run(a, b=None): ..."),
+        strict_types=False,
+    ) == [
+        (_BREAK, "Removed parameter args."),
+        (_CHANGED, "Added optional parameter b."),
+    ]
 
 
 def test_compare_records_every_change_and_the_partition_splits_the_verdicts() -> None:
