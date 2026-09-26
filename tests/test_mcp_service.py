@@ -51,6 +51,7 @@ import codeclone.surfaces.mcp._workspace_drift as mcp_workspace_drift_mod
 import codeclone.surfaces.mcp._workspace_hygiene as mcp_workspace_hygiene_mod
 import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.messages.facts as facts_msgs
+import codeclone.surfaces.mcp.messages.workflow as workflow_msgs
 import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
@@ -13272,18 +13273,35 @@ def test_mcp_workflow_start_replay_rejects_workspace_drift(tmp_path: Path) -> No
     assert second["intent_id"] != first["intent_id"]
 
 
+def _assert_queued_start_grants_no_edit(
+    queued: Mapping[str, object], *, blocked_by: str
+) -> None:
+    """A queued start grants nothing, and says what it waits behind.
+
+    The permission is ``False``, not merely absent: ``start_controlled_change``
+    answers a queued declare itself, before its edit-permission helper runs,
+    so this literal is the one carrier of the refusal on the workflow road.
+    """
+    assert (queued["status"], queued["edit_allowed"]) == ("queued", False)
+    assert queued["message"] == workflow_msgs.START_QUEUED
+    assert [
+        cast("dict[str, object]", entry)["intent_id"]
+        for entry in cast("list[object]", queued["blocked_by"])
+    ] == [blocked_by]
+
+
 def test_mcp_workflow_start_queued_and_latest_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, _foreign_id = _two_agent_service(tmp_path, monkeypatch)
+    service, foreign_id = _two_agent_service(tmp_path, monkeypatch)
     queued = service.start_controlled_change(
         root=str(tmp_path),
         scope={"allowed_files": ["pkg/a.py"]},
         intent="queued follow-up",
         on_conflict="queue",
     )
-    assert queued["status"] == "queued"
+    _assert_queued_start_grants_no_edit(queued, blocked_by=foreign_id)
     assert "blast_radius" not in queued
     _assert_start_context_governance(queued, enforced=False)
     workspace = cast("dict[str, object]", queued["workspace"])
@@ -13331,6 +13349,58 @@ def test_mcp_workflow_start_queued_and_latest_run(
         intent="pin latest run",
     )
     assert latest["run_id"] == "newer123"
+    # The other side of the same answer: an uncontested start is active and
+    # grants the edit.
+    assert (latest["status"], latest["edit_allowed"]) == ("active", True)
+
+
+@pytest.mark.parametrize(
+    ("declare_status", "concurrent_intents", "on_conflict", "expected"),
+    [
+        pytest.param(
+            "queued",
+            [{"ownership": "foreign_active"}],
+            "queue",
+            False,
+            id="queued-behind-a-foreign-intent",
+        ),
+        pytest.param("active", [], None, True, id="active-and-uncontested"),
+    ],
+)
+def test_start_edit_allowed_grants_only_an_active_declare(
+    declare_status: str,
+    concurrent_intents: list[dict[str, object]],
+    on_conflict: str | None,
+    expected: bool,
+) -> None:
+    """The start helper's own status guard, isolated from its siblings.
+
+    A queued declare asked to queue (``on_conflict="queue"``) passes the
+    conflict guard, and clean hygiene passes the last one, so the status
+    guard is the only thing standing between a queued intent and
+    ``edit_allowed=True``. ``start_controlled_change`` answers a queued
+    declare before it ever calls this helper, so the pin is on the helper's
+    contract: a refactor that routes a queued start through it must still
+    refuse the edit.
+    """
+    clean = mcp_workspace_hygiene_mod.WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=(),
+        dirty_paths_in_scope=(),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(),
+        blocks_edit=False,
+    )
+    assert (
+        workflow_mod._start_edit_allowed(
+            declare_status=declare_status,
+            concurrent_intents=concurrent_intents,
+            on_conflict=on_conflict,
+            hygiene=clean,
+            dirty_scope_policy="block",
+        )
+        is expected
+    )
 
 
 def test_mcp_workflow_start_missing_intent_after_declare_raises(
