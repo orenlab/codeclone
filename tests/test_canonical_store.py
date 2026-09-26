@@ -1167,6 +1167,110 @@ def test_two_run_scalar_records_in_one_run_are_refused(tmp_path: Path) -> None:
         store.read_run(forged)
 
 
+def _refit_the_single_run(connection: sqlite3.Connection, run_pk: int) -> str:
+    """Recompute the run's membership and identity through the store's own
+    formulas after its rows were edited; return the self-consistent run id."""
+    from codeclone.canonical.store import _membership_digest, _run_id
+
+    object_ids = [
+        str(row[0])
+        for row in connection.execute(
+            "SELECT o.object_id FROM run_members m "
+            "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
+            (run_pk,),
+        )
+    ]
+    scope_digest = str(
+        connection.execute(
+            "SELECT analysis_scope_digest FROM runs WHERE run_pk = ?", (run_pk,)
+        ).fetchone()[0]
+    )
+    membership = _membership_digest(object_ids)
+    forged = _run_id(_NS, scope_digest, membership)
+    connection.execute(
+        "UPDATE runs SET membership_digest = ?, run_id = ? WHERE run_pk = ?",
+        (membership, forged, run_pk),
+    )
+    return forged
+
+
+def _store_with_a_forged_run_scalar(tmp_path: Path, payload: bytes) -> tuple[Path, str]:
+    """The fixture's one ``run_scalar`` row replaced by ``payload``, with the
+    object address, the membership and the run identity all refit, so every
+    digest check passes and the row decoder is the only wall left."""
+    from codeclone.canonical.store import _object_id
+
+    path = tmp_path / "runs.sqlite"
+    with RunStore(path) as store:
+        _publish(store, fixture_model())
+    with sqlite3.connect(path) as connection:
+        run_pk = int(connection.execute("SELECT run_pk FROM runs").fetchone()[0])
+        connection.execute(
+            "UPDATE objects SET payload = ?, object_id = ? WHERE family = ?",
+            (payload, _object_id(_NS, "run_scalar", payload), "run_scalar"),
+        )
+        forged = _refit_the_single_run(connection, run_pk)
+        connection.commit()
+    return path, forged
+
+
+#: Every run scalar except the two file-population counters under test.
+_RUN_SCALAR_REST = (
+    b'"files_skipped":1,"functions":40,"methods":12,"parsed_lines":900,'
+    b'"source_io_skipped":2,"unsupported_construct_skipped":3}'
+)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"classes":8,"files_found":9,' + _RUN_SCALAR_REST,
+        b'{"classes":8,"files_analyzed":4,"files_cached":2,"files_found":9,'
+        + _RUN_SCALAR_REST,
+    ],
+    ids=["files-observed-missing", "retired-split-instead-of-the-sum"],
+)
+def test_a_run_scalar_row_without_files_observed_is_refused_naming_it(
+    tmp_path: Path, payload: bytes
+) -> None:
+    """The observed count is REQUIRED, never defaulted: a row that lacks it
+    -- including a row written before the split was retired, which carries
+    ``files_analyzed``/``files_cached`` instead -- is a typed refusal naming
+    the field, never a run whose observed population silently reads zero."""
+    path, run_id = _store_with_a_forged_run_scalar(tmp_path, payload)
+    with (
+        RunStore(path) as store,
+        pytest.raises(
+            StoreIntegrityError,
+            match="run_scalar object: stored row is missing 'files_observed'",
+        ),
+    ):
+        store.read_run(run_id)
+
+
+def test_a_complete_run_scalar_row_decodes_through_the_same_forgery(
+    tmp_path: Path,
+) -> None:
+    """Positive control of the refusals above: the same forgery with the
+    field present reads back as exactly the stored values, so the probe
+    reaches the decoder and the refusals are about the one missing field."""
+    payload = b'{"classes":8,"files_found":9,"files_observed":6,' + _RUN_SCALAR_REST
+    path, run_id = _store_with_a_forged_run_scalar(tmp_path, payload)
+    with RunStore(path) as store:
+        scalars = store.read_run(run_id).facts.analysis.run_scalars
+    assert scalars == RunScalars(
+        classes=8,
+        files_found=9,
+        files_observed=6,
+        files_skipped=1,
+        functions=40,
+        methods=12,
+        parsed_lines=900,
+        source_io_skipped=2,
+        unsupported_construct_skipped=3,
+    )
+
+
 def test_intact_store_raises_no_integrity_refusal(tmp_path: Path) -> None:
     """The opposite boundary: verification must not refuse honest bytes."""
     model = fixture_model()
