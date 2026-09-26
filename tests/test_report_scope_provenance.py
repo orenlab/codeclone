@@ -169,10 +169,15 @@ def test_provenance_rides_meta_and_never_a_digest(arms: _Arms) -> None:
 def test_the_provenance_keys_moved_the_report_schema_to_3_5(
     arms: _Arms, tmp_path: Path
 ) -> None:
-    """The keys are additive, the version is not: a 3.4 reader must refuse."""
+    """The keys are additive, the version is not: a 3.4 reader must refuse.
 
-    assert REPORT_SCHEMA_VERSION == "3.5"
-    assert arms.from_git["report_schema_version"] == "3.5"
+    3.5 is where these keys entered; 3.6 (the ``api_surface``
+    ``signature_changed`` kind) carries them unchanged, so the pin follows
+    the live version as every schema pin does.
+    """
+
+    assert REPORT_SCHEMA_VERSION == "3.6"
+    assert arms.from_git["report_schema_version"] == "3.6"
 
     current = tmp_path / "current.json"
     current.write_text(json.dumps(arms.from_git), "utf-8")

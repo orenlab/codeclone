@@ -43,6 +43,8 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Coupling facts are interpreter-independent (pinned builtin names, CPython 3.10–3.15).
 - One terminal design system: errors name a next step, every option in `--help`, warnings keep `[Errno 2]` details (machine outputs unchanged); report tables sorted by risk.
 - GitHub Actions (workflows, composite action) pinned to full commit SHAs; publish pins `build`/`twine` to locked versions.
+- `api_surface` keeps "the signature changed" apart from "it breaks a caller": `change_kind` `signature_changed` (optional parameter appended to the positional block, optional keyword-only parameter, new `*args`/`**kwargs`) fills `summary.changed` and `signature_change` rows; `summary.breaking`, `api_breaking_changes` and `--fail-on-api-break` count `removed`/`signature_break` only; CLI prints `breaking=N changed=M`, MCP `get_run_summary` diff adds `api_signature_changes`.
+- Report schema `3.6` (`REPORT_SCHEMA_VERSION`) for `signature_changed`/`signature_change`/`summary.changed`; stored `3.5` reports are refused like earlier ones, re-run the analysis.
 
 ### Removed
 

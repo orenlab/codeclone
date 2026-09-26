@@ -715,7 +715,21 @@ CACHE_VERSION: Final = "4.2"
 # LIVENESS_POLICY_VERSION moves "4" -> "5" with this change and owns the
 # analysis generation; baseline schema, cache generation, module identity and
 # the semantic identity generation stay where they are.
-REPORT_SCHEMA_VERSION: Final = "3.5"
+#
+# 3.5 -> 3.6 (maintainer decision 2026-09-26): the ``api_surface`` family
+# separates the fact "the signature changed" from the verdict "it breaks a
+# caller". ``change_kind`` gains ``signature_changed`` -- an optional
+# parameter appended to the positional block, an optional keyword-only
+# parameter, a new ``*args`` / ``**kwargs`` -- published as its own
+# ``signature_change`` row and counted in ``summary.changed``, while
+# ``summary.breaking`` and ``fail_on_api_break`` keep counting ``removed`` and
+# ``signature_break`` only. A reader of the old wire switching on
+# ``record_kind`` / ``change_kind`` would meet a value it was never told
+# about; the exact policy refuses the stored 3.5 report instead. The baseline
+# snapshot stores parameters and the verdict is computed at comparison time,
+# so baseline schema, cache generation and the api signature revision stay
+# where they are.
+REPORT_SCHEMA_VERSION: Final = "3.6"
 # The clone vocabulary of the report wire: what the document calls the family
 # and what a clone group calls its kind. These are facts about the payload, not
 # a layer's opinion about it, and they live here because of who has to read

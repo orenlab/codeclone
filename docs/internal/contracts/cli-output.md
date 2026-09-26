@@ -46,7 +46,7 @@ Color is stripped when:
 
 ### JSON contract
 
-`--json [FILE]` outputs the canonical JSON report schema v3.5. Encoding is UTF-8, no BOM. The output must be:
+`--json [FILE]` outputs the canonical JSON report schema v3.6. Encoding is UTF-8, no BOM. The output must be:
 - Valid JSON (all strings escaped, no trailing commas)
 - Single-line or pretty-printed per configuration (not mixed)
 - Complete: all keys present even if null/empty
@@ -91,7 +91,7 @@ Progress output (non-`--no-progress` and TTY stdout):
 **Trigger**: `--json` is passed but code writes a stale schema version instead of the current `REPORT_SCHEMA_VERSION`.
 **Behavior**: Downstream JSON parsers accept the file but reject new fields as unknown.
 **Risk**: PR analyzers and IDE extensions fail silently on missing fields.
-**Verification**: `jq .report_schema_version` on output must equal `REPORT_SCHEMA_VERSION` = `3.5` from the contract.
+**Verification**: `jq .report_schema_version` on output must equal `REPORT_SCHEMA_VERSION` = `3.6` from the contract.
 
 #### Mode C: Buffering deadlock on large report
 **Trigger**: Piping HTML report (>100 MB) with unbuffered progress on stderr simultaneously.
@@ -224,7 +224,7 @@ If a contract error is detected but a later exception sets exit code 5, the user
 
 | Contract ID | File | Line | Value |
 |:------------|:-----|:-----|:------|
-| REPORT_SCHEMA_VERSION | `codeclone/contracts/__init__.py` | — | "3.5" |
+| REPORT_SCHEMA_VERSION | `codeclone/contracts/__init__.py` | — | "3.6" |
 | DEFAULT_JSON_REPORT_PATH | `codeclone/contracts/__init__.py` | — | ".codeclone/report.json" |
 | DEFAULT_HTML_REPORT_PATH | `codeclone/contracts/__init__.py` | — | ".codeclone/report.html" |
 
@@ -238,7 +238,7 @@ If a contract error is detected but a later exception sets exit code 5, the user
 
 ### Baseline and metrics
 
-- **Report schema**: v3.5 (REPORT_SCHEMA_VERSION)
+- **Report schema**: v3.6 (REPORT_SCHEMA_VERSION)
 - **Analysis tool**: CodeClone v2.1.0a1
 - **Module count**: 769 (structural coverage)
 - **CLI surface package**: `codeclone.surfaces.cli` (23 test files covering entry, progress, memory, observability)

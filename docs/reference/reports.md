@@ -44,7 +44,7 @@ graph LR
 
 | Flag | Output | Default path | Use when |
 |------|--------|--------------|----------|
-| `--json FILE` | Structured report (schema `REPORT_SCHEMA_VERSION`, currently `3.5`) | `.codeclone/report.json` | Parsing or CI gates |
+| `--json FILE` | Structured report (schema `REPORT_SCHEMA_VERSION`, currently `3.6`) | `.codeclone/report.json` | Parsing or CI gates |
 | `--html FILE` | Interactive dashboard | `.codeclone/report.html` | Team review or drill-down |
 | `--md FILE` | Markdown findings and metrics | `.codeclone/report.md` | PR descriptions or docs |
 | `--sarif FILE` | SARIF v2.1.0 format | `.codeclone/report.sarif` | IDE / SIEM integration |

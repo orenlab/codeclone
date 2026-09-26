@@ -19,7 +19,7 @@ The release process expects these version and threshold contracts:
 |----------|-------|---------|
 | `BASELINE_SCHEMA_VERSION` | 3.0 | Baseline artifact format agreement |
 | `PATCH_TRAIL_SCHEMA_VERSION` | 1 | Audit trail format for patch forensics |
-| `REPORT_SCHEMA_VERSION` | 3.5 | Report payload structure |
+| `REPORT_SCHEMA_VERSION` | 3.6 | Report payload structure |
 | `BASELINE_FINGERPRINT_VERSION` | 3 | Clone-detection fingerprint logic version |
 | `CACHE_VERSION` | 4.2 | Analysis cache compatibility |
 | `ENGINEERING_MEMORY_SCHEMA_VERSION` | 1.9 | Memory store schema |

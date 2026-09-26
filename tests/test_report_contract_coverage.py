@@ -10,7 +10,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_args, get_type_hints
 from uuid import UUID
 
 import pytest
@@ -24,6 +24,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.models import (
+    ApiBreakingChange,
     DeadItem,
     HealthScore,
     LaneTrust,
@@ -4042,8 +4043,11 @@ def test_both_novelty_writers_answer_the_same_word(
 #: 3.4 -> 3.5 moved for the additive ``meta.scope_source`` /
 #: ``meta.scope_fallback_reason`` provenance keys; the members are unchanged
 #: and are recorded here against the new version, as the pin asks.
+#: 3.5 -> 3.6 moved for the ``api_surface`` ``signature_changed`` change kind
+#: (``_API_CHANGE_KIND_WIRE_CONTRACT`` below); the members are unchanged and
+#: are recorded here against the new version, as the pin asks.
 _NOVELTY_REASON_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
-    "3.5",
+    "3.6",
     (
         "comparison_unavailable",
         "entity_not_compared",
@@ -4100,4 +4104,31 @@ def test_the_novelty_reason_vocabulary_cannot_move_without_the_schema_version() 
         "the new pair here. If the version changed for another reason, record the "
         f"unchanged vocabulary against the new version. Live: {live}. "
         f"Recorded: {_NOVELTY_REASON_WIRE_CONTRACT}."
+    )
+
+
+#: The ``api_surface`` change-kind vocabulary as published under a given
+#: report schema version -- the third pin of the pairing above. 3.5 -> 3.6 is
+#: what ``signature_changed`` forced: a reader switching on ``change_kind``
+#: (and on the ``signature_change`` rows it rides) meets a value it was never
+#: told about, and the exact schema policy is what refuses the older document
+#: instead of letting it be misread. Members are read off the model's own
+#: ``Literal``, so a kind added there cannot ship without this pair moving.
+_API_CHANGE_KIND_WIRE_CONTRACT: tuple[str, tuple[str, ...]] = (
+    "3.6",
+    ("removed", "signature_break", "signature_changed"),
+)
+
+
+def test_the_api_change_kind_vocabulary_cannot_move_without_the_schema_version() -> (
+    None
+):
+    change_kind = get_type_hints(ApiBreakingChange)["change_kind"]
+    live = (REPORT_SCHEMA_VERSION, tuple(sorted(get_args(change_kind))))
+    assert live == _API_CHANGE_KIND_WIRE_CONTRACT, (
+        "The api_surface change_kind vocabulary and REPORT_SCHEMA_VERSION are one "
+        "wire contract. If the kinds changed, bump REPORT_SCHEMA_VERSION and "
+        "record the new pair here. If the version changed for another reason, "
+        f"record the unchanged vocabulary against the new version. Live: {live}. "
+        f"Recorded: {_API_CHANGE_KIND_WIRE_CONTRACT}."
     )
