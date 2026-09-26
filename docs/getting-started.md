@@ -149,12 +149,14 @@ A baseline mismatch means your `codeclone.baseline.json` was created with a diff
 ```bash
 codeclone --update-baseline
 ```
+The update needs a `baseline_scope_id` under `[tool.codeclone]`. If your project does not have one yet, run `codeclone setup apply -y` first — it writes the key.
 
 **Q: How do I ignore specific findings?**
 Use baseline-aware gating. After reviewing a finding, update your baseline:
 ```bash
 codeclone --update-baseline
 ```
+This also needs the `baseline_scope_id` key; `codeclone setup apply -y` writes it once.
 
 Findings present in the baseline are not flagged as new.
 

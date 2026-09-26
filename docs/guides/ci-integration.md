@@ -41,7 +41,7 @@ graph LR
 
 | Task | Command | Notes |
 |------|---------|-------|
-| Set baseline | `codeclone --update-baseline` | Run on main branch once to establish truth |
+| Set baseline | `codeclone setup apply -y`, then `codeclone --update-baseline` | Run once on main; commit `pyproject.toml` and `codeclone.baseline.json` |
 | Check PR | `codeclone --ci --changed-only` | Compares changed files against baseline |
 | Check all files | `codeclone --ci` | Full analysis; slower but comprehensive |
 | Show failures | `codeclone --ci --verbose` | Lists clone IDs and file locations |

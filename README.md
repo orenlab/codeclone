@@ -131,10 +131,15 @@ codeclone .
 Before asking an agent to change the repository, capture the accepted state once:
 
 ```bash
+codeclone setup apply -y
 codeclone . --update-baseline
-git add codeclone.baseline.json
+git add pyproject.toml .gitignore codeclone.baseline.json
 git commit -m "chore: add CodeClone structural baseline"
 ```
+
+`codeclone setup apply -y` writes `[tool.codeclone]` into your existing `pyproject.toml` — the baseline path and a
+freshly generated `baseline_scope_id` that ties the baseline to this project — and adds `.codeclone/` to `.gitignore`.
+Commit them with the baseline, and never change the scope id.
 
 The baseline records the structural debt that already exists. Future analysis can then separate **new regressions**
 from findings that were already present, so agents and reviewers can focus on what the current change introduced.

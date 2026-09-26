@@ -25,7 +25,7 @@ Run an analysis when you:
 ```mermaid
 graph LR
     A["Run analysis<br/>codeclone ."] --> B["Review terminal<br/>output"]
-    B --> C["Create baseline<br/>codeclone . --update-baseline"]
+    B --> C["Create baseline<br/>codeclone setup apply -y<br/>codeclone . --update-baseline"]
     C --> D["Use in CI or<br/>patch-verify"]
 ```
 
@@ -40,10 +40,11 @@ This scans all Python files, detects clones and metrics, and prints a summary to
 To save results for future comparisons, create a baseline:
 
 ```bash
+codeclone setup apply -y
 codeclone . --update-baseline
 ```
 
-The baseline is stored in `codeclone.baseline.json` at the repository root and used to identify new findings in subsequent runs.
+`codeclone setup apply -y` writes `[tool.codeclone]` into `pyproject.toml`, including the `baseline_scope_id` that `--update-baseline` requires. The baseline is stored in `codeclone.baseline.json` at the repository root and used to identify new findings in subsequent runs. Commit it together with `pyproject.toml`.
 
 ## Key commands
 
@@ -52,7 +53,8 @@ The baseline is stored in `codeclone.baseline.json` at the repository root and u
 | `codeclone .` | Run full analysis in current directory |
 | `codeclone . --json [FILE]` | Export results as JSON (default: `.codeclone/report.json`) |
 | `codeclone . --html [FILE]` | Generate interactive HTML report (default: `.codeclone/report.html`) |
-| `codeclone . --update-baseline` | Create or update `codeclone.baseline.json` |
+| `codeclone setup apply -y` | Write `[tool.codeclone]`: baseline path, `baseline_scope_id`, `.gitignore` entry |
+| `codeclone . --update-baseline` | Create or update `codeclone.baseline.json` (needs `baseline_scope_id`) |
 | `codeclone . --patch-verify` | Verify current working tree against baseline (for PR review) |
 | `codeclone . --processes N` | Run analysis with N parallel workers (default: 4) |
 

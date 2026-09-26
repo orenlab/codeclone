@@ -53,7 +53,8 @@ codeclone .
 Record the accepted structural baseline once, then gate future changes against it in CI:
 
 ```bash
-codeclone . --update-baseline
+codeclone setup apply -y            # write [tool.codeclone] with a fresh baseline_scope_id
+codeclone . --update-baseline       # record the baseline; commit it with pyproject.toml
 codeclone . --ci
 ```
 
