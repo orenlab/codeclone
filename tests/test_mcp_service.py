@@ -15071,6 +15071,60 @@ def test_mcp_verify_accepts_analyzer_invariant_python_structural(
     assert "invisible to analysis" in str(delta["reason"])
 
 
+def _edit_comment_and_mypy_table(root: Path) -> None:
+    """Both invisible edits at once: one inside a ``pkg/a.py`` scope, one not."""
+    _edit_python_comment(root)
+    _edit_mypy_table(root)
+
+
+@pytest.mark.parametrize(
+    ("strictness", "expected"),
+    [
+        pytest.param("ci", ("violated", "scope_violation"), id="ci-blocks"),
+        pytest.param(
+            "relaxed", ("accepted", "analyzer_invariant"), id="relaxed-passes"
+        ),
+    ],
+)
+def test_mcp_verify_same_run_scope_violation_blocks_unless_relaxed(
+    tmp_path: Path,
+    strictness: str,
+    expected: tuple[str, str],
+) -> None:
+    """The scope guard of the same-run-id branch, on its own inputs.
+
+    Two edits the analysis cannot see -- a comment inside the declared
+    ``pkg/a.py``, a ``[tool.mypy]`` table in the undeclared
+    ``pyproject.toml`` -- recompute to the SAME run id, so verify takes the
+    analyzer-invariant branch, and the claimed changes break scope. The
+    branch has its own scope guard ahead of the invariant acceptance; the
+    fast and the full structural paths have theirs, and neither of them is
+    on this road. Identical inputs, one knob: ``ci`` must refuse, and
+    ``relaxed`` -- which makes a scope violation non-blocking -- must reach
+    the invariant acceptance, which proves the branch was reached at all.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pkg/a.py"], edit=_edit_comment_and_mypy_table
+    )
+    after_run = _analyze_root(service, tmp_path)
+    # Premise: the recompute landed on the same facts, so the pair takes the
+    # same-run-id branch rather than the full structural path.
+    assert after_run == before_run
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=after_run,
+        intent_id=intent_id,
+        changed_files=["pkg/a.py", "pyproject.toml"],
+        strictness=strictness,
+    )
+
+    scope_check = cast("dict[str, object]", verified["scope_check"])
+    assert scope_check["status"] == "violated"
+    assert (verified["status"], verified["reason"]) == expected
+
+
 def test_mcp_verify_real_structural_edit_still_requires_new_after_run(
     tmp_path: Path,
 ) -> None:
