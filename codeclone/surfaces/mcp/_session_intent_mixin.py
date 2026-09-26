@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from ...audit import (
     EVENT_BLAST_RADIUS,
@@ -57,6 +57,10 @@ from ._session_shared import (
     MCPRunRecord,
     MCPRunRootMismatchError,
     MCPServiceContractError,
+)
+from ._workspace_intent_store import (
+    InaccessibleRegistryEntry,
+    inaccessible_registry_entries,
 )
 from ._workspace_intents import (
     DEFAULT_LEASE_SECONDS,
@@ -1060,10 +1064,12 @@ class _MCPSessionIntentMixin:
         from ._workspace_intents import list_workspace_intent_records_for_recovery
 
         root_path = self._resolve_workspace_root(root)
-        counts = workspace_status_counts(root=root_path)
         now = utc_now()
+        counts = workspace_status_counts(root=root_path)
         recovery_records = list_workspace_intent_records_for_recovery(root=root_path)
         records = list_workspace_intents(root=root_path, exclude_stale=False)
+        unreadable_ids = sorted(unreadable_workspace_intent_ids(root=root_path))
+        inaccessible = inaccessible_registry_entries(root=root_path)
         recovery_available = self._recovery_available_payload(
             records=recovery_records,
             root_path=root_path,
@@ -1089,8 +1095,12 @@ class _MCPSessionIntentMixin:
             # answering is owed the difference between "removed" and "kept but
             # not understood here", and the id is the only handle on a row no
             # projection of this build can describe.
-            "unreadable_workspace_intent_ids": sorted(
-                unreadable_workspace_intent_ids(root=root_path)
+            "unreadable_workspace_intent_ids": unreadable_ids,
+            # Files this process could not read at all, named the same way
+            # the admission refusal names them.
+            "inaccessible_registry_entries": _inaccessible_entry_payloads(
+                root=root_path,
+                entries=inaccessible,
             ),
             **intent_registry_summary(root_path),
         }
@@ -1879,9 +1889,21 @@ def workspace_admission_refusal(
     two grant paths ask: reading the registry, listing it, and finishing or
     releasing authority already held stay available, so a registry with one
     unreadable row does not become a brick.
+
+    Asked first, one level lower: whether the registry could be read at all.
+    A file this process may not open leaves the registry's contents unknown
+    -- refused as ``registry_unreadable``, naming what could not be read,
+    before any row is interpreted.
     """
 
+    inaccessible = inaccessible_registry_entries(root=root)
     unreadable = sorted(unreadable_workspace_intent_ids(root=root))
+    if inaccessible:
+        return _registry_entries_unreadable_refusal(
+            root=root,
+            operation=operation,
+            entries=inaccessible,
+        )
     if not unreadable:
         return None
     from ...config.intent_registry import intent_registry_summary
@@ -1904,6 +1926,94 @@ def workspace_admission_refusal(
             registry_storage=registry["registry_storage"],
         ),
     }
+
+
+# ── a registry this process cannot read ─────────────────────────────────────
+# The same law as the refusal above, one level lower. There a signed row was
+# read and could not be modelled; here nothing could be read at all -- a
+# registry file the process may not open. The registry's contents are then
+# unknown, and "unknown" was being answered as "empty": the file was unlinked
+# as if damaged, so conflict detection saw nobody.
+REGISTRY_UNREADABLE: Final = "registry_unreadable"
+
+_REGISTRY_ENTRIES_UNREADABLE_MESSAGE: Final = (
+    "The workspace intent registry holds an entry this server cannot read "
+    "({errors}). Whose intent it is, and what scope it holds, are unknown -- "
+    "and an unknown intent is not an absent one: granting edit authority now "
+    "could hand out scope another agent is holding. The entry was left "
+    "exactly as found."
+)
+_REGISTRY_ENTRIES_UNREADABLE_NEXT_STEP: Final = (
+    "The workspace intent registry contains an unreadable entry: {paths}. "
+    "Check that file's permissions and owner -- another user or process may "
+    "have written it -- and make it readable to this server, then "
+    "start_controlled_change again. If the user confirms that intent is "
+    "abandoned, remove the file by hand instead. Read-only analysis, "
+    "listing, and finishing an intent you already hold stay available."
+)
+
+
+def _inaccessible_entry_payloads(
+    *,
+    root: Path,
+    entries: Sequence[InaccessibleRegistryEntry],
+) -> list[dict[str, object]]:
+    from ...config.intent_registry import intent_registry_summary
+
+    storage = intent_registry_summary(root)["registry_storage"].rstrip("/")
+    return [
+        {
+            "path": f"{storage}/{entry.storage_key}",
+            "intent_id": entry.keyed_intent_id,
+            "error": entry.error,
+        }
+        for entry in entries
+    ]
+
+
+def _registry_unreadable_status() -> dict[str, object]:
+    """The part every answer about an unreadable registry shares."""
+
+    return {
+        "status": "blocked",
+        "reason": REGISTRY_UNREADABLE,
+        "user_action_required": True,
+    }
+
+
+def _registry_unreadable_grant_refusal(
+    *,
+    operation: str,
+    answer: dict[str, object],
+) -> dict[str, object]:
+    """A refused grant: nothing written, no authority, a human decides."""
+
+    return {
+        **_registry_unreadable_status(),
+        "operation": operation,
+        "edit_allowed": False,
+        "workspace_registered": False,
+        **answer,
+    }
+
+
+def _registry_entries_unreadable_refusal(
+    *,
+    root: Path,
+    operation: str,
+    entries: Sequence[InaccessibleRegistryEntry],
+) -> dict[str, object]:
+    payloads = _inaccessible_entry_payloads(root=root, entries=entries)
+    errors = ", ".join(sorted({entry.error for entry in entries}))
+    paths = ", ".join(str(item["path"]) for item in payloads)
+    return _registry_unreadable_grant_refusal(
+        operation=operation,
+        answer={
+            "inaccessible_registry_entries": payloads,
+            "message": _REGISTRY_ENTRIES_UNREADABLE_MESSAGE.format(errors=errors),
+            "next_step": _REGISTRY_ENTRIES_UNREADABLE_NEXT_STEP.format(paths=paths),
+        },
+    )
 
 
 def _dirty_snapshot_for_declare(

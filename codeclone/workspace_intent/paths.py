@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 from ..paths.workspace import REGISTRY_DIR_PARTS
-from ..utils.json_io import read_json_object
+from ..utils.json_io import BoundedReadError, read_json_object
 from .contract import WorkspaceIntentRecord
 
 _SAFE_INTENT_ID_RE: Final = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
@@ -93,15 +94,77 @@ def registry_files(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(chosen.values()))
 
 
+class RegistryFileReadKind(str, Enum):
+    """What reading one registry FILE produced, before any document is parsed.
+
+    Below :class:`~codeclone.workspace_intent.contract.WorkspaceDocumentRead`
+    on purpose: that vocabulary interprets bytes, and this one answers whether
+    there were bytes to interpret. ``None`` used to stand for both "the bytes
+    are damaged" and "this process could not read the file", and the removal
+    path, handed ``None``, unlinked a live agent's intent because the reader
+    had been refused permission to open it.
+    """
+
+    #: The file was read and holds a JSON object.
+    PAYLOAD = "payload"
+    #: The read itself failed -- permission, I/O, descriptor exhaustion. What
+    #: the file holds, and whose intent it is, are unknown; unknown is not
+    #: absent, and it is not damage either.
+    UNREADABLE = "unreadable"
+    #: Bytes no writer produced: not JSON, not an object, over the size cap,
+    #: or a name with no bytes behind it. Removing them is hygiene.
+    CORRUPT = "corrupt"
+
+
+class RegistryFileRead(NamedTuple):
+    kind: RegistryFileReadKind
+    payload: dict[str, object] | None = None
+    #: Exception class name for an UNREADABLE read, empty otherwise. The
+    #: class, never the message: the message carries an absolute path.
+    error: str = ""
+
+
+def read_registry_file(
+    path: Path,
+    *,
+    reader: Callable[[Path], dict[str, object]] = read_json_object,
+) -> RegistryFileRead:
+    """Read one registry file and say which of three things happened.
+
+    The discriminator is the exception class, never its text. Two ``OSError``
+    subclasses are damage rather than a refused read, and are named first so
+    they cannot fall into the broader arm: :class:`BoundedReadError` is a
+    file larger than any writer emits, and :class:`FileNotFoundError` is a
+    name -- in practice a dangling link -- with no bytes behind it.
+    """
+
+    try:
+        payload = reader(path)
+    except (BoundedReadError, FileNotFoundError):
+        return RegistryFileRead(RegistryFileReadKind.CORRUPT)
+    except OSError as exc:
+        return RegistryFileRead(
+            RegistryFileReadKind.UNREADABLE,
+            error=type(exc).__name__,
+        )
+    except (TypeError, ValueError):
+        return RegistryFileRead(RegistryFileReadKind.CORRUPT)
+    return RegistryFileRead(RegistryFileReadKind.PAYLOAD, payload=payload)
+
+
 def read_payload(
     path: Path,
     *,
     reader: Callable[[Path], dict[str, object]] = read_json_object,
 ) -> dict[str, object] | None:
-    try:
-        return reader(path)
-    except (OSError, TypeError, ValueError):
-        return None
+    """The payload, or nothing -- a projection for readers that only list.
+
+    Kept for the read-only consumers that never act on a miss. A caller that
+    removes or refuses on a miss must use :func:`read_registry_file`: this
+    signature cannot say whether the file was damaged or merely unreadable.
+    """
+
+    return read_registry_file(path, reader=reader).payload
 
 
 def unlink(path: Path) -> bool:
@@ -182,12 +245,15 @@ def safe_remove_own_intent(
 
 __all__ = [
     "REGISTRY_DIR_PARTS",
+    "RegistryFileRead",
+    "RegistryFileReadKind",
     "intent_filename",
     "intent_id_from_filename",
     "intent_path",
     "is_safe_intent_id",
     "is_safe_intent_path",
     "read_payload",
+    "read_registry_file",
     "record_sort_key",
     "registry_dir",
     "registry_files",

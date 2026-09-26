@@ -38,10 +38,12 @@ from ...workspace_intent.models import (
     signed_payload_json_from_record,
 )
 from ...workspace_intent.paths import (
+    RegistryFileReadKind,
     intent_id_from_filename,
     intent_path,
     is_safe_intent_id,
     read_payload,
+    read_registry_file,
     record_sort_key,
     registry_dir,
     registry_files,
@@ -555,6 +557,11 @@ class LazyCloseResult:
     #: not understood here".
     unreadable_retained: tuple[str, ...] = ()
     unreadable_retained_intent_ids: tuple[str, ...] = ()
+    #: Files left exactly as found because this process could not read them
+    #: at all. Not the lane above: nobody has shown these were written whole,
+    #: and nobody has shown they were not -- which is why neither lane may
+    #: remove them.
+    inaccessible_retained: tuple[str, ...] = ()
 
     def to_gc_fragment(self) -> dict[str, object]:
         return {
@@ -566,6 +573,8 @@ class LazyCloseResult:
             "unreadable_retained": len(self.unreadable_retained),
             "unreadable_retained_filenames": list(self.unreadable_retained),
             "unreadable_retained_intent_ids": list(self.unreadable_retained_intent_ids),
+            "inaccessible_retained": len(self.inaccessible_retained),
+            "inaccessible_retained_filenames": list(self.inaccessible_retained),
         }
 
 
@@ -686,20 +695,53 @@ def _lazy_close_from_entries(
     )
 
 
-def _file_entries(
-    store: FileWorkspaceIntentStore,
-) -> tuple[tuple[Path, ScannedRegistryRow], ...]:
-    return tuple(
-        (
-            path,
-            ScannedRegistryRow(
-                storage_key=path.name,
-                keyed_intent_id=intent_id_from_filename(path.name),
-                read=read_workspace_payload(read_payload(path)),
-            ),
+class InaccessibleRegistryEntry(NamedTuple):
+    """A registry file this process could not read -- not a row, no bytes.
+
+    Kept out of :class:`ScannedRegistryRow` on purpose. A scanned row carries
+    a document read, and there is no document here to have read: handing the
+    removal owner a row for it would mean inventing a read outcome, and the
+    one it used to be given -- "corrupt" -- is how a live intent was deleted
+    because its reader lacked permission to open it.
+    """
+
+    storage_key: str
+    keyed_intent_id: str | None
+    #: Exception class name of the failed read.
+    error: str
+
+
+class _FileRegistryScan(NamedTuple):
+    rows: tuple[tuple[Path, ScannedRegistryRow], ...]
+    inaccessible: tuple[InaccessibleRegistryEntry, ...]
+
+
+def _scan_file_store(store: FileWorkspaceIntentStore) -> _FileRegistryScan:
+    rows: list[tuple[Path, ScannedRegistryRow]] = []
+    inaccessible: list[InaccessibleRegistryEntry] = []
+    for path in registry_files(store.root):
+        keyed_intent_id = intent_id_from_filename(path.name)
+        file_read = read_registry_file(path)
+        if file_read.kind is RegistryFileReadKind.UNREADABLE:
+            inaccessible.append(
+                InaccessibleRegistryEntry(
+                    storage_key=path.name,
+                    keyed_intent_id=keyed_intent_id,
+                    error=file_read.error,
+                )
+            )
+            continue
+        rows.append(
+            (
+                path,
+                ScannedRegistryRow(
+                    storage_key=path.name,
+                    keyed_intent_id=keyed_intent_id,
+                    read=read_workspace_payload(file_read.payload),
+                ),
+            )
         )
-        for path in registry_files(store.root)
-    )
+    return _FileRegistryScan(rows=tuple(rows), inaccessible=tuple(inaccessible))
 
 
 def _close_file_store(
@@ -707,18 +749,25 @@ def _close_file_store(
     *,
     for_lazy_close: bool,
 ) -> LazyCloseResult:
-    scanned = _file_entries(store)
+    scan = _scan_file_store(store)
+    scanned = scan.rows
     path_by_name = {row.storage_key: path for path, row in scanned}
     path_by_intent = {
         row.read.record.intent_id: path
         for path, row in scanned
         if row.read.record is not None
     }
-    return _lazy_close_from_entries(
+    # Unreadable files never reach the removal owner: no callback below can
+    # be handed a file whose bytes nobody has seen.
+    result = _lazy_close_from_entries(
         (row for _path, row in scanned),
         for_lazy_close=for_lazy_close,
         remove_corrupted=lambda key: unlink(path_by_name[key]),
         close_active=lambda record, _reason: unlink(path_by_intent[record.intent_id]),
+    )
+    return replace(
+        result,
+        inaccessible_retained=tuple(entry.storage_key for entry in scan.inaccessible),
     )
 
 
@@ -772,7 +821,7 @@ def unreadable_intent_ids(store: WorkspaceIntentStore) -> frozenset[str]:
     """
 
     if isinstance(store, FileWorkspaceIntentStore):
-        rows = tuple(row for _path, row in _file_entries(store))
+        rows = tuple(row for _path, row in _scan_file_store(store).rows)
     elif isinstance(store, SqliteWorkspaceIntentStore):
         rows = tuple(row for _key, row in _sqlite_entries(store))
     else:  # pragma: no cover - the union is closed
@@ -785,14 +834,33 @@ def unreadable_intent_ids(store: WorkspaceIntentStore) -> frozenset[str]:
     )
 
 
+def inaccessible_registry_entries(
+    *,
+    root: Path,
+) -> tuple[InaccessibleRegistryEntry, ...]:
+    """Registry files at ``root`` this process could not read at all.
+
+    Removes nothing and closes nothing. The sqlite backend has no per-file
+    read failure, so its answer here is always the empty tuple.
+    """
+
+    store = get_workspace_intent_store(root)
+    if not isinstance(store, FileWorkspaceIntentStore):
+        return ()
+    with registry_transaction(store):
+        return _scan_file_store(store).inaccessible
+
+
 __all__ = [
     "FileWorkspaceIntentStore",
+    "InaccessibleRegistryEntry",
     "LazyCloseResult",
     "ScannedRegistryRow",
     "SqliteWorkspaceIntentStore",
     "WorkspaceIntentStore",
     "clear_workspace_intent_store_cache",
     "get_workspace_intent_store",
+    "inaccessible_registry_entries",
     "lazy_close_eligible_records",
     "lazy_close_eligible_records_unlocked",
     "registry_transaction",
