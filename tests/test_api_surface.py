@@ -7,8 +7,13 @@
 from __future__ import annotations
 
 import ast
+import json
+import subprocess
+import sys
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
+
+import pytest
 
 from codeclone.domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
 from codeclone.metrics import api_surface as api_surface_mod
@@ -371,16 +376,13 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
 
     class_before = _public_symbol("pkg.mod:Thing", "class")
     class_after = _public_symbol("pkg.mod:Thing", "constant")
+    assert api_surface_mod._signature_change_verdict(
+        baseline_symbol=class_before,
+        current_symbol=class_after,
+        strict_types=False,
+    ) == ("signature_break", "Changed public symbol kind from class to constant.")
     assert (
-        api_surface_mod._signature_break_detail(
-            baseline_symbol=class_before,
-            current_symbol=class_after,
-            strict_types=False,
-        )
-        == "Changed public symbol kind from class to constant."
-    )
-    assert (
-        api_surface_mod._signature_break_detail(
+        api_surface_mod._signature_change_verdict(
             baseline_symbol=class_before,
             current_symbol=_public_symbol("pkg.mod:Thing", "class"),
             strict_types=False,
@@ -429,30 +431,24 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
         params=baseline_typed.params,
         returns_hash="str",
     )
-    assert "Changed parameter kind" in cast(
-        str,
-        api_surface_mod._signature_break_detail(
-            baseline_symbol=baseline_param,
-            current_symbol=current_param_kind,
-            strict_types=False,
-        ),
+    assert api_surface_mod._signature_change_verdict(
+        baseline_symbol=baseline_param,
+        current_symbol=current_param_kind,
+        strict_types=False,
+    ) == (
+        "signature_break",
+        "Changed parameter kind for value from kw_only to pos_or_kw.",
     )
-    assert "Changed type annotation" in cast(
-        str,
-        api_surface_mod._signature_break_detail(
-            baseline_symbol=baseline_typed,
-            current_symbol=current_param_type,
-            strict_types=True,
-        ),
-    )
-    assert (
-        api_surface_mod._signature_break_detail(
-            baseline_symbol=baseline_typed,
-            current_symbol=current_return_type,
-            strict_types=True,
-        )
-        == "Changed return annotation."
-    )
+    assert api_surface_mod._signature_change_verdict(
+        baseline_symbol=baseline_typed,
+        current_symbol=current_param_type,
+        strict_types=True,
+    ) == ("signature_break", "Changed type annotation for parameter value.")
+    assert api_surface_mod._signature_change_verdict(
+        baseline_symbol=baseline_typed,
+        current_symbol=current_return_type,
+        strict_types=True,
+    ) == ("signature_break", "Changed return annotation.")
     fewer_params = _public_symbol("pkg.mod:run", "function", params=())
     more_params = _public_symbol(
         "pkg.mod:run",
@@ -462,18 +458,402 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
             ApiParamSpec(name="b", kind="pos_or_kw", has_default=False),
         ),
     )
+    # A different parameter count is no verdict on its own any more: the
+    # detail names the first parameter that decides it.
+    assert api_surface_mod._signature_change_verdict(
+        baseline_symbol=fewer_params,
+        current_symbol=more_params,
+        strict_types=False,
+    ) == ("signature_break", "Added required parameter a.")
+
+
+def test_signature_change_verdict_compares_annotations_only_when_strict() -> None:
+    """Without ``strict_types`` a changed annotation moves nothing."""
+
+    def symbol(annotation: str) -> PublicSymbol:
+        return _public_symbol(
+            "pkg.mod:run",
+            "function",
+            params=(
+                ApiParamSpec(
+                    name="value",
+                    kind="kw_only",
+                    has_default=False,
+                    annotation_hash=annotation,
+                ),
+            ),
+            returns_hash=annotation,
+        )
+
+    baseline, current = symbol("int"), symbol("str")
     assert (
-        api_surface_mod._signature_break_detail(
-            baseline_symbol=fewer_params,
-            current_symbol=more_params,
+        api_surface_mod._signature_change_verdict(
+            baseline_symbol=baseline,
+            current_symbol=current,
             strict_types=False,
         )
-        == "Changed callable parameter count."
+        is None
     )
 
 
 def test_symbol_index_none_snapshot_returns_empty() -> None:
     assert api_surface_mod._symbol_index(None) == {}
+
+
+# ── the verdict: "the signature changed" is a fact, "it breaks" a verdict ───
+#
+# The maintainer's decision table (2026-09-26), one row per line of it. Each
+# row is reached from real source through the collector and the public
+# comparison, so a row pins what a run records, not what a helper returns.
+# ``None`` is "nothing moved": no change is recorded at all.
+
+
+def _signature_snapshot(source: str) -> ApiSurfaceSnapshot:
+    node = ast.parse(source).body[0]
+    assert isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    symbol = PublicSymbol(
+        qualname="pkg.mod:run",
+        kind="function",
+        start_line=1,
+        end_line=1,
+        params=api_surface_mod._parameter_specs(node=node, is_method=False),
+    )
+    return ApiSurfaceSnapshot(
+        modules=(
+            ModuleApiSurface(
+                module="pkg.mod", filepath="pkg/mod.py", symbols=(symbol,)
+            ),
+        )
+    )
+
+
+def _recorded_change(
+    baseline_source: str, current_source: str
+) -> tuple[str, str] | None:
+    added, changes = compare_api_surfaces(
+        baseline=_signature_snapshot(baseline_source),
+        current=_signature_snapshot(current_source),
+        strict_types=False,
+    )
+    assert added == ()
+    if not changes:
+        return None
+    (change,) = changes
+    return change.change_kind, change.detail
+
+
+_CHANGED = "signature_changed"
+_BREAK = "signature_break"
+
+_SIGNATURE_DECISION_TABLE: tuple[tuple[str, str, str, tuple[str, str] | None], ...] = (
+    # A call that bound before still binds: recorded, never breaking.
+    (
+        "optional-positional-appended",
+        "def run(a): ...",
+        "def run(a, b=None): ...",
+        (_CHANGED, "Added optional parameter b."),
+    ),
+    (
+        "optional-keyword-only-added-mid-block",
+        "def run(a, *, y=1): ...",
+        "def run(a, *, x=1, y=1): ...",
+        (_CHANGED, "Added optional keyword-only parameter x."),
+    ),
+    (
+        "varargs-added",
+        "def run(a): ...",
+        "def run(a, *args): ...",
+        (_CHANGED, "Added *args."),
+    ),
+    (
+        "kwargs-added",
+        "def run(a): ...",
+        "def run(a, **kwargs): ...",
+        (_CHANGED, "Added **kwargs."),
+    ),
+    # A call that bound before fails or binds differently: breaking.
+    (
+        "required-positional-appended",
+        "def run(a): ...",
+        "def run(a, b): ...",
+        (_BREAK, "Added required parameter b."),
+    ),
+    (
+        "required-keyword-only-added",
+        "def run(a, *, y=1): ...",
+        "def run(a, *, x, y=1): ...",
+        (_BREAK, "Added required parameter x."),
+    ),
+    (
+        "positional-only-required-appended",
+        "def run(a, /): ...",
+        "def run(a, x, /): ...",
+        (_BREAK, "Added required parameter x."),
+    ),
+    (
+        "positional-only-with-default-appended",
+        "def run(a, /): ...",
+        "def run(a, x=1, /): ...",
+        (_BREAK, "Added positional-only parameter x."),
+    ),
+    (
+        "positional-only-with-default-inserted",
+        "def run(a, /, b=None): ...",
+        "def run(a, x=1, /, b=None): ...",
+        (_BREAK, "Added positional-only parameter x."),
+    ),
+    (
+        "optional-inserted-before-a-positional",
+        "def run(a, b=1): ...",
+        "def run(a, x=None, b=1): ...",
+        (_BREAK, "Inserted parameter x before b."),
+    ),
+    (
+        "optional-removed",
+        "def run(a, b=1): ...",
+        "def run(a): ...",
+        (_BREAK, "Removed parameter b."),
+    ),
+    (
+        "varargs-removed",
+        "def run(a, *args): ...",
+        "def run(a): ...",
+        (_BREAK, "Removed parameter args."),
+    ),
+    (
+        "kwargs-removed",
+        "def run(a, **kwargs): ...",
+        "def run(a): ...",
+        (_BREAK, "Removed parameter kwargs."),
+    ),
+    (
+        "parameter-kind-changed",
+        "def run(a, b): ...",
+        "def run(a, *, b): ...",
+        (_BREAK, "Changed parameter kind for b from pos_or_kw to kw_only."),
+    ),
+    (
+        "positional-only-became-positional",
+        "def run(a, /): ...",
+        "def run(a): ...",
+        (_BREAK, "Changed parameter kind for a from pos_only to pos_or_kw."),
+    ),
+    (
+        "positional-renamed",
+        "def run(a, b): ...",
+        "def run(a, c): ...",
+        (_BREAK, "Renamed public parameter b to c."),
+    ),
+    (
+        "keyword-only-renamed",
+        "def run(*, x): ...",
+        "def run(*, y): ...",
+        (_BREAK, "Renamed public parameter x to y."),
+    ),
+    (
+        "default-dropped",
+        "def run(a=1): ...",
+        "def run(a): ...",
+        (_BREAK, "Parameter a became required."),
+    ),
+    # Several changes at once: the heaviest outcome, first reason of it.
+    (
+        "optional-and-required-together-break",
+        "def run(a): ...",
+        "def run(a, b=None, *, k): ...",
+        (_BREAK, "Added required parameter k."),
+    ),
+    (
+        "several-compatible-changes-stay-compatible",
+        "def run(a): ...",
+        "def run(a, b=None, *args, k=1, **kwargs): ...",
+        (_CHANGED, "Added optional parameter b."),
+    ),
+    # Nothing a caller can observe moved: nothing is recorded.
+    ("unchanged", "def run(a, b=1): ...", "def run(a, b=1): ...", None),
+    ("required-became-optional", "def run(a): ...", "def run(a=1): ...", None),
+    ("positional-only-renamed", "def run(a, /): ...", "def run(b, /): ...", None),
+)
+
+
+@pytest.mark.parametrize(
+    ("baseline_source", "current_source", "expected"),
+    [
+        pytest.param(baseline, current, expected, id=row_id)
+        for row_id, baseline, current, expected in _SIGNATURE_DECISION_TABLE
+    ],
+)
+def test_signature_change_decision_table(
+    baseline_source: str,
+    current_source: str,
+    expected: tuple[str, str] | None,
+) -> None:
+    assert _recorded_change(baseline_source, current_source) == expected
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        pytest.param("vararg", (_CHANGED, "Added *rest."), id="vararg"),
+        pytest.param("kwarg", (_CHANGED, "Added **rest."), id="kwarg"),
+    ],
+)
+def test_added_variadic_parameter_with_a_default_flag_stays_compatible(
+    kind: Literal["vararg", "kwarg"],
+    expected: tuple[str, str],
+) -> None:
+    """The table is total over ``(kind, has_default)``.
+
+    A collected ``*args`` / ``**kwargs`` never carries a default, but a
+    hand-built snapshot can; its rows answer like the collected ones instead
+    of falling through the table.
+    """
+
+    baseline = _public_symbol("pkg.mod:run", "function", params=())
+    current = _public_symbol(
+        "pkg.mod:run",
+        "function",
+        params=(ApiParamSpec(name="rest", kind=kind, has_default=True),),
+    )
+    assert (
+        api_surface_mod._signature_change_verdict(
+            baseline_symbol=baseline,
+            current_symbol=current,
+            strict_types=False,
+        )
+        == expected
+    )
+
+
+def test_compare_records_every_change_and_the_partition_splits_the_verdicts() -> None:
+    """The edge stays recorded; only the verdict decides what gates.
+
+    ``compare_api_surfaces`` keeps a compatible change beside the breaking
+    ones, and ``partition_api_changes`` is the one split: ``removed`` and
+    ``signature_break`` are breaking, ``signature_changed`` is not.
+    """
+
+    def module(*symbols: PublicSymbol) -> ApiSurfaceSnapshot:
+        return ApiSurfaceSnapshot(
+            modules=(
+                ModuleApiSurface(
+                    module="pkg.mod", filepath="pkg/mod.py", symbols=symbols
+                ),
+            )
+        )
+
+    value = ApiParamSpec(name="value", kind="pos_or_kw", has_default=False)
+    optional = ApiParamSpec(name="limit", kind="pos_or_kw", has_default=True)
+    required = ApiParamSpec(name="limit", kind="pos_or_kw", has_default=False)
+    _added, changes = compare_api_surfaces(
+        baseline=module(
+            _public_symbol("pkg.mod:extended", "function", params=(value,)),
+            _public_symbol("pkg.mod:gone", "function"),
+            _public_symbol("pkg.mod:tightened", "function", params=(value,)),
+        ),
+        current=module(
+            _public_symbol("pkg.mod:extended", "function", params=(value, optional)),
+            _public_symbol("pkg.mod:tightened", "function", params=(value, required)),
+        ),
+        strict_types=False,
+    )
+    assert [(change.qualname, change.change_kind) for change in changes] == [
+        ("pkg.mod:extended", "signature_changed"),
+        ("pkg.mod:gone", "removed"),
+        ("pkg.mod:tightened", "signature_break"),
+    ]
+
+    breaking, compatible = api_surface_mod.partition_api_changes(changes)
+    assert [change.qualname for change in breaking] == [
+        "pkg.mod:gone",
+        "pkg.mod:tightened",
+    ]
+    assert [change.qualname for change in compatible] == ["pkg.mod:extended"]
+
+
+# ── the gate, end to end: a real baseline, a real run, the real exit code ──
+
+_CLI_ENTRY = "from codeclone.surfaces.cli.workflow import main; main()"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_GATE_SCOPE_ID = "6c2d1e94-b028-4f6b-8a35-9d41c0a72e18"
+_GATE_BASELINE_SOURCE = '__all__ = ["run"]\n\n\ndef run(value):\n    return value\n'
+
+
+def _api_gate_run(
+    tmp_path: Path, *, current_source: str
+) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    """Publish a baseline, change the one public function, gate the run.
+
+    Everything the run reads or writes -- repository, baseline, cache,
+    report -- lives under ``tmp_path``. A subprocess, so the exit code is the
+    process's own and not an in-process ``SystemExit``.
+    """
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text(
+        f'[tool.codeclone]\nbaseline_scope_id = "{_GATE_SCOPE_ID}"\n',
+        "utf-8",
+    )
+    module = repo / "api.py"
+    module.write_text(_GATE_BASELINE_SOURCE, "utf-8")
+    common = (
+        "--baseline",
+        str(tmp_path / "codeclone.baseline.json"),
+        "--api-surface",
+        "--cache-path",
+        str(tmp_path / "cache.sqlite3"),
+        "--no-progress",
+        "--no-color",
+    )
+
+    def cli(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", _CLI_ENTRY, *args],
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT,
+            check=False,
+        )
+
+    published = cli(str(repo), *common, "--update-baseline")
+    assert published.returncode == 0, published.stdout + published.stderr
+    module.write_text(current_source, "utf-8")
+    report_path = tmp_path / "report.json"
+    gated = cli(str(repo), *common, "--fail-on-api-break", "--json", str(report_path))
+    document = json.loads(report_path.read_text("utf-8"))
+    summary = document["metrics"]["families"]["api_surface"]["summary"]
+    assert isinstance(summary, dict)
+    return gated, summary
+
+
+def test_api_break_gate_passes_an_appended_optional_parameter(tmp_path: Path) -> None:
+    """The release-port case: ``main(argv=None)`` style growth is not a break."""
+
+    gated, summary = _api_gate_run(
+        tmp_path,
+        current_source=(
+            '__all__ = ["run"]\n\n\ndef run(value, limit=None):\n    return value\n'
+        ),
+    )
+    assert gated.returncode == 0, gated.stdout + gated.stderr
+    assert summary["baseline_diff_available"] is True
+    assert summary["breaking"] == 0
+
+
+def test_api_break_gate_fails_an_appended_required_parameter(tmp_path: Path) -> None:
+    """The opposite boundary on the same pipeline: a real break still fails."""
+
+    gated, summary = _api_gate_run(
+        tmp_path,
+        current_source=(
+            '__all__ = ["run"]\n\n\ndef run(value, limit):\n    return value\n'
+        ),
+    )
+    assert gated.returncode == 3, gated.stdout + gated.stderr
+    assert "Api breaking changes" in gated.stdout
+    assert summary["baseline_diff_available"] is True
+    assert summary["breaking"] == 1
 
 
 # ── track: the product's contract is not the repository's test code ────────

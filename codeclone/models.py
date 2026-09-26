@@ -3767,7 +3767,10 @@ class MetricsDiff:
     typing_return_permille_delta: int = 0
     docstring_permille_delta: int = 0
     new_api_symbols: tuple[str, ...] = ()
+    #: ``removed`` and ``signature_break`` only: the set the api gate counts.
     new_api_breaking_changes: tuple[ApiBreakingChange, ...] = ()
+    #: ``signature_changed`` only: compatible changes, reported and never gated.
+    new_api_signature_changes: tuple[ApiBreakingChange, ...] = ()
     #: The gating lane: cycles that are ``import_cycle`` now and were not
     #: ``import_cycle`` before. That covers both a brand-new import cycle and a
     #: deferred cycle that hardened into one — the crash-at-import risk is
@@ -4786,12 +4789,23 @@ class BaselineContainerV3Input(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class ApiBreakingChange:
+    """One recorded change of a public symbol against the API baseline.
+
+    The name predates the third kind: the record is kept for every change of
+    a baseline symbol, and ``change_kind`` is the verdict. ``removed`` and
+    ``signature_break`` break a caller written against the baseline and are
+    the only kinds ``api_breaking_changes`` and ``fail_on_api_break`` count.
+    ``signature_changed`` is a compatible change -- an optional parameter
+    appended, an optional keyword-only parameter, a new ``*args`` /
+    ``**kwargs`` -- recorded beside them and never counted as breaking.
+    """
+
     qualname: str
     filepath: str
     start_line: int
     end_line: int
     symbol_kind: Literal["function", "class", "method", "constant"]
-    change_kind: Literal["removed", "signature_break"]
+    change_kind: Literal["removed", "signature_break", "signature_changed"]
     detail: str
 
 

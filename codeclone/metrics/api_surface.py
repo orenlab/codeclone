@@ -29,7 +29,7 @@ from ._visibility import (
 from .api_population import ApiSurfacePopulation
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from ..analysis.normalizer import NormalizationConfig
     from ..models import ModuleRegistryHandle
@@ -39,10 +39,58 @@ __all__ = [
     "collect_module_api_surface",
     "compare_api_surfaces",
     "is_product_api_module",
+    "partition_api_changes",
     "product_api_modules",
 ]
 
 _API_SIGNATURE_DOMAIN: Final = b"ccapi1:sig\x00"
+
+#: The two change kinds a signature comparison utters. ``removed`` is
+#: uttered by ``compare_api_surfaces`` itself, for a symbol that is gone.
+_SIGNATURE_BREAK: Final = "signature_break"
+_SIGNATURE_CHANGED: Final = "signature_changed"
+_POSITIONAL_PARAM_KINDS: Final = frozenset({"pos_only", "pos_or_kw"})
+
+_ApiVerdict = tuple[Literal["signature_break", "signature_changed"], str]
+
+#: What an ADDED parameter means for a caller written against the baseline,
+#: keyed by the parameter's ``(kind, has_default)``: the decision table as
+#: data, exhaustive over both domains. A parameter the alignment below left
+#: without a baseline counterpart is appended by construction -- every earlier
+#: positional slot is some baseline parameter's counterpart, and keyword-only
+#: parameters are matched by name, so an insertion surfaces there as
+#: ``Inserted parameter X before Y``, never here.
+#:
+#: A call that bound before still binds after an optional ``pos_or_kw``
+#: appended to the positional block, an optional keyword-only parameter
+#: anywhere in the keyword block, or a new ``*args`` / ``**kwargs``:
+#: ``signature_changed``. A parameter without a default breaks every call
+#: that omits it, and a positional-only one is classified as a shift of the
+#: positional slots even with a default: ``signature_break``. A collected
+#: ``*args`` / ``**kwargs`` never carries a default; its ``True`` rows keep
+#: the table total rather than leaving a hand-built snapshot to a KeyError.
+_ADDED_PARAMETER_VERDICTS: Final[
+    Mapping[
+        tuple[str, bool], tuple[Literal["signature_break", "signature_changed"], str]
+    ]
+] = {
+    ("pos_only", False): (_SIGNATURE_BREAK, "Added required parameter {name}."),
+    ("pos_only", True): (
+        _SIGNATURE_BREAK,
+        "Added positional-only parameter {name}.",
+    ),
+    ("pos_or_kw", False): (_SIGNATURE_BREAK, "Added required parameter {name}."),
+    ("pos_or_kw", True): (_SIGNATURE_CHANGED, "Added optional parameter {name}."),
+    ("vararg", False): (_SIGNATURE_CHANGED, "Added *{name}."),
+    ("vararg", True): (_SIGNATURE_CHANGED, "Added *{name}."),
+    ("kw_only", False): (_SIGNATURE_BREAK, "Added required parameter {name}."),
+    ("kw_only", True): (
+        _SIGNATURE_CHANGED,
+        "Added optional keyword-only parameter {name}.",
+    ),
+    ("kwarg", False): (_SIGNATURE_CHANGED, "Added **{name}."),
+    ("kwarg", True): (_SIGNATURE_CHANGED, "Added **{name}."),
+}
 
 
 def is_product_api_module(
@@ -312,16 +360,25 @@ def compare_api_surfaces(
     current: ApiSurfaceSnapshot | None,
     strict_types: bool,
 ) -> tuple[tuple[str, ...], tuple[ApiBreakingChange, ...]]:
+    """Added symbols, and every recorded change of a surviving or lost one.
+
+    The second element carries all three change kinds. The edge between a
+    baseline symbol and its current form is recorded whether or not it
+    breaks a caller; ``partition_api_changes`` splits it into the breaking set
+    that ``breaking`` and the api gate count and the compatible
+    ``signature_changed`` set that is only reported.
+    """
+
     baseline_symbols = _symbol_index(baseline)
     current_symbols = _symbol_index(current)
     added = tuple(sorted(set(current_symbols) - set(baseline_symbols)))
-    breaking_changes: list[ApiBreakingChange] = []
+    changes: list[ApiBreakingChange] = []
 
     for qualname in sorted(baseline_symbols):
         baseline_symbol = baseline_symbols[qualname]
         current_symbol = current_symbols.get(qualname)
         if current_symbol is None:
-            breaking_changes.append(
+            changes.append(
                 ApiBreakingChange(
                     qualname=qualname,
                     filepath=baseline_symbol[1].filepath,
@@ -333,28 +390,29 @@ def compare_api_surfaces(
                 )
             )
             continue
-        detail = _signature_break_detail(
+        verdict = _signature_change_verdict(
             baseline_symbol=baseline_symbol[0],
             current_symbol=current_symbol[0],
             strict_types=strict_types,
         )
-        if detail is None:
+        if verdict is None:
             continue
-        breaking_changes.append(
+        change_kind, detail = verdict
+        changes.append(
             ApiBreakingChange(
                 qualname=qualname,
                 filepath=current_symbol[1].filepath,
                 start_line=current_symbol[0].start_line,
                 end_line=current_symbol[0].end_line,
                 symbol_kind=current_symbol[0].kind,
-                change_kind="signature_break",
+                change_kind=change_kind,
                 detail=detail,
             )
         )
 
     return added, tuple(
         sorted(
-            breaking_changes,
+            changes,
             key=lambda item: (
                 item.filepath,
                 item.start_line,
@@ -364,6 +422,26 @@ def compare_api_surfaces(
             ),
         )
     )
+
+
+def partition_api_changes(
+    changes: Sequence[ApiBreakingChange],
+) -> tuple[tuple[ApiBreakingChange, ...], tuple[ApiBreakingChange, ...]]:
+    """Split recorded changes into ``(breaking, compatible)``, order kept.
+
+    ``signature_changed`` is the one compatible kind. Everything else --
+    ``removed``, ``signature_break`` -- is breaking, and so would be a kind
+    this function was never taught: the partition fails closed into the gate
+    rather than out of it.
+    """
+
+    breaking = tuple(
+        change for change in changes if change.change_kind != _SIGNATURE_CHANGED
+    )
+    compatible = tuple(
+        change for change in changes if change.change_kind == _SIGNATURE_CHANGED
+    )
+    return breaking, compatible
 
 
 def _symbol_index(
@@ -484,45 +562,234 @@ def _public_constant_rows(
     return tuple(sorted(set(rows)))
 
 
-def _signature_break_detail(
+def _signature_change_verdict(
     *,
     baseline_symbol: PublicSymbol,
     current_symbol: PublicSymbol,
     strict_types: bool,
-) -> str | None:
+) -> _ApiVerdict | None:
+    """The change kind and detail of one surviving symbol, or ``None``.
+
+    Break reasons are sought first; ``signature_changed`` is the verdict only
+    when no reason breaks a caller, so several changes at once take the
+    heaviest outcome. The detail is the first reason of that outcome in the
+    order the comparison walks: the baseline's parameters in declaration
+    order, then the parameters only the current signature has, then the
+    return annotation.
+    """
+
     if baseline_symbol.kind != current_symbol.kind:
         return (
+            _SIGNATURE_BREAK,
             "Changed public symbol kind from "
-            f"{baseline_symbol.kind} to {current_symbol.kind}."
+            f"{baseline_symbol.kind} to {current_symbol.kind}.",
         )
     if baseline_symbol.kind not in {"function", "method"}:
         return None
-    baseline_params = baseline_symbol.params
-    current_params = current_symbol.params
-    if len(current_params) != len(baseline_params):
-        return "Changed callable parameter count."
-    for baseline_param, current_param in zip(
-        baseline_params, current_params, strict=True
-    ):
-        if baseline_param.kind != current_param.kind:
-            return (
-                f"Changed parameter kind for {baseline_param.name} "
-                f"from {baseline_param.kind} to {current_param.kind}."
-            )
-        if (
-            baseline_param.kind != "pos_only"
-            and baseline_param.name != current_param.name
-        ):
-            return (
-                f"Renamed public parameter {baseline_param.name} "
-                f"to {current_param.name}."
-            )
-        if baseline_param.has_default and not current_param.has_default:
-            return f"Parameter {baseline_param.name} became required."
-        if strict_types and (
-            baseline_param.annotation_hash != current_param.annotation_hash
-        ):
-            return f"Changed type annotation for parameter {baseline_param.name}."
+    verdicts = _parameter_verdicts(
+        baseline=baseline_symbol.params,
+        current=current_symbol.params,
+        strict_types=strict_types,
+    )
     if strict_types and baseline_symbol.returns_hash != current_symbol.returns_hash:
-        return "Changed return annotation."
+        verdicts.append((_SIGNATURE_BREAK, "Changed return annotation."))
+    breaks = [verdict for verdict in verdicts if verdict[0] == _SIGNATURE_BREAK]
+    return (breaks or verdicts)[0] if verdicts else None
+
+
+def _parameter_verdicts(
+    *,
+    baseline: tuple[ApiParamSpec, ...],
+    current: tuple[ApiParamSpec, ...],
+    strict_types: bool,
+) -> list[_ApiVerdict]:
+    """Every parameter-level reason, baseline order first, then additions."""
+
+    baseline_names = frozenset(param.name for param in baseline)
+    counterparts = _counterpart_indexes(
+        baseline=baseline,
+        current=current,
+        baseline_names=baseline_names,
+    )
+    matched: set[int] = set()
+    verdicts: list[_ApiVerdict] = []
+    for param, index in zip(baseline, counterparts, strict=True):
+        if index is None:
+            index = _index_by_name(current, param.name)
+            verdicts.append(
+                _missing_parameter_verdict(
+                    param,
+                    moved=None if index is None else current[index],
+                )
+            )
+        else:
+            verdict = _counterpart_verdict(
+                baseline_param=param,
+                current_param=current[index],
+                inserted=_is_insertion(
+                    param,
+                    current=current,
+                    index=index,
+                    baseline_names=baseline_names,
+                ),
+                strict_types=strict_types,
+            )
+            if verdict is not None:
+                verdicts.append(verdict)
+        if index is not None:
+            matched.add(index)
+    verdicts.extend(
+        _added_parameter_verdict(param)
+        for index, param in enumerate(current)
+        if index not in matched
+    )
+    return verdicts
+
+
+def _parameter_slots(
+    params: Sequence[ApiParamSpec],
+) -> tuple[tuple[str, int | str], ...]:
+    """Where a caller reaches each parameter.
+
+    Positional parameters by their position in the positional block,
+    keyword-only parameters by name, ``*args`` / ``**kwargs`` by kind.
+    """
+
+    slots: list[tuple[str, int | str]] = []
+    position = 0
+    for param in params:
+        if param.kind in _POSITIONAL_PARAM_KINDS:
+            slots.append(("positional", position))
+            position += 1
+        elif param.kind == "kw_only":
+            slots.append(("keyword", param.name))
+        else:
+            slots.append((param.kind, 0))
+    return tuple(slots)
+
+
+def _counterpart_indexes(
+    *,
+    baseline: tuple[ApiParamSpec, ...],
+    current: tuple[ApiParamSpec, ...],
+    baseline_names: frozenset[str],
+) -> tuple[int | None, ...]:
+    """The current index each baseline parameter aligns with, or ``None``."""
+
+    current_slots = {
+        slot: index for index, slot in enumerate(_parameter_slots(current))
+    }
+    renamed = _keyword_renames(
+        baseline=baseline,
+        current=current,
+        baseline_names=baseline_names,
+    )
+    return tuple(
+        current_slots.get(slot, renamed.get(param.name))
+        for slot, param in zip(_parameter_slots(baseline), baseline, strict=True)
+    )
+
+
+def _keyword_renames(
+    *,
+    baseline: tuple[ApiParamSpec, ...],
+    current: tuple[ApiParamSpec, ...],
+    baseline_names: frozenset[str],
+) -> dict[str, int]:
+    """Keyword-only parameters renamed in place: baseline name -> current index.
+
+    Keyword-only parameters align by name, so a rename is a baseline name the
+    current signature lacks altogether at a keyword position the current
+    block fills with a name the baseline never had.
+    """
+
+    current_names = frozenset(param.name for param in current)
+    baseline_keywords = [param.name for param in baseline if param.kind == "kw_only"]
+    current_keywords = [
+        index for index, param in enumerate(current) if param.kind == "kw_only"
+    ]
+    return {
+        name: index
+        for name, index in zip(baseline_keywords, current_keywords, strict=False)
+        if name not in current_names and current[index].name not in baseline_names
+    }
+
+
+def _index_by_name(params: tuple[ApiParamSpec, ...], name: str) -> int | None:
+    return next(
+        (index for index, param in enumerate(params) if param.name == name),
+        None,
+    )
+
+
+def _is_insertion(
+    baseline_param: ApiParamSpec,
+    *,
+    current: tuple[ApiParamSpec, ...],
+    index: int,
+    baseline_names: frozenset[str],
+) -> bool:
+    """A new parameter took this positional slot and pushed the old one later."""
+
+    candidate = current[index]
+    return (
+        baseline_param.kind == "pos_or_kw"
+        and candidate.name not in baseline_names
+        and any(later.name == baseline_param.name for later in current[index + 1 :])
+    )
+
+
+def _missing_parameter_verdict(
+    param: ApiParamSpec,
+    *,
+    moved: ApiParamSpec | None,
+) -> _ApiVerdict:
+    if moved is None:
+        return (_SIGNATURE_BREAK, f"Removed parameter {param.name}.")
+    return (
+        _SIGNATURE_BREAK,
+        f"Changed parameter kind for {param.name} from {param.kind} to {moved.kind}.",
+    )
+
+
+def _counterpart_verdict(
+    *,
+    baseline_param: ApiParamSpec,
+    current_param: ApiParamSpec,
+    inserted: bool,
+    strict_types: bool,
+) -> _ApiVerdict | None:
+    if inserted:
+        if current_param.kind == "pos_only":
+            return (
+                _SIGNATURE_BREAK,
+                f"Added positional-only parameter {current_param.name}.",
+            )
+        return (
+            _SIGNATURE_BREAK,
+            f"Inserted parameter {current_param.name} before {baseline_param.name}.",
+        )
+    if baseline_param.kind != current_param.kind:
+        return (
+            _SIGNATURE_BREAK,
+            f"Changed parameter kind for {baseline_param.name} "
+            f"from {baseline_param.kind} to {current_param.kind}.",
+        )
+    if baseline_param.kind != "pos_only" and baseline_param.name != current_param.name:
+        return (
+            _SIGNATURE_BREAK,
+            f"Renamed public parameter {baseline_param.name} to {current_param.name}.",
+        )
+    if baseline_param.has_default and not current_param.has_default:
+        return (_SIGNATURE_BREAK, f"Parameter {baseline_param.name} became required.")
+    if strict_types and baseline_param.annotation_hash != current_param.annotation_hash:
+        return (
+            _SIGNATURE_BREAK,
+            f"Changed type annotation for parameter {baseline_param.name}.",
+        )
     return None
+
+
+def _added_parameter_verdict(param: ApiParamSpec) -> _ApiVerdict:
+    change_kind, template = _ADDED_PARAMETER_VERDICTS[(param.kind, param.has_default)]
+    return change_kind, template.format(name=param.name)

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence, Set
 
-from ..metrics.api_surface import compare_api_surfaces
+from ..metrics.api_surface import compare_api_surfaces, partition_api_changes
 from ..models import (
     ApiBreakingChange,
     ApiSurfaceSnapshot,
@@ -182,13 +182,14 @@ def diff_metrics(
 
     if baseline_api_surface is None:
         added_api_symbols: tuple[str, ...] = ()
-        api_breaking_changes: tuple[ApiBreakingChange, ...] = ()
+        api_changes: tuple[ApiBreakingChange, ...] = ()
     else:
-        added_api_symbols, api_breaking_changes = compare_api_surfaces(
+        added_api_symbols, api_changes = compare_api_surfaces(
             baseline=baseline_api_surface,
             current=current_api_surface,
             strict_types=False,
         )
+    api_breaking_changes, api_signature_changes = partition_api_changes(api_changes)
 
     return MetricsDiff(
         new_high_risk_functions=new_high_risk_functions,
@@ -216,6 +217,7 @@ def diff_metrics(
         ),
         new_api_symbols=added_api_symbols,
         new_api_breaking_changes=api_breaking_changes,
+        new_api_signature_changes=api_signature_changes,
     )
 
 
