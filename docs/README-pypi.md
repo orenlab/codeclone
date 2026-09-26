@@ -85,6 +85,9 @@ uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
+`codeclone --mcp` runs the same server with the same arguments, for catalog and `uvx` launches:
+`uvx --prerelease allow --with "codeclone[mcp]" codeclone --mcp --transport stdio`.
+
 The MCP server is contained by contract: it writes only CodeClone's own service data, and only inside CodeClone's
 service directories (`.codeclone/` and the per-user cache directory). Source files, baselines and generated reports are
 never mutated. The same canonical structural facts back every client — VS Code, Cursor, Claude Code, Codex, and Claude

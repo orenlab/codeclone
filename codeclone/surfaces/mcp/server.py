@@ -13,7 +13,7 @@ import ipaddress
 import os
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, Protocol, TypeVar, cast
@@ -1763,9 +1763,9 @@ def _install_sigterm_handler(
     _signal.signal(_signal.SIGTERM, _handler)
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     _install_sigterm_handler()
-    args = build_parser().parse_args()
+    args = build_parser().parse_args(argv)
     if (
         args.transport == "streamable-http"
         and not args.allow_remote

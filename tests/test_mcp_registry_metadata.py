@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+import codeclone.surfaces.mcp.server as mcp_server
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FIXTURES = _REPO_ROOT / "tests" / "fixtures" / "mcp_registry"
 
@@ -116,6 +118,20 @@ def _typed_arguments(items: object) -> list[tuple[object, object, object]]:
     ]
 
 
+def _client_argv(items: object) -> list[str]:
+    # How an MCP client turns registry arguments into argv (VS Code
+    # mcpManagementService.processArguments): a positional contributes its
+    # value, a named argument its name followed by its value.
+    argv: list[str] = []
+    for item in _sequence(items):
+        argument = _mapping(item)
+        if argument["type"] == "named":
+            argv.append(str(argument["name"]))
+        if "value" in argument:
+            argv.append(str(argument["value"]))
+    return argv
+
+
 def test_server_json_launches_the_mcp_flag_with_the_mcp_extra() -> None:
     project = _project()
     package = _server_package()
@@ -130,6 +146,49 @@ def test_server_json_launches_the_mcp_flag_with_the_mcp_extra() -> None:
     ]
     assert "mcp" in _mapping(project["optional-dependencies"])
     assert "codeclone-mcp" in _mapping(project["scripts"])
+
+
+def test_server_json_client_command_reaches_the_mcp_server_main(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project()
+    package = _server_package()
+    tool = f"{package['identifier']}@{package['version']}"
+    command = [
+        *_client_argv(package["runtimeArguments"]),
+        tool,
+        *_client_argv(package["packageArguments"]),
+    ]
+    module_name, _, attribute = str(
+        _mapping(project["scripts"])[str(package["identifier"])]
+    ).partition(":")
+    entry = getattr(importlib.import_module(module_name), attribute)
+    received: list[object] = []
+
+    def _server_main(argv: object = None) -> None:
+        received.append(argv)
+
+    monkeypatch.setattr(mcp_server, "main", _server_main)
+    monkeypatch.setattr(
+        sys, "argv", [str(package["identifier"]), *command[command.index(tool) + 1 :]]
+    )
+    try:
+        entry()
+    except SystemExit as exc:
+        # The link leaves like every dispatched CLI tree does, by SystemExit;
+        # None and 0 are the success exit, anything else is a refusal.
+        if exc.code not in (None, 0):
+            pytest.fail(f"the client command left the CLI with exit code {exc.code}")
+
+    assert command == [
+        "--with",
+        f"{project['name']}[mcp]=={project['version']}",
+        tool,
+        "--mcp",
+        "--transport",
+        "stdio",
+    ]
+    assert received == [["--transport", "stdio"]]
 
 
 @pytest.mark.parametrize(
