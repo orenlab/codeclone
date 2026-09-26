@@ -29,6 +29,7 @@ from codeclone.models import (
     UnresolvedOverrideItem,
 )
 from codeclone.report.gates.evaluator import (
+    HEALTH_INPUT_LANES,
     GateResult,
     GateState,
     MetricGateConfig,
@@ -812,6 +813,88 @@ def test_unresolved_override_flag_shares_the_dead_code_gate_family() -> None:
     assert flag_only == (("dead_code_current", ("dead_code",)),)
     assert both == flag_only
     assert gate_lane_contract_versions() == ("2", "2")
+
+
+# ---------------------------------------------------------------------------
+# Threshold boundaries. The help text promises strict comparisons -- a
+# function "exceeds" the complexity or cohesion threshold, the health score or
+# typing coverage "falls below" it -- so a value EQUAL to the threshold passes
+# and the first representable step past it fails. Each gate is armed alone.
+# ---------------------------------------------------------------------------
+
+_NO_THRESHOLD_GATES = MetricGateConfig(
+    fail_complexity=-1,
+    fail_coupling=-1,
+    fail_cohesion=-1,
+    fail_cycles=False,
+    fail_dead_code=False,
+    fail_health=-1,
+    fail_on_new_metrics=False,
+)
+_THRESHOLD_GATE_LANES = (*HEALTH_INPUT_LANES, "adoption_counts")
+
+_THRESHOLD_BOUNDARIES = [
+    pytest.param(
+        replace(_NO_THRESHOLD_GATES, fail_health=60),
+        GateState(health_score=60),
+        GateState(health_score=59),
+        gate_msgs.GATE_REASON_HEALTH_THRESHOLD + "score=59, threshold=60.",
+        id="fail-health",
+    ),
+    pytest.param(
+        replace(_NO_THRESHOLD_GATES, fail_complexity=20),
+        GateState(complexity_max=20),
+        GateState(complexity_max=21),
+        gate_msgs.GATE_REASON_COMPLEXITY_THRESHOLD + "max CC=21, threshold=20.",
+        id="fail-complexity",
+    ),
+    pytest.param(
+        replace(_NO_THRESHOLD_GATES, fail_cohesion=4),
+        GateState(cohesion_max=4),
+        GateState(cohesion_max=5),
+        gate_msgs.GATE_REASON_COHESION_THRESHOLD + "max LCOM4=5, threshold=4.",
+        id="fail-cohesion",
+    ),
+    pytest.param(
+        # Typing coverage is stored in permille: 799 is the first value below
+        # 80 % the state can carry.
+        replace(_NO_THRESHOLD_GATES, min_typing_coverage=80),
+        GateState(typing_param_permille=800),
+        GateState(typing_param_permille=799),
+        gate_msgs.GATE_REASON_TYPING_THRESHOLD + "coverage=79.9%, threshold=80%.",
+        id="min-typing-coverage",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("config", "at_threshold", "_past_threshold", "_reason"), _THRESHOLD_BOUNDARIES
+)
+def test_a_value_equal_to_the_gate_threshold_passes(
+    config: MetricGateConfig,
+    at_threshold: GateState,
+    _past_threshold: GateState,
+    _reason: str,
+) -> None:
+    result = evaluate_gate_state(
+        state=at_threshold, config=config, enabled_lanes=_THRESHOLD_GATE_LANES
+    )
+    _assert_gate(result, exit_code=0, reasons=())
+
+
+@pytest.mark.parametrize(
+    ("config", "_at_threshold", "past_threshold", "reason"), _THRESHOLD_BOUNDARIES
+)
+def test_one_step_past_the_gate_threshold_fails(
+    config: MetricGateConfig,
+    _at_threshold: GateState,
+    past_threshold: GateState,
+    reason: str,
+) -> None:
+    result = evaluate_gate_state(
+        state=past_threshold, config=config, enabled_lanes=_THRESHOLD_GATE_LANES
+    )
+    _assert_gate(result, exit_code=3, reasons=(f"metric:{reason}",))
 
 
 def _report_document() -> dict[str, object]:
