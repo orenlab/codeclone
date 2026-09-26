@@ -31,6 +31,7 @@ from ..models import (
     MemoryQuery,
     MemoryRecord,
     MemorySubject,
+    memory_record_tiebreak_key,
     resolve_evidence_status,
 )
 from ..paths import (
@@ -775,7 +776,7 @@ def _rank_record_summaries(
     relations = _record_relations(
         store, project_id=project_id, record_ids=[item[1].id for item in base]
     )
-    scored: list[tuple[float, float, str, dict[str, object]]] = []
+    scored: list[tuple[float, float, tuple[str, ...], dict[str, object]]] = []
     for score, record, subjects, evidence_count in base:
         record_relations = relations.get(record.id)
         adjusted = _apply_conflict_penalty(score, record_relations)
@@ -796,7 +797,7 @@ def _rank_record_summaries(
         )
         if record_relations is not None:
             summary["relations"] = record_relations
-        scored.append((primary, adjusted, record.id, summary))
+        scored.append((primary, adjusted, memory_record_tiebreak_key(record), summary))
     scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
     return [item[3] for item in scored]
 

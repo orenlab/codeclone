@@ -55,6 +55,7 @@ from .models import (
     UpsertAction,
     UpsertResult,
     generate_memory_id,
+    memory_record_tiebreak_sql,
     parse_payload_json,
     payload_json_text,
     validate_ingestion_run,
@@ -970,7 +971,7 @@ class SqliteEngineeringMemoryStore:
             JOIN memory_records ON memory_records.id = memory_records_fts.memory_id
             WHERE {where}
             ORDER BY bm25(memory_records_fts), memory_records.updated_at_utc DESC,
-                     memory_records.id ASC
+                     {memory_record_tiebreak_sql(table="memory_records")}
             LIMIT ?
             """,
             (*params, limit),
@@ -1017,7 +1018,7 @@ class SqliteEngineeringMemoryStore:
         where = " AND ".join(clauses)
         rows = self._conn.execute(
             f"SELECT * FROM memory_records WHERE {where} "
-            "ORDER BY updated_at_utc DESC, id ASC LIMIT ?",
+            f"ORDER BY updated_at_utc DESC, {memory_record_tiebreak_sql()} LIMIT ?",
             (*params, limit),
         ).fetchall()
         return [_record_from_row(row) for row in rows]

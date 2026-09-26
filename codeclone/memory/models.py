@@ -93,6 +93,31 @@ class MemoryRecord:
     schema_version: str = ENGINEERING_MEMORY_SCHEMA_VERSION
 
 
+#: The order of memory records that no score separates, stated once. The row
+#: ``id`` is a random ``uuid4`` (``generate_memory_id``): two stores built from
+#: the same input hold the same records under different ids, so an order the id
+#: decides differs between them. ``identity_key`` is content-derived
+#: (``make_identity_key``) and unique per project (``idx_records_identity``), so
+#: it orders ties the same way in every store; ``id`` only closes the order.
+#: The Python sort key and the SQL ``ORDER BY`` tail both read this tuple.
+MEMORY_RECORD_TIEBREAK_COLUMNS: Final = ("identity_key", "id")
+
+
+def memory_record_tiebreak_key(record: MemoryRecord) -> tuple[str, ...]:
+    """Ascending sort key for records whose score is equal."""
+    return tuple(
+        str(getattr(record, column)) for column in MEMORY_RECORD_TIEBREAK_COLUMNS
+    )
+
+
+def memory_record_tiebreak_sql(*, table: str | None = None) -> str:
+    """The same order as an SQL ``ORDER BY`` tail over ``memory_records`` rows."""
+    prefix = f"{table}." if table else ""
+    return ", ".join(
+        f"{prefix}{column} ASC" for column in MEMORY_RECORD_TIEBREAK_COLUMNS
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MemorySubject:
     id: str
@@ -589,6 +614,7 @@ __all__ = [
     "EVIDENCE_STATUS_ATTACHED",
     "EVIDENCE_STATUS_PAYLOAD_KEY",
     "EVIDENCE_STATUS_VALIDATED",
+    "MEMORY_RECORD_TIEBREAK_COLUMNS",
     "EvidenceRef",
     "IngestionRun",
     "MemoryEvidence",
@@ -603,6 +629,8 @@ __all__ = [
     "UpsertResult",
     "generate_memory_id",
     "make_identity_key",
+    "memory_record_tiebreak_key",
+    "memory_record_tiebreak_sql",
     "parse_payload_json",
     "payload_json_text",
     "resolve_evidence_status",
