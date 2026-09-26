@@ -29,6 +29,8 @@ from .pyproject_loader import _load_toml, copy_str_key_table
 
 INTENT_REGISTRY_BACKENDS: Final[frozenset[str]] = frozenset({"file", "sqlite"})
 _VALID_DB_SUFFIXES: Final[frozenset[str]] = frozenset({".sqlite3", ".db"})
+_RETENTION_DAYS_KEY: Final = "intent_registry_retention_days"
+_RETENTION_DAYS_ENV: Final = "CODECLONE_INTENT_REGISTRY_RETENTION_DAYS"
 
 
 class IntentRegistryConfigError(DiagnosedUserError, ValueError):
@@ -47,19 +49,44 @@ def resolve_intent_registry_retention_days(
     *,
     env_value: object = None,
 ) -> int:
-    raw = env_value if env_value is not None else value
-    if raw is None:
+    """Closed-row retention in days: the env override, else pyproject, else 14.
+
+    The two sources are typed differently and parsed differently. TOML has
+    integers, so a pyproject value must already be one. An environment value
+    is text by construction, so it is parsed -- the way the sibling intent
+    env overrides (``CODECLONE_INTENT_TTL_SECONDS`` and the lease) are, with
+    ``int`` over the stripped text. Where those fall back to a default, this
+    one refuses: an unparsable retention is a configuration error, and each
+    error names the source it came from.
+    """
+
+    if env_value is not None:
+        return _bounded_retention_days(
+            _env_retention_days(env_value),
+            source=_RETENTION_DAYS_ENV,
+        )
+    if value is None:
         return DEFAULT_INTENT_REGISTRY_RETENTION_DAYS
-    if not isinstance(raw, int) or isinstance(raw, bool):
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise IntentRegistryConfigError(f"{_RETENTION_DAYS_KEY} must be an integer")
+    return _bounded_retention_days(value, source=_RETENTION_DAYS_KEY)
+
+
+def _env_retention_days(env_value: object) -> int:
+    try:
+        return int(str(env_value).strip())
+    except ValueError as exc:
         raise IntentRegistryConfigError(
-            "intent_registry_retention_days must be an integer"
-        )
-    if raw < MIN_INTENT_REGISTRY_RETENTION_DAYS:
+            f"{_RETENTION_DAYS_ENV} must be an integer number of days"
+        ) from exc
+
+
+def _bounded_retention_days(days: int, *, source: str) -> int:
+    if days < MIN_INTENT_REGISTRY_RETENTION_DAYS:
         raise IntentRegistryConfigError(
-            "intent_registry_retention_days must be at least "
-            f"{MIN_INTENT_REGISTRY_RETENTION_DAYS}"
+            f"{source} must be at least {MIN_INTENT_REGISTRY_RETENTION_DAYS}"
         )
-    return raw
+    return days
 
 
 def resolve_intent_registry_backend(
