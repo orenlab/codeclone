@@ -23,7 +23,10 @@ import pytest
 from codeclone.audit.events import EVENT_PATCH_VERIFIED, AuditEvent, repo_root_digest
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.config.pyproject_loader import load_pyproject_config
-from codeclone.config.pyproject_writer import PyprojectWriterError
+from codeclone.config.pyproject_writer import (
+    PyprojectWriterError,
+    merge_tool_codeclone,
+)
 from codeclone.contracts import ENGINEERING_MEMORY_SCHEMA_VERSION, ExitCode
 from codeclone.surfaces.cli.console import PlainConsole
 from codeclone.surfaces.cli.setup import render as setup_render
@@ -653,11 +656,11 @@ def test_setup_apply_writes_pyproject_section(
 
     assert result["projection_kind"] == "setup_apply"
     assert result["status"] == "applied"
+    written = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+    # Relative on disk: pyproject.toml is committed and read by CI and other checkouts.
+    assert '[tool.codeclone]\nbaseline = "codeclone.baseline.json"\n' in written
     config = load_pyproject_config(tmp_path)
     assert config["baseline"] == str(tmp_path / "codeclone.baseline.json")
-    assert "[tool.codeclone]" in (tmp_path / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
 
 
 def test_setup_apply_writes_gitignore(
@@ -3554,3 +3557,32 @@ def test_setup_apply_json_and_explicit_plan_id(
         ]
     )
     assert rc_explicit == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_merge_writes_a_relative_baseline_as_given(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+
+    result = merge_tool_codeclone(tmp_path, {"baseline": "custom/path.json"})
+
+    assert result.changed_keys == ("baseline",)
+    assert 'baseline = "custom/path.json"' in pyproject.read_text(encoding="utf-8")
+    assert load_pyproject_config(tmp_path)["baseline"] == str(
+        tmp_path / "custom" / "path.json"
+    )
+
+
+def test_merge_treats_an_equivalent_absolute_baseline_as_satisfied(
+    tmp_path: Path,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    absolute = tmp_path / "codeclone.baseline.json"
+    pyproject.write_text(
+        f'[tool.codeclone]\nbaseline = "{absolute}"\n', encoding="utf-8"
+    )
+    before = pyproject.read_text(encoding="utf-8")
+
+    result = merge_tool_codeclone(tmp_path, {"baseline": "codeclone.baseline.json"})
+
+    assert result.changed_keys == ()
+    assert pyproject.read_text(encoding="utf-8") == before

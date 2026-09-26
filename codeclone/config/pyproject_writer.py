@@ -20,6 +20,7 @@ from ..utils.atomic_write import write_text_atomically
 from .analytics_specs import ANALYTICS_NESTED_TABLE_KEY
 from .memory_specs import MEMORY_NESTED_TABLE_KEY
 from .pyproject_loader import (
+    PATH_CONFIG_KEYS,
     ConfigValidationError,
     load_pyproject_config,
     normalize_path_config_value,
@@ -168,7 +169,9 @@ def merge_tool_codeclone(
 
     current = load_pyproject_config(root_path)
     pending = {
-        key: value for key, value in validated.items() if current.get(key) != value
+        key: _written_spelling(key, requested=updates[key], resolved=value)
+        for key, value in validated.items()
+        if current.get(key) != value
     }
     if not pending:
         return PyprojectWriteResult(
@@ -208,6 +211,20 @@ def merge_tool_codeclone(
         created_section=created_section,
         dry_run=False,
     )
+
+
+def _written_spelling(key: str, *, requested: object, resolved: object) -> object:
+    """The value a merge writes: a path key exactly as the caller spelled it.
+
+    ``resolved`` is the loader's reading of the value, anchored at the root,
+    and it is what decides whether the file already says this. It is not what
+    goes into the file: ``pyproject.toml`` is committed and read by other
+    checkouts and by CI, where an absolute path from this checkout names
+    nothing. The loader resolves a relative path against the root on every
+    read, so the relative spelling is the portable one.
+    """
+
+    return requested if key in PATH_CONFIG_KEYS else resolved
 
 
 def _validate_pyproject_text_before_write(*, root_path: Path, text: str) -> None:
