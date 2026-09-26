@@ -212,6 +212,8 @@ your agent's loop.
 
 ## Agent change control — `2.1 alpha`
 
+<!-- mcp-name: io.github.orenlab/codeclone -->
+
 ### Install the MCP control surface
 
 ```bash

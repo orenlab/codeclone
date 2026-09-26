@@ -78,6 +78,8 @@ trajectories are stored locally.
 
 ## MCP control surface and native clients
 
+<!-- mcp-name: io.github.orenlab/codeclone -->
+
 ```bash
 uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --transport stdio
