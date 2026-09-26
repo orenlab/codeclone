@@ -15,7 +15,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..contracts import BASELINE_FINGERPRINT_VERSION
+from ..contracts import BASELINE_FINGERPRINT_VERSION, BASELINE_SCHEMA_VERSION
 from ..contracts.errors import BaselineValidationError
 from ..models import (
     DigestObject,
@@ -110,7 +110,9 @@ def read_legacy_transition(
         kind="baseline_epoch_transition",
         from_schema=meta.schema_version,
         from_fingerprint=meta.fingerprint_version,
-        to_schema="3.0",
+        # The container this evidence is sealed into is written at the one
+        # owner of the baseline schema version, so the migration target is it.
+        to_schema=BASELINE_SCHEMA_VERSION,
         # The migration target is whatever fingerprint generation the current
         # epoch runs: the caller regenerates every lane from the current run,
         # and the published container pins the same constant in its clone-lane

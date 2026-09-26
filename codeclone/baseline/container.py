@@ -19,7 +19,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from uuid import UUID
 
-from ..contracts import BASELINE_LANE_DESCRIPTOR_VERSION
+from ..contracts import BASELINE_LANE_DESCRIPTOR_VERSION, BASELINE_SCHEMA_VERSION
 from ..models import (
     BaselineContainerV3,
     BaselineContainerV3Input,
@@ -223,7 +223,7 @@ def build_container(
         container = BaselineContainerV3(
             format_name="codeclone-baseline",
             meta=BaselineMeta(
-                container_version="3.0",
+                container_version=BASELINE_SCHEMA_VERSION,
                 generator=BaselineGenerator(
                     name="codeclone",
                     version=_package_version(),
@@ -439,7 +439,7 @@ def _container_from_input(
 ) -> BaselineContainerV3 | ContainerReadFailure | ContainerInspectionResult:
     if value.format != "codeclone-baseline":
         return _read_failure("unsupported_format", "unknown baseline format")
-    if value.meta.container_version != "3.0":
+    if value.meta.container_version != BASELINE_SCHEMA_VERSION:
         return _read_failure(
             "unsupported_format", "unsupported baseline container version"
         )
@@ -470,7 +470,7 @@ def _container_from_input(
         container = BaselineContainerV3(
             format_name="codeclone-baseline",
             meta=BaselineMeta(
-                container_version="3.0",
+                container_version=BASELINE_SCHEMA_VERSION,
                 generator=BaselineGenerator(
                     name="codeclone",
                     version=value.meta.generator.version,
