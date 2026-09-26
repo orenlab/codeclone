@@ -4796,8 +4796,17 @@ class ApiBreakingChange:
     ``signature_break`` break a caller written against the baseline and are
     the only kinds ``api_breaking_changes`` and ``fail_on_api_break`` count.
     ``signature_changed`` is a compatible change -- an optional parameter
-    appended, an optional keyword-only parameter, a new ``*args`` /
-    ``**kwargs`` -- recorded beside them and never counted as breaking.
+    appended to the positional block, positional-only included, an optional
+    keyword-only parameter, a new ``*args`` / ``**kwargs``, a keyword-only
+    parameter that now also accepts a positional value, a renamed ``*args`` /
+    ``**kwargs`` -- recorded beside them and never counted as breaking. A
+    positional parameter that lands in front of a ``*args`` the baseline
+    already had takes a value that used to flow into it, and breaks.
+
+    The verdict is about callers -- whether calls written against the
+    baseline keep binding as they did -- and never about introspection:
+    ``inspect.signature``, documentation generators and decorators that read
+    the signature are outside it.
     """
 
     qualname: str
