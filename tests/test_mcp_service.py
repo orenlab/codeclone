@@ -8655,6 +8655,51 @@ def test_mcp_declare_queue_no_conflict_creates_active(
     assert result["status"] == "active"
 
 
+@pytest.mark.parametrize(
+    ("scope_file", "on_conflict", "expected"),
+    [
+        pytest.param(
+            "pkg/a.py", None, ("active", False, True), id="conflict-refuses-edit"
+        ),
+        pytest.param(
+            "pkg/a.py", "queue", ("queued", False, False), id="conflict-queues"
+        ),
+        pytest.param(
+            "pkg/b.py", "queue", ("active", True, False), id="no-conflict-grants"
+        ),
+    ],
+)
+def test_mcp_atomic_declare_grants_edit_only_without_a_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope_file: str,
+    on_conflict: str | None,
+    expected: tuple[str, bool, bool],
+) -> None:
+    """``manage_change_intent(action="declare")`` answers edit permission the
+    way ``start_controlled_change`` does, on each side of a live conflict.
+
+    A foreign active intent holds ``pkg/a.py``. Declaring over it without
+    queueing registers the intent but refuses the edit and asks the user to
+    act; declaring over it with ``on_conflict="queue"`` queues, and a queued
+    declare grants nothing (the permission is absent there, which reads as
+    ``False``, never ``True``); declaring beside it grants the edit.
+    """
+    service, _foreign_id = _two_agent_service(tmp_path, monkeypatch)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="queuetest",
+        scope={"allowed_files": [scope_file]},
+        intent="agent B declares next to agent A",
+        on_conflict=on_conflict,
+    )
+    assert (
+        declared["status"],
+        declared.get("edit_allowed", False),
+        declared.get("user_action_required", False),
+    ) == expected
+
+
 def _declare_queued_pkg_a(
     service: CodeCloneMCPService,
     intent_text: str = "queued pkg/a intent",
