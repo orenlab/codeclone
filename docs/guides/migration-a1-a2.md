@@ -157,8 +157,8 @@ Add these only after every runner is on 2.1.0a2 — 2.1.0a1 rejects all of them.
 | Baseline schema | `3.0` |
 | Baseline fingerprint | `3` |
 | Wire | `2` |
-| Cache | `3.2` |
-| Report schema | `3.0` |
+| Cache | `4.2` |
+| Report schema | `3.5` |
 | Metrics baseline schema | `1.3` |
 
 ## Health may drop — lower but truer

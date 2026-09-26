@@ -44,6 +44,10 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 | `IDE_GOVERNANCE_PROTOCOL_VERSION` | `3` (int) | IDE MCP protocol | Latest generation of the IDE governance API. Which generations a server still answers is `IDE_GOVERNANCE_SUPPORTED_PROTOCOLS` in `codeclone/memory/ide_governance.py`, so a bump alone does not retire a client. |
 | `TRAJECTORY_QUALITY_SCORE_VERSION` | `"2"` | quality scoring algorithm | Determines how quality scores are computed. |
 | `METRICS_BASELINE_SCHEMA_VERSION` | `"1.3"` | metrics baseline storage | Metrics artifact encoding version. |
+| `CANONICAL_MODEL_REVISION` | `"2"` | canonical normalized model | The semantic model shared by the run store and canonical JSON vNext, independent of the report schema and of the storage revision. A store witness layer of role `analysis`, so it enters the store run id; a store file written under another revision is refused at open, never reinterpreted. |
+| `CANONICAL_OBJECT_IDENTITY_VERSION` | `"1"` | run-store content addressing | Sole owner of the run-store domain separators (`cc-object-identity:`). Moves when the addressing preimage moves; every object id, scope receipt, membership digest and run id moves with it. A store file of another identity generation is refused at open. |
+| `CANONICAL_WIRE_REVISION` | `"1"` | canonical JSON vNext wire | Document bytes and the inner seal domain move with it; a document of another revision is refused at the revision fence (`W21`), never reinterpreted. |
+| `STORAGE_SCHEMA_REVISION` | `"1"` | run-store SQLite schema | Storage physics only: reaches no content address and no run id. A store file of another revision is refused at open (law 7), never migrated in place. |
 
 ### Risk Thresholds and Defaults
 
@@ -54,8 +58,8 @@ Thresholds define boundaries for finding classification. Defaults set baseline c
 | `COMPLEXITY_RISK_LOW_MAX` | `10` | Low complexity ceiling | Findings above this but below MEDIUM trigger low-risk. |
 | `COMPLEXITY_RISK_MEDIUM_MAX` | `20` | Medium complexity ceiling | Findings above this are high-risk. |
 | `COHESION_RISK_MEDIUM_MAX` | `3` | Cohesion split threshold | Modules with metric above this flag cohesion risk. |
-| `COUPLING_RISK_LOW_MAX` | `5` | Low coupling ceiling | Low-risk coupling threshold. |
-| `COUPLING_RISK_MEDIUM_MAX` | `10` | Medium coupling ceiling | Medium/high risk above this. |
+| `COUPLING_RISK_LOW_MAX` | `4` | Low coupling ceiling | Low-risk coupling threshold. |
+| `COUPLING_RISK_MEDIUM_MAX` | `7` | Medium coupling ceiling | Medium/high risk above this. |
 | `DEFAULT_COMPLEXITY_THRESHOLD` | `20` | Reporting threshold | Only report complexity findings >= this. Aligns with COMPLEXITY_RISK_MEDIUM_MAX. |
 | `DEFAULT_COHESION_THRESHOLD` | `4` | Reporting threshold | Only report cohesion findings >= this. |
 | `DEFAULT_COUPLING_THRESHOLD` | `10` | Reporting threshold | Only report coupling findings >= this. Aligns with COUPLING_RISK_MEDIUM_MAX. |

@@ -46,7 +46,7 @@ Color is stripped when:
 
 ### JSON contract
 
-`--json [FILE]` outputs the canonical JSON report schema v3.0. Encoding is UTF-8, no BOM. The output must be:
+`--json [FILE]` outputs the canonical JSON report schema v3.5. Encoding is UTF-8, no BOM. The output must be:
 - Valid JSON (all strings escaped, no trailing commas)
 - Single-line or pretty-printed per configuration (not mixed)
 - Complete: all keys present even if null/empty
@@ -238,7 +238,7 @@ If a contract error is detected but a later exception sets exit code 5, the user
 
 ### Baseline and metrics
 
-- **Report schema**: v3.4 (REPORT_SCHEMA_VERSION)
+- **Report schema**: v3.5 (REPORT_SCHEMA_VERSION)
 - **Analysis tool**: CodeClone v2.1.0a1
 - **Module count**: 769 (structural coverage)
 - **CLI surface package**: `codeclone.surfaces.cli` (23 test files covering entry, progress, memory, observability)

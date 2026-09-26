@@ -213,7 +213,7 @@ git commit -m "chore: update baseline"
 |---------|--------|--------|
 | Cache wire path containment (repo-relative decode, symlink hardening) | supported | `codeclone/cache/projection.py`; memory mem-231f686b92ba4103a6322e683ead9e6a |
 | Security hardening (path validation, config symlink rejection) | supported | `codeclone/cache/projection.py`; memory mem-bc26f97ebb0944a9986de756b857c9d3 |
-| Report schema version 3.0 current | supported | context.reports.schema_version |
+| Report schema version 3.5 current | supported | context.reports.schema_version |
 | Baseline schema version 3.0 current | supported | BASELINE_SCHEMA_VERSION contract |
 | Cache version 4.2 current | supported | CACHE_VERSION contract |
 | MCP tool surface (get_run_summary, get_report_section, compare_runs) | supported | context.mcp_tools.tools |

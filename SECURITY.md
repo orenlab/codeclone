@@ -44,18 +44,22 @@ CodeClone operates purely on static input and follows a conservative execution m
 ### Baseline and cache integrity
 
 - Baseline files are schema/type validated with size limits and tamper-evident integrity fields
-  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in
-  baseline schema `2.1`; legacy `2.0` payloads remain readable under the trust
-  model).
+  (baseline schema `3.0`: every lane carries its own lane digest, and `meta.root_digest` binds
+  the whole container). A legacy schema `2.1` baseline is not read as comparison truth:
+  `--update-baseline` authenticates its `meta.payload_sha256` only as transition evidence and
+  regenerates every lane from the current run; older schemas are refused.
 - Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
-  An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
-- Baseline hash covers canonical clone payload (`clones.functions`, `clones.blocks`,
-  `meta.fingerprint_version`, `meta.python_tag`).
-- Baseline hash excludes non-semantic metadata (`created_at`, `meta.generator.version`).
-- `meta.schema_version` and `meta.generator.name` are validated as compatibility/trust gates and are
-  intentionally excluded from `payload_sha256`.
-- Metrics baseline (`MetricsBaseline`) maintains a separate integrity hash over its own payload,
-  independent of the clone baseline hash.
+  An actor who can rewrite baseline content and recompute the lane and root digests can still
+  alter it.
+- The root digest covers the container format, `meta.container_version`, `meta.generator.name`,
+  `meta.python_tag`, the contract index, `baseline_scope_id`, the observation contract, the source
+  binding, the transition evidence and the digest of every lane.
+- The root digest excludes non-semantic metadata (`meta.created_at`, `meta.generator.version`,
+  `meta.project_label`).
+- `meta.container_version` and `meta.generator.name` are validated as compatibility/trust gates, and
+  both are inside the root digest.
+- Metrics are lanes of the same container, not a separate artifact: each metrics lane carries its
+  own lane digest, and the same root digest binds it together with the clone lanes.
 - In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast; otherwise baseline is ignored
   with explicit warning and comparison proceeds against an empty baseline.
 - Cache files are integrity-signed with canonical payload hashing (constant-time comparison),
