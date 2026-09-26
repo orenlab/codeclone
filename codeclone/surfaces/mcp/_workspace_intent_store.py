@@ -72,6 +72,27 @@ def _file_store_process_lock(root: Path) -> threading.Lock:
         return lock
 
 
+class WorkspaceIntentRegistryUnreadableError(RuntimeError):
+    """The registry could not be read, so nothing may be concluded from it.
+
+    Raised where a read used to answer ``()`` or ``None``. An empty answer
+    from a registry this process could not read is indistinguishable from an
+    empty registry, and conflict detection, handed that answer, gave out edit
+    authority over scope another agent may hold. The grant paths turn this
+    into a typed refusal; every other caller sees it as the error it is.
+    """
+
+    def __init__(self, *, backend: str, storage_path: Path, error: str) -> None:
+        self.backend = backend
+        self.storage_path = storage_path
+        #: ``<exception class>: <message>`` from the storage engine.
+        self.error = error
+        super().__init__(
+            f"workspace intent registry ({backend}) at {storage_path} "
+            f"could not be read: {error}"
+        )
+
+
 @contextmanager
 def registry_transaction(
     store: FileWorkspaceIntentStore | SqliteWorkspaceIntentStore,
@@ -216,7 +237,10 @@ class SqliteWorkspaceIntentStore:
         self._lock = threading.Lock()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         with workspace_registry_lock(self.registry_lock_path):
-            self._conn = open_intent_registry_db(db_path)
+            try:
+                self._conn = open_intent_registry_db(db_path)
+            except sqlite3.Error as exc:
+                raise self._unreadable(exc) from exc
 
     @property
     def backend(self) -> str:
@@ -229,6 +253,13 @@ class SqliteWorkspaceIntentStore:
     @property
     def registry_lock_path(self) -> Path:
         return Path(f"{self._db_path}.lock")
+
+    def _unreadable(self, exc: sqlite3.Error) -> WorkspaceIntentRegistryUnreadableError:
+        return WorkspaceIntentRegistryUnreadableError(
+            backend=self.backend,
+            storage_path=self._db_path,
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
     @contextmanager
     def in_process_lock(self) -> Iterator[None]:
@@ -381,8 +412,8 @@ class SqliteWorkspaceIntentStore:
                 ORDER BY declared_at_utc, agent_pid, intent_id
                 """
             ).fetchall()
-        except sqlite3.Error:
-            return ()
+        except sqlite3.Error as exc:
+            raise self._unreadable(exc) from exc
         return tuple(
             (int(agent_pid), int(agent_start_epoch), str(intent_id), str(payload_json))
             for agent_pid, agent_start_epoch, intent_id, payload_json in rows
@@ -421,8 +452,8 @@ class SqliteWorkspaceIntentStore:
                 FROM workspace_intents
                 """
             ).fetchall()
-        except sqlite3.Error:
-            return ()
+        except sqlite3.Error as exc:
+            raise self._unreadable(exc) from exc
         records = tuple(
             record
             for record in (_record_from_json(row[0]) for row in rows)
@@ -447,6 +478,9 @@ class SqliteWorkspaceIntentStore:
                 (pid, start_epoch, intent_id),
             ).fetchone()
         except sqlite3.Error:
+            # The release path, not a grant: a miss here makes ``remove``
+            # answer "not removed", which leaves the row -- and whatever
+            # authority it records -- exactly where it was.
             return None
         if row is None:
             return None
@@ -840,8 +874,10 @@ def inaccessible_registry_entries(
 ) -> tuple[InaccessibleRegistryEntry, ...]:
     """Registry files at ``root`` this process could not read at all.
 
-    Removes nothing and closes nothing. The sqlite backend has no per-file
-    read failure, so its answer here is always the empty tuple.
+    Removes nothing and closes nothing. The sqlite backend has no per-row
+    read failure: a registry it cannot read raises
+    :class:`WorkspaceIntentRegistryUnreadableError` from the read itself, so
+    its answer here is the empty tuple only after a successful open.
     """
 
     store = get_workspace_intent_store(root)
@@ -857,6 +893,7 @@ __all__ = [
     "LazyCloseResult",
     "ScannedRegistryRow",
     "SqliteWorkspaceIntentStore",
+    "WorkspaceIntentRegistryUnreadableError",
     "WorkspaceIntentStore",
     "clear_workspace_intent_store_cache",
     "get_workspace_intent_store",

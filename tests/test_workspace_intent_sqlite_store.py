@@ -356,14 +356,24 @@ def test_sqlite_store_write_returns_false_for_invalid_record(
         assert store.write(object()) is False  # type: ignore[arg-type]
 
 
-def test_sqlite_store_gc_returns_empty_result_on_query_failure(
+def test_sqlite_store_gc_refuses_to_answer_empty_on_query_failure(
     sqlite_root: Path,
 ) -> None:
+    """A registry that fails on read is not an empty registry.
+
+    This test used to pin ``removed == 0`` and ``remaining == 0`` here -- the
+    very answer that let conflict detection see nobody over a registry it
+    could not read. The failure is now the typed error it is.
+    """
+
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        WorkspaceIntentRegistryUnreadableError,
+    )
+
     with _open_sqlite_store(sqlite_root) as store:
         store.close()
-        result = store.gc()
-        assert result["removed"] == 0
-        assert result["remaining"] == 0
+        with pytest.raises(WorkspaceIntentRegistryUnreadableError, match="closed"):
+            store.gc()
 
 
 def test_record_from_json_accepts_dict_payload() -> None:

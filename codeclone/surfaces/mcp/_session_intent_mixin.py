@@ -60,6 +60,7 @@ from ._session_shared import (
 )
 from ._workspace_intent_store import (
     InaccessibleRegistryEntry,
+    WorkspaceIntentRegistryUnreadableError,
     inaccessible_registry_entries,
 )
 from ._workspace_intents import (
@@ -374,20 +375,34 @@ class _MCPSessionIntentMixin:
             workspace_record,
             dirty_snapshot=dirty_snapshot.to_payload(),
         )
-        for replaced_intent in superseded:
-            remove_workspace_intent(
+        try:
+            for replaced_intent in superseded:
+                remove_workspace_intent(
+                    root=record.root,
+                    pid=self._agent_pid,
+                    start_epoch=self._agent_start_epoch,
+                    intent_id=replaced_intent.intent_id,
+                )
+            (
+                workspace_existing,
+                workspace_registered,
+            ) = write_workspace_intent_with_existing(
                 root=record.root,
-                pid=self._agent_pid,
-                start_epoch=self._agent_start_epoch,
-                intent_id=replaced_intent.intent_id,
+                record=workspace_record,
             )
-        (
-            workspace_existing,
-            workspace_registered,
-        ) = write_workspace_intent_with_existing(
-            root=record.root,
-            record=workspace_record,
-        )
+        except WorkspaceIntentRegistryUnreadableError as exc:
+            # Admission read this registry a moment ago and it can no longer
+            # be read. Nothing was registered, so the session must not keep
+            # the authority it was about to grant: withdraw it, then refuse
+            # exactly as admission would have.
+            with self._state_lock:
+                self._active_intents.pop(intent_id, None)
+            self._unpin_intent_run(record_payload)
+            return _registry_store_unreadable_refusal(
+                root=record.root,
+                operation="declare",
+                error=exc.error,
+            )
         concurrent_intents = detect_conflicts(
             new_scope=normalized_scope.to_payload(),
             existing=workspace_existing,
@@ -1065,11 +1080,25 @@ class _MCPSessionIntentMixin:
 
         root_path = self._resolve_workspace_root(root)
         now = utc_now()
-        counts = workspace_status_counts(root=root_path)
-        recovery_records = list_workspace_intent_records_for_recovery(root=root_path)
-        records = list_workspace_intents(root=root_path, exclude_stale=False)
-        unreadable_ids = sorted(unreadable_workspace_intent_ids(root=root_path))
-        inaccessible = inaccessible_registry_entries(root=root_path)
+        try:
+            counts = workspace_status_counts(root=root_path)
+            recovery_records = list_workspace_intent_records_for_recovery(
+                root=root_path
+            )
+            records = list_workspace_intents(root=root_path, exclude_stale=False)
+            unreadable_ids = sorted(unreadable_workspace_intent_ids(root=root_path))
+            inaccessible = inaccessible_registry_entries(root=root_path)
+        except WorkspaceIntentRegistryUnreadableError as exc:
+            # No ``workspace_intents`` key at all: an empty list would say
+            # "nobody holds anything", which is the one claim a registry
+            # that could not be read cannot support.
+            return {
+                **_registry_unreadable_status(),
+                **_registry_store_unreadable_answer(root=root_path, error=exc.error),
+                "own_pid": self._agent_pid,
+                "own_start_epoch": self._agent_start_epoch,
+                **intent_registry_summary(root_path),
+            }
         recovery_available = self._recovery_available_payload(
             records=recovery_records,
             root_path=root_path,
@@ -1891,13 +1920,20 @@ def workspace_admission_refusal(
     unreadable row does not become a brick.
 
     Asked first, one level lower: whether the registry could be read at all.
-    A file this process may not open leaves the registry's contents unknown
-    -- refused as ``registry_unreadable``, naming what could not be read,
-    before any row is interpreted.
+    A file this process may not open, or a store that fails on read, leaves
+    the registry's contents unknown -- refused as ``registry_unreadable``,
+    naming what could not be read, before any row is interpreted.
     """
 
-    inaccessible = inaccessible_registry_entries(root=root)
-    unreadable = sorted(unreadable_workspace_intent_ids(root=root))
+    try:
+        inaccessible = inaccessible_registry_entries(root=root)
+        unreadable = sorted(unreadable_workspace_intent_ids(root=root))
+    except WorkspaceIntentRegistryUnreadableError as exc:
+        return _registry_store_unreadable_refusal(
+            root=root,
+            operation=operation,
+            error=exc.error,
+        )
     if inaccessible:
         return _registry_entries_unreadable_refusal(
             root=root,
@@ -1931,9 +1967,14 @@ def workspace_admission_refusal(
 # ── a registry this process cannot read ─────────────────────────────────────
 # The same law as the refusal above, one level lower. There a signed row was
 # read and could not be modelled; here nothing could be read at all -- a
-# registry file the process may not open. The registry's contents are then
-# unknown, and "unknown" was being answered as "empty": the file was unlinked
-# as if damaged, so conflict detection saw nobody.
+# registry file the process may not open, or a registry database that fails
+# on read. Either way the registry's contents are unknown, and "unknown" was
+# being answered as "empty": the file was unlinked as if damaged, and the
+# database read as if it held no rows, so conflict detection saw nobody.
+#
+# One reason for both, because the operator's question is the same -- "why
+# may I not edit?" -- and the answer is the same: this server cannot see who
+# else holds scope here. The two message pairs differ only in what to check.
 REGISTRY_UNREADABLE: Final = "registry_unreadable"
 
 _REGISTRY_ENTRIES_UNREADABLE_MESSAGE: Final = (
@@ -1950,6 +1991,22 @@ _REGISTRY_ENTRIES_UNREADABLE_NEXT_STEP: Final = (
     "start_controlled_change again. If the user confirms that intent is "
     "abandoned, remove the file by hand instead. Read-only analysis, "
     "listing, and finishing an intent you already hold stay available."
+)
+_REGISTRY_STORE_UNREADABLE_MESSAGE: Final = (
+    "The workspace intent registry ({registry_backend} backend at "
+    "{registry_storage}) could not be read: {error}. Nothing can be "
+    "concluded from a registry this server cannot read -- in particular not "
+    "that no other agent holds this scope -- so no edit authority is granted "
+    "and nothing was registered."
+)
+_REGISTRY_STORE_UNREADABLE_NEXT_STEP: Final = (
+    "Check the workspace intent registry at {registry_storage} (the "
+    "{registry_backend} backend, as configured by [tool.codeclone] "
+    "intent_registry_backend / intent_registry_path): restore its "
+    "permissions, or -- if it is damaged and the user confirms no other "
+    "agent is working in this repository -- move it aside; it holds only "
+    "ephemeral coordination state and is created again on the next start. "
+    "Then start_controlled_change again."
 )
 
 
@@ -2013,6 +2070,44 @@ def _registry_entries_unreadable_refusal(
             "message": _REGISTRY_ENTRIES_UNREADABLE_MESSAGE.format(errors=errors),
             "next_step": _REGISTRY_ENTRIES_UNREADABLE_NEXT_STEP.format(paths=paths),
         },
+    )
+
+
+def _registry_store_unreadable_answer(
+    *,
+    root: Path,
+    error: str,
+) -> dict[str, object]:
+    """Which store failed, why, and what to check -- for any caller."""
+
+    from ...config.intent_registry import intent_registry_summary
+
+    registry = intent_registry_summary(root)
+    return {
+        "inaccessible_registry_entries": [
+            {"path": registry["registry_storage"], "intent_id": None, "error": error}
+        ],
+        "message": _REGISTRY_STORE_UNREADABLE_MESSAGE.format(
+            registry_backend=registry["registry_backend"],
+            registry_storage=registry["registry_storage"],
+            error=error,
+        ),
+        "next_step": _REGISTRY_STORE_UNREADABLE_NEXT_STEP.format(
+            registry_backend=registry["registry_backend"],
+            registry_storage=registry["registry_storage"],
+        ),
+    }
+
+
+def _registry_store_unreadable_refusal(
+    *,
+    root: Path,
+    operation: str,
+    error: str,
+) -> dict[str, object]:
+    return _registry_unreadable_grant_refusal(
+        operation=operation,
+        answer=_registry_store_unreadable_answer(root=root, error=error),
     )
 
 

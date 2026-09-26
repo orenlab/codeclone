@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import errno
 import os
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -43,6 +44,7 @@ from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
 from codeclone.surfaces.mcp._workspace_intent_contract import WorkspaceIntentRecord
 from codeclone.surfaces.mcp._workspace_intent_store import (
     FileWorkspaceIntentStore,
+    SqliteWorkspaceIntentStore,
     clear_workspace_intent_store_cache,
     get_workspace_intent_store,
 )
@@ -87,6 +89,11 @@ def _registry_root(
 @pytest.fixture
 def file_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     yield from _registry_root("file", tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def sqlite_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    yield from _registry_root("sqlite", tmp_path, monkeypatch)
 
 
 def _foreign_record(intent_id: str = "intent-foreign-001") -> WorkspaceIntentRecord:
@@ -158,6 +165,41 @@ def _start(service: CodeCloneMCPService, root: Path) -> dict[str, object]:
         root=str(root),
         scope={"allowed_files": ["pkg/b.py"]},
         intent="edit pkg/b",
+    )
+
+
+def _damage_sqlite_registry(root: Path) -> None:
+    """Break the intents table's root b-tree page, the audit probe's damage.
+
+    The file still opens as a database; every read of the table fails with
+    ``database disk image is malformed``. The positive control that the
+    damage is real is taken straight from sqlite, beside the reader under test.
+    """
+
+    clear_workspace_intent_store_cache()
+    db = root / ".codeclone" / "db" / "intents.sqlite3"
+    conn = sqlite3.connect(db)
+    root_page = conn.execute(
+        "SELECT rootpage FROM sqlite_master WHERE name='workspace_intents'"
+    ).fetchone()[0]
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+    with open(db, "r+b") as handle:
+        handle.seek((root_page - 1) * page_size)
+        handle.write(b"\xff" * 16)
+    probe = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        with pytest.raises(sqlite3.DatabaseError):
+            probe.execute("SELECT payload_json FROM workspace_intents").fetchall()
+    finally:
+        probe.close()
+
+
+def _seed_foreign_sqlite_row(root: Path) -> None:
+    assert workspace_intents.write_workspace_intent(
+        root=root,
+        record=_foreign_record(),
     )
 
 
@@ -352,6 +394,146 @@ def test_promote_refuses_over_an_unreadable_entry(
 
     _assert_registry_refusal(refused)
     assert blocker_path.exists()
+
+
+# ══ INT-02 · a sqlite registry that cannot be read refuses, typed ═══════════
+
+
+def test_store_reads_raise_instead_of_answering_empty(sqlite_root: Path) -> None:
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        WorkspaceIntentRegistryUnreadableError,
+    )
+
+    _seed_foreign_sqlite_row(sqlite_root)
+    control = get_workspace_intent_store(sqlite_root)
+    assert isinstance(control, SqliteWorkspaceIntentStore)
+    assert [row[2] for row in control.iter_rows()] == ["intent-foreign-001"]
+    _damage_sqlite_registry(sqlite_root)
+    store = get_workspace_intent_store(sqlite_root)
+    assert isinstance(store, SqliteWorkspaceIntentStore)
+
+    for read in (
+        store.iter_rows,
+        store.list_records_current,
+        store.list_records_raw,
+        store.gc,
+        lambda: store.find("intent-foreign-001"),
+    ):
+        with pytest.raises(WorkspaceIntentRegistryUnreadableError) as caught:
+            read()
+        assert caught.value.backend == "sqlite"
+        assert "malformed" in caught.value.error
+
+
+def test_start_refuses_over_a_damaged_sqlite_registry(
+    sqlite_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control and case through the tool an agent actually calls.
+
+    control: the same start on the healthy registry sees the foreign row;
+    case:    the damaged registry is refused -- never read as empty.
+    """
+
+    _seed_foreign_sqlite_row(sqlite_root)
+    service = _service_with_run(sqlite_root, monkeypatch)
+    listed = service.manage_change_intent(
+        action="list_workspace", root=str(sqlite_root)
+    )
+    listed_intents = listed["workspace_intents"]
+    assert isinstance(listed_intents, list)
+    assert [item["intent_id"] for item in listed_intents] == ["intent-foreign-001"]
+    _damage_sqlite_registry(sqlite_root)
+
+    refused = _start(service, sqlite_root)
+
+    _assert_registry_refusal(refused)
+    entries = refused["inaccessible_registry_entries"]
+    assert isinstance(entries, list) and len(entries) == 1
+    assert entries[0]["path"] == ".codeclone/db/intents.sqlite3"
+    assert "malformed" in str(entries[0]["error"])
+    assert ".codeclone/db/intents.sqlite3" in str(refused["next_step"])
+    with service._state_lock:
+        assert service._active_intents == {}
+
+
+def test_declare_refuses_over_a_damaged_sqlite_registry(
+    sqlite_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_foreign_sqlite_row(sqlite_root)
+    service = _service_with_run(sqlite_root, monkeypatch)
+    _damage_sqlite_registry(sqlite_root)
+
+    refused = _declare(service, sqlite_root)
+
+    _assert_registry_refusal(refused)
+
+
+def test_start_refuses_when_the_registry_is_not_a_database(
+    sqlite_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = sqlite_root / ".codeclone" / "db" / "intents.sqlite3"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.write_bytes(b"this is not a sqlite database" * 64)
+    service = _service_with_run(sqlite_root, monkeypatch)
+
+    refused = _start(service, sqlite_root)
+
+    _assert_registry_refusal(refused)
+
+
+def test_listing_a_damaged_registry_does_not_claim_it_is_empty(
+    sqlite_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_foreign_sqlite_row(sqlite_root)
+    service = _service_with_run(sqlite_root, monkeypatch)
+    _damage_sqlite_registry(sqlite_root)
+
+    listed = service.manage_change_intent(
+        action="list_workspace", root=str(sqlite_root)
+    )
+
+    assert listed["status"] == "blocked"
+    assert listed["reason"] == _REGISTRY_UNREADABLE
+    assert "workspace_intents" not in listed
+    assert listed["registry_backend"] == "sqlite"
+
+
+def test_a_registry_that_breaks_after_admission_leaves_no_authority_behind(
+    sqlite_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Probe validity for the second guard: an input really reaches it.
+
+    Admission reads a healthy registry; the snapshot-and-write that follows
+    finds it unreadable. The session must not keep an intent the registry
+    never recorded, and the answer must be the same typed refusal.
+    """
+
+    from codeclone.surfaces.mcp import _session_intent_mixin as mixin
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        WorkspaceIntentRegistryUnreadableError,
+    )
+
+    service = _service_with_run(sqlite_root, monkeypatch)
+
+    def broken(*, root: Path, record: object) -> object:
+        raise WorkspaceIntentRegistryUnreadableError(
+            backend="sqlite",
+            storage_path=root / ".codeclone" / "db" / "intents.sqlite3",
+            error="DatabaseError: database disk image is malformed",
+        )
+
+    monkeypatch.setattr(mixin, "write_workspace_intent_with_existing", broken)
+
+    refused = _declare(service, sqlite_root)
+
+    _assert_registry_refusal(refused)
+    with service._state_lock:
+        assert service._active_intents == {}
 
 
 # ══ INT-03 · the documented override no longer takes change control down ══
