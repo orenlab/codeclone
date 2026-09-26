@@ -10,6 +10,7 @@ import importlib
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import types
 from collections.abc import Callable, Mapping
@@ -17,6 +18,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 
@@ -39,6 +41,7 @@ from codeclone.surfaces.cli.setup.engine.capabilities import (
 )
 from codeclone.surfaces.cli.setup.engine.discover import (
     _client_config_present,
+    build_discover_context,
     build_setup_snapshot,
 )
 from codeclone.surfaces.cli.setup.engine.plan import build_setup_plan
@@ -53,6 +56,7 @@ from codeclone.surfaces.cli.setup.main import setup_main
 from codeclone.surfaces.cli.setup.wizard import WizardPrompts, run_setup_wizard
 from codeclone.surfaces.cli.types import PrinterLike
 from codeclone.ui_messages import setup as setup_ui
+from codeclone.ui_messages.runtime import HINT_SCOPE_ID_FOOTER
 from codeclone.utils.json_io import json_text
 from tests.memory_fixtures import (
     memory_project_db_paths,
@@ -74,6 +78,10 @@ _DISCOVER_SOURCE = (
 )
 _WORKFLOW_SOURCE = _REPO_ROOT / "codeclone" / "surfaces" / "cli" / "workflow.py"
 _SUBCOMMANDS_SOURCE = _REPO_ROOT / "codeclone" / "surfaces" / "cli" / "subcommands.py"
+
+#: A committed ``baseline_scope_id``: with it, and audit enabled, the
+#: ``[tool.codeclone]`` section needs nothing more from setup.
+_KNOWN_SCOPE_ID = "0b6c8d8e-5d0f-4a4e-9a51-3f3b2f7c9e10"
 
 _OPTIONAL_MODULES = frozenset(
     {
@@ -174,6 +182,18 @@ def _write_minimal_pyproject(path: Path, *, audit_enabled: bool = False) -> None
         "[tool.codeclone]\n"
         'baseline = "codeclone.baseline.json"\n'
         f"audit_enabled = {'true' if audit_enabled else 'false'}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_satisfied_pyproject(path: Path) -> None:
+    """A ``[tool.codeclone]`` section setup has nothing left to add to."""
+
+    path.write_text(
+        "[tool.codeclone]\n"
+        'baseline = "codeclone.baseline.json"\n'
+        f'baseline_scope_id = "{_KNOWN_SCOPE_ID}"\n'
+        "audit_enabled = true\n",
         encoding="utf-8",
     )
 
@@ -538,7 +558,7 @@ def test_setup_plan_proposes_pyproject_section(
     actions = _plan_actions(plan)
     merge = next(item for item in actions if item["kind"] == "pyproject_merge")
     assert merge["capability_id"] == "analysis"
-    assert merge["changed_keys"] == ["baseline"]
+    assert merge["changed_keys"] == ["baseline", "baseline_scope_id"]
     preview = merge["preview"]
     assert isinstance(preview, dict)
     assert "tool.codeclone" in str(preview.get("unified_diff", ""))
@@ -566,7 +586,7 @@ def test_setup_plan_is_empty_when_satisfied(
     tmp_path: Path,
     base_install_find_spec: None,
 ) -> None:
-    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    _write_satisfied_pyproject(tmp_path / "pyproject.toml")
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
 
     plan = build_setup_plan(tmp_path)
@@ -679,7 +699,7 @@ def test_setup_apply_noop_when_plan_empty(
     tmp_path: Path,
     base_install_find_spec: None,
 ) -> None:
-    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    _write_satisfied_pyproject(tmp_path / "pyproject.toml")
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
 
     result = apply_setup_plan(tmp_path)
@@ -707,7 +727,7 @@ def test_setup_apply_idempotent_when_already_satisfied(
     tmp_path: Path,
     base_install_find_spec: None,
 ) -> None:
-    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    _write_satisfied_pyproject(tmp_path / "pyproject.toml")
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
 
     first = apply_setup_plan(tmp_path)
@@ -721,7 +741,7 @@ def test_setup_apply_main_exit_success(
     tmp_path: Path,
     base_install_find_spec: None,
 ) -> None:
-    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    _write_satisfied_pyproject(tmp_path / "pyproject.toml")
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
     assert setup_main(["apply", "--yes", "--root", str(tmp_path)]) == int(
         ExitCode.SUCCESS
@@ -1096,7 +1116,7 @@ def test_setup_wizard_guided_empty_plan(
     base_install_find_spec: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    _write_satisfied_pyproject(tmp_path / "pyproject.toml")
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -3557,6 +3577,242 @@ def test_setup_apply_json_and_explicit_plan_id(
         ]
     )
     assert rc_explicit == int(ExitCode.CONTRACT_ERROR)
+
+
+# ---------------------------------------------------------------------------
+# ``codeclone setup`` writes ``baseline_scope_id`` and keeps the baseline path
+# relative.
+# ---------------------------------------------------------------------------
+
+_CODECLONE_CLI: tuple[str, ...] = (sys.executable, "-m", "codeclone.main")
+
+
+def _run_codeclone(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [*_CODECLONE_CLI, *args],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        check=False,
+    )
+
+
+def _project_without_codeclone_section(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    return root
+
+
+def _analysis_merge(plan: Mapping[str, object]) -> dict[str, object]:
+    return next(
+        item
+        for item in _plan_actions(dict(plan))
+        if item["id"] == "pyproject_merge:analysis"
+    )
+
+
+def _merge_updates(action: Mapping[str, object]) -> dict[str, object]:
+    updates = action["updates"]
+    assert isinstance(updates, dict)
+    return cast(dict[str, object], updates)
+
+
+def _flat(text: str) -> str:
+    """Collapse the console's line wrapping so a sentence can be matched."""
+
+    return " ".join(text.split())
+
+
+def test_setup_plan_proposes_a_canonical_scope_id_and_a_relative_baseline(
+    tmp_path: Path,
+) -> None:
+    root = _project_without_codeclone_section(tmp_path / "project")
+
+    shown = _run_codeclone("setup", "plan", "--json", "--root", str(root), cwd=tmp_path)
+
+    assert shown.returncode == 0, shown.stderr
+    merge = _analysis_merge(json.loads(shown.stdout))
+    updates = _merge_updates(merge)
+    scope_id = updates.get("baseline_scope_id")
+    assert isinstance(scope_id, str)
+    assert str(UUID(scope_id)) == scope_id
+    assert updates == {
+        "baseline": "codeclone.baseline.json",
+        "baseline_scope_id": scope_id,
+    }
+    preview = merge["preview"]
+    assert isinstance(preview, dict)
+    diff = str(preview["unified_diff"])
+    # The preview shows what lands in the committed file: the relative path
+    # every checkout and CI resolves against its own root, never this one's.
+    assert '+baseline = "codeclone.baseline.json"' in diff
+    assert f'+baseline_scope_id = "{scope_id}"' in diff
+    assert str(root) not in diff
+
+
+def test_setup_adds_only_the_scope_id_to_an_existing_section(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[tool.codeclone]\nbaseline = "custom/path.json"\naudit_enabled = true\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    plan = build_setup_plan(tmp_path)
+
+    merges = [item for item in _plan_actions(plan) if item["kind"] == "pyproject_merge"]
+    assert [item["id"] for item in merges] == ["pyproject_merge:analysis"]
+    updates = _merge_updates(merges[0])
+    scope_id = updates.get("baseline_scope_id")
+    assert isinstance(scope_id, str)
+    assert updates == {"baseline_scope_id": scope_id}
+
+    result = apply_setup_plan(tmp_path, expected_plan_id=str(plan["plan_id"]))
+
+    assert result["status"] == "applied"
+    text = pyproject.read_text(encoding="utf-8")
+    assert 'baseline = "custom/path.json"' in text
+    assert f'baseline_scope_id = "{scope_id}"' in text
+    assert load_pyproject_config(tmp_path)["baseline"] == str(
+        tmp_path / "custom" / "path.json"
+    )
+    assert build_setup_plan(tmp_path)["status"] == "empty"
+
+
+def _pyproject_merges(root: Path) -> list[tuple[object, object]]:
+    return [
+        (item["id"], item["updates"])
+        for item in _plan_actions(build_setup_plan(root))
+        if item["kind"] == "pyproject_merge"
+    ]
+
+
+def test_setup_plan_proposes_audit_only_for_an_existing_section(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    bare = _project_without_codeclone_section(tmp_path / "bare")
+    configured = tmp_path / "configured"
+    configured.mkdir()
+    (configured / "pyproject.toml").write_text(
+        f'[tool.codeclone]\nbaseline_scope_id = "{_KNOWN_SCOPE_ID}"\n'
+        "audit_enabled = false\n",
+        encoding="utf-8",
+    )
+
+    assert [item_id for item_id, _ in _pyproject_merges(bare)] == [
+        "pyproject_merge:analysis"
+    ]
+    assert _pyproject_merges(configured) == [
+        ("pyproject_merge:audit_and_intents", {"audit_enabled": True})
+    ]
+
+
+def test_setup_keeps_an_existing_scope_id(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    _write_satisfied_pyproject(pyproject)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    before = pyproject.read_text(encoding="utf-8")
+
+    plan = build_setup_plan(tmp_path)
+    result = apply_setup_plan(tmp_path)
+
+    assert plan["status"] == "empty"
+    assert result["status"] == "noop"
+    assert pyproject.read_text(encoding="utf-8") == before
+
+
+def test_setup_scope_id_is_derived_from_root_head_and_pyproject_bytes(
+    tmp_path: Path,
+) -> None:
+    import dataclasses
+
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    first = _project_without_codeclone_section(tmp_path / "first")
+    second = _project_without_codeclone_section(tmp_path / "second")
+    first_ctx = build_discover_context(first)
+
+    scope_id = plan_mod._planned_scope_id(first_ctx)
+
+    assert str(UUID(scope_id)) == scope_id
+    assert plan_mod._planned_scope_id(build_discover_context(first)) == scope_id
+    # Each input discriminates on its own: another checkout, another commit,
+    # another pyproject.toml each get another id.
+    assert plan_mod._planned_scope_id(build_discover_context(second)) != scope_id
+    assert (
+        plan_mod._planned_scope_id(dataclasses.replace(first_ctx, head_commit="0" * 40))
+        != scope_id
+    )
+    (first / "pyproject.toml").write_text(
+        '[project]\nname = "other"\n', encoding="utf-8"
+    )
+    assert plan_mod._planned_scope_id(build_discover_context(first)) != scope_id
+
+
+def test_setup_apply_writes_the_scope_id_the_plan_showed(tmp_path: Path) -> None:
+    root = _project_without_codeclone_section(tmp_path / "project")
+    (root / "demo.py").write_text(
+        "def answer() -> int:\n    return 42\n", encoding="utf-8"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    shown = _run_codeclone(
+        "setup", "plan", "--json", "--root", str(root), cwd=elsewhere
+    )
+    assert shown.returncode == 0, shown.stderr
+    plan = json.loads(shown.stdout)
+    scope_id = _merge_updates(_analysis_merge(plan)).get("baseline_scope_id")
+    assert isinstance(scope_id, str)
+    key_line = f'baseline_scope_id = "{scope_id}"'
+
+    preview = _run_codeclone("setup", "plan", "--root", str(root), cwd=elsewhere)
+    assert preview.returncode == 0, preview.stderr
+    assert _flat(HINT_SCOPE_ID_FOOTER) in _flat(preview.stdout)
+
+    applied = _run_codeclone(
+        "setup",
+        "apply",
+        "--yes",
+        "--plan-id",
+        str(plan["plan_id"]),
+        "--root",
+        str(root),
+        cwd=elsewhere,
+    )
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    assert key_line in applied.stdout
+    assert _flat(HINT_SCOPE_ID_FOOTER) in _flat(applied.stdout)
+
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert key_line in text
+    # Relative on disk, because pyproject.toml is committed and read by other
+    # checkouts and CI; the loader resolves it against the root on every read.
+    assert 'baseline = "codeclone.baseline.json"' in text
+    assert load_pyproject_config(root)["baseline"] == str(
+        root / "codeclone.baseline.json"
+    )
+    assert build_discover_context(root).baseline_path == (
+        root.resolve() / "codeclone.baseline.json"
+    )
+
+    updated = _run_codeclone(
+        str(root),
+        "--update-baseline",
+        "--cache-path",
+        str(tmp_path / "cache" / "cache.sqlite3"),
+        cwd=elsewhere,
+    )
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert (root / "codeclone.baseline.json").is_file()
+    assert not (elsewhere / "codeclone.baseline.json").exists()
 
 
 def test_merge_writes_a_relative_baseline_as_given(tmp_path: Path) -> None:

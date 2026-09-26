@@ -182,7 +182,17 @@ def _apply_pyproject_merge(
         "message": "",
         "changed_keys": list(result.changed_keys),
         "created_section": result.created_section,
+        "updates": _written_updates(updates, result.changed_keys),
     }
+
+
+def _written_updates(
+    updates: Mapping[str, object],
+    changed_keys: tuple[str, ...],
+) -> dict[str, object]:
+    """The values this merge actually wrote, keyed like the plan's ``updates``."""
+
+    return {key: updates[key] for key in changed_keys}
 
 
 def _apply_gitignore_append(

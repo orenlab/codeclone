@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypeGuard
 
 from ....ui_messages import setup as setup_ui
+from ....ui_messages.runtime import HINT_SCOPE_ID_FOOTER, HINT_SCOPE_ID_KEY_LINE
 from ....ui_messages.styling import fmt_bool
 from ..console import rich_panel_symbols, supports_rich_console
 from ..types import PrinterLike
@@ -43,8 +44,9 @@ def render_setup_doctor(
 def render_setup_plan(*, console: PrinterLike, plan: Mapping[str, object]) -> None:
     if supports_rich_console(console):
         _render_plan_rich(console=console, plan=plan)
-        return
-    _render_plan_plain(console=console, plan=plan)
+    else:
+        _render_plan_plain(console=console, plan=plan)
+    _print_scope_id_note(console, _plan_actions(plan))
 
 
 def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
@@ -242,8 +244,9 @@ def _render_plan_plain(console: PrinterLike, plan: Mapping[str, object]) -> None
 def render_setup_apply(*, console: PrinterLike, result: Mapping[str, object]) -> None:
     if supports_rich_console(console):
         _render_apply_rich(console=console, result=result)
-        return
-    _render_apply_plain(console=console, result=result)
+    else:
+        _render_apply_plain(console=console, result=result)
+    _print_scope_id_note(console, _apply_results(result))
 
 
 def _render_apply_rich(console: PrinterLike, result: Mapping[str, object]) -> None:
@@ -335,6 +338,28 @@ def _print_kind_path_status_table(
             str(row.get("status", "")),
         )
     console.print(table)
+
+
+def _print_scope_id_note(
+    console: PrinterLike,
+    rows: list[Mapping[str, object]],
+) -> None:
+    """Hand over a generated ``baseline_scope_id`` in the words of its refusal.
+
+    ``--update-baseline`` refuses without the key and prints this key line and
+    this footer; setup is where the key gets generated instead, so it says the
+    same thing from the same owner. Printed without markup: the key line is
+    TOML and the footer is prose, and neither carries a style.
+    """
+
+    for row in rows:
+        scope_id = _mapping(row.get("updates")).get("baseline_scope_id")
+        if not isinstance(scope_id, str):
+            continue
+        console.print()
+        key_line = HINT_SCOPE_ID_KEY_LINE.format(scope_id=scope_id)
+        console.print(f"  {key_line}", markup=False)
+        console.print(f"  {HINT_SCOPE_ID_FOOTER}", markup=False)
 
 
 def _apply_results(result: Mapping[str, object]) -> list[Mapping[str, object]]:
