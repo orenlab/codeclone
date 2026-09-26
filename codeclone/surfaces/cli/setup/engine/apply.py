@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal, TypeGuard
+from uuid import uuid4
 
 from .....config.pyproject_writer import PyprojectWriterError, merge_tool_codeclone
 from .....paths.gitignore import (
@@ -18,7 +19,7 @@ from .....paths.gitignore import (
     repo_gitignore_covers_codeclone_cache,
     write_gitignore_text_atomically,
 )
-from .plan import build_setup_plan
+from .plan import SCOPE_ID_PLACEHOLDER, build_setup_plan
 
 ApplyStatus = Literal[
     "noop", "preview", "applied", "partial", "failed", "blocked", "stale_plan"
@@ -157,7 +158,10 @@ def _apply_pyproject_merge(
             "missing updates",
         )
 
-    updates = {str(key): value for key, value in updates_raw.items()}
+    updates = _with_generated_scope_id(
+        {str(key): value for key, value in updates_raw.items()},
+        dry_run=dry_run,
+    )
     try:
         result = merge_tool_codeclone(root_path, updates, dry_run=dry_run)
     except PyprojectWriterError as exc:
@@ -184,6 +188,26 @@ def _apply_pyproject_merge(
         "created_section": result.created_section,
         "updates": _written_updates(updates, result.changed_keys),
     }
+
+
+def _with_generated_scope_id(
+    updates: dict[str, object],
+    *,
+    dry_run: bool,
+) -> dict[str, object]:
+    """Swap the plan's placeholder for the scope id this apply generates.
+
+    ``uuid4``, generated here and nowhere earlier. The key is what keeps this
+    project's baseline from being read as another's, so it must be unique by
+    construction, never derived from anything a second project could share.
+    The plan cannot carry it: the plan is recomputed here and its ``plan_id``
+    has to match the preview, so it says only that an id will be generated. A
+    dry run writes nothing and generates nothing -- it keeps the placeholder.
+    """
+
+    if dry_run or updates.get("baseline_scope_id") != SCOPE_ID_PLACEHOLDER:
+        return updates
+    return {**updates, "baseline_scope_id": str(uuid4())}
 
 
 def _written_updates(

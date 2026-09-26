@@ -17,6 +17,7 @@ from ....ui_messages.styling import esc, fmt_bool
 from ..console import rich_panel_symbols, supports_rich_console
 from ..types import PrinterLike
 from .engine.capabilities import GROUP_ORDER
+from .engine.plan import SCOPE_ID_PLACEHOLDER
 
 if TYPE_CHECKING:
     from rich.rule import Rule as RichRule
@@ -44,9 +45,8 @@ def render_setup_doctor(
 def render_setup_plan(*, console: PrinterLike, plan: Mapping[str, object]) -> None:
     if supports_rich_console(console):
         _render_plan_rich(console=console, plan=plan)
-    else:
-        _render_plan_plain(console=console, plan=plan)
-    _print_scope_id_note(console, _plan_actions(plan))
+        return
+    _render_plan_plain(console=console, plan=plan)
 
 
 def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
@@ -345,7 +345,7 @@ def _print_scope_id_note(
     console: PrinterLike,
     rows: list[Mapping[str, object]],
 ) -> None:
-    """Hand over a generated ``baseline_scope_id`` in the words of its refusal.
+    """Hand over the ``baseline_scope_id`` apply wrote, in its refusal's words.
 
     ``--update-baseline`` refuses without the key and prints this key line and
     this footer; setup is where the key gets generated instead, so it says the
@@ -354,13 +354,22 @@ def _print_scope_id_note(
     """
 
     for row in rows:
-        scope_id = _mapping(row.get("updates")).get("baseline_scope_id")
-        if not isinstance(scope_id, str):
+        scope_id = _generated_scope_id(row)
+        if scope_id is None:
             continue
         console.print()
         key_line = HINT_SCOPE_ID_KEY_LINE.format(scope_id=scope_id)
         console.print(f"  {key_line}", markup=False)
         console.print(f"  {HINT_SCOPE_ID_FOOTER}", markup=False)
+
+
+def _generated_scope_id(row: Mapping[str, object]) -> str | None:
+    """The id an apply row wrote; a dry run carries only the placeholder."""
+
+    scope_id = _mapping(row.get("updates")).get("baseline_scope_id")
+    if isinstance(scope_id, str) and scope_id != SCOPE_ID_PLACEHOLDER:
+        return scope_id
+    return None
 
 
 def _apply_results(result: Mapping[str, object]) -> list[Mapping[str, object]]:
