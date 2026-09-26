@@ -37,6 +37,7 @@ from codeclone.contracts import (
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
     CACHE_VERSION,
+    DEFAULT_HTML_REPORT_PATH,
     REPORT_SCHEMA_VERSION,
     ExitCode,
 )
@@ -1830,6 +1831,11 @@ def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
     )
 
 
+def _assert_default_html_report_written_under(root: Path) -> None:
+    """The bare ``--html`` default landed in ``root``, not the process cwd."""
+    assert (root / DEFAULT_HTML_REPORT_PATH).is_file()
+
+
 def test_cli_shared_baseline_mismatch_is_reported_once_without_ci_label(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1851,6 +1857,10 @@ fail_on_new_metrics = true
         + "\n",
         "utf-8",
     )
+    # A bare ``--html`` resolves its default path against the working
+    # directory; without the chdir it lands in the hosting checkout's
+    # ``.codeclone/``.
+    monkeypatch.chdir(tmp_path)
 
     _assert_parallel_cli_exit(
         monkeypatch,
@@ -1862,6 +1872,7 @@ fail_on_new_metrics = true
         expected_code=2,
     )
 
+    _assert_default_html_report_written_under(tmp_path)
     out = capsys.readouterr().out
     assert out.count("Invalid baseline file") == 1
     assert_contains_none(out, "CI requires a trusted baseline")

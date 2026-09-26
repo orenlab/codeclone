@@ -43,7 +43,9 @@ durable write has to pass:
   it is spawned, on a read-verb allowlist (an unknown verb under a live root
   is refused, never assumed harmless);
 * the working tree of the hosting checkout is compared before and after the
-  session, so residue that reached the tree by any other route is named.
+  session, so residue that reached the tree by any other route is named --
+  and so are the files inside its ``.codeclone/`` that no other fence
+  answers for (a report, any stray file), new, rewritten or removed.
 
 One marker, ``live_state(reason=...)``, lifts the in-process enforcements
 for a test whose legitimate subject IS live state. It is loud on purpose:
@@ -572,8 +574,9 @@ def make_guarded_popen_init(
 #: Top-level entries a test run legitimately creates or churns in the
 #: hosting checkout, and so never count as residue. ``.codeclone/`` is the
 #: controller's own service directory, written concurrently by whatever
-#: MCP server is coordinating the session; the SQLite fence, not this gate,
-#: is what keeps a TEST out of it.
+#: MCP server is coordinating the session, and git folds an existing ignored
+#: directory into one entry, so ``git status`` cannot see inside it at all:
+#: its contents are measured by the service-state snapshot below instead.
 _TREE_GATE_RUNTIME_HEADS = frozenset(
     {
         ".agent-runs",
@@ -654,6 +657,85 @@ def tree_residue(
 
 
 # ---------------------------------------------------------------------------
+# Enforcement 4, inside the service directory
+# ---------------------------------------------------------------------------
+
+#: One file inside ``.codeclone/``: ``(size, mtime_ns)``. A rewrite moves the
+#: mtime even when it keeps the size, and reading two integers per file keeps
+#: the snapshot cheap next to a report of hundreds of megabytes.
+ServiceFileStamp = tuple[int, int]
+
+
+def is_controller_service_state(relative_path: str) -> bool:
+    """Whether a path inside ``.codeclone/`` is state another fence owns.
+
+    Named by the product's own layout, not by hand: every SQLite store and
+    its sidecars (the ``-wal``/``-shm``/``-journal`` files and the registry
+    lock beside a database) -- refused to a test by the SQLite fence, and
+    opened concurrently by the controller; the file-backed intent registry
+    -- the controller's coordination state; and engineering memory, which
+    the relocation above keeps a test out of and the controller writes at
+    any time. Everything else in the directory -- a report, an export, a
+    stray file -- has no other owner, so the snapshot answers for it.
+    """
+
+    from codeclone.paths.workspace import (
+        REGISTRY_DIR_PARTS,
+        REL_MEMORY_DB_PATH,
+        REL_RUN_STORE_DB_PATH,
+    )
+
+    parts = relative_path.split("/")
+    controller_dirs = {REGISTRY_DIR_PARTS[1], Path(REL_MEMORY_DB_PATH).parts[1]}
+    return parts[0] in controller_dirs or (
+        Path(REL_RUN_STORE_DB_PATH).suffix in parts[-1]
+    )
+
+
+def capture_service_state(root: Path) -> dict[str, ServiceFileStamp]:
+    """Every file in ``root``'s ``.codeclone/`` no other fence answers for.
+
+    Keyed by the path relative to the service directory. An absent directory
+    is an empty snapshot, so a directory a test creates shows up whole.
+    """
+
+    from codeclone.paths.workspace import repo_workspace_dir
+
+    service_dir = repo_workspace_dir(root)
+    stamps: dict[str, ServiceFileStamp] = {}
+    for directory, subdirectories, files in os.walk(service_dir):
+        relative_dir = Path(directory).relative_to(service_dir)
+        subdirectories[:] = sorted(
+            name
+            for name in subdirectories
+            if not is_controller_service_state((relative_dir / name).as_posix())
+        )
+        for name in files:
+            relative = (relative_dir / name).as_posix()
+            if is_controller_service_state(relative):
+                continue
+            try:
+                stat = (Path(directory) / name).stat()
+            except FileNotFoundError:
+                continue
+            stamps[relative] = (stat.st_size, stat.st_mtime_ns)
+    return stamps
+
+
+def service_state_residue(
+    before: dict[str, ServiceFileStamp], after: dict[str, ServiceFileStamp]
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """``(appeared, rewritten, vanished)`` files inside ``.codeclone/``."""
+
+    appeared = tuple(sorted(set(after) - set(before)))
+    rewritten = tuple(
+        sorted(path for path in set(after) & set(before) if after[path] != before[path])
+    )
+    vanished = tuple(sorted(set(before) - set(after)))
+    return appeared, rewritten, vanished
+
+
+# ---------------------------------------------------------------------------
 # The per-process guard the conftest hooks drive
 # ---------------------------------------------------------------------------
 
@@ -669,6 +751,7 @@ class LiveStateGuard:
     scratch: Path
     lifted: bool = False
     baseline: frozenset[str] | None = None
+    service_baseline: dict[str, ServiceFileStamp] = field(default_factory=dict)
     violations: list[LiveStateViolation] = field(default_factory=list)
     opted_in: list[tuple[str, str]] = field(default_factory=list)
     #: Relocated path -> the live path it stands for.
@@ -696,6 +779,7 @@ class LiveStateGuard:
             scratch=session_scratch,
         )
         guard.baseline = capture_tree_status(guard.hosting_checkout)
+        guard.service_baseline = capture_service_state(guard.hosting_checkout)
 
         def lifted() -> bool:
             return guard.lifted
@@ -821,9 +905,12 @@ __all__ = [
     "LiveStateBoundary",
     "LiveStateGuard",
     "LiveStateViolation",
+    "ServiceFileStamp",
+    "capture_service_state",
     "capture_tree_status",
     "discover_live_state_boundary",
     "git_mutation_under_live_root",
+    "is_controller_service_state",
     "is_read_only_git_command",
     "is_test_runtime_artifact",
     "live_state_guard",
@@ -831,6 +918,7 @@ __all__ = [
     "make_guarded_popen_init",
     "make_redirected_state_path_resolver",
     "make_twin_aware_containment",
+    "service_state_residue",
     "sqlite_database_path",
     "tree_residue",
 ]

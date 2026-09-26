@@ -38,9 +38,11 @@ from tests._live_state import (
     HOSTING_CHECKOUT,
     LiveStateGuard,
     LiveStateViolation,
+    capture_service_state,
     capture_tree_status,
     is_read_only_git_command,
     live_state_guard,
+    service_state_residue,
     sqlite_database_path,
     tree_residue,
 )
@@ -411,6 +413,59 @@ def test_the_tree_gate_says_when_it_cannot_measure(tmp_path: Path) -> None:
     assert capture_tree_status(tmp_path / "not-a-repository") is None
 
 
+def test_the_service_state_gate_names_what_a_test_writes_into_codeclone(
+    tmp_path: Path,
+) -> None:
+    """New, rewritten and removed files inside ``.codeclone/`` are named;
+    the state other fences own there is not.
+
+    ``report.html`` exists before, as it does in a checkout where someone
+    ran ``codeclone --html`` by hand: rewriting it is residue even though
+    no new path appears.
+    """
+    service = tmp_path / ".codeclone"
+    (service / "db").mkdir(parents=True)
+    (service / "report.html").write_text("<html>by hand</html>", encoding="utf-8")
+    (service / "notes.txt").write_text("kept by the operator", encoding="utf-8")
+    (service / "db" / "cache.sqlite3").write_bytes(b"")
+    before = capture_service_state(tmp_path)
+
+    (service / "report.html").write_text("<html>by a test</html>", encoding="utf-8")
+    (service / "report.json").write_text("{}", encoding="utf-8")
+    (service / "notes.txt").unlink()
+    # The controller's own writes, concurrent with any session:
+    (service / "db" / "cache.sqlite3-wal").write_bytes(b"")
+    (service / "db" / "intents.sqlite3.lock").write_bytes(b"")
+    (service / "intents").mkdir()
+    (service / "intents" / "1-2-intent-a.json").write_text("{}", encoding="utf-8")
+    (service / "memory").mkdir()
+    (service / "memory" / ".memory_init.lock").write_bytes(b"")
+    after = capture_service_state(tmp_path)
+
+    assert service_state_residue(before, after) == (
+        ("report.json",),
+        ("report.html",),
+        ("notes.txt",),
+    )
+
+
+def _assert_no_service_state_residue(guard: LiveStateGuard) -> None:
+    """Nothing a test wrote is left inside the host's ``.codeclone/``.
+
+    ``git status`` folds an existing ignored directory into one entry, so the
+    tree gate below is blind inside it; this snapshot is not, and it needs
+    no git.
+    """
+    appeared, rewritten, vanished = service_state_residue(
+        guard.service_baseline, capture_service_state(guard.hosting_checkout)
+    )
+    assert (appeared, rewritten, vanished) == ((), (), ()), (
+        "the suite left residue in the hosting checkout's .codeclone/ "
+        f"({guard.hosting_checkout}):\n  appeared: {list(appeared)}\n"
+        f"  rewritten: {list(rewritten)}\n  vanished: {list(vanished)}"
+    )
+
+
 def test_the_suite_left_no_residue_in_the_hosting_checkout(
     request: pytest.FixtureRequest,
 ) -> None:
@@ -419,11 +474,13 @@ def test_the_suite_left_no_residue_in_the_hosting_checkout(
     A write that reached the hosting checkout by a route the in-process
     fences do not see -- a child process, a file written into the package --
     shows up here as an entry that appeared or vanished. Runtime artifacts of
-    the run itself (``__pycache__``, ``.pytest_cache``, coverage output, the
-    controller's own ``.codeclone/``) are excluded by name.
+    the run itself (``__pycache__``, ``.pytest_cache``, coverage output) are
+    excluded by name; inside ``.codeclone/`` the service-state snapshot
+    answers first.
     """
 
     guard = _guard(request)
+    _assert_no_service_state_residue(guard)
     if guard.baseline is None:
         pytest.skip(
             "INCONCLUSIVE: git status of the hosting checkout was unavailable, "
@@ -586,3 +643,90 @@ def test_unreasoned():
         ]
     )
     result.stdout.no_fnmatch_line("*AttributeError*")
+
+
+# The same gate, end to end: an inner session whose guard stands on a
+# temporary checkout, so the control writes into a host that is not live.
+_INNER_HOST_CONFTEST = """
+import os
+from pathlib import Path
+
+from tests._live_state import LIVE_STATE_GUARD_KEY, LiveStateGuard
+from tests.conftest import (
+    pytest_collection_modifyitems,
+    pytest_configure,
+    pytest_runtest_setup,
+    pytest_runtest_teardown,
+    pytest_sessionfinish,
+    pytest_terminal_summary,
+)
+
+
+def pytest_sessionstart(session):
+    session.config.stash[LIVE_STATE_GUARD_KEY] = LiveStateGuard.install(
+        hosting_checkout=Path(os.environ["LIVE_STATE_TEST_HOST"])
+    )
+"""
+
+_INNER_HOST_WRITER = """
+import os
+from pathlib import Path
+
+from tests.test_live_state_isolation import (
+    test_the_suite_left_no_residue_in_the_hosting_checkout,
+)
+
+
+def test_writer():
+    target = Path(os.environ["LIVE_STATE_TEST_HOST"]) / ".codeclone" / {relative!r}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("written by a test", encoding="utf-8")
+"""
+
+
+@pytest.mark.parametrize(
+    ("relative", "outcomes", "named"),
+    [
+        pytest.param(
+            "report.html",
+            {"passed": 1, "failed": 1},
+            # fnmatch reads ``[...]`` as a character class, hence the ``?``.
+            [
+                "*residue in the hosting checkout's .codeclone/*",
+                "*appeared: ?'report.html'?*",
+            ],
+            id="report-reds",
+        ),
+        pytest.param(
+            "intents/1-2-intent-a.json",
+            {"passed": 2},
+            [],
+            id="controller-state-passes",
+        ),
+    ],
+)
+def test_a_write_into_the_host_codeclone_reds_the_wired_gate(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relative: str,
+    outcomes: dict[str, int],
+    named: list[str],
+) -> None:
+    """The gate, run last by the wired conftest, names a report a test left
+    in the host's ``.codeclone/`` -- and lets be both the controller's own
+    state and a file the operator had there before the session began."""
+
+    host = tmp_path / "host"
+    (host / ".codeclone").mkdir(parents=True)
+    (host / ".codeclone" / "notes.txt").write_text("the operator's", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=host, check=True)
+    monkeypatch.setenv("PYTHONPATH", str(HOSTING_CHECKOUT))
+    monkeypatch.setenv("LIVE_STATE_TEST_HOST", str(host))
+    pytester.makeconftest(_INNER_HOST_CONFTEST)
+    pytester.makepyfile(test_writes=_INNER_HOST_WRITER.format(relative=relative))
+
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "test_writes.py")
+
+    result.assert_outcomes(**outcomes)
+    result.stdout.fnmatch_lines(named)
