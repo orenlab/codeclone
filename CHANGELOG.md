@@ -52,6 +52,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 
 ### Fixed
 
+- README, `docs/index.md`, `docs/plans-and-retention.md` and the architecture overview state 39 default MCP tools (was 38); a test re-derives the count from the live `list_tools()`.
 - Submodule `as` aliases and function-body `from` imports resolve: dead symbols name test witnesses, not empty `unreferenced`.
 - API surface and `api_breaking_changes` exclude the repository's tests (`--fail-on-api-break` ignores test edits; old baselines drop test rows); a `test_*.py` inside an importable package is product code.
 - `partial`/`unmeasured` runs withhold baseline diffs (`baseline_diff_available: false`) for `complexity`/`coupling`/`dependencies`/`dead_code`/API surface instead of zeros or fabricated removals, and surfaces say so (`api_surface_diff_available`); `complete_empty` still compares.

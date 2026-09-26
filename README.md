@@ -239,7 +239,7 @@ codeclone-mcp --transport stdio
 `codeclone --mcp` runs the same server with the same arguments, for catalog and `uvx` launches:
 `uvx --prerelease allow --with "codeclone[mcp]" codeclone --mcp --transport stdio`.
 
-The server exposes **38 MCP tools** covering analysis, change control, blast radius, memory, and diagnostics. Responses
+The server exposes **39 MCP tools** covering analysis, change control, blast radius, memory, and diagnostics. Responses
 are built for agent loops: deterministic `next_tool` guidance, token-budget-aware payloads, and replies that keep
 mandatory control facts inline while linking full evidence for drill-down.
 

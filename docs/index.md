@@ -37,7 +37,7 @@ New here? Jump to:
 - [Getting started](getting-started.md) — install and run your first analysis
 - [Configuration reference](reference/configuration.md) — every `[tool.codeclone]` key and default
 - [CLI reference](reference/cli.md) and [Exit codes](reference/exit-codes.md)
-- [MCP tools reference](reference/mcp-tools.md) — the 38 MCP tools
+- [MCP tools reference](reference/mcp-tools.md) — the 39 MCP tools
 - [Controlled change](concepts/controlled-change.md) — the intent-first edit workflow
 
 ## New in 2.1.0a2

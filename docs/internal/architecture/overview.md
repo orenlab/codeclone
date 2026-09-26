@@ -39,7 +39,7 @@ graph TB
     end
 
     subgraph "MCP Surface"
-        MCP[38 tools<br/>read-only + intent coordination]
+        MCP[39 tools<br/>read-only + intent coordination]
     end
 
     A --> B
@@ -69,7 +69,7 @@ The four core tiers:
 | Surface | Packages | Contract | Tests |
 |---------|----------|----------|-------|
 | **Change control** | `codeclone.budget`, `codeclone.controller_insights`, `codeclone.surfaces.mcp`, `codeclone.workspace_intent` | `start_controlled_change`, `finish_controlled_change`, `manage_change_intent` | `test_mcp_service.py`, `test_controller_insights.py` |
-| **MCP workflow** | `codeclone.surfaces.mcp` | 38 tools: analyze, help, context, memory, artifact retrieval | `test_mcp_*.py` |
+| **MCP workflow** | `codeclone.surfaces.mcp` | 39 tools: analyze, help, context, memory, artifact retrieval | `test_mcp_*.py` |
 | **Engineering Memory** | `codeclone.memory` | `get_relevant_memory`, `manage_engineering_memory`, commit-anchored semantics | `test_cli_memory_*.py`, `test_memory_*.py` |
 | **Baseline, cache, report** | `codeclone.baseline`, `codeclone.cache`, `codeclone.report` | Immutable fingerprints, deterministic ordering, version pinning | `test_baseline.py`, `test_cache.py`, `test_analytics_reporting.py` |
 
