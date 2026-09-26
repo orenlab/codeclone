@@ -182,18 +182,24 @@ def test_workspace_intent_validation_rejects_scope_digest_mismatch() -> None:
     assert workspace_intents.validate_workspace_record(payload) is None
 
 
-def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
-    tmp_path: Path,
-) -> None:
-    record = _record()
-    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+def _stored_intent_payload(
+    root: Path, record: WorkspaceIntentRecord
+) -> tuple[Path, dict[str, object]]:
+    """Write ``record`` to the file registry; return its path and stored payload."""
+    assert workspace_intents.write_workspace_intent(root=root, record=record)
     path = workspace_intents.intent_path(
-        root=tmp_path,
+        root=root,
         pid=record.agent_pid,
         start_epoch=record.agent_start_epoch,
         intent_id=record.intent_id,
     )
-    payload = read_json_object(path)
+    return path, read_json_object(path)
+
+
+def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
+    tmp_path: Path,
+) -> None:
+    path, payload = _stored_intent_payload(tmp_path, _record())
     payload["intent"] = "tampered"
     write_json_document_atomically(path, payload, sort_keys=True)
 
@@ -221,6 +227,34 @@ def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
         workspace_intents.validate_workspace_record(_signed_payload_with(traversal))
         is None
     )
+
+
+def test_workspace_intent_integrity_seals_the_scope(tmp_path: Path) -> None:
+    """A scope widened under a stale digest is corrupt, not an unknown intent.
+
+    Only ``scope`` is edited, so the refusal cannot come from ``scope_digest``
+    alone: the model already refuses a scope that disagrees with its digest,
+    and a check on the listing would stay green even if the integrity digest
+    stopped covering ``scope``. What separates the two is the next question
+    the registry asks -- does the stored digest still verify? If it does, the
+    record is kept as an intact document from a writer this build cannot
+    read, and every later declare is refused over it; if it does not, the
+    bytes are attributable to no writer and are removed. The intact record
+    verifies first, so the refusal is the edit's doing.
+    """
+    record = _record()
+    path, payload = _stored_intent_payload(tmp_path, record)
+    assert workspace_intents.verify_intent_integrity(payload) is True
+
+    payload["scope"] = {**record.scope, "allowed_files": ["pkg/a.py", "pkg/b.py"]}
+    write_json_document_atomically(path, payload, sort_keys=True)
+
+    assert workspace_intents.verify_intent_integrity(payload) is False
+    assert workspace_intents.unreadable_workspace_intent_ids(root=tmp_path) == (
+        frozenset()
+    )
+    assert workspace_intents.list_workspace_intents(root=tmp_path) == ()
+    assert not path.exists()
 
 
 def test_workspace_intent_stale_orphan_and_gc(
