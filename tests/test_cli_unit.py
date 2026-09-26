@@ -367,6 +367,8 @@ def test_missing_scope_id_error_keeps_config_table_name(
 
 
 _SCOPE_ID_TABLE_HEADER = "[tool.codeclone]"
+#: The one command the refusal puts first, spelled as the quick start spells it.
+_SETUP_APPLY_COMMAND = "codeclone setup apply -y"
 
 
 def _scope_id_hint_block(printed: str) -> list[str]:
@@ -433,9 +435,10 @@ def test_scope_id_hint_adds_only_the_key_when_the_table_exists(
     printed = _refuse_missing_scope_id(tmp_path)
 
     config_path = tmp_path / "pyproject.toml"
-    assert f"Add this line to [tool.codeclone] in {config_path}:" in printed
+    assert f"Or add this line to [tool.codeclone] in {config_path}:" in printed
     assert _scope_id_hint_block(printed) == [
-        f'baseline_scope_id = "{_hinted_scope_ids(printed)[0]}"'
+        _SETUP_APPLY_COMMAND,
+        f'baseline_scope_id = "{_hinted_scope_ids(printed)[0]}"',
     ]
     assert _SCOPE_ID_TABLE_HEADER not in _scope_id_hint_block(printed)
 
@@ -455,11 +458,72 @@ def test_scope_id_hint_adds_the_whole_section_when_it_is_missing(
     printed = _refuse_missing_scope_id(tmp_path)
 
     config_path = tmp_path / "pyproject.toml"
-    assert f"Add this section to {config_path}:" in printed
+    assert f"Or add this section to {config_path}:" in printed
     assert _scope_id_hint_block(printed) == [
+        _SETUP_APPLY_COMMAND,
         _SCOPE_ID_TABLE_HEADER,
         f'baseline_scope_id = "{_hinted_scope_ids(printed)[0]}"',
     ]
+
+
+@pytest.mark.parametrize(
+    ("pyproject_text", "fallback_lead"),
+    [
+        (
+            '[project]\nname = "p"\n\n[tool.codeclone]\nfail_on_new = false\n',
+            "Or add this line to [tool.codeclone] in ",
+        ),
+        ('[project]\nname = "p"\n', "Or add this section to "),
+    ],
+    ids=["existing_section", "missing_section"],
+)
+def test_scope_id_refusal_puts_setup_apply_first(
+    tmp_path: Path,
+    pyproject_text: str,
+    fallback_lead: str,
+) -> None:
+    """One command first; the paste is the fallback, not the procedure.
+
+    ``codeclone setup apply -y`` writes the key -- a fresh ``uuid4`` -- along
+    with whatever else setup still proposes, so it leads, and the hand-edited
+    key line follows as the way to do the same thing without setup.
+    """
+
+    (tmp_path / "pyproject.toml").write_text(pyproject_text, "utf-8")
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    assert _scope_id_hint_block(printed)[0] == _SETUP_APPLY_COMMAND
+    assert (
+        printed.index(_SETUP_APPLY_COMMAND)
+        < printed.index(fallback_lead)
+        < printed.index('baseline_scope_id = "')
+    )
+
+
+@pytest.mark.parametrize(
+    "pyproject_text",
+    [None, "[project\nname = 'p'\n"],
+    ids=["missing_file", "unreadable"],
+)
+def test_scope_id_refusal_offers_setup_only_where_setup_can_write(
+    tmp_path: Path,
+    pyproject_text: str | None,
+) -> None:
+    """The other boundary: setup refuses a missing or unparseable file.
+
+    ``setup apply`` needs a readable ``pyproject.toml`` to merge into; offered
+    here, the first step would fail and the reader would still have to fall
+    back -- a wrong instruction is worse than none.
+    """
+
+    if pyproject_text is not None:
+        (tmp_path / "pyproject.toml").write_text(pyproject_text, "utf-8")
+
+    printed = _refuse_missing_scope_id(tmp_path)
+
+    assert "baseline_scope_id is required" in printed
+    assert "codeclone setup" not in printed
 
 
 def test_scope_id_hint_offers_to_create_a_missing_pyproject(tmp_path: Path) -> None:

@@ -92,9 +92,10 @@ def _print_scope_id_required(console: _PrinterLike, *, root_path: Path) -> None:
     only actionable detail. The marker keeps its styling; the body is printed
     with ``markup=False`` so the table name survives.
 
-    The body also carries a ready-to-paste key line and the absolute file it
-    belongs in. ``codeclone setup`` would write it, but not every project runs
-    setup, and a refusal that only names a requirement is not a procedure.
+    The body names ``codeclone setup apply -y`` first wherever setup can write
+    the key, then carries a ready-to-paste key line and the absolute file it
+    belongs in for anyone who would rather edit by hand: a refusal that only
+    names a requirement is not a procedure.
     """
     console.print(f"\n{' ' * ui.INDENT_UNIT}{ui.MARKER_CONTRACT_ERROR}")
     body = ui.fmt_baseline_scope_id_required(

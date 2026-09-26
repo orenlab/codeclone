@@ -57,6 +57,8 @@ from .runtime import (
     HINT_SCOPE_ID_CREATE_FILE,
     HINT_SCOPE_ID_FOOTER,
     HINT_SCOPE_ID_KEY_LINE,
+    HINT_SCOPE_ID_RUN_SETUP,
+    HINT_SCOPE_ID_SETUP_COMMAND,
     HINT_SCOPE_ID_TABLE_HEADER,
     INFO_PROCESSING_CHANGED,
     NOTE_BASELINE_FOREIGN_INTERPRETER,
@@ -1086,6 +1088,15 @@ def fmt_contract_error(message: str) -> str:
 
 _SCOPE_ID_HINT_INDENT = "    "
 
+# Offered only where ``codeclone setup apply`` can write the key: it merges into
+# an existing, readable ``pyproject.toml`` and refuses to create one.
+_SCOPE_ID_SETUP_STEP = (
+    HINT_SCOPE_ID_RUN_SETUP,
+    "",
+    f"{_SCOPE_ID_HINT_INDENT}{HINT_SCOPE_ID_SETUP_COMMAND}",
+    "",
+)
+
 
 def fmt_baseline_scope_id_required(
     *,
@@ -1093,19 +1104,23 @@ def fmt_baseline_scope_id_required(
     config_path: Path,
     scope_id: UUID,
 ) -> str:
-    """Refuse, then hand over the exact line and the exact place for it.
+    """Refuse, then hand over the one command and the exact line to paste.
 
     The refusal sentence is unchanged and stays first; everything after it is
-    the part an operator can act on without reading a guide. ``table_state``
-    picks one of three insertions, and each wrong pick damages a real file:
-    repeating ``[tool.codeclone]`` in a project that has it makes the TOML
-    invalid, and omitting the header in a project that does not have it drops
-    the key into whichever table happens to precede it. When the file cannot be
-    inspected there is no fourth guess to make -- the sentence goes out alone.
+    the part an operator can act on without reading a guide. Where setup can
+    write the key -- a readable ``pyproject.toml`` exists -- its command comes
+    first and the paste follows as the fallback. ``table_state`` picks one of
+    three insertions, and each wrong pick damages a real file: repeating
+    ``[tool.codeclone]`` in a project that has it makes the TOML invalid, and
+    omitting the header in a project that does not have it drops the key into
+    whichever table happens to precede it. With no file, setup has nothing to
+    merge into and is not offered. When the file cannot be inspected there is
+    no fourth guess to make -- the sentence goes out alone.
     """
 
     key_line = HINT_SCOPE_ID_KEY_LINE.format(scope_id=scope_id)
     insertion: tuple[str, ...]
+    setup_step: tuple[str, ...] = _SCOPE_ID_SETUP_STEP
     if table_state == "existing_section":
         lead = HINT_SCOPE_ID_ADD_KEY.format(path=config_path)
         insertion = (key_line,)
@@ -1115,10 +1130,11 @@ def fmt_baseline_scope_id_required(
     elif table_state == "missing_file":
         lead = HINT_SCOPE_ID_CREATE_FILE.format(path=config_path)
         insertion = (HINT_SCOPE_ID_TABLE_HEADER, key_line)
+        setup_step = ()
     else:
         return ERR_BASELINE_SCOPE_ID_REQUIRED
 
-    body = [ERR_BASELINE_SCOPE_ID_REQUIRED, "", lead, ""]
+    body = [ERR_BASELINE_SCOPE_ID_REQUIRED, "", *setup_step, lead, ""]
     body.extend(f"{_SCOPE_ID_HINT_INDENT}{line}" for line in insertion)
     body.extend(("", HINT_SCOPE_ID_FOOTER))
     return "\n".join(body)

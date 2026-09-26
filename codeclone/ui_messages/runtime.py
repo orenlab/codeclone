@@ -87,14 +87,20 @@ ERR_BASELINE_SCOPE_ID_REQUIRED = (
     "baseline_scope_id is required for baseline update and gating; set a "
     "stable canonical UUID under [tool.codeclone]."
 )
-# The refusal above says what is wrong. These say what to paste and where,
-# because "run codeclone setup" is not an answer for the projects that never
-# run it. Which one applies is decided by the shape of the file on disk --
-# offering a table header to a project that already has one hands it broken
-# TOML, and a wrong instruction is worse than none.
+# The refusal above says what is wrong. These say what to do about it: first
+# the one command that writes the key, then -- for anyone who would rather not
+# run setup -- what to paste and where. Which paste applies is decided by the
+# shape of the file on disk: offering a table header to a project that already
+# has one hands it broken TOML, and a wrong instruction is worse than none.
+# The key line and the footer are the same strings ``codeclone setup apply``
+# prints when it writes the key.
+HINT_SCOPE_ID_RUN_SETUP = (
+    "Run setup to write it (codeclone setup plan previews every change):"
+)
+HINT_SCOPE_ID_SETUP_COMMAND = "codeclone setup apply -y"
 HINT_SCOPE_ID_CREATE_FILE = "No pyproject.toml yet. Create {path} with:"
-HINT_SCOPE_ID_ADD_SECTION = "Add this section to {path}:"
-HINT_SCOPE_ID_ADD_KEY = "Add this line to [tool.codeclone] in {path}:"
+HINT_SCOPE_ID_ADD_SECTION = "Or add this section to {path}:"
+HINT_SCOPE_ID_ADD_KEY = "Or add this line to [tool.codeclone] in {path}:"
 HINT_SCOPE_ID_TABLE_HEADER = "[tool.codeclone]"
 HINT_SCOPE_ID_KEY_LINE = 'baseline_scope_id = "{scope_id}"'
 HINT_SCOPE_ID_FOOTER = (
