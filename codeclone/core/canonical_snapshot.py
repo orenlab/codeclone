@@ -211,7 +211,8 @@ RENAMED_STRUCTURE_FAMILY = "renamed_structure"
 _TRUNCATING_STATES = frozenset({"truncated", "unavailable"})
 
 if TYPE_CHECKING:
-    from ..canonical.store import RunReportEdge, RunStore
+    from ..canonical.model import CanonicalModel
+    from ..canonical.store import PublishReceipt, RunReportEdge, RunStore
 
 
 class ProducerSnapshotUnavailable(RuntimeError):
@@ -1678,20 +1679,8 @@ def _publish_enabled(
     from ..canonical.store import RunStore
 
     with RunStore(path) as store:
-        head = store.head(namespace=namespace, target=target)
-        receipt = store.write_full_run(
-            model,
-            namespace=namespace,
-            target=target,
-            expected_generation=0 if head is None else head.generation,
-        )
-        # The store grows here and nowhere else, so this is where it is
-        # collected: on the publishing handle, after the commit.  The owner
-        # answers every failure of its own as a typed receipt, so nothing it
-        # does can turn a STORED publication into the containment's
-        # ``failed``.
-        in_flight_lease, collection = _collect_after_publication(
-            store, run_id=receipt.run_id
+        receipt, in_flight_lease, collection = _publish_and_collect(
+            store, model, namespace=namespace, target=target
         )
     if receipt.head_advanced:
         outcome = (
@@ -1745,10 +1734,6 @@ def _publish_enabled(
 #: is not racing the collector.
 _PUBLICATION_RETAIN_HISTORY: Final = 2
 
-#: The in-flight lease kind of the store's closed vocabulary: an operation in
-#: progress, which is exactly what a publisher is until its bridge is stated.
-_IN_FLIGHT_LEASE_KIND: Final = "active"
-
 #: The deadline of an in-flight lease nobody released.  The publisher releases
 #: it explicitly once its bridge is stated; the deadline is only the backstop
 #: for a publisher that died first.  The two ways to miss are not symmetric --
@@ -1765,47 +1750,61 @@ def _refused_collection(job: str, stage: str, error: Exception) -> GcJobReport:
     )
 
 
-def _collect_after_publication(
-    store: RunStore, *, run_id: str
-) -> tuple[str, GcJobReport]:
-    """Sweep the store once after a stored publication; say what happened.
+def _publish_and_collect(
+    store: RunStore, model: CanonicalModel, *, namespace: str, target: str
+) -> tuple[PublishReceipt, str, GcJobReport]:
+    """Publish one model under the publisher's in-flight lease, then sweep.
 
-    Two steps, each fail-closed on its own.  The publisher first roots its
-    own run with an in-flight lease: a run that lost the head race is
-    neither head nor history, and this very sweep would otherwise take the
-    run the bridge is about to address.  Then ``RunStoreGcJob`` sweeps under
-    the owner's retention policy.
+    The lease is written by the SAME transaction that publishes the run and
+    moves the head (ruling 2026-09-25, protocol A): a run that lost the head
+    race is neither head nor history, so from its first visible moment until
+    its bridge is stated nothing but this lease roots it.  Granted in a
+    second transaction after the commit -- the shape before this owner --
+    it left a window in which a collector in another process took the run
+    (measured: the bridge then died on ``run_not_published``, CLI exit 5).
+    The lease guards the run's logical life; the transaction guards the
+    bytes; neither stands in for the other.
 
-    Every failure of either step -- the lease's or the sweep's ``BEGIN
-    IMMEDIATE`` not obtained, the store generation moved, anything else the
-    substrate raises -- becomes a claim-free refusal receipt.  It may not
-    escape: the publication behind it is STORED, and the containment it
-    would land in answers ``failed``, which says nothing was.  A refused
-    lease also means no sweep, so a publication is never counted as swept
-    by a sweep that did not run.  ``BaseException`` is not contained, for
-    the same reason the publication boundary does not contain it.
-
-    Returns the granted lease id (empty when none was) and the receipt.
+    The store grows here and nowhere else, so this is where it is collected:
+    on the publishing handle, after the commit.  Returns the store's receipt,
+    the lease id the publisher now holds and the collection receipt.
     """
 
-    from ..canonical.store import RunStoreGcJob, acquire_run_lease
+    lease_id = f"publication:{os.getpid()}:{uuid4().hex}"
+    head = store.head(namespace=namespace, target=target)
+    receipt = store.write_full_run(
+        model,
+        namespace=namespace,
+        target=target,
+        expected_generation=0 if head is None else head.generation,
+        in_flight_lease=(lease_id, _IN_FLIGHT_LEASE_SECONDS),
+    )
+    return receipt, lease_id, _collect_after_publication(store)
+
+
+def _collect_after_publication(store: RunStore) -> GcJobReport:
+    """Sweep the store once after a stored publication; say what happened.
+
+    The publisher's own run is already rooted by the lease its publishing
+    transaction wrote, so this sweep -- and any other collector -- holds it
+    whether or not it won the head.  ``RunStoreGcJob`` sweeps under the
+    owner's retention policy.
+
+    Every failure of the sweep -- its ``BEGIN IMMEDIATE`` not obtained, the
+    store generation moved, anything else the substrate raises -- becomes a
+    claim-free refusal receipt.  It may not escape: the publication behind
+    it is STORED, and the containment it would land in answers ``failed``,
+    which says nothing was.  ``BaseException`` is not contained, for the
+    same reason the publication boundary does not contain it.
+    """
+
+    from ..canonical.store import RunStoreGcJob
 
     job = RunStoreGcJob(store=store, retain_history=_PUBLICATION_RETAIN_HISTORY)
-    lease_id = f"publication:{os.getpid()}:{uuid4().hex}"
     try:
-        acquire_run_lease(
-            store,
-            run_id,
-            kind=_IN_FLIGHT_LEASE_KIND,
-            lease_id=lease_id,
-            ttl_seconds=_IN_FLIGHT_LEASE_SECONDS,
-        )
-    except Exception as refusal:
-        return "", _refused_collection(job.name, "in-flight lease not granted", refusal)
-    try:
-        return lease_id, job.collect()
+        return job.collect()
     except Exception as failure:
-        return lease_id, _refused_collection(job.name, "sweep not completed", failure)
+        return _refused_collection(job.name, "sweep not completed", failure)
 
 
 def release_publication_lease(
@@ -1814,9 +1813,11 @@ def release_publication_lease(
     """End a publisher's in-flight operation: clear its lease root.
 
     Called once the identity bridge has been stated, which is the last thing
-    the publisher does with its run.  From here the run stays exactly as
-    rooted as the store says -- head, history, an operator's retention, a
-    reader's lease -- or it is garbage for the next sweep.
+    the publisher does with its run -- and, because ``report`` calls it from
+    ``finally``, also when anything before that point ended the report.
+    From here the run stays exactly as rooted as the store says -- head,
+    history, an operator's retention, a reader's lease -- or it is garbage
+    for the next sweep.
 
     ``False`` when there is nothing to release (the rollout is off, nothing
     was stored, the lease was never granted) or when the store refuses the

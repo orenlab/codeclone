@@ -3888,12 +3888,27 @@ class RunStore:
         namespace: str,
         target: str,
         expected_generation: int,
+        in_flight_lease: tuple[str, int] | None = None,
     ) -> PublishReceipt:
         """Stage and atomically publish one full run (brief §10).
 
         The head advances only from ``expected_generation`` (CAS, law 8);
         a stale publisher's run stays stored, unpublished to no one —
         readable by ``run_id`` — but the head does not move.
+
+        ``in_flight_lease`` -- a ``(lease_id, ttl_seconds)`` pair -- roots
+        the run from the same COMMIT that publishes it, as an ``active``
+        lease, the in-flight kind of the lease vocabulary (ruling
+        2026-09-25, protocol A): a publisher that must still address
+        its run after this call -- its bridge, its release -- cannot let a
+        collector see the run published and unrooted for even one
+        transaction, and a run that lost the head race is neither head nor
+        history.  Measured before this parameter existed: a collector in
+        another process that took the write lock between the publish commit
+        and the separately committed lease collected the run, and the
+        publisher's bridge died on ``run_not_published`` (CLI exit 5, no
+        report written).  The lease is a logical root, not a lock: it holds
+        the run against the collector and nothing else.
 
         This wrapper owns the outcome of one publish call and nothing
         else.  A stale publisher is a head conflict, never a failure: it
@@ -3910,6 +3925,7 @@ class RunStore:
                     namespace=namespace,
                     target=target,
                     expected_generation=expected_generation,
+                    in_flight_lease=in_flight_lease,
                 )
             except BaseException:
                 publish_span.set_counter("canonical_store_publish_failures", 1)
@@ -3925,6 +3941,7 @@ class RunStore:
         namespace: str,
         target: str,
         expected_generation: int,
+        in_flight_lease: tuple[str, int] | None = None,
     ) -> PublishReceipt:
         """The publish itself, measured in its two operational phases.
 
@@ -4013,6 +4030,7 @@ class RunStore:
                 run_pk=run_pk,
                 run_id=run_id,
             )
+            _grant_publication_lease(cursor, run_pk, in_flight_lease)
             cursor.execute("COMMIT")
         except BaseException:
             cursor.execute("ROLLBACK")
@@ -4244,6 +4262,93 @@ class RunStore:
         """
 
 
+@dataclass(frozen=True, slots=True)
+class LeaseGrant:
+    """One lease root to grant: its id, its kind, its time to live.
+
+    Validated where it is built, so the two places a lease is granted -- a
+    consumer's :func:`acquire_run_lease` and a publication's own transaction
+    (:meth:`RunStore.write_full_run`) -- refuse exactly the same grants with
+    exactly the same words.
+    """
+
+    lease_id: str
+    kind: str
+    ttl_seconds: int
+
+    def __post_init__(self) -> None:
+        if self.kind not in _LEASE_KINDS:
+            raise RunStoreError(
+                f"unknown lease kind {self.kind!r}; leases are {sorted(_LEASE_KINDS)!r}"
+            )
+        if not self.lease_id:
+            raise RunStoreError("lease_id must be non-empty")
+        if isinstance(self.ttl_seconds, bool) or not isinstance(self.ttl_seconds, int):
+            raise RunStoreError("ttl_seconds must be an integer")
+        if self.ttl_seconds <= 0:
+            raise RunStoreError(
+                "ttl_seconds must be positive: an eternal lease has no "
+                "representation in this store"
+            )
+
+
+def _grant_lease(cursor: sqlite3.Cursor, run_pk: int, grant: LeaseGrant) -> int:
+    """Grant or renew ``grant`` on ``run_pk`` inside the caller's
+    transaction; returns the expiry.  A ``lease_id`` that already names a
+    different run or kind is refused, never silently rebound."""
+    expires_at = _lease_now() + grant.ttl_seconds
+    existing = cursor.execute(
+        "SELECT run_pk, kind FROM run_leases WHERE lease_id = ?",
+        (grant.lease_id,),
+    ).fetchone()
+    if existing is None:
+        cursor.execute(
+            "INSERT INTO run_leases (lease_id, run_pk, kind, expires_at) "
+            "VALUES (?, ?, ?, ?)",
+            (grant.lease_id, run_pk, grant.kind, expires_at),
+        )
+    elif (int(existing[0]), str(existing[1])) != (run_pk, grant.kind):
+        raise RunStoreError(
+            f"lease {grant.lease_id!r} already grants a different run or kind"
+        )
+    else:
+        cursor.execute(
+            "UPDATE run_leases SET expires_at = ? WHERE lease_id = ?",
+            (expires_at, grant.lease_id),
+        )
+    return expires_at
+
+
+#: The kind of the lease a publication grants itself: the in-flight
+#: operation of the closed vocabulary, which a publisher is until it is done
+#: addressing its run.
+_IN_FLIGHT_LEASE_KIND: Final = "active"
+
+
+def _grant_publication_lease(
+    cursor: sqlite3.Cursor, run_pk: int, lease: tuple[str, int] | None
+) -> None:
+    """The publisher's own lease, written by the transaction that publishes.
+
+    Called after the head CAS and before COMMIT, so the run and its root
+    become visible to every other connection in one commit: no snapshot a
+    collector can take shows the run published and this lease absent.  A
+    publish that asked for no lease grants nothing.  ``lease`` is the pair
+    ``(lease_id, ttl_seconds)``, validated exactly as
+    :func:`acquire_run_lease` validates a grant; a refusal rolls the whole
+    publication back.
+    """
+    if lease is not None:
+        lease_id, ttl_seconds = lease
+        _grant_lease(
+            cursor,
+            run_pk,
+            LeaseGrant(
+                lease_id=lease_id, kind=_IN_FLIGHT_LEASE_KIND, ttl_seconds=ttl_seconds
+            ),
+        )
+
+
 def acquire_run_lease(
     store: RunStore, run_id: str, *, kind: str, lease_id: str, ttl_seconds: int
 ) -> int:
@@ -4257,42 +4362,16 @@ def acquire_run_lease(
     re-acquiring the same ``lease_id`` for the same run and kind; a
     ``lease_id`` that names a different run or kind is refused, never
     silently rebound.
+
+    A lease on a run that is ALREADY published: whoever publishes and must
+    keep addressing the run grants its lease in the publishing transaction
+    instead (``RunStore.write_full_run(in_flight_lease=...)``), because
+    between two commits a collector may take the run.
     """
-    if kind not in _LEASE_KINDS:
-        raise RunStoreError(
-            f"unknown lease kind {kind!r}; leases are {sorted(_LEASE_KINDS)!r}"
-        )
-    if not lease_id:
-        raise RunStoreError("lease_id must be non-empty")
-    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
-        raise RunStoreError("ttl_seconds must be an integer")
-    if ttl_seconds <= 0:
-        raise RunStoreError(
-            "ttl_seconds must be positive: an eternal lease has no "
-            "representation in this store"
-        )
+    grant = LeaseGrant(lease_id=lease_id, kind=kind, ttl_seconds=ttl_seconds)
     with _fenced_transaction(store) as cursor:
         run_pk = _published_run_row(store._connection, run_id)[0]
-        expires_at = _lease_now() + ttl_seconds
-        existing = cursor.execute(
-            "SELECT run_pk, kind FROM run_leases WHERE lease_id = ?",
-            (lease_id,),
-        ).fetchone()
-        if existing is None:
-            cursor.execute(
-                "INSERT INTO run_leases (lease_id, run_pk, kind, expires_at) "
-                "VALUES (?, ?, ?, ?)",
-                (lease_id, run_pk, kind, expires_at),
-            )
-        elif (int(existing[0]), str(existing[1])) != (run_pk, kind):
-            raise RunStoreError(
-                f"lease {lease_id!r} already grants a different run or kind"
-            )
-        else:
-            cursor.execute(
-                "UPDATE run_leases SET expires_at = ? WHERE lease_id = ?",
-                (expires_at, lease_id),
-            )
+        expires_at = _grant_lease(cursor, run_pk, grant)
     return expires_at
 
 
@@ -4679,6 +4758,7 @@ __all__ = [
     "FAMILY_UNREACHABLE_STATEMENT_GROUP",
     "FAMILY_VIOLATION",
     "HeadState",
+    "LeaseGrant",
     "PublishReceipt",
     "RunReportEdge",
     "RunStore",

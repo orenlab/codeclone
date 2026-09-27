@@ -639,46 +639,33 @@ def _lock_after(
     monkeypatch.setattr(RunStore, "close", close_and_release)
 
 
-@pytest.mark.parametrize(
-    ("owner", "name", "stage", "lease_granted"),
-    [
-        pytest.param(RunStore, "write_full_run", "in-flight lease", False, id="lease"),
-        pytest.param(store_module, "acquire_run_lease", "sweep", True, id="sweep"),
-    ],
-)
 def test_a_refused_substrate_is_a_typed_receipt_and_the_publication_stands(
-    corpus: _Corpus,
-    meters: _Meters,
-    monkeypatch: pytest.MonkeyPatch,
-    owner: object,
-    name: str,
-    stage: str,
-    lease_granted: bool,
+    corpus: _Corpus, meters: _Meters, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """IMMEDIATE not obtained -- for the lease, then for the sweep.
+    """IMMEDIATE not obtained for the sweep that follows a publication.
 
-    Either way the publication is stored and says so, the receipt is a
-    claim-free refusal naming the cause, nothing was collected (the run the
-    sweep would have taken is still there), and the analysis finishes.
+    The publication is stored and says so, its in-flight lease was granted
+    by the publishing transaction itself (there is no separate lease step
+    left to refuse -- protocol A), the receipt is a claim-free refusal naming
+    the cause, nothing was collected (the run the sweep would have taken is
+    still there), the lease is released, and the analysis finishes.
     """
     corpus.publish("a")
     corpus.publish("b")
     run_a = meters.sweeps[0].before.head_run_id
     sweeps_before = len(meters.sweeps)
     with monkeypatch.context() as patch:
-        _lock_after(patch, _WriteLockHolder(corpus.store), owner, name)
+        _lock_after(patch, _WriteLockHolder(corpus.store), RunStore, "write_full_run")
         corpus.publish("c")
 
     refused = meters.last_publication()
     assert refused.outcome == RUN_SNAPSHOT_PUBLICATION_PUBLISHED
     assert refused.collection is not None
     assert refused.collection.refusal is not None
-    assert refused.collection.refusal.startswith(stage)
+    assert refused.collection.refusal.startswith("sweep not completed")
     assert "database is locked" in refused.collection.refusal
-    assert bool(refused.in_flight_lease) is lease_granted
-    assert [sweep.report for sweep in meters.sweeps[sweeps_before:]] == (
-        [None] if lease_granted else []
-    )
+    assert refused.in_flight_lease
+    assert [sweep.report for sweep in meters.sweeps[sweeps_before:]] == [None]
     with corpus.open() as store:
         assert {run_a, refused.run_id} <= _run_ids(store)
         assert _lease_rows(store) == []

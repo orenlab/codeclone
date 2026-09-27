@@ -583,145 +583,148 @@ def report(
             baseline_scope_id=baseline_scope_id,
         ),
     )
-    needs_report_document = report_document_required(
-        boot,
-        include_report_document=include_report_document,
-    )
-    if needs_report_document:
-        resolved_baseline_trust = _resolved_baseline_trust(
-            baseline_trust, baseline_container, baseline_scope_id
+    try:
+        needs_report_document = report_document_required(
+            boot,
+            include_report_document=include_report_document,
         )
-        resolved_body = (
-            dict(report_body)
-            if report_body is not None
-            else build_report_body_for_analysis(
-                discovery=discovery,
-                processing=processing,
-                analysis=analysis,
-                report_meta=report_meta,
-                new_func=new_func,
-                new_block=new_block,
-                metrics_diff=metrics_diff,
-                coverage_adoption_diff_available=coverage_adoption_diff_available,
-                api_surface_diff_available=api_surface_diff_available,
-                baseline_trust=resolved_baseline_trust,
+        if needs_report_document:
+            resolved_baseline_trust = _resolved_baseline_trust(
+                baseline_trust, baseline_container, baseline_scope_id
             )
-        )
-        if (gate_config is None) != (gate_result is None):
-            raise ValueError("gate config and result must be supplied together")
-        if gate_config is None or gate_result is None:
-            gate_config, gate_result = gate_with_config(
-                boot=boot,
-                analysis=analysis,
-                new_func=new_func,
-                new_block=new_block,
-                metrics_diff=_coerce_metrics_diff(metrics_diff),
-                baseline_trust=resolved_baseline_trust,
-                files_skipped=processing.files_skipped,
-                # Computed here, from the one owner, because this fallback is
-                # the only gate constructor in this path that cannot read it
-                # off ``project_metrics`` when metrics were skipped.
-                analysis_population=observed_population(
-                    files_found=discovery.files_found,
-                    files_analyzed_or_cached=analysis.files_analyzed_or_cached,
+            resolved_body = (
+                dict(report_body)
+                if report_body is not None
+                else build_report_body_for_analysis(
+                    discovery=discovery,
+                    processing=processing,
+                    analysis=analysis,
+                    report_meta=report_meta,
+                    new_func=new_func,
+                    new_block=new_block,
+                    metrics_diff=metrics_diff,
+                    coverage_adoption_diff_available=coverage_adoption_diff_available,
+                    api_surface_diff_available=api_surface_diff_available,
+                    baseline_trust=resolved_baseline_trust,
+                )
+            )
+            if (gate_config is None) != (gate_result is None):
+                raise ValueError("gate config and result must be supplied together")
+            if gate_config is None or gate_result is None:
+                gate_config, gate_result = gate_with_config(
+                    boot=boot,
+                    analysis=analysis,
+                    new_func=new_func,
+                    new_block=new_block,
+                    metrics_diff=_coerce_metrics_diff(metrics_diff),
+                    baseline_trust=resolved_baseline_trust,
+                    files_skipped=processing.files_skipped,
+                    # Computed here, from the one owner, because this fallback is
+                    # the only gate constructor in this path that cannot read it
+                    # off ``project_metrics`` when metrics were skipped.
+                    analysis_population=observed_population(
+                        files_found=discovery.files_found,
+                        files_analyzed_or_cached=analysis.files_analyzed_or_cached,
+                    ),
+                )
+            # Sealing hashes the whole document, so it is a heavyweight stage in
+            # its own right and needs to be visible next to build and render.
+            with span(name="report.finalize"):
+                report_document = _load_report_document_finalizer()(
+                    body=resolved_body,
+                    observation_bundle=analysis.observation_bundle,
+                    baseline_container=baseline_container,
+                    baseline_trust=resolved_baseline_trust,
+                    gate_config=gate_config,
+                    gate_result=gate_result,
+                    new_function_group_keys=new_func,
+                    new_block_group_keys=new_block,
+                )
+
+        if boot.output_paths.html and html_builder is not None:
+            assert report_document is not None
+            contents["html"] = _render_report_projection(
+                format_name="html",
+                report_document=report_document,
+                renderer=lambda: html_builder(
+                    report_document=report_document,
+                    title="CodeClone Report",
+                    context_lines=3,
+                    max_snippet_lines=220,
                 ),
             )
-        # Sealing hashes the whole document, so it is a heavyweight stage in
-        # its own right and needs to be visible next to build and render.
-        with span(name="report.finalize"):
-            report_document = _load_report_document_finalizer()(
-                body=resolved_body,
-                observation_bundle=analysis.observation_bundle,
-                baseline_container=baseline_container,
-                baseline_trust=resolved_baseline_trust,
-                gate_config=gate_config,
-                gate_result=gate_result,
-                new_function_group_keys=new_func,
-                new_block_group_keys=new_block,
+
+        if any(
+            path is not None
+            for path in (
+                boot.output_paths.json,
+                boot.output_paths.md,
+                boot.output_paths.sarif,
+                boot.output_paths.text,
+            )
+        ):
+            assert report_document is not None
+
+        if boot.output_paths.json and report_document is not None:
+            contents["json"] = _render_report_projection(
+                format_name="json",
+                report_document=report_document,
+                renderer=lambda: render_json_report_document(report_document),
             )
 
-    if boot.output_paths.html and html_builder is not None:
-        assert report_document is not None
-        contents["html"] = _render_report_projection(
-            format_name="html",
-            report_document=report_document,
-            renderer=lambda: html_builder(
+        for key, output_path, loader in (
+            ("md", boot.output_paths.md, _load_markdown_report_renderer),
+            ("sarif", boot.output_paths.sarif, _load_sarif_report_renderer),
+        ):
+            if output_path and report_document is not None:
+                render_projection = loader()
+                contents[key] = _render_report_projection(
+                    format_name="markdown" if key == "md" else key,
+                    report_document=report_document,
+                    renderer=partial(render_projection, report_document),
+                )
+
+        if boot.output_paths.text and report_document is not None:
+            contents["text"] = _render_report_projection(
+                format_name="text",
                 report_document=report_document,
-                title="CodeClone Report",
-                context_lines=3,
-                max_snippet_lines=220,
-            ),
-        )
-
-    if any(
-        path is not None
-        for path in (
-            boot.output_paths.json,
-            boot.output_paths.md,
-            boot.output_paths.sarif,
-            boot.output_paths.text,
-        )
-    ):
-        assert report_document is not None
-
-    if boot.output_paths.json and report_document is not None:
-        contents["json"] = _render_report_projection(
-            format_name="json",
-            report_document=report_document,
-            renderer=lambda: render_json_report_document(report_document),
-        )
-
-    for key, output_path, loader in (
-        ("md", boot.output_paths.md, _load_markdown_report_renderer),
-        ("sarif", boot.output_paths.sarif, _load_sarif_report_renderer),
-    ):
-        if output_path and report_document is not None:
-            render_projection = loader()
-            contents[key] = _render_report_projection(
-                format_name="markdown" if key == "md" else key,
-                report_document=report_document,
-                renderer=partial(render_projection, report_document),
+                renderer=lambda: render_text_report_document(report_document),
             )
 
-    if boot.output_paths.text and report_document is not None:
-        contents["text"] = _render_report_projection(
-            format_name="text",
+        # The bridge is stated AFTER the document is sealed, because the report
+        # half of the relation does not exist until then, and it is stated on
+        # every path: a gate-only run reaches here with ``report_document`` None
+        # and gets the ``unevaluated`` state rather than no link at all.  The
+        # publication witness itself is not enough -- it names the store record
+        # and knows nothing of the document that evaluated it.
+        run_snapshot_link = bridge_run_snapshot(
+            publication=publication,
             report_document=report_document,
-            renderer=lambda: render_text_report_document(report_document),
         )
-
-    # The bridge is stated AFTER the document is sealed, because the report
-    # half of the relation does not exist until then, and it is stated on
-    # every path: a gate-only run reaches here with ``report_document`` None
-    # and gets the ``unevaluated`` state rather than no link at all.  The
-    # publication witness itself is not enough -- it names the store record
-    # and knows nothing of the document that evaluated it.
-    run_snapshot_link = bridge_run_snapshot(
-        publication=publication,
-        report_document=report_document,
-    )
-    # Persisted here and not inside the bridge: stating the relation is a
-    # pure reading of two artifacts, and writing it is a store mutation.
-    # A run with the rollout off has no store to write into, which is the
-    # false branch of this condition on every default run.
-    if run_store_config.path is not None:
-        persist_run_snapshot_link(
-            store_path=run_store_config.path, link=run_snapshot_link
+        # Persisted here and not inside the bridge: stating the relation is a
+        # pure reading of two artifacts, and writing it is a store mutation.
+        # A run with the rollout off has no store to write into, which is the
+        # false branch of this condition on every default run.
+        if run_store_config.path is not None:
+            persist_run_snapshot_link(
+                store_path=run_store_config.path, link=run_snapshot_link
+            )
+        return ReportArtifacts(
+            html=contents["html"],
+            json=contents["json"],
+            md=contents["md"],
+            sarif=contents["sarif"],
+            text=contents["text"],
+            report_document=report_document,
+            run_snapshot_link=run_snapshot_link,
         )
-    # The bridge was the publisher's last use of its run, so its in-flight
-    # lease ends here; from now on the run is exactly as rooted as the store
-    # says.  A run that ends before this line leaves the lease to its own
-    # deadline, which is what the deadline is for.
-    release_publication_lease(config=run_store_config, publication=publication)
-    return ReportArtifacts(
-        html=contents["html"],
-        json=contents["json"],
-        md=contents["md"],
-        sarif=contents["sarif"],
-        text=contents["text"],
-        report_document=report_document,
-        run_snapshot_link=run_snapshot_link,
-    )
+    finally:
+        # The bridge was the publisher's last use of its run, so its in-flight
+        # lease ends here -- and on EVERY way out of this block, because a
+        # render, a seal or a bridge write that raises would otherwise leave
+        # the run rooted for a whole day behind a publisher that is gone.
+        # From now on the run is exactly as rooted as the store says.
+        release_publication_lease(config=run_store_config, publication=publication)
 
 
 def build_gate_config(args: object) -> MetricGateConfig:
