@@ -208,26 +208,47 @@ def test_the_diff_block_matches_the_mcp_surface(served_diff: _Served) -> None:
 _API_TERMS = DELTA_FAMILY_TERMS["api_surface_delta"]
 
 
-def test_the_surface_states_api_deltas_for_a_lane_the_run_disabled(
-    served_comparison_runs: dict[str, ServedComparisonRun],
+#: The measured divergences (2026-09-27): for a run whose API comparison
+#: did not run, what the store says about the lane, and the ``diff`` terms
+#: the surface nevertheless states.
+_API_DIVERGENCE: dict[str, tuple[str, frozenset[str]]] = {
+    "api_disabled": ("disabled", frozenset({"api_breaking_changes"})),
+    "partial": ("not_compared", frozenset(_API_TERMS)),
+}
+
+
+def _api_lane_state(comparison: ComparisonFacts) -> str:
+    if "api_surface" in {row.lane for row in comparison.disabled_capabilities}:
+        return "disabled"
+    return next(
+        row.availability
+        for row in comparison.comparison_availability
+        if row.lane == "api_surface"
+    )
+
+
+@pytest.mark.parametrize("name", list(_API_DIVERGENCE))
+def test_the_surface_states_api_deltas_for_an_api_comparison_that_did_not_run(
+    served_comparison_runs: dict[str, ServedComparisonRun], name: str
 ) -> None:
-    """DIVERGENCE on the desk, measured 2026-09-27, not fitted: a run whose
-    API lane was not enabled is a disabled capability in the store and
-    carries no API delta, while the surface's ``diff`` reads the metrics
-    diff raw and states every API symbol the baseline recorded as a
-    breaking change.  Every other key agrees byte for byte."""
-    served = _comparison_served(served_comparison_runs["api_disabled"])
+    """DIVERGENCE on the desk, measured 2026-09-27, not fitted: when the
+    API comparison did not run — the lane not enabled (a disabled
+    capability), or enabled over a partial population (trusted and not
+    compared: the current universe was not observed) — the store carries
+    no API delta, while the surface's ``diff`` reads the metrics diff raw
+    and states API counts anyway (every baseline symbol as a breaking
+    change on the first; all three counts on the second).  Every other key
+    agrees byte for byte."""
+    served = _comparison_served(served_comparison_runs[name])
     comparison = served.model.facts.comparison
-    assert {row.lane for row in comparison.disabled_capabilities} == {"api_surface"}
+    state, divergent = _API_DIVERGENCE[name]
+    assert _api_lane_state(comparison) == state
     assert not comparison.api_surface_delta
     projected = _projected_diff(comparison)
     surface = _surface_diff(served)
-    agreeing = {key for key in projected if projected[key] == surface[key]}
-    assert set(projected) - agreeing == {"api_breaking_changes"}
+    assert {key for key in projected if projected[key] != surface[key]} == divergent
     assert [projected[term] for term in _API_TERMS] == [0, 0, 0]
-    breaking = surface["api_breaking_changes"]
-    assert isinstance(breaking, int)
-    assert breaking > 0
+    assert all(isinstance(surface[term], int) for term in divergent)
 
 
 def test_the_delta_keys_are_the_delta_families_terms() -> None:
@@ -329,21 +350,23 @@ def _witness_line(served: _Served) -> tuple[object, ...]:
     return (block["loaded"], block["status"], "baseline_python_tag" in block)
 
 
-def test_the_served_populations_carry_every_distinguishing_state(
+def _served_runs(
+    runs: dict[str, ServedComparisonRun], missing: ServedRunStoreProjection
+) -> dict[str, _Served]:
+    served = {name: _comparison_served(run) for name, run in runs.items()}
+    served["missing"] = _missing_served(missing)
+    return served
+
+
+def test_the_served_populations_carry_every_witness_and_novelty_state(
     served_comparison_runs: dict[str, ServedComparisonRun],
     served_run_store_projection: ServedRunStoreProjection,
 ) -> None:
     """Measured 2026-09-27: the trusted run utters all three novelty words
     and a ``mixed`` new finding; the witness is loaded, refused and
-    missing across the populations; the availability is compared,
-    unavailable and disabled; known debt sits in one blast zone and not
-    the other; the authority violations exist where the baseline is
-    trusted.  (``not_compared`` is carried by the CLI ``partial``
-    population, which the MCP surface cannot produce: it refuses no file.)"""
-    runs = {
-        name: _comparison_served(run) for name, run in served_comparison_runs.items()
-    }
-    runs["missing"] = _missing_served(served_run_store_projection)
+    missing across the populations; the clone count is a number where a
+    clone lane was compared and absent where none was."""
+    runs = _served_runs(served_comparison_runs, served_run_store_projection)
     trusted = runs["trusted"]
     assert novelty_counts(trusted.model) == {"new": 6, "known": 8, "unavailable": 4}
     kinds = new_by_source_kind(trusted.model)
@@ -352,24 +375,39 @@ def test_the_served_populations_carry_every_distinguishing_state(
         "trusted": (True, "ok", True),
         "foreign_scope": (False, "mismatch_scope_id", True),
         "api_disabled": (True, "ok", True),
+        "partial": (True, "ok", True),
         "missing": (False, "missing", False),
     }
     assert new_clone_groups(trusted.model.facts.comparison) == 2
     assert new_clone_groups(runs["foreign_scope"].model.facts.comparison) is None
+
+
+def test_the_served_populations_carry_every_availability_state(
+    served_comparison_runs: dict[str, ServedComparisonRun],
+) -> None:
+    """Measured 2026-09-27: the availability takes all four states —
+    compared, not compared (the partial run), unavailable, and the
+    disabled capability beside them; known debt sits in one blast zone
+    and not the other; the authority violations exist where the baseline
+    is trusted, and the changed-file PR summary cuts one new finding."""
+    runs = {
+        name: _comparison_served(run) for name, run in served_comparison_runs.items()
+    }
     words = {
         name: {
             row.availability
             for row in run.model.facts.comparison.comparison_availability
         }
         for name, run in runs.items()
-        if name != "missing"
     }
     assert words == {
         "trusted": {"compared"},
         "foreign_scope": {"unavailable"},
         "api_disabled": {"compared"},
+        "partial": {"compared", "not_compared"},
     }
-    assert known_debt_paths(trusted.model)
+    assert _api_lane_state(runs["api_disabled"].model.facts.comparison) == "disabled"
+    trusted = runs["trusted"]
     assert _known_debt_entries(trusted, "blast_known") == [
         "pkg/tri_b.py",
         "pkg/tri_c.py",

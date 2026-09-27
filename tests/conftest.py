@@ -19,7 +19,10 @@ import pytest
 from codeclone.baseline.trust import current_python_tag
 from codeclone.canonical.model import CanonicalModel
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
-from codeclone.models import RUN_SNAPSHOT_PUBLICATION_PUBLISHED
+from codeclone.models import (
+    RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
+    RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
+)
 from tests._live_state import (
     LIVE_STATE_GUARD_KEY,
     LIVE_STATE_MARKER,
@@ -337,15 +340,19 @@ def _run_store_rollout(store_path: Path) -> Iterator[None]:
         monkeypatch.undo()
 
 
-def _published_store_run_id(record: object) -> str:
+def _published_store_run_id(
+    record: object, *, outcome: str = RUN_SNAPSHOT_PUBLICATION_PUBLISHED
+) -> str:
     """The store run an MCP execution published, proven before anything is
     counted: an execution that published nothing leaves the store empty,
     and every comparison downstream would then be measuring an ABSENT run
-    rather than an inexpressible one."""
+    rather than an inexpressible one.  ``outcome`` is the publication the
+    execution must state (a partial population stores its run and withholds
+    the head)."""
     execution = getattr(record, "execution", None)
     link = getattr(execution, "run_snapshot_link", None)
     assert link is not None, "the execution carries no run-snapshot link"
-    assert link.outcome == RUN_SNAPSHOT_PUBLICATION_PUBLISHED, link
+    assert link.outcome == outcome, link
     assert link.store_run_id
     return str(link.store_run_id)
 
@@ -686,7 +693,7 @@ def _comparison_run(
     root = base / name
     materialize_comparison_corpus(root, stage_b=True)
     if name == "partial":
-        (root / "pkg" / "unparsable.py").write_text("def broken(:\n    pass\n", "utf-8")
+        _write_unparsable(root)
     if name == "foreign_scope":
         _rewrite_scope_as_foreign(root)
     store_path = base / f"{name}.sqlite3"
@@ -767,12 +774,15 @@ def comparison_runs(
 # surface's own answers are the oracle of the comparison projections, so
 # the corpus is analysed by an in-process ``CodeCloneMCPService`` with the
 # stage-A baseline at the tree's default baseline path — the way a user's
-# checkout carries it — under three configurations:
+# checkout carries it — under four configurations:
 #
 #   * ``trusted``       — every lane compared, the API lane included;
 #   * ``foreign_scope`` — the container belongs to another scope: the
 #                         surface's resolver refuses it (loaded false);
-#   * ``api_disabled``  — the API lane is not enabled on the run.
+#   * ``api_disabled``  — the API lane is not enabled on the run;
+#   * ``partial``       — one unparsable file leaves the population partial:
+#                         the set-difference lanes are NOT compared, and the
+#                         run is stored with its head withheld.
 #
 # (The baseline-less state is the serving corpus above.)  One served-only
 # carrier sits beside stage B, never inside it (the CLI populations' pins
@@ -817,11 +827,12 @@ SERVED_COMPARISON_BLAST_ORIGINS: dict[str, tuple[str, str]] = {
     "blast_new": ("pkg/cyc_c.py", "direct"),
 }
 #: Every served comparison population, by name: (API lane enabled,
-#: container scope rewritten to a foreign one).
-SERVED_COMPARISON_POPULATIONS: dict[str, tuple[bool, bool]] = {
-    "trusted": (True, False),
-    "foreign_scope": (True, True),
-    "api_disabled": (False, False),
+#: container scope rewritten to a foreign one, one unparsable file).
+SERVED_COMPARISON_POPULATIONS: dict[str, tuple[bool, bool, bool]] = {
+    "trusted": (True, False, False),
+    "foreign_scope": (True, True, False),
+    "api_disabled": (False, False, False),
+    "partial": (True, False, True),
 }
 
 
@@ -849,21 +860,45 @@ def _served_comparison_answers(
     return answers
 
 
-def _serve_comparison_corpus(
-    base: Path, name: str, baseline: Path
-) -> ServedComparisonRun:
-    """One MCP analysis of stage B (plus the mixed carrier) against the
-    stage-A baseline at the tree's default path, with the run store on."""
-    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
-    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+#: The publication each served population must state, by whether it is
+#: partial: a partial population stores its run and withholds the head.
+_SERVED_OUTCOMES: dict[bool, str] = {
+    False: RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
+    True: RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
+}
 
-    api_surface, foreign = SERVED_COMPARISON_POPULATIONS[name]
+
+def _write_unparsable(root: Path) -> None:
+    """One file the parser refuses: the population becomes partial."""
+    (root / "pkg" / "unparsable.py").write_text("def broken(:\n    pass\n", "utf-8")
+
+
+def _served_comparison_tree(base: Path, name: str, baseline: Path) -> Path:
+    """The tree one served population analyses: stage B, the mixed
+    carrier, the stage-A baseline at the tree's default path, and the
+    population's own change (a foreign scope, an unparsable file)."""
+    _api_surface, foreign, partial = SERVED_COMPARISON_POPULATIONS[name]
     root = base / f"served_{name}"
     materialize_comparison_corpus(root, stage_b=True)
     _write_tree(root, SERVED_COMPARISON_MIXED_CARRIER)
     (root / "codeclone.baseline.json").write_bytes(baseline.read_bytes())
     if foreign:
         _rewrite_scope_as_foreign(root)
+    if partial:
+        _write_unparsable(root)
+    return root
+
+
+def _serve_comparison_corpus(
+    base: Path, name: str, baseline: Path
+) -> ServedComparisonRun:
+    """One MCP analysis of a served population's tree with the run store
+    on, and the comparison-reading answers of that same execution."""
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    api_surface, _foreign, partial = SERVED_COMPARISON_POPULATIONS[name]
+    root = _served_comparison_tree(base, name, baseline)
     store_path = base / f"served_{name}.sqlite3"
     with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)
@@ -877,7 +912,7 @@ def _serve_comparison_corpus(
     return ServedComparisonRun(
         name=name,
         store_path=store_path,
-        store_run_id=_published_store_run_id(record),
+        store_run_id=_published_store_run_id(record, outcome=_SERVED_OUTCOMES[partial]),
         answers=answers,
     )
 
