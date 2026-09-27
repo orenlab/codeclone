@@ -29,7 +29,7 @@ from ._visibility import (
 from .api_population import ApiSurfacePopulation
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from ..analysis.normalizer import NormalizationConfig
     from ..models import ModuleRegistryHandle
@@ -55,6 +55,8 @@ _POSITIONAL_PARAM_KINDS: Final = frozenset({"pos_only", "pos_or_kw"})
 _VARIADIC_PREFIXES: Final[Mapping[str, str]] = {"vararg": "*", "kwarg": "**"}
 
 _ApiVerdict = tuple[Literal["signature_break", "signature_changed"], str]
+#: One definition of a public name, with the module surface that holds it.
+_ApiDefinition = tuple[PublicSymbol, ModuleApiSurface]
 
 #: What an ADDED parameter means for a caller written against the baseline,
 #: keyed by the parameter's ``(kind, has_default)``: the decision table as
@@ -373,49 +375,29 @@ def compare_api_surfaces(
     breaks a caller; ``partition_api_changes`` splits it into the breaking set
     that ``breaking`` and the api gate count and the compatible
     ``signature_changed`` set that is only reported.
+
+    A symbol is its qualname with every definition of it: ``@overload``
+    declarations and their implementation, property accessors. Each side of
+    the comparison is one group per name, one record per name at most (see
+    ``_group_verdict``).
     """
 
-    baseline_symbols = _symbol_index(baseline)
-    current_symbols = _symbol_index(current)
-    added = tuple(sorted(set(current_symbols) - set(baseline_symbols)))
-    changes: list[ApiBreakingChange] = []
-
-    for qualname in sorted(baseline_symbols):
-        baseline_symbol = baseline_symbols[qualname]
-        current_symbol = current_symbols.get(qualname)
-        if current_symbol is None:
-            changes.append(
-                ApiBreakingChange(
-                    qualname=qualname,
-                    filepath=baseline_symbol[1].filepath,
-                    start_line=baseline_symbol[0].start_line,
-                    end_line=baseline_symbol[0].end_line,
-                    symbol_kind=baseline_symbol[0].kind,
-                    change_kind="removed",
-                    detail="Removed from the public API surface.",
-                )
-            )
-            continue
-        verdict = _signature_change_verdict(
-            baseline_symbol=baseline_symbol[0],
-            current_symbol=current_symbol[0],
-            strict_types=strict_types,
-        )
-        if verdict is None:
-            continue
-        change_kind, detail = verdict
-        changes.append(
-            ApiBreakingChange(
-                qualname=qualname,
-                filepath=current_symbol[1].filepath,
-                start_line=current_symbol[0].start_line,
-                end_line=current_symbol[0].end_line,
-                symbol_kind=current_symbol[0].kind,
-                change_kind=change_kind,
-                detail=detail,
+    baseline_groups = _symbol_index(baseline, strict_types=strict_types)
+    current_groups = _symbol_index(current, strict_types=strict_types)
+    added = tuple(sorted(set(current_groups) - set(baseline_groups)))
+    changes = [
+        change
+        for qualname in sorted(baseline_groups)
+        if (
+            change := _group_change(
+                qualname,
+                baseline_groups[qualname],
+                current_groups.get(qualname),
+                strict_types=strict_types,
             )
         )
-
+        is not None
+    ]
     return added, tuple(
         sorted(
             changes,
@@ -452,14 +434,318 @@ def partition_api_changes(
 
 def _symbol_index(
     snapshot: ApiSurfaceSnapshot | None,
-) -> dict[str, tuple[PublicSymbol, ModuleApiSurface]]:
+    *,
+    strict_types: bool,
+) -> dict[str, tuple[_ApiDefinition, ...]]:
+    """Every public name with its distinct forms, in form-key order.
+
+    Neither the order definitions arrive in nor their lines take part: a run
+    lists a name's definitions as the source declares them, a stored baseline
+    as its lane orders them and without lines, so a name that kept only the
+    definition that came last compared one ``@overload`` with another on an
+    unchanged source.
+    """
+
     if snapshot is None:
         return {}
     return {
-        symbol.qualname: (symbol, module)
-        for module in snapshot.modules
-        for symbol in module.symbols
+        qualname: _distinct_forms(group, strict_types=strict_types)
+        for qualname, group in _definitions_by_name(snapshot).items()
     }
+
+
+def _definitions_by_name(
+    snapshot: ApiSurfaceSnapshot,
+) -> dict[str, list[_ApiDefinition]]:
+    grouped: dict[str, list[_ApiDefinition]] = {}
+    for module in snapshot.modules:
+        for symbol in module.symbols:
+            grouped.setdefault(symbol.qualname, []).append((symbol, module))
+    return grouped
+
+
+def _distinct_forms(
+    definitions: Sequence[_ApiDefinition],
+    *,
+    strict_types: bool,
+) -> tuple[_ApiDefinition, ...]:
+    """One definition per form, the first declared, ordered by form key.
+
+    Two definitions of one form -- a constant assigned twice, a function
+    declared the same way in two branches -- accept the same calls; the
+    group is a set of forms, not a count of statements.
+    """
+
+    forms: dict[tuple[str, str], _ApiDefinition] = {}
+    for definition in sorted(definitions, key=_declaration_site):
+        forms.setdefault(
+            _form_key(definition[0], strict_types=strict_types), definition
+        )
+    return tuple(forms[key] for key in sorted(forms))
+
+
+def _declaration_site(definition: _ApiDefinition) -> tuple[int, int]:
+    return definition[0].start_line, definition[0].end_line
+
+
+def _form_key(symbol: PublicSymbol, *, strict_types: bool) -> tuple[str, str]:
+    """The symbol kind and the canonical signature variant of what is compared.
+
+    ``canonical.api_identity`` owns the one formula that tells two
+    definitions of a name apart -- the canonical api family is keyed
+    ``(SYMBOL, canonical_signature_variant)`` -- and this reads it rather than
+    spelling a second one. An empty digest is absence, as the canonical fact
+    spells it.
+
+    Under ``strict_types`` a form is its whole canonical variant. Without it
+    no annotation is compared anywhere -- a changed annotation is no change
+    -- so a form is the variant of its call shape, digests absent: overloads
+    that differ only in their types accept the same calls, and keyed on their
+    annotations they read as forms added, removed or paired with the wrong
+    counterpart (measured on the frozen external pairs: typed overloads of
+    ``requests`` 2.34.2, ``click`` 8.5.0 and ``pydantic`` 2.13.5).
+    """
+
+    from ..canonical.api_identity import signature_variant
+    from ..canonical.model import ApiParameterFact
+
+    return symbol.kind, signature_variant(
+        parameters=tuple(
+            ApiParameterFact(
+                name=param.name,
+                kind=param.kind,
+                has_default=param.has_default,
+                annotation_digest=_compared_digest(
+                    param.annotation_hash, strict_types=strict_types
+                ),
+            )
+            for param in symbol.params
+        ),
+        returns_digest=_compared_digest(symbol.returns_hash, strict_types=strict_types),
+    )
+
+
+def _compared_digest(digest: str, *, strict_types: bool) -> str | None:
+    """A digest as the comparison reads it: absent unless types are compared."""
+
+    if not strict_types:
+        return None
+    return digest or None
+
+
+def _group_change(
+    qualname: str,
+    baseline_group: tuple[_ApiDefinition, ...],
+    current_group: tuple[_ApiDefinition, ...] | None,
+    *,
+    strict_types: bool,
+) -> ApiBreakingChange | None:
+    if current_group is None:
+        return _api_change(
+            qualname,
+            _first_declared(baseline_group),
+            ("removed", "Removed from the public API surface."),
+        )
+    located = _group_verdict(baseline_group, current_group, strict_types=strict_types)
+    return None if located is None else _api_change(qualname, *located)
+
+
+def _api_change(
+    qualname: str,
+    definition: _ApiDefinition,
+    verdict: tuple[Literal["removed", "signature_break", "signature_changed"], str],
+) -> ApiBreakingChange:
+    symbol, module = definition
+    return ApiBreakingChange(
+        qualname=qualname,
+        filepath=module.filepath,
+        start_line=symbol.start_line,
+        end_line=symbol.end_line,
+        symbol_kind=symbol.kind,
+        change_kind=verdict[0],
+        detail=verdict[1],
+    )
+
+
+def _first_declared(group: tuple[_ApiDefinition, ...]) -> _ApiDefinition:
+    return min(group, key=_declaration_site)
+
+
+def _group_verdict(
+    baseline_group: tuple[_ApiDefinition, ...],
+    current_group: tuple[_ApiDefinition, ...],
+    *,
+    strict_types: bool,
+) -> tuple[_ApiDefinition, _ApiVerdict] | None:
+    """The heaviest reason one name's forms give, and the definition it names.
+
+    Forms both sides share are unchanged. What is left is aligned, best match
+    first (``_best_pairs``); every aligned pair is judged by the signature
+    table, a baseline form left without a counterpart is a removed overload
+    and breaks -- a call written against that form is no longer declared --
+    and a current form left without one is an added overload and is
+    compatible: it accepts calls nothing made before. A break outranks a
+    compatible change, and the first reason in that order is the detail.
+
+    The lane stores neither an ``@overload`` marker nor lines, so an
+    implementation is one more form of its name here: it is what a call binds
+    at run time, and the declared overloads are what a checked call is
+    written against. Where a name has several forms, a reason names the form
+    it is about.
+    """
+
+    baseline_only, current_only = _unmatched_forms(
+        baseline_group, current_group, strict_types=strict_types
+    )
+    pairs = _best_pairs(baseline_only, current_only)
+    named = len(baseline_group) > 1 or len(current_group) > 1
+    located = [
+        *_paired_verdicts(
+            baseline_only, current_only, pairs, named=named, strict_types=strict_types
+        ),
+        *_removed_overloads(
+            baseline_only, pairs, anchor=_first_declared(current_group)
+        ),
+        *_added_overloads(current_only, pairs),
+    ]
+    breaks = [item for item in located if item[1][0] == _SIGNATURE_BREAK]
+    return (breaks or located)[0] if located else None
+
+
+def _removed_overloads(
+    baseline_only: tuple[_ApiDefinition, ...],
+    pairs: dict[int, int],
+    *,
+    anchor: _ApiDefinition,
+) -> Iterator[tuple[_ApiDefinition, _ApiVerdict]]:
+    """Baseline forms nothing aligned with, reported at the surviving name."""
+
+    for index, (symbol, _module) in enumerate(baseline_only):
+        if index not in pairs:
+            yield anchor, (_SIGNATURE_BREAK, f"Removed overload {_form_label(symbol)}.")
+
+
+def _added_overloads(
+    current_only: tuple[_ApiDefinition, ...],
+    pairs: dict[int, int],
+) -> Iterator[tuple[_ApiDefinition, _ApiVerdict]]:
+    """Current forms nothing aligned with, each reported where it is declared."""
+
+    aligned = set(pairs.values())
+    for index, definition in enumerate(current_only):
+        if index not in aligned:
+            label = _form_label(definition[0])
+            yield definition, (_SIGNATURE_CHANGED, f"Added overload {label}.")
+
+
+def _unmatched_forms(
+    baseline_group: tuple[_ApiDefinition, ...],
+    current_group: tuple[_ApiDefinition, ...],
+    *,
+    strict_types: bool,
+) -> tuple[tuple[_ApiDefinition, ...], tuple[_ApiDefinition, ...]]:
+    """The forms each side has and the other does not, group order kept."""
+
+    def key(definition: _ApiDefinition) -> tuple[str, str]:
+        return _form_key(definition[0], strict_types=strict_types)
+
+    baseline_keys = {key(definition) for definition in baseline_group}
+    current_keys = {key(definition) for definition in current_group}
+    return (
+        tuple(item for item in baseline_group if key(item) not in current_keys),
+        tuple(item for item in current_group if key(item) not in baseline_keys),
+    )
+
+
+def _best_pairs(
+    baseline_only: tuple[_ApiDefinition, ...],
+    current_only: tuple[_ApiDefinition, ...],
+) -> dict[int, int]:
+    """Baseline index -> current index, as many pairs as the smaller side has.
+
+    Greedy over every candidate pair, best first: the same symbol kind, then
+    the most parameters a call reaches unchanged -- name, kind and default
+    alike -- then the most parameter names in common, then form-key order on
+    each side, so the alignment never depends on where a definition sits in
+    the file. Names alone tie between a form and a narrower sibling that
+    shares them, and pairing with the narrower one reads as a parameter that
+    became required.
+    """
+
+    candidates = sorted(
+        (_alignment_rank(baseline[0], current[0]), baseline_index, current_index)
+        for baseline_index, baseline in enumerate(baseline_only)
+        for current_index, current in enumerate(current_only)
+    )
+    pairs: dict[int, int] = {}
+    for _rank, baseline_index, current_index in candidates:
+        if baseline_index not in pairs and current_index not in pairs.values():
+            pairs[baseline_index] = current_index
+    return pairs
+
+
+def _alignment_rank(
+    baseline: PublicSymbol, current: PublicSymbol
+) -> tuple[bool, int, int]:
+    reached = _call_specs(baseline) & _call_specs(current)
+    shared = {param.name for param in baseline.params} & {
+        param.name for param in current.params
+    }
+    return baseline.kind != current.kind, -len(reached), -len(shared)
+
+
+def _call_specs(symbol: PublicSymbol) -> set[tuple[str, str, bool]]:
+    return {(param.name, param.kind, param.has_default) for param in symbol.params}
+
+
+def _paired_verdicts(
+    baseline_only: tuple[_ApiDefinition, ...],
+    current_only: tuple[_ApiDefinition, ...],
+    pairs: dict[int, int],
+    *,
+    named: bool,
+    strict_types: bool,
+) -> Iterator[tuple[_ApiDefinition, _ApiVerdict]]:
+    """Each aligned pair's reason, in baseline form order, at its current form."""
+
+    for baseline_index in sorted(pairs):
+        baseline_symbol = baseline_only[baseline_index][0]
+        current = current_only[pairs[baseline_index]]
+        verdict = _signature_change_verdict(
+            baseline_symbol=baseline_symbol,
+            current_symbol=current[0],
+            strict_types=strict_types,
+        )
+        if verdict is not None:
+            yield (
+                current,
+                _named_verdict(verdict, baseline_symbol) if named else verdict,
+            )
+
+
+def _named_verdict(verdict: _ApiVerdict, form: PublicSymbol) -> _ApiVerdict:
+    return verdict[0], f"Overload {_form_label(form)}: {verdict[1]}"
+
+
+def _form_label(symbol: PublicSymbol) -> str:
+    """A form the way a signature spells it, without annotations.
+
+    ``(func, /)``, ``(*, maxsize, typed=...)``, ``(*fields, **options)``:
+    ``=...`` marks a default, ``/`` closes the positional-only block, and a
+    bare ``*`` opens a keyword-only block no ``*args`` opened.
+    """
+
+    kinds = [param.kind for param in symbol.params]
+    parts = [
+        f"{_VARIADIC_PREFIXES.get(param.kind, '')}{param.name}"
+        f"{'=...' if param.has_default else ''}"
+        for param in symbol.params
+    ]
+    if "kw_only" in kinds and "vararg" not in kinds:
+        parts.insert(kinds.index("kw_only"), "*")
+    if "pos_only" in kinds:
+        parts.insert(len(kinds) - kinds[::-1].index("pos_only"), "/")
+    return f"({', '.join(parts)})"
 
 
 def _parameter_specs(

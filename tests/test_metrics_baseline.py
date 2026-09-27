@@ -30,6 +30,7 @@ from codeclone.contracts import (
     METRICS_BASELINE_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
+from codeclone.metrics import api_surface as api_surface_mod
 from codeclone.metrics.api_surface import compare_api_surfaces
 from codeclone.models import (
     ApiParamSpec,
@@ -67,6 +68,13 @@ from codeclone.observations.contracts import build_observation_contract
 from codeclone.observations.lanes import _encode_api_surface_lane
 from codeclone.observations.projection import build_observation_bundle
 from tests._ast_metrics_helpers import module_registry_context
+from tests.test_api_surface import (
+    _ACCESSORS,
+    _CACHE,
+    _OVERLOAD_SCENARIOS,
+    _group_change,
+    _surface,
+)
 from tests.test_baseline import _write_container
 
 _SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
@@ -1380,3 +1388,73 @@ def test_stored_api_surface_drops_a_legacy_test_track_row(
         current=ApiSurfaceSnapshot(modules=_API_MODULES),
         strict_types=True,
     ) == ((), ())
+
+
+# ---------------------------------------------------------------------------
+# One public name, several definitions: the stored half of the comparison.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("baseline_source", "current_source", "expected"),
+    [
+        pytest.param(baseline, current, expected, id=row_id)
+        for row_id, baseline, current, expected in _OVERLOAD_SCENARIOS
+    ],
+)
+def test_stored_definitions_of_one_name_compare_as_the_run_compares_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    baseline_source: str,
+    current_source: str,
+    expected: tuple[str, str] | None,
+) -> None:
+    """Every scenario again, with the baseline read back from a container.
+
+    The lane hands a name's definitions back in its own order and without
+    their lines -- the order the run-to-run rows never see -- so each verdict
+    must come out of the stored baseline exactly as it comes out of a run.
+    """
+
+    stored = _stored_api_snapshot(
+        tmp_path, monkeypatch, api_modules=_surface(baseline_source).modules
+    )
+    assert _group_change(stored, _surface(current_source)) == expected
+
+
+def test_stored_api_surface_indexes_every_definition_the_run_indexes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The decoder and the run give one index on one snapshot, both ways.
+
+    Distinguishing population: an ``@overload`` group of three forms and a
+    property whose getter, setter and deleter share one qualname. Read back
+    from the container, neither may compare as changed against the run that
+    stored it, in either direction, and both sides index the same forms.
+    """
+
+    run = _surface(f"{_CACHE}\n\n{_ACCESSORS}")
+    stored = _stored_api_snapshot(tmp_path, monkeypatch, api_modules=run.modules)
+    assert (
+        compare_api_surfaces(baseline=stored, current=run, strict_types=True),
+        compare_api_surfaces(baseline=run, current=stored, strict_types=True),
+    ) == (((), ()), ((), ()))
+
+    def forms(snapshot: ApiSurfaceSnapshot) -> dict[str, tuple[tuple[str, str], ...]]:
+        return {
+            qualname: tuple(
+                api_surface_mod._form_key(symbol, strict_types=True)
+                for symbol, _ in group
+            )
+            for qualname, group in api_surface_mod._symbol_index(
+                snapshot, strict_types=True
+            ).items()
+        }
+
+    assert forms(stored) == forms(run)
+    assert {qualname: len(keys) for qualname, keys in forms(run).items()} == {
+        "pkg.mod:Box": 1,
+        "pkg.mod:Box.size": 3,
+        "pkg.mod:cache": 3,
+    }

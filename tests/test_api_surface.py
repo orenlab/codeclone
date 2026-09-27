@@ -10,11 +10,14 @@ import ast
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 import pytest
 
+from codeclone.canonical.api_identity import signature_variant
+from codeclone.canonical.model import ApiParameterFact
 from codeclone.domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
 from codeclone.metrics import api_surface as api_surface_mod
 from codeclone.metrics._visibility import ModuleVisibility
@@ -497,7 +500,7 @@ def test_signature_change_verdict_compares_annotations_only_when_strict() -> Non
 
 
 def test_symbol_index_none_snapshot_returns_empty() -> None:
-    assert api_surface_mod._symbol_index(None) == {}
+    assert api_surface_mod._symbol_index(None, strict_types=False) == {}
 
 
 # ── the verdict: "the signature changed" is a fact, "it breaks" a verdict ───
@@ -961,6 +964,468 @@ def test_compare_records_every_change_and_the_partition_splits_the_verdicts() ->
     assert [change.qualname for change in compatible] == ["pkg.mod:extended"]
 
 
+# ── one public name, several definitions ───────────────────────────────────
+#
+# ``@overload`` declarations and their implementation, property accessors, a
+# constant assigned twice: every definition of one qualname is a form of that
+# name, and the comparison takes them as one group. The same rows are driven
+# through a stored baseline in ``test_metrics_baseline``, where the
+# definitions come back in lane order and without their lines.
+
+
+def _surface(source: str) -> ApiSurfaceSnapshot:
+    """The public surface a run collects from ``source`` as ``pkg.mod``."""
+
+    tree, collector, import_names = tree_collector_and_imports(
+        source, module_name="pkg.mod"
+    )
+    module = collect_module_api_surface(
+        tree=tree,
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        collector=collector,
+        imported_names=import_names,
+    )
+    assert module is not None
+    return ApiSurfaceSnapshot(modules=(module,))
+
+
+def _overloaded(
+    name: str,
+    *forms: str,
+    implementation: str,
+    implementation_first: bool = False,
+) -> str:
+    """A module declaring ``name`` once per ``@overload`` form, then its body."""
+
+    overloads = [f"@overload\ndef {name}({form}) -> int: ...\n" for form in forms]
+    body = f"def {name}({implementation}) -> int:\n    return 0\n"
+    definitions = [body, *overloads] if implementation_first else [*overloads, body]
+    return "from typing import overload\n\n\n" + "".join(definitions)
+
+
+def _plain(name: str, parameters: str) -> str:
+    return f"def {name}({parameters}) -> int:\n    return 0\n"
+
+
+_KEYWORD_FORM = "*, maxsize: int, typed: bool = False"
+_CALLABLE_FORM = "func: object, /"
+_CACHE_BODY = (
+    "func: object | None = None, /, *, maxsize: int = 128, typed: bool = False"
+)
+_CACHE = _overloaded("cache", _KEYWORD_FORM, _CALLABLE_FORM, implementation=_CACHE_BODY)
+_SERIALIZER_FORMS = ("*fields: str, mode: str = ''", "*fields: str, when: str = ''")
+_SERIALIZER_BODY = "*fields: str, mode: str = '', when: str = ''"
+_ACCESSORS = """class Box:
+    @property
+    def size(self) -> int:
+        return 1
+
+    @size.setter
+    def size(self, value: int) -> None:
+        pass
+
+    @size.deleter
+    def size(self) -> None:
+        pass
+"""
+_BRANCH_DUPLICATES = """import sys
+
+if sys.version_info >= (3, 12):
+
+    def run(value: int) -> int:
+        return value
+
+else:
+
+    def run(value: int) -> int:
+        return value
+"""
+_TYPED_AUTH = _overloaded(
+    "auth",
+    "username: str, password: str",
+    "username: bytes, password: bytes",
+    implementation="username: bytes | str, password: bytes | str",
+)
+_KEYWORD_FORM_BREAK = (
+    _BREAK,
+    "Overload (*, maxsize, typed=...): Added required parameter strict.",
+)
+
+_OVERLOAD_SCENARIOS: tuple[tuple[str, str, str, tuple[str, str] | None], ...] = (
+    # The same group, whatever order or lines its definitions arrive in.
+    ("overloads-unchanged", _CACHE, _CACHE, None),
+    (
+        "overloads-reordered",
+        _CACHE,
+        _overloaded("cache", _CALLABLE_FORM, _KEYWORD_FORM, implementation=_CACHE_BODY),
+        None,
+    ),
+    ("accessors-unchanged", _ACCESSORS, _ACCESSORS, None),
+    ("constant-assigned-twice", "VALUE = 1\nVALUE = 2\n", "VALUE = 1\n", None),
+    # Two definitions of one form are one form: only what changed is reported.
+    (
+        "branch-duplicates-gain-an-optional-parameter",
+        _BRANCH_DUPLICATES,
+        _plain("run", "value: int, limit: int = 0"),
+        (_CHANGED, "Added optional parameter limit."),
+    ),
+    # A form that stopped accepting its calls breaks, named by that form.
+    (
+        "overload-form-gains-required-parameter",
+        _CACHE,
+        _overloaded(
+            "cache",
+            f"{_KEYWORD_FORM}, strict: bool",
+            _CALLABLE_FORM,
+            implementation=f"{_CACHE_BODY}, strict: bool = False",
+        ),
+        _KEYWORD_FORM_BREAK,
+    ),
+    (
+        "overload-form-gains-required-parameter-implementation-first",
+        _CACHE,
+        _overloaded(
+            "cache",
+            f"{_KEYWORD_FORM}, strict: bool",
+            _CALLABLE_FORM,
+            implementation=f"{_CACHE_BODY}, strict: bool = False",
+            implementation_first=True,
+        ),
+        _KEYWORD_FORM_BREAK,
+    ),
+    (
+        "implementation-drops-a-parameter",
+        _CACHE,
+        _overloaded(
+            "cache",
+            _KEYWORD_FORM,
+            _CALLABLE_FORM,
+            implementation="func: object | None = None, /, *, maxsize: int = 128",
+        ),
+        (
+            _BREAK,
+            "Overload (func=..., /, *, maxsize=..., typed=...): "
+            "Removed parameter typed.",
+        ),
+    ),
+    (
+        "every-form-gains-a-leading-positional",
+        _overloaded("serialize", *_SERIALIZER_FORMS, implementation=_SERIALIZER_BODY),
+        _overloaded(
+            "serialize",
+            *(f"field: str, /, {form}" for form in _SERIALIZER_FORMS),
+            implementation=f"field: str, /, {_SERIALIZER_BODY}",
+        ),
+        (
+            _BREAK,
+            "Overload (*fields, when=...): Added required parameter field.",
+        ),
+    ),
+    # Types are compared nowhere by default: overloads that only type calls
+    # the old form already accepted add no form and remove none.
+    (
+        "typed-overloads-accept-what-the-untyped-form-accepted",
+        _plain("auth", "username, password"),
+        _TYPED_AUTH,
+        None,
+    ),
+    (
+        "typed-overloads-removed-beside-an-implementation-of-the-same-shape",
+        _overloaded(
+            "default",
+            "ctx: int, call: bool = True",
+            "ctx: int, call: int = 1",
+            implementation="ctx: int, call: bool | int = True",
+        ),
+        _plain("default", "ctx: int, call: bool | int = True"),
+        None,
+    ),
+    (
+        "typed-overloads-beside-a-narrower-form",
+        _plain("jar", "cookies, jar=None, overwrite=True"),
+        _overloaded(
+            "jar",
+            "cookies: dict, jar: None = None, overwrite: bool = True",
+            "cookies: dict, jar: list, overwrite: bool = True",
+            implementation=(
+                "cookies: dict, jar: list | None = None, overwrite: bool = True"
+            ),
+        ),
+        (_CHANGED, "Added overload (cookies, jar, overwrite=...)."),
+    ),
+    # A form pairs with the sibling a call reaches unchanged, not with a
+    # narrower one that merely shares its names.
+    (
+        "a-widened-form-beside-a-narrowed-one",
+        _plain("lookup", "key, default=None, strict=True"),
+        _overloaded(
+            "lookup",
+            "key, default, strict=True",
+            implementation="key, default=None, strict=True, extra=None",
+        ),
+        (
+            _CHANGED,
+            "Overload (key, default=..., strict=...): Added optional parameter extra.",
+        ),
+    ),
+    (
+        "a-form-that-lost-a-default-beside-a-renamed-sibling",
+        _plain("pick", "key, limit=1"),
+        _overloaded("pick", "key, limit", implementation="key, size=1"),
+        (_BREAK, "Overload (key, limit=...): Parameter limit became required."),
+    ),
+    (
+        "a-function-beside-a-constant-of-the-same-name",
+        _plain("f", "a"),
+        "f = 1\n\n\n" + _plain("f", "b"),
+        (_BREAK, "Overload (a): Renamed public parameter a to b."),
+    ),
+    # A form is gone: calls written against it are no longer declared.
+    (
+        "overload-removed",
+        _CACHE,
+        _overloaded("cache", _KEYWORD_FORM, implementation=_CACHE_BODY),
+        (_BREAK, "Removed overload (func, /)."),
+    ),
+    (
+        "overload-removed-beside-a-compatible-form",
+        _CACHE,
+        _overloaded(
+            "cache",
+            f"{_KEYWORD_FORM}, strict: bool = False",
+            implementation=_CACHE_BODY,
+        ),
+        (_BREAK, "Removed overload (func, /)."),
+    ),
+    # A new form accepts calls nothing made before.
+    (
+        "overload-added",
+        _overloaded("cache", _KEYWORD_FORM, implementation=_CACHE_BODY),
+        _overloaded(
+            "cache",
+            _KEYWORD_FORM,
+            "func: object, /, **options: int",
+            implementation=_CACHE_BODY,
+        ),
+        (_CHANGED, "Added overload (func, /, **options)."),
+    ),
+    (
+        "a-kept-form-beside-a-wider-new-one",
+        _plain("grow", "item"),
+        _overloaded("grow", "item", implementation="item, extra=None"),
+        (_CHANGED, "Added overload (item, extra=...)."),
+    ),
+    # One definition per side: the verdicts the tables above already own.
+    (
+        "plain-unchanged",
+        _plain("cache", _CACHE_BODY),
+        _plain("cache", _CACHE_BODY),
+        None,
+    ),
+    (
+        "plain-gains-required-parameter",
+        _plain("cache", _CACHE_BODY),
+        _plain("cache", f"{_CACHE_BODY}, strict: bool"),
+        (_BREAK, "Added required parameter strict."),
+    ),
+    (
+        "plain-drops-a-parameter",
+        _plain("cache", _CACHE_BODY),
+        _plain("cache", "func: object | None = None, /, *, maxsize: int = 128"),
+        (_BREAK, "Removed parameter typed."),
+    ),
+    (
+        "plain-gains-a-leading-positional",
+        _plain("serialize", _SERIALIZER_BODY),
+        _plain("serialize", f"field: str, /, {_SERIALIZER_BODY}"),
+        (_BREAK, "Added required parameter field."),
+    ),
+)
+
+
+def _group_change(
+    baseline: ApiSurfaceSnapshot, current: ApiSurfaceSnapshot
+) -> tuple[str, str] | None:
+    added, changes = compare_api_surfaces(
+        baseline=baseline, current=current, strict_types=False
+    )
+    assert added == ()
+    if not changes:
+        return None
+    (change,) = changes
+    return change.change_kind, change.detail
+
+
+@pytest.mark.parametrize(
+    ("baseline_source", "current_source", "expected"),
+    [
+        pytest.param(baseline, current, expected, id=row_id)
+        for row_id, baseline, current, expected in _OVERLOAD_SCENARIOS
+    ],
+)
+def test_one_name_with_several_definitions_is_compared_as_one_group(
+    baseline_source: str,
+    current_source: str,
+    expected: tuple[str, str] | None,
+) -> None:
+    assert (
+        _group_change(_surface(baseline_source), _surface(current_source)) == expected
+    )
+
+
+def test_group_comparison_ignores_definition_order_and_lines() -> None:
+    """The stored baseline hands definitions back in lane order, lines zeroed.
+
+    Keeping whichever definition came last compared one overload with another
+    on an unchanged source. The same definitions in the reverse order and
+    without their lines are the same group, in both directions.
+    """
+
+    current = _surface(_CACHE)
+    (module,) = current.modules
+    reordered = replace(
+        module,
+        symbols=tuple(
+            replace(symbol, start_line=0, end_line=0)
+            for symbol in reversed(module.symbols)
+        ),
+    )
+    baseline = ApiSurfaceSnapshot(modules=(reordered,))
+    assert (
+        compare_api_surfaces(baseline=baseline, current=current, strict_types=True),
+        compare_api_surfaces(baseline=current, current=baseline, strict_types=True),
+    ) == (((), ()), ((), ()))
+
+
+def test_a_group_record_points_at_the_definition_it_names() -> None:
+    """A reason about one form lands on that form's current definition.
+
+    The paired reason lands on the current form it was judged against, an
+    added form where it is declared, and a reason about a form that is gone,
+    or about a name that is gone, on the name's first definition. Lines 5 and
+    7 hold the ``@overload`` declarations of an ``_overloaded`` module, 7 and
+    9 once its implementation is declared first -- which moves the grown
+    form off the line its baseline form holds.
+    """
+
+    def location(baseline_source: str, current_source: str) -> tuple[str, int, int]:
+        _added, changes = compare_api_surfaces(
+            baseline=_surface(baseline_source),
+            current=_surface(current_source),
+            strict_types=False,
+        )
+        (change,) = changes
+        return change.change_kind, change.start_line, change.end_line
+
+    grown = _overloaded(
+        "cache",
+        f"{_KEYWORD_FORM}, strict: bool",
+        _CALLABLE_FORM,
+        implementation=f"{_CACHE_BODY}, strict: bool = False",
+        implementation_first=True,
+    )
+    single = _overloaded("cache", _KEYWORD_FORM, implementation=_CACHE_BODY)
+    extended = _overloaded(
+        "cache",
+        _KEYWORD_FORM,
+        "func: object, /, **options: int",
+        implementation=_CACHE_BODY,
+    )
+    assert [
+        location(_CACHE, grown),
+        location(single, extended),
+        location(_CACHE, single),
+        location(_CACHE, _plain("other", "value: int")),
+    ] == [
+        (_BREAK, 7, 7),
+        (_CHANGED, 7, 7),
+        (_BREAK, 5, 5),
+        ("removed", 5, 5),
+    ]
+
+
+def test_a_definition_is_told_apart_by_the_canonical_signature_variant() -> None:
+    """One formula owner: the comparison keys a form the way the canon does.
+
+    The canonical api family is keyed ``(SYMBOL, canonical_signature_variant)``
+    through ``canonical.api_identity``. Under ``strict_types`` a group's forms
+    are that variant plus the symbol kind, with an empty digest spelled as
+    absence, exactly as the canonical fact spells it; without it they are the
+    variant of the call shape, every digest absent. The population carries
+    both digest spellings.
+    """
+
+    annotated = _surface(_CACHE).modules[0].symbols
+    unannotated = _surface("def cache(func=None, /, *, maxsize=128): ...").modules[0]
+    symbols = (*annotated, *unannotated.symbols)
+    digests = {
+        digest
+        for symbol in symbols
+        for digest in (
+            symbol.returns_hash,
+            *(param.annotation_hash for param in symbol.params),
+        )
+    }
+    assert "" in digests
+    assert len(digests) > 1
+
+    def canonical(symbol: PublicSymbol, *, typed: bool) -> tuple[str, str]:
+        return symbol.kind, signature_variant(
+            parameters=tuple(
+                ApiParameterFact(
+                    name=param.name,
+                    kind=param.kind,
+                    has_default=param.has_default,
+                    annotation_digest=(param.annotation_hash or None)
+                    if typed
+                    else None,
+                )
+                for param in symbol.params
+            ),
+            returns_digest=(symbol.returns_hash or None) if typed else None,
+        )
+
+    for symbol in symbols:
+        assert [
+            api_surface_mod._form_key(symbol, strict_types=strict)
+            for strict in (True, False)
+        ] == [canonical(symbol, typed=True), canonical(symbol, typed=False)]
+    assert len({canonical(symbol, typed=True) for symbol in annotated}) == 3
+
+
+def test_types_are_part_of_a_form_only_when_types_are_compared() -> None:
+    """Both directions of one boundary, on the same two sources.
+
+    Typed overloads added over an untyped function: without ``strict_types``
+    nothing a call binds moved, so nothing is recorded; under it the untyped
+    form now has typed counterparts, and a changed annotation breaks there as
+    it breaks everywhere else.
+    """
+
+    baseline = _surface(_plain("auth", "username, password"))
+    current = _surface(_TYPED_AUTH)
+    recorded = [
+        [
+            (change.change_kind, change.detail)
+            for change in compare_api_surfaces(
+                baseline=baseline, current=current, strict_types=strict
+            )[1]
+        ]
+        for strict in (False, True)
+    ]
+    assert recorded == [
+        [],
+        [
+            (
+                _BREAK,
+                "Overload (username, password): "
+                "Changed type annotation for parameter username.",
+            )
+        ],
+    ]
+
+
 # ── the gate, end to end: a real baseline, a real run, the real exit code ──
 
 _CLI_ENTRY = "from codeclone.surfaces.cli.workflow import main; main()"
@@ -972,7 +1437,19 @@ _GATE_BASELINE_SOURCE = '__all__ = ["run"]\n\n\ndef run(value):\n    return valu
 def _api_gate_run(
     tmp_path: Path, *, current_source: str
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
-    """Publish a baseline, change the one public function, gate the run.
+    gated, family = _api_gate_family(tmp_path, current_source=current_source)
+    summary = family["summary"]
+    assert isinstance(summary, dict)
+    return gated, summary
+
+
+def _api_gate_family(
+    tmp_path: Path,
+    *,
+    current_source: str,
+    baseline_source: str = _GATE_BASELINE_SOURCE,
+) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    """Publish a baseline, change the one public module, gate the run.
 
     Everything the run reads or writes -- repository, baseline, cache,
     report -- lives under ``tmp_path``. A subprocess, so the exit code is the
@@ -986,7 +1463,7 @@ def _api_gate_run(
         "utf-8",
     )
     module = repo / "api.py"
-    module.write_text(_GATE_BASELINE_SOURCE, "utf-8")
+    module.write_text(baseline_source, "utf-8")
     common = (
         "--baseline",
         str(tmp_path / "codeclone.baseline.json"),
@@ -1012,9 +1489,54 @@ def _api_gate_run(
     report_path = tmp_path / "report.json"
     gated = cli(str(repo), *common, "--fail-on-api-break", "--json", str(report_path))
     document = json.loads(report_path.read_text("utf-8"))
-    summary = document["metrics"]["families"]["api_surface"]["summary"]
+    family = document["metrics"]["families"]["api_surface"]
+    assert isinstance(family, dict)
+    return gated, family
+
+
+def _recorded_rows(family: dict[str, object]) -> list[tuple[object, object]]:
+    items = family["items"]
+    assert isinstance(items, list)
+    return [
+        (item["change_kind"], item["detail"])
+        for item in items
+        if isinstance(item, dict) and item["record_kind"] != "symbol"
+    ]
+
+
+def test_api_break_gate_passes_an_unchanged_overloaded_function(
+    tmp_path: Path,
+) -> None:
+    """Nothing moved: the stored group and the run's group are one group."""
+
+    gated, family = _api_gate_family(
+        tmp_path, baseline_source=_CACHE, current_source=_CACHE
+    )
+    assert gated.returncode == 0, gated.stdout + gated.stderr
+    summary = family["summary"]
     assert isinstance(summary, dict)
-    return gated, summary
+    assert summary["baseline_diff_available"] is True
+    assert (summary["breaking"], summary["changed"]) == (0, 0)
+    assert _recorded_rows(family) == []
+
+
+def test_api_break_gate_fails_an_overload_form_that_gained_a_required_parameter(
+    tmp_path: Path,
+) -> None:
+    """The implementation only grew an optional parameter; the form broke."""
+
+    gated, family = _api_gate_family(
+        tmp_path,
+        baseline_source=_CACHE,
+        current_source=_overloaded(
+            "cache",
+            f"{_KEYWORD_FORM}, strict: bool",
+            _CALLABLE_FORM,
+            implementation=f"{_CACHE_BODY}, strict: bool = False",
+        ),
+    )
+    assert gated.returncode == 3, gated.stdout + gated.stderr
+    assert _recorded_rows(family) == [_KEYWORD_FORM_BREAK]
 
 
 def test_api_break_gate_passes_an_appended_optional_parameter(tmp_path: Path) -> None:
