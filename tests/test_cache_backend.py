@@ -48,6 +48,7 @@ from tests._pipeline_fixtures import (
     analysis_boot,
     run_pipeline_once,
 )
+from tests._sqlite_single_step import SingleStepConnection
 
 _MODULES = {
     "alpha.py": (
@@ -470,6 +471,55 @@ def test_a_new_store_is_created_able_to_give_pages_back(tmp_path: Path) -> None:
     assert _storage(cache_path)["auto_vacuum"] == _AUTO_VACUUM_INCREMENTAL
 
 
+def _swept_cache(tmp_path: Path) -> tuple[Path, dict[str, int]]:
+    """A store whose sweep left pages on the freelist, and its state.
+
+    The assertion is the reachability proof for every release test: it fails
+    if the deletion left nothing to reclaim, so a green run can never mean
+    the release was asked for nothing.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _bulk_store(cache_path)
+    _delete_oldest(cache_path, _BULK_ENTRIES * 3 // 4)
+    swept = _storage(cache_path)
+    assert swept["freelist_count"] > 0, "no pages were freed, so nothing is proved"
+    return cache_path, swept
+
+
+def test_reclaim_drains_the_freelist_when_the_cursor_steps_the_pragma_once(
+    tmp_path: Path,
+) -> None:
+    """The release must not depend on the cursor stepping the pragma to its end.
+
+    CPython 3.11's ``sqlite3`` resets a statement that reports no result
+    columns after its first step, so ``execute("PRAGMA
+    incremental_vacuum").fetchall()`` freed one page per call there and the
+    3.11 job left 733 pages on the freelist (CI, 2026-09-27) while 3.10 and
+    3.12+ were green. ``SingleStepConnection`` reproduces that stepping on
+    every interpreter: the assertion in the middle is the positive control --
+    through this connection the old form frees exactly one page -- and the
+    release still has to leave the freelist empty.
+    """
+
+    cache_path, swept = _swept_cache(tmp_path)
+
+    with CacheBackend(cache_path) as backend:
+        backend._connection = SingleStepConnection(backend._connection)  # type: ignore[assignment]
+        backend._connection.execute("PRAGMA incremental_vacuum").fetchall()
+        stepped_once = int(
+            backend._connection.execute("PRAGMA freelist_count").fetchone()[0]
+        )
+        assert stepped_once == swept["freelist_count"] - 1, (
+            "the proxy must model CPython 3.11: one page per execute"
+        )
+        backend.reclaim()
+    reclaimed = _storage(cache_path)
+
+    assert reclaimed["freelist_count"] == 0
+    assert reclaimed["page_count"] < swept["page_count"]
+
+
 def test_a_sweep_gives_the_freed_pages_back_to_the_filesystem(
     tmp_path: Path,
 ) -> None:
@@ -486,12 +536,7 @@ def test_a_sweep_gives_the_freed_pages_back_to_the_filesystem(
     mean the sweep was asked for nothing.
     """
 
-    cache_path = tmp_path / "cache.sqlite3"
-    _bulk_store(cache_path)
-    _delete_oldest(cache_path, _BULK_ENTRIES * 3 // 4)
-
-    swept = _storage(cache_path)
-    assert swept["freelist_count"] > 0, "no pages were freed, so nothing is proved"
+    cache_path, swept = _swept_cache(tmp_path)
 
     with CacheBackend(cache_path) as backend:
         backend.reclaim()

@@ -690,11 +690,20 @@ class CacheBackend:
         """Return freed pages to the filesystem after a sweep.
 
         ``PRAGMA incremental_vacuum`` yields one result row per page it hands
-        back, so draining the cursor IS the work and not a reading of it: a
-        statement that is prepared and never stepped hands back nothing.
-        Measured on a store holding 3002 free pages, ``execute`` alone left all
-        3002 of them free and the file at 16.4 MB, while the drain emptied the
-        freelist and took the file to 4.1 MB in 37 ms.
+        back, so stepping the statement to its end IS the work and not a
+        reading of it: a statement that is prepared and never stepped hands
+        back nothing. Measured on a store holding 3002 free pages, ``execute``
+        alone left all 3002 of them free and the file at 16.4 MB, while the
+        drain emptied the freelist and took the file to 4.1 MB in 37 ms.
+
+        The drain goes through ``executescript`` because that is the one form
+        every supported CPython steps to completion. ``execute(...).fetchall()``
+        is not: CPython 3.11's ``sqlite3`` resets a statement that reports no
+        result columns after its first step, so that form handed back exactly
+        ONE page per call there (measured 2026-09-27 on 3.11.15 with SQLite
+        3.50.4: 375 free pages -> 374, while 3.10 and 3.12+ drained all 375
+        either way). ``tests/_sqlite_single_step.py`` reproduces that stepping
+        on every interpreter, so the pin does not wait for a 3.11 runner.
 
         This depends on the store's mode actually being incremental, which is
         a property of the file and is established by
@@ -703,7 +712,7 @@ class CacheBackend:
         """
 
         try:
-            self._connection.execute("PRAGMA incremental_vacuum").fetchall()
+            self._connection.executescript("PRAGMA incremental_vacuum;")
             self._connection.commit()
         except sqlite3.Error as exc:
             raise CacheBackendUnusable(str(exc)) from exc
