@@ -46,9 +46,10 @@ Two populations are deliberately NOT stored, and the reason is the three-class
 law, not omission: the novelty of an UNGOVERNED finding (structural,
 unreachable statements, cohesion, coverage, segment clones, authority) is a
 constant of its family — no baseline lane carries its identity — and the
-health delta is an evaluation-domain fact (the report identity registry
-digests ``metrics.families.health`` whole in the evaluation tier), whose
-subject family arrives with the evaluation tier.
+health delta waited for its subject: the report identity registry digests
+``metrics.families.health`` whole in the evaluation tier, and since canonical
+epoch E3 the delta is the ``health_delta`` annotation of the evaluation
+family ``health_result``.
 
 Nothing in this module reaches the wire: until the wire-revision bump the
 comparison house is internal model and store state (ruling 2026-09-26).
@@ -528,6 +529,10 @@ DELTA_FAMILY_TERMS: Final[dict[str, tuple[str, ...]]] = {
         "api_signature_changes",
         "new_api_symbols",
     ),
+    # Canonical epoch E3 (2026-09-27): the delta of the health score — a
+    # comparison fact about an evaluation quantity, the delta annotation of
+    # ``health_result`` (``MetricsDiff.health_delta``).
+    "health_delta": ("health_delta",),
 }
 #: The terms that are counts of a comparison's findings, never negative; a
 #: permille delta may be.
@@ -543,8 +548,10 @@ class MetricDeltaRow:
 
     The adoption comparison states three permille deltas (``adoption_delta``,
     a delta annotation of ``adoption_counts``), the API comparison three
-    counts (``api_surface_delta``, of ``api_symbols``); both families share
-    this one row shape and are keyed by ``delta``.  The model admits a family
+    counts (``api_surface_delta``, of ``api_symbols``), the health comparison
+    one score delta (``health_delta``, of the evaluation family
+    ``health_result``, canonical epoch E3); the families share this one row
+    shape and are keyed by ``delta``.  The model admits a family
     whole or not at all, and exactly when its comparison ran.
     ``api_signature_changes`` (compatible) is counted beside
     ``api_breaking_changes`` and never inside it.

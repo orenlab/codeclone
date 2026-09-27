@@ -61,6 +61,15 @@ from codeclone.canonical.comparison_rows import (
     MetricDeltaRow,
     MetricsBaselineWitnessRecord,
 )
+from codeclone.canonical.evaluation_rows import (
+    EvaluationContractRecord,
+    EvaluationRequestRecord,
+    FindingEvaluationRow,
+    GateOutcomeRecord,
+    HealthResultRecord,
+    HotlistRow,
+    UnitRiskRow,
+)
 from codeclone.canonical.identity import FileId, ModuleId
 from codeclone.canonical.model import (
     AdoptionCountRow,
@@ -108,7 +117,7 @@ from codeclone.canonical.store import (
     _require_str_list,
 )
 from codeclone.contracts import STORAGE_SCHEMA_REVISION
-from tests.test_canonical_roundtrip import comparison_fixture_model, fixture_model
+from tests.test_canonical_roundtrip import evaluated_fixture_model, fixture_model
 
 _NS = "lineage-alpha"
 _TARGET = "worktree-a"
@@ -1618,6 +1627,16 @@ _EXPECTED_ROW_TYPES: dict[str, type[object]] = {
     "dependency_cycle_novelty": FindingNoveltyRow,
     "adoption_delta": MetricDeltaRow,
     "api_surface_delta": MetricDeltaRow,
+    # Canonical epoch E3 (2026-09-27): the health delta rides the shared
+    # delta row; the evaluation tier — four records and three row families.
+    "health_delta": MetricDeltaRow,
+    "evaluation_contract": EvaluationContractRecord,
+    "evaluation_request": EvaluationRequestRecord,
+    "gate_outcome": GateOutcomeRecord,
+    "health_result": HealthResultRecord,
+    "unit_risk_result": UnitRiskRow,
+    "finding_evaluation": FindingEvaluationRow,
+    "hotlist_selection": HotlistRow,
 }
 
 _STORE_SOURCE = _REPO_ROOT / "codeclone" / "canonical" / "store.py"
@@ -1658,9 +1677,17 @@ def test_model_assembly_does_not_restate_the_family_table() -> None:
     tree = _store_module_ast()
     spelled = {
         name: _spelled_families(_named_function(tree, name))
-        for name in ("_collected_model", "_collected_comparison")
+        for name in (
+            "_collected_model",
+            "_collected_comparison",
+            "_collected_evaluation",
+        )
     }
-    assert spelled == {"_collected_model": [], "_collected_comparison": []}
+    assert spelled == {
+        "_collected_model": [],
+        "_collected_comparison": [],
+        "_collected_evaluation": [],
+    }
 
 
 def _spelled_families(assembler: ast.FunctionDef) -> list[str]:
@@ -1683,9 +1710,9 @@ def test_every_family_decodes_to_its_declared_row_type() -> None:
     from codeclone.canonical.store import _collect_row, _model_rows
 
     collected: dict[str, list[object]] = {}
-    # The comparison fixture: the analysis fixture plus a populated
-    # comparison house, so every family of both tiers is reached.
-    for family, row in _model_rows(comparison_fixture_model().normalize()):
+    # The evaluated fixture: the analysis fixture plus a populated comparison
+    # and evaluation house, so every family of the three tiers is reached.
+    for family, row in _model_rows(evaluated_fixture_model().normalize()):
         _collect_row(family, row, f"{family} object", collected)
     for family, expected in _EXPECTED_ROW_TYPES.items():
         rows = collected.get(family, [])

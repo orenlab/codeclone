@@ -61,6 +61,7 @@ from typing import Final
 from codeclone.canonical.grammar import (
     require_analysis_wire_families,
     require_comparison_families,
+    require_evaluation_families,
 )
 
 ANALYSIS_FACT: Final = "analysis_fact"
@@ -2424,6 +2425,19 @@ COMPARISON_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
     "coupling_novelty": _novelty("design coupling"),
     "dead_symbol_novelty": _novelty("dead-code unused symbol"),
     "dependency_cycle_novelty": _novelty("design dependency cycle"),
+    "health_delta": (
+        *_metric_delta(
+            "health_result",
+            "health_delta (MetricsDiff.health_delta), the score delta; present "
+            "iff the document states the health comparison "
+            "(metrics.families.health.summary.baseline_diff_available)",
+        ),
+        _declared(
+            "baseline_diff_available",
+            "canonical.evaluation_projection",
+            "a health_delta row exists",
+        ),
+    ),
     "disabled_capabilities": (
         *_baseline_identity("report.document.builder baseline projection"),
         _stored(
@@ -2481,6 +2495,165 @@ def comparison_stored_fields(family: str) -> tuple[str, ...]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Canonical epoch E3 (2026-09-27): the evaluation tier.
+#
+# Internal model and store state until the wire-revision bump, exactly as the
+# comparison tier: every declaration is ``wire=False`` and the analysis wire
+# gate refuses the families.  A stored evaluation fact is what THIS run
+# concluded under its own request; a value derived from one through its named
+# owner is declared and never stored.
+# ---------------------------------------------------------------------------
+
+_EVALUATION_FACT: Final = "evaluation_fact"
+
+
+def _evaluated(field: str, owner: str, derivation: str) -> FieldDeclaration:
+    return FieldDeclaration(
+        field, _EVALUATION_FACT, owner, derivation, stored=True, wire=False
+    )
+
+
+_REQUEST_KEY: Final = (
+    "the request identity (contracts.evaluation.gate_thresholds_digest, "
+    "report.document.integrity.build_evaluation_contract); key"
+)
+
+EVALUATION_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
+    "evaluation_contract": (
+        _evaluated(
+            "active_gate_lane_requirements",
+            "report.gates.evaluator",
+            "each requested gate and the lanes it reads, under the run's lanes",
+        ),
+        _evaluated("gate_algorithm_revision", "contracts", "GATE_ALGORITHM_REVISION"),
+        _evaluated("gate_lane_matrix_version", "contracts", "GATE_LANE_MATRIX_VERSION"),
+        _evaluated("gate_thresholds_digest", "report.document.integrity", _REQUEST_KEY),
+        _evaluated(
+            "health_algorithm_revision", "contracts", "HEALTH_ALGORITHM_REVISION"
+        ),
+        _evaluated(
+            "health_input_lanes",
+            "report.gates.evaluator",
+            "HEALTH_INPUT_LANES the run enabled",
+        ),
+        _evaluated(
+            "health_input_manifest_version",
+            "contracts",
+            "HEALTH_INPUT_MANIFEST_VERSION",
+        ),
+        _evaluated(
+            "health_params",
+            "contracts.report_identity.realized_health_params",
+            "the realized health parameters, dotted names; empty iff no health "
+            "verdict was computed",
+        ),
+        _declared(
+            "health_params_digest",
+            "report.document.integrity",
+            "sha256 of the canonical health parameter mapping",
+        ),
+    ),
+    "evaluation_request": (
+        _evaluated("gate_thresholds_digest", "report.document.integrity", _REQUEST_KEY),
+        _evaluated(
+            "terms",
+            "report.gates.evaluator.MetricGateConfig",
+            "every gate term by name, as uttered (evaluation.request)",
+        ),
+    ),
+    "finding_evaluation": (
+        _evaluated(
+            "clone_type",
+            "report.suggestions.classify_clone_type",
+            "clone findings only",
+        ),
+        _evaluated("confidence", "report.document findings", "high / medium / low"),
+        _evaluated(
+            "finding_id",
+            "codeclone.findings.ids",
+            "key: the published finding id; the reference to the finding",
+        ),
+        _evaluated(
+            "priority",
+            "report.document._common._priority",
+            "severity rank / effort weight",
+        ),
+        _evaluated("severity", "report.document findings", "critical / warning / info"),
+    ),
+    "gate_outcome": (
+        _evaluated("exit_code", "report.gates.evaluator", "0 / 2 / 3"),
+        _evaluated("gate_thresholds_digest", "report.document.integrity", _REQUEST_KEY),
+        _evaluated("reasons", "report.gates.evaluator", "in the evaluator's order"),
+        _evaluated("required_lanes", "report.gates.evaluator", "sorted lanes"),
+        _evaluated("unavailable_lanes", "report.gates.evaluator", "sorted lanes"),
+        _declared("would_fail", "canonical.evaluation_projection", "exit_code != 0"),
+    ),
+    "health_result": (
+        _evaluated("dimensions", "metrics.health", "null iff the score is withheld"),
+        _evaluated("grade", "metrics.health", "null iff the score is withheld"),
+        _evaluated(
+            "health_algorithm_revision",
+            "contracts",
+            "the revision it was computed under",
+        ),
+        _evaluated(
+            "health_input_manifest_version",
+            "contracts",
+            "the input manifest it was computed under",
+        ),
+        _evaluated(
+            "population",
+            "contracts.observed_population",
+            "withholds the score for complete_empty / unmeasured",
+        ),
+        _evaluated("score", "metrics.health", "0..100, null iff withheld"),
+    ),
+    "hotlist_selection": (
+        _evaluated("finding_id", "report.document.derived", "the selected finding"),
+        _evaluated(
+            "hotlist",
+            "report.document.derived",
+            "key: the four derived.hotlists and the suggestions order",
+        ),
+        _evaluated("rank", "report.document.derived", "key: 1-based position"),
+    ),
+    "unit_risk_result": (
+        _evaluated(
+            "band", "metrics complexity / coupling / cohesion", "low/medium/high"
+        ),
+        _evaluated(
+            "dimension", "report.document.metrics", "key: complexity/coupling/cohesion"
+        ),
+        _evaluated("start_line", "report.document.metrics", "key: declaration site"),
+        _evaluated("symbol", "report.document.metrics", "key: the measured unit"),
+    ),
+}
+
+#: Evaluation families that are ONE record per evaluated run.
+EVALUATION_RECORD_FAMILIES: Final[frozenset[str]] = frozenset(
+    {"evaluation_contract", "evaluation_request", "gate_outcome", "health_result"}
+)
+
+
+def evaluation_stored_fields(family: str) -> tuple[str, ...]:
+    """The stored fields of one evaluation family, in sorted order."""
+    return tuple(
+        sorted(
+            declaration.field
+            for declaration in EVALUATION_FAMILY_FIELDS[family]
+            if declaration.stored
+        )
+    )
+
+
+# The evaluation registry gate, executed at import: every family is declared
+# under an evaluation production and carries no foreign-tier field.
+require_evaluation_families(
+    {family: evaluation_stored_fields(family) for family in EVALUATION_FAMILY_FIELDS}
+)
+
+
 # The comparison registry gate, executed at import beside the analysis wire
 # gate: every family is declared under a comparison production, carries no
 # foreign-tier field, and — for an annotation — shares no field with its
@@ -2493,11 +2666,18 @@ require_comparison_families(
         for family, declarations in COMPARISON_FAMILY_FIELDS.items()
     },
     {
-        family: tuple(
-            declaration.field
-            for declaration in declarations
-            if declaration.stored or declaration.wire
-        )
-        for family, declarations in FACT_FAMILY_FIELDS.items()
+        **{
+            family: tuple(
+                declaration.field
+                for declaration in declarations
+                if declaration.stored or declaration.wire
+            )
+            for family, declarations in FACT_FAMILY_FIELDS.items()
+        },
+        # Canonical epoch E3: the health delta annotates an evaluation family.
+        **{
+            family: evaluation_stored_fields(family)
+            for family in EVALUATION_FAMILY_FIELDS
+        },
     },
 )

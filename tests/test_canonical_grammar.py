@@ -41,6 +41,7 @@ from codeclone.canonical.grammar import (
     require_closed_vocabularies,
     require_comparison_families,
     require_declaration,
+    require_evaluation_families,
     require_house_families,
     require_tier_pure_fields,
     tier_of_family,
@@ -146,6 +147,19 @@ _EXPECTED_KINDS: dict[str, str] = {
     "disabled_capabilities": "disabled_capability",
     "lane_trust": "lane_trust",
     "metrics_baseline_witness": "baseline_witness",
+    # Canonical epoch E3 (2026-09-27): the evaluation tier under its five
+    # EXISTING productions — the realized contract, the request, the gate
+    # outcome, the health verdict (the run's and each unit's band), the
+    # verdicts (on each finding, the document's selections) — and the health
+    # delta, a comparison annotation of an evaluation family.
+    "evaluation_contract": "evaluation_contract",
+    "evaluation_request": "evaluation_request",
+    "finding_evaluation": "verdict",
+    "gate_outcome": "gate_outcome",
+    "health_delta": "delta_annotation",
+    "health_result": "health_result",
+    "hotlist_selection": "verdict",
+    "unit_risk_result": "health_result",
 }
 
 #: The subject each E2 annotation references — independent literal: the
@@ -159,6 +173,8 @@ _EXPECTED_SUBJECTS: dict[str, str] = {
     "coupling_novelty": "coupling_hotspots",
     "dead_symbol_novelty": "dead_symbol_groups",
     "dependency_cycle_novelty": "dependency_cycles",
+    # E3: the delta of the health score annotates the health verdict.
+    "health_delta": "health_result",
 }
 
 
@@ -427,9 +443,8 @@ def test_analysis_house_fields_are_analysis_tier_families() -> None:
 
 def test_the_comparison_house_is_the_comparison_registry() -> None:
     """Canonical epoch E2: the comparison house carries exactly the families
-    the comparison registry declares, every one of them comparison-tier; the
-    evaluation house stays born empty until its own tier lands."""
-    from codeclone.canonical.model import ComparisonFacts, EvaluationFacts
+    the comparison registry declares, every one of them comparison-tier."""
+    from codeclone.canonical.model import ComparisonFacts
     from codeclone.canonical.registry import COMPARISON_FAMILY_FIELDS
 
     field_names = tuple(
@@ -437,7 +452,19 @@ def test_the_comparison_house_is_the_comparison_registry() -> None:
     )
     assert sorted(field_names) == sorted(COMPARISON_FAMILY_FIELDS)
     require_house_families(COMPARISON_TIER, field_names)
-    assert dataclasses.fields(EvaluationFacts) == ()
+
+
+def test_the_evaluation_house_is_the_evaluation_registry() -> None:
+    """Canonical epoch E3: the evaluation house carries exactly the families
+    the evaluation registry declares, every one of them evaluation-tier."""
+    from codeclone.canonical.model import EvaluationFacts
+    from codeclone.canonical.registry import EVALUATION_FAMILY_FIELDS
+
+    field_names = tuple(
+        model_field.name for model_field in dataclasses.fields(EvaluationFacts)
+    )
+    assert sorted(field_names) == sorted(EVALUATION_FAMILY_FIELDS)
+    require_house_families(EVALUATION_TIER, field_names)
 
 
 def test_analysis_family_cannot_live_in_a_foreign_house() -> None:
@@ -581,7 +608,7 @@ def test_registry_source_executes_the_comparison_gate_at_import() -> None:
 
 
 def test_the_real_comparison_population_passes_the_gate() -> None:
-    """Witness that the instrument is on: 12 families, 60 stored fields.
+    """Witness that the instrument is on: 13 families, 64 stored fields.
 
     Canonical epoch E2 (2026-09-26): ``baseline_witness`` (9),
     ``metrics_baseline_witness`` (6), ``lane_trust`` (5),
@@ -589,20 +616,25 @@ def test_the_real_comparison_population_passes_the_gate() -> None:
     novelty families (5 each: the two identity columns, ``finding_id``,
     ``novelty``, ``novelty_reason``) and the two delta families of one shared
     row shape (4 each: the two identity columns, ``delta``, ``value``) =
-    9 + 6 + 5 + 4 + 3 + 25 + 8 = 60.  The declared-only columns (``trusted``,
-    ``compared_without_valid_baseline``, ``payload_sha256_verified``,
-    ``new_clones``) have no residence and are not counted.  None of these
-    families is a wire family: the wire population above is unchanged.
+    9 + 6 + 5 + 4 + 3 + 25 + 8 = 60.  Canonical epoch E3 adds the health
+    delta, a third family of the shared delta shape (+4 = 64).  The
+    declared-only columns (``trusted``, ``compared_without_valid_baseline``,
+    ``payload_sha256_verified``, ``new_clones``, ``baseline_diff_available``)
+    have no residence and are not counted.  None of these families is a wire
+    family: the wire population above is unchanged.
     """
     from codeclone.canonical.registry import FACT_FAMILY_FIELDS
 
     families = _comparison_field_names()
-    assert len(families) == 12
+    assert len(families) == 13
     assert (
-        sum(len(fields) for fields in families.values()) == 9 + 6 + 5 + 4 + 3 + 25 + 8
+        sum(len(fields) for fields in families.values())
+        == 9 + 6 + 5 + 4 + 3 + 25 + 8 + 4
     )
     assert not set(families) & set(FACT_FAMILY_FIELDS)
-    require_comparison_families(families, _wire_field_names())
+    require_comparison_families(
+        families, {**_wire_field_names(), **_evaluation_field_names()}
+    )
 
 
 def test_a_comparison_family_cannot_enter_the_analysis_wire() -> None:
@@ -643,11 +675,105 @@ def test_an_annotation_embedding_its_subject_is_refused() -> None:
         require_comparison_families(families, _wire_field_names())
 
 
+def test_an_annotation_embedding_its_evaluation_subject_is_refused() -> None:
+    """Canonical epoch E3: the disjointness guard reached through the first
+    annotation whose subject is an evaluation family — a health delta
+    carrying the verdict's own score is the embedded record."""
+    families = dict(_comparison_field_names())
+    families["health_delta"] = (*families["health_delta"], "score")
+    with pytest.raises(GrammarViolation, match=r"embeds fields \['score'\]"):
+        require_comparison_families(
+            families, {**_wire_field_names(), **_evaluation_field_names()}
+        )
+
+
 def test_a_dangling_comparison_declaration_is_refused() -> None:
     families = dict(_comparison_field_names())
     del families["lane_trust"]
     with pytest.raises(GrammarViolation, match="dangling declaration"):
         require_comparison_families(families, _wire_field_names())
+
+
+# ---------------------------------------------------------------------------
+# Canonical epoch E3: the evaluation registry gate.
+# ---------------------------------------------------------------------------
+
+
+def _evaluation_field_names() -> dict[str, tuple[str, ...]]:
+    from codeclone.canonical.registry import (
+        EVALUATION_FAMILY_FIELDS,
+        evaluation_stored_fields,
+    )
+
+    return {
+        family: evaluation_stored_fields(family) for family in EVALUATION_FAMILY_FIELDS
+    }
+
+
+def test_registry_source_executes_the_evaluation_gate_at_import() -> None:
+    tree = ast.parse(_REGISTRY_PATH.read_text("utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "require_evaluation_families"
+    ]
+    assert len(calls) == 1, "registry.py must execute the evaluation gate once"
+
+
+def test_the_real_evaluation_population_passes_the_gate() -> None:
+    """Witness that the instrument is on: 7 families, 33 stored fields.
+
+    ``evaluation_contract`` (8), ``evaluation_request`` (2),
+    ``finding_evaluation`` (5), ``gate_outcome`` (5), ``health_result`` (6),
+    ``hotlist_selection`` (3), ``unit_risk_result`` (4) = 33.  The
+    declared-only columns (``health_params_digest``, ``would_fail``) are not
+    counted, and no family is a wire or a comparison family.
+    """
+    from codeclone.canonical.registry import (
+        COMPARISON_FAMILY_FIELDS,
+        FACT_FAMILY_FIELDS,
+    )
+
+    families = _evaluation_field_names()
+    assert len(families) == 7
+    assert sum(len(fields) for fields in families.values()) == 8 + 2 + 5 + 5 + 6 + 3 + 4
+    assert not set(families) & (set(FACT_FAMILY_FIELDS) | set(COMPARISON_FAMILY_FIELDS))
+    require_evaluation_families(families)
+
+
+def test_a_comparison_field_on_an_evaluation_family_is_refused() -> None:
+    """``baseline_diff_available`` beside the health score is the comparison
+    fact embedded in the verdict — the shape the document itself carries,
+    refused in the store."""
+    families = dict(_evaluation_field_names())
+    families["health_result"] = (*families["health_result"], "baseline_diff_available")
+    with pytest.raises(
+        GrammarViolation, match=r"'baseline_diff_available'.*comparison"
+    ):
+        require_evaluation_families(families)
+
+
+def test_an_analysis_family_cannot_enter_the_evaluation_registry() -> None:
+    families = dict(_evaluation_field_names())
+    families["clone_groups"] = ("clone_kind",)
+    with pytest.raises(GrammarViolation, match="cannot live in the evaluation"):
+        require_evaluation_families(families)
+
+
+def test_an_undeclared_evaluation_family_is_refused() -> None:
+    families = dict(_evaluation_field_names())
+    families["ghost_verdict"] = ("rank",)
+    with pytest.raises(GrammarViolation, match="evaluation family 'ghost_verdict'"):
+        require_evaluation_families(families)
+
+
+def test_a_dangling_evaluation_declaration_is_refused() -> None:
+    families = dict(_evaluation_field_names())
+    del families["gate_outcome"]
+    with pytest.raises(GrammarViolation, match="'gate_outcome' is declared but absent"):
+        require_evaluation_families(families)
 
 
 # ---------------------------------------------------------------------------

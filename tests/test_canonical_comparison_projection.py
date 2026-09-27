@@ -251,11 +251,24 @@ def test_the_surface_states_api_deltas_for_an_api_comparison_that_did_not_run(
     assert all(isinstance(surface[term], int) for term in divergent)
 
 
+#: The two delta families the ``diff`` block's six deltas belong to.
+_DIFF_DELTA_FAMILIES = ("adoption_delta", "api_surface_delta")
+
+
 def test_the_delta_keys_are_the_delta_families_terms() -> None:
-    assert set(DIFF_DELTA_KEYS) == {
-        term for terms in DELTA_FAMILY_TERMS.values() for term in terms
+    terms = {
+        term for family in _DIFF_DELTA_FAMILIES for term in DELTA_FAMILY_TERMS[family]
     }
+    assert set(DIFF_DELTA_KEYS) == terms
     assert len(DIFF_DELTA_KEYS) == len(set(DIFF_DELTA_KEYS))
+
+
+def test_the_health_delta_is_the_one_term_outside_the_diff_deltas() -> None:
+    """The health term (canonical epoch E3, the delta of ``health_result``)
+    is the third delta family: it answers ``diff.health_delta`` beside the
+    health verdict, not among the six metric deltas."""
+    assert set(DELTA_FAMILY_TERMS) == {*_DIFF_DELTA_FAMILIES, "health_delta"}
+    assert set(DELTA_FAMILY_TERMS["health_delta"]) == set(UNPROJECTED_DIFF_KEYS)
 
 
 # -- C5.07: the PR summary's new findings --------------------------------------------

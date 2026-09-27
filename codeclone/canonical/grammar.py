@@ -71,7 +71,7 @@ analysis wire gate below still refuses them.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -165,7 +165,8 @@ class FamilyGrammar:
 
 
 #: The grammar declaration of every wave-1..4 wire family and, since
-#: canonical epoch E2, of every comparison family of the model and store.
+#: canonical epochs E2 and E3, of every comparison and evaluation family of
+#: the model and store.
 #: The tier of each family is derived from its production via
 #: :data:`SEMANTIC_KIND_TIERS`; there is deliberately no tier literal
 #: anywhere in this table.
@@ -237,6 +238,18 @@ FAMILY_SEMANTIC_GRAMMAR: Final[Mapping[str, FamilyGrammar]] = {
     "disabled_capabilities": FamilyGrammar("disabled_capability"),
     "lane_trust": FamilyGrammar("lane_trust"),
     "metrics_baseline_witness": FamilyGrammar("baseline_witness"),
+    # Canonical epoch E3 (2026-09-27): the evaluation tier, bound to the five
+    # existing productions, and the health delta — a comparison fact about an
+    # evaluation quantity, the first annotation whose subject is evaluation.
+    # Internal model and store state until the wire-revision bump.
+    "evaluation_contract": FamilyGrammar("evaluation_contract"),
+    "evaluation_request": FamilyGrammar("evaluation_request"),
+    "finding_evaluation": FamilyGrammar("verdict"),
+    "gate_outcome": FamilyGrammar("gate_outcome"),
+    "health_delta": FamilyGrammar("delta_annotation", subject_family="health_result"),
+    "health_result": FamilyGrammar("health_result"),
+    "hotlist_selection": FamilyGrammar("verdict"),
+    "unit_risk_result": FamilyGrammar("health_result"),
 }
 
 
@@ -390,6 +403,47 @@ def require_analysis_wire_families(
             )
 
 
+def _require_registry_families(
+    tier: str,
+    families: Mapping[str, Iterable[str]],
+    declarations: Mapping[str, FamilyGrammar],
+) -> Iterator[tuple[str, FamilyGrammar, tuple[str, ...]]]:
+    """The checks every non-wire tier registry shares, family by family in
+    name order: a declaration exists, its derived tier is the registry's, and
+    no field spells another tier.  Yields each admitted family for the
+    registry's own further checks."""
+    for family in sorted(families):
+        declaration = declarations.get(family)
+        if declaration is None:
+            raise GrammarViolation(
+                f"{tier} family {family!r} has no grammar declaration"
+            )
+        family_tier = require_declaration(family, declaration, declarations)
+        if family_tier != tier:
+            raise GrammarViolation(
+                f"family {family!r} is {family_tier}-tier "
+                f"({declaration.semantic_kind}) and cannot live in the "
+                f"{tier} registry"
+            )
+        fields = tuple(families[family])
+        require_tier_pure_fields(family, family_tier, fields)
+        yield family, declaration, fields
+
+
+def _require_no_dangling(
+    tier: str,
+    families: Mapping[str, Iterable[str]],
+    declarations: Mapping[str, FamilyGrammar],
+) -> None:
+    for family in sorted(declarations):
+        if tier_of_family(family, declarations) == tier and family not in families:
+            raise GrammarViolation(
+                f"{tier}-tier family {family!r} is declared but absent "
+                f"from the {tier} registry: a dangling declaration is "
+                f"narration"
+            )
+
+
 def require_comparison_families(
     families: Mapping[str, Iterable[str]],
     subject_fields: Mapping[str, Iterable[str]],
@@ -398,50 +452,54 @@ def require_comparison_families(
     """The comparison-tier registry gate (canonical epoch E2).
 
     ``families`` maps each comparison family to its stored field names;
-    ``subject_fields`` maps each analysis family to ITS stored and wire field
-    names.  Refused, in deterministic order: a family without a grammar
-    declaration; a family whose derived tier is not comparison; a field
-    whose morphology spells another tier; an annotation whose payload shares
-    a field with its subject's (the annotation references its subject and
-    never embeds it); and a comparison-tier declaration no registry family
-    answers (a dangling declaration is narration).
+    ``subject_fields`` maps each family an annotation may annotate — the
+    analysis families and, since canonical epoch E3, the evaluation families —
+    to ITS stored field names.  Refused, in deterministic order: a family
+    without a grammar declaration; a family whose derived tier is not
+    comparison; a field whose morphology spells another tier; an annotation
+    whose payload shares a field with its subject's (the annotation
+    references its subject and never embeds it); and a comparison-tier
+    declaration no registry family answers (a dangling declaration is
+    narration).
     """
-    for family in sorted(families):
-        declaration = declarations.get(family)
-        if declaration is None:
+    for family, declaration, fields in _require_registry_families(
+        COMPARISON_TIER, families, declarations
+    ):
+        if declaration.subject_family is None:
+            continue
+        embedded = sorted(
+            set(fields) & set(subject_fields.get(declaration.subject_family, ()))
+        )
+        if embedded:
             raise GrammarViolation(
-                f"comparison family {family!r} has no grammar declaration"
+                f"annotation family {family!r} embeds fields "
+                f"{embedded!r} of its subject "
+                f"{declaration.subject_family!r}: an annotation references "
+                f"its subject, it never carries it"
             )
-        tier = require_declaration(family, declaration, declarations)
-        if tier != COMPARISON_TIER:
-            raise GrammarViolation(
-                f"family {family!r} is {tier}-tier "
-                f"({declaration.semantic_kind}) and cannot live in the "
-                f"comparison registry"
-            )
-        fields = tuple(families[family])
-        require_tier_pure_fields(family, tier, fields)
-        if declaration.subject_family is not None:
-            embedded = sorted(
-                set(fields) & set(subject_fields.get(declaration.subject_family, ()))
-            )
-            if embedded:
-                raise GrammarViolation(
-                    f"annotation family {family!r} embeds fields "
-                    f"{embedded!r} of its subject "
-                    f"{declaration.subject_family!r}: an annotation references "
-                    f"its subject, it never carries it"
-                )
-    for family in sorted(declarations):
-        if (
-            tier_of_family(family, declarations) == COMPARISON_TIER
-            and family not in families
-        ):
-            raise GrammarViolation(
-                f"comparison-tier family {family!r} is declared but absent "
-                f"from the comparison registry: a dangling declaration is "
-                f"narration"
-            )
+    _require_no_dangling(COMPARISON_TIER, families, declarations)
+
+
+def require_evaluation_families(
+    families: Mapping[str, Iterable[str]],
+    declarations: Mapping[str, FamilyGrammar] = FAMILY_SEMANTIC_GRAMMAR,
+) -> None:
+    """The evaluation-tier registry gate (canonical epoch E3).
+
+    ``families`` maps each evaluation family to its stored field names.
+    Refused, in deterministic order: a family without a grammar declaration;
+    a family whose derived tier is not evaluation; a field whose morphology
+    spells another tier (a ``baseline_*`` or ``*_delta`` column on a verdict
+    row is the comparison fact embedded in it); and an evaluation-tier
+    declaration no registry family answers.  No evaluation production is an
+    annotation (``ANNOTATION_KINDS`` are comparison productions), so there is
+    no subject to check.
+    """
+    for _admitted in _require_registry_families(
+        EVALUATION_TIER, families, declarations
+    ):
+        continue
+    _require_no_dangling(EVALUATION_TIER, families, declarations)
 
 
 def require_house_families(

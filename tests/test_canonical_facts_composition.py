@@ -25,11 +25,11 @@ shape of composition:
 * every registry wire family lives in ``AnalysisFacts`` (``file_modules``
   deliberately excepted: the FILE-MODULE relation rides the model, a table
   and never a column, §2.3);
-* the evaluation house is BORN EMPTY — the current, legitimate state under
-  the ratified grammar.  The comparison house received its first families
-  in canonical epoch E2 (2026-09-26), a declared transition: they are model
-  and store state only, the wire gains nothing until its own revision bump,
-  and every one of them is a comparison-registry family (pinned below).
+* the comparison house received its first families in canonical epoch E2
+  (2026-09-26) and the evaluation house in canonical epoch E3 (2026-09-27),
+  two declared transitions: they are model and store state only, the wire
+  gains nothing until its own revision bump, and every family of each house
+  is a family of that tier's registry (pinned below).
 """
 
 from __future__ import annotations
@@ -123,10 +123,19 @@ def test_every_comparison_registry_family_lives_in_the_comparison_house() -> Non
     assert not comparison_fields & set(wire_fact_family_order())
 
 
-def test_the_evaluation_house_is_born_empty() -> None:
-    """Zero families is the CURRENT ratified state of the evaluation house,
-    not an omission: its first resident arrives with its own tier."""
-    assert dataclasses.fields(EvaluationFacts) == ()
+def test_every_evaluation_registry_family_lives_in_the_evaluation_house() -> None:
+    """Canonical epoch E3: the evaluation house and the evaluation registry
+    are one population, in both directions, and none of it is a wire family
+    or a comparison family."""
+    from codeclone.canonical.registry import (
+        COMPARISON_FAMILY_FIELDS,
+        EVALUATION_FAMILY_FIELDS,
+    )
+
+    evaluation_fields = {field.name for field in dataclasses.fields(EvaluationFacts)}
+    assert evaluation_fields == set(EVALUATION_FAMILY_FIELDS)
+    assert not evaluation_fields & set(wire_fact_family_order())
+    assert not evaluation_fields & set(COMPARISON_FAMILY_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +162,7 @@ def test_the_evaluation_house_is_born_empty() -> None:
 #: compared for equality below, so the rule cannot be dodged by moving a row
 #: into this list: growing it is a visible, reviewable edit.
 _CONTAINER_TYPES = frozenset(
-    {AnalysisFacts, CanonicalFacts, CanonicalModel, ComparisonFacts}
+    {AnalysisFacts, CanonicalFacts, CanonicalModel, ComparisonFacts, EvaluationFacts}
 )
 
 #: Floor on the enumerated row population. An enumeration that silently

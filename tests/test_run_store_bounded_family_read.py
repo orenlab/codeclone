@@ -72,7 +72,7 @@ from codeclone.canonical.store import (
     RunStore,
     StoredFamily,
 )
-from tests.test_canonical_roundtrip import comparison_fixture_model, fixture_model
+from tests.test_canonical_roundtrip import evaluated_fixture_model, fixture_model
 from tests.test_run_store_construction_intent import run_store_constructions
 
 _NS: Final = "bounded-read"
@@ -163,8 +163,8 @@ def test_every_declared_family_is_readable_and_equals_the_whole_model_path(
     )
 
     with RunStore(tmp_path / "runs.sqlite") as store:
-        # The comparison fixture: every family of both tiers is non-empty.
-        run_id = _publish(store, comparison_fixture_model())
+        # The evaluated fixture: every family of the three tiers is non-empty.
+        run_id = _publish(store, evaluated_fixture_model())
         whole = store.read_run(run_id)
         for entry in store_module._FAMILIES:
             bounded = _read_any_family(store, run_id, entry)
@@ -637,6 +637,18 @@ _MODEL_ACCESSORS: Final[dict[str, Callable[[CanonicalModel], frozenset[object]]]
     "dependency_cycle_novelty": lambda m: m.facts.comparison.dependency_cycle_novelty,
     "adoption_delta": lambda m: m.facts.comparison.adoption_delta,
     "api_surface_delta": lambda m: m.facts.comparison.api_surface_delta,
+    # Canonical epoch E3 (2026-09-27): the health delta, and the evaluation
+    # house — four record families among the seven.
+    "health_delta": lambda m: m.facts.comparison.health_delta,
+    "evaluation_contract": (
+        lambda m: _optional(m.facts.evaluation.evaluation_contract)
+    ),
+    "evaluation_request": lambda m: _optional(m.facts.evaluation.evaluation_request),
+    "gate_outcome": lambda m: _optional(m.facts.evaluation.gate_outcome),
+    "health_result": lambda m: _optional(m.facts.evaluation.health_result),
+    "unit_risk_result": lambda m: m.facts.evaluation.unit_risk_result,
+    "finding_evaluation": lambda m: m.facts.evaluation.finding_evaluation,
+    "hotlist_selection": lambda m: m.facts.evaluation.hotlist_selection,
 }
 
 

@@ -129,6 +129,15 @@ from codeclone.canonical.errors import (
     StoreUnavailableError,
     UnknownRunError,
 )
+from codeclone.canonical.evaluation_rows import (
+    EvaluationContractRecord,
+    EvaluationRequestRecord,
+    FindingEvaluationRow,
+    GateOutcomeRecord,
+    HealthResultRecord,
+    HotlistRow,
+    UnitRiskRow,
+)
 from codeclone.canonical.export import (
     ByteSink,
     ExportEnvelope,
@@ -184,6 +193,7 @@ from codeclone.canonical.model import (
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
+    EvaluationFacts,
     FileModuleRelation,
     GraphNodeRow,
     ImportObservationRow,
@@ -210,6 +220,10 @@ from codeclone.contracts import (
     CONTRACT_IR_VERSION,
     DESIGN_METRICS_ALGORITHM_REVISION,
     FUNCTION_RELATIONSHIP_ALGORITHM_REVISION,
+    GATE_ALGORITHM_REVISION,
+    GATE_LANE_MATRIX_VERSION,
+    HEALTH_ALGORITHM_REVISION,
+    HEALTH_INPUT_MANIFEST_VERSION,
     LIVENESS_POLICY_VERSION,
     METRICS_BASELINE_SCHEMA_VERSION,
     MODULE_IDENTITY_VERSION,
@@ -857,6 +871,7 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
         )
     yield from _observation_model_rows(facts)
     yield from _comparison_model_rows(model.facts.comparison)
+    yield from _evaluation_model_rows(model.facts.evaluation)
 
 
 def _observation_model_rows(
@@ -1261,9 +1276,64 @@ def _comparison_result_rows(
     for family, deltas in (
         ("adoption_delta", comparison.adoption_delta),
         ("api_surface_delta", comparison.api_surface_delta),
+        ("health_delta", comparison.health_delta),
     ):
         for delta in sorted(deltas, key=lambda row: row.delta):
             yield family, dict(sorted(asdict(delta).items()))
+
+
+def _evaluation_model_rows(
+    evaluation: EvaluationFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """Storage rows of the evaluation house (canonical epoch E3).
+
+    Every record and row is stored whole: a verdict is what the run concluded
+    under ITS request, and the request digest the records carry keeps two
+    policies' verdicts apart.  Row order is the same insurance as everywhere
+    in this walk; the content address owns determinism.
+    """
+    for family, record in (
+        ("evaluation_contract", evaluation.evaluation_contract),
+        ("evaluation_request", evaluation.evaluation_request),
+        ("gate_outcome", evaluation.gate_outcome),
+        ("health_result", evaluation.health_result),
+    ):
+        if record is not None:
+            yield family, _storage_form(asdict(record))
+    for verdict in sorted(
+        evaluation.finding_evaluation, key=lambda row: row.finding_id
+    ):
+        yield "finding_evaluation", _storage_form(asdict(verdict))
+    for unit in sorted(
+        evaluation.unit_risk_result,
+        key=lambda row: (row.dimension, canonical_key(row.symbol), row.start_line),
+    ):
+        yield (
+            "unit_risk_result",
+            {
+                "band": unit.band,
+                "dimension": unit.dimension,
+                "start_line": unit.start_line,
+                "symbol": _symbol_value(unit.symbol),
+            },
+        )
+    for selected in sorted(
+        evaluation.hotlist_selection, key=lambda row: (row.hotlist, row.rank)
+    ):
+        yield "hotlist_selection", _storage_form(asdict(selected))
+
+
+def _storage_form(fields: Mapping[str, object]) -> dict[str, object]:
+    """A record's storage row: its fields in name order, every tuple as the
+    JSON array it is stored and read back as — so the row this walk yields
+    is the row the decoder reads, not a look-alike."""
+    return {name: _listed(value) for name, value in sorted(fields.items())}
+
+
+def _listed(value: object) -> object:
+    if isinstance(value, tuple):
+        return [_listed(item) for item in value]
+    return value
 
 
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
@@ -1298,7 +1368,10 @@ def _require_str(row: Mapping[str, object], key: str, where: str) -> str:
 
 
 def _require_str_list(row: Mapping[str, object], key: str, where: str) -> list[str]:
-    values = _require_field(row, key, where)
+    return _decode_str_list(_require_field(row, key, where), key, where)
+
+
+def _decode_str_list(values: object, key: str, where: str) -> list[str]:
     if not isinstance(values, list):
         raise StoreIntegrityError(f"{where}: stored field {key!r} is not an array")
     items: list[str] = []
@@ -2038,6 +2111,153 @@ def _decode_metric_delta_row(row: Mapping[str, object], where: str) -> MetricDel
     )
 
 
+def _require_optional_int(
+    row: Mapping[str, object], key: str, where: str
+) -> int | None:
+    value = _require_field(row, key, where)
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+        raise StoreIntegrityError(
+            f"{where}: stored field {key!r} is neither an int nor null"
+        )
+    return value
+
+
+def _decode_request_terms(value: object, where: str) -> tuple[tuple[str, int], ...]:
+    """Request terms: every value an int or a boolean (``bool`` is an ``int``
+    here; the record's own law holds each term to its declared type)."""
+    terms: list[tuple[str, int]] = []
+    for name, term in _decode_stored_pairs(value, where):
+        if not isinstance(term, int):
+            raise StoreIntegrityError(f"{where}: stored term {name!r} is not an int")
+        terms.append((name, term))
+    return tuple(terms)
+
+
+def _decode_numeric_pairs(
+    value: object, where: str
+) -> tuple[tuple[str, int | float], ...]:
+    pairs: list[tuple[str, int | float]] = []
+    for name, number in _decode_stored_pairs(value, where):
+        if isinstance(number, bool) or not isinstance(number, (int, float)):
+            raise StoreIntegrityError(
+                f"{where}: stored value of {name!r} is not a number"
+            )
+        pairs.append((name, number))
+    return tuple(pairs)
+
+
+def _decode_gate_requirements(
+    value: object, where: str
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    return tuple(
+        (gate, tuple(_decode_str_list(lanes, f"lanes of {gate}", where)))
+        for gate, lanes in _decode_stored_pairs(value, where)
+    )
+
+
+def _decode_evaluation_request_row(
+    row: Mapping[str, object], where: str
+) -> EvaluationRequestRecord:
+    return EvaluationRequestRecord(
+        gate_thresholds_digest=_require_str(row, "gate_thresholds_digest", where),
+        terms=_decode_request_terms(_require_field(row, "terms", where), where),
+    )
+
+
+def _decode_evaluation_contract_row(
+    row: Mapping[str, object], where: str
+) -> EvaluationContractRecord:
+    return EvaluationContractRecord(
+        gate_thresholds_digest=_require_str(row, "gate_thresholds_digest", where),
+        health_algorithm_revision=_require_str(row, "health_algorithm_revision", where),
+        gate_algorithm_revision=_require_str(row, "gate_algorithm_revision", where),
+        gate_lane_matrix_version=_require_str(row, "gate_lane_matrix_version", where),
+        health_input_manifest_version=_require_str(
+            row, "health_input_manifest_version", where
+        ),
+        health_input_lanes=tuple(_require_str_list(row, "health_input_lanes", where)),
+        active_gate_lane_requirements=_decode_gate_requirements(
+            _require_field(row, "active_gate_lane_requirements", where), where
+        ),
+        health_params=_decode_numeric_pairs(
+            _require_field(row, "health_params", where), where
+        ),
+    )
+
+
+def _decode_gate_outcome_row(
+    row: Mapping[str, object], where: str
+) -> GateOutcomeRecord:
+    return GateOutcomeRecord(
+        gate_thresholds_digest=_require_str(row, "gate_thresholds_digest", where),
+        exit_code=_require_int(row, "exit_code", where),
+        reasons=tuple(_require_str_list(row, "reasons", where)),
+        required_lanes=tuple(_require_str_list(row, "required_lanes", where)),
+        unavailable_lanes=tuple(_require_str_list(row, "unavailable_lanes", where)),
+    )
+
+
+def _decode_health_dimensions(
+    value: object, where: str
+) -> tuple[tuple[str, int], ...] | None:
+    if value is None:
+        return None
+    dimensions: list[tuple[str, int]] = []
+    for name, score in _decode_numeric_pairs(value, where):
+        if not isinstance(score, int):
+            raise StoreIntegrityError(
+                f"{where}: stored dimension {name!r} is not an int"
+            )
+        dimensions.append((name, score))
+    return tuple(dimensions)
+
+
+def _decode_health_result_row(
+    row: Mapping[str, object], where: str
+) -> HealthResultRecord:
+    return HealthResultRecord(
+        score=_require_optional_int(row, "score", where),
+        grade=_require_optional_str(row, "grade", where),
+        dimensions=_decode_health_dimensions(
+            _require_field(row, "dimensions", where), where
+        ),
+        population=_require_str(row, "population", where),
+        health_algorithm_revision=_require_str(row, "health_algorithm_revision", where),
+        health_input_manifest_version=_require_str(
+            row, "health_input_manifest_version", where
+        ),
+    )
+
+
+def _decode_unit_risk_row(row: Mapping[str, object], where: str) -> UnitRiskRow:
+    return UnitRiskRow(
+        dimension=_require_str(row, "dimension", where),
+        symbol=_row_symbol(row, "symbol", where),
+        start_line=_require_line(row, "start_line", where),
+        band=_require_str(row, "band", where),
+    )
+
+
+def _decode_finding_evaluation_row(
+    row: Mapping[str, object], where: str
+) -> FindingEvaluationRow:
+    return FindingEvaluationRow(
+        finding_id=_require_str(row, "finding_id", where),
+        severity=_require_str(row, "severity", where),
+        confidence=_require_str(row, "confidence", where),
+        priority=_require_float(row, "priority", where),
+        clone_type=_require_optional_str(row, "clone_type", where),
+    )
+
+
+def _decode_hotlist_row(row: Mapping[str, object], where: str) -> HotlistRow:
+    return HotlistRow(
+        hotlist=_require_str(row, "hotlist", where),
+        rank=_require_int(row, "rank", where),
+        finding_id=_require_str(row, "finding_id", where),
+    )
+
+
 class _FamilyEntry(Protocol):
     """The registry's erased face — what a caller still needs from an entry
     once the row type has done its work at declaration time."""
@@ -2485,6 +2705,79 @@ FAMILY_API_SURFACE_DELTA: Final = StoredFamily(
     row_type=MetricDeltaRow,
 )
 
+FAMILY_HEALTH_DELTA: Final = StoredFamily(
+    family="health_delta",
+    namespace=(
+        f"{_METRICS_BASELINE_NAMESPACE}:health_algorithm:{HEALTH_ALGORITHM_REVISION}"
+        f":health_input_manifest:{HEALTH_INPUT_MANIFEST_VERSION}"
+    ),
+    decode=_decode_metric_delta_row,
+    row_type=MetricDeltaRow,
+)
+
+# Canonical epoch E3 (2026-09-27): the evaluation tier.  The request, the
+# outcome and the contract take the gate algorithm and its lane matrix; the
+# health verdict takes the health algorithm and its input manifest; a band
+# takes the health namespace AND the revision that measured its unit (the
+# subject rule of the comparison families).  The verdict on a finding and the
+# document's selections have no revision of their own and take the
+# canonical-model namespace (the A4 precedent).  The band EDGES have no version
+# constant at all — the realized health parameters on the contract row are the
+# only dating a band carries.
+_GATE_NAMESPACE: Final = (
+    f"gate_algorithm:{GATE_ALGORITHM_REVISION}"
+    f":gate_lane_matrix:{GATE_LANE_MATRIX_VERSION}"
+)
+_HEALTH_NAMESPACE: Final = (
+    f"health_algorithm:{HEALTH_ALGORITHM_REVISION}"
+    f":health_input_manifest:{HEALTH_INPUT_MANIFEST_VERSION}"
+)
+FAMILY_EVALUATION_CONTRACT: Final = StoredFamily(
+    family="evaluation_contract",
+    namespace=f"{_GATE_NAMESPACE}:{_HEALTH_NAMESPACE}",
+    decode=_decode_evaluation_contract_row,
+    row_type=EvaluationContractRecord,
+)
+FAMILY_EVALUATION_REQUEST: Final = StoredFamily(
+    family="evaluation_request",
+    namespace=_GATE_NAMESPACE,
+    decode=_decode_evaluation_request_row,
+    row_type=EvaluationRequestRecord,
+)
+FAMILY_GATE_OUTCOME: Final = StoredFamily(
+    family="gate_outcome",
+    namespace=_GATE_NAMESPACE,
+    decode=_decode_gate_outcome_row,
+    row_type=GateOutcomeRecord,
+)
+FAMILY_HEALTH_RESULT: Final = StoredFamily(
+    family="health_result",
+    namespace=_HEALTH_NAMESPACE,
+    decode=_decode_health_result_row,
+    row_type=HealthResultRecord,
+)
+FAMILY_UNIT_RISK_RESULT: Final = StoredFamily(
+    family="unit_risk_result",
+    namespace=(
+        f"{_HEALTH_NAMESPACE}:complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}"
+        f":design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
+    ),
+    decode=_decode_unit_risk_row,
+    row_type=UnitRiskRow,
+)
+FAMILY_FINDING_EVALUATION: Final = StoredFamily(
+    family="finding_evaluation",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_finding_evaluation_row,
+    row_type=FindingEvaluationRow,
+)
+FAMILY_HOTLIST_SELECTION: Final = StoredFamily(
+    family="hotlist_selection",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
+    decode=_decode_hotlist_row,
+    row_type=HotlistRow,
+)
+
 _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_ADOPTION_COUNT,
     FAMILY_ANALYSIS_POPULATION,
@@ -2535,6 +2828,14 @@ _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_ADOPTION_DELTA,
     FAMILY_API_SURFACE_DELTA,
+    FAMILY_HEALTH_DELTA,
+    FAMILY_EVALUATION_CONTRACT,
+    FAMILY_EVALUATION_REQUEST,
+    FAMILY_GATE_OUTCOME,
+    FAMILY_HEALTH_RESULT,
+    FAMILY_UNIT_RISK_RESULT,
+    FAMILY_FINDING_EVALUATION,
+    FAMILY_HOTLIST_SELECTION,
 )
 
 # Derived, never restated: the reader dispatch and the content address read
@@ -2641,6 +2942,7 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 dead_code_summary=_single_record(FAMILY_DEAD_CODE_SUMMARY, collected),
             ),
             comparison=_collected_comparison(collected),
+            evaluation=_collected_evaluation(collected),
         ),
         coupled_sets=frozenset(FAMILY_COUPLED_SET.rows(collected)),
     )
@@ -2667,6 +2969,20 @@ def _collected_comparison(collected: Mapping[str, list[object]]) -> ComparisonFa
         dead_symbol_novelty=frozenset(FAMILY_DEAD_SYMBOL_NOVELTY.rows(collected)),
         adoption_delta=frozenset(FAMILY_ADOPTION_DELTA.rows(collected)),
         api_surface_delta=frozenset(FAMILY_API_SURFACE_DELTA.rows(collected)),
+        health_delta=frozenset(FAMILY_HEALTH_DELTA.rows(collected)),
+    )
+
+
+def _collected_evaluation(collected: Mapping[str, list[object]]) -> EvaluationFacts:
+    """Assemble the evaluation house from decoded rows (canonical epoch E3)."""
+    return EvaluationFacts(
+        evaluation_contract=_single_record(FAMILY_EVALUATION_CONTRACT, collected),
+        evaluation_request=_single_record(FAMILY_EVALUATION_REQUEST, collected),
+        gate_outcome=_single_record(FAMILY_GATE_OUTCOME, collected),
+        health_result=_single_record(FAMILY_HEALTH_RESULT, collected),
+        finding_evaluation=frozenset(FAMILY_FINDING_EVALUATION.rows(collected)),
+        unit_risk_result=frozenset(FAMILY_UNIT_RISK_RESULT.rows(collected)),
+        hotlist_selection=frozenset(FAMILY_HOTLIST_SELECTION.rows(collected)),
     )
 
 
@@ -4862,9 +5178,16 @@ __all__ = [
     "FAMILY_DEPENDENCY_OCCURRENCE",
     "FAMILY_DEPENDENCY_RELATION",
     "FAMILY_DISABLED_CAPABILITY",
+    "FAMILY_EVALUATION_CONTRACT",
+    "FAMILY_EVALUATION_REQUEST",
     "FAMILY_FILE",
     "FAMILY_FILE_MODULE",
+    "FAMILY_FINDING_EVALUATION",
+    "FAMILY_GATE_OUTCOME",
     "FAMILY_GRAPH_NODE",
+    "FAMILY_HEALTH_DELTA",
+    "FAMILY_HEALTH_RESULT",
+    "FAMILY_HOTLIST_SELECTION",
     "FAMILY_IMPORT_OBSERVATION",
     "FAMILY_LANE_TRUST",
     "FAMILY_METRICS_BASELINE_WITNESS",
@@ -4878,6 +5201,7 @@ __all__ = [
     "FAMILY_SINK_ROLE",
     "FAMILY_STRUCTURAL_GROUP",
     "FAMILY_SUPPRESSED_CLONE_GROUP",
+    "FAMILY_UNIT_RISK_RESULT",
     "FAMILY_UNIT_SPAN",
     "FAMILY_UNREACHABLE_STATEMENT_GROUP",
     "FAMILY_VIOLATION",

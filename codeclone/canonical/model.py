@@ -56,9 +56,9 @@ The fact container is a three-house composition (ruling 2026-08-24 §4,
 variant v): :class:`CanonicalFacts` is the pure composition root over
 :class:`AnalysisFacts` (the wire's ``facts`` record tables),
 :class:`ComparisonFacts` (canonical epoch E2: internal model and store state
-until the wire-revision bump) and :class:`EvaluationFacts` (born empty under
-the ratified grammar); :class:`CanonicalModel` adds the identity domains, the
-scope, and the standalone value sets.
+until the wire-revision bump) and :class:`EvaluationFacts` (canonical epoch
+E3: the same, for the evaluation tier); :class:`CanonicalModel` adds the
+identity domains, the scope, and the standalone value sets.
 """
 
 from __future__ import annotations
@@ -89,6 +89,7 @@ from codeclone.canonical.comparison_rows import (
     CLONE_NOVELTY_LANES,
     COMPARED_LANES,
     DELTA_FAMILY_TERMS,
+    LANE_TRUSTED,
     NOVELTY_FAMILY_ID_PREFIXES,
     NOVELTY_UNAVAILABLE,
     OBSERVATION_LANES,
@@ -102,6 +103,16 @@ from codeclone.canonical.comparison_rows import (
     baseline_identity,
 )
 from codeclone.canonical.errors import CanonicalModelError
+from codeclone.canonical.evaluation_rows import (
+    HEALTH_INPUT_LANES,
+    EvaluationContractRecord,
+    EvaluationRequestRecord,
+    FindingEvaluationRow,
+    GateOutcomeRecord,
+    HealthResultRecord,
+    HotlistRow,
+    UnitRiskRow,
+)
 from codeclone.canonical.identity import (
     ADOPTION_FEATURES,
     API_PARAMETER_KINDS,
@@ -1344,17 +1355,42 @@ class ComparisonFacts:
     dead_symbol_novelty: frozenset[FindingNoveltyRow] = field(default_factory=frozenset)
     adoption_delta: frozenset[MetricDeltaRow] = field(default_factory=frozenset)
     api_surface_delta: frozenset[MetricDeltaRow] = field(default_factory=frozenset)
+    # Canonical epoch E3: the health score's delta, an annotation of the
+    # evaluation house's ``health_result`` (proved in ``_normalized``).
+    health_delta: frozenset[MetricDeltaRow] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
 class EvaluationFacts:
-    """The evaluation-tier fact house — born empty, and legitimately so.
+    """The evaluation-tier fact house: what this run concluded under the
+    evaluation it was given.
 
-    The ratified §4 grammar names its future residents: evaluation contract
-    revisions, the evaluation request, health results, gate inputs and
-    outcomes, verdict/refusal facts.  Zero families is the CURRENT state
-    for the same four-state reason as :class:`ComparisonFacts`.
+    Canonical epoch E3 (2026-09-27, the E2 ruling applied to the next tier):
+    the residents the ratified §4 grammar names — the realized evaluation
+    contract, the request, the gate outcome, the health verdict, the band of
+    every measured unit, the verdict on every finding and the document's
+    selections — are carried here and stored as rows, and NOT emitted: the
+    wire of this revision carries no evaluation section.  A model decoded
+    from the wire carries this house EMPTY, which reads "not witnessed by this
+    artifact" — the three evaluation records are ``None`` and the model
+    refuses every other evaluation row without them — never "evaluated,
+    nothing concluded".
+
+    The four records are one per evaluated run (``None`` is the typed
+    absence; ``health_result`` is absent exactly when the metrics never ran);
+    the rest are keyed row sets.  The laws binding them are proved on every
+    normalization (:func:`_prove_evaluation_facts`).
     """
+
+    evaluation_contract: EvaluationContractRecord | None = None
+    evaluation_request: EvaluationRequestRecord | None = None
+    gate_outcome: GateOutcomeRecord | None = None
+    health_result: HealthResultRecord | None = None
+    finding_evaluation: frozenset[FindingEvaluationRow] = field(
+        default_factory=frozenset
+    )
+    unit_risk_result: frozenset[UnitRiskRow] = field(default_factory=frozenset)
+    hotlist_selection: frozenset[HotlistRow] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1996,6 +2032,7 @@ def _compared_rows(comparison: ComparisonFacts) -> Iterable[_ComparedRow]:
         comparison.disabled_capabilities,
         comparison.adoption_delta,
         comparison.api_surface_delta,
+        comparison.health_delta,
         *(rows for _family, rows in novelty_families(comparison)),
     )
     return rows
@@ -2021,6 +2058,7 @@ def _prove_comparison_keys(comparison: ComparisonFacts) -> None:
     _unique_by_key(
         comparison.api_surface_delta, "api_surface_delta.delta", lambda row: row.delta
     )
+    _unique_by_key(comparison.health_delta, "health_delta.delta", lambda row: row.delta)
     # Five call sites rather than a loop, for the reason the E1 site-keyed
     # families give: the roundtrip pin reads every ``_unique_by_key`` site
     # off the house by name.
@@ -2131,6 +2169,7 @@ def _prove_comparison_results(comparison: ComparisonFacts) -> None:
         row.lane: row.availability for row in comparison.comparison_availability
     }
     _prove_delta_families(comparison, availability)
+    _prove_health_delta(comparison)
     _prove_clone_verdicts(comparison, availability)
 
 
@@ -2153,6 +2192,33 @@ def _prove_delta_families(
                 f"{family} states {sorted(terms)!r}, not exactly its terms "
                 f"{list(DELTA_FAMILY_TERMS[family])!r}"
             )
+
+
+def _prove_health_delta(comparison: ComparisonFacts) -> None:
+    """The health delta (canonical epoch E3) states exactly its one term, and
+    only when no health input lane the container was assessed for is
+    untrusted: a delta against a lane the comparison could not vouch for
+    compares the run with nothing.  A health input lane the run did not
+    enable is not trust-assessed and does not refuse the delta — the
+    document states it that way (the enrichment reads the container's trust
+    vector), and the store states what the document states."""
+    terms = {row.delta for row in comparison.health_delta}
+    if not terms:
+        return
+    if terms != set(DELTA_FAMILY_TERMS["health_delta"]):
+        raise CanonicalModelError(
+            f"health_delta states {sorted(terms)!r}, not exactly its term"
+        )
+    untrusted = sorted(
+        row.lane
+        for row in comparison.lane_trust
+        if row.lane in HEALTH_INPUT_LANES and row.status != LANE_TRUSTED
+    )
+    if untrusted:
+        raise CanonicalModelError(
+            f"a health delta is stated while the health input lanes "
+            f"{untrusted!r} are untrusted"
+        )
 
 
 def _prove_clone_verdicts(
@@ -2181,6 +2247,125 @@ def _prove_comparison_facts(comparison: ComparisonFacts) -> None:
     _prove_comparison_results(comparison)
 
 
+def _prove_evaluation_keys(evaluation: EvaluationFacts) -> None:
+    """Stage 2 for the evaluation house: one verdict per finding, one band
+    per measured unit, one finding per rank and one rank per finding of each
+    selection."""
+    _unique_by_key(
+        evaluation.finding_evaluation,
+        "finding_evaluation.id",
+        lambda row: row.finding_id,
+    )
+    _unique_by_key(
+        evaluation.unit_risk_result,
+        "unit_risk_result.key",
+        lambda row: (row.dimension, canonical_key(row.symbol), row.start_line),
+    )
+    _unique_by_key(
+        evaluation.hotlist_selection,
+        "hotlist_selection.rank",
+        lambda row: (row.hotlist, row.rank),
+    )
+    _unique_by_key(
+        evaluation.hotlist_selection,
+        "hotlist_selection.id",
+        lambda row: (row.hotlist, row.finding_id),
+    )
+
+
+def _prove_one_request(evaluation: EvaluationFacts) -> None:
+    """The evaluation is witnessed whole or not at all, and one run is
+    evaluated under ONE request.
+
+    The contract, the request and the outcome are one document section
+    (``evaluation`` / ``contracts.evaluation``): a run carries all three or
+    none, every other evaluation fact needs them, and all three name the
+    same request digest — a verdict under one policy beside a contract of
+    another would be two evaluations under one run.
+    """
+    records = (
+        evaluation.evaluation_contract,
+        evaluation.evaluation_request,
+        evaluation.gate_outcome,
+    )
+    witnessed = [record is not None for record in records]
+    if any(witnessed) and not all(witnessed):
+        raise CanonicalModelError(
+            "the evaluation is witnessed in part: the contract, the request and "
+            "the gate outcome are one section"
+        )
+    contract, request, outcome = records
+    if contract is None or request is None or outcome is None:
+        if evaluation != EvaluationFacts():
+            raise CanonicalModelError(
+                "evaluation facts carried without the evaluation witness: "
+                "nothing says what they were evaluated under"
+            )
+        return
+    digests = {
+        contract.gate_thresholds_digest,
+        request.gate_thresholds_digest,
+        outcome.gate_thresholds_digest,
+    }
+    if len(digests) != 1:
+        raise CanonicalModelError(
+            f"one run is evaluated under one request, not {sorted(digests)!r}"
+        )
+
+
+def _prove_health_dating(evaluation: EvaluationFacts) -> None:
+    """A health verdict is dated by the contract it was computed under: the
+    contract carries the health parameters exactly when a verdict exists, and
+    the verdict's revision and manifest are the contract's."""
+    contract = evaluation.evaluation_contract
+    health = evaluation.health_result
+    if contract is None:
+        return
+    if (health is None) != (not contract.health_params):
+        raise CanonicalModelError(
+            "the health parameters ride the contract exactly when a health "
+            "verdict exists"
+        )
+    if health is not None and (
+        health.health_algorithm_revision,
+        health.health_input_manifest_version,
+    ) != (contract.health_algorithm_revision, contract.health_input_manifest_version):
+        raise CanonicalModelError(
+            "the health verdict is dated by another contract than the run's"
+        )
+
+
+def _prove_selections(evaluation: EvaluationFacts, files: frozenset[FileId]) -> None:
+    """Every selection ranks from one without a gap, and every band names a
+    unit of a file this run carries — the evaluation never widens the
+    identity domains the wire addresses."""
+    ranks: dict[str, list[int]] = {}
+    for row in evaluation.hotlist_selection:
+        ranks.setdefault(row.hotlist, []).append(row.rank)
+    for hotlist, positions in sorted(ranks.items()):
+        if sorted(positions) != list(range(1, len(positions) + 1)):
+            raise CanonicalModelError(f"the {hotlist} selection skips a rank")
+    for unit in evaluation.unit_risk_result:
+        if unit.symbol.file not in files:
+            raise CanonicalModelError(
+                f"a band names {unit.symbol!r}, a unit of no file of the run"
+            )
+
+
+def _prove_evaluation_facts(facts: CanonicalFacts, files: frozenset[FileId]) -> None:
+    """Stage 5: the evaluation house's keys and laws, and the one law across
+    houses — the health delta annotates a health verdict that exists and
+    states a score."""
+    evaluation = facts.evaluation
+    _prove_evaluation_keys(evaluation)
+    _prove_one_request(evaluation)
+    _prove_health_dating(evaluation)
+    _prove_selections(evaluation, files)
+    health = evaluation.health_result
+    if facts.comparison.health_delta and (health is None or health.score is None):
+        raise CanonicalModelError("a health delta annotates no stated health score")
+
+
 def _normalized(model: CanonicalModel) -> CanonicalModel:
     """Complete the domains to their closure and prove every key law
     (idempotent; never invents facts, never reorders — order is a
@@ -2192,6 +2377,7 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     _prove_coverage_join(model.facts.analysis)
     _prove_function_roles(model.facts.analysis)
     _prove_comparison_facts(model.facts.comparison)
+    _prove_evaluation_facts(model.facts, frozenset(closure.files))
     return replace(
         model,
         files=frozenset(closure.files),

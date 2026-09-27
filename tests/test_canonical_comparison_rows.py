@@ -329,7 +329,10 @@ def test_a_comparison_row_requires_every_field() -> None:
             "must be an int",
         ),
         (
-            lambda: MetricDeltaRow(**_IDENTITY, delta="health_delta", value=1),
+            # ``health_delta`` joined the closed term set with canonical epoch
+            # E3 (the delta annotation of ``health_result``); the term set
+            # stays closed.
+            lambda: MetricDeltaRow(**_IDENTITY, delta="score_delta", value=1),
             "unknown delta term",
         ),
         (

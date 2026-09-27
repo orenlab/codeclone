@@ -104,7 +104,17 @@ from codeclone.canonical.comparison_rows import (
     MetricDeltaRow,
     MetricsBaselineWitnessRecord,
 )
-from codeclone.canonical.model import ComparisonFacts, _unique_by_key
+from codeclone.canonical.evaluation_rows import (
+    GATE_REQUEST_TERMS,
+    EvaluationContractRecord,
+    EvaluationRequestRecord,
+    FindingEvaluationRow,
+    GateOutcomeRecord,
+    HealthResultRecord,
+    HotlistRow,
+    UnitRiskRow,
+)
+from codeclone.canonical.model import ComparisonFacts, EvaluationFacts, _unique_by_key
 
 
 def analysis_facts(**families: object) -> CanonicalFacts:
@@ -1102,6 +1112,186 @@ def comparison_fixture_model() -> CanonicalModel:
     )
 
 
+#: The evaluation fixture's one request identity (canonical epoch E3).
+FIXTURE_REQUEST_DIGEST = "e3" + "a" * 62
+#: A request with an int, a bool and a negative (disabled) threshold set.
+FIXTURE_REQUEST_TERMS: dict[str, int | bool] = {
+    **{
+        name: (False if kind is bool else -1)
+        for name, kind in GATE_REQUEST_TERMS.items()
+    },
+    "coverage_min": 50,
+    "fail_complexity": 20,
+    "fail_cycles": True,
+    "fail_health": 60,
+}
+
+
+def evaluation_fixture_facts() -> EvaluationFacts:
+    """A distinguishing evaluation house (canonical epoch E3): every family
+    non-empty, a failed gate with two reasons, a scored health verdict, all
+    three bands over all three unit dimensions, all three severities and a
+    clone type, two selections of different lengths."""
+    fa = FileId("pkg/a.py")
+    fb = FileId("tools/b.py")
+    required = ("clones.functions", "risk_observations")
+    return EvaluationFacts(
+        evaluation_contract=EvaluationContractRecord(
+            gate_thresholds_digest=FIXTURE_REQUEST_DIGEST,
+            health_algorithm_revision="1",
+            gate_algorithm_revision="1",
+            gate_lane_matrix_version="2",
+            health_input_manifest_version="2",
+            health_input_lanes=("clones.functions", "risk_observations"),
+            active_gate_lane_requirements=(
+                ("complexity_current", ("risk_observations",)),
+                ("health_current", required),
+            ),
+            health_params=(
+                ("complexity_risk_low_max", 10),
+                ("dependency_depth_avg_multiplier", 2.0),
+                ("weights.clones", 0.25),
+            ),
+        ),
+        evaluation_request=EvaluationRequestRecord(
+            gate_thresholds_digest=FIXTURE_REQUEST_DIGEST,
+            terms=tuple(sorted(FIXTURE_REQUEST_TERMS.items())),
+        ),
+        gate_outcome=GateOutcomeRecord(
+            gate_thresholds_digest=FIXTURE_REQUEST_DIGEST,
+            exit_code=3,
+            reasons=(
+                "metric:Complexity threshold exceeded: max CC=25, threshold=20.",
+                "metric:Health score below threshold: score=58, threshold=60.",
+            ),
+            required_lanes=required,
+            unavailable_lanes=(),
+        ),
+        health_result=HealthResultRecord(
+            score=58,
+            grade="D",
+            dimensions=(
+                ("clones", 100),
+                ("cohesion", 90),
+                ("complexity", 40),
+                ("coupling", 75),
+                ("coverage", 100),
+                ("dead_code", 0),
+                ("dependencies", 80),
+            ),
+            population="complete_nonempty",
+            health_algorithm_revision="1",
+            health_input_manifest_version="2",
+        ),
+        finding_evaluation=frozenset(
+            {
+                FindingEvaluationRow(
+                    finding_id="clone:function:aa11|0-19",
+                    severity="warning",
+                    confidence="high",
+                    priority=2.0,
+                    clone_type="Type-2",
+                ),
+                FindingEvaluationRow(
+                    finding_id="design:dependency:pkg.a -> pkg.h",
+                    severity="critical",
+                    confidence="high",
+                    priority=1.0,
+                    clone_type=None,
+                ),
+                FindingEvaluationRow(
+                    finding_id="dead_code:tools/b.py:helper",
+                    severity="info",
+                    confidence="medium",
+                    priority=0.5,
+                    clone_type=None,
+                ),
+            }
+        ),
+        unit_risk_result=frozenset(
+            {
+                UnitRiskRow(
+                    dimension="complexity",
+                    symbol=SymbolId(fa, "A.run"),
+                    start_line=3,
+                    band="high",
+                ),
+                UnitRiskRow(
+                    dimension="complexity",
+                    symbol=SymbolId(fb, "helper"),
+                    start_line=1,
+                    band="low",
+                ),
+                UnitRiskRow(
+                    dimension="coupling",
+                    symbol=SymbolId(fb, "K"),
+                    start_line=9,
+                    band="medium",
+                ),
+                UnitRiskRow(
+                    dimension="cohesion",
+                    symbol=SymbolId(fb, "K"),
+                    start_line=9,
+                    band="high",
+                ),
+            }
+        ),
+        hotlist_selection=frozenset(
+            {
+                HotlistRow(
+                    hotlist="most_actionable",
+                    rank=1,
+                    finding_id="clone:function:aa11|0-19",
+                ),
+                HotlistRow(
+                    hotlist="most_actionable",
+                    rank=2,
+                    finding_id="design:dependency:pkg.a -> pkg.h",
+                ),
+                HotlistRow(
+                    hotlist="suggestions",
+                    rank=1,
+                    finding_id="design:dependency:pkg.a -> pkg.h",
+                ),
+            }
+        ),
+    )
+
+
+def evaluated_fixture_model() -> CanonicalModel:
+    """The compared fixture, evaluated (canonical epoch E3): the SAME
+    analysis house, the comparison house with every health input lane
+    trusted and a health delta annotating the verdict, and a populated
+    evaluation house."""
+    model = comparison_fixture_model()
+    comparison = model.facts.comparison
+    identity = {
+        "baseline_scope_id": FIXTURE_BASELINE_SCOPE_ID,
+        "root_digest": FIXTURE_ROOT_DIGEST,
+    }
+    return replace(
+        model,
+        facts=replace(
+            model.facts,
+            comparison=replace(
+                comparison,
+                lane_trust=frozenset(
+                    replace(row, status="trusted", reason="compatible")
+                    for row in comparison.lane_trust
+                ),
+                comparison_availability=frozenset(
+                    replace(row, availability="compared")
+                    if row.lane == "risk_observations"
+                    else row
+                    for row in comparison.comparison_availability
+                ),
+                health_delta=_fixture_deltas(identity, health_delta=-4),
+            ),
+            evaluation=evaluation_fixture_facts(),
+        ),
+    )
+
+
 def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     """Known-answer pin: any silent movement of the byte contract — member
     order, escaping, float lexemes, the integrity domain — turns this red.
@@ -1255,6 +1445,19 @@ def test_the_comparison_house_does_not_move_the_known_answer_bytes() -> None:
     from it: the fixture compared against a baseline encodes to the SAME
     10458 bytes — the literal above, not a second one."""
     payload = encode_canonical_json(comparison_fixture_model())
+    assert len(payload) == 10458
+    assert (
+        hashlib.sha256(payload).hexdigest()
+        == "d33cfae67368db253f095a0789b3cf129558d8977514abceb9d07e2e5996eb06"
+    )
+
+
+def test_the_evaluation_house_does_not_move_the_known_answer_bytes() -> None:
+    """The known-answer pin's third job (canonical epoch E3): the fixture
+    compared AND evaluated — every evaluation family and the health delta
+    populated — encodes to the SAME 10458 bytes.  Until the wire-revision
+    bump the evaluation house joins no wire member."""
+    payload = encode_canonical_json(evaluated_fixture_model())
     assert len(payload) == 10458
     assert (
         hashlib.sha256(payload).hexdigest()
@@ -2663,6 +2866,8 @@ def test_uniqueness_prover_swallows_the_repeat_no_frozenset_can_carry() -> None:
 _PROVER_HOUSES: dict[str, type] = {
     "facts": AnalysisFacts,
     "comparison": ComparisonFacts,
+    # Canonical epoch E3: the verdicts, bands and selections.
+    "evaluation": EvaluationFacts,
 }
 
 
