@@ -50,7 +50,8 @@ uv tool install codeclone           # install as a local tool
 codeclone .
 ```
 
-Record the accepted structural baseline once, then gate future changes against it in CI:
+Then, on the CodeClone 2.1 alpha (`uv tool install --prerelease allow "codeclone==2.1.0a2"`), record the accepted
+structural baseline once and gate future changes against it in CI:
 
 ```bash
 codeclone setup apply -y            # write [tool.codeclone] with a fresh baseline_scope_id

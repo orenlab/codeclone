@@ -12,10 +12,18 @@ now requires, a renamed subcommand -- the reader meets an exit code where the
 README promised a baseline. So the commands are read out of ``README.md`` and
 run, in order, on a temporary project: the text is the test input, and a
 README edit that breaks the sequence fails here.
+
+Step 2 needs the 2.1 alpha, and says so: its heading carries the release line
+and the section opens with the install of the exact prerelease in
+``pyproject.toml``. That install is the one command here that is never run --
+it fetches the published package, and the test runs this checkout instead --
+so it sits in its own block, and the section is pinned to exactly those two
+blocks, which leaves no third one to go unexecuted in silence.
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
 import shlex
@@ -27,7 +35,9 @@ from codeclone.ui_messages.runtime import HINT_SCOPE_ID_SETUP_COMMAND
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _README = _REPO_ROOT / "README.md"
+_PYPI_README = _REPO_ROOT / "docs" / "README-pypi.md"
 _SECTION_HEADING = "### 2. Record the current structural baseline"
+_ALPHA_RELEASE = re.compile(r"(\d+)\.(\d+)\.\d+a\d+")
 
 #: The quick start exactly as a new user types it. Changing the README block
 #: means changing this too -- and then the sequence below has to run.
@@ -51,13 +61,54 @@ _GIT_ENV = {
 }
 
 
-def _readme_commands() -> tuple[str, ...]:
+def _project_version() -> str:
+    toml = importlib.import_module(
+        "tomllib" if sys.version_info >= (3, 11) else "tomli"
+    )
+    pyproject = toml.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return str(pyproject["project"]["version"])
+
+
+def _alpha_marker(version: str) -> str:
+    """``2.1.0a2`` -> ``CodeClone 2.1 alpha``; a non-alpha version has none."""
+
+    release = _ALPHA_RELEASE.fullmatch(version)
+    assert release is not None, (
+        f"project.version {version!r} is not an alpha: README step 2 is marked "
+        "alpha and installs a prerelease, so it has to be rewritten, not re-pinned"
+    )
+    return f"CodeClone {release.group(1)}.{release.group(2)} alpha"
+
+
+def _alpha_install_line(version: str) -> str:
+    return f'uv tool install --prerelease allow "codeclone=={version}"'
+
+
+def _step_two_section() -> tuple[str, str]:
+    """The heading line of step 2 and the text under it, up to step 3."""
+
     text = _README.read_text(encoding="utf-8")
-    start = text.index(_SECTION_HEADING)
-    end = text.index("\n### ", start + len(_SECTION_HEADING))
-    block = re.search(r"```bash\n(.*?)```", text[start:end], re.DOTALL)
-    assert block is not None, f"no bash block under {_SECTION_HEADING!r}"
-    return tuple(line.strip() for line in block.group(1).splitlines() if line.strip())
+    headings = [line for line in text.splitlines() if line.startswith(_SECTION_HEADING)]
+    assert len(headings) == 1, headings
+    start = text.index(headings[0])
+    end = text.index("\n### ", start + len(headings[0]))
+    return headings[0], text[start:end]
+
+
+def _step_two_blocks() -> list[tuple[str, ...]]:
+    _heading, section = _step_two_section()
+    return [
+        tuple(line.strip() for line in block.splitlines() if line.strip())
+        for block in re.findall(r"```bash\n(.*?)```", section, re.DOTALL)
+    ]
+
+
+def _readme_commands() -> tuple[str, ...]:
+    """The sequence the test runs: the block after the alpha install."""
+
+    blocks = _step_two_blocks()
+    assert len(blocks) == 2, f"step 2 must hold the install and the sequence: {blocks}"
+    return blocks[1]
 
 
 def _argv(command: str, *, cache_path: Path) -> list[str]:
@@ -78,6 +129,26 @@ def test_readme_quick_start_sequence_is_pinned() -> None:
     assert commands == _EXPECTED_COMMANDS
     # The refusal of ``--update-baseline`` names the same first step.
     assert commands[0] == HINT_SCOPE_ID_SETUP_COMMAND
+
+
+def test_readme_step_two_names_the_alpha_it_needs() -> None:
+    """Heading marker and install line both follow ``project.version``.
+
+    The version is read from ``pyproject.toml`` on every run and never written
+    here, so a release bump reddens the README until its install line names
+    the new prerelease -- and a stable release reddens it until the alpha
+    marker is gone.
+    """
+
+    version = _project_version()
+    heading, _section = _step_two_section()
+    install = _alpha_install_line(version)
+
+    assert heading == f"{_SECTION_HEADING} — {_alpha_marker(version)}"
+    # First block: the install, never executed (see the module docstring).
+    assert _step_two_blocks()[0] == (install,)
+    # The PyPI page carries the same two-step split with the same install.
+    assert install in _PYPI_README.read_text(encoding="utf-8")
 
 
 def _new_git_project(root: Path, *, env: dict[str, str]) -> Path:

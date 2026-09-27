@@ -126,7 +126,14 @@ uv tool install codeclone
 codeclone .
 ```
 
-### 2. Record the current structural baseline
+### 2. Record the current structural baseline — CodeClone 2.1 alpha
+
+This step needs the CodeClone 2.1 alpha, `2.1.0a2`: `codeclone setup` and `baseline_scope_id` are not in the stable
+release. Install it:
+
+```bash
+uv tool install --prerelease allow "codeclone==2.1.0a2"
+```
 
 Before asking an agent to change the repository, capture the accepted state once:
 
