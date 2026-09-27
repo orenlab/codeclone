@@ -2904,6 +2904,21 @@ def _decide_open(
     return fence
 
 
+def _open_statement(*, create: bool, fresh: bool) -> str:
+    """The statement that opens the transaction deciding an open.
+
+    Only the creation writes, so only the creation takes the write lock
+    (ruling 2026-09-25, protocol B; storage audit RS-02).  Every other open
+    decides under a deferred read snapshot, which under WAL never waits for
+    a writer: measured before, a reader queued behind any publication or
+    sweep for the whole busy timeout and then failed (5.43 s, ``database is
+    locked``).  A file that holds a store is judged read-only; one that
+    turned empty after the look is created from the snapshot and refused,
+    typed, if a concurrent creator committed first.
+    """
+    return "BEGIN IMMEDIATE" if create and fresh else "BEGIN"
+
+
 def _look_before_opening(path: str, *, create: bool) -> bool:
     """Refuse an existing file on its own witness and schema before any write;
     ``True`` when it holds no schema at all and a store will be created in it.
@@ -3061,28 +3076,37 @@ def _require_publish_inputs(namespace: str, target: str) -> None:
 
 
 def _verify_staged_membership(
-    cursor: sqlite3.Cursor, run_pk: int, namespace: str, membership: str
+    cursor: sqlite3.Cursor,
+    run_pk: int,
+    staged: Mapping[str, tuple[str, bytes]],
+    membership: str,
 ) -> None:
     """Re-verify the staged run from the database rows themselves before
     the publish flip (brief §10: verify digests inside the transaction).
 
-    Every member's bytes must still hash to its own content address: a
-    publish that sealed corrupted staging would produce a published run no
-    reader can decode — law 5 promises the previous generation or the next
-    COMPLETE one, never a published-but-unreadable state.  The membership
-    digest over the member ids must reproduce as well.
+    Every member's stored family and bytes must be exactly the ones staged
+    for its content address -- the bytes the address was hashed from before
+    the write lock was taken, so a stored member that differs from them
+    cannot hash to its own address: a publish that sealed corrupted staging
+    would produce a published run no reader can decode — law 5 promises the
+    previous generation or the next COMPLETE one, never a
+    published-but-unreadable state.  Comparing with the staged bytes rather
+    than hashing them a second time under the lock is the same proof at a
+    fraction of the hold (RS-13: the re-hash of every member was a quarter
+    of it); the rows come back unordered because the membership digest,
+    which must reproduce as well, owns its own sort.
     """
     stored_ids: list[str] = []
     for object_id_value, family, payload in cursor.execute(
         "SELECT o.object_id, o.family, o.payload FROM run_members m "
         "JOIN objects o ON o.object_pk = m.object_pk "
-        "WHERE m.run_pk = ? ORDER BY o.object_id",
+        "WHERE m.run_pk = ?",
         (run_pk,),
     ):
         stored_id = str(object_id_value)
-        if (
-            _object_id(namespace, str(family), _member_payload(stored_id, payload))
-            != stored_id
+        if staged.get(stored_id) != (
+            str(family),
+            _member_payload(stored_id, payload),
         ):
             raise StoreIntegrityError(
                 f"staged object {stored_id[:12]}… does not hash to its "
@@ -3093,6 +3117,87 @@ def _verify_staged_membership(
         raise RunStoreError(
             "staged membership does not reproduce its digest; publish refused"
         )
+
+
+#: Object ids per lookup statement: well inside SQLite's bound-parameter limit.
+_OBJECT_LOOKUP_CHUNK: Final = 500
+
+
+def _lookup_objects(
+    source: sqlite3.Connection | sqlite3.Cursor,
+    namespace_pk: int | None,
+    object_ids: Sequence[str],
+) -> dict[str, int]:
+    """``object_id -> object_pk`` for every id the namespace already holds."""
+    known: dict[str, int] = {}
+    if namespace_pk is None:
+        return known
+    for start in range(0, len(object_ids), _OBJECT_LOOKUP_CHUNK):
+        chunk = object_ids[start : start + _OBJECT_LOOKUP_CHUNK]
+        marks = ",".join("?" * len(chunk))
+        known.update(
+            (str(row[0]), int(row[1]))
+            for row in source.execute(
+                "SELECT object_id, object_pk FROM objects "
+                f"WHERE namespace_pk = ? AND object_id IN ({marks})",
+                (namespace_pk, *chunk),
+            )
+        )
+    return known
+
+
+def _data_version(source: sqlite3.Connection | sqlite3.Cursor) -> int:
+    """SQLite's own counter of commits by OTHER connections, as this
+    connection sees it: equal twice means nobody else committed between."""
+    return int(source.execute("PRAGMA data_version").fetchone()[0])
+
+
+def _prepare_object_lookup(
+    connection: sqlite3.Connection, namespace: str, object_ids: Sequence[str]
+) -> tuple[int, dict[str, int]]:
+    """Look a publication's objects up before its write lock is requested.
+
+    One read snapshot, no lock a writer waits on.  Returned with the
+    witness that decides whether the answer may be trusted once the lock is
+    held: ``data_version`` read BEFORE the snapshot opened, so any commit by
+    another connection from that moment on -- a collector deleting objects,
+    a publisher inserting them, a rowid handed out again -- moves it.
+    """
+    witness = _data_version(connection)
+    cursor = connection.cursor()
+    cursor.execute("BEGIN")
+    try:
+        row = cursor.execute(
+            "SELECT namespace_pk FROM namespaces WHERE namespace = ?", (namespace,)
+        ).fetchone()
+        known = _lookup_objects(
+            cursor, None if row is None else int(row[0]), object_ids
+        )
+        cursor.execute("COMMIT")
+    except BaseException:
+        cursor.execute("ROLLBACK")
+        raise
+    return witness, known
+
+
+def _objects_under_the_lock(
+    cursor: sqlite3.Cursor,
+    prepared: tuple[int, dict[str, int]],
+    namespace_pk: int,
+    object_ids: Sequence[str],
+) -> dict[str, int]:
+    """The prepared lookup when no other connection committed since it was
+    taken; otherwise the same lookup again, under the lock (idempotent).
+
+    Trusting a stale lookup would address object rows that a collector
+    deleted -- or whose rowids another insert has taken since -- and seal a
+    run over the wrong bytes; redoing a fresh one would put the whole lookup
+    back inside the lock.  The witness decides between the two.
+    """
+    witness, known = prepared
+    if _data_version(cursor) == witness:
+        return known
+    return _lookup_objects(cursor, namespace_pk, object_ids)
 
 
 def _published_run_row(
@@ -3805,7 +3910,7 @@ class RunStore:
         )
         self._fence: tuple[int, str, str] = (0, "", "")
         try:
-            self._initialize(create=create)
+            self._initialize(create=create, fresh=fresh)
         except BaseException:
             # A refused open hands back no handle, so it keeps no connection
             # either: left to the garbage collector, the refused file kept
@@ -3831,14 +3936,14 @@ class RunStore:
 
     # -- open-time witness (law 7) ----------------------------------------
 
-    def _initialize(self, *, create: bool) -> None:
-        # One immediate transaction decides the open under the write lock:
-        # an empty file becomes a store -- DDL and witness together, visible
-        # together or not at all -- and any other file is verified by the
-        # same decision the look before the connection owner took, because
-        # the file may have changed between the two.
+    def _initialize(self, *, create: bool, fresh: bool) -> None:
+        # One transaction decides the open: an empty file becomes a store --
+        # DDL and witness together, visible together or not at all -- and
+        # any other file is verified by the same decision the look before
+        # the connection owner took, because the file may have changed
+        # between the two.  Which transaction that is: :func:`_open_statement`.
         cursor = self._connection.cursor()
-        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(_open_statement(create=create, fresh=fresh))
         try:
             fence = _decide_open(cursor, path=self._path, create=create)
             if fence is None:
@@ -3968,6 +4073,16 @@ class RunStore:
             "canonical_store_ingest_duration", _elapsed_us(ingest_started)
         )
 
+        # Insertion order is insurance, not identity: it decides rowids
+        # only, and rowids never escape (wall 3).  Measured — reversing
+        # this sort survives the full suite, so nothing pins it and the
+        # C1 ruling says nothing should.
+        object_ids = sorted(staged)
+        # Read before the write lock is requested (ruling 2026-09-25,
+        # protocol B; storage audit RS-13): one lookup per object inside the
+        # lock was the larger half of its hold on a store that already holds
+        # the objects.  The lock only confirms the lookup still stands.
+        prepared = _prepare_object_lookup(self._connection, namespace, object_ids)
         cursor = self._connection.cursor()
         membership_rows = 0
         # Started before BEGIN IMMEDIATE on purpose: the wait for the write
@@ -3977,30 +4092,22 @@ class RunStore:
         try:
             _fence_guard(cursor, self._fence)
             namespace_pk = self._namespace_pk(cursor, namespace)
+            known = _objects_under_the_lock(cursor, prepared, namespace_pk, object_ids)
             new_objects = 0
             object_pks: list[int] = []
-            # Insertion order is insurance, not identity: it decides rowids
-            # only, and rowids never escape (wall 3).  Measured — reversing
-            # this sort survives the full suite, so nothing pins it and the
-            # C1 ruling says nothing should.
-            for object_id_value in sorted(staged):
-                family, payload = staged[object_id_value]
-                existing = cursor.execute(
-                    "SELECT object_pk FROM objects "
-                    "WHERE namespace_pk = ? AND object_id = ?",
-                    (namespace_pk, object_id_value),
-                ).fetchone()
-                if existing is None:
+            for object_id_value in object_ids:
+                object_pk = known.get(object_id_value)
+                if object_pk is None:
+                    family, payload = staged[object_id_value]
                     cursor.execute(
                         "INSERT INTO objects "
                         "(namespace_pk, object_id, family, payload) "
                         "VALUES (?, ?, ?, ?)",
                         (namespace_pk, object_id_value, family, payload),
                     )
-                    object_pks.append(int(cursor.lastrowid or 0))
+                    object_pk = int(cursor.lastrowid or 0)
                     new_objects += 1
-                else:
-                    object_pks.append(int(existing[0]))
+                object_pks.append(object_pk)
             existing_run = cursor.execute(
                 "SELECT run_pk, published FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -4020,7 +4127,7 @@ class RunStore:
             else:
                 run_pk = int(existing_run[0])
             self._before_publish()
-            _verify_staged_membership(cursor, run_pk, namespace, membership)
+            _verify_staged_membership(cursor, run_pk, staged, membership)
             cursor.execute("UPDATE runs SET published = 1 WHERE run_pk = ?", (run_pk,))
             head_advanced, generation, head_run_id = self._advance_head(
                 cursor,
@@ -4454,10 +4561,18 @@ def link_run_report(
     outside it could name a run the collector removes before the insert,
     and the foreign key would then refuse a write whose input was true when
     it was read.
+
+    The write waits for the lock a bounded time -- the store connection's
+    busy timeout -- and a lock still held after it, a read-only medium or an
+    I/O fault leaves here as :class:`StoreUnavailableError` (ruling
+    2026-09-25, protocol B): since an open no longer takes the write lock,
+    this transaction is the first place the edge's writer can meet another
+    writer, and it answers in the store's own words, never a raw ``sqlite3``
+    error.
     """
     if not report_run_identity:
         raise RunReportLinkError("an edge must name the report identity it answers")
-    with _fenced_transaction(store) as cursor:
+    with _typed_sqlite_faults(store._path), _fenced_transaction(store) as cursor:
         run_pk, _namespace, scope_digest, _membership = _published_run_row(
             cursor, run_id
         )

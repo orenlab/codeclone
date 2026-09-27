@@ -32,6 +32,13 @@ directly as well, so the door still classifies nothing on its own.
 The positive control of every fault is the same door on the same store once
 the fault is lifted: a pin that stayed green because the door never reached
 the store cannot pass.
+
+Since protocol B (ruling 2026-09-25) a plain write lock no longer stops a
+reader at all -- the open decides under a deferred read snapshot, pinned in
+``test_run_store_contention`` -- so the held lock below is the one that
+still does under WAL: another connection in ``locking_mode=EXCLUSIVE``
+holding its transaction.  The reader then waits out its busy timeout at the
+open and meets the same ``database is locked`` the audit measured.
 """
 
 from __future__ import annotations
@@ -123,9 +130,12 @@ def _sidecars(path: Path) -> list[str]:
     )
 
 
-def _hold_write_lock(path: Path) -> sqlite3.Connection:
+def _hold_exclusively(path: Path) -> sqlite3.Connection:
+    """A lock no reader passes under WAL: exclusive locking mode, holding."""
     holder = sqlite3.connect(path, isolation_level=None)
-    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("PRAGMA locking_mode=EXCLUSIVE")
+    holder.execute("BEGIN EXCLUSIVE")
+    holder.execute("SELECT COUNT(*) FROM runs").fetchone()
     return holder
 
 
@@ -151,11 +161,11 @@ def test_a_locked_store_is_answered_from_memory_as_unavailable(
     path = tmp_path / "runs.sqlite3"
     run_id = _publish(path)
     _enable(monkeypatch, path)
-    # The owner's busy timeout is the five seconds the audit measured; the
-    # pin shortens the WAIT and never the fault -- the holder below still
-    # owns the write lock the door's open takes.
+    # The owner's busy timeout is shortened; the open's look waits its own
+    # five seconds first -- the WAIT, never the fault: the holder below still
+    # owns the lock every reader of the file needs.
     monkeypatch.setattr(sqlite_store, "_SQLITE_BUSY_TIMEOUT_MS", 200)
-    holder = _hold_write_lock(path)
+    holder = _hold_exclusively(path)
     try:
         answer, outcome = door(root=tmp_path, link=_linked(run_id))
     finally:
@@ -182,7 +192,7 @@ def test_the_store_itself_names_a_held_lock_as_unavailable(
     path = tmp_path / "runs.sqlite3"
     _publish(path)
     monkeypatch.setattr(sqlite_store, "_SQLITE_BUSY_TIMEOUT_MS", 200)
-    holder = _hold_write_lock(path)
+    holder = _hold_exclusively(path)
     try:
         with pytest.raises(StoreUnavailableError) as refused:
             RunStore(path, create=False)
