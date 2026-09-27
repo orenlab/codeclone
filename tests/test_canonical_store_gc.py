@@ -51,6 +51,7 @@ from codeclone.models import (
     GC_HOLD_STAGING,
     GcJobReport,
 )
+from tests._sqlite_single_step import SingleStepConnection
 from tests.test_canonical_roundtrip import fixture_model
 
 _NS = "lineage-gc"
@@ -471,6 +472,49 @@ def _page_stats(store: RunStore) -> tuple[int, int, int]:
     )
 
 
+def _store_of_twelve_runs(tmp_path: Path) -> RunStore:
+    """Twelve published runs of growing width: a sweep that keeps one frees
+    pages worth measuring, on a store opened with incremental auto-vacuum."""
+
+    store = _store(tmp_path)
+    for index in range(12):
+        _publish(
+            store,
+            _wider_model(*(f"pad-{index}-{n}" for n in range(400 + index))),
+            expected_generation=index,
+        )
+    return store
+
+
+def test_the_release_drains_the_freelist_when_the_cursor_steps_the_pragma_once(
+    tmp_path: Path,
+) -> None:
+    """The release must not depend on the cursor stepping the pragma to its end.
+
+    CPython 3.11's ``sqlite3`` resets a statement that reports no result
+    columns after its first step, so ``execute("PRAGMA
+    incremental_vacuum").fetchall()`` freed one page per call there: the
+    3.11 job left 228 pages of this store on the freelist (CI, 2026-09-27)
+    while 3.10 and 3.12+ were green. ``SingleStepConnection`` reproduces that
+    stepping on every interpreter, and the sweep's release still has to leave
+    the freelist empty through it.
+    """
+
+    store = _store_of_twelve_runs(tmp_path)
+    store._connection = SingleStepConnection(store._connection)  # type: ignore[assignment]
+    _, pages_before, freelist_before = _page_stats(store)
+    assert freelist_before == 0
+
+    collect_garbage(store, retain_history=1)
+
+    _, pages_after, freelist_after = _page_stats(store)
+    assert pages_after < pages_before, "the sweep freed nothing, so nothing is proved"
+    assert freelist_after == 0, (
+        f"{freelist_after} freed pages were left on the freelist: the release "
+        "stepped the pragma once instead of draining it"
+    )
+
+
 def test_the_sweep_returns_the_pages_it_freed_to_the_file(tmp_path: Path) -> None:
     """A collected run must leave the FILE, not only the tables.
 
@@ -490,13 +534,7 @@ def test_the_sweep_returns_the_pages_it_freed_to_the_file(tmp_path: Path) -> Non
     sweep reports about itself.
     """
 
-    store = _store(tmp_path)
-    for index in range(12):
-        _publish(
-            store,
-            _wider_model(*(f"pad-{index}-{n}" for n in range(400 + index))),
-            expected_generation=index,
-        )
+    store = _store_of_twelve_runs(tmp_path)
 
     auto_vacuum, pages_before, freelist_before = _page_stats(store)
     assert auto_vacuum == 2, (

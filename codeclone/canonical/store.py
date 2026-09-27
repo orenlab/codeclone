@@ -4666,7 +4666,16 @@ def _release_freed_pages(store: RunStore) -> None:
     connection = store._connection
     if connection.in_transaction:
         connection.commit()
-    connection.execute("PRAGMA incremental_vacuum").fetchall()
+    # ``executescript`` is the one form every supported CPython steps to
+    # completion.  ``execute(...).fetchall()`` is not: CPython 3.11's
+    # ``sqlite3`` resets a statement that reports no result columns after its
+    # first step, so that form handed back exactly ONE page per call there
+    # (measured 2026-09-27 on 3.11.15 with SQLite 3.50.4: 375 free pages ->
+    # 374, while 3.10 and 3.12+ drained all 375 either way; the 3.11 CI job
+    # left 228 pages of this store on its freelist).
+    # ``tests/_sqlite_single_step.py`` reproduces that stepping on every
+    # interpreter, so the pin does not wait for a 3.11 runner.
+    connection.executescript("PRAGMA incremental_vacuum;")
 
 
 def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
