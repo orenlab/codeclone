@@ -32,6 +32,7 @@ from tests._live_state import (
 )
 from tests._served_run import (
     ServedComparisonRun,
+    ServedEvaluationRun,
     ServedRunStoreProjection,
     ServedUnitLocation,
 )
@@ -994,6 +995,7 @@ SERVED_COMPARISON_POPULATIONS: dict[str, tuple[bool, bool, bool]] = {
 def _served_comparison_answers(
     service: object, root: Path
 ) -> dict[str, dict[str, object]]:
+    from codeclone.surfaces.mcp._session_shared import MCPGateRequest
     from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
     assert isinstance(service, CodeCloneMCPService)
@@ -1012,7 +1014,28 @@ def _served_comparison_answers(
         answers[label] = service.get_blast_radius(
             root=str(root), files=[origin], depth=depth
         )
+    # Canonical epoch E3: the gate answer under the run's own request (every
+    # gate off here) and the patch-contract budget, asked last so no earlier
+    # answer reads a session gate result.
+    answers.update(_evaluation_answers(service, root, MCPGateRequest(root=str(root))))
     return answers
+
+
+def _evaluation_answers(
+    service: object, root: Path, own_request: object
+) -> dict[str, dict[str, object]]:
+    """The evaluation-reading answers E3 holds the store to that the E2
+    answers do not already carry: ``evaluate_gates`` under the run's own
+    request and the patch-contract budget."""
+    from codeclone.surfaces.mcp._session_shared import MCPGateRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    assert isinstance(service, CodeCloneMCPService)
+    assert isinstance(own_request, MCPGateRequest)
+    return {
+        "evaluate_gates": service.evaluate_gates(own_request),
+        "patch_budget": service.check_patch_contract(root=str(root), mode="budget"),
+    }
 
 
 #: The publication each served population must state, by whether it is
@@ -1083,6 +1106,149 @@ def served_comparison_runs(
     return {
         name: _serve_comparison_corpus(base, name, baseline)
         for name in SERVED_COMPARISON_POPULATIONS
+    }
+
+
+# ---------------------------------------------------------------------------
+# The evaluation corpus served by MCP (canonical epoch E3, cycle 3): the
+# surface's own answers are the oracle of the evaluation projections.
+#
+#   * ``gated``       — stage B, the evaluation carrier and the stage-A
+#                       baseline, with two gates the repository itself
+#                       declares (``fail_complexity`` / ``fail_health`` in
+#                       ``pyproject.toml``, which the MCP surface delivers): the
+#                       run's OWN request fails.  The session then analyses the
+#                       tree again without one clone pair and one complexity
+#                       hotspot and compares the two runs;
+#   * ``clones_only`` — the metrics never run: no verdict, no band.
+# ---------------------------------------------------------------------------
+
+#: The two gates the ``gated`` repository declares, as ``evaluate_gates``
+#: spells them.
+SERVED_EVALUATION_GATES: dict[str, int] = {"fail_complexity": 20, "fail_health": 99}
+#: The blast-radius origins of the ``gated`` run: a high-complexity function
+#: and a high-coupling class.
+SERVED_EVALUATION_BLAST: tuple[str, ...] = ("pkg/complex_old.py", "pkg/hub.py")
+
+
+def _served_gated_tree(base: Path, baseline: Path) -> Path:
+    root = _served_comparison_tree(base, "trusted", baseline)
+    target = base / "served_gated"
+    root.rename(target)
+    _write_tree(target, EVALUATION_CARRIER)
+    pyproject = target / "pyproject.toml"
+    declared = "".join(
+        f"{name} = {value}\n" for name, value in SERVED_EVALUATION_GATES.items()
+    )
+    pyproject.write_text(
+        pyproject.read_text("utf-8").replace(
+            "[tool.codeclone]\n", f"[tool.codeclone]\n{declared}", 1
+        ),
+        "utf-8",
+    )
+    return target
+
+
+def _serve_gated_corpus(base: Path, baseline: Path) -> ServedEvaluationRun:
+    """Two MCP analyses of the gated tree in one session — the second after
+    two files are removed — and the evaluation answers between them."""
+    from codeclone.surfaces.mcp._session_shared import (
+        MCPAnalysisRequest,
+        MCPGateRequest,
+    )
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    root = _served_gated_tree(base, baseline)
+    store_path = base / "served_gated.sqlite3"
+    request = MCPAnalysisRequest(root=str(root), analysis_mode="full", api_surface=True)
+    with _run_store_rollout(store_path):
+        service = CodeCloneMCPService(history_limit=4)
+        service.analyze_repository(request)
+        before = service._runs.resolve_any_root()
+        answers: dict[str, dict[str, object]] = {
+            "run_summary": service.get_run_summary(root=str(root)),
+            "production_triage": service.get_production_triage(root=str(root)),
+            "check_authority": service.check_authority(root=str(root), max_results=100),
+            # A zone that holds a high band on both banded dimensions (the
+            # comparison populations' zones hold none).
+            "blast_high": service.get_blast_radius(
+                root=str(root), files=list(SERVED_EVALUATION_BLAST), depth="direct"
+            ),
+            **_evaluation_answers(
+                service,
+                root,
+                MCPGateRequest(
+                    root=str(root),
+                    fail_complexity=SERVED_EVALUATION_GATES["fail_complexity"],
+                    fail_health=SERVED_EVALUATION_GATES["fail_health"],
+                ),
+            ),
+        }
+        # The second analysis loses a clone pair and a complexity hotspot, so
+        # the two runs' health verdicts differ (the run comparison's
+        # distinguishing case).
+        for relative in ("pkg/clones_three.py", "pkg/complex_new.py"):
+            (root / relative).unlink()
+        service.analyze_repository(request)
+        after = service._runs.resolve_any_root()
+        answers["compare_runs"] = service.compare_runs(
+            before_run_id=before.run_id, after_run_id=after.run_id, root=str(root)
+        )
+    return ServedEvaluationRun(
+        name="gated",
+        store_path=store_path,
+        store_run_ids=(
+            _published_store_run_id(before),
+            _published_store_run_id(after),
+        ),
+        answers=answers,
+    )
+
+
+def _serve_clones_only_corpus(base: Path, baseline: Path) -> ServedEvaluationRun:
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    root = _served_comparison_tree(base, "api_disabled", baseline)
+    pyproject = root / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text("utf-8").replace("semantic_authority = true\n", ""),
+        "utf-8",
+    )
+    store_path = base / "served_clones_only.sqlite3"
+    with _run_store_rollout(store_path):
+        service = CodeCloneMCPService(history_limit=4)
+        service.analyze_repository(
+            MCPAnalysisRequest(root=str(root), analysis_mode="clones_only")
+        )
+        record = service._runs.resolve_any_root()
+        answers = {
+            "run_summary": service.get_run_summary(root=str(root)),
+            "production_triage": service.get_production_triage(root=str(root)),
+        }
+    return ServedEvaluationRun(
+        name="clones_only",
+        store_path=store_path,
+        # A clones-only population is stored with its head withheld.
+        store_run_ids=(
+            _published_store_run_id(
+                record, outcome=RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD
+            ),
+        ),
+        answers=answers,
+    )
+
+
+@pytest.fixture(scope="session")
+def served_evaluation_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, ServedEvaluationRun]:
+    """The evaluation corpus served by MCP (see above), one shared baseline."""
+    base = tmp_path_factory.mktemp("served_evaluation").resolve()
+    baseline = _comparison_baseline(base)
+    return {
+        "gated": _serve_gated_corpus(base, baseline),
+        "clones_only": _serve_clones_only_corpus(base, baseline),
     }
 
 

@@ -76,4 +76,25 @@ class ServedComparisonRun:
     answers: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
-__all__ = ["ServedComparisonRun", "ServedRunStoreProjection", "ServedUnitLocation"]
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedEvaluationRun:
+    """One MCP session over the evaluation corpus (canonical epoch E3).
+
+    ``store_run_ids`` names the canonical run each analysis of the session
+    published, in analysis order — a session that analysed twice (the run
+    comparison) names two — and ``answers`` holds the evaluation-reading tool
+    answers of that same session, by label (``conftest`` names them).
+    """
+
+    name: str
+    store_path: Path
+    store_run_ids: tuple[str, ...]
+    answers: dict[str, dict[str, object]] = field(default_factory=dict)
+
+
+__all__ = [
+    "ServedComparisonRun",
+    "ServedEvaluationRun",
+    "ServedRunStoreProjection",
+    "ServedUnitLocation",
+]
