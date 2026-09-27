@@ -59,4 +59,21 @@ class ServedRunStoreProjection:
     production_triage: dict[str, object] = field(default_factory=dict)
 
 
-__all__ = ["ServedRunStoreProjection", "ServedUnitLocation"]
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedComparisonRun:
+    """One MCP execution of the comparison corpus against its baseline.
+
+    Canonical epoch E2: ``answers`` holds the comparison-reading tool
+    answers of that same execution, by label (``conftest`` names the
+    labels and the arguments each was asked with), and ``store_run_id``
+    names the canonical run it published — the two sides of every shadow
+    pin are one execution.
+    """
+
+    name: str
+    store_path: Path
+    store_run_id: str
+    answers: dict[str, dict[str, object]] = field(default_factory=dict)
+
+
+__all__ = ["ServedComparisonRun", "ServedRunStoreProjection", "ServedUnitLocation"]

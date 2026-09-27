@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from tests._live_state import (
     live_state_guard,
 )
 from tests._served_run import (
+    ServedComparisonRun,
     ServedRunStoreProjection,
     ServedUnitLocation,
 )
@@ -318,6 +320,36 @@ _RUN_STORE_SERVING_CORPUS = (
 )
 
 
+@contextmanager
+def _run_store_rollout(store_path: Path) -> Iterator[None]:
+    """The run-store rollout environment of one in-process MCP execution.
+
+    The rollout is CI-neutral by design and the suite may run under CI; the
+    fixture says so rather than depending on the host.
+    """
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
+        monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
+        monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store_path))
+        yield
+    finally:
+        monkeypatch.undo()
+
+
+def _published_store_run_id(record: object) -> str:
+    """The store run an MCP execution published, proven before anything is
+    counted: an execution that published nothing leaves the store empty,
+    and every comparison downstream would then be measuring an ABSENT run
+    rather than an inexpressible one."""
+    execution = getattr(record, "execution", None)
+    link = getattr(execution, "run_snapshot_link", None)
+    assert link is not None, "the execution carries no run-snapshot link"
+    assert link.outcome == RUN_SNAPSHOT_PUBLICATION_PUBLISHED, link
+    assert link.store_run_id
+    return str(link.store_run_id)
+
+
 def _serve_run_store_corpus(root: Path, store_path: Path) -> ServedRunStoreProjection:
     """One MCP analysis of a materialized tree, with the run store enabled.
 
@@ -329,13 +361,7 @@ def _serve_run_store_corpus(root: Path, store_path: Path) -> ServedRunStoreProje
     from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
     from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
-    monkeypatch = pytest.MonkeyPatch()
-    try:
-        monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
-        # The rollout is CI-neutral by design and the suite may run under
-        # CI; the fixture says so rather than depending on the host.
-        monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
-        monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store_path))
+    with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)
         service.analyze_repository(
             MCPAnalysisRequest(root=str(root), analysis_mode="full")
@@ -347,20 +373,10 @@ def _serve_run_store_corpus(root: Path, store_path: Path) -> ServedRunStoreProje
         # own bytes.
         run_summary = service.get_run_summary(root=str(root))
         production_triage = service.get_production_triage(root=str(root))
-    finally:
-        monkeypatch.undo()
-    # The instrument is proven on before anything is counted: an execution
-    # that published nothing leaves the store empty, and every comparison
-    # downstream would then be measuring an ABSENT run rather than an
-    # inexpressible one.
-    link = record.execution.run_snapshot_link
-    assert link is not None, "the execution carries no run-snapshot link"
-    assert link.outcome == RUN_SNAPSHOT_PUBLICATION_PUBLISHED, link
-    assert link.store_run_id
     return ServedRunStoreProjection(
         root=root,
         store_path=store_path,
-        store_run_id=str(link.store_run_id),
+        store_run_id=_published_store_run_id(record),
         unit_inventory=tuple(
             ServedUnitLocation(
                 qualname=unit.qualname,
@@ -639,6 +655,18 @@ def materialize_comparison_corpus(root: Path, *, stage_b: bool) -> None:
         _write_tree(root, COMPARISON_CORPUS_STAGE_B)
 
 
+def _rewrite_scope_as_foreign(root: Path) -> None:
+    """Point the tree's ``baseline_scope_id`` at another scope, so the
+    stage-A container no longer describes it."""
+    pyproject = root / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text("utf-8").replace(
+            "9e6a3f60-1df0-4c1e-9f3a-6f2f4b6a0c11", _COMPARISON_FOREIGN_SCOPE
+        ),
+        "utf-8",
+    )
+
+
 def _published_run(store_path: Path) -> tuple[str, CanonicalModel]:
     from codeclone.canonical.store import RunStore
 
@@ -660,13 +688,7 @@ def _comparison_run(
     if name == "partial":
         (root / "pkg" / "unparsable.py").write_text("def broken(:\n    pass\n", "utf-8")
     if name == "foreign_scope":
-        pyproject = root / "pyproject.toml"
-        pyproject.write_text(
-            pyproject.read_text("utf-8").replace(
-                "9e6a3f60-1df0-4c1e-9f3a-6f2f4b6a0c11", _COMPARISON_FOREIGN_SCOPE
-            ),
-            "utf-8",
-        )
+        _rewrite_scope_as_foreign(root)
     store_path = base / f"{name}.sqlite3"
     report_path = base / f"{name}.report.json"
     _run_codeclone_cli(
@@ -706,13 +728,9 @@ COMPARISON_POPULATIONS: dict[str, tuple[str, ...]] = {
 }
 
 
-@pytest.fixture(scope="session")
-def comparison_runs(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> dict[str, ComparisonRun]:
-    """The comparison corpus under all six configurations (see above),
-    each its own tree copy and its own store, one shared stage-A baseline."""
-    base = tmp_path_factory.mktemp("comparison_corpus").resolve()
+def _comparison_baseline(base: Path) -> Path:
+    """The stage-A baseline (API lane included) every comparison run of
+    the corpus is compared against, written under ``base``."""
     stage_a = base / "stage_a"
     materialize_comparison_corpus(stage_a, stage_b=False)
     baseline = base / "corpus.baseline.json"
@@ -727,9 +745,154 @@ def comparison_runs(
         ],
         {},
     )
+    return baseline
+
+
+@pytest.fixture(scope="session")
+def comparison_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, ComparisonRun]:
+    """The comparison corpus under all six configurations (see above),
+    each its own tree copy and its own store, one shared stage-A baseline."""
+    base = tmp_path_factory.mktemp("comparison_corpus").resolve()
+    baseline = _comparison_baseline(base)
     return {
         name: _comparison_run(base, name, baseline, list(args))
         for name, args in COMPARISON_POPULATIONS.items()
+    }
+
+
+# ---------------------------------------------------------------------------
+# The comparison corpus served by MCP (canonical epoch E2, cycle 3): the
+# surface's own answers are the oracle of the comparison projections, so
+# the corpus is analysed by an in-process ``CodeCloneMCPService`` with the
+# stage-A baseline at the tree's default baseline path — the way a user's
+# checkout carries it — under three configurations:
+#
+#   * ``trusted``       — every lane compared, the API lane included;
+#   * ``foreign_scope`` — the container belongs to another scope: the
+#                         surface's resolver refuses it (loaded false);
+#   * ``api_disabled``  — the API lane is not enabled on the run.
+#
+# (The baseline-less state is the serving corpus above.)  One served-only
+# carrier sits beside stage B, never inside it (the CLI populations' pins
+# are measured on stage B as it is): a NEW clone pair with one member in
+# production and one under ``tests/``, the one group whose dominant source
+# kind is ``mixed`` — without it the ``mixed`` bucket of
+# ``new_by_source_kind`` is zero on every population and a projection that
+# folded it into ``other`` would pass unseen (measured 2026-09-27).
+# ---------------------------------------------------------------------------
+
+_TWIN_SOURCE = """def twin_tally(values: list[int]) -> dict[str, int]:
+    evens = 0
+    odds = 0
+    peak = 0
+    floor = 10**9
+    for value in values:
+        if value % 2 == 0:
+            evens = evens + 1
+        else:
+            odds = odds + 1
+        if value > peak:
+            peak = value
+        if value < floor:
+            floor = value
+    return {"evens": evens, "odds": odds, "peak": peak, "floor": floor}
+"""
+SERVED_COMPARISON_MIXED_CARRIER: dict[str, str] = {
+    "pkg/twin_prod.py": _TWIN_SOURCE,
+    "tests/test_twin.py": _TWIN_SOURCE,
+}
+#: The changed paths the PR summary is asked about: one new and one known
+#: complexity hotspot, so both filters (path and novelty) must bite.
+SERVED_COMPARISON_CHANGED_PATHS: tuple[str, ...] = (
+    "pkg/complex_new.py",
+    "pkg/complex_old.py",
+)
+#: The blast-radius origins, by answer label: ``pkg/tri_a.py`` reaches the
+#: KNOWN tri cycle transitively, ``pkg/cyc_c.py`` reaches only the NEW
+#: cyc cycle — known debt is present in one zone and absent from the other.
+SERVED_COMPARISON_BLAST_ORIGINS: dict[str, tuple[str, str]] = {
+    "blast_known": ("pkg/tri_a.py", "transitive"),
+    "blast_new": ("pkg/cyc_c.py", "direct"),
+}
+#: Every served comparison population, by name: (API lane enabled,
+#: container scope rewritten to a foreign one).
+SERVED_COMPARISON_POPULATIONS: dict[str, tuple[bool, bool]] = {
+    "trusted": (True, False),
+    "foreign_scope": (True, True),
+    "api_disabled": (False, False),
+}
+
+
+def _served_comparison_answers(
+    service: object, root: Path
+) -> dict[str, dict[str, object]]:
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    assert isinstance(service, CodeCloneMCPService)
+    answers: dict[str, dict[str, object]] = {
+        "run_summary": service.get_run_summary(root=str(root)),
+        "production_triage": service.get_production_triage(root=str(root)),
+        "pr_summary": service.generate_pr_summary(root=str(root), format="json"),
+        "pr_summary_changed": service.generate_pr_summary(
+            root=str(root),
+            changed_paths=SERVED_COMPARISON_CHANGED_PATHS,
+            format="json",
+        ),
+        "check_authority": service.check_authority(root=str(root), max_results=100),
+    }
+    for label, (origin, depth) in SERVED_COMPARISON_BLAST_ORIGINS.items():
+        answers[label] = service.get_blast_radius(
+            root=str(root), files=[origin], depth=depth
+        )
+    return answers
+
+
+def _serve_comparison_corpus(
+    base: Path, name: str, baseline: Path
+) -> ServedComparisonRun:
+    """One MCP analysis of stage B (plus the mixed carrier) against the
+    stage-A baseline at the tree's default path, with the run store on."""
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    api_surface, foreign = SERVED_COMPARISON_POPULATIONS[name]
+    root = base / f"served_{name}"
+    materialize_comparison_corpus(root, stage_b=True)
+    _write_tree(root, SERVED_COMPARISON_MIXED_CARRIER)
+    (root / "codeclone.baseline.json").write_bytes(baseline.read_bytes())
+    if foreign:
+        _rewrite_scope_as_foreign(root)
+    store_path = base / f"served_{name}.sqlite3"
+    with _run_store_rollout(store_path):
+        service = CodeCloneMCPService(history_limit=4)
+        service.analyze_repository(
+            MCPAnalysisRequest(
+                root=str(root), analysis_mode="full", api_surface=api_surface
+            )
+        )
+        record = service._runs.resolve_any_root()
+        answers = _served_comparison_answers(service, root)
+    return ServedComparisonRun(
+        name=name,
+        store_path=store_path,
+        store_run_id=_published_store_run_id(record),
+        answers=answers,
+    )
+
+
+@pytest.fixture(scope="session")
+def served_comparison_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, ServedComparisonRun]:
+    """The comparison corpus served by MCP under all three configurations
+    (see above), each its own tree and store, one shared stage-A baseline."""
+    base = tmp_path_factory.mktemp("served_comparison").resolve()
+    baseline = _comparison_baseline(base)
+    return {
+        name: _serve_comparison_corpus(base, name, baseline)
+        for name in SERVED_COMPARISON_POPULATIONS
     }
 
 

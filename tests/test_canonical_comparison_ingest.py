@@ -37,11 +37,19 @@ from codeclone.canonical.comparison_rows import (
 from codeclone.canonical.errors import LegacyIngestError
 from codeclone.canonical.ingest import canonical_model_from_legacy_document
 from codeclone.canonical.model import ComparisonFacts, novelty_families
+from codeclone.core.comparison_snapshot import ComparisonInputs, _clone_novelty_rows
+from codeclone.findings.ids import clone_group_id
+from codeclone.models import LaneTrust, TrustVector
 from tests._served_run import ServedRunStoreProjection
 from tests.conftest import (
     COMPARISON_POPULATIONS,
     ComparisonRun,
     RunStoreCorpusRunner,
+)
+from tests.test_canonical_roundtrip import (
+    FIXTURE_BASELINE_SCOPE_ID,
+    FIXTURE_ROOT_DIGEST,
+    fixture_model,
 )
 
 _REPORTING = Path(__file__).resolve().parents[1] / "codeclone" / "core" / "reporting.py"
@@ -287,6 +295,21 @@ def test_a_meta_stating_no_baseline_status_witnessed_no_comparison(
         ),
         (("baseline", "sorted_lane_trust"), {}, "is not an array"),
         (("baseline", "root_digest_or_null"), 7, "neither a string nor null"),
+        (
+            ("metrics", "families", "coverage_adoption", "summary"),
+            [],
+            "coverage_adoption.summary is not an object",
+        ),
+        (
+            ("metrics", "families", "coverage_adoption", "summary", "param_delta"),
+            "7",
+            "param_delta is not an int",
+        ),
+        (
+            ("metrics", "families", "coverage_adoption", "summary", "param_delta"),
+            True,
+            "param_delta is not an int",
+        ),
     ],
 )
 def test_a_malformed_comparison_member_is_refused(
@@ -311,6 +334,113 @@ def test_a_missing_delta_term_is_refused(
     del document["metrics"]["families"]["coverage_adoption"]["summary"]["param_delta"]
     with pytest.raises(LegacyIngestError, match="param_delta"):
         comparison_facts_from_document(document)
+
+
+#: A cut of the document's metrics (the path, and what is left there —
+#: nothing, or a non-object), and the metric lanes it leaves uncompared.
+_METRIC_CUTS: dict[str, tuple[tuple[str, ...], object, frozenset[str]]] = {
+    "metrics": (("metrics",), None, frozenset(COMPARISON_LANE_FAMILIES)),
+    "families": (("metrics", "families"), [], frozenset(COMPARISON_LANE_FAMILIES)),
+    "family": (
+        ("metrics", "families", "coverage_adoption"),
+        None,
+        frozenset({"adoption_counts"}),
+    ),
+}
+
+
+@pytest.mark.parametrize("cut", list(_METRIC_CUTS))
+def test_an_absent_metric_family_reads_its_trusted_lane_as_not_compared(
+    comparison_runs: dict[str, ComparisonRun], cut: str
+) -> None:
+    """A document without a metric family (a clones-only run carries none)
+    states no comparison for its lane: the lane is trusted and was not
+    compared, and its delta family is empty.  Three spellings of the
+    absence; the untouched document, every lane compared, is the other
+    boundary."""
+    document = _document(comparison_runs)
+    assert set(_availability(comparison_facts_from_document(document)).values()) == {
+        "compared"
+    }
+    path, left, uncompared = _METRIC_CUTS[cut]
+    container: Any = document
+    for key in path[:-1]:
+        container = container[key]
+    container.pop(path[-1])
+    if left is not None:
+        container[path[-1]] = left
+    house = comparison_facts_from_document(document)
+    assert {
+        lane for lane, word in _availability(house).items() if word == "not_compared"
+    } == uncompared
+    assert not house.adoption_delta
+    assert bool(house.api_surface_delta) is ("api_surface" not in uncompared)
+
+
+def test_an_ungoverned_design_group_states_no_novelty(
+    comparison_runs: dict[str, ComparisonRun],
+) -> None:
+    """A cohesion hotspot has no comparison term (``not_baseline_governed``):
+    added to the document beside the governed design groups, it files no
+    novelty row and leaves the house as it was (the comparison corpus
+    carries no cohesion hotspot of its own)."""
+    document = _document(comparison_runs)
+    house = comparison_facts_from_document(document)
+    groups = document["findings"]["groups"]["design"]["groups"]
+    cohesion = copy.deepcopy(
+        next(group for group in groups if group["category"] == "complexity")
+    )
+    cohesion.update(
+        id="design:cohesion:pkg.hub:Hub",
+        category="cohesion",
+        novelty="unavailable",
+        novelty_reason="not_baseline_governed",
+    )
+    groups.append(cohesion)
+    assert comparison_facts_from_document(document) == house
+
+
+def test_a_segment_group_keyed_like_a_new_function_group_states_no_novelty() -> None:
+    """A segment group's novelty is its family's constant, never a
+    comparison result, so the producer files no row for it.  The fixture
+    model's segment group shares its producer key with the function group
+    and the function lane calls that key NEW — the one input on which a
+    lane read off the key instead of the kind would file a verdict (no CLI
+    or MCP population carries a segment group, measured 2026-09-27)."""
+    analysis = fixture_model().facts.analysis
+    assert {group.clone_kind for group in analysis.clone_groups} == {
+        "block",
+        "function",
+        "segment",
+    }
+    trust = TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(name=lane, status="trusted", reason="compatible")
+            for lane in ("clones.blocks", "clones.functions")
+        ),
+    )
+    inputs = ComparisonInputs(
+        section={},
+        meta={},
+        metrics=None,
+        trust=trust,
+        new_func=frozenset({"aa11|0-19"}),
+        new_block=frozenset(),
+        entity_novelty_facts={},
+    )
+    rows = _clone_novelty_rows(
+        inputs,
+        analysis,
+        {
+            "baseline_scope_id": FIXTURE_BASELINE_SCOPE_ID,
+            "root_digest": FIXTURE_ROOT_DIGEST,
+        },
+    )
+    assert {(row.finding_id, row.novelty) for row in rows} == {
+        (clone_group_id("function", "aa11|0-19"), "new"),
+        (clone_group_id("block", "bb22|bb22|bb22|bb22"), "known"),
+    }
 
 
 def test_a_trusted_clone_lane_its_groups_call_uncompared_is_not_compared(
