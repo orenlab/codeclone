@@ -8,7 +8,7 @@ source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 
 ## What it is
 
-CodeClone integrates with Claude (via MCP) to provide deterministic change control and structural governance during AI-assisted development. The MCP server exposes 38 tools spanning analysis, inspection, triage, change control, engineering memory, and audit/receipts. See the [MCP tools reference](../reference/mcp-tools.md) for the full catalog.
+CodeClone integrates with Claude (via MCP) to provide deterministic change control and structural governance during AI-assisted development. The MCP server exposes 39 tools spanning analysis, inspection, triage, change control, engineering memory, and audit/receipts. See the [MCP tools reference](../reference/mcp-tools.md) for the full catalog.
 
 When Claude edits your code, CodeClone's MCP tools track changes against a declared scope, compute impact zones (blast radius), and verify that edits conform to your repository's structural contracts.
 

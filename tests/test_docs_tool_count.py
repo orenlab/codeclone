@@ -28,6 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _COUNTING_PAGES = (
     "README.md",
     "docs/index.md",
+    "docs/integrations/claude.md",
     "docs/internal/architecture/overview.md",
     "docs/plans-and-retention.md",
 )
