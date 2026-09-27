@@ -39,6 +39,7 @@ from codeclone.canonical.grammar import (
     field_morphology,
     require_analysis_wire_families,
     require_closed_vocabularies,
+    require_comparison_families,
     require_declaration,
     require_house_families,
     require_tier_pure_fields,
@@ -129,6 +130,35 @@ _EXPECTED_KINDS: dict[str, str] = {
     "unit_spans": "normalized_fact",
     "unreachable_statement_groups": "normalized_finding",
     "violations": "normalized_finding",
+    # Canonical epoch E2 (2026-09-26): the comparison tier, each family
+    # under one of the seven EXISTING comparison productions — two baseline
+    # witnesses, per-lane trust, availability and disabled capabilities,
+    # five per-subject novelty annotations and two delta annotations.
+    "adoption_delta": "delta_annotation",
+    "api_surface_delta": "delta_annotation",
+    "baseline_witness": "baseline_witness",
+    "clone_novelty": "novelty_annotation",
+    "comparison_availability": "comparison_availability",
+    "complexity_novelty": "novelty_annotation",
+    "coupling_novelty": "novelty_annotation",
+    "dead_symbol_novelty": "novelty_annotation",
+    "dependency_cycle_novelty": "novelty_annotation",
+    "disabled_capabilities": "disabled_capability",
+    "lane_trust": "lane_trust",
+    "metrics_baseline_witness": "baseline_witness",
+}
+
+#: The subject each E2 annotation references — independent literal: the
+#: finding family whose finding it annotates, the analysis family whose
+#: quantity it is the delta of.
+_EXPECTED_SUBJECTS: dict[str, str] = {
+    "adoption_delta": "adoption_counts",
+    "api_surface_delta": "api_symbols",
+    "clone_novelty": "clone_groups",
+    "complexity_novelty": "complexity_hotspots",
+    "coupling_novelty": "coupling_hotspots",
+    "dead_symbol_novelty": "dead_symbol_groups",
+    "dependency_cycle_novelty": "dependency_cycles",
 }
 
 
@@ -160,6 +190,15 @@ def test_every_wire_family_matches_the_independent_kind_fixture() -> None:
     assert sorted(FAMILY_SEMANTIC_GRAMMAR) == sorted(_EXPECTED_KINDS)
     for family, expected_kind in sorted(_EXPECTED_KINDS.items()):
         assert FAMILY_SEMANTIC_GRAMMAR[family].semantic_kind == expected_kind, family
+
+
+def test_every_annotation_references_its_independent_subject() -> None:
+    declared = {
+        family: declaration.subject_family
+        for family, declaration in FAMILY_SEMANTIC_GRAMMAR.items()
+        if declaration.subject_family is not None
+    }
+    assert declared == _EXPECTED_SUBJECTS
 
 
 def test_production_tiers_are_the_ratified_ones() -> None:
@@ -386,10 +425,18 @@ def test_analysis_house_fields_are_analysis_tier_families() -> None:
     require_house_families(ANALYSIS_TIER, field_names)
 
 
-def test_comparison_and_evaluation_houses_are_born_empty_today() -> None:
+def test_the_comparison_house_is_the_comparison_registry() -> None:
+    """Canonical epoch E2: the comparison house carries exactly the families
+    the comparison registry declares, every one of them comparison-tier; the
+    evaluation house stays born empty until its own tier lands."""
     from codeclone.canonical.model import ComparisonFacts, EvaluationFacts
+    from codeclone.canonical.registry import COMPARISON_FAMILY_FIELDS
 
-    assert dataclasses.fields(ComparisonFacts) == ()
+    field_names = tuple(
+        model_field.name for model_field in dataclasses.fields(ComparisonFacts)
+    )
+    assert sorted(field_names) == sorted(COMPARISON_FAMILY_FIELDS)
+    require_house_families(COMPARISON_TIER, field_names)
     assert dataclasses.fields(EvaluationFacts) == ()
 
 
@@ -501,6 +548,106 @@ def test_the_real_wire_population_passes_the_gate() -> None:
     assert len(families) == 33
     assert sum(len(fields) for fields in families.values()) == 118 + 80 - 1
     require_analysis_wire_families(families)
+
+
+# ---------------------------------------------------------------------------
+# Canonical epoch E2: the comparison registry gate.
+# ---------------------------------------------------------------------------
+
+
+def _comparison_field_names() -> dict[str, tuple[str, ...]]:
+    from codeclone.canonical.registry import (
+        COMPARISON_FAMILY_FIELDS,
+        comparison_stored_fields,
+    )
+
+    return {
+        family: comparison_stored_fields(family) for family in COMPARISON_FAMILY_FIELDS
+    }
+
+
+def test_registry_source_executes_the_comparison_gate_at_import() -> None:
+    """The comparison gate is enforcement only on the executed path — the
+    wire-gate precedent above, pinned on the SOURCE."""
+    tree = ast.parse(_REGISTRY_PATH.read_text("utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "require_comparison_families"
+    ]
+    assert len(calls) == 1, "registry.py must execute the comparison gate once"
+
+
+def test_the_real_comparison_population_passes_the_gate() -> None:
+    """Witness that the instrument is on: 12 families, 60 stored fields.
+
+    Canonical epoch E2 (2026-09-26): ``baseline_witness`` (9),
+    ``metrics_baseline_witness`` (6), ``lane_trust`` (5),
+    ``comparison_availability`` (4), ``disabled_capabilities`` (3), the five
+    novelty families (5 each: the two identity columns, ``finding_id``,
+    ``novelty``, ``novelty_reason``) and the two delta families of one shared
+    row shape (4 each: the two identity columns, ``delta``, ``value``) =
+    9 + 6 + 5 + 4 + 3 + 25 + 8 = 60.  The declared-only columns (``trusted``,
+    ``compared_without_valid_baseline``, ``payload_sha256_verified``,
+    ``new_clones``) have no residence and are not counted.  None of these
+    families is a wire family: the wire population above is unchanged.
+    """
+    from codeclone.canonical.registry import FACT_FAMILY_FIELDS
+
+    families = _comparison_field_names()
+    assert len(families) == 12
+    assert (
+        sum(len(fields) for fields in families.values()) == 9 + 6 + 5 + 4 + 3 + 25 + 8
+    )
+    assert not set(families) & set(FACT_FAMILY_FIELDS)
+    require_comparison_families(families, _wire_field_names())
+
+
+def test_a_comparison_family_cannot_enter_the_analysis_wire() -> None:
+    families = dict(_wire_field_names())
+    families["clone_novelty"] = ("novelty",)
+    with pytest.raises(GrammarViolation, match="comparison-tier"):
+        require_analysis_wire_families(families)
+
+
+def test_an_analysis_family_cannot_enter_the_comparison_registry() -> None:
+    families = dict(_comparison_field_names())
+    families["clone_groups"] = ("clone_kind",)
+    with pytest.raises(GrammarViolation, match="cannot live in the comparison"):
+        require_comparison_families(families, _wire_field_names())
+
+
+def test_an_undeclared_comparison_family_is_refused() -> None:
+    families = dict(_comparison_field_names())
+    families["ghost_trust"] = ("lane",)
+    with pytest.raises(GrammarViolation, match="no grammar declaration"):
+        require_comparison_families(families, _wire_field_names())
+
+
+def test_an_evaluation_field_in_a_comparison_family_is_refused() -> None:
+    families = dict(_comparison_field_names())
+    families["lane_trust"] = (*families["lane_trust"], "gate_status")
+    with pytest.raises(GrammarViolation, match=r"'gate_status'.*evaluation"):
+        require_comparison_families(families, _wire_field_names())
+
+
+def test_an_annotation_embedding_its_subject_is_refused() -> None:
+    """The guard the grammar used to name as absent, reached by a real
+    family: novelty that carries its clone group's own key column is the
+    embedded record the split forbids."""
+    families = dict(_comparison_field_names())
+    families["clone_novelty"] = (*families["clone_novelty"], "group_key")
+    with pytest.raises(GrammarViolation, match=r"embeds fields \['group_key'\]"):
+        require_comparison_families(families, _wire_field_names())
+
+
+def test_a_dangling_comparison_declaration_is_refused() -> None:
+    families = dict(_comparison_field_names())
+    del families["lane_trust"]
+    with pytest.raises(GrammarViolation, match="dangling declaration"):
+        require_comparison_families(families, _wire_field_names())
 
 
 # ---------------------------------------------------------------------------

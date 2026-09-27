@@ -25,6 +25,7 @@ import hashlib
 import inspect
 import json
 import random
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,16 @@ from codeclone.canonical.analysis_rows import (
     SuppressedCloneGroupRow,
     UnreachableStatementRow,
 )
-from codeclone.canonical.model import _unique_by_key
+from codeclone.canonical.comparison_rows import (
+    BaselineWitnessRecord,
+    ComparisonAvailabilityRow,
+    DisabledCapabilityRow,
+    FindingNoveltyRow,
+    LaneTrustRow,
+    MetricDeltaRow,
+    MetricsBaselineWitnessRecord,
+)
+from codeclone.canonical.model import ComparisonFacts, _unique_by_key
 
 
 def analysis_facts(**families: object) -> CanonicalFacts:
@@ -950,6 +960,148 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
     )
 
 
+#: The comparison fixture's one container identity (canonical epoch E2).
+FIXTURE_BASELINE_SCOPE_ID = "5f1c0de3-3c3c-4c3c-8c3c-3c3c3c3c3c3c"
+FIXTURE_ROOT_DIGEST = "c0ffee" + "0" * 58
+
+
+def _fixture_deltas(
+    identity: dict[str, str], **values: int
+) -> frozenset[MetricDeltaRow]:
+    return frozenset(
+        MetricDeltaRow(delta=delta, value=value, **identity)
+        for delta, value in values.items()
+    )
+
+
+def comparison_fixture_facts() -> ComparisonFacts:
+    """A distinguishing comparison house: every E2 family non-empty, all
+    three availability words beside the fourth state (a disabled lane), all
+    three novelty words, a negative delta beside a zero one."""
+    identity = {
+        "baseline_scope_id": FIXTURE_BASELINE_SCOPE_ID,
+        "root_digest": FIXTURE_ROOT_DIGEST,
+    }
+    untrusted = "risk_observations"
+    trust_lanes = (
+        "adoption_counts",
+        "api_surface",
+        "clones.blocks",
+        "clones.functions",
+        "coupling_cohesion_observations",
+        "dead_code",
+        "dependencies",
+        "module_identity",
+        untrusted,
+    )
+    availability = {
+        "adoption_counts": "compared",
+        "api_surface": "compared",
+        "clones.blocks": "compared",
+        "clones.functions": "compared",
+        "coupling_cohesion_observations": "not_compared",
+        "dead_code": "compared",
+        "dependencies": "compared",
+        untrusted: "unavailable",
+    }
+
+    def novelty(
+        finding_id: str, word: str, reason: str | None = None
+    ) -> FindingNoveltyRow:
+        return FindingNoveltyRow(
+            finding_id=finding_id, novelty=word, novelty_reason=reason, **identity
+        )
+
+    return ComparisonFacts(
+        baseline_witness=BaselineWitnessRecord(
+            state="untrusted",
+            loaded=True,
+            status="ok",
+            fingerprint_version="3",
+            schema_version="3.0",
+            python_tag="cp314",
+            payload_sha256=FIXTURE_ROOT_DIGEST,
+            **identity,
+        ),
+        metrics_baseline_witness=MetricsBaselineWitnessRecord(
+            loaded=True,
+            status="ok",
+            schema_version="3.0",
+            payload_sha256=FIXTURE_ROOT_DIGEST,
+            **identity,
+        ),
+        lane_trust=frozenset(
+            LaneTrustRow(
+                lane=lane,
+                status="unavailable" if lane == untrusted else "trusted",
+                reason="payload_schema_outdated" if lane == untrusted else "compatible",
+                **identity,
+            )
+            for lane in trust_lanes
+        ),
+        comparison_availability=frozenset(
+            ComparisonAvailabilityRow(lane=lane, availability=word, **identity)
+            for lane, word in availability.items()
+        ),
+        disabled_capabilities=frozenset(
+            {DisabledCapabilityRow(lane="semantic_authority", **identity)}
+        ),
+        clone_novelty=frozenset(
+            {
+                novelty("clone:function:aa11|0-19", "new"),
+                novelty("clone:block:bb22|bb22|bb22|bb22", "known"),
+            }
+        ),
+        complexity_novelty=frozenset(
+            {
+                novelty(
+                    "design:complexity:pkg.a:A.run",
+                    "unavailable",
+                    "entity_not_compared",
+                )
+            }
+        ),
+        coupling_novelty=frozenset(
+            {novelty("design:coupling:tools/b.py:K", "unavailable", "lane_unavailable")}
+        ),
+        dependency_cycle_novelty=frozenset(
+            {novelty("design:dependency:pkg.a -> pkg.h", "known")}
+        ),
+        dead_symbol_novelty=frozenset(
+            {
+                novelty("dead_code:pkg.a:A.run", "new"),
+                novelty(
+                    "dead_code:tools/b.py:helper",
+                    "unavailable",
+                    "comparison_unavailable",
+                ),
+            }
+        ),
+        adoption_delta=_fixture_deltas(
+            identity,
+            docstring_permille_delta=0,
+            typing_param_permille_delta=12,
+            typing_return_permille_delta=-3,
+        ),
+        api_surface_delta=_fixture_deltas(
+            identity,
+            api_breaking_changes=2,
+            api_signature_changes=1,
+            new_api_symbols=5,
+        ),
+    )
+
+
+def comparison_fixture_model() -> CanonicalModel:
+    """The analysis fixture, compared against one baseline (canonical epoch
+    E2): the SAME analysis house beside a populated comparison house."""
+    model = fixture_model()
+    return replace(
+        model,
+        facts=replace(model.facts, comparison=comparison_fixture_facts()),
+    )
+
+
 def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     """Known-answer pin: any silent movement of the byte contract — member
     order, escaping, float lexemes, the integrity domain — turns this red.
@@ -1082,8 +1234,27 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     as the ONLY cause: re-spelling that one member of the new bytes back to
     the old two fields and re-sealing reproduces 10475 bytes and 14b0d49e…
     exactly.
+
+    Canonical epoch E2 (2026-09-26) did NOT move this literal, and that is
+    the pin's second job: the SAME bytes are asserted below for the fixture
+    compared against a baseline — twelve comparison families populated in
+    the model — because until the wire-revision bump the comparison house
+    joins no wire member (ruling 2026-09-26).  A comparison byte reaching
+    this document without the bump reds the pin beside this one.
     """
     payload = encode_canonical_json(fixture_model())
+    assert len(payload) == 10458
+    assert (
+        hashlib.sha256(payload).hexdigest()
+        == "d33cfae67368db253f095a0789b3cf129558d8977514abceb9d07e2e5996eb06"
+    )
+
+
+def test_the_comparison_house_does_not_move_the_known_answer_bytes() -> None:
+    """The known-answer pin's second job (canonical epoch E2), held apart
+    from it: the fixture compared against a baseline encodes to the SAME
+    10458 bytes — the literal above, not a second one."""
+    payload = encode_canonical_json(comparison_fixture_model())
     assert len(payload) == 10458
     assert (
         hashlib.sha256(payload).hexdigest()
@@ -2486,17 +2657,19 @@ def test_uniqueness_prover_swallows_the_repeat_no_frozenset_can_carry() -> None:
         _unique_by_key([row, _risk_probe_row(4)], "probe.key", _risk_probe_key)
 
 
-def test_every_family_the_uniqueness_prover_reads_is_a_frozenset() -> None:
-    """The unreachability claim itself, executed.
+#: The fact houses whose keyed families reach the uniqueness prover, by the
+#: receiver name the model spells them under (canonical epoch E2 added the
+#: comparison house).
+_PROVER_HOUSES: dict[str, type] = {
+    "facts": AnalysisFacts,
+    "comparison": ComparisonFacts,
+}
 
-    Every ``_unique_by_key`` call site reads a family straight off the fact
-    house, and every one of those families is a ``frozenset`` — so no call
-    site can hand the prover a sequence, and the swallow branch cannot run.
-    Retype one family as a sequence and this reds: that change must decide
-    the branch before it lands, not inherit it.
-    """
+
+def _uniqueness_prover_sites() -> list[tuple[str, str]]:
+    """Every ``_unique_by_key`` call site of the model, as (house, family)."""
     source = Path(inspect.getsourcefile(canonical_model) or "").read_text("utf-8")
-    families: list[str] = []
+    sites: list[tuple[str, str]] = []
     for node in ast.walk(ast.parse(source)):
         if not (
             isinstance(node, ast.Call)
@@ -2509,17 +2682,35 @@ def test_every_family_the_uniqueness_prover_reads_is_a_frozenset() -> None:
             "a uniqueness-prover call site reads something other than a "
             "declared fact family; this pin can no longer see what it keys"
         )
-        assert isinstance(argument.value, ast.Name) and argument.value.id == "facts"
-        families.append(argument.attr)
+        receiver = argument.value
+        assert isinstance(receiver, ast.Name)
+        assert receiver.id in _PROVER_HOUSES
+        sites.append((receiver.id, argument.attr))
+    return sites
 
-    assert families, "no uniqueness-prover call sites found: the pin is vacuous"
-    annotations = AnalysisFacts.__annotations__
-    for family in families:
-        assert annotations[family].startswith("frozenset["), (
-            f"{family!r} reaches the uniqueness prover but is not a frozenset: "
-            "the byte-identical-repeat branch is now reachable and silently "
-            "swallows a duplicated row"
-        )
+
+def test_every_family_the_uniqueness_prover_reads_is_a_frozenset() -> None:
+    """The unreachability claim itself, executed.
+
+    Every ``_unique_by_key`` call site reads a family straight off a fact
+    house, and every one of those families is a ``frozenset`` — so no call
+    site can hand the prover a sequence, and the swallow branch cannot run.
+    Retype one family as a sequence and this reds: that change must decide
+    the branch before it lands, not inherit it.
+    """
+    sites = _uniqueness_prover_sites()
+    assert sites, "no uniqueness-prover call sites found: the pin is vacuous"
+    assert {house for house, _family in sites} == set(_PROVER_HOUSES)
+    offenders = [
+        family
+        for house, family in sites
+        if not _PROVER_HOUSES[house].__annotations__[family].startswith("frozenset[")
+    ]
+    assert offenders == [], (
+        f"{offenders!r} reach the uniqueness prover but are not frozensets: "
+        "the byte-identical-repeat branch is now reachable and silently "
+        "swallows a duplicated row"
+    )
 
 
 # ---------------------------------------------------------------------------

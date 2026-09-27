@@ -25,10 +25,11 @@ shape of composition:
 * every registry wire family lives in ``AnalysisFacts`` (``file_modules``
   deliberately excepted: the FILE-MODULE relation rides the model, a table
   and never a column, §2.3);
-* the comparison and evaluation houses are BORN EMPTY — the current,
-  legitimate state under the ratified grammar.  When their first family
-  lands (with its own wire-revision bump), this pin is updated as part of
-  that declared transition, never silently.
+* the evaluation house is BORN EMPTY — the current, legitimate state under
+  the ratified grammar.  The comparison house received its first families
+  in canonical epoch E2 (2026-09-26), a declared transition: they are model
+  and store state only, the wire gains nothing until its own revision bump,
+  and every one of them is a comparison-registry family (pinned below).
 """
 
 from __future__ import annotations
@@ -110,11 +111,21 @@ def test_every_registry_family_lives_in_the_analysis_house() -> None:
     assert analysis_fields == registry_families
 
 
-def test_comparison_and_evaluation_houses_are_born_empty() -> None:
-    """Zero families is the CURRENT ratified state, not an omission: the
-    houses exist so the §4 grammar has typed homes, and their first
-    resident arrives only with a declared wire-revision bump."""
-    assert dataclasses.fields(ComparisonFacts) == ()
+def test_every_comparison_registry_family_lives_in_the_comparison_house() -> None:
+    """Canonical epoch E2: the comparison house and the comparison registry
+    are one population, in both directions, and none of it is a wire
+    family — a comparison family smuggled into the analysis house (or the
+    wire order) would be the collapse the grammar forbids."""
+    from codeclone.canonical.registry import COMPARISON_FAMILY_FIELDS
+
+    comparison_fields = {field.name for field in dataclasses.fields(ComparisonFacts)}
+    assert comparison_fields == set(COMPARISON_FAMILY_FIELDS)
+    assert not comparison_fields & set(wire_fact_family_order())
+
+
+def test_the_evaluation_house_is_born_empty() -> None:
+    """Zero families is the CURRENT ratified state of the evaluation house,
+    not an omission: its first resident arrives with its own tier."""
     assert dataclasses.fields(EvaluationFacts) == ()
 
 
@@ -141,7 +152,9 @@ def test_comparison_and_evaluation_houses_are_born_empty() -> None:
 #: The dataclasses a default legitimately belongs on. Declared as a SET and
 #: compared for equality below, so the rule cannot be dodged by moving a row
 #: into this list: growing it is a visible, reviewable edit.
-_CONTAINER_TYPES = frozenset({AnalysisFacts, CanonicalFacts, CanonicalModel})
+_CONTAINER_TYPES = frozenset(
+    {AnalysisFacts, CanonicalFacts, CanonicalModel, ComparisonFacts}
+)
 
 #: Floor on the enumerated row population. An enumeration that silently
 #: returned nothing would satisfy every "no offenders" assertion below.

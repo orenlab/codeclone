@@ -55,8 +55,9 @@ wave (a record-in-record wire shape the revision-0 grammar does not carry).
 The fact container is a three-house composition (ruling 2026-08-24 §4,
 variant v): :class:`CanonicalFacts` is the pure composition root over
 :class:`AnalysisFacts` (the wire's ``facts`` record tables),
-:class:`ComparisonFacts` and :class:`EvaluationFacts` (born empty under the
-ratified grammar); :class:`CanonicalModel` adds the identity domains, the
+:class:`ComparisonFacts` (canonical epoch E2: internal model and store state
+until the wire-revision bump) and :class:`EvaluationFacts` (born empty under
+the ratified grammar); :class:`CanonicalModel` adds the identity domains, the
 scope, and the standalone value sets.
 """
 
@@ -83,6 +84,23 @@ from codeclone.canonical.analysis_rows import (
     UnreachableStatementRow,
 )
 from codeclone.canonical.api_identity import signature_variant
+from codeclone.canonical.comparison_rows import (
+    AVAILABILITY_COMPARED,
+    CLONE_NOVELTY_LANES,
+    COMPARED_LANES,
+    DELTA_FAMILY_TERMS,
+    NOVELTY_FAMILY_ID_PREFIXES,
+    NOVELTY_UNAVAILABLE,
+    OBSERVATION_LANES,
+    BaselineWitnessRecord,
+    ComparisonAvailabilityRow,
+    DisabledCapabilityRow,
+    FindingNoveltyRow,
+    LaneTrustRow,
+    MetricDeltaRow,
+    MetricsBaselineWitnessRecord,
+    baseline_identity,
+)
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.identity import (
     ADOPTION_FEATURES,
@@ -1287,16 +1305,45 @@ class AnalysisFacts:
 
 @dataclass(frozen=True, slots=True)
 class ComparisonFacts:
-    """The comparison-tier fact house — born empty, and legitimately so.
+    """The comparison-tier fact house: this run compared against ONE baseline.
 
-    The ratified §4 grammar names its future residents: baseline
-    state/scope/root witnesses, per-lane trust, availability/refusal,
-    novelty facts, metric-baseline identity and results, deltas, disabled
-    capabilities.  Zero families is the CURRENT state, not an omission:
-    comparison facts join with their own wire-revision bump, because
-    emitting an empty section today would present "not populated by this
-    model revision" as "measured empty" (the four-state law forbids it).
+    Canonical epoch E2 (2026-09-26, ruling of the same day): the residents
+    the ratified §4 grammar names — baseline witnesses, per-lane trust and
+    availability, disabled capabilities, novelty annotations, deltas — are
+    carried here and stored as rows, and they are NOT emitted: the wire and
+    the report document of this revision carry no comparison section, and
+    the section joins with its own wire-revision bump.  Emitting it earlier
+    would make a revision-1 artifact carry semantics its revision does not
+    declare.  A model decoded from the wire therefore carries this house
+    EMPTY, which reads "not witnessed by this artifact" — ``baseline_witness``
+    is ``None`` and the model refuses every other comparison row without it —
+    never "compared, nothing found".
+
+    The two witnesses are records (one per run, ``None`` is the typed
+    absence) and always exist on a witnessed run; the delta families exist
+    whole exactly when their comparison ran.  The rest are keyed row sets.
+    The laws that bind them to one another are proved on every normalization
+    (:func:`_prove_comparison_facts`).
     """
+
+    baseline_witness: BaselineWitnessRecord | None = None
+    metrics_baseline_witness: MetricsBaselineWitnessRecord | None = None
+    lane_trust: frozenset[LaneTrustRow] = field(default_factory=frozenset)
+    comparison_availability: frozenset[ComparisonAvailabilityRow] = field(
+        default_factory=frozenset
+    )
+    disabled_capabilities: frozenset[DisabledCapabilityRow] = field(
+        default_factory=frozenset
+    )
+    clone_novelty: frozenset[FindingNoveltyRow] = field(default_factory=frozenset)
+    complexity_novelty: frozenset[FindingNoveltyRow] = field(default_factory=frozenset)
+    coupling_novelty: frozenset[FindingNoveltyRow] = field(default_factory=frozenset)
+    dependency_cycle_novelty: frozenset[FindingNoveltyRow] = field(
+        default_factory=frozenset
+    )
+    dead_symbol_novelty: frozenset[FindingNoveltyRow] = field(default_factory=frozenset)
+    adoption_delta: frozenset[MetricDeltaRow] = field(default_factory=frozenset)
+    api_surface_delta: frozenset[MetricDeltaRow] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1914,6 +1961,226 @@ def _prove_function_roles(facts: AnalysisFacts) -> None:
             )
 
 
+#: A comparison row or record of the comparison house (everything but the
+#: witness itself): each one names the baseline it was compared against.
+_ComparedRow = (
+    MetricsBaselineWitnessRecord
+    | LaneTrustRow
+    | ComparisonAvailabilityRow
+    | DisabledCapabilityRow
+    | FindingNoveltyRow
+    | MetricDeltaRow
+)
+
+
+def novelty_families(
+    comparison: ComparisonFacts,
+) -> tuple[tuple[str, frozenset[FindingNoveltyRow]], ...]:
+    """The five novelty families by grammar name, in name order — the one
+    enumeration the model laws, the store walk and the projections share."""
+    return (
+        ("clone_novelty", comparison.clone_novelty),
+        ("complexity_novelty", comparison.complexity_novelty),
+        ("coupling_novelty", comparison.coupling_novelty),
+        ("dead_symbol_novelty", comparison.dead_symbol_novelty),
+        ("dependency_cycle_novelty", comparison.dependency_cycle_novelty),
+    )
+
+
+def _compared_rows(comparison: ComparisonFacts) -> Iterable[_ComparedRow]:
+    metrics_witness = comparison.metrics_baseline_witness
+    rows: Iterable[_ComparedRow] = chain(
+        () if metrics_witness is None else (metrics_witness,),
+        comparison.lane_trust,
+        comparison.comparison_availability,
+        comparison.disabled_capabilities,
+        comparison.adoption_delta,
+        comparison.api_surface_delta,
+        *(rows for _family, rows in novelty_families(comparison)),
+    )
+    return rows
+
+
+def _prove_comparison_keys(comparison: ComparisonFacts) -> None:
+    """Stage 2 for the comparison house: one row per lane, one novelty per
+    published finding, each novelty filed under its own subject family."""
+    _unique_by_key(comparison.lane_trust, "lane_trust.lane", lambda row: row.lane)
+    _unique_by_key(
+        comparison.comparison_availability,
+        "comparison_availability.lane",
+        lambda row: row.lane,
+    )
+    _unique_by_key(
+        comparison.disabled_capabilities,
+        "disabled_capabilities.lane",
+        lambda row: row.lane,
+    )
+    _unique_by_key(
+        comparison.adoption_delta, "adoption_delta.delta", lambda row: row.delta
+    )
+    _unique_by_key(
+        comparison.api_surface_delta, "api_surface_delta.delta", lambda row: row.delta
+    )
+    # Five call sites rather than a loop, for the reason the E1 site-keyed
+    # families give: the roundtrip pin reads every ``_unique_by_key`` site
+    # off the house by name.
+    _unique_by_key(
+        comparison.clone_novelty, "clone_novelty.id", lambda row: row.finding_id
+    )
+    _unique_by_key(
+        comparison.complexity_novelty,
+        "complexity_novelty.id",
+        lambda row: row.finding_id,
+    )
+    _unique_by_key(
+        comparison.coupling_novelty, "coupling_novelty.id", lambda row: row.finding_id
+    )
+    _unique_by_key(
+        comparison.dead_symbol_novelty,
+        "dead_symbol_novelty.id",
+        lambda row: row.finding_id,
+    )
+    _unique_by_key(
+        comparison.dependency_cycle_novelty,
+        "dependency_cycle_novelty.id",
+        lambda row: row.finding_id,
+    )
+    for family, rows in novelty_families(comparison):
+        prefixes = NOVELTY_FAMILY_ID_PREFIXES[family]
+        for row in rows:
+            if not row.finding_id.startswith(prefixes) or row.finding_id in prefixes:
+                raise CanonicalModelError(
+                    f"{family} carries {row.finding_id!r}, which is not a "
+                    f"finding of its subject family ({', '.join(prefixes)})"
+                )
+
+
+def _prove_one_baseline(comparison: ComparisonFacts) -> None:
+    """Every comparison fact of a run names the ONE baseline its witness
+    names — and none exists without the witness.
+
+    A novelty with no witness would be a verdict about a comparison nobody
+    can name; a row naming another container would put two baselines under
+    one run.  Both are refused, never dropped.
+    """
+    witness = comparison.baseline_witness
+    rows = list(_compared_rows(comparison))
+    if witness is None:
+        if rows:
+            raise CanonicalModelError(
+                "comparison facts carried without the baseline witness: "
+                "nothing says what they were compared against"
+            )
+        return
+    if comparison.metrics_baseline_witness is None:
+        raise CanonicalModelError(
+            "a witnessed comparison names the clone baseline but not the "
+            "metrics baseline read from the same container"
+        )
+    identity = baseline_identity(witness)
+    for row in rows:
+        if baseline_identity(row) != identity:
+            raise CanonicalModelError(
+                f"{type(row).__name__} names the baseline "
+                f"{baseline_identity(row)!r}, the run's witness names "
+                f"{identity!r}: one run is compared against one baseline"
+            )
+
+
+def _prove_lane_partition(comparison: ComparisonFacts) -> None:
+    """The four availability states partition the lanes.
+
+    Every observation lane is either trust-assessed or a disabled
+    capability, never both; every lane a comparison has a term for carries
+    EXACTLY ONE of an availability row (three words) and a disabled row (the
+    fourth state) — the four states are never folded into three, and no lane
+    is left without one.
+    """
+    if comparison.baseline_witness is None:
+        return
+    trusted = {row.lane for row in comparison.lane_trust}
+    disabled = {row.lane for row in comparison.disabled_capabilities}
+    both = sorted(trusted & disabled)
+    if both:
+        raise CanonicalModelError(
+            f"lanes {both!r} are both trust-assessed and disabled"
+        )
+    missing = sorted(set(OBSERVATION_LANES) - trusted - disabled)
+    if missing:
+        raise CanonicalModelError(
+            f"lanes {missing!r} are neither trust-assessed nor disabled"
+        )
+    available = {row.lane for row in comparison.comparison_availability}
+    for lane in COMPARED_LANES:
+        if (lane in available) == (lane in disabled):
+            raise CanonicalModelError(
+                f"lane {lane!r} must carry exactly one of an availability "
+                "row and a disabled capability"
+            )
+
+
+def _prove_comparison_results(comparison: ComparisonFacts) -> None:
+    """A result exists exactly when its comparison ran.
+
+    A delta family is present — every one of its terms, and none of another
+    family's — iff its lane is ``compared`` (zero is admissible only as a
+    measured result); a clone finding is ``new`` or ``known`` only under a
+    compared clone lane.
+    """
+    availability = {
+        row.lane: row.availability for row in comparison.comparison_availability
+    }
+    _prove_delta_families(comparison, availability)
+    _prove_clone_verdicts(comparison, availability)
+
+
+def _prove_delta_families(
+    comparison: ComparisonFacts, availability: dict[str, str]
+) -> None:
+    for family, lane, rows in (
+        ("adoption_delta", "adoption_counts", comparison.adoption_delta),
+        ("api_surface_delta", "api_surface", comparison.api_surface_delta),
+    ):
+        terms = {row.delta for row in rows}
+        compared = availability.get(lane) == AVAILABILITY_COMPARED
+        if compared != bool(terms):
+            raise CanonicalModelError(
+                f"the {lane} delta is {'present' if terms else 'absent'} while "
+                f"the lane is {availability.get(lane, 'disabled')!r}"
+            )
+        if terms and terms != set(DELTA_FAMILY_TERMS[family]):
+            raise CanonicalModelError(
+                f"{family} states {sorted(terms)!r}, not exactly its terms "
+                f"{list(DELTA_FAMILY_TERMS[family])!r}"
+            )
+
+
+def _prove_clone_verdicts(
+    comparison: ComparisonFacts, availability: dict[str, str]
+) -> None:
+    for row in comparison.clone_novelty:
+        if row.novelty == NOVELTY_UNAVAILABLE:
+            continue
+        lane = next(
+            lane
+            for prefix, lane in CLONE_NOVELTY_LANES.items()
+            if row.finding_id.startswith(prefix)
+        )
+        if availability.get(lane) != AVAILABILITY_COMPARED:
+            raise CanonicalModelError(
+                f"clone finding {row.finding_id!r} is {row.novelty!r} while "
+                f"{lane} is {availability.get(lane, 'disabled')!r}"
+            )
+
+
+def _prove_comparison_facts(comparison: ComparisonFacts) -> None:
+    """Stage 4: the comparison house's keys and cross-family laws."""
+    _prove_comparison_keys(comparison)
+    _prove_one_baseline(comparison)
+    _prove_lane_partition(comparison)
+    _prove_comparison_results(comparison)
+
+
 def _normalized(model: CanonicalModel) -> CanonicalModel:
     """Complete the domains to their closure and prove every key law
     (idempotent; never invents facts, never reorders — order is a
@@ -1924,6 +2191,7 @@ def _normalized(model: CanonicalModel) -> CanonicalModel:
     _prove_occurrence_relations(model.facts.analysis)
     _prove_coverage_join(model.facts.analysis)
     _prove_function_roles(model.facts.analysis)
+    _prove_comparison_facts(model.facts.comparison)
     return replace(
         model,
         files=frozenset(closure.files),

@@ -58,13 +58,15 @@ productions of TWO tiers.  A marker that cannot discriminate is a false
 instrument and stays out; the dated numbers above are observations of one
 corpus, never invariants.
 
-Deliberately absent, named so it cannot rot silently: an annotation
-family's payload-disjointness with its subject (the "annotation must
-reference, never embed" rule beyond the reference itself) needs the key
-vocabulary of the first real comparison family, and no such family exists
-in the wire — a guard no input can reach is theater, so it is not built
-here.  It lands with the first comparison family and that family's own
-wire-revision bump (§10: the wire is NOT frozen by this step).
+Canonical epoch E2 (2026-09-26) lands the first comparison families, and
+with them the guard this module used to name as absent: an annotation
+family's payload must be DISJOINT from its subject's (the "annotation must
+reference, never embed" rule beyond the reference itself) — executed by
+:func:`require_comparison_families` against the real field vocabularies of
+both families, because the first real comparison family is the first input
+that can reach it.  The families live in the model and the store only: they
+join no wire section until their own wire-revision bump (§10), and the
+analysis wire gate below still refuses them.
 """
 
 from __future__ import annotations
@@ -162,8 +164,9 @@ class FamilyGrammar:
     subject_family: str | None = None
 
 
-#: The grammar declaration of every wave-1..4 wire family.  The tier of
-#: each family is derived from its production via
+#: The grammar declaration of every wave-1..4 wire family and, since
+#: canonical epoch E2, of every comparison family of the model and store.
+#: The tier of each family is derived from its production via
 #: :data:`SEMANTIC_KIND_TIERS`; there is deliberately no tier literal
 #: anywhere in this table.
 FAMILY_SEMANTIC_GRAMMAR: Final[Mapping[str, FamilyGrammar]] = {
@@ -207,6 +210,33 @@ FAMILY_SEMANTIC_GRAMMAR: Final[Mapping[str, FamilyGrammar]] = {
     "unit_spans": FamilyGrammar("normalized_fact"),
     "unreachable_statement_groups": FamilyGrammar("normalized_finding"),
     "violations": FamilyGrammar("normalized_finding"),
+    # Canonical epoch E2 (2026-09-26): the comparison tier, bound to the
+    # seven existing productions.  Internal model and store state until the
+    # wire-revision bump; the analysis wire gate refuses every one of them.
+    "adoption_delta": FamilyGrammar(
+        "delta_annotation", subject_family="adoption_counts"
+    ),
+    "api_surface_delta": FamilyGrammar(
+        "delta_annotation", subject_family="api_symbols"
+    ),
+    "baseline_witness": FamilyGrammar("baseline_witness"),
+    "clone_novelty": FamilyGrammar("novelty_annotation", subject_family="clone_groups"),
+    "comparison_availability": FamilyGrammar("comparison_availability"),
+    "complexity_novelty": FamilyGrammar(
+        "novelty_annotation", subject_family="complexity_hotspots"
+    ),
+    "coupling_novelty": FamilyGrammar(
+        "novelty_annotation", subject_family="coupling_hotspots"
+    ),
+    "dead_symbol_novelty": FamilyGrammar(
+        "novelty_annotation", subject_family="dead_symbol_groups"
+    ),
+    "dependency_cycle_novelty": FamilyGrammar(
+        "novelty_annotation", subject_family="dependency_cycles"
+    ),
+    "disabled_capabilities": FamilyGrammar("disabled_capability"),
+    "lane_trust": FamilyGrammar("lane_trust"),
+    "metrics_baseline_witness": FamilyGrammar("baseline_witness"),
 }
 
 
@@ -356,6 +386,60 @@ def require_analysis_wire_families(
             raise GrammarViolation(
                 f"analysis-tier family {family!r} is declared but absent "
                 f"from the wire registry: a dangling declaration is "
+                f"narration"
+            )
+
+
+def require_comparison_families(
+    families: Mapping[str, Iterable[str]],
+    subject_fields: Mapping[str, Iterable[str]],
+    declarations: Mapping[str, FamilyGrammar] = FAMILY_SEMANTIC_GRAMMAR,
+) -> None:
+    """The comparison-tier registry gate (canonical epoch E2).
+
+    ``families`` maps each comparison family to its stored field names;
+    ``subject_fields`` maps each analysis family to ITS stored and wire field
+    names.  Refused, in deterministic order: a family without a grammar
+    declaration; a family whose derived tier is not comparison; a field
+    whose morphology spells another tier; an annotation whose payload shares
+    a field with its subject's (the annotation references its subject and
+    never embeds it); and a comparison-tier declaration no registry family
+    answers (a dangling declaration is narration).
+    """
+    for family in sorted(families):
+        declaration = declarations.get(family)
+        if declaration is None:
+            raise GrammarViolation(
+                f"comparison family {family!r} has no grammar declaration"
+            )
+        tier = require_declaration(family, declaration, declarations)
+        if tier != COMPARISON_TIER:
+            raise GrammarViolation(
+                f"family {family!r} is {tier}-tier "
+                f"({declaration.semantic_kind}) and cannot live in the "
+                f"comparison registry"
+            )
+        fields = tuple(families[family])
+        require_tier_pure_fields(family, tier, fields)
+        if declaration.subject_family is not None:
+            embedded = sorted(
+                set(fields) & set(subject_fields.get(declaration.subject_family, ()))
+            )
+            if embedded:
+                raise GrammarViolation(
+                    f"annotation family {family!r} embeds fields "
+                    f"{embedded!r} of its subject "
+                    f"{declaration.subject_family!r}: an annotation references "
+                    f"its subject, it never carries it"
+                )
+    for family in sorted(declarations):
+        if (
+            tier_of_family(family, declarations) == COMPARISON_TIER
+            and family not in families
+        ):
+            raise GrammarViolation(
+                f"comparison-tier family {family!r} is declared but absent "
+                f"from the comparison registry: a dangling declaration is "
                 f"narration"
             )
 

@@ -105,6 +105,15 @@ from codeclone.canonical.codec import (
     referenced_symbols,
     stream_canonical_wire,
 )
+from codeclone.canonical.comparison_rows import (
+    BaselineWitnessRecord,
+    ComparisonAvailabilityRow,
+    DisabledCapabilityRow,
+    FindingNoveltyRow,
+    LaneTrustRow,
+    MetricDeltaRow,
+    MetricsBaselineWitnessRecord,
+)
 from codeclone.canonical.errors import (
     UNKNOWN_RUN_HEAD_ABSENT,
     UNKNOWN_RUN_NOT_OF_STORE,
@@ -168,6 +177,7 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
+    ComparisonFacts,
     ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
@@ -185,12 +195,14 @@ from codeclone.canonical.model import (
     SinkRoleRow,
     UnitSpanRow,
     ViolationRow,
+    novelty_families,
 )
 from codeclone.contracts import (
     ADOPTION_COVERAGE_POLICY_VERSION,
     API_SURFACE_SIGNATURE_VERSION,
     AUTHORITY_ANALYSIS_REVISION,
     BASELINE_FINGERPRINT_VERSION,
+    BASELINE_SCHEMA_VERSION,
     CANONICAL_MODEL_REVISION,
     CANONICAL_OBJECT_IDENTITY_VERSION,
     CANONICAL_WIRE_REVISION,
@@ -199,6 +211,7 @@ from codeclone.contracts import (
     DESIGN_METRICS_ALGORITHM_REVISION,
     FUNCTION_RELATIONSHIP_ALGORITHM_REVISION,
     LIVENESS_POLICY_VERSION,
+    METRICS_BASELINE_SCHEMA_VERSION,
     MODULE_IDENTITY_VERSION,
     SECURITY_SURFACE_CATALOG_VERSION,
     SOURCE_KIND_POLICY_VERSION,
@@ -843,6 +856,7 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
             },
         )
     yield from _observation_model_rows(facts)
+    yield from _comparison_model_rows(model.facts.comparison)
 
 
 def _observation_model_rows(
@@ -1206,6 +1220,50 @@ def _revision_two_model_rows(
                 "target": _relationship_target_value(relationship.target),
             },
         )
+
+
+def _comparison_model_rows(
+    comparison: ComparisonFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """Storage rows of the comparison house (canonical epoch E2).
+
+    Every row is stored whole — its baseline identity included — because the
+    comparison it states is against THAT container: two runs compared against
+    two baselines never share a novelty object.  Row order is the same
+    insurance as everywhere in this walk; the content address owns
+    determinism.
+    """
+    yield from _comparison_result_rows(comparison)
+    for trust in sorted(comparison.lane_trust, key=lambda row: row.lane):
+        yield "lane_trust", dict(sorted(asdict(trust).items()))
+    for available in sorted(
+        comparison.comparison_availability, key=lambda row: row.lane
+    ):
+        yield "comparison_availability", dict(sorted(asdict(available).items()))
+    for disabled in sorted(comparison.disabled_capabilities, key=lambda row: row.lane):
+        yield "disabled_capability", dict(sorted(asdict(disabled).items()))
+    for family, rows in novelty_families(comparison):
+        for novelty in sorted(rows, key=lambda row: row.finding_id):
+            yield family, dict(sorted(asdict(novelty).items()))
+
+
+def _comparison_result_rows(
+    comparison: ComparisonFacts,
+) -> Iterator[tuple[str, dict[str, object]]]:
+    """The two witness records and the two delta families' named rows."""
+    for family, record in (
+        ("baseline_witness", comparison.baseline_witness),
+        ("metrics_baseline_witness", comparison.metrics_baseline_witness),
+    ):
+        if record is not None:
+            # One record per run, present iff the model carries it.
+            yield family, dict(sorted(asdict(record).items()))
+    for family, deltas in (
+        ("adoption_delta", comparison.adoption_delta),
+        ("api_surface_delta", comparison.api_surface_delta),
+    ):
+        for delta in sorted(deltas, key=lambda row: row.delta):
+            yield family, dict(sorted(asdict(delta).items()))
 
 
 def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
@@ -1883,6 +1941,103 @@ def _decode_dead_code_summary_row(
     )
 
 
+def _stored_identity(
+    row: Mapping[str, object], where: str
+) -> tuple[str | None, str | None]:
+    return (
+        _require_optional_str(row, "baseline_scope_id", where),
+        _require_optional_str(row, "root_digest", where),
+    )
+
+
+def _decode_baseline_witness_row(
+    row: Mapping[str, object], where: str
+) -> BaselineWitnessRecord:
+    scope_id, root_digest = _stored_identity(row, where)
+    return BaselineWitnessRecord(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        state=_require_str(row, "state", where),
+        loaded=_require_bool(row, "loaded", where),
+        status=_require_str(row, "status", where),
+        fingerprint_version=_require_optional_str(row, "fingerprint_version", where),
+        schema_version=_require_optional_str(row, "schema_version", where),
+        python_tag=_require_optional_str(row, "python_tag", where),
+        payload_sha256=_require_optional_str(row, "payload_sha256", where),
+    )
+
+
+def _decode_metrics_baseline_witness_row(
+    row: Mapping[str, object], where: str
+) -> MetricsBaselineWitnessRecord:
+    scope_id, root_digest = _stored_identity(row, where)
+    return MetricsBaselineWitnessRecord(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        loaded=_require_bool(row, "loaded", where),
+        status=_require_str(row, "status", where),
+        schema_version=_require_optional_str(row, "schema_version", where),
+        payload_sha256=_require_optional_str(row, "payload_sha256", where),
+    )
+
+
+def _decode_lane_trust_row(row: Mapping[str, object], where: str) -> LaneTrustRow:
+    scope_id, root_digest = _stored_identity(row, where)
+    return LaneTrustRow(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        lane=_require_str(row, "lane", where),
+        status=_require_str(row, "status", where),
+        reason=_require_str(row, "reason", where),
+    )
+
+
+def _decode_comparison_availability_row(
+    row: Mapping[str, object], where: str
+) -> ComparisonAvailabilityRow:
+    scope_id, root_digest = _stored_identity(row, where)
+    return ComparisonAvailabilityRow(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        lane=_require_str(row, "lane", where),
+        availability=_require_str(row, "availability", where),
+    )
+
+
+def _decode_disabled_capability_row(
+    row: Mapping[str, object], where: str
+) -> DisabledCapabilityRow:
+    scope_id, root_digest = _stored_identity(row, where)
+    return DisabledCapabilityRow(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        lane=_require_str(row, "lane", where),
+    )
+
+
+def _decode_finding_novelty_row(
+    row: Mapping[str, object], where: str
+) -> FindingNoveltyRow:
+    scope_id, root_digest = _stored_identity(row, where)
+    return FindingNoveltyRow(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        finding_id=_require_str(row, "finding_id", where),
+        novelty=_require_str(row, "novelty", where),
+        novelty_reason=_require_optional_str(row, "novelty_reason", where),
+    )
+
+
+def _decode_metric_delta_row(row: Mapping[str, object], where: str) -> MetricDeltaRow:
+    scope_id, root_digest = _stored_identity(row, where)
+    return MetricDeltaRow(
+        baseline_scope_id=scope_id,
+        root_digest=root_digest,
+        delta=_require_str(row, "delta", where),
+        value=_require_int(row, "value", where),
+    )
+
+
 class _FamilyEntry(Protocol):
     """The registry's erased face — what a caller still needs from an entry
     once the row type has done its work at declaration time."""
@@ -2246,6 +2401,90 @@ FAMILY_DEAD_CODE_SUMMARY: Final = StoredFamily(
     row_type=DeadCodeSummaryRecord,
 )
 
+# Canonical epoch E2 (2026-09-26): the comparison tier.  A comparison fact's
+# meaning is owned by the baseline container contract it was read from — and,
+# for a novelty or a delta, by the producer revision that gives its SUBJECT
+# meaning — so both enter the namespace and a baseline-schema bump never lets
+# two generations of a comparison share one content address.
+_BASELINE_NAMESPACE: Final = f"baseline_schema:{BASELINE_SCHEMA_VERSION}"
+_METRICS_BASELINE_NAMESPACE: Final = (
+    f"{_BASELINE_NAMESPACE}:metrics_baseline_schema:{METRICS_BASELINE_SCHEMA_VERSION}"
+)
+FAMILY_BASELINE_WITNESS: Final = StoredFamily(
+    family="baseline_witness",
+    namespace=_BASELINE_NAMESPACE,
+    decode=_decode_baseline_witness_row,
+    row_type=BaselineWitnessRecord,
+)
+FAMILY_METRICS_BASELINE_WITNESS: Final = StoredFamily(
+    family="metrics_baseline_witness",
+    namespace=_METRICS_BASELINE_NAMESPACE,
+    decode=_decode_metrics_baseline_witness_row,
+    row_type=MetricsBaselineWitnessRecord,
+)
+FAMILY_LANE_TRUST: Final = StoredFamily(
+    family="lane_trust",
+    namespace=_BASELINE_NAMESPACE,
+    decode=_decode_lane_trust_row,
+    row_type=LaneTrustRow,
+)
+FAMILY_COMPARISON_AVAILABILITY: Final = StoredFamily(
+    family="comparison_availability",
+    namespace=_BASELINE_NAMESPACE,
+    decode=_decode_comparison_availability_row,
+    row_type=ComparisonAvailabilityRow,
+)
+FAMILY_DISABLED_CAPABILITY: Final = StoredFamily(
+    family="disabled_capability",
+    namespace=_BASELINE_NAMESPACE,
+    decode=_decode_disabled_capability_row,
+    row_type=DisabledCapabilityRow,
+)
+FAMILY_CLONE_NOVELTY: Final = StoredFamily(
+    family="clone_novelty",
+    namespace=f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}:{_BASELINE_NAMESPACE}",
+    decode=_decode_finding_novelty_row,
+    row_type=FindingNoveltyRow,
+)
+FAMILY_COMPLEXITY_NOVELTY: Final = StoredFamily(
+    family="complexity_novelty",
+    namespace=(
+        f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}:{_BASELINE_NAMESPACE}"
+    ),
+    decode=_decode_finding_novelty_row,
+    row_type=FindingNoveltyRow,
+)
+FAMILY_COUPLING_NOVELTY: Final = StoredFamily(
+    family="coupling_novelty",
+    namespace=f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}:{_BASELINE_NAMESPACE}",
+    decode=_decode_finding_novelty_row,
+    row_type=FindingNoveltyRow,
+)
+FAMILY_DEAD_SYMBOL_NOVELTY: Final = StoredFamily(
+    family="dead_symbol_novelty",
+    namespace=f"liveness:{LIVENESS_POLICY_VERSION}:{_BASELINE_NAMESPACE}",
+    decode=_decode_finding_novelty_row,
+    row_type=FindingNoveltyRow,
+)
+FAMILY_DEPENDENCY_CYCLE_NOVELTY: Final = StoredFamily(
+    family="dependency_cycle_novelty",
+    namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}:{_BASELINE_NAMESPACE}",
+    decode=_decode_finding_novelty_row,
+    row_type=FindingNoveltyRow,
+)
+FAMILY_ADOPTION_DELTA: Final = StoredFamily(
+    family="adoption_delta",
+    namespace=_METRICS_BASELINE_NAMESPACE,
+    decode=_decode_metric_delta_row,
+    row_type=MetricDeltaRow,
+)
+FAMILY_API_SURFACE_DELTA: Final = StoredFamily(
+    family="api_surface_delta",
+    namespace=_METRICS_BASELINE_NAMESPACE,
+    decode=_decode_metric_delta_row,
+    row_type=MetricDeltaRow,
+)
+
 _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_ADOPTION_COUNT,
     FAMILY_ANALYSIS_POPULATION,
@@ -2284,6 +2523,18 @@ _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
     FAMILY_COVERAGE_UNIT,
     FAMILY_COVERAGE_JOIN,
     FAMILY_DEAD_CODE_SUMMARY,
+    FAMILY_BASELINE_WITNESS,
+    FAMILY_METRICS_BASELINE_WITNESS,
+    FAMILY_LANE_TRUST,
+    FAMILY_COMPARISON_AVAILABILITY,
+    FAMILY_DISABLED_CAPABILITY,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_ADOPTION_DELTA,
+    FAMILY_API_SURFACE_DELTA,
 )
 
 # Derived, never restated: the reader dispatch and the content address read
@@ -2388,9 +2639,34 @@ def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
                 ),
                 coverage_join=_single_record(FAMILY_COVERAGE_JOIN, collected),
                 dead_code_summary=_single_record(FAMILY_DEAD_CODE_SUMMARY, collected),
-            )
+            ),
+            comparison=_collected_comparison(collected),
         ),
         coupled_sets=frozenset(FAMILY_COUPLED_SET.rows(collected)),
+    )
+
+
+def _collected_comparison(collected: Mapping[str, list[object]]) -> ComparisonFacts:
+    """Assemble the comparison house from decoded rows (canonical epoch E2)."""
+    return ComparisonFacts(
+        baseline_witness=_single_record(FAMILY_BASELINE_WITNESS, collected),
+        metrics_baseline_witness=_single_record(
+            FAMILY_METRICS_BASELINE_WITNESS, collected
+        ),
+        lane_trust=frozenset(FAMILY_LANE_TRUST.rows(collected)),
+        comparison_availability=frozenset(
+            FAMILY_COMPARISON_AVAILABILITY.rows(collected)
+        ),
+        disabled_capabilities=frozenset(FAMILY_DISABLED_CAPABILITY.rows(collected)),
+        clone_novelty=frozenset(FAMILY_CLONE_NOVELTY.rows(collected)),
+        complexity_novelty=frozenset(FAMILY_COMPLEXITY_NOVELTY.rows(collected)),
+        coupling_novelty=frozenset(FAMILY_COUPLING_NOVELTY.rows(collected)),
+        dependency_cycle_novelty=frozenset(
+            FAMILY_DEPENDENCY_CYCLE_NOVELTY.rows(collected)
+        ),
+        dead_symbol_novelty=frozenset(FAMILY_DEAD_SYMBOL_NOVELTY.rows(collected)),
+        adoption_delta=frozenset(FAMILY_ADOPTION_DELTA.rows(collected)),
+        api_surface_delta=frozenset(FAMILY_API_SURFACE_DELTA.rows(collected)),
     )
 
 
@@ -4354,29 +4630,41 @@ def export_head(
 
 __all__ = [
     "FAMILY_ADOPTION_COUNT",
+    "FAMILY_ADOPTION_DELTA",
     "FAMILY_ANALYSIS_POPULATION",
     "FAMILY_ANALYZED_FILE",
+    "FAMILY_API_SURFACE_DELTA",
     "FAMILY_API_SYMBOL",
+    "FAMILY_BASELINE_WITNESS",
     "FAMILY_CANDIDATE",
     "FAMILY_CLONE_GROUP",
+    "FAMILY_CLONE_NOVELTY",
     "FAMILY_COHESION_HOTSPOT",
+    "FAMILY_COMPARISON_AVAILABILITY",
     "FAMILY_COMPLEXITY_HOTSPOT",
+    "FAMILY_COMPLEXITY_NOVELTY",
     "FAMILY_CONTRACT",
     "FAMILY_COUPLED_SET",
     "FAMILY_COUPLING_COHESION",
     "FAMILY_COUPLING_HOTSPOT",
+    "FAMILY_COUPLING_NOVELTY",
     "FAMILY_COVERAGE_JOIN",
     "FAMILY_COVERAGE_UNIT",
     "FAMILY_DEAD_CODE_OBSERVATION",
     "FAMILY_DEAD_CODE_SUMMARY",
     "FAMILY_DEAD_SYMBOL_GROUP",
+    "FAMILY_DEAD_SYMBOL_NOVELTY",
     "FAMILY_DEPENDENCY_CYCLE",
+    "FAMILY_DEPENDENCY_CYCLE_NOVELTY",
     "FAMILY_DEPENDENCY_OCCURRENCE",
     "FAMILY_DEPENDENCY_RELATION",
+    "FAMILY_DISABLED_CAPABILITY",
     "FAMILY_FILE",
     "FAMILY_FILE_MODULE",
     "FAMILY_GRAPH_NODE",
     "FAMILY_IMPORT_OBSERVATION",
+    "FAMILY_LANE_TRUST",
+    "FAMILY_METRICS_BASELINE_WITNESS",
     "FAMILY_MODULE",
     "FAMILY_OVERLOADED_MODULE",
     "FAMILY_RELATIONSHIP_OBSERVATION",

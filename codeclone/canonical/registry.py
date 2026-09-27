@@ -58,7 +58,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from codeclone.canonical.grammar import require_analysis_wire_families
+from codeclone.canonical.grammar import (
+    require_analysis_wire_families,
+    require_comparison_families,
+)
 
 ANALYSIS_FACT: Final = "analysis_fact"
 CONTRACT_DERIVED: Final = "contract_derived_semantic"
@@ -2262,4 +2265,239 @@ require_analysis_wire_families(
         )
         for family, declarations in FACT_FAMILY_FIELDS.items()
     }
+)
+
+
+# ---------------------------------------------------------------------------
+# Canonical epoch E2 (2026-09-26): the comparison tier.
+#
+# These families are internal model and store state until the wire-revision
+# bump: every declaration is ``wire=False``, the wire order above never names
+# them, and the analysis wire gate refuses them.  The declaration still
+# carries the same epistemics — a stored comparison fact, or a value derived
+# from one through its named owner, declared and never stored.
+# ---------------------------------------------------------------------------
+
+_COMPARISON_FACT: Final = "comparison_fact"
+
+
+def _stored(field: str, owner: str, derivation: str) -> FieldDeclaration:
+    return FieldDeclaration(
+        field, _COMPARISON_FACT, owner, derivation, stored=True, wire=False
+    )
+
+
+def _declared(field: str, owner: str, derivation: str) -> FieldDeclaration:
+    return FieldDeclaration(
+        field, CONTRACT_DERIVED, owner, derivation, stored=False, wire=False
+    )
+
+
+def _baseline_identity(owner: str) -> tuple[FieldDeclaration, ...]:
+    """The two identity columns every comparison row carries: this run was
+    compared against THIS container (both ``None``: no container)."""
+    return (
+        _stored(
+            "baseline_scope_id",
+            owner,
+            "the container's baseline_scope_id (document "
+            "baseline.baseline_scope_id); key component of the comparison",
+        ),
+        _stored(
+            "root_digest",
+            owner,
+            "the container's meta.root_digest (document "
+            "baseline.root_digest_or_null); key component of the comparison",
+        ),
+    )
+
+
+def _novelty(subject: str) -> tuple[FieldDeclaration, ...]:
+    owner = "report.document._common novelty owner"
+    return (
+        *_baseline_identity(owner),
+        _stored(
+            "finding_id",
+            owner,
+            f"the published id of the {subject} finding (codeclone.findings."
+            "ids); the reference to the subject, never its payload",
+        ),
+        _stored("novelty", owner, "closed vocabulary: new / known / unavailable"),
+        _stored(
+            "novelty_reason",
+            owner,
+            "null for a verdict; for unavailable the absence it is "
+            "(lane_unavailable / comparison_unavailable / entity_not_compared)",
+        ),
+    )
+
+
+def _metric_delta(subject: str, terms: str) -> tuple[FieldDeclaration, ...]:
+    owner = "metrics_baseline.diff"
+    return (
+        *_baseline_identity(owner),
+        _stored(
+            "delta",
+            owner,
+            f"key: the delta term of the {subject} comparison; closed per "
+            f"family: {terms}",
+        ),
+        _stored("value", owner, "the term's measured value"),
+    )
+
+
+COMPARISON_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
+    "adoption_delta": _metric_delta(
+        "adoption_counts",
+        "docstring_permille_delta / typing_param_permille_delta / "
+        "typing_return_permille_delta (MetricsDiff); every term present iff "
+        "adoption_counts is compared",
+    ),
+    "api_surface_delta": _metric_delta(
+        "api_symbols",
+        "api_breaking_changes / api_signature_changes (compatible, never "
+        "inside the breaking count) / new_api_symbols (MetricsDiff lengths); "
+        "every term present iff api_surface is compared",
+    ),
+    "baseline_witness": (
+        *_baseline_identity("report.document.builder baseline projection"),
+        _stored("fingerprint_version", "report.meta", "meta.baseline"),
+        _stored("loaded", "clone baseline resolver", "meta.baseline.loaded"),
+        _stored(
+            "payload_sha256",
+            "report.meta",
+            "meta.baseline.payload_sha256 (the container root digest when read)",
+        ),
+        _stored(
+            "python_tag",
+            "report.meta",
+            "the artifact's interpreter tag; provenance, bound by the root "
+            "digest; the RUNTIME tag is execution provenance and never stored",
+        ),
+        _stored("schema_version", "report.meta", "meta.baseline"),
+        _stored(
+            "state",
+            "report.document.builder baseline projection",
+            "missing / trusted / untrusted (baseline.state)",
+        ),
+        _stored("status", "clone baseline resolver", "meta.baseline.status"),
+        _declared(
+            "compared_without_valid_baseline",
+            "surfaces baseline summary",
+            "not trusted",
+        ),
+        _declared(
+            "payload_sha256_verified",
+            "report.meta",
+            "loaded and status == ok and payload_sha256 is not null",
+        ),
+        _declared(
+            "trusted",
+            "surfaces baseline resolvers",
+            "trusted_for_diff, set exactly when loaded is set",
+        ),
+    ),
+    "clone_novelty": (
+        *_novelty("function or block clone"),
+        _declared(
+            "new_clones",
+            "canonical.comparison_projection",
+            "count of new function and block clone findings; null when "
+            "neither clone lane is compared",
+        ),
+    ),
+    "comparison_availability": (
+        *_baseline_identity("canonical.comparison_rows availability owner"),
+        _stored(
+            "availability",
+            "canonical.comparison_rows availability owner",
+            "compared / not_compared / unavailable; the fourth state is a "
+            "disabled capability, never a word here",
+        ),
+        _stored(
+            "lane",
+            "canonical.comparison_rows availability owner",
+            "key: one of the lanes a comparison has a term for",
+        ),
+    ),
+    "complexity_novelty": _novelty("design complexity"),
+    "coupling_novelty": _novelty("design coupling"),
+    "dead_symbol_novelty": _novelty("dead-code unused symbol"),
+    "dependency_cycle_novelty": _novelty("design dependency cycle"),
+    "disabled_capabilities": (
+        *_baseline_identity("report.document.builder baseline projection"),
+        _stored(
+            "lane",
+            "report.document.builder baseline projection",
+            "key: an observation lane the run's contract did not enable",
+        ),
+    ),
+    "lane_trust": (
+        *_baseline_identity("report.document.builder baseline projection"),
+        _stored("lane", "baseline.container_trust", "key: the observation lane"),
+        _stored(
+            "reason",
+            "baseline.container_trust",
+            "LaneTrustReason, or baseline_missing / root_unverified",
+        ),
+        _stored("status", "baseline.container_trust", "trusted / unavailable"),
+    ),
+    "metrics_baseline_witness": (
+        *_baseline_identity("report.document.builder baseline projection"),
+        _stored("loaded", "metrics baseline resolver", "meta.metrics_baseline"),
+        _stored(
+            "payload_sha256", "report.meta", "meta.metrics_baseline.payload_sha256"
+        ),
+        _stored("schema_version", "report.meta", "meta.metrics_baseline"),
+        _stored("status", "metrics baseline resolver", "meta.metrics_baseline"),
+        _declared(
+            "payload_sha256_verified",
+            "report.meta",
+            "loaded and status == ok and payload_sha256 is not null",
+        ),
+        _declared(
+            "trusted",
+            "surfaces baseline resolvers",
+            "trusted_for_diff, set exactly when loaded is set",
+        ),
+    ),
+}
+
+#: Comparison families that are ONE record per run (``None`` is the typed
+#: absence), never a keyed row set.
+COMPARISON_RECORD_FAMILIES: Final[frozenset[str]] = frozenset(
+    {"baseline_witness", "metrics_baseline_witness"}
+)
+
+
+def comparison_stored_fields(family: str) -> tuple[str, ...]:
+    """The stored fields of one comparison family, in sorted order."""
+    return tuple(
+        sorted(
+            declaration.field
+            for declaration in COMPARISON_FAMILY_FIELDS[family]
+            if declaration.stored
+        )
+    )
+
+
+# The comparison registry gate, executed at import beside the analysis wire
+# gate: every family is declared under a comparison production, carries no
+# foreign-tier field, and — for an annotation — shares no field with its
+# subject.  Declaration-only columns are not passed, as above.
+require_comparison_families(
+    {
+        family: tuple(
+            declaration.field for declaration in declarations if declaration.stored
+        )
+        for family, declarations in COMPARISON_FAMILY_FIELDS.items()
+    },
+    {
+        family: tuple(
+            declaration.field
+            for declaration in declarations
+            if declaration.stored or declaration.wire
+        )
+        for family, declarations in FACT_FAMILY_FIELDS.items()
+    },
 )

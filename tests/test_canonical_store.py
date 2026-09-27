@@ -52,6 +52,15 @@ from codeclone.canonical.analysis_rows import (
     SuppressedCloneGroupRow,
     UnreachableStatementRow,
 )
+from codeclone.canonical.comparison_rows import (
+    BaselineWitnessRecord,
+    ComparisonAvailabilityRow,
+    DisabledCapabilityRow,
+    FindingNoveltyRow,
+    LaneTrustRow,
+    MetricDeltaRow,
+    MetricsBaselineWitnessRecord,
+)
 from codeclone.canonical.identity import FileId, ModuleId
 from codeclone.canonical.model import (
     AdoptionCountRow,
@@ -99,7 +108,7 @@ from codeclone.canonical.store import (
     _require_str_list,
 )
 from codeclone.contracts import STORAGE_SCHEMA_REVISION
-from tests.test_canonical_roundtrip import fixture_model
+from tests.test_canonical_roundtrip import comparison_fixture_model, fixture_model
 
 _NS = "lineage-alpha"
 _TARGET = "worktree-a"
@@ -1594,6 +1603,21 @@ _EXPECTED_ROW_TYPES: dict[str, type[object]] = {
     "coverage_unit": CoverageUnitRow,
     "coverage_join": CoverageJoinRecord,
     "dead_code_summary": DeadCodeSummaryRecord,
+    # Canonical epoch E2 (2026-09-26): the comparison tier — two witness
+    # records, three lane-keyed row families, five novelty families sharing
+    # one row type, two delta families sharing another.
+    "baseline_witness": BaselineWitnessRecord,
+    "metrics_baseline_witness": MetricsBaselineWitnessRecord,
+    "lane_trust": LaneTrustRow,
+    "comparison_availability": ComparisonAvailabilityRow,
+    "disabled_capability": DisabledCapabilityRow,
+    "clone_novelty": FindingNoveltyRow,
+    "complexity_novelty": FindingNoveltyRow,
+    "coupling_novelty": FindingNoveltyRow,
+    "dead_symbol_novelty": FindingNoveltyRow,
+    "dependency_cycle_novelty": FindingNoveltyRow,
+    "adoption_delta": MetricDeltaRow,
+    "api_surface_delta": MetricDeltaRow,
 }
 
 _STORE_SOURCE = _REPO_ROOT / "codeclone" / "canonical" / "store.py"
@@ -1631,8 +1655,17 @@ def test_model_assembly_does_not_restate_the_family_table() -> None:
     """One place for ``family -> row type``: the assembler reads typed
     buckets and must not spell a storage family name at all.  A family
     name here is the second statement whose drift nothing catches."""
-    assembler = _named_function(_store_module_ast(), "_collected_model")
-    spelled = sorted(
+    tree = _store_module_ast()
+    spelled = {
+        name: _spelled_families(_named_function(tree, name))
+        for name in ("_collected_model", "_collected_comparison")
+    }
+    assert spelled == {"_collected_model": [], "_collected_comparison": []}
+
+
+def _spelled_families(assembler: ast.FunctionDef) -> list[str]:
+    """The storage family names one assembler spells as string literals."""
+    return sorted(
         {
             node.value
             for node in ast.walk(assembler)
@@ -1641,7 +1674,6 @@ def test_model_assembly_does_not_restate_the_family_table() -> None:
             and node.value in _EXPECTED_ROW_TYPES
         }
     )
-    assert spelled == [], f"_collected_model restates families {spelled}"
 
 
 def test_every_family_decodes_to_its_declared_row_type() -> None:
@@ -1651,7 +1683,9 @@ def test_every_family_decodes_to_its_declared_row_type() -> None:
     from codeclone.canonical.store import _collect_row, _model_rows
 
     collected: dict[str, list[object]] = {}
-    for family, row in _model_rows(fixture_model().normalize()):
+    # The comparison fixture: the analysis fixture plus a populated
+    # comparison house, so every family of both tiers is reached.
+    for family, row in _model_rows(comparison_fixture_model().normalize()):
         _collect_row(family, row, f"{family} object", collected)
     for family, expected in _EXPECTED_ROW_TYPES.items():
         rows = collected.get(family, [])

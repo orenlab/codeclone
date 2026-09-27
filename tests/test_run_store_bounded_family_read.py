@@ -72,7 +72,7 @@ from codeclone.canonical.store import (
     RunStore,
     StoredFamily,
 )
-from tests.test_canonical_roundtrip import fixture_model
+from tests.test_canonical_roundtrip import comparison_fixture_model, fixture_model
 from tests.test_run_store_construction_intent import run_store_constructions
 
 _NS: Final = "bounded-read"
@@ -163,7 +163,8 @@ def test_every_declared_family_is_readable_and_equals_the_whole_model_path(
     )
 
     with RunStore(tmp_path / "runs.sqlite") as store:
-        run_id = _publish(store, fixture_model())
+        # The comparison fixture: every family of both tiers is non-empty.
+        run_id = _publish(store, comparison_fixture_model())
         whole = store.read_run(run_id)
         for entry in store_module._FAMILIES:
             bounded = _read_any_family(store, run_id, entry)
@@ -620,6 +621,22 @@ _MODEL_ACCESSORS: Final[dict[str, Callable[[CanonicalModel], frozenset[object]]]
     "coverage_unit": lambda m: m.facts.analysis.coverage_units,
     "coverage_join": lambda m: _optional(m.facts.analysis.coverage_join),
     "dead_code_summary": lambda m: _optional(m.facts.analysis.dead_code_summary),
+    # Canonical epoch E2 (2026-09-26): the comparison house, two record
+    # families among the twelve.
+    "baseline_witness": lambda m: _optional(m.facts.comparison.baseline_witness),
+    "metrics_baseline_witness": (
+        lambda m: _optional(m.facts.comparison.metrics_baseline_witness)
+    ),
+    "lane_trust": lambda m: m.facts.comparison.lane_trust,
+    "comparison_availability": lambda m: m.facts.comparison.comparison_availability,
+    "disabled_capability": lambda m: m.facts.comparison.disabled_capabilities,
+    "clone_novelty": lambda m: m.facts.comparison.clone_novelty,
+    "complexity_novelty": lambda m: m.facts.comparison.complexity_novelty,
+    "coupling_novelty": lambda m: m.facts.comparison.coupling_novelty,
+    "dead_symbol_novelty": lambda m: m.facts.comparison.dead_symbol_novelty,
+    "dependency_cycle_novelty": lambda m: m.facts.comparison.dependency_cycle_novelty,
+    "adoption_delta": lambda m: m.facts.comparison.adoption_delta,
+    "api_surface_delta": lambda m: m.facts.comparison.api_surface_delta,
 }
 
 
