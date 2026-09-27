@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
+from typing import Protocol
 from uuid import UUID
 
 from ...api.comparison import build_comparison_context as _build_comparison_context
@@ -136,6 +137,21 @@ def _reachable_qualnames(project_metrics: object) -> frozenset[str]:
         for fact in facts
         if (qualname := str(getattr(fact, "target_qualname", "")).strip())
     )
+
+
+class _SurfaceWarnings(Protocol):
+    """What the session needs of a bridge witness: the lines the witness
+    asks a surface to say (``RunSnapshotLink.warnings``)."""
+
+    def warnings(self) -> tuple[str, ...]: ...
+
+
+def _run_snapshot_link_warnings(link: _SurfaceWarnings | None) -> tuple[str, ...]:
+    """The bridge witness's own lines for the answer's ``warnings``: one for
+    a link the store could not record (ruling 2026-09-25, protocol C), none
+    for every other state or for a report that stated no bridge.  The words
+    are the witness's; the session only carries them."""
+    return () if link is None else link.warnings()
 
 
 __all__ = [
@@ -568,6 +584,7 @@ class MCPSession(
         if cache.load_warning:
             warning_items.add(cache.load_warning)
         warning_items.update(discovery_result.skipped_warnings)
+        warning_items.update(_run_snapshot_link_warnings(run_snapshot_link))
         warnings = tuple(sorted(warning_items))
         failures = tuple(
             sorted(

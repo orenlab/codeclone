@@ -1127,11 +1127,11 @@ def authority_projection_documents(
 # environment is applied through monkeypatch, undone on the way out.
 # ---------------------------------------------------------------------------
 
-RunStoreCorpusRunner = Callable[..., None]
+RunStoreCorpusRunner = Callable[..., int]
 
 
-def _run_codeclone_cli(args: list[str], environment: dict[str, str]) -> None:
-    """One CLI invocation with an explicit rollout environment."""
+def _run_codeclone_cli(args: list[str], environment: dict[str, str]) -> int:
+    """One CLI invocation with an explicit rollout environment; its exit code."""
 
     import codeclone.surfaces.cli.workflow as cli
 
@@ -1152,8 +1152,12 @@ def _run_codeclone_cli(args: list[str], environment: dict[str, str]) -> None:
         except SystemExit as exit_signal:
             code = exit_signal.code
             assert code in (None, 0, 1), f"CLI exited {code!r}: {args}"
+            # ``None`` is SystemExit's own spelling of 0: bool() maps the three
+            # admitted codes onto 0, 0 and 1.
+            return int(bool(code))
     finally:
         monkeypatch.undo()
+    return 0
 
 
 @pytest.fixture
@@ -1165,7 +1169,7 @@ def run_store_cli() -> RunStoreCorpusRunner:
         *args: str,
         store: Path | None = None,
         force_ci: bool = True,
-    ) -> None:
+    ) -> int:
         environment: dict[str, str] = {}
         if force_ci:
             # The rollout is CI-neutral by design and the suite may run
@@ -1174,7 +1178,7 @@ def run_store_cli() -> RunStoreCorpusRunner:
         if store is not None:
             environment["CODECLONE_RUN_STORE_ENABLED"] = "1"
             environment["CODECLONE_RUN_STORE_PATH"] = str(store)
-        _run_codeclone_cli(
+        return _run_codeclone_cli(
             [
                 str(root),
                 "--no-progress",
@@ -1184,6 +1188,31 @@ def run_store_cli() -> RunStoreCorpusRunner:
             ],
             environment,
         )
+
+    return _run
+
+
+RunStoreMcpRunner = Callable[[Path, Path], dict[str, object]]
+
+
+@pytest.fixture
+def run_store_mcp() -> RunStoreMcpRunner:
+    """One in-process MCP ``analyze_repository`` of ``root`` with the rollout
+    pointed at ``store``; the tool's own answer.  Driven here, beside
+    ``run_store_cli``, so a consuming module stays the ring its subject is
+    (the Phase 39S test-import law)."""
+
+    def _run(root: Path, store: Path) -> dict[str, object]:
+        from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+        from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+        with _run_store_rollout(store):
+            service = CodeCloneMCPService(history_limit=4)
+            return dict(
+                service.analyze_repository(
+                    MCPAnalysisRequest(root=str(root), analysis_mode="full")
+                )
+            )
 
     return _run
 

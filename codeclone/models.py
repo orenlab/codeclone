@@ -1968,20 +1968,51 @@ RUN_SNAPSHOT_PUBLICATION_REASONED: Final[frozenset[str]] = frozenset(
     {RUN_SNAPSHOT_PUBLICATION_FAILED, RUN_SNAPSHOT_PUBLICATION_REFUSED}
 )
 
-#: The three states of the identity bridge (RULING-2026-08-24 §7).  The two
+#: The states of the identity bridge (RULING-2026-08-24 §7).  The two
 #: identity domains address different things, so their relation is NOT
 #: total, and the two zeros are measured facts rather than error paths:
 #: a gate-only run stores a snapshot no document evaluates, and a run with
 #: the rollout off evaluates a document no snapshot backs.  Naming both
 #: keeps "there is no backend" apart from "the bridge lost the pair".
+#:
+#: ``unrecorded`` (ruling 2026-09-25, protocol C) is ``linked`` whose record
+#: the store could not take: both halves stated and agreeing, the snapshot
+#: stored, and the edge write refused by the store's own
+#: ``StoreUnavailableError`` -- a lock still held after the bounded wait, a
+#: read-only medium, an I/O fault.  It carries that refusal; nothing else
+#: does.  The run it names is an ordinary orphan of retention.
 RUN_SNAPSHOT_LINK_LINKED: Final = "linked"
 RUN_SNAPSHOT_LINK_UNPUBLISHED: Final = "unpublished"
 RUN_SNAPSHOT_LINK_UNEVALUATED: Final = "unevaluated"
+RUN_SNAPSHOT_LINK_UNRECORDED: Final = "unrecorded"
 RUN_SNAPSHOT_LINK_STATES: Final[tuple[str, ...]] = (
     RUN_SNAPSHOT_LINK_LINKED,
     RUN_SNAPSHOT_LINK_UNEVALUATED,
     RUN_SNAPSHOT_LINK_UNPUBLISHED,
+    RUN_SNAPSHOT_LINK_UNRECORDED,
 )
+
+#: The states that STATE the relation: both halves, joined by the receipt.
+RUN_SNAPSHOT_LINK_STATED: Final[frozenset[str]] = frozenset(
+    {RUN_SNAPSHOT_LINK_LINKED, RUN_SNAPSHOT_LINK_UNRECORDED}
+)
+
+#: The one line a surface prints for an unrecorded relation, every surface
+#: the same words: the CLI as a runtime warning, MCP in ``warnings[]``.
+RUN_SNAPSHOT_LINK_UNRECORDED_WARNING: Final = (
+    "report-to-snapshot link was not recorded: {refusal}; analysis and "
+    "reports are complete; the next analysis publishes a fresh run"
+)
+
+
+def _require_refusal_iff_unrecorded(state: str, refusal: str) -> None:
+    """The refusal rides the ``unrecorded`` state and no other."""
+    if (state == RUN_SNAPSHOT_LINK_UNRECORDED) != bool(refusal):
+        raise ValueError(
+            "an unrecorded bridge carries the store's refusal, and no other "
+            "state carries one"
+        )
+
 
 #: Outcome of asking a store which analysis backs one report document.
 #: ``unlinked`` is a measured state -- no published run of this store answers
@@ -2168,14 +2199,19 @@ class RunSnapshotLink:
     #: Report domain -- the evaluated run identity.  Empty iff no document
     #: was produced.
     report_run_identity: str = ""
+    #: Why the store did not record a stated relation, spelled like every
+    #: contained failure of the rollout: ``"<Type>: <message>"``.  Present
+    #: on the ``unrecorded`` state and on no other.
+    refusal: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in RUN_SNAPSHOT_LINK_STATES:
             raise ValueError(f"unknown run snapshot link state: {self.state!r}")
         stored = bool(self.store_run_id)
         evaluated = bool(self.report_run_identity)
-        if self.state == RUN_SNAPSHOT_LINK_LINKED and not (stored and evaluated):
-            raise ValueError("a linked bridge carries both addresses")
+        if self.state in RUN_SNAPSHOT_LINK_STATED and not (stored and evaluated):
+            raise ValueError(f"a {self.state} bridge carries both addresses")
+        _require_refusal_iff_unrecorded(self.state, self.refusal)
         if self.state == RUN_SNAPSHOT_LINK_UNPUBLISHED and stored:
             raise ValueError("an unpublished bridge carries no store address")
         if self.state == RUN_SNAPSHOT_LINK_UNEVALUATED and evaluated:
@@ -2185,6 +2221,13 @@ class RunSnapshotLink:
                 "an address and its scope receipt travel together: a stored or "
                 "an evaluated half brings its receipt, and nothing else does"
             )
+
+    def warnings(self) -> tuple[str, ...]:
+        """What a surface says about this relation: the unrecorded state's
+        one line, naming the refusal, and nothing for every other state."""
+        if not self.refusal:
+            return ()
+        return (RUN_SNAPSHOT_LINK_UNRECORDED_WARNING.format(refusal=self.refusal),)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

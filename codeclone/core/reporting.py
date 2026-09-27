@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
+from dataclasses import replace
 from functools import partial
+from pathlib import Path
 from uuid import UUID
 
 from ..baseline.container_trust import evaluate_container_trust
 from ..baseline.trust import current_python_tag
+from ..canonical.errors import StoreUnavailableError
 from ..contracts import (
     DEFAULT_COVERAGE_MIN,
     ObservedPopulation,
@@ -19,8 +22,10 @@ from ..contracts import (
     population_universe_observed,
 )
 from ..models import (
+    RUN_SNAPSHOT_LINK_UNRECORDED,
     BaselineContainerV3,
     MetricsDiff,
+    RunSnapshotLink,
     RunSnapshotPublication,
     RunStoreConfig,
     TrustVector,
@@ -706,8 +711,8 @@ def report(
         # A run with the rollout off has no store to write into, which is the
         # false branch of this condition on every default run.
         if run_store_config.path is not None:
-            persist_run_snapshot_link(
-                store_path=run_store_config.path, link=run_snapshot_link
+            run_snapshot_link = _recorded_run_snapshot_link(
+                run_store_config.path, run_snapshot_link
             )
         return ReportArtifacts(
             html=contents["html"],
@@ -725,6 +730,34 @@ def report(
         # the run rooted for a whole day behind a publisher that is gone.
         # From now on the run is exactly as rooted as the store says.
         release_publication_lease(config=run_store_config, publication=publication)
+
+
+def _recorded_run_snapshot_link(
+    store_path: Path, link: RunSnapshotLink
+) -> RunSnapshotLink:
+    """Record the stated relation, or say on the link why the store could not.
+
+    The one outcome that is contained is the store's own
+    ``StoreUnavailableError`` -- a lock still held when the bounded wait of
+    the edge write ran out, a read-only medium, an I/O fault (ruling
+    2026-09-25, protocol C): the snapshot is stored and the report is
+    sealed, so the edge that joins them is an index the store could not take
+    right now, and the link says ``unrecorded`` with the refusal instead of
+    the analysis failing.  Every other exception is left to escape on
+    purpose, and no broader clause catches it: a relation the store refuses
+    as false, damaged bytes, a store of another generation, a run the lease
+    was holding gone, a programming error -- each of those is a fault to be
+    seen, not a state to be reported.
+    """
+    try:
+        persist_run_snapshot_link(store_path=store_path, link=link)
+    except StoreUnavailableError as refusal:
+        return replace(
+            link,
+            state=RUN_SNAPSHOT_LINK_UNRECORDED,
+            refusal=f"{type(refusal).__name__}: {refusal}",
+        )
+    return link
 
 
 def build_gate_config(args: object) -> MetricGateConfig:

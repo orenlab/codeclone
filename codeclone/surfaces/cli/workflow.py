@@ -27,7 +27,12 @@ from ...contracts import (
     observed_population,
 )
 from ...contracts.errors import DiagnosedUserError
-from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
+from ...core._types import (
+    AnalysisResult,
+    BootstrapResult,
+    DiscoveryResult,
+    ReportArtifacts,
+)
 from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.bootstrap import bootstrap
 from ...core.discovery import discover
@@ -788,6 +793,7 @@ def _main_impl() -> None:
         report_artifacts=report_artifacts,
         open_html_report=args.open_html_report,
     )
+    _print_run_snapshot_link_warnings(report_artifacts)
 
     _enforce_gating(
         args=args,
@@ -855,6 +861,17 @@ def _main_impl() -> None:
         console=_console(),
         root_path=root_path,
     )
+
+
+def _print_run_snapshot_link_warnings(report_artifacts: ReportArtifacts) -> None:
+    """The bridge witness's own warning line, after every report is written:
+    a link the store could not record (ruling 2026-09-25, protocol C) is one
+    runtime warning, never an error -- the exit code does not move.  Read
+    the way the report writer reads the artifacts (``_rendered_attr``): an
+    artifact bundle that states no bridge says nothing here."""
+    link = getattr(report_artifacts, "run_snapshot_link", None)
+    for warning in () if link is None else link.warnings():
+        _console().print(ui.fmt_cli_runtime_warning(warning))
 
 
 def _emit_cli_analysis_completed_if_enabled(
