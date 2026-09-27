@@ -232,6 +232,7 @@ def _document_groups(document: Mapping[str, Any]) -> list[Mapping[str, Any]]:
             (
                 "metric:Complexity threshold exceeded: max CC=25, threshold=20.",
                 "metric:Health score below threshold: score=66, threshold=99.",
+                "clone:new",
             ),
         ),
         ("gates_passed", 0, ()),

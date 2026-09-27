@@ -776,7 +776,8 @@ def comparison_runs(
 # analysed by the CLI under gate requests that between them reach every
 # outcome the evaluation families distinguish (Probe Validity Law):
 #
-#   * ``gates_failed``  — two gates fail: exit 3, two reasons in order;
+#   * ``gates_failed``  — three gates fail: exit 3, three reasons in the
+#                         evaluator's order (which is not sorted);
 #   * ``gates_passed``  — the same two gates, looser: exit 0 with required
 #                         lanes (a pass is not "no gate");
 #   * ``gate_lane``     — the container belongs to another scope and an
@@ -834,6 +835,9 @@ EVALUATION_POPULATIONS: dict[str, tuple[bool, bool, tuple[str, ...]]] = {
             "20",
             "--fail-health",
             "99",
+            # A clone gate beside the metric gates: its reason follows theirs
+            # and sorts before them, so the stored order is distinguishing.
+            "--fail-on-new",
         ),
     ),
     "gates_passed": (
@@ -1127,8 +1131,14 @@ def served_comparison_runs(
 #: spells them.
 SERVED_EVALUATION_GATES: dict[str, int] = {"fail_complexity": 20, "fail_health": 99}
 #: The blast-radius origins of the ``gated`` run: a high-complexity function
-#: and a high-coupling class.
-SERVED_EVALUATION_BLAST: tuple[str, ...] = ("pkg/complex_old.py", "pkg/hub.py")
+#: and a high-coupling class, beside a medium one of each (a band that is not
+#: high must stay out of the lists).
+SERVED_EVALUATION_BLAST: tuple[str, ...] = (
+    "pkg/complex_old.py",
+    "pkg/eval_graded.py",
+    "pkg/eval_mid.py",
+    "pkg/hub.py",
+)
 
 
 def _served_gated_tree(base: Path, baseline: Path) -> Path:

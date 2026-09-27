@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -43,7 +44,7 @@ from codeclone.canonical.evaluation_projection import (
     suggestion_total,
 )
 from codeclone.canonical.evaluation_rows import GATE_REQUEST_TERMS
-from codeclone.canonical.model import CanonicalModel
+from codeclone.canonical.model import CanonicalModel, EvaluationFacts
 from codeclone.canonical.store import RunStore
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests._served_run import (
@@ -52,6 +53,10 @@ from tests._served_run import (
     ServedRunStoreProjection,
 )
 from tests.conftest import SERVED_COMPARISON_POPULATIONS, SERVED_EVALUATION_GATES
+from tests.test_canonical_roundtrip import (
+    evaluated_fixture_model,
+    evaluation_fixture_facts,
+)
 
 _Answers = Mapping[str, Mapping[str, object]]
 
@@ -363,3 +368,82 @@ def test_a_zone_with_high_bands_matches_the_mcp_surface(
     risk = as_mapping(answer["structural_risk"])
     assert [str(path) for path in as_sequence(risk[key])] == stated
     assert high_band_paths(model.facts.evaluation, dimension, _zone(answer)) == stated
+
+
+# -- The projection alone: the outcomes no served population reaches ------------------
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "reasons", "unavailable", "would_fail"),
+    [
+        (0, (), (), False),
+        (2, ("lane:unavailable:risk_observations",), ("risk_observations",), True),
+        (3, ("metric:x",), (), True),
+    ],
+)
+def test_the_gate_answer_states_every_outcome(
+    exit_code: int,
+    reasons: tuple[str, ...],
+    unavailable: tuple[str, ...],
+    would_fail: bool,
+) -> None:
+    """m-gate-both-outcomes on the projection: a pass under gates, a lane
+    refusal (which the served runs never reach) and a failure; the request
+    echo in the surface's key order."""
+    fixture = evaluation_fixture_facts()
+    assert fixture.gate_outcome is not None
+    evaluation = replace(
+        fixture,
+        gate_outcome=replace(
+            fixture.gate_outcome,
+            exit_code=exit_code,
+            reasons=reasons,
+            required_lanes=("risk_observations",),
+            unavailable_lanes=unavailable,
+        ),
+    )
+    answer = gate_answer(evaluation)
+    assert (answer["would_fail"], answer["exit_code"], answer["reasons"]) == (
+        would_fail,
+        exit_code,
+        list(reasons),
+    )
+    assert list(as_mapping(answer["config"])) == list(GATE_CONFIG_KEYS)
+    assert gate_answer(EvaluationFacts()) == {}
+
+
+def test_a_run_without_a_verdict_outside_clones_only_is_unavailable() -> None:
+    """The surface's second absence: no verdict, and the metrics were not
+    skipped — ``unavailable``, never ``metrics_skipped``."""
+    model = evaluated_fixture_model()
+    bare = replace(
+        model,
+        facts=replace(
+            model.facts,
+            evaluation=replace(model.facts.evaluation, health_result=None),
+        ),
+    )
+    assert health_payload(bare) == {"available": False, "reason": "unavailable"}
+    assert health_score(bare) is None
+    assert authority_health(bare) == {"score": None, "grade": None, "dimensions": {}}
+
+
+@pytest.mark.parametrize("name", list(SERVED_COMPARISON_POPULATIONS))
+def test_the_pr_summary_card_severities_are_the_stored_verdicts(
+    request: pytest.FixtureRequest, name: str
+) -> None:
+    """C5.07's evaluation half: every new finding the PR summary lists for
+    the changed paths carries the stored verdict's severity."""
+    served = _served(request, name)
+    items = [
+        as_mapping(item)
+        for item in as_sequence(
+            _answer(served, "pr_summary_changed")["new_findings_in_changed_files"]
+        )
+    ]
+    severities = finding_severities(served.model.facts.evaluation)
+    assert [item["severity"] for item in items] == [
+        severities[str(item["canonical_id"])] for item in items
+    ]
+    # The instrument reaches a card on the trusted population.
+    assert name != "trusted" or items
