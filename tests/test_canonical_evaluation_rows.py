@@ -306,7 +306,9 @@ def test_the_hotlists_are_the_documents_selections() -> None:
         (lambda: _verdict(severity="critical", priority=2.0), "no effort's priority"),
         (lambda: _verdict(severity="fatal"), "severity"),
         (lambda: _verdict(confidence="certain"), "confidence"),
-        (lambda: _verdict(priority=True), "must be a number"),
+        (lambda: _verdict(priority=True), "priority must be a float"),
+        (lambda: _verdict(priority=1), "priority must be a float"),
+        (lambda: _verdict(priority=float("inf")), "priority must be a float"),
         (lambda: _verdict(clone_type="Type-2"), "clone findings only"),
         (
             lambda: _verdict(finding_id="clone:block:k", severity="info", priority=0.5),

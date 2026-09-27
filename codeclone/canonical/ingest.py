@@ -74,6 +74,7 @@ from codeclone.canonical.analysis_rows import (
 )
 from codeclone.canonical.comparison_ingest import comparison_facts_from_document
 from codeclone.canonical.errors import LegacyIngestError
+from codeclone.canonical.evaluation_ingest import evaluation_facts_from_document
 from codeclone.canonical.identity import (
     DEAD_SYMBOL_GROUP_KIND,
     UNREACHABLE_STATEMENT_GROUP_KIND,
@@ -521,6 +522,9 @@ def canonical_model_from_legacy_document(
             # Canonical epoch E2: the comparison the document published,
             # read by its own oracle module.
             comparison=comparison_facts_from_document(document),
+            # Canonical epoch E3: the evaluation, likewise — its bands are
+            # named through the same identity index as every analysis symbol.
+            evaluation=evaluation_facts_from_document(document, index),
         ),
         coupled_sets=coupled_sets,
     ).normalize()

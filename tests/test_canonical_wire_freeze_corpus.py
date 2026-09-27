@@ -31,6 +31,7 @@ from codeclone.canonical import (
     ComparisonFacts,
     DeadCodeObservationRow,
     DependencyCycleRow,
+    EvaluationFacts,
     FileId,
     ModuleId,
     ModuleSymbol,
@@ -314,12 +315,22 @@ def _wire_view(model: CanonicalModel) -> CanonicalModel:
 
     Canonical epoch E2: the document witnessed its comparison (no container:
     ``missing``) and the model carries it — the store keeps it, the wire of
-    this revision does not, so the decode answers the house empty.
+    this revision does not, so the decode answers the house empty.  Canonical
+    epoch E3: the same for the evaluation the document witnessed.
     """
     normalized = model.normalize()
-    assert normalized.facts.comparison.baseline_witness is not None
+    witnesses = (
+        normalized.facts.comparison.baseline_witness,
+        normalized.facts.evaluation.gate_outcome,
+    )
+    assert None not in witnesses
     return replace(
-        normalized, facts=replace(normalized.facts, comparison=ComparisonFacts())
+        normalized,
+        facts=replace(
+            normalized.facts,
+            comparison=ComparisonFacts(),
+            evaluation=EvaluationFacts(),
+        ),
     )
 
 

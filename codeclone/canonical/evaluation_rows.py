@@ -52,11 +52,12 @@ evaluation house is internal model and store state (ruling 2026-09-26).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, cast
 
 from codeclone.canonical.comparison_rows import OBSERVATION_LANES
-from codeclone.canonical.errors import CanonicalModelError
+from codeclone.canonical.errors import CanonicalModelError, LegacyIngestError
 from codeclone.canonical.identity import SymbolId
 from codeclone.contracts import (
     ExitCode,
@@ -75,6 +76,10 @@ from codeclone.domain.quality import (
     SEVERITY_RANK,
 )
 from codeclone.findings.ids import clone_group_id
+from codeclone.utils.finding_groups import (
+    flatten_finding_groups,
+    groups_root_of_findings,
+)
 
 #: The gate request terms and the type each is uttered in — the fields of
 #: ``report.gates.evaluator.MetricGateConfig``, mirrored and pinned against
@@ -394,6 +399,13 @@ class UnitRiskRow:
         _require_member(self.band, RISK_BANDS, "unit risk band")
 
 
+def _require_priority(value: object, what: str) -> None:
+    """A finite float, never an int: the store reads back exactly the type the
+    document utters (``_priority`` divides two floats)."""
+    if not isinstance(value, float) or not math.isfinite(value):
+        raise CanonicalModelError(f"{what} priority must be a float")
+
+
 def finding_priority_is_admissible(severity: str, priority: float) -> bool:
     """Whether ``priority`` is the document's priority of a finding of this
     severity under SOME effort — ``severity rank / effort weight``, the one
@@ -426,7 +438,7 @@ class FindingEvaluationRow:
         _require_text(self.finding_id, "evaluated finding id")
         _require_member(self.severity, SEVERITIES, f"{what} severity")
         _require_member(self.confidence, CONFIDENCES, f"{what} confidence")
-        _require_number(self.priority, f"{what} priority")
+        _require_priority(self.priority, what)
         if not finding_priority_is_admissible(self.severity, self.priority):
             raise CanonicalModelError(
                 f"{what}: priority {self.priority!r} is no effort's priority "
@@ -457,6 +469,113 @@ class HotlistRow:
         _require_text(self.finding_id, f"{self.hotlist} finding id")
 
 
+#: The document key of each of its hotlists (``derived.hotlists``); the fifth
+#: selection is the order of ``derived.suggestions``.
+_HOTLIST_KEYS: Final[dict[str, str]] = {
+    "highest_spread": "highest_spread_ids",
+    "most_actionable": "most_actionable_ids",
+    "production_hotspot": "production_hotspot_ids",
+    "test_fixture_hotspot": "test_fixture_hotspot_ids",
+}
+_SUGGESTIONS: Final = "suggestions"
+
+
+def _read(container: Mapping[str, object], key: str, where: str) -> object:
+    if key not in container:
+        raise LegacyIngestError(f"{where} is missing {key!r}")
+    return container[key]
+
+
+def _read_text(container: Mapping[str, object], key: str, where: str) -> str:
+    value = _read(container, key, where)
+    if not isinstance(value, str):
+        raise LegacyIngestError(f"{where}.{key} is not a string")
+    return value
+
+
+def _read_mapping(value: object, where: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise LegacyIngestError(f"{where} is not an object")
+    return cast("Mapping[str, object]", value)
+
+
+def _read_sequence(value: object, where: str) -> Sequence[object]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise LegacyIngestError(f"{where} is not an array")
+    return value
+
+
+def finding_verdicts(findings: Mapping[str, object]) -> frozenset[FindingEvaluationRow]:
+    """The verdict on every published finding of a ``findings`` section —
+    the one reading of the four evaluation keys of a finding group, shared by
+    the ingest oracle (the serialized document) and the producer-native
+    snapshot (the body the same document is sealed from).  The groups are
+    walked through their one owner (``utils.finding_groups``); two groups of
+    one declaration name share one id, and the model refuses them if they
+    ever disagree."""
+    verdicts: set[FindingEvaluationRow] = set()
+    for group in flatten_finding_groups(groups_root_of_findings(findings)):
+        where = "finding group"
+        priority = _read(group, "priority", where)
+        clone_type = group.get("clone_type")
+        verdicts.add(
+            FindingEvaluationRow(
+                finding_id=_read_text(group, "id", where),
+                severity=_read_text(group, "severity", where),
+                confidence=_read_text(group, "confidence", where),
+                priority=priority if isinstance(priority, float) else math.nan,
+                clone_type=None if clone_type is None else str(clone_type),
+            )
+        )
+    return frozenset(verdicts)
+
+
+def document_selections(derived: Mapping[str, object]) -> frozenset[HotlistRow]:
+    """The document's selections of a ``derived`` section: each hotlist and
+    the suggestions, ranked from one in the document's own order — shared by
+    the oracle and the producer-native snapshot exactly as
+    :func:`finding_verdicts` is."""
+    hotlists = _read_mapping(_read(derived, "hotlists", "derived"), "derived.hotlists")
+    ranked: list[tuple[str, Sequence[object]]] = [
+        (hotlist, _read_sequence(_read(hotlists, key, "hotlists"), key))
+        for hotlist, key in sorted(_HOTLIST_KEYS.items())
+    ]
+    ranked.append(
+        (
+            _SUGGESTIONS,
+            [
+                _read_text(
+                    _read_mapping(item, "suggestion"), "finding_id", "suggestion"
+                )
+                for item in _read_sequence(_read(derived, _SUGGESTIONS, "derived"), "")
+            ],
+        )
+    )
+    return frozenset(
+        HotlistRow(hotlist=hotlist, rank=rank, finding_id=str(finding_id))
+        for hotlist, finding_ids in ranked
+        for rank, finding_id in enumerate(finding_ids, start=1)
+    )
+
+
+def flatten_health_params(
+    params: Mapping[str, object], prefix: str = ""
+) -> tuple[tuple[str, int | float], ...]:
+    """The realized health parameters as dotted pairs (``weights.clones``) —
+    the one flattening, read by the oracle and the producer alike and pinned
+    by re-nesting it into the document's own ``params_digest``."""
+    pairs: list[tuple[str, int | float]] = []
+    for name, value in params.items():
+        dotted = f"{prefix}{name}"
+        if isinstance(value, Mapping):
+            pairs.extend(flatten_health_params(value, f"{dotted}."))
+        elif isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise LegacyIngestError(f"health parameter {dotted!r} is not a number")
+        else:
+            pairs.append((dotted, value))
+    return tuple(sorted(pairs))
+
+
 __all__ = [
     "CLONE_FINDING_PREFIXES",
     "CLONE_TYPES",
@@ -482,5 +601,8 @@ __all__ = [
     "HealthResultRecord",
     "HotlistRow",
     "UnitRiskRow",
+    "document_selections",
     "finding_priority_is_admissible",
+    "finding_verdicts",
+    "flatten_health_params",
 ]

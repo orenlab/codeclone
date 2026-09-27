@@ -770,6 +770,161 @@ def comparison_runs(
 
 
 # ---------------------------------------------------------------------------
+# The evaluation populations (canonical epoch E3): the comparison corpus,
+# stage B against the stage-A baseline, with an evaluation carrier beside it,
+# analysed by the CLI under gate requests that between them reach every
+# outcome the evaluation families distinguish (Probe Validity Law):
+#
+#   * ``gates_failed``  — two gates fail: exit 3, two reasons in order;
+#   * ``gates_passed``  — the same two gates, looser: exit 0 with required
+#                         lanes (a pass is not "no gate");
+#   * ``gate_lane``     — the container belongs to another scope and an
+#                         adoption gate is requested: exit 2, the lane
+#                         unavailable, no health delta;
+#   * ``clones_only``   — the metrics never ran: no health verdict, no band.
+#
+# The carrier gives the bands their middle word (a medium-complexity
+# function, a medium-coupling class, a high-cohesion-risk class) and the
+# verdicts a second confidence (a duplicated-branches structural finding).
+# The six E2 populations ride beside these for health with and without its
+# delta; the served runs below carry the MCP answers.
+# ---------------------------------------------------------------------------
+
+EVALUATION_CARRIER: dict[str, str] = {
+    "pkg/eval_graded.py": "def graded(value: int) -> str:\n    if value < 0:\n"
+    "        return 'v0'\n"
+    + "".join(f"    elif value < {i}:\n        return 'v{i}'\n" for i in range(1, 13))
+    + "    return 'vmax'\n",
+    "pkg/eval_route.py": (
+        "def route(kind: str, payload: list[int]) -> str:\n"
+        "    marker = kind.strip()\n    count = len(payload)\n"
+        "    if marker == 'a':\n        for item in payload:\n            print(item)\n"
+        "        return 'a'\n"
+        "    elif marker == 'b':\n"
+        "        for item in payload:\n            print(item)\n"
+        "        return 'b'\n    total = count + 1\n    return str(total)\n"
+    ),
+    "pkg/eval_mid.py": "from pkg.parts import Part0, Part1, Part2, Part3, Part4\n\n\n"
+    "class Mid:\n    def __init__(self) -> None:\n"
+    + "".join(f"        self.p{i} = Part{i}()\n" for i in range(5)),
+    "pkg/eval_split.py": "class Split:\n"
+    + "".join(
+        f"    def m{i}(self) -> int:\n        self.v{i} = {i}\n"
+        f"        return self.v{i}\n\n"
+        for i in range(4)
+    ),
+}
+
+#: The unit floor the gated populations analyse under: low enough that the
+#: carrier's duplicated branches are a unit's structural finding (measured
+#: 2026-09-27: the default floor leaves the structural family empty, and with
+#: it the ``medium`` confidence).
+_EVALUATION_UNIT_FLOOR: tuple[str, ...] = ("--min-loc", "3", "--min-stmt", "2")
+#: Every evaluation population, by name: (whether the container is foreign,
+#: whether the semantic-authority lane is on, the CLI arguments).
+EVALUATION_POPULATIONS: dict[str, tuple[bool, bool, tuple[str, ...]]] = {
+    "gates_failed": (
+        False,
+        True,
+        (
+            *_EVALUATION_UNIT_FLOOR,
+            "--api-surface",
+            "--fail-complexity",
+            "20",
+            "--fail-health",
+            "99",
+        ),
+    ),
+    "gates_passed": (
+        False,
+        True,
+        (
+            *_EVALUATION_UNIT_FLOOR,
+            "--api-surface",
+            "--fail-complexity",
+            "30",
+            "--fail-health",
+            "10",
+        ),
+    ),
+    "gate_lane": (
+        True,
+        True,
+        (*_EVALUATION_UNIT_FLOOR, "--api-surface", "--fail-on-typing-regression"),
+    ),
+    "clones_only": (False, False, ("--skip-metrics",)),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationRun:
+    """One CLI execution of the evaluation corpus: the document it rendered
+    (the oracle), the run it published (the store) and its exit code."""
+
+    name: str
+    document: dict[str, object]
+    stored: CanonicalModel
+    store_path: Path
+    run_id: str
+    exit_code: int | str | None
+
+
+def _evaluation_run(base: Path, name: str, baseline: Path) -> EvaluationRun:
+    foreign, authority, args = EVALUATION_POPULATIONS[name]
+    root = base / name
+    materialize_comparison_corpus(root, stage_b=True)
+    _write_tree(root, EVALUATION_CARRIER)
+    if foreign:
+        _rewrite_scope_as_foreign(root)
+    if not authority:
+        pyproject = root / "pyproject.toml"
+        pyproject.write_text(
+            pyproject.read_text("utf-8").replace("semantic_authority = true\n", ""),
+            "utf-8",
+        )
+    store_path = base / f"{name}.sqlite3"
+    report_path = base / f"{name}.report.json"
+    exit_code = _run_codeclone_cli_exit(
+        [
+            str(root),
+            "--no-progress",
+            "--baseline",
+            str(baseline),
+            "--json",
+            str(report_path),
+            *args,
+        ],
+        {
+            "CODECLONE_RUN_STORE_FORCE": "1",
+            "CODECLONE_RUN_STORE_ENABLED": "1",
+            "CODECLONE_RUN_STORE_PATH": str(store_path),
+        },
+    )
+    run_id, stored = _published_run(store_path)
+    return EvaluationRun(
+        name=name,
+        document=json.loads(report_path.read_text("utf-8")),
+        stored=stored,
+        store_path=store_path,
+        run_id=run_id,
+        exit_code=exit_code,
+    )
+
+
+@pytest.fixture(scope="session")
+def evaluation_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, EvaluationRun]:
+    """The evaluation corpus under all four gate configurations (see above),
+    each its own tree and store, one shared stage-A baseline."""
+    base = tmp_path_factory.mktemp("evaluation_corpus").resolve()
+    baseline = _comparison_baseline(base)
+    return {
+        name: _evaluation_run(base, name, baseline) for name in EVALUATION_POPULATIONS
+    }
+
+
+# ---------------------------------------------------------------------------
 # The comparison corpus served by MCP (canonical epoch E2, cycle 3): the
 # surface's own answers are the oracle of the comparison projections, so
 # the corpus is analysed by an in-process ``CodeCloneMCPService`` with the
@@ -1133,6 +1288,20 @@ RunStoreCorpusRunner = Callable[..., int]
 def _run_codeclone_cli(args: list[str], environment: dict[str, str]) -> int:
     """One CLI invocation with an explicit rollout environment; its exit code."""
 
+    code = _run_codeclone_cli_exit(args, environment)
+    assert code in (None, 0, 1), f"CLI exited {code!r}: {args}"
+    # ``None`` is SystemExit's own spelling of 0: bool() maps the three
+    # admitted codes onto 0, 0 and 1.
+    return int(bool(code))
+
+
+def _run_codeclone_cli_exit(
+    args: list[str], environment: dict[str, str]
+) -> int | str | None:
+    """One CLI invocation with an explicit rollout environment and the exit
+    code exactly as the CLI raised it (``None`` when it returned) — the gate
+    outcomes (2 and 3) included."""
+
     import codeclone.surfaces.cli.workflow as cli
 
     monkeypatch = pytest.MonkeyPatch()
@@ -1150,14 +1319,10 @@ def _run_codeclone_cli(args: list[str], environment: dict[str, str]) -> int:
         try:
             cli.main()
         except SystemExit as exit_signal:
-            code = exit_signal.code
-            assert code in (None, 0, 1), f"CLI exited {code!r}: {args}"
-            # ``None`` is SystemExit's own spelling of 0: bool() maps the three
-            # admitted codes onto 0, 0 and 1.
-            return int(bool(code))
+            return exit_signal.code
     finally:
         monkeypatch.undo()
-    return 0
+    return None
 
 
 @pytest.fixture

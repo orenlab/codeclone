@@ -338,6 +338,23 @@ def _deltas(
     return deltas
 
 
+def _health_delta(
+    inputs: ComparisonInputs, identity: _Identity
+) -> frozenset[MetricDeltaRow]:
+    """Canonical epoch E3: the health score's delta, off the enriched health
+    family the document is built from — present exactly when that family says
+    the health comparison ran."""
+    health = as_mapping(
+        as_mapping(as_mapping(inputs.metrics).get("health")).get("summary")
+    )
+    if health.get("baseline_diff_available") is not True:
+        return frozenset()
+    (term,) = DELTA_FAMILY_TERMS["health_delta"]
+    return frozenset(
+        {MetricDeltaRow(**identity, delta=term, value=as_int(health.get("delta")))}
+    )
+
+
 def comparison_facts_from_producers(
     inputs: ComparisonInputs,
     facts: AnalysisFacts,
@@ -398,6 +415,7 @@ def comparison_facts_from_producers(
         dead_symbol_novelty=entity["dead_symbol_novelty"],
         adoption_delta=deltas["adoption_delta"],
         api_surface_delta=deltas["api_surface_delta"],
+        health_delta=_health_delta(inputs, identity),
     )
 
 

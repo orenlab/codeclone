@@ -72,6 +72,7 @@ from ..canonical.errors import (
     SemanticGrammarError,
     UnknownRunError,
 )
+from ..canonical.evaluation_rows import UnitRiskRow
 from ..canonical.identity import (
     UNRESOLVED_IMPORT_RESOLUTIONS,
     FileId,
@@ -179,6 +180,7 @@ from ..utils.coerce import as_sequence as _as_sequence
 from ..utils.coerce import as_str as _as_str
 from ._types import AnalysisResult, DiscoveryResult, ProcessingResult
 from .comparison_snapshot import ComparisonInputsFactory, comparison_house
+from .evaluation_snapshot import EvaluationInputsFactory, evaluation_house
 
 #: The run-wide metrics switch as the report meta spells it.  Both
 #: surfaces write it from the SAME argument (``args.skip_metrics`` in the
@@ -1173,6 +1175,33 @@ def _design_hotspot_rows(
     return complexity, coupling, cohesion
 
 
+#: Canonical epoch E3: the measured-unit container of each banded metric
+#: family, in the producer's own names.
+_BANDED_UNITS: Final[tuple[tuple[str, str], ...]] = (
+    ("cohesion", "classes"),
+    ("complexity", "functions"),
+    ("coupling", "classes"),
+)
+
+
+def _unit_risk_rows(
+    payload: Mapping[str, object], index: IdentityIndex
+) -> frozenset[UnitRiskRow]:
+    """Canonical epoch E3: the band every measured unit was given, off the
+    producer's own metric rows (the rows the document's ``items`` are renamed
+    from) and named through the one symbol-key owner."""
+    return frozenset(
+        UnitRiskRow(
+            dimension=dimension,
+            symbol=parse_symbol(index, _as_str(row.get("qualname")), dimension),
+            start_line=_as_int(row.get("start_line")),
+            band=_as_str(row.get("risk")),
+        )
+        for dimension, container in _BANDED_UNITS
+        for row in _metric_rows(payload, dimension, container)
+    )
+
+
 def _contracted_file(path: object, *, scan_root: str, where: str) -> FileId:
     """A producer's absolute path as the FILE identity the document
     publishes, through the document's own path contract."""
@@ -1444,6 +1473,7 @@ def canonical_snapshot_from_producers(
     report_meta: Mapping[str, object],
     population: AnalysisPopulation,
     comparison: ComparisonInputsFactory | None = None,
+    evaluation: EvaluationInputsFactory | None = None,
 ) -> CanonicalModel:
     """Build one normalized model straight from the run's producers.
 
@@ -1548,6 +1578,8 @@ def canonical_snapshot_from_producers(
             # Canonical epoch E2: the run's comparison, when the publisher was
             # handed one; without it the house is honestly unwitnessed.
             comparison=comparison_house(comparison, facts, file_modules),
+            # Canonical epoch E3: the run's evaluation, the same way.
+            evaluation=evaluation_house(evaluation, _unit_risk_rows(payload, index)),
         ),
         coupled_sets=_coupled_sets(payload),
     ).normalize()
@@ -1562,6 +1594,7 @@ def publish_run_snapshot(
     report_meta: Mapping[str, object],
     namespace: str = RUN_SNAPSHOT_NAMESPACE,
     comparison: ComparisonInputsFactory | None = None,
+    evaluation: EvaluationInputsFactory | None = None,
 ) -> RunSnapshotPublication:
     """Resolve, build and publish — or say, typed, why nothing was stored.
 
@@ -1608,6 +1641,7 @@ def publish_run_snapshot(
                 namespace=namespace,
                 publish_span=publish_span,
                 comparison=comparison,
+                evaluation=evaluation,
             )
         except ProducerSnapshotUnavailable as refusal:
             # Anticipated, and kept apart from the containment below: a
@@ -1646,6 +1680,7 @@ def _publish_enabled(
     namespace: str,
     publish_span: SpanHandle,
     comparison: ComparisonInputsFactory | None = None,
+    evaluation: EvaluationInputsFactory | None = None,
 ) -> RunSnapshotPublication:
     """Everything the enabled rollout does, inside the containment.
 
@@ -1667,9 +1702,10 @@ def _publish_enabled(
         report_meta=report_meta,
         population=population,
         # Evaluated inside the build, so inside the containment: a
-        # comparison that cannot be spelled is a contained publication
-        # failure, never an analysis failure.
+        # comparison or an evaluation that cannot be spelled is a contained
+        # publication failure, never an analysis failure.
         comparison=comparison,
+        evaluation=evaluation,
     )
     admissible = population_is_admissible(population)
     target = profile_head_target(population)

@@ -12,11 +12,15 @@ identity generation.  Generation 2 landed, so the relation can be stated.
 
 What is measured here, and why each property needs its own pin:
 
-* The two domains address DIFFERENT things, and the cardinality proves it.
-  One store record answered two report identities on one measured corpus
-  (same analysis, two gate thresholds), and both zero directions are
-  reachable today: a gate-only run stores a snapshot no document evaluates,
-  and a flag-off run evaluates a document no snapshot backs.
+* The two domains address DIFFERENT things, and the cardinality proved it:
+  until canonical epoch E3 one store record answered two report identities
+  on one measured corpus (same analysis, two gate thresholds).  Since E3 the
+  store run carries the run's evaluation — the gate request among it — so
+  that witness splits into two store records (declared transition, pinned
+  below; the cardinality is an input the store bump has to decide).  Both
+  zero directions are still reachable: a gate-only run stores a snapshot no
+  document evaluates, and a flag-off run evaluates a document no snapshot
+  backs.
 * A wrong pair is invisible at both endpoints.  ``read_run`` re-derives a
   run id from the run's own scope and membership, so a wrong-but-real run
   verifies perfectly; the falsehood lives in the RELATION, which neither
@@ -489,17 +493,23 @@ def test_producer_edge_states_the_unevaluated_zero(
     assert link.store_run_id and not link.report_run_identity
 
 
-def test_one_store_record_answers_many_report_identities(
+def test_the_gate_request_is_a_member_of_the_store_record(
     tmp_path: Path, rollout: Callable[[Path | None], None]
 ) -> None:
-    """The measured one-to-many, end to end.
+    """The measured cardinality, end to end — a DECLARED transition of
+    canonical epoch E3, on the desk before the store bump.
 
-    Two runs over one tree that differ ONLY in the gate request share a
-    store record -- the store's id covers the analysis, and a threshold is
-    not analysis -- while their report identities differ, because the
-    evaluation tier seals the gate request.  This is the cardinality the
-    ruling's "do not connect" rests on: a bridge that assumed 1:1 would
-    have to pick one of the two documents and be wrong about the other.
+    Until E3 two runs over one tree that differed ONLY in the gate request
+    shared a store record — the store's id covered the analysis, and a
+    threshold is not analysis — while their report identities differed.
+    That one-to-many was the witness the ruling's "do not connect" rested
+    on.  E3 stores the run's evaluation — the request, the gate outcome and
+    the realized contract, keyed by the request digest — as members of the
+    run, so the request now enters the store run identity: the two runs are
+    two store records over ONE scope receipt, and still two report
+    identities.  The bridge keeps refusing to assume 1:1 (nothing in it
+    changed); what changed is that a gate request no longer produces the
+    many.
     """
 
     store = tmp_path / "runs.sqlite3"
@@ -517,8 +527,8 @@ def test_one_store_record_answers_many_report_identities(
     first, second = links
     assert first is not None and second is not None
     assert first.state == second.state == RUN_SNAPSHOT_LINK_LINKED
-    # One analysis: one store record, one scope receipt.
-    assert first.store_run_id == second.store_run_id
+    # One analysis, two evaluations: one scope receipt, two store records.
+    assert first.store_run_id != second.store_run_id
     assert first.analysis_scope_digest == second.analysis_scope_digest
     # Two evaluations: two report identities.
     assert first.report_run_identity != second.report_run_identity

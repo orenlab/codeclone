@@ -10,6 +10,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
+from typing import TypeVar
 from uuid import UUID
 
 from ..baseline.container_trust import evaluate_container_trust
@@ -21,6 +22,7 @@ from ..contracts import (
     observed_population,
     population_universe_observed,
 )
+from ..contracts.report_identity import realized_health_params
 from ..models import (
     RUN_SNAPSHOT_LINK_UNRECORDED,
     BaselineContainerV3,
@@ -61,10 +63,13 @@ from .canonical_snapshot import (
     resolve_run_store_config,
 )
 from .comparison_snapshot import ComparisonInputs, ComparisonInputsFactory
+from .evaluation_snapshot import EvaluationInputs, EvaluationInputsFactory
 from .metrics_payload import _enrich_metrics_report_payload
 
 MetricGateConfig = _MetricGateConfig
 GatingResult = GateResult
+
+_T = TypeVar("_T")
 
 _REPORT_FORMAT_COUNTERS = {
     "html": "report_render_format_html",
@@ -503,6 +508,7 @@ def _publish_canonical_snapshot(
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
     comparison: ComparisonInputsFactory | None = None,
+    evaluation: EvaluationInputsFactory | None = None,
 ) -> tuple[RunStoreConfig, RunSnapshotPublication]:
     """Resolve the rollout flag and publish, at the point that publishes.
 
@@ -526,7 +532,135 @@ def _publish_canonical_snapshot(
         analysis=analysis,
         report_meta=report_meta,
         comparison=comparison,
+        evaluation=evaluation,
     )
+
+
+def _once(build: Callable[[], _T]) -> Callable[[], _T]:
+    """One evaluation of ``build``, shared by every caller of its result.
+
+    The publication and the document read the SAME body, gate result and
+    trust vector of one run through this: each is built at most once, and
+    only by the first caller that needs it — a default run whose rollout is
+    off and whose document nobody consumes builds none of them, exactly as
+    before canonical epoch E3.  A build that raises is not remembered: the
+    next caller meets the same failure.
+    """
+    held: list[_T] = []
+
+    def value() -> _T:
+        if not held:
+            held.append(build())
+        return held[0]
+
+    return value
+
+
+def _report_body(
+    *,
+    report_body: Mapping[str, object] | None,
+    trust: Callable[[], TrustVector | None],
+    discovery: DiscoveryResult,
+    processing: ProcessingResult,
+    analysis: AnalysisResult,
+    report_meta: Mapping[str, object],
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
+    metrics_diff: object | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
+) -> dict[str, object]:
+    """The report body of this run: the caller's, or the one owner's build."""
+    if report_body is not None:
+        return dict(report_body)
+    return build_report_body_for_analysis(
+        discovery=discovery,
+        processing=processing,
+        analysis=analysis,
+        report_meta=report_meta,
+        new_func=new_func,
+        new_block=new_block,
+        metrics_diff=metrics_diff,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
+        baseline_trust=trust(),
+    )
+
+
+def _report_gate(
+    *,
+    boot: BootstrapResult,
+    discovery: DiscoveryResult,
+    processing: ProcessingResult,
+    analysis: AnalysisResult,
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
+    metrics_diff: object | None,
+    trust: Callable[[], TrustVector | None],
+    gate_config: MetricGateConfig | None,
+    gate_result: GateResult | None,
+) -> tuple[MetricGateConfig, GateResult]:
+    """The gate request and result this run is evaluated under: the caller's
+    pair, or the one owner's evaluation of the run's own request."""
+    if (gate_config is None) != (gate_result is None):
+        raise ValueError("gate config and result must be supplied together")
+    if gate_config is not None and gate_result is not None:
+        return gate_config, gate_result
+    return gate_with_config(
+        boot=boot,
+        analysis=analysis,
+        new_func=new_func,
+        new_block=new_block,
+        metrics_diff=_coerce_metrics_diff(metrics_diff),
+        baseline_trust=trust(),
+        files_skipped=processing.files_skipped,
+        # Computed here, from the one owner, because this fallback is the only
+        # gate constructor in this path that cannot read it off
+        # ``project_metrics`` when metrics were skipped.
+        analysis_population=observed_population(
+            files_found=discovery.files_found,
+            files_analyzed_or_cached=analysis.files_analyzed_or_cached,
+        ),
+    )
+
+
+def _evaluation_inputs_factory(
+    *,
+    analysis: AnalysisResult,
+    body: Callable[[], Mapping[str, object]],
+    gate: Callable[[], tuple[MetricGateConfig, GateResult]],
+) -> EvaluationInputsFactory:
+    """The run's evaluation, spelled by the owners the document is built from.
+
+    Canonical epoch E3: the gate request and result are the pair the document
+    is finalized with, the contract is the document's own builder over them,
+    the health verdict the one projection every report surface reads, and the
+    body the one the document is sealed from — shared through :func:`_once`,
+    so the store and the document cannot hold two evaluations of one run.
+    Returned as a factory because the publisher evaluates it inside its own
+    containment, and only on the enabled rollout path.
+    """
+
+    def build() -> EvaluationInputs:
+        from ..metrics.health import health_report_fields
+        from ..report.document.integrity import build_evaluation_contract
+
+        config, result = gate()
+        metrics = analysis.project_metrics
+        health = None if metrics is None else health_report_fields(metrics.health)
+        return EvaluationInputs(
+            config=config,
+            result=result,
+            contract=build_evaluation_contract(
+                config,
+                enabled_lanes=analysis.observation_bundle.contract.enabled_lanes,
+            ),
+            health=health,
+            health_params=None if health is None else realized_health_params(),
+            body=body(),
+        )
+
+    return build
 
 
 def report(
@@ -560,6 +694,48 @@ def report(
         "text": None,
     }
     report_document: dict[str, object] | None = None
+    # Canonical epoch E3: the trust vector, the body and the gate pair of this
+    # run, each built at most once and shared by the publication below and the
+    # document after it (``_once``).
+    trust = _once(
+        partial(
+            _resolved_baseline_trust,
+            baseline_trust,
+            baseline_container,
+            baseline_scope_id,
+        )
+    )
+    body = _once(
+        partial(
+            _report_body,
+            report_body=report_body,
+            trust=trust,
+            discovery=discovery,
+            processing=processing,
+            analysis=analysis,
+            report_meta=report_meta,
+            new_func=new_func,
+            new_block=new_block,
+            metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
+        )
+    )
+    gate_pair = _once(
+        partial(
+            _report_gate,
+            boot=boot,
+            discovery=discovery,
+            processing=processing,
+            analysis=analysis,
+            new_func=new_func,
+            new_block=new_block,
+            metrics_diff=metrics_diff,
+            trust=trust,
+            gate_config=gate_config,
+            gate_result=gate_result,
+        )
+    )
     # The ONE producer-edge publication point (backend step 7).  It lives
     # here and not in the CLI stage runner because MCP deliberately
     # bypasses ``run_analysis_stages``: a publish hung off the stage runner
@@ -587,51 +763,17 @@ def report(
             baseline_trust=baseline_trust,
             baseline_scope_id=baseline_scope_id,
         ),
+        evaluation=_evaluation_inputs_factory(
+            analysis=analysis, body=body, gate=gate_pair
+        ),
     )
     try:
-        needs_report_document = report_document_required(
+        if report_document_required(
             boot,
             include_report_document=include_report_document,
-        )
-        if needs_report_document:
-            resolved_baseline_trust = _resolved_baseline_trust(
-                baseline_trust, baseline_container, baseline_scope_id
-            )
-            resolved_body = (
-                dict(report_body)
-                if report_body is not None
-                else build_report_body_for_analysis(
-                    discovery=discovery,
-                    processing=processing,
-                    analysis=analysis,
-                    report_meta=report_meta,
-                    new_func=new_func,
-                    new_block=new_block,
-                    metrics_diff=metrics_diff,
-                    coverage_adoption_diff_available=coverage_adoption_diff_available,
-                    api_surface_diff_available=api_surface_diff_available,
-                    baseline_trust=resolved_baseline_trust,
-                )
-            )
-            if (gate_config is None) != (gate_result is None):
-                raise ValueError("gate config and result must be supplied together")
-            if gate_config is None or gate_result is None:
-                gate_config, gate_result = gate_with_config(
-                    boot=boot,
-                    analysis=analysis,
-                    new_func=new_func,
-                    new_block=new_block,
-                    metrics_diff=_coerce_metrics_diff(metrics_diff),
-                    baseline_trust=resolved_baseline_trust,
-                    files_skipped=processing.files_skipped,
-                    # Computed here, from the one owner, because this fallback is
-                    # the only gate constructor in this path that cannot read it
-                    # off ``project_metrics`` when metrics were skipped.
-                    analysis_population=observed_population(
-                        files_found=discovery.files_found,
-                        files_analyzed_or_cached=analysis.files_analyzed_or_cached,
-                    ),
-                )
+        ):
+            resolved_body = body()
+            resolved_gate_config, resolved_gate_result = gate_pair()
             # Sealing hashes the whole document, so it is a heavyweight stage in
             # its own right and needs to be visible next to build and render.
             with span(name="report.finalize"):
@@ -639,9 +781,9 @@ def report(
                     body=resolved_body,
                     observation_bundle=analysis.observation_bundle,
                     baseline_container=baseline_container,
-                    baseline_trust=resolved_baseline_trust,
-                    gate_config=gate_config,
-                    gate_result=gate_result,
+                    baseline_trust=trust(),
+                    gate_config=resolved_gate_config,
+                    gate_result=resolved_gate_result,
                     new_function_group_keys=new_func,
                     new_block_group_keys=new_block,
                 )

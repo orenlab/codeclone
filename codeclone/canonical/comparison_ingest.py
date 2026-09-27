@@ -313,6 +313,26 @@ def _deltas(
     return deltas
 
 
+def _health_delta(
+    document: Mapping[str, object], identity: _Identity
+) -> frozenset[MetricDeltaRow]:
+    """Canonical epoch E3: the health score's delta, stated exactly when the
+    document says the health comparison ran (``baseline_diff_available`` of
+    the health family)."""
+    summary = _metric_summary(document, "health")
+    if summary.get("baseline_diff_available") is not True:
+        return frozenset()
+    return frozenset(
+        {
+            MetricDeltaRow(
+                **identity,
+                delta=DELTA_FAMILY_TERMS["health_delta"][0],
+                value=_number(summary, "delta", "metrics.families.health.summary"),
+            )
+        }
+    )
+
+
 def comparison_facts_from_document(document: Mapping[str, object]) -> ComparisonFacts:
     """The comparison house the report document publishes — or the empty
     house for a document that never witnessed a comparison."""
@@ -370,6 +390,7 @@ def comparison_facts_from_document(document: Mapping[str, object]) -> Comparison
         dead_symbol_novelty=novelty["dead_symbol_novelty"],
         adoption_delta=deltas["adoption_delta"],
         api_surface_delta=deltas["api_surface_delta"],
+        health_delta=_health_delta(document, identity),
     )
 
 
