@@ -19,6 +19,10 @@ and the section opens with the install of the exact prerelease in
 it fetches the published package, and the test runs this checkout instead --
 so it sits in its own block, and the section is pinned to exactly those two
 blocks, which leaves no third one to go unexecuted in silence.
+
+The upgrade guide quotes the refusal that sends a reader to that first step,
+and it is held to the CLI's own rendering of it here, beside the README pin
+on the same constant.
 """
 
 from __future__ import annotations
@@ -30,7 +34,9 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from uuid import UUID
 
+from codeclone.ui_messages.formatters import fmt_baseline_scope_id_required
 from codeclone.ui_messages.runtime import HINT_SCOPE_ID_SETUP_COMMAND
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +44,12 @@ _README = _REPO_ROOT / "README.md"
 _PYPI_README = _REPO_ROOT / "docs" / "README-pypi.md"
 _SECTION_HEADING = "### 2. Record the current structural baseline"
 _ALPHA_RELEASE = re.compile(r"(\d+)\.(\d+)\.\d+a\d+")
+_UPGRADE_GUIDE = _REPO_ROOT / "docs" / "guides" / "migration-a1-a2.md"
+_SCOPE_ID_SECTION = "## `baseline_scope_id` is now required"
+# The example values of the refusal the upgrade guide quotes: the page shows
+# these two, the CLI generates its own UUID and names the real file.
+_GUIDE_EXAMPLE_CONFIG = Path("/srv/acme/pyproject.toml")
+_GUIDE_EXAMPLE_SCOPE_ID = UUID("0f5c6f3d-9d2e-4a2a-9a5f-6b0f9a1a2b3c")
 
 #: The quick start exactly as a new user types it. Changing the README block
 #: means changing this too -- and then the sequence below has to run.
@@ -149,6 +161,32 @@ def test_readme_step_two_names_the_alpha_it_needs() -> None:
     assert _step_two_blocks()[0] == (install,)
     # The PyPI page carries the same two-step split with the same install.
     assert install in _PYPI_README.read_text(encoding="utf-8")
+
+
+def test_upgrade_guide_quotes_the_scope_id_refusal_the_cli_prints() -> None:
+    """The quoted refusal is the CLI's own, rendered from its constants.
+
+    The guide quotes what ``codeclone . --update-baseline`` prints without a
+    ``baseline_scope_id``. That quote went stale once: the refusal learned to
+    name ``codeclone setup apply -y`` as its first step and the page kept the
+    older paste-only text. The expectation is rendered here by the CLI's own
+    formatter from the ``ui_messages.runtime`` constants, for the case the page
+    shows -- an existing ``[tool.codeclone]`` table -- and compared with line
+    wrapping ignored, so a reworded constant reddens the page.
+    """
+
+    text = _UPGRADE_GUIDE.read_text(encoding="utf-8")
+    start = text.index(_SCOPE_ID_SECTION)
+    end = text.index("\n## ", start + len(_SCOPE_ID_SECTION))
+    refusal = fmt_baseline_scope_id_required(
+        table_state="existing_section",
+        config_path=_GUIDE_EXAMPLE_CONFIG,
+        scope_id=_GUIDE_EXAMPLE_SCOPE_ID,
+    )
+
+    # The case the page shows is one where setup can write the key.
+    assert HINT_SCOPE_ID_SETUP_COMMAND in refusal
+    assert " ".join(refusal.split()) in " ".join(text[start:end].split())
 
 
 def _new_git_project(root: Path, *, env: dict[str, str]) -> Path:

@@ -31,7 +31,11 @@ Design constraints, deliberately conservative:
   matcher only fires on a claim that *names* the constant, and a public
   reference page naming `REPORT_SCHEMA_VERSION` is quoting the schema, not
   a package release. (This caught docs/reference/json-output.md quoting
-  `REPORT_SCHEMA_VERSION: 3.1` after the contract moved to 3.2.)
+  `REPORT_SCHEMA_VERSION: 3.1` after the contract moved to 3.2.) The
+  2.1.0a1 -> 2.1.0a2 upgrade guide joins it for the same reason: its contract
+  table names each constant beside its value. (Its report schema row read
+  `3.5` after the contract moved to 3.6, naming no constant, so nothing
+  compared it.)
 - CHANGELOG and the remaining public docs are not scanned: CHANGELOG
   entries are historical by design, and narrative pages carry
   package-release versions this matcher must not reinterpret as schema
@@ -70,6 +74,7 @@ _AGENTS_DOC: Final = _REPO_ROOT / "AGENTS.md"
 _DOCS_INTERNAL: Final = _REPO_ROOT / "docs" / "internal"
 _DOCS_REFERENCE: Final = _REPO_ROOT / "docs" / "reference"
 _JSON_OUTPUT_DOC: Final = _DOCS_REFERENCE / "json-output.md"
+_MIGRATION_GUIDE_DOC: Final = _REPO_ROOT / "docs" / "guides" / "migration-a1-a2.md"
 _CLI_REFERENCE_DOC: Final = _DOCS_REFERENCE / "cli.md"
 _CLI_HELP_GOLDEN: Final = (
     _REPO_ROOT / "tests" / "fixtures" / "contract_snapshots" / "cli_help.txt"
@@ -115,15 +120,16 @@ def _governance_doc_paths() -> tuple[Path, ...]:
 
 
 def _version_claim_doc_paths() -> tuple[Path, ...]:
-    """Governance docs plus the public reference pages.
+    """Governance docs, the public reference pages and the upgrade guide.
 
     A reference page that names a contract constant is quoting the contract,
-    so it drifts exactly like an internal one. Narrative public pages stay
-    out: they quote release versions this matcher must not reinterpret.
+    so it drifts exactly like an internal one; so does the upgrade guide's
+    contract table. Other narrative public pages stay out: they quote release
+    versions this matcher must not reinterpret.
     """
 
     reference = () if not _DOCS_REFERENCE.is_dir() else _DOCS_REFERENCE.rglob("*.md")
-    return (*_governance_doc_paths(), *sorted(reference))
+    return (*_governance_doc_paths(), *sorted(reference), _MIGRATION_GUIDE_DOC)
 
 
 def _contract_versions() -> dict[str, str]:
@@ -259,6 +265,36 @@ def test_documented_version_literals_match_contracts() -> None:
     assert not violations, "docs quote stale contract versions:\n" + "\n".join(
         violations
     )
+
+
+def test_the_upgrade_guide_contract_table_is_read_row_by_row() -> None:
+    """Population witness for the version sync on the upgrade guide.
+
+    The matcher reads a table row only when the row names its constant, so a
+    row that states a value without the name is not checked -- it is not
+    absent, only unmeasured. The report schema row sat at `3.5` that way while
+    the contract moved to 3.6. Every row of the guide's contract table has to
+    reach the matcher, and the matcher has to read the guide.
+    """
+
+    assert _MIGRATION_GUIDE_DOC in _version_claim_doc_paths()
+    names = frozenset(_contract_versions())
+    claimed = sorted(
+        {
+            name
+            for line in _MIGRATION_GUIDE_DOC.read_text(encoding="utf-8").splitlines()
+            for name, _quoted in _claimed_versions_in_line(line, names)
+        }
+    )
+
+    assert claimed == [
+        "BASELINE_FINGERPRINT_VERSION",
+        "BASELINE_SCHEMA_VERSION",
+        "CACHE_VERSION",
+        "METRICS_BASELINE_SCHEMA_VERSION",
+        "REPORT_SCHEMA_VERSION",
+        "WIRE_VERSION",
+    ]
 
 
 def test_json_output_doc_states_every_novelty_word_the_producers_emit() -> None:

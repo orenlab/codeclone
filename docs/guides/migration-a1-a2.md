@@ -90,16 +90,21 @@ The value has to be yours: it is the discriminator that stops one project's
 baseline being compared against another's, so two projects must never share one.
 Do not copy the placeholder above.
 
-You do not have to invent it. Run CodeClone without the key and it hands you a
-generated one, together with the file it belongs in and whether the section
-already exists:
+You do not have to invent it. Run CodeClone without the key and it names the
+command that writes one first, then hands you a generated UUID for anyone who
+would rather paste it, together with the file it belongs in and whether the
+section already exists:
 
 ```text
 CONTRACT ERROR:
 baseline_scope_id is required for baseline update and gating; set a stable
 canonical UUID under [tool.codeclone].
 
-Add this line to [tool.codeclone] in /srv/acme/pyproject.toml:
+Run setup to write it (codeclone setup plan previews every change):
+
+    codeclone setup apply -y
+
+Or add this line to [tool.codeclone] in /srv/acme/pyproject.toml:
 
     baseline_scope_id = "0f5c6f3d-9d2e-4a2a-9a5f-6b0f9a1a2b3c"
 
@@ -107,8 +112,10 @@ That UUID was generated for this run. Commit it and never change it: it is what
 keeps this project's baseline from being read as another's.
 ```
 
-`codeclone setup` writes the same key for you. Either way, commit it and never
-change it. (`python -c "import uuid; print(uuid.uuid4())"` produces one too.)
+`codeclone setup apply -y` is offered when a `pyproject.toml` exists; with no
+file there is nothing for setup to merge into, and only the paste is offered.
+Either way, commit the key and never change it.
+(`python -c "import uuid; print(uuid.uuid4())"` produces one too.)
 
 ## Removed flags and keys
 
@@ -152,24 +159,28 @@ Add these only after every runner is on 2.1.0a2 — 2.1.0a1 rejects all of them.
 
 ## Contract versions
 
-| Contract | Version |
-|----------|---------|
-| Baseline schema | `3.0` |
-| Baseline fingerprint | `3` |
-| Wire | `2` |
-| Cache | `4.2` |
-| Report schema | `3.5` |
-| Metrics baseline schema | `1.3` |
+| Contract | Constant | Version |
+|----------|----------|---------|
+| Baseline schema | `BASELINE_SCHEMA_VERSION` | `3.0` |
+| Baseline fingerprint | `BASELINE_FINGERPRINT_VERSION` | `3` |
+| Wire | `WIRE_VERSION` | `2` |
+| Cache | `CACHE_VERSION` | `4.2` |
+| Report schema | `REPORT_SCHEMA_VERSION` | `3.6` |
+| Metrics baseline schema | `METRICS_BASELINE_SCHEMA_VERSION` | `1.3` |
 
 ## Health may drop — lower but truer
 
 Expect health scores to move, and expect some to move down. The semantics got
 honest; the code did not get worse.
 
-- **Complexity rose.** V(G) is now full McCabe over the normalized CFG.
-  Exception dispatch, `finally` routing and context-manager suppression are real
-  control flow and are counted. Values are higher than tools that ignore those
-  paths report, and higher than 2.1.0a1 reported.
+- **Complexity counts authored decisions.** `cyclomatic_complexity` — the
+  value health, risk bands and gates read — is a source-level count of the
+  decisions written in each function (`if`/`elif`, ternaries, `and`/`or`,
+  loops, comprehension clauses, `except` clauses, `match` cases, `assert`).
+  Exception routing, `finally` and context managers add nothing to it. Full
+  McCabe over the normalized CFG is reported beside it as the diagnostic
+  `cfg_cyclomatic_complexity` and never feeds health or a gate. The 2.1.0a1
+  values are not comparable and are treated as untrusted, not diffed.
 - **Every function is measured.** Clone-lane size floors no longer decide which
   functions carry a complexity fact, so small functions now count toward the
   population.
@@ -187,6 +198,6 @@ as a regression.
 ## Related pages
 
 - [Baseline container and lane trust](../concepts/baseline-container.md)
-- [Full-McCabe complexity](../concepts/complexity.md)
+- [Complexity: two metrics, one owner each](../concepts/complexity.md)
 - [Health explainability](../concepts/health-explainability.md)
 - [CI integration](ci-integration.md)
