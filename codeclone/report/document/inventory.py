@@ -242,3 +242,9 @@ def _build_meta_payload(
     if analysis_profile is not None:
         payload["analysis_profile"] = analysis_profile
     return payload
+
+
+#: The public name of the meta owner, read by the producer-native comparison
+#: snapshot (canonical epoch E2) for ``meta.baseline`` and
+#: ``meta.metrics_baseline`` exactly as the document spells them.
+meta_payload = _build_meta_payload

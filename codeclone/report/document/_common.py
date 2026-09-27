@@ -413,6 +413,16 @@ def _entity_novelty(
     )
 
 
+#: The public names of the novelty owners, read by the producer-native
+#: comparison snapshot (``core/comparison_snapshot.py``, canonical epoch E2):
+#: the novelty a store row states is decided by the SAME functions the
+#: document's finding groups are, never by a second spelling of them.
+clone_novelty = _clone_novelty
+entity_novelty = _entity_novelty
+entity_novelty_facts = _entity_novelty_facts
+lane_is_trusted = _lane_is_trusted
+
+
 def _item_sort_key(item: Mapping[str, object]) -> tuple[str, int, int, str]:
     return (
         str(item.get("relative_path", "")),

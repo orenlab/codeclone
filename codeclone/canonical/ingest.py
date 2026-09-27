@@ -72,6 +72,7 @@ from codeclone.canonical.analysis_rows import (
     UnreachableStatementRow,
     overloaded_module_row,
 )
+from codeclone.canonical.comparison_ingest import comparison_facts_from_document
 from codeclone.canonical.errors import LegacyIngestError
 from codeclone.canonical.identity import (
     DEAD_SYMBOL_GROUP_KIND,
@@ -516,7 +517,10 @@ def canonical_model_from_legacy_document(
                 analysis_population=analysis_population,
                 coverage_join=coverage_join,
                 dead_code_summary=dead_code_summary,
-            )
+            ),
+            # Canonical epoch E2: the comparison the document published,
+            # read by its own oracle module.
+            comparison=comparison_facts_from_document(document),
         ),
         coupled_sets=coupled_sets,
     ).normalize()

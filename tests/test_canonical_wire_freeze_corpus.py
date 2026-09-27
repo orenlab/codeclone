@@ -21,11 +21,14 @@ Phase 39S test-import law.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from codeclone.canonical import (
     ADOPTION_FEATURES,
     AdoptionCountRow,
+    CanonicalModel,
+    ComparisonFacts,
     DeadCodeObservationRow,
     DependencyCycleRow,
     FileId,
@@ -306,6 +309,20 @@ def test_f5_canonical_family_carries_the_overload_corpus_symbols(
     assert {row.visibility for row in rows} == {"all"}
 
 
+def _wire_view(model: CanonicalModel) -> CanonicalModel:
+    """What the wire of this revision carries of an ingested model.
+
+    Canonical epoch E2: the document witnessed its comparison (no container:
+    ``missing``) and the model carries it — the store keeps it, the wire of
+    this revision does not, so the decode answers the house empty.
+    """
+    normalized = model.normalize()
+    assert normalized.facts.comparison.baseline_witness is not None
+    return replace(
+        normalized, facts=replace(normalized.facts, comparison=ComparisonFacts())
+    )
+
+
 def test_f5_overload_corpus_ingests_whole_and_satisfies_l8(
     corpus_f5_report: dict[str, object], tmp_path: Path
 ) -> None:
@@ -319,6 +336,7 @@ def test_f5_overload_corpus_ingests_whole_and_satisfies_l8(
     """
     model = canonical_model_from_legacy_document(corpus_f5_report)
     model_bytes = encode_canonical_json(model)
+    wire_view = _wire_view(model)
     with RunStore(tmp_path / "runs.sqlite") as store:
         receipt = store.write_full_run(
             model,
@@ -327,7 +345,7 @@ def test_f5_overload_corpus_ingests_whole_and_satisfies_l8(
             expected_generation=0,
         )
         assert store.project_run(receipt.run_id) == model_bytes
-        assert decode_canonical_json(model_bytes) == model.normalize()
+        assert decode_canonical_json(model_bytes) == wire_view
         assert store.read_run(receipt.run_id) == model.normalize()
 
 

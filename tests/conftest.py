@@ -10,11 +10,13 @@ import json
 import sqlite3
 import sys
 from collections.abc import Callable, Generator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from codeclone.baseline.trust import current_python_tag
+from codeclone.canonical.model import CanonicalModel
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import RUN_SNAPSHOT_PUBLICATION_PUBLISHED
 from tests._live_state import (
@@ -538,6 +540,197 @@ def served_projection_corpus(
     store_path = root.parent / "run_store_projection.sqlite3"
     materialize_projection_corpus(root)
     return _serve_run_store_corpus(root, store_path)
+
+
+# ---------------------------------------------------------------------------
+# The comparison corpus (canonical epoch E2, 2026-09-26): the wire-freeze
+# corpus compared against its own stage-A baseline, grown so every governed
+# novelty family carries BOTH verdicts where the producer can utter them —
+# a known complexity hotspot and a new one, a known dead symbol and a new
+# one, a new coupling hotspot, a known and a new dependency cycle, a known
+# and a new clone pair — and run under six configurations, one per
+# comparison state the families must distinguish (Probe Validity Law):
+#
+#   * ``compared``      — every metric lane compared, the API lane included;
+#   * ``partial``       — an unparsable file leaves the population partial,
+#                         so the set-difference lanes are NOT compared;
+#   * ``api_disabled``  — the API lane is not enabled: a disabled capability;
+#   * ``lanes_skipped`` — dead code and dependencies not collected: two
+#                         compared lanes are disabled capabilities;
+#   * ``foreign_scope`` — the container belongs to another scope: every lane
+#                         unavailable, the witness ``untrusted``;
+#   * ``missing``       — no container at all: the witness ``missing``.
+# ---------------------------------------------------------------------------
+
+COMPARISON_CORPUS_STAGE_A: dict[str, str] = {
+    "pkg/complex_old.py": "def old_tangle(a: int) -> int:\n    t = 0\n"
+    + "".join(f"    if a > {i}:\n        t += {i}\n" for i in range(24))
+    + "    return t\n",
+    "pkg/dead_old.py": (
+        "def _old_orphan(value: int) -> int:\n"
+        "    total = value\n    total += 3\n    return total\n"
+    ),
+    # The API the baseline records: stage B removes two symbols (breaking)
+    # and widens one signature compatibly, so the three API counts differ.
+    "pkg/api_mod.py": (
+        "def keep(a: int) -> int:\n    return a\n\n\n"
+        "def gone_one() -> int:\n    return 1\n\n\n"
+        "def gone_two() -> int:\n    return 2\n"
+    ),
+}
+COMPARISON_CORPUS_STAGE_B: dict[str, str] = {
+    "pkg/complex_new.py": "def new_tangle(a: int) -> int:\n    t = 0\n"
+    + "".join(f"    if a < {i}:\n        t -= {i}\n" for i in range(24))
+    + "    return t\n",
+    "pkg/dead_new.py": (
+        "def _new_orphan(value: int) -> int:\n"
+        "    total = value\n    total += 1\n    return total\n"
+    ),
+    "pkg/parts.py": "\n\n".join(
+        f"class Part{i}:\n    def value(self) -> int:\n        return {i}\n"
+        for i in range(14)
+    ),
+    "pkg/hub.py": "from pkg.parts import "
+    + ", ".join(f"Part{i}" for i in range(14))
+    + "\n\n\nclass Hub:\n    def __init__(self) -> None:\n"
+    + "\n".join(f"        self.p{i} = Part{i}()" for i in range(14))
+    + "\n",
+    "pkg/api_mod.py": "def keep(a: int, b: int = 0) -> int:\n    return a + b\n",
+    # Unannotated and one documented: the three adoption deltas differ.
+    "pkg/loose.py": (
+        'def loose_one(a, b):\n    """Documented."""\n    return a\n\n\n'
+        "def loose_two(c):\n    return c\n"
+    ),
+    "pkg/cyc_c.py": (
+        "from pkg.cyc_d import d\n\n\ndef c() -> int:\n    return d() + 1\n"
+    ),
+    "pkg/cyc_d.py": (
+        "from pkg.cyc_c import c\n\n\ndef d() -> int:\n    return c() - 1\n"
+    ),
+}
+_COMPARISON_FOREIGN_SCOPE = "11111111-2222-4333-8444-555555555555"
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonRun:
+    """One CLI execution of the comparison corpus: the document it rendered
+    (the oracle) beside the run it published (the store), one execution."""
+
+    name: str
+    document: dict[str, object]
+    stored: CanonicalModel
+    store_path: Path
+    run_id: str
+
+
+def _write_tree(root: Path, files: dict[str, str]) -> None:
+    for relative, source in files.items():
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source, "utf-8")
+
+
+def materialize_comparison_corpus(root: Path, *, stage_b: bool) -> None:
+    """The comparison corpus tree: stage A is the baseline's, stage B is
+    what the comparison runs see."""
+    materialize_wire_freeze_corpus(root, post_baseline=stage_b)
+    _write_tree(root, COMPARISON_CORPUS_STAGE_A)
+    if stage_b:
+        _write_tree(root, COMPARISON_CORPUS_STAGE_B)
+
+
+def _published_run(store_path: Path) -> tuple[str, CanonicalModel]:
+    from codeclone.canonical.store import RunStore
+
+    with RunStore(store_path, create=False) as store:
+        (run_id,) = [
+            str(row[0])
+            for row in store._connection.execute(
+                "SELECT run_id FROM runs WHERE published = 1"
+            )
+        ]
+        return run_id, store.read_run(run_id)
+
+
+def _comparison_run(
+    base: Path, name: str, baseline: Path, args: list[str]
+) -> ComparisonRun:
+    root = base / name
+    materialize_comparison_corpus(root, stage_b=True)
+    if name == "partial":
+        (root / "pkg" / "unparsable.py").write_text("def broken(:\n    pass\n", "utf-8")
+    if name == "foreign_scope":
+        pyproject = root / "pyproject.toml"
+        pyproject.write_text(
+            pyproject.read_text("utf-8").replace(
+                "9e6a3f60-1df0-4c1e-9f3a-6f2f4b6a0c11", _COMPARISON_FOREIGN_SCOPE
+            ),
+            "utf-8",
+        )
+    store_path = base / f"{name}.sqlite3"
+    report_path = base / f"{name}.report.json"
+    _run_codeclone_cli(
+        [
+            str(root),
+            "--no-progress",
+            "--baseline",
+            str(baseline if name != "missing" else base / "absent.baseline.json"),
+            "--json",
+            str(report_path),
+            *args,
+        ],
+        {
+            "CODECLONE_RUN_STORE_FORCE": "1",
+            "CODECLONE_RUN_STORE_ENABLED": "1",
+            "CODECLONE_RUN_STORE_PATH": str(store_path),
+        },
+    )
+    run_id, stored = _published_run(store_path)
+    return ComparisonRun(
+        name=name,
+        document=json.loads(report_path.read_text("utf-8")),
+        stored=stored,
+        store_path=store_path,
+        run_id=run_id,
+    )
+
+
+#: Every comparison population, by name, and the CLI arguments it runs with.
+COMPARISON_POPULATIONS: dict[str, tuple[str, ...]] = {
+    "compared": ("--api-surface",),
+    "partial": ("--api-surface",),
+    "api_disabled": (),
+    "lanes_skipped": ("--api-surface", "--skip-dead-code", "--skip-dependencies"),
+    "foreign_scope": ("--api-surface",),
+    "missing": ("--api-surface",),
+}
+
+
+@pytest.fixture(scope="session")
+def comparison_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, ComparisonRun]:
+    """The comparison corpus under all six configurations (see above),
+    each its own tree copy and its own store, one shared stage-A baseline."""
+    base = tmp_path_factory.mktemp("comparison_corpus").resolve()
+    stage_a = base / "stage_a"
+    materialize_comparison_corpus(stage_a, stage_b=False)
+    baseline = base / "corpus.baseline.json"
+    _run_codeclone_cli(
+        [
+            str(stage_a),
+            "--no-progress",
+            "--api-surface",
+            "--baseline",
+            str(baseline),
+            "--update-baseline",
+        ],
+        {},
+    )
+    return {
+        name: _comparison_run(base, name, baseline, list(args))
+        for name, args in COMPARISON_POPULATIONS.items()
+    }
 
 
 @pytest.fixture(autouse=True)

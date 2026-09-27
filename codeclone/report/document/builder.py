@@ -291,6 +291,13 @@ def _baseline_projection(
     }
 
 
+#: The public name of the comparison-section owner, read by the
+#: producer-native comparison snapshot (canonical epoch E2): the store's
+#: witness, lane trust and disabled capabilities are the section this
+#: function writes into the document, taken from it rather than restated.
+baseline_projection = _baseline_projection
+
+
 def finalize_report_document(
     *,
     body: Mapping[str, object],

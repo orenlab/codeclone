@@ -178,6 +178,7 @@ from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
 from ..utils.coerce import as_str as _as_str
 from ._types import AnalysisResult, DiscoveryResult, ProcessingResult
+from .comparison_snapshot import ComparisonInputsFactory, comparison_house
 
 #: The run-wide metrics switch as the report meta spells it.  Both
 #: surfaces write it from the SAME argument (``args.skip_metrics`` in the
@@ -1441,6 +1442,7 @@ def canonical_snapshot_from_producers(
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
     population: AnalysisPopulation,
+    comparison: ComparisonInputsFactory | None = None,
 ) -> CanonicalModel:
     """Build one normalized model straight from the run's producers.
 
@@ -1531,15 +1533,21 @@ def canonical_snapshot_from_producers(
         dead_code_summary=dead_code_summary,
     )
     files = frozenset(FileId(path) for path in analyzed)
+    file_modules = frozenset(
+        FileModuleRelation(FileId(path), ModuleId(module))
+        for path, module in index.path_to_module.items()
+    )
     return CanonicalModel(
         files=files,
         modules=frozenset(ModuleId(name) for name in index.module_to_path),
         analyzed_files=files,
-        file_modules=frozenset(
-            FileModuleRelation(FileId(path), ModuleId(module))
-            for path, module in index.path_to_module.items()
+        file_modules=file_modules,
+        facts=CanonicalFacts(
+            analysis=facts,
+            # Canonical epoch E2: the run's comparison, when the publisher was
+            # handed one; without it the house is honestly unwitnessed.
+            comparison=comparison_house(comparison, facts, file_modules),
         ),
-        facts=CanonicalFacts(analysis=facts),
         coupled_sets=_coupled_sets(payload),
     ).normalize()
 
@@ -1552,6 +1560,7 @@ def publish_run_snapshot(
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
     namespace: str = RUN_SNAPSHOT_NAMESPACE,
+    comparison: ComparisonInputsFactory | None = None,
 ) -> RunSnapshotPublication:
     """Resolve, build and publish — or say, typed, why nothing was stored.
 
@@ -1597,6 +1606,7 @@ def publish_run_snapshot(
                 report_meta=report_meta,
                 namespace=namespace,
                 publish_span=publish_span,
+                comparison=comparison,
             )
         except ProducerSnapshotUnavailable as refusal:
             # Anticipated, and kept apart from the containment below: a
@@ -1634,6 +1644,7 @@ def _publish_enabled(
     report_meta: Mapping[str, object],
     namespace: str,
     publish_span: SpanHandle,
+    comparison: ComparisonInputsFactory | None = None,
 ) -> RunSnapshotPublication:
     """Everything the enabled rollout does, inside the containment.
 
@@ -1654,6 +1665,10 @@ def _publish_enabled(
         analysis=analysis,
         report_meta=report_meta,
         population=population,
+        # Evaluated inside the build, so inside the containment: a
+        # comparison that cannot be spelled is a contained publication
+        # failure, never an analysis failure.
+        comparison=comparison,
     )
     admissible = population_is_admissible(population)
     target = profile_head_target(population)

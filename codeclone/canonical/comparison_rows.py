@@ -56,6 +56,7 @@ comparison house is internal model and store state (ruling 2026-09-26).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Protocol
 
@@ -136,6 +137,28 @@ COMPARED_LANES: Final = (
     "dependencies",
     "risk_observations",
 )
+
+#: The report document's metrics family whose ``summary.baseline_diff_available``
+#: states whether each METRIC lane's comparison ran — the pairing
+#: ``core.reporting._metrics_for_report`` writes (pinned against its source by
+#: test).  The two clone lanes are not here: the document states their
+#: comparison per group, through ``novelty_reason``.
+COMPARISON_LANE_FAMILIES: Final[dict[str, str]] = {
+    "adoption_counts": "coverage_adoption",
+    "api_surface": "api_surface",
+    "coupling_cohesion_observations": "coupling",
+    "dead_code": "dead_code",
+    "dependencies": "dependencies",
+    "risk_observations": "complexity",
+}
+#: The clone lane of each emitted clone kind the baseline compares.
+CLONE_KIND_LANES: Final[dict[str, str]] = {
+    "block": "clones.blocks",
+    "function": "clones.functions",
+}
+#: The ``novelty_reason`` of a clone group whose lane was comparable and not
+#: compared in this run (``report.document._common``).
+NOVELTY_REASON_COMPARISON_UNAVAILABLE: Final = "comparison_unavailable"
 
 #: Per-lane trust as the document publishes it (``baseline.sorted_lane_trust``).
 LANE_TRUSTED: Final = "trusted"
@@ -222,6 +245,18 @@ def comparison_availability_state(*, compared: bool, lane_trusted: bool) -> str:
     if lane_trusted:
         return AVAILABILITY_NOT_COMPARED
     return AVAILABILITY_UNAVAILABLE
+
+
+def baseline_statuses_stated(meta: Mapping[str, object]) -> bool:
+    """Whether a meta block states a status for BOTH baselines — the
+    precondition of a comparison witness, read by the producer-native
+    snapshot and the ingest oracle alike.  A meta that states neither (a
+    caller that handed ``report`` an empty meta) witnessed no comparison."""
+    for key in ("baseline", "metrics_baseline"):
+        block = meta.get(key)
+        if not isinstance(block, Mapping) or not isinstance(block.get("status"), str):
+            return False
+    return True
 
 
 def _require_member(value: object, vocabulary: tuple[str, ...], what: str) -> None:
@@ -540,9 +575,11 @@ __all__ = [
     "BASELINE_STATUS_OK",
     "BASELINE_WITNESS_MISSING",
     "BASELINE_WITNESS_STATES",
+    "CLONE_KIND_LANES",
     "CLONE_NOVELTY_LANES",
     "COMPARED_LANES",
     "COMPARISON_AVAILABILITY_STATES",
+    "COMPARISON_LANE_FAMILIES",
     "COUNT_DELTA_TERMS",
     "DELTA_FAMILY_TERMS",
     "GOVERNED_NOVELTY_REASONS",
@@ -555,6 +592,7 @@ __all__ = [
     "NOVELTY_FAMILY_ID_PREFIXES",
     "NOVELTY_KNOWN",
     "NOVELTY_NEW",
+    "NOVELTY_REASON_COMPARISON_UNAVAILABLE",
     "NOVELTY_UNAVAILABLE",
     "NOVELTY_WORDS",
     "OBSERVATION_LANES",
@@ -566,5 +604,6 @@ __all__ = [
     "MetricDeltaRow",
     "MetricsBaselineWitnessRecord",
     "baseline_identity",
+    "baseline_statuses_stated",
     "comparison_availability_state",
 ]

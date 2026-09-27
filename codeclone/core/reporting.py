@@ -55,6 +55,7 @@ from .canonical_snapshot import (
     release_publication_lease,
     resolve_run_store_config,
 )
+from .comparison_snapshot import ComparisonInputs, ComparisonInputsFactory
 from .metrics_payload import _enrich_metrics_report_payload
 
 MetricGateConfig = _MetricGateConfig
@@ -411,6 +412,84 @@ def build_report_body_for_analysis(
         )
 
 
+def _resolved_baseline_trust(
+    baseline_trust: TrustVector | None,
+    baseline_container: BaselineContainerV3 | None,
+    baseline_scope_id: str | None,
+) -> TrustVector | None:
+    """The trust vector ``report`` reads its comparison under: the caller's,
+    or — for a caller that handed the container alone (the memory-init
+    analysis does) — the one owner's resolution of it.  One spelling for the
+    document and the store, so the two cannot resolve one container twice."""
+    if baseline_trust is not None:
+        return baseline_trust
+    return resolve_report_baseline_trust(
+        baseline_container, baseline_scope_id=baseline_scope_id
+    )
+
+
+def _comparison_inputs_factory(
+    *,
+    analysis: AnalysisResult,
+    report_meta: Mapping[str, object],
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
+    metrics_diff: object | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
+    baseline_container: BaselineContainerV3 | None,
+    baseline_trust: TrustVector | None,
+    baseline_scope_id: str | None,
+) -> ComparisonInputsFactory:
+    """The run's comparison, spelled by the owners the document is built from.
+
+    Canonical epoch E2: the producer-native comparison facts are the SAME
+    readings the document makes — its comparison section, its meta block, its
+    enriched metric families, its novelty facts — so the store and the
+    document cannot hold two answers about one comparison.  Returned as a
+    factory because the publisher evaluates it inside its own containment,
+    and only on the enabled rollout path: a default run computes nothing.
+    """
+
+    def build() -> ComparisonInputs:
+        from ..report.document._common import entity_novelty_facts
+        from ..report.document.builder import baseline_projection
+        from ..report.document.inventory import meta_payload
+
+        trust = _resolved_baseline_trust(
+            baseline_trust, baseline_container, baseline_scope_id
+        )
+        return ComparisonInputs(
+            section=baseline_projection(
+                bundle=analysis.observation_bundle,
+                container=baseline_container,
+                trust=trust,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
+            ),
+            meta=meta_payload(
+                report_meta, scan_root=str(report_meta.get("scan_root", ""))
+            ),
+            metrics=_metrics_for_report(
+                analysis=analysis,
+                metrics_diff=metrics_diff,
+                coverage_adoption_diff_available=coverage_adoption_diff_available,
+                api_surface_diff_available=api_surface_diff_available,
+                baseline_trust=trust,
+            ),
+            trust=trust,
+            new_func=None if new_func is None else frozenset(new_func),
+            new_block=None if new_block is None else frozenset(new_block),
+            entity_novelty_facts=entity_novelty_facts(
+                project_metrics=analysis.project_metrics,
+                metrics_diff=_coerce_metrics_diff(metrics_diff),
+                baseline_trust=trust,
+            ),
+        )
+
+    return build
+
+
 def _publish_canonical_snapshot(
     *,
     boot: BootstrapResult,
@@ -418,6 +497,7 @@ def _publish_canonical_snapshot(
     processing: ProcessingResult,
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
+    comparison: ComparisonInputsFactory | None = None,
 ) -> tuple[RunStoreConfig, RunSnapshotPublication]:
     """Resolve the rollout flag and publish, at the point that publishes.
 
@@ -440,6 +520,7 @@ def _publish_canonical_snapshot(
         processing=processing,
         analysis=analysis,
         report_meta=report_meta,
+        comparison=comparison,
     )
 
 
@@ -489,19 +570,26 @@ def report(
         processing=processing,
         analysis=analysis,
         report_meta=report_meta,
+        comparison=_comparison_inputs_factory(
+            analysis=analysis,
+            report_meta=report_meta,
+            new_func=new_func,
+            new_block=new_block,
+            metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
+            baseline_container=baseline_container,
+            baseline_trust=baseline_trust,
+            baseline_scope_id=baseline_scope_id,
+        ),
     )
     needs_report_document = report_document_required(
         boot,
         include_report_document=include_report_document,
     )
     if needs_report_document:
-        resolved_baseline_trust = (
-            baseline_trust
-            if baseline_trust is not None
-            else resolve_report_baseline_trust(
-                baseline_container,
-                baseline_scope_id=baseline_scope_id,
-            )
+        resolved_baseline_trust = _resolved_baseline_trust(
+            baseline_trust, baseline_container, baseline_scope_id
         )
         resolved_body = (
             dict(report_body)
