@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -67,4 +69,59 @@ def test_cli_help_snapshot(argv: tuple[str, ...], snapshot: str) -> None:
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert result.stdout.replace("\r\n", "\n") == load_text_snapshot(snapshot)
+    read = _help_reading(argv)
+    actual = result.stdout.replace("\r\n", "\n")
+    assert read(actual) == read(load_text_snapshot(snapshot))
+
+
+def _help_reading(argv: tuple[str, ...]) -> Callable[[str], object]:
+    """How a screen is compared on this interpreter: byte for byte, or by table.
+
+    argparse before 3.12 lays a subcommand table out two columns narrower
+    (the rows' extra indent was left out of the help column) and therefore
+    wraps long descriptions at other words, so the goldens -- produced on
+    3.12+ -- differ from these interpreters' output only in whitespace and
+    line breaks inside that table. The contract these screens hold is the
+    table itself: which commands exist and what each says. On 3.10 and 3.11
+    that is what is compared; every other line still has to match. The root
+    screen has no such table and is byte-exact everywhere.
+    """
+
+    if sys.version_info >= (3, 12) or not argv:
+        return str
+    return _subcommand_table
+
+
+_TABLE_ROW = re.compile(r"^( {2}| {4})(\S.*?)(?: {2,}(\S.*))?$")
+_CONTINUATION = re.compile(r"^ {6,}(\S.*)$")
+
+
+def _subcommand_table(text: str) -> tuple[dict[str, str], tuple[str, ...]]:
+    """``({entry: help joined by single spaces}, every other line)``.
+
+    An entry is a subcommand row (four spaces) or an option row (two spaces):
+    the name, then two or more spaces and its help -- or the name alone when
+    argparse could not fit the help beside it, as 3.10 and 3.11 do for a long
+    command name -- and the lines indented deeper right after it continue
+    that help. Entries must exist for a screen that lists subcommands, so an
+    empty table is a failure of this parser, never a pass.
+    """
+
+    rows: dict[str, str] = {}
+    rest: list[str] = []
+    current: str | None = None
+    for line in text.split("\n"):
+        row = _TABLE_ROW.match(line)
+        if row is not None:
+            current = f"{row.group(1)}{row.group(2)}"
+            rows[current] = row.group(3) or ""
+            continue
+        if current is not None:
+            continuation = _CONTINUATION.match(line)
+            if continuation is not None:
+                rows[current] = f"{rows[current]} {continuation.group(1)}".strip()
+                continue
+        current = None
+        rest.append(line.rstrip())
+    assert rows, "no table rows parsed: the table comparison saw nothing"
+    return rows, tuple(rest)
