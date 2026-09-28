@@ -72,6 +72,17 @@ def _artifacts_the_manifest_does_not_own(
     return on_disk - named, named - on_disk
 
 
+def _unnamed_layers(refusal: StoreCompatibilityError) -> list[str]:
+    """The diverging layers whose own words -- the layer with BOTH
+    revisions -- the refusal's message leaves out; ``[]`` when it names
+    every one.  The layers themselves are pinned on ``refusal.diverging``."""
+    words = [
+        f"{layer} stored '{stored}' declared '{declared}'"
+        for layer, stored, declared in refusal.diverging
+    ]
+    return [line for line in words if line not in str(refusal)]
+
+
 def _refused_copy(
     fixtures: Path, tmp_path: Path
 ) -> tuple[Path, dict[str, object], StoreCompatibilityError]:
@@ -168,12 +179,12 @@ def test_a_generation_one_store_is_refused_at_open_with_its_migration_path(
     assert refusal.diverging == (
         ("canonical_model", "1", "3"),
         ("canonical_wire", "0", "2"),
+        ("storage_schema", "1", "2"),
     )
     assert refusal.path == str(store)
     assert refusal.next_step == STORE_GENERATION_NEXT_STEP
+    assert _unnamed_layers(refusal) == []
     message = str(refusal)
-    assert "canonical_model stored '1' declared '3'" in message
-    assert "canonical_wire stored '0' declared '2'" in message
     assert "(law 7)" in message and STORE_GENERATION_NEXT_STEP in message
     with sqlite3.connect(store) as connection:
         assert dict(connection.execute("SELECT layer, revision FROM witness")) == {
@@ -294,11 +305,11 @@ def test_a_generation_two_store_is_refused_at_open_by_its_witness(
     assert refusal.diverging == (
         ("canonical_model", "2", "3"),
         ("canonical_wire", "1", "2"),
+        ("storage_schema", "1", "2"),
     )
     assert refusal.next_step == STORE_GENERATION_NEXT_STEP
-    message = str(refusal)
-    assert "canonical_model stored '2' declared '3'" in message
-    assert "canonical_wire stored '1' declared '2'" in message
+    # The container moved in this generation too, and the refusal says so.
+    assert _unnamed_layers(refusal) == []
     with pytest.raises(StoreCompatibilityError) as migrated:
         migrate_store_schema(store)
     assert migrated.value.diverging == refusal.diverging

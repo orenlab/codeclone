@@ -38,6 +38,7 @@ import pytest
 
 from codeclone.canonical import RunStore, StoreIntegrityError
 from codeclone.canonical import store as store_module
+from codeclone.contracts import STORAGE_SCHEMA_REVISION
 from tests.test_canonical_roundtrip import fixture_model
 
 _NS: Final = "container"
@@ -54,6 +55,54 @@ def _published(path: Path) -> tuple[str, dict[str, int]]:
 
 def _columns(connection: sqlite3.Connection, table: str) -> list[str]:
     return [str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")]
+
+
+#: The store the build before this container wrote (its provenance records
+#: the revisions it declared): the one real file of the previous container.
+_PREVIOUS_CONTAINER: Final = (
+    Path(__file__).parent / "fixtures" / "run_store_generation_2" / "runs.sqlite3"
+)
+
+
+def _schema_and_storage_revision(
+    path: Path,
+) -> tuple[frozenset[tuple[str, str, str]], str]:
+    """Every declared schema object with its DDL, and the storage revision
+    the file's witness states -- read off one connection to ``path``."""
+    with closing(sqlite3.connect(path)) as raw:
+        schema = frozenset(
+            (str(kind), str(name), str(sql))
+            for kind, name, sql in raw.execute(
+                "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL"
+            )
+        )
+        (revision,) = raw.execute(
+            "SELECT revision FROM witness WHERE layer = 'storage_schema'"
+        ).fetchone()
+    return schema, str(revision)
+
+
+def test_the_container_moved_so_the_storage_revision_moved(tmp_path: Path) -> None:
+    """The rule the revision exists for, re-derived from two real files: a
+    store whose DDL differs from this build's declares another storage
+    revision.  The previous container's file (read from a copy -- a
+    connection to a WAL file leaves side files beside it) and a store this
+    build creates are compared schema object by schema object; they differ
+    -- the positive control that the container really moved -- so their
+    storage revisions must differ too, and the new store states this
+    build's revision."""
+    previous = tmp_path / "previous.sqlite3"
+    previous.write_bytes(_PREVIOUS_CONTAINER.read_bytes())
+    current = tmp_path / "current.sqlite3"
+    _published(current)
+    old_schema, old_revision = _schema_and_storage_revision(previous)
+    new_schema, new_revision = _schema_and_storage_revision(current)
+    assert old_schema != new_schema
+    assert ("table", "families") in {(kind, name) for kind, name, _ in new_schema}
+    assert new_revision == STORAGE_SCHEMA_REVISION
+    assert old_revision != STORAGE_SCHEMA_REVISION, (
+        f"the container moved and the storage revision stayed {old_revision!r}"
+    )
 
 
 def test_an_object_id_is_stored_as_the_32_bytes_of_its_digest(

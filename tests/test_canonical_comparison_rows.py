@@ -613,7 +613,10 @@ def test_each_comparison_family_is_read_back_under_its_own_name(
 def test_the_comparison_families_take_no_ddl(tmp_path: Path) -> None:
     """Rows in ``objects(object_id, family, payload)`` under the storage
     revision the tree already has: no table, no index names a family."""
-    assert STORAGE_SCHEMA_REVISION == "1"
+    # "2" is the E4 container (32-byte ids, family table and index; see
+    # ``test_the_container_moved_so_the_storage_revision_moved``), not
+    # these families: they still add no table and no index of their own.
+    assert STORAGE_SCHEMA_REVISION == "2"
     path = tmp_path / "runs.sqlite3"
     with RunStore(path) as store:
         _publish(store, comparison_fixture_model())

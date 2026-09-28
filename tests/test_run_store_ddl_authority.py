@@ -462,6 +462,7 @@ def test_the_verb_refuses_a_generation_one_store_with_its_migration_path(
     assert caught.value.diverging == (
         ("canonical_model", "1", "3"),
         ("canonical_wire", "0", "2"),
+        ("storage_schema", "1", "2"),
     )
     assert ("index", INDEX) not in _objects(path)
 

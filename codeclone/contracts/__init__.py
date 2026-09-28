@@ -152,7 +152,16 @@ CANONICAL_WIRE_REVISION: Final = "2"
 # receipt, membership digest and run id. That was not true through revision
 # "1", which was spelled into the separators and reset all four; files of that
 # generation do not declare the identity witness layer and are refused at open.
-STORAGE_SCHEMA_REVISION: Final = "1"
+#
+# "2" (the E4 boundary, beside CANONICAL_MODEL_REVISION "3") is the container
+# the store-schema audit measured: ``objects.object_id`` as the 32 bytes of
+# the digest, a ``families`` lookup table with ``objects.family_pk``, and the
+# ``idx_objects_family`` index. The DDL moved, so this revision moved with it:
+# a revision-1 file is refused at open naming ``storage_schema`` among its
+# diverging layers, and by the migration verb alike. No content address, scope
+# receipt, membership digest or run id moves: they are computed from hex
+# digests and family names, never from the storage representation.
+STORAGE_SCHEMA_REVISION: Final = "2"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"

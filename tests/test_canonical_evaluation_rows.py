@@ -739,7 +739,10 @@ def test_a_withheld_verdict_is_neither_absent_nor_scored_in_the_store(
 
 
 def test_the_evaluation_families_take_no_ddl(tmp_path: Path) -> None:
-    assert STORAGE_SCHEMA_REVISION == "1"
+    # "2" is the E4 container (32-byte ids, family table and index; see
+    # ``test_the_container_moved_so_the_storage_revision_moved``), not
+    # these families: they still add no table and no index of their own.
+    assert STORAGE_SCHEMA_REVISION == "2"
     path = tmp_path / "runs.sqlite3"
     with RunStore(path) as store:
         _publish(store, evaluated_fixture_model())
