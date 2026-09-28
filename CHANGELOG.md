@@ -83,6 +83,10 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Report generation peak memory −24% (JSON), further −14% (multi-artifact); documents built only on demand.
 - Engineering Memory staleness checks batch subject lookups.
 
+### Dependencies
+
+- Locked dependencies refreshed (`uv.lock`, hashes kept); extras floors raised to `mcp>=1.30.0`, `lancedb>=0.39.0`, `fastembed>=0.8.1`, dev tools to `ckdn>=1.3.4`, `ruff>=0.16.9`, `ty>=0.0.84`.
+
 ## [2.1.0a1] - 2026-07-09
 
 CodeClone 2.1 introduces intent-first structural change control, persistent engineering context, agent workflow
