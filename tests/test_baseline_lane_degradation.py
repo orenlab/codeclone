@@ -29,6 +29,7 @@ none, which is why every test here stayed green while that answer was wrong.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -63,6 +64,7 @@ from codeclone.models import (
     ObservationLaneName,
     ProjectMetrics,
 )
+from codeclone.observations.contracts import lane_payload_schema
 from codeclone.report.gates.evaluator import HEALTH_INPUT_LANES
 
 _SCOPE_ID = "3f2b8c1e-7a41-4d90-9c62-5b0e8a7d4f13"
@@ -126,6 +128,30 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         cwd=_REPO_ROOT,
         check=False,
     )
+
+
+def outdated_lane_sentence(lane_name: ObservationLaneName, stored: str) -> str:
+    """The one plain sentence every surface says for a lane recorded under an
+    older payload schema (ruling 2026-09-28): the lane, both schema numbers
+    and the one command.  Spelled here, independently of the product's own
+    template; only the declared number is read from its sole owner."""
+    return (
+        f"Baseline not trusted: its {lane_name.replace('_', '-')} facts were "
+        f"recorded with lane schema {stored}, this version records schema "
+        f"{lane_payload_schema(lane_name)}. Run `codeclone . --update-baseline` "
+        "once to record the baseline again."
+    )
+
+
+def _present(stdout: str, *words: str) -> tuple[str, ...]:
+    """The words, of those named, that the output carries."""
+    return tuple(word for word in words if word in stdout)
+
+
+def _said(stdout: str) -> str:
+    """The console text with every run of whitespace folded to one space: a
+    rich console hangs a long line under its column, a plain one does not."""
+    return " ".join(stdout.split())
 
 
 def _rewrite_container(
@@ -281,9 +307,10 @@ def test_case_a_untrusted_lane_no_active_gate_needs_completes(
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    # The opaque lane is named, once, rather than silently dropped.
-    assert "Baseline lanes opaque for this run" in result.stdout
-    assert result.stdout.count("api_surface:payload_schema_outdated") == 1
+    # The opaque lane is named, once, in one plain sentence (ruling
+    # 2026-09-28) rather than silently dropped or spelled as a reason code.
+    assert _said(result.stdout).count(outdated_lane_sentence("api_surface", "2")) == 1
+    assert "payload_schema_outdated" not in result.stdout
 
     # Novelty for the opaque lane is nulled honestly; every other lane keeps
     # its baseline comparison. One stale lane must not blind the rest.
@@ -310,12 +337,82 @@ def test_case_b_untrusted_lane_an_active_gate_needs_stays_fail_closed(
     )
     assert result.returncode == 2, result.stdout + result.stderr
 
-    # Degrading is not ignoring: the established wording is preserved exactly.
+    # Degrading is not ignoring: the refusal says why in one plain sentence
+    # (ruling 2026-09-28), and never the degraded path's words.
+    assert _said(result.stdout).count(outdated_lane_sentence("api_surface", "2")) == 1
     assert (
-        "Baseline lane compatibility failed: api_surface:payload_schema_outdated"
-        in result.stdout
+        _present(
+            result.stdout,
+            "payload_schema_outdated",
+            "Baseline lanes opaque for this run",
+        )
+        == ()
     )
-    assert "Baseline lanes opaque for this run" not in result.stdout
+
+
+def test_without_a_container_every_lane_keeps_its_own_words() -> None:
+    """No container, no recorded schema to name: an outdated lane is not
+    given a sentence with a number nobody read -- it keeps its reason."""
+
+    from codeclone.baseline import outdated_lane_sentences
+    from codeclone.models import LaneTrust
+
+    lane = LaneTrust(
+        name="dead_code", status="unavailable", reason="payload_schema_outdated"
+    )
+    assert outdated_lane_sentences(None, (lane,)) == ((), (lane,))
+
+
+def test_ci_on_an_outdated_dead_code_lane_says_one_plain_sentence(
+    tmp_path: Path,
+) -> None:
+    """The pre-commit path, ``codeclone . --ci``, on a baseline whose
+    dead-code lane was recorded under an older schema: the refusal stays
+    typed (exit 2, a trusted baseline is required), the baseline file is
+    left byte for byte as it was, and the reason is ONE plain sentence on
+    one line -- the lane, both schema numbers, the one command -- never a
+    reason code (ruling 2026-09-28)."""
+
+    root = _write_repo(tmp_path)
+    # The repository's own gate set: a dead-code gate reads the lane, so the
+    # refusal is decided where the baseline is loaded -- the hook's path.
+    with (root / "pyproject.toml").open("a", encoding="utf-8") as config:
+        config.write("fail_dead_code = true\n")
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    published = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--update-baseline",
+        "--no-progress",
+    )
+    assert published.returncode == 0, published.stdout + published.stderr
+    stored = str(int(lane_payload_schema("dead_code")) - 1)
+    downgrade_lane_payload_schema(
+        baseline_path, lane_name="dead_code", payload_schema=stored
+    )
+    before = baseline_path.read_bytes()
+
+    result = _run_cli(
+        str(root), "--baseline", str(baseline_path), "--ci", "--no-progress"
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    sentence = outdated_lane_sentence("dead_code", stored)
+    # On ONE line, verbatim: the hook reads this output as it is printed.
+    lines = [line for line in result.stdout.splitlines() if sentence in line]
+    assert len(lines) == 1, result.stdout
+    assert "CI requires a trusted baseline" in result.stdout
+    # The command the sentence names is the one the CLI's own refusal hands
+    # over -- two layers, two spellings, held equal on one output.
+    (handed_over,) = (
+        line.split("Create it: ", 1)[1]
+        for line in result.stdout.splitlines()
+        if "Create it: " in line
+    )
+    assert f"Run `{handed_over}` once" in sentence
+    assert "payload_schema_outdated" not in result.stdout
+    assert baseline_path.read_bytes() == before
 
 
 def test_verify_compatibility_still_condemns_any_untrusted_lane(
@@ -334,7 +431,9 @@ def test_verify_compatibility_still_condemns_any_untrusted_lane(
     baseline = Baseline(degraded_baseline)
     baseline.load(max_size_bytes=_LIMIT_BYTES)
 
-    with pytest.raises(BaselineValidationError, match="api_surface"):
+    # Typed as it always was; worded as the one plain sentence, whole.
+    sentence = outdated_lane_sentence("api_surface", "2")
+    with pytest.raises(BaselineValidationError, match=f"^{re.escape(sentence)}$"):
         baseline.verify_compatibility(
             current_python_tag=current_python_tag(),
             baseline_scope_id=UUID(_SCOPE_ID),
@@ -1310,8 +1409,9 @@ def assert_pre_migration_lane_is_a_typed_absence(
         "--no-progress",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Baseline lanes opaque for this run" in result.stdout
-    assert result.stdout.count(f"{lane_name}:payload_schema_outdated") == 1
+    said = _said(result.stdout)
+    assert said.count(outdated_lane_sentence(lane_name, stored_schema)) == 1
+    assert "payload_schema_outdated" not in result.stdout
 
     document: Mapping[str, Any] = json.loads(report_path.read_text("utf-8"))
     summary = document["metrics"]["summary"]

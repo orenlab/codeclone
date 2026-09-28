@@ -20518,11 +20518,11 @@ def test_mcp_never_calls_a_clone_known_without_a_comparison(
     # The summary's clone track read null while the document said "known" -- one
     # payload, two answers. Both now report the comparison that actually ran.
     assert _mapping_child(summary, "diff")["new_clones"] == 1
-    # The opacity is still named rather than swallowed (`RP2`).
+    # The opacity is still named rather than swallowed (`RP2`), in the one
+    # plain sentence every surface says for it (ruling 2026-09-28).
     warnings = cast("list[str]", summary["warnings"])
-    assert any("api_surface:payload_schema_outdated" in item for item in warnings), (
-        warnings
-    )
+    sentence = lane_degradation.outdated_lane_sentence("api_surface", "2")
+    assert warnings == [sentence], warnings
 
 
 def test_mcp_clone_absent_from_an_intact_baseline_is_new(

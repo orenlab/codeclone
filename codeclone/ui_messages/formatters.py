@@ -349,6 +349,16 @@ def fmt_baseline_foreign_interpreter(*, baseline_tag: str, runtime_tag: str) -> 
     )
 
 
+def fmt_baseline_lane_outdated(sentence: str) -> str:
+    """One lane recorded under an older schema, said as the one plain sentence
+    the baseline layer words (ruling 2026-09-28): glyph and sentence on one
+    line, nothing split into a detail column, so the words read the same here
+    as in MCP ``warnings[]``."""
+
+    style = STYLE_VERDICT_WARN
+    return f"{_INDENT}[{style}]{GLYPH_WARN} {esc(sentence)}[/{style}]"
+
+
 def fmt_baseline_lanes_opaque(lanes: Iterable[object]) -> str:
     """Name the opaque lanes deterministically, with their trust reasons."""
 

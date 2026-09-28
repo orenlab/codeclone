@@ -19,6 +19,7 @@ from ...baseline import (
     coerce_baseline_status,
     coerce_metrics_baseline_status,
     current_python_tag,
+    outdated_lane_sentences,
 )
 from ...contracts import ExitCode
 from ...contracts.errors import BaselineValidationError
@@ -110,6 +111,7 @@ def resolve_clone_baseline_state(
             warning_message=str(exc),
         )
 
+    outdated, still_opaque = outdated_lane_sentences(baseline.container, opaque_lanes)
     return CloneBaselineState(
         baseline=baseline,
         loaded=True,
@@ -117,8 +119,20 @@ def resolve_clone_baseline_state(
         failure_code=None,
         trusted_for_diff=True,
         updated_path=None,
-        warning_message=lane_opacity_warning(opaque_lanes) if opaque_lanes else None,
+        warning_message=_joined_warning(
+            *outdated,
+            lane_opacity_warning(still_opaque) if still_opaque else None,
+        ),
     )
+
+
+def _joined_warning(*lines: str | None) -> str | None:
+    """What the answer's ``warnings`` say about lanes the run degrades: one
+    plain sentence per lane recorded under an older schema (ruling
+    2026-09-28), then the opacity line for every other reason; nothing when
+    every lane is trusted."""
+
+    return "\n".join(line for line in lines if line) or None
 
 
 def resolve_metrics_baseline_state(

@@ -26,6 +26,7 @@ from .container_trust import (
     map_container_read_failure,
     unavailable_container_lanes,
     unavailable_lanes_after_version_checks,
+    untrusted_lanes_message,
 )
 from .diff import diff_clone_groups
 from .trust import MAX_BASELINE_SIZE_BYTES, BaselineStatus
@@ -132,9 +133,12 @@ class Baseline:
                 status = BaselineStatus.MISMATCH_FINGERPRINT_VERSION
             else:
                 status = BaselineStatus.MISMATCH_SCHEMA_VERSION
-            reasons = ", ".join(f"{item.name}:{item.reason}" for item in unavailable)
             raise BaselineValidationError(
-                f"Baseline lane compatibility failed: {reasons}",
+                untrusted_lanes_message(
+                    self.container,
+                    unavailable,
+                    head="Baseline lane compatibility failed",
+                ),
                 status=status,
             )
         if self.schema_version != BASELINE_SCHEMA_VERSION:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hmac
 from collections.abc import Sequence
-from typing import TypeVar
+from typing import Final, TypeVar
 from uuid import UUID
 
 from ..contracts.errors import BaselineValidationError
@@ -24,7 +24,7 @@ from ..models import (
     TrustVector,
 )
 from ..observability import span
-from ..observations.contracts import build_observation_contract
+from ..observations.contracts import build_observation_contract, lane_payload_schema
 from .container_digest import compute_lane_digest, compute_root_digest
 from .lanes import lane_payload_is_opaque
 
@@ -290,11 +290,76 @@ def runtime_contracts_for_container(
     )
 
 
+#: The one sentence every surface says for a lane the baseline recorded under
+#: an older payload schema than this version records (ruling 2026-09-28): the
+#: lane, both schema numbers and the one command that records the baseline
+#: again -- the same words on the CLI (``--ci`` included) and in MCP
+#: ``warnings[]``, on the refusing path and on the degrading one.  Every
+#: other reason a lane is not trusted keeps its own words.
+LANE_SCHEMA_OUTDATED_SENTENCE: Final = (
+    "Baseline not trusted: its {lane} facts were recorded with lane schema "
+    "{stored}, this version records schema {declared}. Run `{command}` once "
+    "to record the baseline again."
+)
+#: The command the sentence names.  The CLI spells the same action as
+#: ``ui_messages.ACTION_UPDATE_BASELINE``; a test holds the two equal, since
+#: this layer may not import the presentation one.
+UPDATE_BASELINE_COMMAND: Final = "codeclone . --update-baseline"
+
+
+def _outdated_lane_sentence(container: BaselineContainerV3, lane: LaneTrust) -> str:
+    return LANE_SCHEMA_OUTDATED_SENTENCE.format(
+        lane=lane.name.replace("_", "-"),
+        stored=container.lanes[lane.name].descriptor.payload_schema,
+        declared=lane_payload_schema(lane.name),
+        command=UPDATE_BASELINE_COMMAND,
+    )
+
+
+def outdated_lane_sentences(
+    container: BaselineContainerV3 | None,
+    unavailable: Sequence[LaneTrust],
+) -> tuple[tuple[str, ...], tuple[LaneTrust, ...]]:
+    """Split untrusted lanes into the plain sentence each OUTDATED lane says
+    and the lanes whose reason keeps its own words.  A missing container has
+    no recorded schema to name, so every lane then keeps its own words."""
+
+    if container is None:
+        return (), tuple(unavailable)
+    sentences = tuple(
+        _outdated_lane_sentence(container, lane)
+        for lane in unavailable
+        if lane.reason == "payload_schema_outdated"
+    )
+    rest = tuple(
+        lane for lane in unavailable if lane.reason != "payload_schema_outdated"
+    )
+    return sentences, rest
+
+
+def untrusted_lanes_message(
+    container: BaselineContainerV3 | None,
+    unavailable: Sequence[LaneTrust],
+    *,
+    head: str,
+) -> str:
+    """The refusal's text: one plain sentence per outdated lane, then the
+    other lanes under ``head`` with their reasons, as they always read."""
+
+    sentences, rest = outdated_lane_sentences(container, unavailable)
+    reasons = ", ".join(f"{lane.name}:{lane.reason}" for lane in rest)
+    return "\n".join((*sentences, *((f"{head}: {reasons}",) if rest else ())))
+
+
 __all__ = [
+    "LANE_SCHEMA_OUTDATED_SENTENCE",
+    "UPDATE_BASELINE_COMMAND",
     "evaluate_container_trust",
     "evaluate_lane_trust",
     "map_container_read_failure",
+    "outdated_lane_sentences",
     "runtime_contracts_for_container",
     "unavailable_container_lanes",
     "unavailable_lanes_after_version_checks",
+    "untrusted_lanes_message",
 ]

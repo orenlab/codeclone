@@ -119,6 +119,11 @@ def _build_catalog() -> dict[str, str]:
         "fmt_baseline_lanes_opaque": ui.fmt_baseline_lanes_opaque(
             ["clones:schema_mismatch"]
         ),
+        "fmt_baseline_lane_outdated": ui.fmt_baseline_lane_outdated(
+            "Baseline not trusted: its dead-code facts were recorded with lane "
+            "schema 3, this version records schema 4. Run "
+            "`codeclone . --update-baseline` once to record the baseline again."
+        ),
         "fmt_baseline_gating_requires_trusted": (
             ui.fmt_baseline_gating_requires_trusted(ci=True)
         ),

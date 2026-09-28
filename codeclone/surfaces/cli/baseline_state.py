@@ -27,6 +27,7 @@ from ...baseline import (
     coerce_baseline_status,
     coerce_metrics_baseline_status,
     current_python_tag,
+    outdated_lane_sentences,
     probe_metrics_baseline_section,
     publish_baseline,
     recover_publish_lock,
@@ -221,6 +222,23 @@ def _clone_opaque_lanes(
     return opaque_lanes
 
 
+def _print_opaque_lanes(
+    baseline: Baseline,
+    opaque_lanes: tuple[LaneTrust, ...],
+    *,
+    console: _PrinterLike,
+) -> None:
+    """Say each degraded lane once: a lane recorded under an older schema in
+    its one plain sentence (ruling 2026-09-28), every other lane in the
+    opacity block with its reason; nothing when every lane is trusted."""
+
+    sentences, rest = outdated_lane_sentences(baseline.container, opaque_lanes)
+    for sentence in sentences:
+        console.print(ui.fmt_baseline_lane_outdated(sentence))
+    if rest:
+        console.print(ui.fmt_baseline_lanes_opaque(rest))
+
+
 class _BaselineArgs(Protocol):
     root: str | Path
     max_baseline_size_mb: int
@@ -323,8 +341,7 @@ def resolve_clone_baseline_state(
                     baseline_loaded = True
                     baseline_status = BaselineStatus.OK
                     baseline_trusted_for_diff = True
-                    if opaque_lanes:
-                        console.print(ui.fmt_baseline_lanes_opaque(opaque_lanes))
+                    _print_opaque_lanes(baseline, opaque_lanes, console=console)
                     _print_foreign_interpreter_note(baseline, console=console)
     # A missing baseline is not announced here: the ``New`` summary row says
     # "not compared (no baseline yet)" and the run outcome hands over the

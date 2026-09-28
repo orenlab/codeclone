@@ -79,6 +79,7 @@ from .container_trust import (
     map_container_read_failure,
     unavailable_container_lanes,
     unavailable_lanes_after_version_checks,
+    untrusted_lanes_message,
 )
 from .diff import diff_metrics
 from .lanes import (
@@ -216,7 +217,6 @@ class MetricsBaseline:
             integrity_status=MetricsBaselineStatus.INTEGRITY_FAILED,
         )
         if unavailable:
-            reasons = ", ".join(f"{item.name}:{item.reason}" for item in unavailable)
             if any(item.reason == "baseline_scope_id" for item in unavailable):
                 status = MetricsBaselineStatus.MISMATCH_SCOPE_ID
             elif all(item.reason in _METRICS_CONTRACT_REASONS for item in unavailable):
@@ -224,7 +224,11 @@ class MetricsBaseline:
             else:
                 status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
             raise BaselineValidationError(
-                f"Metrics baseline lane compatibility failed: {reasons}",
+                untrusted_lanes_message(
+                    self.container,
+                    unavailable,
+                    head="Metrics baseline lane compatibility failed",
+                ),
                 status=status,
             )
         if self.schema_version != BASELINE_SCHEMA_VERSION:

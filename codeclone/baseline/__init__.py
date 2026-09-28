@@ -13,7 +13,7 @@ from .container_digest import (
     compute_root_digest,
     container_document,
 )
-from .container_trust import evaluate_lane_trust
+from .container_trust import evaluate_lane_trust, outdated_lane_sentences
 from .metrics_baseline import (
     MetricsBaseline,
     MetricsBaselineSectionProbe,
@@ -55,6 +55,7 @@ __all__ = [
     "container_document",
     "current_python_tag",
     "evaluate_lane_trust",
+    "outdated_lane_sentences",
     "probe_metrics_baseline_section",
     "publish_baseline",
     "read_container_v3",
