@@ -5192,6 +5192,45 @@ def test_mcp_service_list_findings_detail_levels_slim_and_full_payloads(
     )
 
 
+def test_mcp_finding_priority_names_one_value_at_every_detail_level(
+    tmp_path: Path,
+) -> None:
+    """One name, one meaning: ``priority`` is the report's own priority of the
+    finding on every card, and ``priority_score`` the surface's composite
+    rank of it -- rounded to two places on the compact cards.  Until
+    2026-09-28 a compact card answered the rank under ``priority``, so the
+    same field held two numbers depending on the detail level asked for."""
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+    cards = {
+        level: {
+            str(item["canonical_id"]): item
+            for item in cast(
+                "list[dict[str, object]]",
+                service.list_findings(run_id=run_id, detail_level=level, limit=200)[
+                    "items"
+                ],
+            )
+        }
+        for level in ("summary", "normal", "full")
+    }
+    full = cards["full"]
+    # The population tells the two numbers apart on every finding.
+    assert full
+    assert all(
+        item["priority"] != round(cast(float, item["priority_score"]), 2)
+        for item in full.values()
+    )
+    for level in ("summary", "normal"):
+        assert sorted(cards[level]) == sorted(full)
+        for canonical_id, item in cards[level].items():
+            whole = full[canonical_id]
+            assert item["priority"] == whole["priority"]
+            assert item["priority_score"] == round(
+                cast(float, whole["priority_score"]), 2
+            )
+
+
 def test_mcp_service_list_findings_decorates_only_requested_page(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

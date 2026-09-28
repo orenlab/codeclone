@@ -1383,6 +1383,20 @@ def _run_comparison_answers(
     }
 
 
+def _authority_answers(service: object, root: Path) -> dict[str, dict[str, object]]:
+    """The authority check of the session's run at every detail level, so the
+    one meaning of ``priority`` and ``priority_score`` is held on each."""
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    assert isinstance(service, CodeCloneMCPService)
+    return {
+        f"check_authority_{level}": service.check_authority(
+            root=str(root), max_results=100, detail_level=level
+        )
+        for level in ("full", "normal", "summary")
+    }
+
+
 @pytest.fixture(scope="session")
 def served_run_comparison(
     tmp_path_factory: pytest.TempPathFactory,
@@ -1402,11 +1416,7 @@ def served_run_comparison(
         service = CodeCloneMCPService(history_limit=4)
         service.analyze_repository(request)
         before = service._runs.resolve_any_root()
-        answers = {
-            "check_authority_full": service.check_authority(
-                root=str(root), max_results=100, detail_level="full"
-            )
-        }
+        answers = _authority_answers(service, root)
         for relative in SERVED_RUN_COMPARISON_REMOVED:
             (root / relative).unlink()
         _write_tree(root, SERVED_RUN_COMPARISON_ADDED)

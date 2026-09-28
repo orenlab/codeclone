@@ -39,7 +39,8 @@ the `analyze_repository` response itself — no second call for the health quest
 |------------------------------|---------------------------------------------------------------------------|
 | `kind`                       | which ranking was requested — an ordering, not a severity filter          |
 | `total` vs `returned`        | how many rank under that kind; how many this call carried back            |
-| item `severity` / `priority` | impact class; composite rank within this run                              |
+| item `severity` / `priority` | impact class; the report's own priority of the finding                    |
+| item `priority_score`        | composite rank within this run (what `highest_priority` orders by)        |
 | item `scope`                 | production vs tests vs fixtures                                           |
 | item `spread`                | how widely the finding is distributed                                     |
 | item `novelty`               | baseline-relative — `unavailable` when nothing compared it; see below     |

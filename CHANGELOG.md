@@ -48,6 +48,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - `api_surface` keeps "the signature changed" apart from "it breaks a caller": `change_kind` `signature_changed` (optional parameter appended to the positional block, optional keyword-only parameter, new `*args`/`**kwargs`) fills `summary.changed` and `signature_change` rows; `summary.breaking`, `api_breaking_changes` and `--fail-on-api-break` count `removed`/`signature_break` only; CLI prints `breaking=N changed=M`, MCP `get_run_summary` diff adds `api_signature_changes`.
 - Report schema `3.6` (`REPORT_SCHEMA_VERSION`) for `signature_changed`/`signature_change`/`summary.changed`; stored `3.5` reports are refused like earlier ones, re-run the analysis.
 - API surface: signature verdicts follow caller compatibility — an appended optional positional-only parameter, a keyword-only parameter made positional-or-keyword (no `*args` before it) and a renamed `*args`/`**kwargs` are now `signature_changed`; an optional positional parameter placed before an existing `*args` is now `signature_break`.
+- MCP finding cards: `priority` means the report's own priority at every `detail_level` (summary and normal answered the surface's composite rank under that name, full the report's value); the composite rank is `priority_score` on every card, rounded to two places on summary/normal. Clients showing the compact `priority` now show the report's value.
 
 ### Removed
 

@@ -45,7 +45,8 @@ Structural / clone / changed-scope / gate review. Read-only; never mutates state
 | `findings.new`/`known`                    | baseline-relative novelty — NOT patch-local proof (use change-control verify) |
 | `new_by_source_kind`                      | new split prod / tests / fixtures (the gate counts production)                |
 | `evaluate_gates.would_fail` + `reasons[]` | gate verdict + cause tokens (`clone:new`, `metric:…`)                        |
-| finding `severity` vs `priority`          | severity = impact class; priority = ranked action order                       |
+| finding `severity` vs `priority`          | severity = impact class; priority = the report's own priority                 |
+| finding `priority_score`                  | ranked action order within this run (`sort_by="priority"`)                    |
 | finding `source_kind`                     | production / tests / fixtures — filter test noise                             |
 | `novelty="known"`                         | in baseline, NOT "safe" — a patch may reintroduce it                          |
 

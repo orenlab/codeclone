@@ -611,30 +611,85 @@ def test_the_patch_verification_health_is_each_runs_stored_score(
     ]
 
 
-def test_the_authority_items_carry_the_stored_verdicts(
-    served_run_comparison: ServedEvaluationRun,
-) -> None:
-    """C8v.09: the severity, confidence and priority ``check_authority``
-    states on each item at full detail are the stored verdict on that
-    finding.  The projection module projects the severity; the confidence
-    and the priority are read off the stored row itself, because no
-    projection of them exists yet.  ``priority_score`` / ``priority_factors``
-    are the surface's own weights and are not stored."""
-    served = served_run_comparison
-    model = _read(served.store_path, served.store_run_ids[0])
-    items = [
+def _authority_items(
+    served: ServedEvaluationRun, detail_level: str
+) -> list[Mapping[str, object]]:
+    return [
         as_mapping(item)
         for item in as_sequence(
-            as_mapping(served.answers["check_authority_full"])["items"]
+            as_mapping(served.answers[f"check_authority_{detail_level}"])["items"]
         )
     ]
+
+
+#: The verdict fields each detail level states: the confidence rides the full
+#: card only; the severity and the priority ride every card.
+_AUTHORITY_VERDICT_FIELDS: dict[str, tuple[str, ...]] = {
+    "full": ("severity", "confidence", "priority"),
+    "normal": ("severity", "priority"),
+    "summary": ("severity", "priority"),
+}
+
+
+def _stored_verdicts(
+    model: CanonicalModel, finding_ids: list[str]
+) -> list[Mapping[str, object]]:
+    """The stored verdict on each finding, in the order asked for."""
     severities = finding_severities(model.facts.evaluation)
     verdicts = {
         row.finding_id: row for row in model.facts.evaluation.finding_evaluation
     }
-    stored = [verdicts[str(item["canonical_id"])] for item in items]
-    assert _canonical(
-        [[item["severity"], item["confidence"], item["priority"]] for item in items]
-    ) == _canonical(
-        [[severities[row.finding_id], row.confidence, row.priority] for row in stored]
-    )
+    return [
+        {
+            "severity": severities[finding_id],
+            "confidence": verdicts[finding_id].confidence,
+            "priority": verdicts[finding_id].priority,
+        }
+        for finding_id in finding_ids
+    ]
+
+
+def _rows(
+    records: list[Mapping[str, object]], fields: tuple[str, ...]
+) -> list[list[object]]:
+    return [[record[name] for name in fields] for record in records]
+
+
+@pytest.mark.parametrize("detail_level", ["full", "normal", "summary"])
+def test_the_authority_items_carry_the_stored_verdicts(
+    served_run_comparison: ServedEvaluationRun, detail_level: str
+) -> None:
+    """C8v.09: the severity, confidence and priority ``check_authority``
+    states on each item are the stored verdict on that finding -- the
+    priority at EVERY detail level, because one name carries one meaning
+    (the confidence rides the full card only).  The projection module
+    projects the severity; the confidence and the priority are read off the
+    stored row itself, because no projection of them exists yet.
+    ``priority_score`` / ``priority_factors`` are the surface's own weights
+    and are not stored."""
+    served = served_run_comparison
+    model = _read(served.store_path, served.store_run_ids[0])
+    items = _authority_items(served, detail_level)
+    fields = _AUTHORITY_VERDICT_FIELDS[detail_level]
+    stored = _stored_verdicts(model, [str(item["canonical_id"]) for item in items])
+    assert _canonical(_rows(items, fields)) == _canonical(_rows(stored, fields))
+
+
+@pytest.mark.parametrize("detail_level", ["normal", "summary"])
+def test_the_authority_priority_score_is_one_rank_at_every_detail_level(
+    served_run_comparison: ServedEvaluationRun, detail_level: str
+) -> None:
+    """The surface's composite rank rides every card as ``priority_score``:
+    on a compact card it is the full card's score, rounded to two places.
+    The population tells the two numbers apart (the report's ``1.0`` against
+    a rank below it), so neither can stand in for the other unseen."""
+    served = served_run_comparison
+    full = {
+        str(item["canonical_id"]): item for item in _authority_items(served, "full")
+    }
+    items = _authority_items(served, detail_level)
+    assert sorted(str(item["canonical_id"]) for item in items) == sorted(full)
+    for item in items:
+        whole = full[str(item["canonical_id"])]
+        assert whole["priority"] != round(float(str(whole["priority_score"])), 2)
+        assert item["priority_score"] == round(float(str(whole["priority_score"])), 2)

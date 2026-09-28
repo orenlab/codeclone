@@ -618,7 +618,13 @@ class _MCPSessionFindingMixin:
             "scope": _helpers._finding_source_kind(finding),
             "count": _as_int(finding.get("count", 0), 0),
             "spread": dict(_helpers._as_mapping(finding.get("spread"))),
-            "priority": round(_as_float(finding.get("priority_score", 0.0), 0.0), 2),
+            # One name, one meaning at every detail level: ``priority`` is the
+            # report's own priority of the finding (the full card's value),
+            # ``priority_score`` this surface's composite rank of it.
+            "priority": _as_float(finding.get("priority", 0.0), 0.0),
+            "priority_score": round(
+                _as_float(finding.get("priority_score", 0.0), 0.0), 2
+            ),
         }
         clone_type = str(finding.get("clone_type", "")).strip()
         if clone_type:
