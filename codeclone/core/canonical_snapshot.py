@@ -1659,14 +1659,16 @@ def publish_run_snapshot(
             # how the last hole was left open, and the next producer, store
             # or grammar error has to land here without anyone editing this
             # clause.  Contained is not silent — the outcome carries the
-            # failure's own type and the edge counts the case — because
-            # swapping a crash for an unobservable missing backend would be
-            # the worse trade.
+            # failure's own type, the edge counts the case, and every
+            # surface says one line naming that type (ruling 2026-09-28) —
+            # because swapping a crash for an unobservable missing backend
+            # would be the worse trade.
             publish_span.set_counter("run_snapshot_publish_failed", 1)
             return RunSnapshotPublication(
                 outcome=RUN_SNAPSHOT_PUBLICATION_FAILED,
                 admissible=False,
                 reason=f"{type(failure).__name__}: {failure}",
+                failure_type=type(failure).__name__,
             )
 
 
@@ -1967,7 +1969,9 @@ def bridge_run_snapshot(
             # Nothing stored and nothing evaluated: there is no relation to
             # state, and the outcome still says which road got here.
             return RunSnapshotLink(
-                state=RUN_SNAPSHOT_LINK_UNEVALUATED, outcome=publication.outcome
+                state=RUN_SNAPSHOT_LINK_UNEVALUATED,
+                outcome=publication.outcome,
+                failure=publication.failure_type,
             )
         # The report half, whole: the identity AND the receipt this document
         # re-derives.  A process holding only this half -- every process but
@@ -1980,6 +1984,7 @@ def bridge_run_snapshot(
             outcome=publication.outcome,
             analysis_scope_digest=report_scope_receipt(report_document),
             report_run_identity=identity,
+            failure=publication.failure_type,
         )
     if report_document is None:
         return RunSnapshotLink(

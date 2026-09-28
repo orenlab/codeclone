@@ -2014,6 +2014,35 @@ def _require_refusal_iff_unrecorded(state: str, refusal: str) -> None:
         )
 
 
+#: The one line a surface prints for a publication the producer edge
+#: contained (ruling 2026-09-28): the analysis and its reports are complete,
+#: the recording of them is not, and the words name the failure's own type.
+#: Every surface the same words, exactly like the unrecorded line.
+RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING: Final = (
+    "analysis complete, publication failed ({failure})"
+)
+
+
+def _require_failure_iff_failed(outcome: str, failure_type: str) -> None:
+    """The failure's type rides the ``failed`` outcome and no other."""
+    if (outcome == RUN_SNAPSHOT_PUBLICATION_FAILED) != bool(failure_type):
+        raise ValueError(
+            "a failed publication carries the failure's own type, and no "
+            "other outcome carries one"
+        )
+
+
+def _run_snapshot_link_warning_lines(refusal: str, failure: str) -> tuple[str, ...]:
+    """The one line a link asks a surface to say, or none.  The two carriers
+    exclude each other by construction -- a refusal rides a STORED relation,
+    a failure an unstored one -- so no link has two lines."""
+    if refusal:
+        return (RUN_SNAPSHOT_LINK_UNRECORDED_WARNING.format(refusal=refusal),)
+    if failure:
+        return (RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING.format(failure=failure),)
+    return ()
+
+
 #: Outcome of asking a store which analysis backs one report document.
 #: ``unlinked`` is a measured state -- no published run of this store answers
 #: this document -- and is not the same as any refusal: a refusal means the
@@ -2114,6 +2143,12 @@ class RunSnapshotPublication:
     #: any sweep between the commit and the bridge takes the very run the
     #: bridge is about to address.  Empty when no lease was granted.
     in_flight_lease: str = ""
+    #: The contained failure's own type name, on the ``failed`` outcome only
+    #: -- what every surface names in its one warning line (ruling
+    #: 2026-09-28).  Carried beside ``reason`` rather than read back out of
+    #: it: a surface that parsed a message would be recomputing a fact the
+    #: producer edge already held.
+    failure_type: str = ""
 
     def __post_init__(self) -> None:
         if self.outcome not in RUN_SNAPSHOT_PUBLICATION_OUTCOMES:
@@ -2146,6 +2181,7 @@ class RunSnapshotPublication:
                 "a refusal and a contained failure each carry their reason, "
                 "and no other outcome carries one"
             )
+        _require_failure_iff_failed(self.outcome, self.failure_type)
         if self.admissible and self.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD:
             raise ValueError(
                 "head_withheld is the inadmissible-profile outcome; an "
@@ -2203,6 +2239,11 @@ class RunSnapshotLink:
     #: contained failure of the rollout: ``"<Type>: <message>"``.  Present
     #: on the ``unrecorded`` state and on no other.
     refusal: str = ""
+    #: The type of the contained failure that ended the publication, carried
+    #: over from the publication witness: present on the ``failed`` outcome
+    #: and on no other (ruling 2026-09-28).  A contained failure that no
+    #: surface named was the silence the containment promised not to be.
+    failure: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in RUN_SNAPSHOT_LINK_STATES:
@@ -2212,6 +2253,7 @@ class RunSnapshotLink:
         if self.state in RUN_SNAPSHOT_LINK_STATED and not (stored and evaluated):
             raise ValueError(f"a {self.state} bridge carries both addresses")
         _require_refusal_iff_unrecorded(self.state, self.refusal)
+        _require_failure_iff_failed(self.outcome, self.failure)
         if self.state == RUN_SNAPSHOT_LINK_UNPUBLISHED and stored:
             raise ValueError("an unpublished bridge carries no store address")
         if self.state == RUN_SNAPSHOT_LINK_UNEVALUATED and evaluated:
@@ -2224,10 +2266,9 @@ class RunSnapshotLink:
 
     def warnings(self) -> tuple[str, ...]:
         """What a surface says about this relation: the unrecorded state's
-        one line, naming the refusal, and nothing for every other state."""
-        if not self.refusal:
-            return ()
-        return (RUN_SNAPSHOT_LINK_UNRECORDED_WARNING.format(refusal=self.refusal),)
+        one line, naming the refusal; a failed publication's one line,
+        naming the failure's type; and nothing for every other state."""
+        return _run_snapshot_link_warning_lines(self.refusal, self.failure)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
