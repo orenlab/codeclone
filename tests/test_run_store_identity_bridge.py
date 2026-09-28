@@ -497,7 +497,8 @@ def test_the_gate_request_is_a_member_of_the_store_record(
     tmp_path: Path, rollout: Callable[[Path | None], None]
 ) -> None:
     """The measured cardinality, end to end — a DECLARED transition of
-    canonical epoch E3, on the desk before the store bump.
+    canonical epoch E3, decided at the store bump (D-10, 2026-09-28): the
+    request is a member of the store run, not a key beside it.
 
     Until E3 two runs over one tree that differed ONLY in the gate request
     shared a store record — the store's id covered the analysis, and a

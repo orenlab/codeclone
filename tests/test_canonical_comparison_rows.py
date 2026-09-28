@@ -557,6 +557,28 @@ def test_two_novelties_of_one_finding_are_refused() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_the_comparison_is_a_member_of_the_store_run(tmp_path: Path) -> None:
+    """Decision D-10 (2026-09-28), the comparison half: the rows of the
+    comparison house are MEMBERS of the store run, never a key beside it.
+    One analysis, published once unwitnessed and once compared against a
+    container, is two store runs over ONE scope receipt."""
+    compared = comparison_fixture_model()
+    with RunStore(tmp_path / "runs.sqlite3") as store:
+        unwitnessed = store.write_full_run(
+            fixture_model(), namespace="e2", target="a", expected_generation=0
+        )
+        witnessed = store.write_full_run(
+            compared, namespace="e2", target="b", expected_generation=0
+        )
+    assert (
+        compared.normalize().facts.analysis
+        == fixture_model().normalize().facts.analysis
+    )
+    assert witnessed.analysis_scope_digest == unwitnessed.analysis_scope_digest
+    assert witnessed.run_id != unwitnessed.run_id
+    assert witnessed.object_count > unwitnessed.object_count
+
+
 def test_each_comparison_family_is_read_back_under_its_own_name(
     tmp_path: Path,
 ) -> None:

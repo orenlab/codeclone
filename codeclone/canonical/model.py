@@ -1335,6 +1335,11 @@ class ComparisonFacts:
     whole exactly when their comparison ran.  The rest are keyed row sets.
     The laws that bind them to one another are proved on every normalization
     (:func:`_prove_comparison_facts`).
+
+    Every row of this house is a MEMBER of the store run (decision D-10,
+    2026-09-28): the store run id is the digest of what the run states, and a
+    comparison is stated against one container, so one analysis compared
+    against two baselines is two store runs over one scope receipt.
     """
 
     baseline_witness: BaselineWitnessRecord | None = None
@@ -1380,6 +1385,13 @@ class EvaluationFacts:
     absence; ``health_result`` is absent exactly when the metrics never ran);
     the rest are keyed row sets.  The laws binding them are proved on every
     normalization (:func:`_prove_evaluation_facts`).
+
+    Every row of this house is a MEMBER of the store run, the gate request
+    included (decision D-10, 2026-09-28: the request is a member of the run,
+    not a key beside it): a run's evaluation is what it concluded under ITS
+    request, so one analysis gated under two requests is two store runs over
+    one scope receipt and two report identities
+    (``tests/test_run_store_identity_bridge.py`` holds the transition).
     """
 
     evaluation_contract: EvaluationContractRecord | None = None

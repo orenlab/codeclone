@@ -4174,7 +4174,9 @@ class RunReportEdge:
     the store.  The edge asserts nothing a third party cannot check.
     """
 
-    #: Store domain — the analysis state this edge addresses.
+    #: Store domain — the stored run this edge addresses: its analysis, and
+    #: the comparison and evaluation it was published with, the gate request
+    #: included (decision D-10, 2026-09-28).
     run_id: str
     #: Report domain — the evaluated identity that answered it.
     report_run_identity: str
