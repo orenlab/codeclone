@@ -448,17 +448,19 @@ def _comparison_inputs_factory(
     coverage_adoption_diff_available: bool,
     api_surface_diff_available: bool,
     baseline_container: BaselineContainerV3 | None,
-    baseline_trust: TrustVector | None,
-    baseline_scope_id: str | None,
+    trust: Callable[[], TrustVector | None],
 ) -> ComparisonInputsFactory:
     """The run's comparison, spelled by the owners the document is built from.
 
     Canonical epoch E2: the producer-native comparison facts are the SAME
     readings the document makes — its comparison section, its meta block, its
     enriched metric families, its novelty facts — so the store and the
-    document cannot hold two answers about one comparison.  Returned as a
-    factory because the publisher evaluates it inside its own containment,
-    and only on the enabled rollout path: a default run computes nothing.
+    document cannot hold two answers about one comparison.  The trust vector
+    is the one ``report`` shares through :func:`_once`, never a resolution of
+    its own: the document is sealed under that vector, and the comparison is
+    read under the same one.  Returned as a factory because the publisher
+    evaluates it inside its own containment, and only on the enabled rollout
+    path: a default run computes nothing.
     """
 
     def build() -> ComparisonInputs:
@@ -466,14 +468,12 @@ def _comparison_inputs_factory(
         from ..report.document.builder import baseline_projection
         from ..report.document.inventory import meta_payload
 
-        trust = _resolved_baseline_trust(
-            baseline_trust, baseline_container, baseline_scope_id
-        )
+        shared_trust = trust()
         return ComparisonInputs(
             section=baseline_projection(
                 bundle=analysis.observation_bundle,
                 container=baseline_container,
-                trust=trust,
+                trust=shared_trust,
                 new_function_group_keys=new_func,
                 new_block_group_keys=new_block,
             ),
@@ -485,15 +485,15 @@ def _comparison_inputs_factory(
                 metrics_diff=metrics_diff,
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
-                baseline_trust=trust,
+                baseline_trust=shared_trust,
             ),
-            trust=trust,
+            trust=shared_trust,
             new_func=None if new_func is None else frozenset(new_func),
             new_block=None if new_block is None else frozenset(new_block),
             entity_novelty_facts=entity_novelty_facts(
                 project_metrics=analysis.project_metrics,
                 metrics_diff=_coerce_metrics_diff(metrics_diff),
-                baseline_trust=trust,
+                baseline_trust=shared_trust,
             ),
         )
 
@@ -760,8 +760,7 @@ def report(
             coverage_adoption_diff_available=coverage_adoption_diff_available,
             api_surface_diff_available=api_surface_diff_available,
             baseline_container=baseline_container,
-            baseline_trust=baseline_trust,
-            baseline_scope_id=baseline_scope_id,
+            trust=trust,
         ),
         evaluation=_evaluation_inputs_factory(
             analysis=analysis, body=body, gate=gate_pair

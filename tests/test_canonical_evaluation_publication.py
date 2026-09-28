@@ -21,7 +21,9 @@ the document's selections — and none of that may be silence.
 The producer edge reads that evaluation off the SAME body, gate result and
 trust vector the document is sealed from: ``core.reporting.report`` builds
 each of them at most once, through ``_once``, and only when a reader needs
-it.  Those three properties are pinned last, on the real pipeline.
+it — the comparison inputs included, which read the one trust vector rather
+than resolving their own.  Those properties are pinned last, on the real
+pipeline.
 """
 
 from __future__ import annotations
@@ -128,10 +130,17 @@ def _counted(
 
 def _count_builds(monkeypatch: pytest.MonkeyPatch) -> Counter[str]:
     """Count every build ``report`` shares through ``_once`` — the body, the
-    gate pair, the trust vector — and every build of the comparison inputs,
-    which resolves a trust vector of its own."""
+    gate pair, the trust vector — every call of the trust owner behind that
+    vector, and every build of the comparison inputs.  The owner is counted
+    beside the vector so that a comparison which resolved its trust through
+    the owner directly is seen as well as one which went through the vector."""
     counts: Counter[str] = Counter()
-    for name in ("_report_body", "_report_gate", "_resolved_baseline_trust"):
+    for name in (
+        "_report_body",
+        "_report_gate",
+        "_resolved_baseline_trust",
+        "resolve_report_baseline_trust",
+    ):
         monkeypatch.setattr(
             reporting, name, _counted(counts, name, getattr(reporting, name))
         )
@@ -153,10 +162,11 @@ def _rollout(monkeypatch: pytest.MonkeyPatch, store: Path | None) -> None:
 def test_the_store_and_the_document_share_one_build_of_each_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both readers are live — the store published the run's evaluation,
-    the document was sealed — and each shared input was built once.  The
-    trust vector is resolved once more by the comparison inputs, which do
-    not read it through ``_once`` (measured 2026-09-28)."""
+    """Both readers are live — the store published the run's evaluation and
+    its comparison, the document was sealed — and each shared input was
+    built once.  The trust vector is resolved exactly once: the comparison
+    inputs read the vector the document is sealed with instead of resolving
+    their own (until 2026-09-28 they did, and the count was two)."""
     store = tmp_path / "runs.sqlite3"
     _rollout(monkeypatch, store)
     counts = _count_builds(monkeypatch)
@@ -171,7 +181,8 @@ def test_the_store_and_the_document_share_one_build_of_each_input(
     assert counts == {
         "_report_body": 1,
         "_report_gate": 1,
-        "_resolved_baseline_trust": 1 + counts["comparison"],
+        "_resolved_baseline_trust": 1,
+        "resolve_report_baseline_trust": 1,
         "comparison": 1,
     }
 

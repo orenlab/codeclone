@@ -76,6 +76,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Run store: a cold and a warm analysis of one tree now publish one store run (`run_scalar` stores the parsed-plus-cached sum `files_observed`, not the cache split), so a warm repeat no longer adds a second report link that made the identity bridge report its index as corrupt.
 - Tests: a queued `start_controlled_change` and the atomic `manage_change_intent(action="declare")` are pinned on `edit_allowed` in every conflict outcome; the scope guard of the same-run-id verify branch, the intent digest's coverage of `scope`, and the equal-to-threshold boundary of `--fail-health`, `--fail-complexity`, `--fail-cohesion` and `--min-typing-coverage` are held in both directions.
 - Tests: the suite no longer writes `.codeclone/report.html` into the checkout it runs from, and the live-state residue gate names files added, rewritten or removed inside the host's `.codeclone/`.
+- Run store: a published run resolves its baseline trust once; the stored comparison reads the trust vector the report is sealed with instead of resolving it a second time (report, wire and store bytes unchanged).
 
 ### Performance
 
