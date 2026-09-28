@@ -49,7 +49,8 @@ owner, and it rebuilds the published row whole.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import cast
+from types import MappingProxyType
+from typing import Final, cast
 
 from codeclone.canonical.analysis_rows import (
     OVERLOADED_MODULE_COUNTERS as _OVERLOADED_COUNTERS,
@@ -122,6 +123,7 @@ from codeclone.canonical.semantic_grammar import (
     parse_symbol_set,
     surface_head,
 )
+from codeclone.contracts.report_identity import PRODUCER_STATE_DISABLED
 
 
 def _mapping(value: object, where: str) -> Mapping[str, object]:
@@ -237,6 +239,75 @@ def _string_tuple(values: object, where: str) -> tuple[str, ...]:
     return tuple(_root_string(item, where) for item in _sequence(values, where))
 
 
+#: The two producers whose section a document may legitimately carry as
+#: absent, named as the document's own population declares them
+#: (``contracts.report_identity.REPORT_SEMANTIC_PRODUCERS``).
+_AUTHORITY_PRODUCER: Final = "authority"
+_DEAD_CODE_PRODUCER: Final = "dead_code"
+
+#: The authority section of a run whose lane never ran: the six families the
+#: producer stores for it (``core.canonical_snapshot._EMPTY_SEMANTIC``), read
+#: through the same readers as a section that is present.
+_NEVER_RUN_AUTHORITY_SECTION: Final[Mapping[str, object]] = MappingProxyType(
+    {
+        "contract_ir": MappingProxyType({"contracts": ()}),
+        "graph": MappingProxyType({"nodes": (), "edges": ()}),
+        "sinks": (),
+        "candidates": (),
+        "violations": (),
+    }
+)
+
+#: The dead-code summary counters, in the record's field order.
+_DEAD_CODE_SUMMARY_COUNTERS: Final = (
+    "suppressed",
+    "unresolved",
+    "unresolved_internal",
+    "unresolved_external_override",
+    "candidates",
+    "nested_candidates",
+    "live_roots",
+)
+
+
+def _declared_producer_state(
+    document: Mapping[str, object], producer: str
+) -> str | None:
+    """The execution state the document itself declares for one producer
+    (``integrity.semantic.population.producers``), or ``None`` when it
+    declares none.
+
+    The declaration is the only witness that tells a section its producer
+    never wrote from a section that went missing, so nothing stands in for
+    it: a document that does not declare reads as ``None``, and an absence
+    beside ``None`` stays the refusal it always was.
+    """
+    current: object = document
+    for key in ("integrity", "semantic", "population", "producers", producer):
+        if not isinstance(current, Mapping):
+            return None
+        current = cast("Mapping[str, object]", current).get(key)
+    return current if isinstance(current, str) else None
+
+
+def _authority_section(
+    document: Mapping[str, object], source_facts: Mapping[str, object]
+) -> Mapping[str, object]:
+    """``source_facts.semantic`` in its three states: present with rows,
+    present and empty, or null beside a document that declares the authority
+    lane ``disabled`` -- the lane never ran, and its families are empty the
+    way the store holds them.  A null the document does not declare so is
+    refused."""
+    value = _field(source_facts, "semantic", "source_facts")
+    if (
+        value is None
+        and _declared_producer_state(document, _AUTHORITY_PRODUCER)
+        == PRODUCER_STATE_DISABLED
+    ):
+        return _NEVER_RUN_AUTHORITY_SECTION
+    return _mapping(value, "source_facts.semantic")
+
+
 def canonical_model_from_legacy_document(
     document: Mapping[str, object],
 ) -> CanonicalModel:
@@ -245,9 +316,7 @@ def canonical_model_from_legacy_document(
     source_facts = _mapping(
         _field(document, "source_facts", "document"), "source_facts"
     )
-    semantic = _mapping(
-        _field(source_facts, "semantic", "source_facts"), "source_facts.semantic"
-    )
+    semantic = _authority_section(document, source_facts)
     metrics = _mapping(_field(document, "metrics", "document"), "metrics")
     families = _mapping(_field(metrics, "families", "metrics"), "metrics.families")
 
@@ -403,7 +472,9 @@ def canonical_model_from_legacy_document(
     )
     overloaded_modules = _overloaded_module_family(families, index)
     coverage_join, coverage_units = _coverage_join_family(families, index)
-    dead_code_summary = _dead_code_summary(families)
+    dead_code_summary = _dead_code_summary(
+        families, _declared_producer_state(document, _DEAD_CODE_PRODUCER)
+    )
 
     coupling_rows = _sequence(
         _field(
@@ -1163,7 +1234,9 @@ def _coverage_join_family(
     return record, units
 
 
-def _dead_code_summary(families: Mapping[str, object]) -> DeadCodeSummaryRecord:
+def _dead_code_summary(
+    families: Mapping[str, object], declared_state: str | None
+) -> DeadCodeSummaryRecord | None:
     """A7: the dead-code lane's counters, read from the summary the gate
     and every surface read — never re-measured from the lists beside it."""
     container = _mapping(
@@ -1171,17 +1244,37 @@ def _dead_code_summary(families: Mapping[str, object]) -> DeadCodeSummaryRecord:
     )
     where = "metrics.families.dead_code.summary"
     summary = _mapping(_field(container, "summary", "dead_code"), where)
+    return _dead_code_summary_record(summary, where, declared_state)
+
+
+def _dead_code_summary_record(
+    summary: Mapping[str, object], where: str, declared_state: str | None
+) -> DeadCodeSummaryRecord | None:
+    """The summary as the record, or absent -- as the store holds it -- when
+    the document declares the producer ``disabled`` AND the summary is the
+    one a producer that never ran writes: no world contract, nothing
+    counted.  Any other summary is read into the record, whose own law
+    refuses a missing world contract."""
+    counters = {
+        name: _lane_int(summary, name, where) for name in _DEAD_CODE_SUMMARY_COUNTERS
+    }
+    world_contract = _string(summary, "world_contract", where)
+    never_ran = (declared_state, world_contract, any(counters.values())) == (
+        PRODUCER_STATE_DISABLED,
+        "",
+        False,
+    )
+    if never_ran:
+        return None
     return DeadCodeSummaryRecord(
-        suppressed=_lane_int(summary, "suppressed", where),
-        unresolved=_lane_int(summary, "unresolved", where),
-        unresolved_internal=_lane_int(summary, "unresolved_internal", where),
-        unresolved_external_override=_lane_int(
-            summary, "unresolved_external_override", where
-        ),
-        candidates=_lane_int(summary, "candidates", where),
-        nested_candidates=_lane_int(summary, "nested_candidates", where),
-        live_roots=_lane_int(summary, "live_roots", where),
-        world_contract=_string(summary, "world_contract", where),
+        suppressed=counters["suppressed"],
+        unresolved=counters["unresolved"],
+        unresolved_internal=counters["unresolved_internal"],
+        unresolved_external_override=counters["unresolved_external_override"],
+        candidates=counters["candidates"],
+        nested_candidates=counters["nested_candidates"],
+        live_roots=counters["live_roots"],
+        world_contract=world_contract,
     )
 
 

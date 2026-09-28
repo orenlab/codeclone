@@ -25,7 +25,9 @@ Four properties are pinned that no green publish proves on its own:
 from __future__ import annotations
 
 import ast
+import copy
 import json
+import re
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -34,7 +36,11 @@ from typing import cast
 
 import pytest
 
-from codeclone.canonical.errors import SemanticGrammarError
+from codeclone.canonical.errors import (
+    CanonicalModelError,
+    LegacyIngestError,
+    SemanticGrammarError,
+)
 from codeclone.canonical.identity import (
     PRODUCER_EXECUTION_STATES,
     EffectRoot,
@@ -97,7 +103,7 @@ from codeclone.models import (
 )
 from codeclone.paths.module_identity.inventory import build_module_registry
 from codeclone.paths.workspace import REL_RUN_STORE_DB_PATH
-from tests.conftest import RunStoreCorpusRunner
+from tests.conftest import EvaluationRun, RunStoreCorpusRunner
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -1696,3 +1702,224 @@ def test_native_overloaded_scores_are_stored_at_the_published_precision(
         row.score,
     ) == (0.3333, 0.6667, 0.1235, 0.0, 1.0, 0.5, 0.9877)
     assert row.candidate_reasons == ("size_pressure",)
+
+
+# ---------------------------------------------------------------------------
+# A section the document declares its producer never wrote (2026-09-28).
+#
+# The whole-document oracle refused every document whose semantic-authority
+# lane did not run -- ``source_facts.semantic`` is null there: measured on an
+# empty scope, an all-unparsable scope, a clones-only run and a plain metrics
+# run without the lane -- and every clones-only document, whose dead-code
+# summary states no world contract.  The store holds each of those runs.  A
+# section is read in one of three states: present with rows, present and
+# empty, or absent because the document itself declares its producer
+# ``disabled`` (``integrity.semantic.population.producers``).  An absence the
+# document does not declare stays a refusal.
+# ---------------------------------------------------------------------------
+
+#: Every declared-absence population, by name: (the files of its tree beside
+#: an empty ``pkg/``, whether the semantic-authority lane is on, the CLI
+#: arguments).  ``complete_empty_authority`` is the present-and-empty state
+#: of the authority section, which was never refused.
+_DECLARED_ABSENCE_POPULATIONS: dict[
+    str, tuple[dict[str, str], bool, tuple[str, ...]]
+] = {
+    "complete_empty": ({}, False, ("--no-skip-metrics",)),
+    "complete_empty_authority": ({}, True, ("--no-skip-metrics",)),
+    "unmeasured": (
+        {"pkg/unparsable.py": "def broken(:\n    pass\n"},
+        False,
+        ("--no-skip-metrics",),
+    ),
+    "metrics_without_authority": (
+        _CORPUS,
+        False,
+        ("--no-skip-metrics", "--min-loc", "3", "--min-stmt", "2"),
+    ),
+    "clones_only": (
+        _CORPUS,
+        False,
+        ("--skip-metrics", "--min-loc", "3", "--min-stmt", "2"),
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def declared_absence_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, tuple[dict[str, object], CanonicalModel]]:
+    """Each declared-absence population through the real CLI, the document
+    it rendered and the run it published, from one execution."""
+    from tests.conftest import _published_run, _run_codeclone_cli
+
+    base = tmp_path_factory.mktemp("declared_absence").resolve()
+    runs: dict[str, tuple[dict[str, object], CanonicalModel]] = {}
+    for name, (files, authority, args) in _DECLARED_ABSENCE_POPULATIONS.items():
+        root = base / name
+        (root / "pkg").mkdir(parents=True)
+        for relative, source in files.items():
+            (root / relative).write_text(source, "utf-8")
+        if authority:
+            (root / "pyproject.toml").write_text(
+                "[tool.codeclone]\nsemantic_authority = true\n", "utf-8"
+            )
+        store = base / f"{name}.sqlite3"
+        report = base / f"{name}.report.json"
+        _run_codeclone_cli(
+            [str(root), "--no-progress", "--json", str(report), *args],
+            {
+                ENV_RUN_STORE_FORCE: "1",
+                ENV_RUN_STORE_ENABLED: "1",
+                ENV_RUN_STORE_PATH: str(store),
+            },
+        )
+        _run_id, stored = _published_run(store)
+        runs[name] = (json.loads(report.read_text("utf-8")), stored)
+    return runs
+
+
+#: The refusal of an authority section that is neither present nor declared
+#: never written.
+_SEMANTIC_REFUSAL = re.escape("source_facts.semantic is not an object")
+
+
+def _declared(document: dict[str, object]) -> dict[str, object]:
+    integrity = cast("dict[str, dict[str, dict[str, object]]]", document["integrity"])
+    population = integrity["semantic"]["population"]
+    return cast("dict[str, object]", population["producers"])
+
+
+def _semantic_section(document: dict[str, object]) -> object:
+    return cast("dict[str, object]", document["source_facts"])["semantic"]
+
+
+def _dead_code_summary_section(document: dict[str, object]) -> dict[str, object]:
+    metrics = cast("dict[str, dict[str, dict[str, object]]]", document["metrics"])
+    return cast("dict[str, object]", metrics["families"]["dead_code"]["summary"])
+
+
+def _document_borne(model: CanonicalModel) -> CanonicalModel:
+    """The model less the three analysis families no document carries: the
+    execution population, which the producer pronounces in states a rendered
+    document cannot witness (see the equivalence test above), and the import
+    and relationship observations, which the oracle has no reader for."""
+    analysis = replace(
+        model.facts.analysis,
+        analysis_population=None,
+        import_observations=frozenset(),
+        relationship_observations=frozenset(),
+    )
+    return replace(model, facts=replace(model.facts, analysis=analysis))
+
+
+def test_each_declared_absence_population_carries_the_state_it_is_named_for(
+    declared_absence_runs: dict[str, tuple[dict[str, object], CanonicalModel]],
+    evaluation_runs: dict[str, EvaluationRun],
+) -> None:
+    """The accounting before the pins below (Probe Validity Law): every
+    state of both sections is present, each absence beside its declaration,
+    and the populations that carry an absence also carry rows elsewhere.
+    Each absence also occurs alone: the authority section in the three
+    populations whose dead-code producer completed, the dead-code summary in
+    the E3 clones-only document, whose authority lane is declared complete
+    with a present, empty section."""
+    states = {
+        name: (
+            _declared(document)["authority"],
+            None if _semantic_section(document) is None else "object",
+            _declared(document)["dead_code"],
+            _dead_code_summary_section(document)["world_contract"],
+            bool(_dead_code_summary_section(document)["candidates"]),
+        )
+        for name, (document, _stored) in {
+            **declared_absence_runs,
+            "e3_clones_only": (
+                evaluation_runs["clones_only"].document,
+                evaluation_runs["clones_only"].stored,
+            ),
+        }.items()
+    }
+    assert states == {
+        "complete_empty": ("disabled", None, "complete", "open", False),
+        "complete_empty_authority": ("complete", "object", "complete", "open", False),
+        "unmeasured": ("disabled", None, "complete", "open", False),
+        "metrics_without_authority": ("disabled", None, "complete", "open", True),
+        "clones_only": ("disabled", None, "disabled", "", False),
+        "e3_clones_only": ("complete", "object", "disabled", "", False),
+    }
+    corpus = declared_absence_runs["metrics_without_authority"][1].facts.analysis
+    assert corpus.clone_groups and corpus.dead_code_observations
+    clones = declared_absence_runs["clones_only"][1].facts.analysis
+    assert clones.clone_groups and clones.dead_code_summary is None
+    e3 = evaluation_runs["clones_only"].stored.facts.analysis
+    assert e3.clone_groups and e3.dead_code_summary is None
+
+
+@pytest.mark.parametrize("population", sorted(_DECLARED_ABSENCE_POPULATIONS))
+def test_a_declared_absence_is_read_the_way_the_store_holds_the_run(
+    declared_absence_runs: dict[str, tuple[dict[str, object], CanonicalModel]],
+    population: str,
+) -> None:
+    document, stored = declared_absence_runs[population]
+    oracle = canonical_model_from_legacy_document(document)
+    assert _document_borne(oracle) == _document_borne(stored)
+    oracle_population = oracle.facts.analysis.analysis_population
+    stored_population = stored.facts.analysis.analysis_population
+    assert oracle_population is not None and stored_population is not None
+    assert oracle_population.analysis_mode == stored_population.analysis_mode
+
+
+def test_the_e3_clones_only_document_is_read_the_way_the_store_holds_the_run(
+    evaluation_runs: dict[str, EvaluationRun],
+) -> None:
+    """The E3 clones-only population: the authority lane ran, the dead-code
+    producer did not -- the one absence alone."""
+    run = evaluation_runs["clones_only"]
+    oracle = canonical_model_from_legacy_document(run.document)
+    assert _document_borne(oracle) == _document_borne(run.stored)
+
+
+def test_a_cut_authority_section_whose_producer_completed_is_refused(
+    evaluation_runs: dict[str, EvaluationRun],
+) -> None:
+    """The control of the authority section: a non-empty population whose
+    document declares the lane ``complete`` and carries no section."""
+    document = copy.deepcopy(evaluation_runs["clones_only"].document)
+    cast("dict[str, object]", document["source_facts"])["semantic"] = None
+    with pytest.raises(LegacyIngestError, match=_SEMANTIC_REFUSAL):
+        canonical_model_from_legacy_document(document)
+
+
+def test_an_absent_authority_section_without_a_declaration_is_refused(
+    declared_absence_runs: dict[str, tuple[dict[str, object], CanonicalModel]],
+) -> None:
+    """The same absence the reader accepts once declared, with the
+    declaration taken away: silence is not a declaration."""
+    document = copy.deepcopy(declared_absence_runs["metrics_without_authority"][0])
+    del _declared(document)["authority"]
+    with pytest.raises(LegacyIngestError, match=_SEMANTIC_REFUSAL):
+        canonical_model_from_legacy_document(document)
+
+
+def test_a_summary_without_a_world_contract_is_refused_unless_declared_disabled(
+    evaluation_runs: dict[str, EvaluationRun],
+) -> None:
+    """The control of the dead-code summary: the clones-only summary, with
+    its producer declared ``complete``.  Drawn on the E3 document, whose
+    authority section is present, so only the dead-code reader can refuse."""
+    document = copy.deepcopy(evaluation_runs["clones_only"].document)
+    _declared(document)["dead_code"] = "complete"
+    with pytest.raises(CanonicalModelError, match="unknown world contract"):
+        canonical_model_from_legacy_document(document)
+
+
+def test_a_disabled_dead_code_summary_that_counts_is_refused(
+    evaluation_runs: dict[str, EvaluationRun],
+) -> None:
+    """A producer that never ran counts nothing: the clones-only summary
+    with one counter raised is a document at war with its declaration."""
+    document = copy.deepcopy(evaluation_runs["clones_only"].document)
+    _dead_code_summary_section(document)["candidates"] = 3
+    with pytest.raises(CanonicalModelError, match="unknown world contract"):
+        canonical_model_from_legacy_document(document)

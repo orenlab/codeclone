@@ -77,6 +77,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Tests: a queued `start_controlled_change` and the atomic `manage_change_intent(action="declare")` are pinned on `edit_allowed` in every conflict outcome; the scope guard of the same-run-id verify branch, the intent digest's coverage of `scope`, and the equal-to-threshold boundary of `--fail-health`, `--fail-complexity`, `--fail-cohesion` and `--min-typing-coverage` are held in both directions.
 - Tests: the suite no longer writes `.codeclone/report.html` into the checkout it runs from, and the live-state residue gate names files added, rewritten or removed inside the host's `.codeclone/`.
 - Run store: a published run resolves its baseline trust once; the stored comparison reads the trust vector the report is sealed with instead of resolving it a second time (report, wire and store bytes unchanged).
+- Run store: the report-document reader accepts a section the document declares its producer never ran (`integrity.semantic.population.producers`): `source_facts.semantic` null with the authority lane `disabled`, and the clones-only dead-code summary; such reports (every run without the authority lane, empty and unparsable scopes, clones-only) now read equal to the stored run, and an undeclared absence is still refused.
 
 ### Performance
 
