@@ -460,8 +460,8 @@ def test_the_verb_refuses_a_generation_one_store_with_its_migration_path(
         store_module.migrate_store_schema(path)
     assert type(caught.value) is StoreCompatibilityError
     assert caught.value.diverging == (
-        ("canonical_model", "1", "2"),
-        ("canonical_wire", "0", "1"),
+        ("canonical_model", "1", "3"),
+        ("canonical_wire", "0", "2"),
     )
     assert ("index", INDEX) not in _objects(path)
 

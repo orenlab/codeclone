@@ -235,9 +235,13 @@ _TARGET = "worktree-a"
 # each naming every family of its house even when empty, so the artifact
 # digest moved (ce9413ba… → 990f2011…) while the run id did not -- the wire is
 # a projection, and the container change of the same generation moved no
-# content address either.
-_FIXTURE_RUN_ID = "65f9a17086657049628577c719c1887e511b14704bbad01805f03d5a57195475"
-_FIXTURE_ARTIFACT = "990f2011b4639d7b6aa0502576da2df6b2852d40cca90dbbea1138605e09e7f3"
+# content address either.  The constant bump that closed the boundary then
+# moved both (reason: generation bump): ``canonical_model`` "3" is an analysis
+# witness layer of the run-id preimage and the namespace of the families it
+# owns (65f9a170… → 5841ce9e…), and wire "2" is in the artifact domain and the
+# document bytes (990f2011… → 604fb3e5…).
+_FIXTURE_RUN_ID = "5841ce9efac9db2224a4bf1a4a90adfc0fc55591988cabd178efb33ef4628a13"
+_FIXTURE_ARTIFACT = "604fb3e551c7439da84e654c97035ba5dc062cf985044e57681be091be9de6ad"
 # The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
 _RETIRED_LIVENESS_GENERATION = "4"
@@ -363,7 +367,7 @@ def test_known_answer_run_and_artifact_identity(tmp_path: Path) -> None:
     # inside the artifact preimage and nowhere inside the run identity.
     assert (
         envelope.artifact_digest
-        == hashlib.sha256(b"cc-canonical-artifact:1\x00" + data).hexdigest()
+        == hashlib.sha256(b"cc-canonical-artifact:2\x00" + data).hexdigest()
     )
     assert envelope.artifact_digest != envelope.run_id
 

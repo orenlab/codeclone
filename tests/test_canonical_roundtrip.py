@@ -1436,13 +1436,16 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     deliberately (10458 bytes, sha256 d33cfae6… → 11925 bytes, sha256
     f37dc2c0…): the wire gained the ``comparison`` and ``evaluation`` root
     members, and the unwitnessed fixture carries both with every family
-    named and empty.  The two pins beside this one flipped with it.
+    named and empty.  The two pins beside this one flipped with it.  The
+    constant bump that closed the boundary (``canonical_model`` "3",
+    ``wire`` "2") moved the digest once more and not the length, exactly as
+    measured on 2026-09-05 (f37dc2c0… → d2f84c85…, 11925 bytes).
     """
     payload = encode_canonical_json(fixture_model())
     assert len(payload) == 11925
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "f37dc2c0f84ef67030c4b74aa339e086068a55e30a8207918160bf210b831ce2"
+        == "d2f84c85cc223c14d061b415c3856de17a9e09adb551c3ba1fddab04e4416f60"
     )
 
 
@@ -1456,7 +1459,7 @@ def test_the_comparison_house_moves_the_known_answer_bytes() -> None:
     assert len(payload) == 16969
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "4084b9fa485b62f6c4ccceac76836fb1a5d63bc6142a32942491002fd4299161"
+        == "b024a8e84287296dba72d0222056ba93cf1e7283eb107eed90cf8ebd1f623113"
     )
     assert payload != encode_canonical_json(fixture_model())
 
@@ -1470,7 +1473,7 @@ def test_the_evaluation_house_moves_the_known_answer_bytes() -> None:
     assert len(payload) == 19298
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "15babd2a4930d601a133a2bdb845928812e846bec0faa0918b736656372b8839"
+        == "cb6d825afca5a92309f0aec5fd753a2ee702524e7c38575049e0b3af580c0cc1"
     )
     assert payload != encode_canonical_json(comparison_fixture_model())
 

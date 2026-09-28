@@ -409,8 +409,8 @@ def test_the_door_falls_back_typed_on_a_generation_one_store(
         SERVING_SOURCE_MEMORY,
         SERVING_REASON_INCOMPATIBLE_GENERATION,
     )
-    assert "canonical_model stored '1' declared '2'" in outcome.detail
-    assert "canonical_wire stored '0' declared '1'" in outcome.detail
+    assert "canonical_model stored '1' declared '3'" in outcome.detail
+    assert "canonical_wire stored '0' declared '2'" in outcome.detail
     assert STORE_GENERATION_NEXT_STEP in outcome.detail
 
 

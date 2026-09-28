@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from codeclone.canonical import (
+    CanonicalModelError,
     ComparisonFacts,
     EvaluationFacts,
     RunStore,
@@ -42,6 +43,7 @@ from codeclone.canonical import (
     encode_canonical_json,
     export_run,
 )
+from codeclone.canonical import codec as codec_module
 from codeclone.canonical.registry import (
     COMPARISON_FAMILY_FIELDS,
     COMPARISON_RECORD_FAMILIES,
@@ -50,8 +52,10 @@ from codeclone.canonical.registry import (
     comparison_stored_fields,
     evaluation_stored_fields,
 )
+from codeclone.canonical.tier_storage import comparison_house, tier_families
 from codeclone.contracts import CANONICAL_WIRE_REVISION
 from tests.test_canonical_roundtrip import (
+    comparison_fixture_facts,
     comparison_fixture_model,
     evaluated_fixture_model,
     fixture_model,
@@ -232,7 +236,7 @@ def test_the_tier_family_list_is_the_registry_and_the_store() -> None:
     each house has exactly one wire family, and the store's export streams
     exactly their storage families."""
     from codeclone.canonical import store as store_module
-    from codeclone.canonical.tier_storage import TIER_FAMILIES, tier_families
+    from codeclone.canonical.tier_storage import TIER_FAMILIES
 
     assert [family.name for family in tier_families("comparison")] == sorted(
         COMPARISON_FAMILY_FIELDS
@@ -256,3 +260,38 @@ def test_a_tier_family_with_ragged_columns_is_refused_typed() -> None:
     with pytest.raises(WireDecodeError) as refusal:
         decode_canonical_json(_resealed(document))
     assert refusal.value.code == "W15"
+
+
+def test_a_tier_cell_outside_the_signed_range_is_refused_at_encoding() -> None:
+    """Reachability of the signed range: a delta the analysis tables could
+    never carry is still bounded -- one past the top is refused, never
+    written."""
+    evaluated = evaluated_fixture_model()
+    comparison = evaluated.facts.comparison
+    (delta,) = comparison.health_delta
+    too_large = replace(delta, value=2**31)
+    model = replace(
+        evaluated,
+        facts=replace(
+            evaluated.facts,
+            comparison=replace(comparison, health_delta=frozenset({too_large})),
+        ),
+    )
+    with pytest.raises(CanonicalModelError, match="integer out of wire range"):
+        encode_canonical_json(model)
+
+
+def test_a_row_that_is_not_its_declared_columns_is_refused_at_encoding() -> None:
+    lane_trust = next(
+        family for family in tier_families("comparison") if family.name == "lane_trust"
+    )
+    with pytest.raises(CanonicalModelError, match="not the declared stored fields"):
+        codec_module._tier_family_member(lane_trust, [{"lane": "clones.functions"}])
+
+
+def test_the_house_assembly_refuses_a_foreign_row_and_a_second_record() -> None:
+    witness = comparison_fixture_facts().baseline_witness
+    with pytest.raises(CanonicalModelError, match="carries a str"):
+        comparison_house({"lane_trust": ["not a row"]})
+    with pytest.raises(CanonicalModelError, match="more than one record"):
+        comparison_house({"baseline_witness": [witness, witness]})

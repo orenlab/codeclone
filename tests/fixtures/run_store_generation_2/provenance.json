@@ -1,0 +1,59 @@
+{
+ "objects": 244,
+ "produced_by": {
+  "CANONICAL_MODEL_REVISION": "2",
+  "CANONICAL_OBJECT_IDENTITY_VERSION": "1",
+  "CANONICAL_WIRE_REVISION": "1",
+  "STORAGE_SCHEMA_REVISION": "1",
+  "corpus": "tests/fixtures/run_store_serving_corpus",
+  "git_head": "02262334c2b40fdcb6e5051012fab6298a081f96",
+  "git_status_porcelain": "",
+  "how": "CodeCloneMCPService.analyze_repository over the serving corpus with CODECLONE_RUN_STORE_ENABLED=1, then export_run; engine = git archive of git_head",
+  "produced_at": "2026-09-28",
+  "python": "3.14.3"
+ },
+ "run_id": "db8b34178dd97530c04665968882413962329b2ae011c425e95b0f310f793677",
+ "sha256": {
+  "run.envelope.json": "b058028d37a2f8186423139f9185e304fb9ec5ab0679348e29549be1fc7c15d6",
+  "run.wire.json": "c9d687f38128e6508bbaf5dce12e8194e53626fac1d5567026cf8908813d2f7e",
+  "runs.sqlite3": "0e5792cb360c7942a536a3257ffc17b51ee327ae02b6200e6da7585e1d0741fd"
+ },
+ "wire_bytes": 15042,
+ "witness": [
+  [
+   "authority_analysis",
+   "1",
+   "analysis"
+  ],
+  [
+   "canonical_model",
+   "2",
+   "analysis"
+  ],
+  [
+   "canonical_object_identity",
+   "1",
+   "identity"
+  ],
+  [
+   "canonical_wire",
+   "1",
+   "projection"
+  ],
+  [
+   "contract_ir",
+   "1",
+   "analysis"
+  ],
+  [
+   "module_identity",
+   "2",
+   "analysis"
+  ],
+  [
+   "storage_schema",
+   "1",
+   "storage"
+  ]
+ ]
+}

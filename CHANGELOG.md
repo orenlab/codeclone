@@ -16,7 +16,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 
 ### Added
 
-- Canonical run store: `CANONICAL_MODEL_REVISION` `2` adds `import_observations`/`relationship_observations`, wire revision `1` (`CANONICAL_WIRE_REVISION`); `get_implementation_context(query=...)` serves from the store when it matches (`serving`), else falls back with a typed reason; older generations refused.
+- Canonical run store: `CANONICAL_MODEL_REVISION` `3` (`import_observations`/`relationship_observations`, the report's analysis groups, the comparison and evaluation tiers), wire revision `2` (`CANONICAL_WIRE_REVISION`); `get_implementation_context(query=...)` serves from the store when it matches (`serving`), else falls back with a typed reason; older generations refused.
 - Semantic authority governance: `[[tool.codeclone.authority]]`, `--semantic-authority`, `--fail-on-authority-violation`, a report tab, MCP `check_authority`.
 - Advisory clone channels (never gated or baselined): `--near-miss` (one statement apart, also across renamed structure, `token_domain` `y8`/`renamed`; `NEAR_MISS_ALGORITHM_REVISION` `3`) and `--renamed-structure` (consistently renamed locals/attributes; `RENAMED_STRUCTURE_ALGORITHM_REVISION` `1`).
 - Dead code reports unreachable statements; `--fail-on-unresolved-dead-code` gates on public methods with bases outside the root (abstentions, not dead).
@@ -30,10 +30,11 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Official MCP Registry entry `io.github.orenlab/codeclone` (`server.json`: `codeclone --mcp`, `mcp` extra), published after PyPI; `glama.json`, `mcp-name` in both READMEs.
 - `.pre-commit-hooks.yaml`: hook `codeclone` (`codeclone . --ci`) for `repo: https://github.com/orenlab/codeclone`.
 - First-argument `codeclone --mcp` runs `codeclone-mcp` with the rest; without the `mcp` extra: same install hint, exit `2`.
-- Canonical run store: the comparison tier (baseline and metrics-baseline witnesses, per-lane trust, comparison availability, disabled capabilities, novelty of five finding families, adoption and API deltas) is published as run-store rows beside the analysis rows; report, wire and MCP answers are unchanged byte for byte.
+- Canonical run store: the comparison tier (baseline and metrics-baseline witnesses, per-lane trust, comparison availability, disabled capabilities, novelty of five finding families, adoption and API deltas) is published as run-store rows beside the analysis rows; report and MCP answers are unchanged byte for byte.
 
 ### Changed
 
+- Run store generation (`CANONICAL_MODEL_REVISION` `3`, `CANONICAL_WIRE_REVISION` `2`): the canonical wire carries the comparison and evaluation tiers as `comparison`/`evaluation` members; the store keeps 32-byte object ids, a family lookup and a family index (a fresh store measured 12–18% smaller; a family read starts from that family's index); stores of the previous generation are refused at open with a typed reason (move or delete the file, the next analysis publishes again).
 - MCP Registry `server.json` `description` leads with the product name: "Structural Change Controller for AI-assisted Python: baseline-aware, deterministic, built for CI" (96 of the schema's 100 characters); the PyPI summary is unchanged.
 - Run identity generation `3` (`REPORT_SEMANTIC_IDENTITY_VERSION`, `integrity.semantic_identity_version`): each analysis assertion has one family digest (`novelty` moves to a new `comparison` tier of `integrity.semantic.family_digests`; `api_surface`/`coverage_adoption`/`overloaded_modules`/`security_surfaces`/`semantic_authority` added; `integrity.semantic.population` gains `observed`); every `run_id` moves once; generation-2 documents still verify.
 - Baselines work across CPython versions: `meta.python_tag` is signed provenance (noted by the CLI), not trust; only `baseline_scope_id` condemns a container.

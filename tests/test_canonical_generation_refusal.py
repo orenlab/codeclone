@@ -28,6 +28,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import cast
 
@@ -44,6 +45,7 @@ from codeclone.canonical import (
     decode_canonical_json,
     verify_export_artifact,
 )
+from codeclone.canonical.store import migrate_store_schema
 from codeclone.contracts import CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISION
 from tests._run_store_schema_evidence import byte_state
 from tests.test_canonical_roundtrip import fixture_model
@@ -70,6 +72,21 @@ def _artifacts_the_manifest_does_not_own(
     return on_disk - named, named - on_disk
 
 
+def _refused_copy(
+    fixtures: Path, tmp_path: Path
+) -> tuple[Path, dict[str, object], StoreCompatibilityError]:
+    """Open a copy of one generation's store; hand back the copy, its byte
+    state measured before any connection touched it, and the refusal -- the
+    file proven left exactly as it was."""
+    store = tmp_path / "runs.sqlite3"
+    shutil.copy(fixtures / "runs.sqlite3", store)
+    before = byte_state(store)
+    with pytest.raises(StoreCompatibilityError) as caught:
+        RunStore(store, create=False)
+    assert byte_state(store) == before
+    return store, before, caught.value
+
+
 @pytest.fixture(scope="module")
 def provenance() -> dict[str, object]:
     return cast(
@@ -90,7 +107,7 @@ def test_the_artifacts_are_the_ones_the_revision_one_build_produced(
         produced_by["CANONICAL_WIRE_REVISION"],
         produced_by["git_status_porcelain"],
     ) == ("1", "0", "")
-    assert (CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISION) == ("2", "1")
+    assert (CANONICAL_MODEL_REVISION, CANONICAL_WIRE_REVISION) == ("3", "2")
     recorded = cast("dict[str, str]", provenance["sha256"])
     measured = {
         name: hashlib.sha256((_FIXTURES / name).read_bytes()).hexdigest()
@@ -139,30 +156,24 @@ def test_a_generation_one_store_is_refused_at_open_with_its_migration_path(
     step a reader can take.  The file is left as it was -- its ``-wal`` and
     ``-shm`` and its journal mode included, measured before any other
     connection touches it."""
-    store = tmp_path / "runs.sqlite3"
-    shutil.copy(_FIXTURES / "runs.sqlite3", store)
-    before = byte_state(store)
+    store, before, refusal = _refused_copy(_FIXTURES, tmp_path)
     assert (before["-wal"], before["-shm"], before["journal"]) == (
         None,
         None,
         b"\x02\x02",
     )
-    with pytest.raises(StoreCompatibilityError) as caught:
-        RunStore(store, create=False)
-    assert byte_state(store) == before
-    refusal = caught.value
     # Witness first: the generation-1 store also lacks this build's index,
     # and it is named for its generation, never for its schema.
     assert type(refusal) is StoreCompatibilityError
     assert refusal.diverging == (
-        ("canonical_model", "1", "2"),
-        ("canonical_wire", "0", "1"),
+        ("canonical_model", "1", "3"),
+        ("canonical_wire", "0", "2"),
     )
     assert refusal.path == str(store)
     assert refusal.next_step == STORE_GENERATION_NEXT_STEP
     message = str(refusal)
-    assert "canonical_model stored '1' declared '2'" in message
-    assert "canonical_wire stored '0' declared '1'" in message
+    assert "canonical_model stored '1' declared '3'" in message
+    assert "canonical_wire stored '0' declared '2'" in message
     assert "(law 7)" in message and STORE_GENERATION_NEXT_STEP in message
     with sqlite3.connect(store) as connection:
         assert dict(connection.execute("SELECT layer, revision FROM witness")) == {
@@ -193,7 +204,7 @@ def test_a_generation_zero_wire_document_is_refused_at_the_revision_fence() -> N
         decode_canonical_json(data)
     assert caught.value.code == "W21"
     assert "declares wire generation '0'" in caught.value.detail
-    assert "this build reads '1' only" in caught.value.detail
+    assert "this build reads '2' only" in caught.value.detail
     assert "next_step" in caught.value.detail
 
 
@@ -214,4 +225,111 @@ def test_a_generation_zero_export_envelope_is_refused_by_this_verifier() -> None
     )
     assert envelope.wire_revision == "0" and len(data) == envelope.byte_count
     with pytest.raises(ExportIntegrityError, match="declares wire revision '0'"):
+        verify_export_artifact(data, envelope)
+
+
+# ---------------------------------------------------------------------------
+# Generation 2 (canonical epoch E4): the artifacts the revision-2 build left
+# behind, refused by the revision-3 build the same way generation 1 is.
+# ``tests/fixtures/run_store_generation_2`` was produced by the build at
+# 02262334 (the last commit before the E4 series), from a ``git archive`` of
+# that commit, over the same serving corpus; its provenance records the
+# constants that build declared and the sha256 of every artifact.
+# ---------------------------------------------------------------------------
+
+_FIXTURES_2 = Path(__file__).parent / "fixtures" / "run_store_generation_2"
+
+
+@pytest.fixture(scope="module")
+def provenance_2() -> dict[str, object]:
+    return cast(
+        "dict[str, object]",
+        json.loads((_FIXTURES_2 / _MANIFEST_NAME).read_text("utf-8")),
+    )
+
+
+def test_the_artifacts_are_the_ones_the_revision_two_build_produced(
+    provenance_2: dict[str, object], tmp_path: Path
+) -> None:
+    produced_by = cast("dict[str, str]", provenance_2["produced_by"])
+    assert (
+        produced_by["CANONICAL_MODEL_REVISION"],
+        produced_by["CANONICAL_WIRE_REVISION"],
+        produced_by["git_status_porcelain"],
+    ) == ("2", "1", "")
+    recorded = cast("dict[str, str]", provenance_2["sha256"])
+    assert _artifacts_the_manifest_does_not_own(_FIXTURES_2, recorded) == (
+        frozenset(),
+        frozenset(),
+    )
+    assert frozenset(recorded) == _MANIFESTED_ARTIFACTS
+    measured = {
+        name: hashlib.sha256((_FIXTURES_2 / name).read_bytes()).hexdigest()
+        for name in recorded
+    }
+    assert measured == recorded
+    # Read a copy: a read-only connection to a WAL file leaves -wal/-shm
+    # beside it, which would put two artifacts into the fixture directory.
+    copy = tmp_path / "runs.sqlite3"
+    shutil.copy(_FIXTURES_2 / "runs.sqlite3", copy)
+    with closing(sqlite3.connect(copy)) as raw:
+        witness = dict(raw.execute("SELECT layer, revision FROM witness"))
+        objects = raw.execute("SELECT count(*) FROM objects").fetchone()[0]
+        columns = [str(row[1]) for row in raw.execute("PRAGMA table_info(objects)")]
+    assert witness["canonical_model"] == "2" and witness["canonical_wire"] == "1"
+    assert objects == provenance_2["objects"]
+    # The container the audit changed: a generation-2 object row names its
+    # family by text and its address by hex -- the shape this build refuses.
+    assert columns == ["object_pk", "namespace_pk", "object_id", "family", "payload"]
+
+
+def test_a_generation_two_store_is_refused_at_open_by_its_witness(
+    tmp_path: Path,
+) -> None:
+    """The witness decides before the schema: the generation-2 file also
+    lacks this build's ``families`` table and family index, and it is named
+    for its generation, never offered the migration verb."""
+    store, before, refusal = _refused_copy(_FIXTURES_2, tmp_path)
+    assert type(refusal) is StoreCompatibilityError
+    assert refusal.diverging == (
+        ("canonical_model", "2", "3"),
+        ("canonical_wire", "1", "2"),
+    )
+    assert refusal.next_step == STORE_GENERATION_NEXT_STEP
+    message = str(refusal)
+    assert "canonical_model stored '2' declared '3'" in message
+    assert "canonical_wire stored '1' declared '2'" in message
+    with pytest.raises(StoreCompatibilityError) as migrated:
+        migrate_store_schema(store)
+    assert migrated.value.diverging == refusal.diverging
+    assert byte_state(store) == before
+
+
+def test_a_generation_one_wire_document_is_refused_at_the_revision_fence() -> None:
+    data = (_FIXTURES_2 / "run.wire.json").read_bytes()
+    assert b'"wire":"1"' in data and b'"canonical_model":"2"' in data
+    with pytest.raises(WireDecodeError) as caught:
+        decode_canonical_json(data)
+    assert caught.value.code == "W21"
+    assert "declares wire generation '1'" in caught.value.detail
+    assert "this build reads '2' only" in caught.value.detail
+
+
+def test_a_generation_one_export_envelope_is_refused_by_this_verifier() -> None:
+    data = (_FIXTURES_2 / "run.wire.json").read_bytes()
+    raw = json.loads((_FIXTURES_2 / "run.envelope.json").read_text("utf-8"))
+    envelope = ExportEnvelope(
+        run_id=str(raw["run_id"]),
+        artifact_digest=str(raw["artifact_digest"]),
+        byte_count=int(raw["byte_count"]),
+        wire_revision=str(raw["wire_revision"]),
+        witness=tuple(
+            WitnessLayer(
+                layer=str(w["layer"]), revision=str(w["revision"]), role=str(w["role"])
+            )
+            for w in raw["witness"]
+        ),
+    )
+    assert envelope.wire_revision == "1" and len(data) == envelope.byte_count
+    with pytest.raises(ExportIntegrityError, match="declares wire revision '1'"):
         verify_export_artifact(data, envelope)

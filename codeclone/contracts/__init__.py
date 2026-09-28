@@ -68,7 +68,21 @@ CONTRACT_IR_VERSION: Final = "1"
 # targets into them. The wire revision moves with this constant in the same
 # epoch (below), so no generation of the store or of a wire document carries
 # one of the two families without the other.
-CANONICAL_MODEL_REVISION: Final = "2"
+#
+# Revision "3" (sanctioned 2026-09-23 as ONE epoch boundary, the E1..E4 chain
+# landed together): the model gained the E1 analysis-tier families (the
+# report's clone, structural, dead-code, hotspot, overloaded-module and
+# coverage groups), the comparison house (E2: baseline witnesses, lane trust,
+# availability, disabled capabilities, novelty, adoption / API / health
+# deltas) and the evaluation house (E3: the realized evaluation contract, the
+# gate request and outcome, the health verdict, unit risk bands, finding
+# verdicts, document selections), all members of the store run (decision
+# D-10, 2026-09-28); and the store's container moved (E4: 32-byte BLOB
+# addresses, a ``families`` lookup, the family index).  A revision-2 store is
+# refused at open by this witness layer -- before its schema is judged -- and
+# its runs are not migrated: the next analysis publishes them again.  The
+# wire revision moves with it in the same boundary.
+CANONICAL_MODEL_REVISION: Final = "3"
 # Generation of the CANONICAL OBJECT IDENTITY: the semantic preimage by which a
 # stored object, a scope receipt, a membership digest and a run are addressed.
 # This constant and no other owns the run-store's domain separators. It moves
@@ -110,7 +124,14 @@ CANONICAL_OBJECT_IDENTITY_VERSION: Final = "1"
 # Whether "1" is also the FROZEN grammar of §7 is a separate evidence
 # question (the wire corpus benchmark is still an instrumentation run, not
 # freeze evidence); a freeze that changes bytes bumps again.
-CANONICAL_WIRE_REVISION: Final = "1"
+#
+# "2" (the E4 boundary, moved together with CANONICAL_MODEL_REVISION "3")
+# carries the model's comparison and evaluation houses as two more root
+# members after ``facts`` -- ``comparison`` and ``evaluation`` -- in the store's
+# own row form, and the facts tables of the E1 families; a revision-1
+# document is refused at the revision fence (``W21``), which runs before the
+# root's shape is judged.
+CANONICAL_WIRE_REVISION: Final = "2"
 # Storage schema revision of the canonical run-store (backend wave 2).
 # Deliberately separate from CANONICAL_WIRE_REVISION and REPORT_SCHEMA_VERSION
 # (F-3 §10, brief §14): the SQLite physics may change without claiming the

@@ -57,6 +57,8 @@ def _replaced(data: bytes, needle: str, replacement: str) -> bytes:
 # survived in production.  These literals are third-party witnesses.
 _GENERATION_0_DOMAIN = b"cc-canonical-wire:0\x00"
 _GENERATION_1_DOMAIN = b"cc-canonical-wire:1\x00"
+# The generation this build writes (the E4 boundary moved it from "1").
+_GENERATION_2_DOMAIN = b"cc-canonical-wire:2\x00"
 
 
 def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
@@ -66,15 +68,15 @@ def _resealed(data: bytes, needle: str, replacement: str) -> bytes:
     body, _, _tail = text.partition(marker)
     assert body.count(needle) == 1, f"needle not unique in body: {needle!r}"
     new_body = body.replace(needle, replacement)[1:]
-    digest = hashlib.sha256(_GENERATION_1_DOMAIN + new_body.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(_GENERATION_2_DOMAIN + new_body.encode("utf-8")).hexdigest()
     return (
         "{" + new_body + f',"integrity":{{"algorithm":"sha256","value":"{digest}"}}}}'
     ).encode("utf-8")
 
 
-_SEG_FORMAT = '"format":{"name":"codeclone-canonical","wire":"1"}'
+_SEG_FORMAT = '"format":{"name":"codeclone-canonical","wire":"2"}'
 _SEG_REVISIONS = (
-    '"revisions":{"authority_analysis":"1","canonical_model":"2",'
+    '"revisions":{"authority_analysis":"1","canonical_model":"3",'
     '"contract_ir":"1","module_identity":"2"}'
 )
 
@@ -101,8 +103,8 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W03",
         "duplicate object key",
-        '{"name":"codeclone-canonical","wire":"1"}',
-        '{"name":"codeclone-canonical","name":"codeclone-canonical","wire":"1"}',
+        '{"name":"codeclone-canonical","wire":"2"}',
+        '{"name":"codeclone-canonical","name":"codeclone-canonical","wire":"2"}',
     ),
     ("W05", "lone surrogate escape", '"zz"', '"z\\ud800z"'),
     (
@@ -869,7 +871,7 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
     (
         "W21",
         "incompatible revision value",
-        '"canonical_model":"2"',
+        '"canonical_model":"3"',
         '"canonical_model":"9"',
     ),
     ("W21", "incomplete revisions", '"contract_ir":"1",', ""),
@@ -927,7 +929,7 @@ def test_w23_refuses_a_tampered_integrity_digest(canonical_bytes: bytes) -> None
 @pytest.mark.parametrize(
     ("label", "needle", "replacement"),
     [
-        ("inserted whitespace", '"wire":"1"}', '"wire":"1" }'),
+        ("inserted whitespace", '"wire":"2"}', '"wire":"2" }'),
         ("non-canonical escape", '"x.y"', '"\\u0078.y"'),
         (
             "non-canonical float lexeme",
@@ -1321,7 +1323,7 @@ def test_the_seal_domain_is_derived_from_the_wire_revision() -> None:
     assert codec_module._wire_integrity_domain("1") == _GENERATION_1_DOMAIN
     assert (
         codec_module._wire_integrity_domain(CANONICAL_WIRE_REVISION)
-        == _GENERATION_1_DOMAIN
+        == _GENERATION_2_DOMAIN
     )
 
 
@@ -1347,7 +1349,7 @@ def test_the_naive_cross_generation_pin_cannot_reach_the_seal() -> None:
     """
     native = encode_canonical_json(fixture_model())
     forged = _sealed_under(
-        _body_of(native).replace('"wire":"1"', '"wire":"2"', 1), _GENERATION_1_DOMAIN
+        _body_of(native).replace('"wire":"2"', '"wire":"3"', 1), _GENERATION_2_DOMAIN
     )
     with pytest.raises(WireDecodeError) as caught:
         decode_canonical_json(forged)
@@ -1359,9 +1361,9 @@ def test_a_document_declaring_the_next_generation_is_refused_by_this_seal(
 ) -> None:
     """Pin 3: the defect's own signature, in the only form that can fire.
 
-    A generation-2 build is simulated by moving the wire authority alone --
+    A generation-3 build is simulated by moving the wire authority alone --
     every derivation from it must follow, which is the whole claim.  The
-    document then DECLARES generation 2, passes the revision fence, and
+    document then DECLARES generation 3, passes the revision fence, and
     lands precisely on the seal check.
 
     Both boundaries die here: the forged case catches a domain hard-coded in
@@ -1369,14 +1371,14 @@ def test_a_document_declaring_the_next_generation_is_refused_by_this_seal(
     half alone -- derive the writer but not the reader, or the reverse, and
     what this build seals it can no longer verify.
     """
-    monkeypatch.setattr(codec_module, "CANONICAL_WIRE_REVISION", "2")
+    monkeypatch.setattr(codec_module, "CANONICAL_WIRE_REVISION", "3")
     native = encode_canonical_json(fixture_model())
-    assert b'"wire":"2"' in native
+    assert b'"wire":"3"' in native
 
     # Positive control, same causal path: what this build seals, it verifies.
     decode_canonical_json(native)
 
-    forged = _sealed_under(_body_of(native), _GENERATION_1_DOMAIN)
+    forged = _sealed_under(_body_of(native), _GENERATION_2_DOMAIN)
     assert _body_of(forged) == _body_of(native), "only the seal may differ"
     with pytest.raises(WireDecodeError) as caught:
         decode_canonical_json(forged)
@@ -1400,12 +1402,12 @@ def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> 
     The door it CAN be reached through is the one an external verifier uses
     and the one a future reordering would open: :func:`_check_integrity`
     itself.  A document that declares generation 9 and is sealed under
-    generation 9's domain must still be refused by a generation-1 build --
+    generation 9's domain must still be refused by a generation-2 build --
     a forgery does not get to choose the domain it is checked under.
     """
 
     body = _body_of(encode_canonical_json(fixture_model()))
-    body_nine = body.replace('"wire":"1"', '"wire":"9"', 1)
+    body_nine = body.replace('"wire":"2"', '"wire":"9"', 1)
     assert body_nine != body, "the declared revision must actually differ"
 
     forged = _sealed_under(body_nine, _GENERATION_9_DOMAIN)
@@ -1419,7 +1421,7 @@ def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> 
 
     # Positive control on the same function: what this build seals, this
     # build verifies -- so the refusal above is the domain, not the door.
-    honest = _sealed_under(body, _GENERATION_1_DOMAIN)
+    honest = _sealed_under(body, _GENERATION_2_DOMAIN)
     codec_module._check_integrity(
         honest,
         codec_module._expect_object(
