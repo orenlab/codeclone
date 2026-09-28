@@ -390,7 +390,9 @@ def test_the_oracle_sees_one_changed_verdict(
     assert _oracle(document) != run.stored.facts.evaluation
 
 
-def _corrupt(document: dict[str, Any], path: tuple[str, ...], value: object) -> None:
+def _corrupt(
+    document: dict[str, Any], path: tuple[str | int, ...], value: object
+) -> None:
     target: Any = document
     for key in path[:-1]:
         target = target[key]
@@ -442,11 +444,29 @@ def _corrupt(document: dict[str, Any], path: tuple[str, ...], value: object) -> 
             "not a number",
         ),
         (("evaluation", "outcome", "exit_code"), 1, CanonicalModelError, "exit code"),
+        (
+            ("contracts", "evaluation", "gate_thresholds_digest"),
+            7,
+            LegacyIngestError,
+            r"contracts\.evaluation\.gate_thresholds_digest is not a string",
+        ),
+        (
+            ("findings", "groups", "design", "groups", 0, "id"),
+            7,
+            LegacyIngestError,
+            r"finding group\.id is not a string",
+        ),
+        (
+            ("derived", "hotlists", "most_actionable_ids"),
+            {},
+            LegacyIngestError,
+            "most_actionable_ids is not an array",
+        ),
     ],
 )
 def test_a_malformed_evaluation_member_is_a_typed_refusal(
     evaluation_runs: dict[str, EvaluationRun],
-    path: tuple[str, ...],
+    path: tuple[str | int, ...],
     value: object,
     error: type[Exception],
     match: str,
@@ -454,4 +474,33 @@ def test_a_malformed_evaluation_member_is_a_typed_refusal(
     document = copy.deepcopy(evaluation_runs["gates_failed"].document)
     _corrupt(document, path, value)
     with pytest.raises(error, match=match):
+        _oracle(document)
+
+
+@pytest.mark.parametrize(
+    ("container", "member", "match"),
+    [
+        (
+            ("evaluation", "outcome"),
+            "reasons",
+            "evaluation.outcome is missing 'reasons'",
+        ),
+        (("derived",), "hotlists", "derived is missing 'hotlists'"),
+    ],
+)
+def test_a_missing_evaluation_member_is_a_typed_refusal(
+    evaluation_runs: dict[str, EvaluationRun],
+    container: tuple[str, ...],
+    member: str,
+    match: str,
+) -> None:
+    """A member the document builder always writes, absent: the oracle's own
+    reader (``evaluation.outcome``) and the reader it shares with the
+    producer (``derived``) each refuse it by name — never a ``KeyError``."""
+    document: Any = copy.deepcopy(evaluation_runs["gates_failed"].document)
+    target = document
+    for key in container:
+        target = target[key]
+    del target[member]
+    with pytest.raises(LegacyIngestError, match=match):
         _oracle(document)

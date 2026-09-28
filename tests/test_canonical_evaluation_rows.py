@@ -49,7 +49,7 @@ from codeclone.canonical.evaluation_rows import (
     finding_priority_is_admissible,
 )
 from codeclone.canonical.identity import FileId, SymbolId
-from codeclone.canonical.model import EvaluationFacts
+from codeclone.canonical.model import CanonicalModel, EvaluationFacts
 from codeclone.canonical.store import (
     FAMILY_EVALUATION_CONTRACT,
     FAMILY_EVALUATION_REQUEST,
@@ -346,6 +346,11 @@ def test_the_hotlists_are_the_documents_selections() -> None:
         ),
         (lambda: HotlistRow(hotlist="favourites", rank=1, finding_id="x"), "hotlist"),
         (lambda: HotlistRow(hotlist="suggestions", rank=0, finding_id="x"), "rank"),
+        (
+            lambda: HotlistRow(hotlist="suggestions", rank=1.0, finding_id="x"),  # type: ignore[arg-type]
+            "rank must be an int",
+        ),
+        (lambda: _health(score=True), "score must be an int"),
         (
             lambda: HotlistRow(hotlist="suggestions", rank=1, finding_id=""),
             "finding id",
@@ -658,6 +663,79 @@ def test_each_evaluation_family_is_read_back_under_its_own_name(
     assert frozenset(read["finding_evaluation"]) == evaluation.finding_evaluation
     assert frozenset(read["hotlist_selection"]) == evaluation.hotlist_selection
     assert frozenset(read["health_delta"]) == expected.comparison.health_delta
+
+
+def _withheld(population: str) -> HealthResultRecord:
+    return _health(score=None, grade=None, dimensions=None, population=population)
+
+
+def _with_health(health: HealthResultRecord) -> CanonicalModel:
+    """The evaluated fixture under another verdict — without the health
+    delta, which annotates a stated score only."""
+    model = evaluated_fixture_model()
+    return replace(
+        model,
+        facts=replace(
+            model.facts,
+            comparison=replace(model.facts.comparison, health_delta=frozenset()),
+            evaluation=replace(model.facts.evaluation, health_result=health),
+        ),
+    )
+
+
+@pytest.mark.parametrize("population", ["complete_empty", "unmeasured"])
+def test_a_withheld_health_verdict_is_read_back_withheld(
+    tmp_path: Path, population: str
+) -> None:
+    """Both withholding populations: the stored ``dimensions`` is ``null``
+    and reads back ``None`` — an empty tuple would be a verdict stating no
+    dimension, which the row refuses for a population that withholds."""
+    withheld = _withheld(population)
+    with RunStore(tmp_path / "runs.sqlite3") as store:
+        run_id = _publish(store, _with_health(withheld))
+        family = store.read_family(run_id, FAMILY_HEALTH_RESULT)
+        whole = store.read_run(run_id).facts.evaluation.health_result
+    assert family == (withheld,)
+    assert whole == withheld
+
+
+def test_a_withheld_verdict_is_neither_absent_nor_scored_in_the_store(
+    tmp_path: Path,
+) -> None:
+    """The three health states of a run, one store: a scored verdict, a
+    withheld one and none at all read back as three different answers — a
+    withheld verdict is a stored row, not the absence of one."""
+    scored = evaluated_fixture_model()
+    withheld = _withheld("complete_empty")
+    absent = _with_health(withheld)
+    absent = replace(
+        absent,
+        facts=replace(
+            absent.facts,
+            evaluation=replace(
+                absent.facts.evaluation,
+                health_result=None,
+                evaluation_contract=_contract(health_params=()),
+            ),
+        ),
+    )
+    published = {
+        "scored": scored,
+        "withheld": _with_health(withheld),
+        "absent": absent,
+    }
+    with RunStore(tmp_path / "runs.sqlite3") as store:
+        read = {
+            name: store.read_family(
+                _publish(store, model, target=name), FAMILY_HEALTH_RESULT
+            )
+            for name, model in published.items()
+        }
+    assert read == {
+        "scored": (scored.facts.evaluation.health_result,),
+        "withheld": (withheld,),
+        "absent": (),
+    }
 
 
 def test_the_evaluation_families_take_no_ddl(tmp_path: Path) -> None:
