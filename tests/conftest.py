@@ -1262,6 +1262,170 @@ def served_evaluation_runs(
     }
 
 
+# ---------------------------------------------------------------------------
+# The withheld health verdict served by MCP (the E3 testing debts): the two
+# populations whose health producer completes and withholds its number — a
+# scope with no source file (``complete_empty``) and a scope whose every file
+# the parser refused (``unmeasured``).  Measured 2026-09-28: no CLI or served
+# population before these stored a withheld verdict, so the store never read
+# a withheld ``dimensions`` back.  The CLI reaches them only when the metrics
+# are asked for (on a tree without a metrics baseline it skips them, and the
+# run states no verdict at all); MCP ``full`` mode always runs them.
+# ---------------------------------------------------------------------------
+
+#: Every withheld-verdict population, by its population word, and the
+#: publication it states: an unmeasured population stores its run and
+#: withholds the head.
+SERVED_WITHHELD_POPULATIONS: dict[str, str] = {
+    "complete_empty": RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
+    "unmeasured": RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD,
+}
+
+
+def _serve_withheld_corpus(base: Path, population: str) -> ServedEvaluationRun:
+    """One MCP analysis of an empty package, or of a package whose one file
+    does not parse, with the run store on."""
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    root = base / population
+    (root / "pkg").mkdir(parents=True)
+    if population == "unmeasured":
+        _write_unparsable(root)
+    store_path = base / f"{population}.sqlite3"
+    with _run_store_rollout(store_path):
+        service = CodeCloneMCPService(history_limit=4)
+        service.analyze_repository(
+            MCPAnalysisRequest(root=str(root), analysis_mode="full")
+        )
+        record = service._runs.resolve_any_root()
+        answers = {
+            "run_summary": service.get_run_summary(root=str(root)),
+            "production_triage": service.get_production_triage(root=str(root)),
+        }
+    outcome = SERVED_WITHHELD_POPULATIONS[population]
+    return ServedEvaluationRun(
+        name=population,
+        store_path=store_path,
+        store_run_ids=(_published_store_run_id(record, outcome=outcome),),
+        answers=answers,
+    )
+
+
+@pytest.fixture(scope="session")
+def served_withheld_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, ServedEvaluationRun]:
+    """Both withheld-verdict populations served by MCP (see above)."""
+    base = tmp_path_factory.mktemp("served_withheld").resolve()
+    return {
+        population: _serve_withheld_corpus(base, population)
+        for population in SERVED_WITHHELD_POPULATIONS
+    }
+
+
+# ---------------------------------------------------------------------------
+# The run comparison served by MCP (the E3 testing debts): the carriers of
+# three census rows the served populations above leave unpinned — the finding
+# verdicts ``check_authority`` states at full detail, the card severities of
+# ``compare_runs`` and the per-run health of the patch verification.  The
+# gated session's comparison cannot carry them: its cards are two, both
+# ``warning`` and both on one side (measured 2026-09-28), so a projection
+# answering one constant word would pass.  Here the second analysis loses a
+# ``warning`` clone pair, a ``critical`` import cycle and an ``info`` block
+# clone, and gains a ``critical`` import cycle and a ``warning`` dead-code
+# item, so both sides of the comparison carry more than one severity.
+# ---------------------------------------------------------------------------
+
+#: The files the second analysis of the run comparison no longer sees.
+SERVED_RUN_COMPARISON_REMOVED: tuple[str, ...] = (
+    "pkg/clones_three.py",
+    "pkg/cyc_c.py",
+    "pkg/run_host_two.py",
+)
+#: The files the second analysis sees for the first time.
+SERVED_RUN_COMPARISON_ADDED: dict[str, str] = {
+    "pkg/ring_a.py": (
+        "from pkg.ring_b import b\n\n\ndef a() -> int:\n    return b() + 1\n"
+    ),
+    "pkg/ring_b.py": (
+        "from pkg.ring_a import a\n\n\ndef b() -> int:\n    return a() - 1\n"
+    ),
+    "pkg/dead_fresh.py": (
+        "def _fresh_orphan(flag: bool) -> str:\n    return 'on' if flag else 'off'\n"
+    ),
+}
+
+
+def _run_comparison_answers(
+    service: object, root: Path, before: str, after: str
+) -> dict[str, dict[str, object]]:
+    """The run-against-run answers of the session, and the surface's own
+    finding listing of each run — the join from a card's short id to the
+    canonical id a store row is keyed by, stated by the surface itself."""
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    assert isinstance(service, CodeCloneMCPService)
+    changed = [*SERVED_RUN_COMPARISON_REMOVED, *sorted(SERVED_RUN_COMPARISON_ADDED)]
+    return {
+        "compare_runs": service.compare_runs(
+            before_run_id=before, after_run_id=after, root=str(root)
+        ),
+        "patch_verify": service.check_patch_contract(
+            mode="verify",
+            before_run_id=before,
+            after_run_id=after,
+            root=str(root),
+            changed_files=changed,
+        ),
+        "list_before": service.list_findings(run_id=before, root=str(root), limit=200),
+        "list_after": service.list_findings(run_id=after, root=str(root), limit=200),
+    }
+
+
+@pytest.fixture(scope="session")
+def served_run_comparison(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> ServedEvaluationRun:
+    """Two MCP analyses of one tree in one session (see above): the
+    authority check of the first, and the run-against-run answers between
+    the two."""
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+
+    base = tmp_path_factory.mktemp("served_run_comparison").resolve()
+    root = _served_comparison_tree(base, "trusted", _comparison_baseline(base))
+    _write_tree(root, EVALUATION_CARRIER)
+    store_path = base / "served_run_comparison.sqlite3"
+    request = MCPAnalysisRequest(root=str(root), analysis_mode="full", api_surface=True)
+    with _run_store_rollout(store_path):
+        service = CodeCloneMCPService(history_limit=4)
+        service.analyze_repository(request)
+        before = service._runs.resolve_any_root()
+        answers = {
+            "check_authority_full": service.check_authority(
+                root=str(root), max_results=100, detail_level="full"
+            )
+        }
+        for relative in SERVED_RUN_COMPARISON_REMOVED:
+            (root / relative).unlink()
+        _write_tree(root, SERVED_RUN_COMPARISON_ADDED)
+        service.analyze_repository(request)
+        after = service._runs.resolve_any_root()
+        answers.update(
+            _run_comparison_answers(service, root, before.run_id, after.run_id)
+        )
+    return ServedEvaluationRun(
+        name="run_comparison",
+        store_path=store_path,
+        store_run_ids=(
+            _published_store_run_id(before),
+            _published_store_run_id(after),
+        ),
+        answers=answers,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _clear_workspace_intent_store_cache() -> Generator[None, None, None]:
     from codeclone.surfaces.mcp._workspace_intent_store import (

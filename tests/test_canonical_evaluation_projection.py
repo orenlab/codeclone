@@ -45,14 +45,18 @@ from codeclone.canonical.evaluation_projection import (
 )
 from codeclone.canonical.evaluation_rows import GATE_REQUEST_TERMS
 from codeclone.canonical.model import CanonicalModel, EvaluationFacts
-from codeclone.canonical.store import RunStore
+from codeclone.canonical.store import FAMILY_HEALTH_RESULT, RunStore
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests._served_run import (
     ServedComparisonRun,
     ServedEvaluationRun,
     ServedRunStoreProjection,
 )
-from tests.conftest import SERVED_COMPARISON_POPULATIONS, SERVED_EVALUATION_GATES
+from tests.conftest import (
+    SERVED_COMPARISON_POPULATIONS,
+    SERVED_EVALUATION_GATES,
+    SERVED_WITHHELD_POPULATIONS,
+)
 from tests.test_canonical_roundtrip import (
     evaluated_fixture_model,
     evaluation_fixture_facts,
@@ -447,3 +451,190 @@ def test_the_pr_summary_card_severities_are_the_stored_verdicts(
     ]
     # The instrument reaches a card on the trusted population.
     assert name != "trusted" or items
+
+
+# -- The withheld verdict, served (the E3 testing debts) -------------------------------
+
+
+def _served_withheld(request: pytest.FixtureRequest, name: str) -> _Served:
+    runs: dict[str, ServedEvaluationRun] = request.getfixturevalue(
+        "served_withheld_runs"
+    )
+    run = runs[name]
+    return _Served(name, _read(run.store_path, run.store_run_ids[0]), run.answers)
+
+
+def test_the_withheld_populations_state_their_word_and_no_number(
+    request: pytest.FixtureRequest,
+) -> None:
+    """The accounting of the two populations below: each answers a health
+    block that names its population and states no score, grade or dimensions
+    — neither the scored block of the serving corpus nor the no-verdict
+    block of the clones-only run."""
+    blocks = {
+        name: _answer(_served_withheld(request, name), "run_summary")["health"]
+        for name in SERVED_WITHHELD_POPULATIONS
+    }
+    assert blocks == {
+        name: {
+            "score": None,
+            "grade": None,
+            "dimensions": None,
+            "population": name,
+            "baseline_diff_available": False,
+            "delta": 0,
+        }
+        for name in SERVED_WITHHELD_POPULATIONS
+    }
+    scored = as_mapping(_answer(_served(request, "missing"), "run_summary")["health"])
+    assert isinstance(scored["score"], int)
+    assert _answer(_served(request, "clones_only"), "run_summary")["health"] == {
+        "available": False,
+        "reason": "metrics_skipped",
+    }
+
+
+@pytest.mark.parametrize("name", list(SERVED_WITHHELD_POPULATIONS))
+@pytest.mark.parametrize("label", ["run_summary", "production_triage"])
+def test_a_withheld_health_block_matches_the_mcp_surface(
+    request: pytest.FixtureRequest, name: str, label: str
+) -> None:
+    """C1.15 / C2.05 on the two withheld populations: the stored verdict
+    reads back withheld — not as "no verdict", not as a number."""
+    served = _served_withheld(request, name)
+    assert _canonical(_answer(served, label)["health"]) == _canonical(
+        health_payload(served.model)
+    )
+
+
+@pytest.mark.parametrize("name", list(SERVED_WITHHELD_POPULATIONS))
+def test_the_withheld_health_row_reads_back_under_its_own_name(
+    served_withheld_runs: dict[str, ServedEvaluationRun], name: str
+) -> None:
+    """The ``health_result`` row of a real withheld run, read alone: one
+    record, its population word, and ``None`` — never an empty tuple — for
+    each of the three withheld values."""
+    run = served_withheld_runs[name]
+    with RunStore(run.store_path) as store:
+        rows = store.read_family(run.store_run_ids[0], FAMILY_HEALTH_RESULT)
+    assert [(row.score, row.grade, row.dimensions, row.population) for row in rows] == [
+        (None, None, None, name)
+    ]
+
+
+# -- C8v.09 / C3.10 / C6v.02: the run comparison (the E3 testing debts) ----------------
+
+
+def _listed_ids(listing: Mapping[str, object]) -> dict[str, str]:
+    """The surface's own short id -> canonical id of every finding it lists."""
+    return {
+        str(as_mapping(item)["id"]): str(as_mapping(item)["canonical_id"])
+        for item in as_sequence(listing["items"])
+    }
+
+
+def _card_severities(comparison: Mapping[str, object], side: str) -> list[str]:
+    return [str(as_mapping(card)["severity"]) for card in as_sequence(comparison[side])]
+
+
+def test_the_run_comparison_carries_every_distinguishing_state(
+    served_run_comparison: ServedEvaluationRun,
+) -> None:
+    """The accounting before the pins below: cards on both sides of the
+    comparison, more than one severity on each; two runs whose health
+    differs; listings that name every finding of their run; and the
+    authority items, whose three verdict words are ONE constant triple by
+    construction (``report.document.findings._build_authority_groups``) —
+    so the pin on them can see a disagreement with the store, never a
+    projection that answers the constant."""
+    answers = served_run_comparison.answers
+    comparison = as_mapping(answers["compare_runs"])
+    assert {
+        side: sorted(set(_card_severities(comparison, side)))
+        for side in ("regressions", "improvements")
+    } == {
+        "regressions": ["critical", "warning"],
+        "improvements": ["critical", "info", "warning"],
+    }
+    verify = as_mapping(answers["patch_verify"])
+    before, after = (as_mapping(verify[side])["health"] for side in ("before", "after"))
+    assert before != after
+    for label in ("list_before", "list_after"):
+        listing = as_mapping(answers[label])
+        assert listing["total"] == len(_listed_ids(listing))
+    items = as_sequence(as_mapping(answers["check_authority_full"])["items"])
+    assert len(items) == 3
+    assert {
+        (as_mapping(item)["severity"], as_mapping(item)["confidence"]) for item in items
+    } == {("warning", "high")}
+    assert {as_mapping(item)["priority"] for item in items} == {1.0}
+
+
+@pytest.mark.parametrize(
+    ("side", "run", "listing"),
+    [("regressions", 1, "list_after"), ("improvements", 0, "list_before")],
+)
+def test_the_run_comparison_card_severities_are_the_stored_verdicts(
+    served_run_comparison: ServedEvaluationRun, side: str, run: int, listing: str
+) -> None:
+    """C3.10's evaluation half: each card of ``compare_runs`` carries the
+    severity the store holds for that finding in the run the card is drawn
+    from — a regression from the later run, an improvement from the earlier
+    one."""
+    served = served_run_comparison
+    model = _read(served.store_path, served.store_run_ids[run])
+    canonical = _listed_ids(as_mapping(served.answers[listing]))
+    comparison = as_mapping(served.answers["compare_runs"])
+    severities = finding_severities(model.facts.evaluation)
+    stated = _card_severities(comparison, side)
+    assert _canonical(stated) == _canonical(
+        [
+            severities[canonical[str(as_mapping(card)["id"])]]
+            for card in as_sequence(comparison[side])
+        ]
+    )
+
+
+def test_the_patch_verification_health_is_each_runs_stored_score(
+    served_run_comparison: ServedEvaluationRun,
+) -> None:
+    """C6v.02's health half: ``before.health`` / ``after.health`` of the
+    patch verification are the two runs' stored scores.  The ``run_id``
+    half is the report identity, which the store does not carry (the bridge
+    indexes it)."""
+    served = served_run_comparison
+    verify = as_mapping(served.answers["patch_verify"])
+    stated = [as_mapping(verify[side])["health"] for side in ("before", "after")]
+    assert stated == [
+        health_score(_read(served.store_path, run_id))
+        for run_id in served.store_run_ids
+    ]
+
+
+def test_the_authority_items_carry_the_stored_verdicts(
+    served_run_comparison: ServedEvaluationRun,
+) -> None:
+    """C8v.09: the severity, confidence and priority ``check_authority``
+    states on each item at full detail are the stored verdict on that
+    finding.  The projection module projects the severity; the confidence
+    and the priority are read off the stored row itself, because no
+    projection of them exists yet.  ``priority_score`` / ``priority_factors``
+    are the surface's own weights and are not stored."""
+    served = served_run_comparison
+    model = _read(served.store_path, served.store_run_ids[0])
+    items = [
+        as_mapping(item)
+        for item in as_sequence(
+            as_mapping(served.answers["check_authority_full"])["items"]
+        )
+    ]
+    severities = finding_severities(model.facts.evaluation)
+    verdicts = {
+        row.finding_id: row for row in model.facts.evaluation.finding_evaluation
+    }
+    stored = [verdicts[str(item["canonical_id"])] for item in items]
+    assert _canonical(
+        [[item["severity"], item["confidence"], item["priority"]] for item in items]
+    ) == _canonical(
+        [[severities[row.finding_id], row.confidence, row.priority] for row in stored]
+    )
