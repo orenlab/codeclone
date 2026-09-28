@@ -267,10 +267,16 @@ def _implant(connection: sqlite3.Connection, family: str, payload: bytes) -> Non
     run_pk, namespace_pk = connection.execute(
         "SELECT run_pk, namespace_pk FROM runs"
     ).fetchone()
+    connection.execute("INSERT OR IGNORE INTO families (family) VALUES (?)", (family,))
     cursor = connection.execute(
-        "INSERT INTO objects (namespace_pk, object_id, family, payload) "
-        "VALUES (?, ?, ?, ?)",
-        (namespace_pk, _object_id(_NS, family, payload), family, payload),
+        "INSERT INTO objects (namespace_pk, object_id, family_pk, payload) "
+        "VALUES (?, ?, (SELECT family_pk FROM families WHERE family = ?), ?)",
+        (
+            namespace_pk,
+            bytes.fromhex(_object_id(_NS, family, payload)),
+            family,
+            payload,
+        ),
     )
     connection.execute(
         "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
@@ -293,7 +299,7 @@ def _refit(
         "SELECT run_pk, analysis_scope_digest FROM runs"
     ).fetchone()
     object_ids = [
-        str(row[0])
+        bytes(row[0]).hex()
         for row in connection.execute(
             "SELECT o.object_id FROM run_members m "
             "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
@@ -523,9 +529,13 @@ def test_export_refuses_an_unknown_stored_family(tmp_path: Path) -> None:
     with RunStore(path) as store:
         run_id = _publish(store, fixture_model())
     with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO families (family) VALUES ('mystery')")
         connection.execute(
-            "UPDATE objects SET family = 'mystery' WHERE object_pk = "
-            "(SELECT object_pk FROM objects WHERE family = 'coupled_set' LIMIT 1)"
+            "UPDATE objects SET family_pk = "
+            "(SELECT family_pk FROM families WHERE family = 'mystery') "
+            "WHERE object_pk = (SELECT o.object_pk FROM objects o "
+            "JOIN families f ON f.family_pk = o.family_pk "
+            "WHERE f.family = 'coupled_set' LIMIT 1)"
         )
         connection.commit()
     with RunStore(path) as store:
@@ -607,12 +617,17 @@ def test_export_refuses_a_well_addressed_non_row_payload(
         _publish(store, fixture_model())
     with sqlite3.connect(path) as connection:
         object_pk = connection.execute(
-            "SELECT object_pk FROM objects WHERE family = 'coupled_set' "
-            "ORDER BY object_id LIMIT 1"
+            "SELECT o.object_pk FROM objects o "
+            "JOIN families f ON f.family_pk = o.family_pk "
+            "WHERE f.family = 'coupled_set' ORDER BY o.object_id LIMIT 1"
         ).fetchone()[0]
         connection.execute(
             "UPDATE objects SET payload = ?, object_id = ? WHERE object_pk = ?",
-            (payload, _object_id(_NS, "coupled_set", payload), object_pk),
+            (
+                payload,
+                bytes.fromhex(_object_id(_NS, "coupled_set", payload)),
+                object_pk,
+            ),
         )
         forged = _refit(connection, update_membership=True, update_run_id=True)
         connection.commit()

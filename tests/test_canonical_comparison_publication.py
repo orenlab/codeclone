@@ -49,8 +49,9 @@ def _published_families(served: ServedRunStoreProjection) -> set[str]:
         return {
             str(row[0])
             for row in connection.execute(
-                "SELECT DISTINCT o.family FROM run_members m "
+                "SELECT DISTINCT f.family FROM run_members m "
                 "JOIN objects o ON o.object_pk = m.object_pk "
+                "JOIN families f ON f.family_pk = o.family_pk "
                 "JOIN runs r ON r.run_pk = m.run_pk WHERE r.run_id = ?",
                 (served.store_run_id,),
             )

@@ -66,6 +66,11 @@ from tests.test_canonical_roundtrip import fixture_model
 _NS: Final = "member-index"
 _TARGET: Final = "worktree"
 _INDEX: Final = "idx_run_members_object"
+#: Every index this build declares except the one under test, so a "before"
+#: store differs from the current one by exactly that index.
+_OTHER_INDEXES: Final = tuple(
+    statement for statement in store_module._INDEXES if _INDEX not in statement
+)
 _GENERATION_1: Final = (
     Path(__file__).parent / "fixtures" / "run_store_generation_1" / "runs.sqlite3"
 )
@@ -143,7 +148,7 @@ def _without_the_index(monkeypatch: pytest.MonkeyPatch) -> None:
     step: the probe-validity asserts below, not this call, are what prove
     the "before" population really carries no index.
     """
-    monkeypatch.setattr(store_module, "_INDEXES", (), raising=False)
+    monkeypatch.setattr(store_module, "_INDEXES", _OTHER_INDEXES, raising=False)
 
 
 # -- presence and plan ------------------------------------------------------
@@ -286,8 +291,9 @@ def _content_address_order(path: Path, run_id: str) -> dict[str, str]:
             (run_id,),
         ).fetchone()
         members = raw.execute(
-            "SELECT o.object_id, o.family, o.payload FROM run_members m "
-            "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
+            "SELECT o.object_id, f.family, o.payload FROM run_members m "
+            "JOIN objects o ON o.object_pk = m.object_pk "
+            "JOIN families f ON f.family_pk = o.family_pk WHERE m.run_pk = ?",
             (run_pk,),
         ).fetchall()
     finally:
@@ -299,7 +305,7 @@ def _content_address_order(path: Path, run_id: str) -> dict[str, str]:
             if stored_family == family.family:
                 store_module._decode_member_object(
                     str(namespace),
-                    str(object_id),
+                    bytes(object_id).hex(),
                     str(stored_family),
                     bytes(payload),
                     collected,
@@ -312,12 +318,13 @@ def _storage_order_disagrees(path: Path, run_id: str, family: str) -> bool:
     raw = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         ids = [
-            str(row[0])
+            bytes(row[0]).hex()
             for row in raw.execute(
                 "SELECT o.object_id FROM run_members m "
                 "JOIN objects o ON o.object_pk = m.object_pk "
+                "JOIN families f ON f.family_pk = o.family_pk "
                 "JOIN runs r ON r.run_pk = m.run_pk "
-                "WHERE r.run_id = ? AND o.family = ? ORDER BY m.object_pk",
+                "WHERE r.run_id = ? AND f.family = ? ORDER BY m.object_pk",
                 (run_id, family),
             )
         ]

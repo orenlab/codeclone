@@ -198,12 +198,13 @@ def _storage_order(store: RunStore, run_id: str, family: str) -> list[str]:
     down -- the order a bounded read must not inherit."""
 
     return [
-        str(row[0])
+        bytes(row[0]).hex()
         for row in store._connection.execute(
             "SELECT o.object_id FROM run_members m "
             "JOIN objects o ON o.object_pk = m.object_pk "
+            "JOIN families f ON f.family_pk = o.family_pk "
             "JOIN runs r ON r.run_pk = m.run_pk "
-            "WHERE r.run_id = ? AND o.family = ? ORDER BY o.object_pk",
+            "WHERE r.run_id = ? AND f.family = ? ORDER BY o.object_pk",
             (run_id, family),
         )
     ]
@@ -559,9 +560,10 @@ def test_the_bounded_read_still_proves_every_row_against_its_content_address(
 
     with sqlite3.connect(path) as raw:
         raw.execute(
-            "UPDATE objects SET payload = ? WHERE family = 'unit_span' "
-            "AND object_pk = (SELECT MIN(object_pk) FROM objects "
-            "WHERE family = 'unit_span')",
+            "UPDATE objects SET payload = ? WHERE object_pk = "
+            "(SELECT MIN(o.object_pk) FROM objects o "
+            "JOIN families f ON f.family_pk = o.family_pk "
+            "WHERE f.family = 'unit_span')",
             (b'{"tampered": true}',),
         )
     raw.close()

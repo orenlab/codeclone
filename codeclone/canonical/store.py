@@ -299,6 +299,25 @@ _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
 )
 
 
+# The container of the model's objects (store-schema audit, 2026-09-28,
+# measured on five repositories from 2.3k to 327k objects per run):
+#
+# * ``objects.object_id`` holds the 32 bytes of the digest, never its hex
+#   spelling -- the file shrank 10.4-15.1 % after ten runs and the automatic
+#   ``UNIQUE`` index 43.6 %, no timing worse than noise.  Hex is spoken at the
+#   API boundary only (:func:`_address_hex`, :func:`_address_bytes`), and the
+#   byte order of a BLOB is the order of its lowercase hex, so every
+#   ``ORDER BY object_id`` keeps its answer.  The ``CHECK`` keeps ``UNIQUE``
+#   meaningful: SQLite never equates a TEXT value with a BLOB, so a hex
+#   spelling of a stored address would otherwise be a second row for the same
+#   object.
+# * A family name is stored once, in ``families``, and ``objects`` carries its
+#   key -- the lookup ``idx_objects_family`` (below) makes one family's
+#   objects findable without walking a run's membership.
+#
+# The representation reaches no content address, no membership digest and no
+# run id: those are computed from hex digests and family NAMES before any row
+# is written.
 _SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS store_meta (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -315,11 +334,16 @@ CREATE TABLE IF NOT EXISTS namespaces (
     namespace_pk INTEGER PRIMARY KEY,
     namespace TEXT NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS families (
+    family_pk INTEGER PRIMARY KEY,
+    family TEXT NOT NULL UNIQUE
+);
 CREATE TABLE IF NOT EXISTS objects (
     object_pk INTEGER PRIMARY KEY,
     namespace_pk INTEGER NOT NULL REFERENCES namespaces(namespace_pk),
-    object_id TEXT NOT NULL,
-    family TEXT NOT NULL,
+    object_id BLOB NOT NULL
+        CHECK (typeof(object_id) = 'blob' AND length(object_id) = 32),
+    family_pk INTEGER NOT NULL REFERENCES families(family_pk),
     payload BLOB NOT NULL,
     UNIQUE (namespace_pk, object_id)
 );
@@ -388,6 +412,14 @@ _INDEXES: Final[tuple[str, ...]] = (
     # ``run_pk`` equality still leads through the primary key) and its
     # ``ORDER BY``.
     "CREATE INDEX IF NOT EXISTS idx_run_members_object ON run_members(object_pk)",
+    # One family's objects, found without the run: the family read
+    # (``_MEMBER_FAMILY_SQL``) starts here and proves each object's
+    # membership with one primary-key probe of ``run_members``.  Measured by
+    # the store-schema audit: every family read was O(run) before it (the
+    # positive control visited 327 354 membership rows to return one), and
+    # with it the family reads' SQL time fell 70.8-84.4 % on five
+    # repositories at +1.6 % of file size.
+    "CREATE INDEX IF NOT EXISTS idx_objects_family ON objects(family_pk)",
 )
 
 
@@ -3328,6 +3360,47 @@ _STORAGE_CLASS: Final[dict[type, str]] = {
 }
 
 
+#: The byte length of a stored content address: one SHA-256 digest.
+_ADDRESS_BYTES: Final = 32
+
+
+def _address_bytes(object_id: str) -> bytes:
+    """The stored form of a content address: the digest's 32 bytes."""
+    return bytes.fromhex(object_id)
+
+
+def _address_hex(value: object) -> str:
+    """The API form of a stored content address, as lowercase hex.
+
+    The column admits nothing but 32 bytes, so a value of another shape is a
+    file whose bytes were changed outside this store -- the same class as a
+    payload stored under the wrong storage class (:func:`_member_payload`),
+    and the same typed integrity refusal rather than a raw ``TypeError``.
+    """
+    if isinstance(value, bytes) and len(value) == _ADDRESS_BYTES:
+        return value.hex()
+    raise StoreIntegrityError(
+        f"stored object address is "
+        f"{_STORAGE_CLASS.get(type(value), type(value).__name__)} "
+        f"of length {len(value) if isinstance(value, (bytes, str)) else '?'}, "
+        f"not a {_ADDRESS_BYTES}-byte BLOB; it cannot address its object"
+    )
+
+
+def _family_keys(cursor: sqlite3.Cursor, families: Sequence[str]) -> dict[str, int]:
+    """``family -> family_pk`` for every named family, adding the missing ones.
+
+    Inside the publication's own write transaction: a family name enters the
+    lookup together with the first object that carries it, or not at all.
+    """
+    for family in sorted(set(families)):
+        cursor.execute("INSERT OR IGNORE INTO families (family) VALUES (?)", (family,))
+    return {
+        str(name): int(key)
+        for key, name in cursor.execute("SELECT family_pk, family FROM families")
+    }
+
+
 def _fence_guard(cursor: sqlite3.Cursor, fence: tuple[int, str, str]) -> None:
     """Refuse the mutation when the store generation moved under the handle
     (brief §4.2: fencing on every mutation, not only at open)."""
@@ -3414,12 +3487,13 @@ def _verify_staged_membership(
     """
     stored_ids: list[str] = []
     for object_id_value, family, payload in cursor.execute(
-        "SELECT o.object_id, o.family, o.payload FROM run_members m "
+        "SELECT o.object_id, f.family, o.payload FROM run_members m "
         "JOIN objects o ON o.object_pk = m.object_pk "
+        "JOIN families f ON f.family_pk = o.family_pk "
         "WHERE m.run_pk = ?",
         (run_pk,),
     ):
-        stored_id = str(object_id_value)
+        stored_id = _address_hex(object_id_value)
         if staged.get(stored_id) != (
             str(family),
             _member_payload(stored_id, payload),
@@ -3452,11 +3526,11 @@ def _lookup_objects(
         chunk = object_ids[start : start + _OBJECT_LOOKUP_CHUNK]
         marks = ",".join("?" * len(chunk))
         known.update(
-            (str(row[0]), int(row[1]))
+            (_address_hex(row[0]), int(row[1]))
             for row in source.execute(
                 "SELECT object_id, object_pk FROM objects "
                 f"WHERE namespace_pk = ? AND object_id IN ({marks})",
-                (namespace_pk, *chunk),
+                (namespace_pk, *map(_address_bytes, chunk)),
             )
         )
     return known
@@ -3619,8 +3693,9 @@ def _reconstruct_run(
     collected: dict[str, list[object]] = {}
     object_ids: list[str] = []
     rows = connection.execute(
-        "SELECT o.object_id, o.family, o.payload FROM run_members m "
+        "SELECT o.object_id, f.family, o.payload FROM run_members m "
         "JOIN objects o ON o.object_pk = m.object_pk "
+        "JOIN families f ON f.family_pk = o.family_pk "
         "WHERE m.run_pk = ? ORDER BY o.object_id",
         (run_pk,),
     )
@@ -3630,14 +3705,15 @@ def _reconstruct_run(
             raise StoreIntegrityError(
                 f"run {run_id!r} carries unknown family {family_name!r}"
             )
+        stored_id = _address_hex(object_id_value)
         _decode_member_object(
             namespace,
-            str(object_id_value),
+            stored_id,
             family_name,
-            _member_payload(object_id_value, payload),
+            _member_payload(stored_id, payload),
             collected,
         )
-        object_ids.append(str(object_id_value))
+        object_ids.append(stored_id)
     model = _collected_model(collected)
     _prove_run_digests(
         object_ids=object_ids,
@@ -3702,10 +3778,20 @@ _WIRE_FAMILY_STORAGE: Final[dict[str, str]] = {
     "violations": "violation",
 }
 
+# One family of one run, read from the OBJECTS side: the family's key, its
+# objects through ``idx_objects_family``, and one primary-key probe of
+# ``run_members`` per object proving it a member of this run.  ``CROSS JOIN``
+# is SQLite's way of fixing that loop order, and it is fixed on purpose:
+# without ``ANALYZE`` statistics the planner keeps walking the run's whole
+# membership and filtering by family (measured by the store-schema audit;
+# ``tests/test_run_store_container_schema.py`` reads the executed plan).
+# Parameters: the family name, then the run key.
 _MEMBER_FAMILY_SQL: Final = (
-    "SELECT o.object_id, o.payload FROM run_members m "
-    "JOIN objects o ON o.object_pk = m.object_pk "
-    "WHERE m.run_pk = ? AND o.family = ? ORDER BY o.object_id"
+    "SELECT o.object_id, o.payload FROM families f "
+    "CROSS JOIN objects o CROSS JOIN run_members m "
+    "WHERE f.family = ? AND o.family_pk = f.family_pk "
+    "AND m.run_pk = ? AND m.object_pk = o.object_pk "
+    "ORDER BY o.object_id"
 )
 
 
@@ -3745,9 +3831,9 @@ def _scan_run_family(
     """Decode one family of one run into its bucket, row by row, proving
     every byte."""
     for object_id_value, payload in connection.execute(
-        _MEMBER_FAMILY_SQL, (run_pk, family)
+        _MEMBER_FAMILY_SQL, (family, run_pk)
     ):
-        stored_id = str(object_id_value)
+        stored_id = _address_hex(object_id_value)
         _decode_member_object(
             namespace, stored_id, family, _member_payload(stored_id, payload), into
         )
@@ -3786,8 +3872,9 @@ def _export_plan(
     stored_families = {
         str(row[0])
         for row in connection.execute(
-            "SELECT DISTINCT o.family FROM run_members m "
+            "SELECT DISTINCT f.family FROM run_members m "
             "JOIN objects o ON o.object_pk = m.object_pk "
+            "JOIN families f ON f.family_pk = o.family_pk "
             "WHERE m.run_pk = ?",
             (run_pk,),
         )
@@ -4409,6 +4496,7 @@ class RunStore:
             _fence_guard(cursor, self._fence)
             namespace_pk = self._namespace_pk(cursor, namespace)
             known = _objects_under_the_lock(cursor, prepared, namespace_pk, object_ids)
+            family_keys = _family_keys(cursor, list(family_counts))
             new_objects = 0
             object_pks: list[int] = []
             for object_id_value in object_ids:
@@ -4417,9 +4505,14 @@ class RunStore:
                     family, payload = staged[object_id_value]
                     cursor.execute(
                         "INSERT INTO objects "
-                        "(namespace_pk, object_id, family, payload) "
+                        "(namespace_pk, object_id, family_pk, payload) "
                         "VALUES (?, ?, ?, ?)",
-                        (namespace_pk, object_id_value, family, payload),
+                        (
+                            namespace_pk,
+                            _address_bytes(object_id_value),
+                            family_keys[family],
+                            payload,
+                        ),
                     )
                     object_pk = int(cursor.lastrowid or 0)
                     new_objects += 1

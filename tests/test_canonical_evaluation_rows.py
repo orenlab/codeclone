@@ -753,7 +753,10 @@ def test_the_evaluation_families_take_no_ddl(tmp_path: Path) -> None:
         }
         families = {
             family
-            for (family,) in connection.execute("SELECT DISTINCT family FROM objects")
+            for (family,) in connection.execute(
+                "SELECT DISTINCT f.family FROM objects o "
+                "JOIN families f ON f.family_pk = o.family_pk"
+            )
         }
     finally:
         connection.close()

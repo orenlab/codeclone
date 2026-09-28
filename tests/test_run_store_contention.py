@@ -397,8 +397,13 @@ def test_the_in_lock_verification_refuses_a_member_whose_family_moved(
 
         def move_one_family() -> None:
             store._connection.execute(
-                "UPDATE objects SET family = 'coupled_set' WHERE object_pk = "
-                "(SELECT MIN(object_pk) FROM objects WHERE family = 'file')"
+                "INSERT OR IGNORE INTO families (family) VALUES ('coupled_set')"
+            )
+            store._connection.execute(
+                "UPDATE objects SET family_pk = "
+                "(SELECT family_pk FROM families WHERE family = 'coupled_set') "
+                "WHERE object_pk = (SELECT MIN(object_pk) FROM objects WHERE "
+                "family_pk = (SELECT family_pk FROM families WHERE family = 'file'))"
             )
 
         monkeypatch.setattr(store, "_before_publish", move_one_family)

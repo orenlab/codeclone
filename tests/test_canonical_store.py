@@ -290,7 +290,7 @@ with tempfile.TemporaryDirectory() as directory:
         )
     with sqlite3.connect(path) as connection:
         objects = [
-            str(row[0])
+            bytes(row[0]).hex()
             for row in connection.execute(
                 "SELECT object_id FROM objects ORDER BY object_id"
             )
@@ -493,13 +493,15 @@ def test_a_prior_generation_store_file_is_refused_not_reopened(
 
     with sqlite3.connect(path) as connection:
         prior_addresses = frozenset(
-            str(row[0]) for row in connection.execute("SELECT object_id FROM objects")
+            bytes(row[0]).hex()
+            for row in connection.execute("SELECT object_id FROM objects")
         )
     with _store(tmp_path, "current.sqlite") as store:
         _publish(store, fixture_model())
     with sqlite3.connect(tmp_path / "current.sqlite") as connection:
         current_addresses = frozenset(
-            str(row[0]) for row in connection.execute("SELECT object_id FROM objects")
+            bytes(row[0]).hex()
+            for row in connection.execute("SELECT object_id FROM objects")
         )
     assert prior_addresses and current_addresses
     assert prior_addresses.isdisjoint(current_addresses)
@@ -1099,12 +1101,14 @@ def test_well_addressed_malformed_payload_is_refused(
         run_id = _publish(store, model).run_id
     with sqlite3.connect(path) as connection:
         row = connection.execute(
-            "SELECT object_pk FROM objects WHERE family = ? ORDER BY object_id LIMIT 1",
+            "SELECT o.object_pk FROM objects o "
+            "JOIN families f ON f.family_pk = o.family_pk "
+            "WHERE f.family = ? ORDER BY o.object_id LIMIT 1",
             (family,),
         ).fetchone()
         connection.execute(
             "UPDATE objects SET payload = ?, object_id = ? WHERE object_pk = ?",
-            (malformed, _object_id(_NS, family, malformed), row[0]),
+            (malformed, bytes.fromhex(_object_id(_NS, family, malformed)), row[0]),
         )
         connection.commit()
     with (
@@ -1150,16 +1154,21 @@ def test_two_run_scalar_records_in_one_run_are_refused(tmp_path: Path) -> None:
             "SELECT run_pk, namespace_pk FROM runs"
         ).fetchone()
         cursor = connection.execute(
-            "INSERT INTO objects (namespace_pk, object_id, family, payload) "
-            "VALUES (?, ?, ?, ?)",
-            (namespace_pk, _object_id(_NS, "run_scalar", second), "run_scalar", second),
+            "INSERT INTO objects (namespace_pk, object_id, family_pk, payload) "
+            "VALUES (?, ?, (SELECT family_pk FROM families WHERE family = ?), ?)",
+            (
+                namespace_pk,
+                bytes.fromhex(_object_id(_NS, "run_scalar", second)),
+                "run_scalar",
+                second,
+            ),
         )
         connection.execute(
             "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
             (run_pk, cursor.lastrowid),
         )
         object_ids = [
-            str(row[0])
+            bytes(row[0]).hex()
             for row in connection.execute(
                 "SELECT o.object_id FROM run_members m "
                 "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
@@ -1191,7 +1200,7 @@ def _refit_the_single_run(connection: sqlite3.Connection, run_pk: int) -> str:
     from codeclone.canonical.store import _membership_digest, _run_id
 
     object_ids = [
-        str(row[0])
+        bytes(row[0]).hex()
         for row in connection.execute(
             "SELECT o.object_id FROM run_members m "
             "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",
@@ -1224,8 +1233,13 @@ def _store_with_a_forged_run_scalar(tmp_path: Path, payload: bytes) -> tuple[Pat
     with sqlite3.connect(path) as connection:
         run_pk = int(connection.execute("SELECT run_pk FROM runs").fetchone()[0])
         connection.execute(
-            "UPDATE objects SET payload = ?, object_id = ? WHERE family = ?",
-            (payload, _object_id(_NS, "run_scalar", payload), "run_scalar"),
+            "UPDATE objects SET payload = ?, object_id = ? WHERE family_pk = "
+            "(SELECT family_pk FROM families WHERE family = ?)",
+            (
+                payload,
+                bytes.fromhex(_object_id(_NS, "run_scalar", payload)),
+                "run_scalar",
+            ),
         )
         forged = _refit_the_single_run(connection, run_pk)
         connection.commit()
@@ -1522,11 +1536,11 @@ def test_two_analysis_population_records_in_one_run_are_refused(
             "SELECT run_pk, namespace_pk FROM runs"
         ).fetchone()
         cursor = connection.execute(
-            "INSERT INTO objects (namespace_pk, object_id, family, payload) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO objects (namespace_pk, object_id, family_pk, payload) "
+            "VALUES (?, ?, (SELECT family_pk FROM families WHERE family = ?), ?)",
             (
                 namespace_pk,
-                _object_id(_NS, "analysis_population", second),
+                bytes.fromhex(_object_id(_NS, "analysis_population", second)),
                 "analysis_population",
                 second,
             ),
@@ -1536,7 +1550,7 @@ def test_two_analysis_population_records_in_one_run_are_refused(
             (run_pk, cursor.lastrowid),
         )
         object_ids = [
-            str(row[0])
+            bytes(row[0]).hex()
             for row in connection.execute(
                 "SELECT o.object_id FROM run_members m "
                 "JOIN objects o ON o.object_pk = m.object_pk WHERE m.run_pk = ?",

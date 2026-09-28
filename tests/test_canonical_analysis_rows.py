@@ -737,7 +737,7 @@ def _publish(store: RunStore, model: CanonicalModel) -> str:
 def test_the_e1_families_take_no_ddl(tmp_path: Path) -> None:
     """The brief's stop condition, measured rather than assumed: the store
     is object-based, so the eleven families ride ``objects(object_id,
-    family, payload)`` under the storage revision E1 inherited — no table,
+    family_pk, payload)`` under the storage revision E1 inherited — no table,
     no index, no schema bump.  Pinned on the schema the store declares and
     on the rows a published run actually lands."""
     assert STORAGE_SCHEMA_REVISION == "1"
@@ -754,7 +754,10 @@ def test_the_e1_families_take_no_ddl(tmp_path: Path) -> None:
         }
         families = {
             family
-            for (family,) in connection.execute("SELECT DISTINCT family FROM objects")
+            for (family,) in connection.execute(
+                "SELECT DISTINCT f.family FROM objects o "
+                "JOIN families f ON f.family_pk = o.family_pk"
+            )
         }
     finally:
         connection.close()
