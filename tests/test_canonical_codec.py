@@ -1409,7 +1409,9 @@ def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> 
     assert body_nine != body, "the declared revision must actually differ"
 
     forged = _sealed_under(body_nine, _GENERATION_9_DOMAIN)
-    root = codec_module._parse_document(forged)
+    root = codec_module._expect_object(
+        codec_module._parse_document(forged), codec_module._ROOT_KEYS, "root"
+    )
     with pytest.raises(WireDecodeError) as caught:
         codec_module._check_integrity(forged, root)
     assert caught.value.code == "W23"
@@ -1418,4 +1420,9 @@ def test_the_seal_is_checked_under_this_build_never_under_the_declared_one() -> 
     # Positive control on the same function: what this build seals, this
     # build verifies -- so the refusal above is the domain, not the door.
     honest = _sealed_under(body, _GENERATION_1_DOMAIN)
-    codec_module._check_integrity(honest, codec_module._parse_document(honest))
+    codec_module._check_integrity(
+        honest,
+        codec_module._expect_object(
+            codec_module._parse_document(honest), codec_module._ROOT_KEYS, "root"
+        ),
+    )

@@ -55,10 +55,10 @@ wave (a record-in-record wire shape the revision-0 grammar does not carry).
 The fact container is a three-house composition (ruling 2026-08-24 §4,
 variant v): :class:`CanonicalFacts` is the pure composition root over
 :class:`AnalysisFacts` (the wire's ``facts`` record tables),
-:class:`ComparisonFacts` (canonical epoch E2: internal model and store state
-until the wire-revision bump) and :class:`EvaluationFacts` (canonical epoch
-E3: the same, for the evaluation tier); :class:`CanonicalModel` adds the
-identity domains, the scope, and the standalone value sets.
+:class:`ComparisonFacts` (canonical epoch E2; the wire's ``comparison``
+member from the E4 generation) and :class:`EvaluationFacts` (canonical epoch
+E3; the wire's ``evaluation`` member from E4); :class:`CanonicalModel` adds
+the identity domains, the scope, and the standalone value sets.
 """
 
 from __future__ import annotations
@@ -1321,14 +1321,12 @@ class ComparisonFacts:
     Canonical epoch E2 (2026-09-26, ruling of the same day): the residents
     the ratified §4 grammar names — baseline witnesses, per-lane trust and
     availability, disabled capabilities, novelty annotations, deltas — are
-    carried here and stored as rows, and they are NOT emitted: the wire and
-    the report document of this revision carry no comparison section, and
-    the section joins with its own wire-revision bump.  Emitting it earlier
-    would make a revision-1 artifact carry semantics its revision does not
-    declare.  A model decoded from the wire therefore carries this house
-    EMPTY, which reads "not witnessed by this artifact" — ``baseline_witness``
-    is ``None`` and the model refuses every other comparison row without it —
-    never "compared, nothing found".
+    carried here and stored as rows.  From the generation bump (canonical
+    epoch E4, wire revision 2) the wire carries them too, as its
+    ``comparison`` member; the report document is unchanged.  A run that was
+    not compared carries this house EMPTY, which reads "not witnessed by this
+    artifact" — ``baseline_witness`` is ``None`` and the model refuses every
+    other comparison row without it — never "compared, nothing found".
 
     The two witnesses are records (one per run, ``None`` is the typed
     absence) and always exist on a witnessed run; the delta families exist
@@ -1374,12 +1372,12 @@ class EvaluationFacts:
     the residents the ratified §4 grammar names — the realized evaluation
     contract, the request, the gate outcome, the health verdict, the band of
     every measured unit, the verdict on every finding and the document's
-    selections — are carried here and stored as rows, and NOT emitted: the
-    wire of this revision carries no evaluation section.  A model decoded
-    from the wire carries this house EMPTY, which reads "not witnessed by this
-    artifact" — the three evaluation records are ``None`` and the model
-    refuses every other evaluation row without them — never "evaluated,
-    nothing concluded".
+    selections — are carried here and stored as rows, and from the generation
+    bump (canonical epoch E4, wire revision 2) the wire carries them as its
+    ``evaluation`` member.  A run that was not evaluated carries this house
+    EMPTY, which reads "not witnessed by this artifact" — the three
+    evaluation records are ``None`` and the model refuses every other
+    evaluation row without them — never "evaluated, nothing concluded".
 
     The four records are one per evaluated run (``None`` is the typed
     absence; ``health_result`` is absent exactly when the metrics never ran);
@@ -2376,6 +2374,18 @@ def _prove_evaluation_facts(facts: CanonicalFacts, files: frozenset[FileId]) -> 
     health = evaluation.health_result
     if facts.comparison.health_delta and (health is None or health.score is None):
         raise CanonicalModelError("a health delta annotates no stated health score")
+
+
+def prove_tier_facts(facts: CanonicalFacts, files: frozenset[FileId]) -> None:
+    """The laws of the comparison and evaluation houses, on their own.
+
+    For a reader that holds the two houses before it holds a model -- the
+    wire decoder, which must name a house that breaks its law (``W28``)
+    apart from a cell no decoder admits (``W27``).  The same two provers
+    :func:`_normalized` runs, not a second spelling of them.
+    """
+    _prove_comparison_facts(facts.comparison)
+    _prove_evaluation_facts(facts, files)
 
 
 def _normalized(model: CanonicalModel) -> CanonicalModel:

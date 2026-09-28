@@ -230,8 +230,14 @@ _TARGET = "worktree-a"
 # 65f9a170…), and the projected bytes moved the artifact digest (fd709bd6… →
 # ce9413ba…).  The split was cache-state provenance: it gave one tree a cold
 # and a warm store run under one report identity.
+# Moved deliberately at the E4 generation bump (2026-09-28, reason: generation
+# bump): the wire gained the ``comparison`` and ``evaluation`` root members,
+# each naming every family of its house even when empty, so the artifact
+# digest moved (ce9413ba… → 990f2011…) while the run id did not -- the wire is
+# a projection, and the container change of the same generation moved no
+# content address either.
 _FIXTURE_RUN_ID = "65f9a17086657049628577c719c1887e511b14704bbad01805f03d5a57195475"
-_FIXTURE_ARTIFACT = "ce9413baead70324b75c92fdb236980b0b199f413a03618ce1b9ab27c9e66dc2"
+_FIXTURE_ARTIFACT = "990f2011b4639d7b6aa0502576da2df6b2852d40cca90dbbea1138605e09e7f3"
 # The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
 _RETIRED_LIVENESS_GENERATION = "4"

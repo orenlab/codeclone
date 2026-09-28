@@ -850,13 +850,13 @@ def test_a_malformed_stored_evaluation_field_is_refused(
         _collect_row(family, row, f"{family} object", {})
 
 
-def test_the_evaluation_house_enters_the_store_run_and_not_the_wire(
+def test_the_evaluation_house_enters_the_store_run_and_the_wire(
     tmp_path: Path,
 ) -> None:
     """The evaluation facts are MEMBERS of the run — its identity names the
-    evaluation it made — while the artifact the run exports is the
-    analysis-only wire, byte for byte.  Two requests over one analysis are
-    two store runs (the input the store bump has to decide)."""
+    evaluation it made — and, from the generation bump, of the artifact the
+    run exports (the E3 negative pin, flipped at E4).  Two requests over one
+    analysis are two store runs (D-10, 2026-09-28)."""
     compared = replace(
         evaluated_fixture_model(),
         facts=replace(
@@ -895,41 +895,42 @@ def test_the_evaluation_house_enters_the_store_run_and_not_the_wire(
         plain_bytes, full_bytes = io.BytesIO(), io.BytesIO()
         plain_envelope = export_run(store, plain, plain_bytes)
         full_envelope = export_run(store, full, full_bytes)
-        assert store.project_run(full) == encode_canonical_json(fixture_model())
+        assert store.project_run(full) == encode_canonical_json(evaluated)
     assert len({plain, full, other}) == 3
-    assert full_bytes.getvalue() == plain_bytes.getvalue()
-    assert full_envelope.artifact_digest == plain_envelope.artifact_digest
+    assert full_bytes.getvalue() == encode_canonical_json(evaluated)
+    assert full_bytes.getvalue() != plain_bytes.getvalue()
+    assert full_envelope.artifact_digest != plain_envelope.artifact_digest
     assert full_envelope.wire_revision == CANONICAL_WIRE_REVISION
 
 
 # ---------------------------------------------------------------------------
-# The negative contract: no evaluation byte on the wire of this revision.
+# The emission contract (flipped at the E4 generation bump): the evaluation
+# house on the wire, the health delta in the comparison member beside it.
 # ---------------------------------------------------------------------------
 
 
-def test_the_wire_carries_no_evaluation_section() -> None:
+def test_the_wire_carries_the_evaluation_section() -> None:
     """Byte for byte AND semantically: the encoding of an evaluated model is
-    the encoding of the same analysis unevaluated, no member of it names an
-    evaluation family, and a decode answers the house empty — "not witnessed
-    by this artifact", never "evaluated, nothing concluded"."""
+    NOT the encoding of the same analysis unevaluated; the house rides its
+    own root member; and a decode answers the house -- and the health delta
+    in the comparison house -- exactly as the model states them."""
     evaluated = evaluated_fixture_model()
     data = encode_canonical_json(evaluated)
-    assert data == encode_canonical_json(fixture_model())
+    assert data != encode_canonical_json(fixture_model())
     document = json.loads(data)
-    assert "evaluation" not in document
+    assert set(document["evaluation"]) == set(EvaluationFacts.__annotations__)
     assert not set(document["facts"]) & set(EvaluationFacts.__annotations__)
-    for family in (entry.family for entry in _EVALUATION_FAMILIES):
-        assert f'"{family}"'.encode() not in data
     decoded = decode_canonical_json(data)
-    assert decoded.facts.evaluation == EvaluationFacts()
-    assert decoded.facts.comparison.health_delta == frozenset()
+    assert decoded.facts.evaluation == evaluated.normalize().facts.evaluation
+    assert decoded.facts.comparison.health_delta == (
+        evaluated.normalize().facts.comparison.health_delta
+    )
+    assert decoded.facts.comparison.health_delta != frozenset()
 
 
-def test_a_revision_one_document_carrying_an_evaluation_section_is_refused() -> None:
+def test_a_document_without_the_evaluation_member_is_refused() -> None:
     document = json.loads(encode_canonical_json(fixture_model()))
-    integrity = document.pop("integrity")
-    document["evaluation"] = {}
-    document["integrity"] = integrity
+    del document["evaluation"]
     with pytest.raises(WireDecodeError) as refusal:
         decode_canonical_json(json.dumps(document, separators=(",", ":")).encode())
     assert refusal.value.code == "W01"

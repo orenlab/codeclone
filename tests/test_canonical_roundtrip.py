@@ -1431,38 +1431,48 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     the model — because until the wire-revision bump the comparison house
     joins no wire member (ruling 2026-09-26).  A comparison byte reaching
     this document without the bump reds the pin beside this one.
+
+    The E4 generation bump (2026-09-28, reason: generation bump) replaced it
+    deliberately (10458 bytes, sha256 d33cfae6… → 11925 bytes, sha256
+    f37dc2c0…): the wire gained the ``comparison`` and ``evaluation`` root
+    members, and the unwitnessed fixture carries both with every family
+    named and empty.  The two pins beside this one flipped with it.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 10458
+    assert len(payload) == 11925
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "d33cfae67368db253f095a0789b3cf129558d8977514abceb9d07e2e5996eb06"
+        == "f37dc2c0f84ef67030c4b74aa339e086068a55e30a8207918160bf210b831ce2"
     )
 
 
-def test_the_comparison_house_does_not_move_the_known_answer_bytes() -> None:
-    """The known-answer pin's second job (canonical epoch E2), held apart
-    from it: the fixture compared against a baseline encodes to the SAME
-    10458 bytes — the literal above, not a second one."""
+def test_the_comparison_house_moves_the_known_answer_bytes() -> None:
+    """The known-answer pin's second job (canonical epoch E2), flipped at the
+    E4 generation bump (reason: generation bump): until E4 the compared
+    fixture encoded to the SAME bytes as the analysis alone (10458, d33cfae6…);
+    from E4 its comparison house rides the ``comparison`` member, so it is a
+    second literal -- 5044 bytes more than the unwitnessed fixture's."""
     payload = encode_canonical_json(comparison_fixture_model())
-    assert len(payload) == 10458
+    assert len(payload) == 16969
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "d33cfae67368db253f095a0789b3cf129558d8977514abceb9d07e2e5996eb06"
+        == "4084b9fa485b62f6c4ccceac76836fb1a5d63bc6142a32942491002fd4299161"
     )
+    assert payload != encode_canonical_json(fixture_model())
 
 
-def test_the_evaluation_house_does_not_move_the_known_answer_bytes() -> None:
-    """The known-answer pin's third job (canonical epoch E3): the fixture
-    compared AND evaluated — every evaluation family and the health delta
-    populated — encodes to the SAME 10458 bytes.  Until the wire-revision
-    bump the evaluation house joins no wire member."""
+def test_the_evaluation_house_moves_the_known_answer_bytes() -> None:
+    """The known-answer pin's third job (canonical epoch E3), flipped at the
+    E4 generation bump (reason: generation bump): the fixture compared AND
+    evaluated — every evaluation family and the health delta populated —
+    carries both houses on the wire, a third literal."""
     payload = encode_canonical_json(evaluated_fixture_model())
-    assert len(payload) == 10458
+    assert len(payload) == 19298
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "d33cfae67368db253f095a0789b3cf129558d8977514abceb9d07e2e5996eb06"
+        == "15babd2a4930d601a133a2bdb845928812e846bec0faa0918b736656372b8839"
     )
+    assert payload != encode_canonical_json(comparison_fixture_model())
 
 
 def test_l1_normalize_is_idempotent() -> None:
@@ -1546,6 +1556,8 @@ def test_wire_fact_families_come_from_the_registry_in_sorted_order() -> None:
         "sets",
         "scope",
         "facts",
+        "comparison",
+        "evaluation",
         "integrity",
     ]
 

@@ -205,7 +205,40 @@ from codeclone.canonical.model import (
     SinkRoleRow,
     UnitSpanRow,
     ViolationRow,
-    novelty_families,
+)
+from codeclone.canonical.stored_fields import (
+    decode_stored_pairs as _decode_stored_pairs,
+)
+from codeclone.canonical.stored_fields import decode_symbol as _decode_symbol
+from codeclone.canonical.stored_fields import require_bool as _require_bool
+from codeclone.canonical.stored_fields import require_field as _require_field
+from codeclone.canonical.stored_fields import require_float as _require_float
+from codeclone.canonical.stored_fields import require_int as _require_int
+from codeclone.canonical.stored_fields import require_line as _require_line
+from codeclone.canonical.stored_fields import (
+    require_optional_str as _require_optional_str,
+)
+from codeclone.canonical.stored_fields import require_str as _require_str
+from codeclone.canonical.stored_fields import require_str_list as _require_str_list
+from codeclone.canonical.stored_fields import row_symbol as _row_symbol
+from codeclone.canonical.stored_fields import symbol_value as _symbol_value
+from codeclone.canonical.tier_storage import (
+    comparison_storage_rows,
+    decode_baseline_witness_row,
+    decode_comparison_availability_row,
+    decode_disabled_capability_row,
+    decode_evaluation_contract_row,
+    decode_evaluation_request_row,
+    decode_finding_evaluation_row,
+    decode_finding_novelty_row,
+    decode_gate_outcome_row,
+    decode_health_result_row,
+    decode_hotlist_row,
+    decode_lane_trust_row,
+    decode_metric_delta_row,
+    decode_metrics_baseline_witness_row,
+    decode_unit_risk_row,
+    evaluation_storage_rows,
 )
 from codeclone.contracts import (
     ADOPTION_COVERAGE_POLICY_VERSION,
@@ -444,19 +477,6 @@ def _payload_bytes(value: object) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError, UnicodeEncodeError) as error:
         raise CanonicalModelError(f"value has no storage form: {error}") from error
-
-
-def _symbol_value(symbol: SymbolId) -> list[str]:
-    return [symbol.file.path, symbol.qualname]
-
-
-def _decode_symbol(value: object, where: str) -> SymbolId:
-    if not isinstance(value, list) or len(value) != 2:
-        raise StoreIntegrityError(f"{where}: stored symbol is not a [path, qualname]")
-    path, qualname = value
-    if not isinstance(path, str) or not isinstance(qualname, str):
-        raise StoreIntegrityError(f"{where}: stored symbol is not a [path, qualname]")
-    return SymbolId(FileId(path), qualname)
 
 
 def _endpoint_value(endpoint: DependencyEndpoint) -> list[str]:
@@ -902,8 +922,8 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
             },
         )
     yield from _observation_model_rows(facts)
-    yield from _comparison_model_rows(model.facts.comparison)
-    yield from _evaluation_model_rows(model.facts.evaluation)
+    yield from comparison_storage_rows(model.facts.comparison)
+    yield from evaluation_storage_rows(model.facts.evaluation)
 
 
 def _observation_model_rows(
@@ -1269,171 +1289,6 @@ def _revision_two_model_rows(
         )
 
 
-def _comparison_model_rows(
-    comparison: ComparisonFacts,
-) -> Iterator[tuple[str, dict[str, object]]]:
-    """Storage rows of the comparison house (canonical epoch E2).
-
-    Every row is stored whole — its baseline identity included — because the
-    comparison it states is against THAT container: two runs compared against
-    two baselines never share a novelty object.  Row order is the same
-    insurance as everywhere in this walk; the content address owns
-    determinism.
-    """
-    yield from _comparison_result_rows(comparison)
-    for trust in sorted(comparison.lane_trust, key=lambda row: row.lane):
-        yield "lane_trust", dict(sorted(asdict(trust).items()))
-    for available in sorted(
-        comparison.comparison_availability, key=lambda row: row.lane
-    ):
-        yield "comparison_availability", dict(sorted(asdict(available).items()))
-    for disabled in sorted(comparison.disabled_capabilities, key=lambda row: row.lane):
-        yield "disabled_capability", dict(sorted(asdict(disabled).items()))
-    for family, rows in novelty_families(comparison):
-        for novelty in sorted(rows, key=lambda row: row.finding_id):
-            yield family, dict(sorted(asdict(novelty).items()))
-
-
-def _comparison_result_rows(
-    comparison: ComparisonFacts,
-) -> Iterator[tuple[str, dict[str, object]]]:
-    """The two witness records and the two delta families' named rows."""
-    for family, record in (
-        ("baseline_witness", comparison.baseline_witness),
-        ("metrics_baseline_witness", comparison.metrics_baseline_witness),
-    ):
-        if record is not None:
-            # One record per run, present iff the model carries it.
-            yield family, dict(sorted(asdict(record).items()))
-    for family, deltas in (
-        ("adoption_delta", comparison.adoption_delta),
-        ("api_surface_delta", comparison.api_surface_delta),
-        ("health_delta", comparison.health_delta),
-    ):
-        for delta in sorted(deltas, key=lambda row: row.delta):
-            yield family, dict(sorted(asdict(delta).items()))
-
-
-def _evaluation_model_rows(
-    evaluation: EvaluationFacts,
-) -> Iterator[tuple[str, dict[str, object]]]:
-    """Storage rows of the evaluation house (canonical epoch E3).
-
-    Every record and row is stored whole: a verdict is what the run concluded
-    under ITS request, and the request digest the records carry keeps two
-    policies' verdicts apart.  Row order is the same insurance as everywhere
-    in this walk; the content address owns determinism.
-    """
-    for family, record in (
-        ("evaluation_contract", evaluation.evaluation_contract),
-        ("evaluation_request", evaluation.evaluation_request),
-        ("gate_outcome", evaluation.gate_outcome),
-        ("health_result", evaluation.health_result),
-    ):
-        if record is not None:
-            yield family, _storage_form(asdict(record))
-    for verdict in sorted(
-        evaluation.finding_evaluation, key=lambda row: row.finding_id
-    ):
-        yield "finding_evaluation", _storage_form(asdict(verdict))
-    for unit in sorted(
-        evaluation.unit_risk_result,
-        key=lambda row: (row.dimension, canonical_key(row.symbol), row.start_line),
-    ):
-        yield (
-            "unit_risk_result",
-            {
-                "band": unit.band,
-                "dimension": unit.dimension,
-                "start_line": unit.start_line,
-                "symbol": _symbol_value(unit.symbol),
-            },
-        )
-    for selected in sorted(
-        evaluation.hotlist_selection, key=lambda row: (row.hotlist, row.rank)
-    ):
-        yield "hotlist_selection", _storage_form(asdict(selected))
-
-
-def _storage_form(fields: Mapping[str, object]) -> dict[str, object]:
-    """A record's storage row: its fields in name order, every tuple as the
-    JSON array it is stored and read back as — so the row this walk yields
-    is the row the decoder reads, not a look-alike."""
-    return {name: _listed(value) for name, value in sorted(fields.items())}
-
-
-def _listed(value: object) -> object:
-    if isinstance(value, tuple):
-        return [_listed(item) for item in value]
-    return value
-
-
-def _require_field(row: Mapping[str, object], key: str, where: str) -> object:
-    if key not in row:
-        raise StoreIntegrityError(f"{where}: stored row is missing {key!r}")
-    return row[key]
-
-
-def _require_int(row: Mapping[str, object], key: str, where: str) -> int:
-    value = _require_field(row, key, where)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise StoreIntegrityError(f"{where}: stored field {key!r} is not an int")
-    return value
-
-
-def _require_optional_str(
-    row: Mapping[str, object], key: str, where: str
-) -> str | None:
-    value = _require_field(row, key, where)
-    if value is not None and not isinstance(value, str):
-        raise StoreIntegrityError(
-            f"{where}: stored field {key!r} is neither a string nor null"
-        )
-    return value
-
-
-def _require_str(row: Mapping[str, object], key: str, where: str) -> str:
-    value = _require_field(row, key, where)
-    if not isinstance(value, str):
-        raise StoreIntegrityError(f"{where}: stored field {key!r} is not a string")
-    return value
-
-
-def _require_str_list(row: Mapping[str, object], key: str, where: str) -> list[str]:
-    return _decode_str_list(_require_field(row, key, where), key, where)
-
-
-def _decode_str_list(values: object, key: str, where: str) -> list[str]:
-    if not isinstance(values, list):
-        raise StoreIntegrityError(f"{where}: stored field {key!r} is not an array")
-    items: list[str] = []
-    for item in values:
-        if not isinstance(item, str):
-            raise StoreIntegrityError(
-                f"{where}: stored field {key!r} carries a non-string"
-            )
-        items.append(item)
-    return items
-
-
-def _require_bool(row: Mapping[str, object], key: str, where: str) -> bool:
-    value = _require_field(row, key, where)
-    if not isinstance(value, bool):
-        raise StoreIntegrityError(f"{where}: stored field {key!r} is not a boolean")
-    return value
-
-
-def _require_line(row: Mapping[str, object], key: str, where: str) -> int:
-    value = _require_field(row, key, where)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise StoreIntegrityError(f"{where}: stored field {key!r} is not an int")
-    return value
-
-
-def _row_symbol(row: Mapping[str, object], key: str, where: str) -> SymbolId:
-    return _decode_symbol(_require_field(row, key, where), where)
-
-
 def _decode_file_row(row: Mapping[str, object], where: str) -> FileId:
     return FileId(_require_str(row, "path", where))
 
@@ -1733,24 +1588,6 @@ def _decode_security_surface_row(
     )
 
 
-def _decode_stored_pairs(value: object, where: str) -> list[tuple[str, object]]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise StoreIntegrityError(f"{where}: stored pairs are not a list")
-    pairs: list[tuple[str, object]] = []
-    for item in value:
-        if (
-            not isinstance(item, Sequence)
-            or isinstance(item, (str, bytes))
-            or len(item) != 2
-            or not isinstance(item[0], str)
-        ):
-            raise StoreIntegrityError(
-                f"{where}: stored pair is not a [name, value] list"
-            )
-        pairs.append((item[0], item[1]))
-    return pairs
-
-
 def _decode_analysis_population_row(
     row: Mapping[str, object], where: str
 ) -> AnalysisPopulation:
@@ -1883,13 +1720,6 @@ def _decode_stored_pairs_of_str(
             raise StoreIntegrityError(f"{where}: stored pair value is not a string")
         pairs.append((key, item))
     return tuple(pairs)
-
-
-def _require_float(row: Mapping[str, object], key: str, where: str) -> float:
-    value = _require_field(row, key, where)
-    if isinstance(value, bool) or not isinstance(value, float):
-        raise StoreIntegrityError(f"{where}: stored field {key!r} is not a float")
-    return value
 
 
 def _decode_suppressed_clone_group_row(
@@ -2043,250 +1873,6 @@ def _decode_dead_code_summary_row(
         nested_candidates=_require_line(row, "nested_candidates", where),
         live_roots=_require_line(row, "live_roots", where),
         world_contract=_require_str(row, "world_contract", where),
-    )
-
-
-def _stored_identity(
-    row: Mapping[str, object], where: str
-) -> tuple[str | None, str | None]:
-    return (
-        _require_optional_str(row, "baseline_scope_id", where),
-        _require_optional_str(row, "root_digest", where),
-    )
-
-
-def _decode_baseline_witness_row(
-    row: Mapping[str, object], where: str
-) -> BaselineWitnessRecord:
-    scope_id, root_digest = _stored_identity(row, where)
-    return BaselineWitnessRecord(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        state=_require_str(row, "state", where),
-        loaded=_require_bool(row, "loaded", where),
-        status=_require_str(row, "status", where),
-        fingerprint_version=_require_optional_str(row, "fingerprint_version", where),
-        schema_version=_require_optional_str(row, "schema_version", where),
-        python_tag=_require_optional_str(row, "python_tag", where),
-        payload_sha256=_require_optional_str(row, "payload_sha256", where),
-    )
-
-
-def _decode_metrics_baseline_witness_row(
-    row: Mapping[str, object], where: str
-) -> MetricsBaselineWitnessRecord:
-    scope_id, root_digest = _stored_identity(row, where)
-    return MetricsBaselineWitnessRecord(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        loaded=_require_bool(row, "loaded", where),
-        status=_require_str(row, "status", where),
-        schema_version=_require_optional_str(row, "schema_version", where),
-        payload_sha256=_require_optional_str(row, "payload_sha256", where),
-    )
-
-
-def _decode_lane_trust_row(row: Mapping[str, object], where: str) -> LaneTrustRow:
-    scope_id, root_digest = _stored_identity(row, where)
-    return LaneTrustRow(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        lane=_require_str(row, "lane", where),
-        status=_require_str(row, "status", where),
-        reason=_require_str(row, "reason", where),
-    )
-
-
-def _decode_comparison_availability_row(
-    row: Mapping[str, object], where: str
-) -> ComparisonAvailabilityRow:
-    scope_id, root_digest = _stored_identity(row, where)
-    return ComparisonAvailabilityRow(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        lane=_require_str(row, "lane", where),
-        availability=_require_str(row, "availability", where),
-    )
-
-
-def _decode_disabled_capability_row(
-    row: Mapping[str, object], where: str
-) -> DisabledCapabilityRow:
-    scope_id, root_digest = _stored_identity(row, where)
-    return DisabledCapabilityRow(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        lane=_require_str(row, "lane", where),
-    )
-
-
-def _decode_finding_novelty_row(
-    row: Mapping[str, object], where: str
-) -> FindingNoveltyRow:
-    scope_id, root_digest = _stored_identity(row, where)
-    return FindingNoveltyRow(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        finding_id=_require_str(row, "finding_id", where),
-        novelty=_require_str(row, "novelty", where),
-        novelty_reason=_require_optional_str(row, "novelty_reason", where),
-    )
-
-
-def _decode_metric_delta_row(row: Mapping[str, object], where: str) -> MetricDeltaRow:
-    scope_id, root_digest = _stored_identity(row, where)
-    return MetricDeltaRow(
-        baseline_scope_id=scope_id,
-        root_digest=root_digest,
-        delta=_require_str(row, "delta", where),
-        value=_require_int(row, "value", where),
-    )
-
-
-def _require_optional_int(
-    row: Mapping[str, object], key: str, where: str
-) -> int | None:
-    value = _require_field(row, key, where)
-    if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
-        raise StoreIntegrityError(
-            f"{where}: stored field {key!r} is neither an int nor null"
-        )
-    return value
-
-
-def _decode_request_terms(value: object, where: str) -> tuple[tuple[str, int], ...]:
-    """Request terms: every value an int or a boolean (``bool`` is an ``int``
-    here; the record's own law holds each term to its declared type)."""
-    terms: list[tuple[str, int]] = []
-    for name, term in _decode_stored_pairs(value, where):
-        if not isinstance(term, int):
-            raise StoreIntegrityError(f"{where}: stored term {name!r} is not an int")
-        terms.append((name, term))
-    return tuple(terms)
-
-
-def _decode_numeric_pairs(
-    value: object, where: str
-) -> tuple[tuple[str, int | float], ...]:
-    pairs: list[tuple[str, int | float]] = []
-    for name, number in _decode_stored_pairs(value, where):
-        if isinstance(number, bool) or not isinstance(number, (int, float)):
-            raise StoreIntegrityError(
-                f"{where}: stored value of {name!r} is not a number"
-            )
-        pairs.append((name, number))
-    return tuple(pairs)
-
-
-def _decode_gate_requirements(
-    value: object, where: str
-) -> tuple[tuple[str, tuple[str, ...]], ...]:
-    return tuple(
-        (gate, tuple(_decode_str_list(lanes, f"lanes of {gate}", where)))
-        for gate, lanes in _decode_stored_pairs(value, where)
-    )
-
-
-def _decode_evaluation_request_row(
-    row: Mapping[str, object], where: str
-) -> EvaluationRequestRecord:
-    return EvaluationRequestRecord(
-        gate_thresholds_digest=_require_str(row, "gate_thresholds_digest", where),
-        terms=_decode_request_terms(_require_field(row, "terms", where), where),
-    )
-
-
-def _decode_evaluation_contract_row(
-    row: Mapping[str, object], where: str
-) -> EvaluationContractRecord:
-    return EvaluationContractRecord(
-        gate_thresholds_digest=_require_str(row, "gate_thresholds_digest", where),
-        health_algorithm_revision=_require_str(row, "health_algorithm_revision", where),
-        gate_algorithm_revision=_require_str(row, "gate_algorithm_revision", where),
-        gate_lane_matrix_version=_require_str(row, "gate_lane_matrix_version", where),
-        health_input_manifest_version=_require_str(
-            row, "health_input_manifest_version", where
-        ),
-        health_input_lanes=tuple(_require_str_list(row, "health_input_lanes", where)),
-        active_gate_lane_requirements=_decode_gate_requirements(
-            _require_field(row, "active_gate_lane_requirements", where), where
-        ),
-        health_params=_decode_numeric_pairs(
-            _require_field(row, "health_params", where), where
-        ),
-    )
-
-
-def _decode_gate_outcome_row(
-    row: Mapping[str, object], where: str
-) -> GateOutcomeRecord:
-    return GateOutcomeRecord(
-        gate_thresholds_digest=_require_str(row, "gate_thresholds_digest", where),
-        exit_code=_require_int(row, "exit_code", where),
-        reasons=tuple(_require_str_list(row, "reasons", where)),
-        required_lanes=tuple(_require_str_list(row, "required_lanes", where)),
-        unavailable_lanes=tuple(_require_str_list(row, "unavailable_lanes", where)),
-    )
-
-
-def _decode_health_dimensions(
-    value: object, where: str
-) -> tuple[tuple[str, int], ...] | None:
-    if value is None:
-        return None
-    dimensions: list[tuple[str, int]] = []
-    for name, score in _decode_numeric_pairs(value, where):
-        if not isinstance(score, int):
-            raise StoreIntegrityError(
-                f"{where}: stored dimension {name!r} is not an int"
-            )
-        dimensions.append((name, score))
-    return tuple(dimensions)
-
-
-def _decode_health_result_row(
-    row: Mapping[str, object], where: str
-) -> HealthResultRecord:
-    return HealthResultRecord(
-        score=_require_optional_int(row, "score", where),
-        grade=_require_optional_str(row, "grade", where),
-        dimensions=_decode_health_dimensions(
-            _require_field(row, "dimensions", where), where
-        ),
-        population=_require_str(row, "population", where),
-        health_algorithm_revision=_require_str(row, "health_algorithm_revision", where),
-        health_input_manifest_version=_require_str(
-            row, "health_input_manifest_version", where
-        ),
-    )
-
-
-def _decode_unit_risk_row(row: Mapping[str, object], where: str) -> UnitRiskRow:
-    return UnitRiskRow(
-        dimension=_require_str(row, "dimension", where),
-        symbol=_row_symbol(row, "symbol", where),
-        start_line=_require_line(row, "start_line", where),
-        band=_require_str(row, "band", where),
-    )
-
-
-def _decode_finding_evaluation_row(
-    row: Mapping[str, object], where: str
-) -> FindingEvaluationRow:
-    return FindingEvaluationRow(
-        finding_id=_require_str(row, "finding_id", where),
-        severity=_require_str(row, "severity", where),
-        confidence=_require_str(row, "confidence", where),
-        priority=_require_float(row, "priority", where),
-        clone_type=_require_optional_str(row, "clone_type", where),
-    )
-
-
-def _decode_hotlist_row(row: Mapping[str, object], where: str) -> HotlistRow:
-    return HotlistRow(
-        hotlist=_require_str(row, "hotlist", where),
-        rank=_require_int(row, "rank", where),
-        finding_id=_require_str(row, "finding_id", where),
     )
 
 
@@ -2665,37 +2251,37 @@ _METRICS_BASELINE_NAMESPACE: Final = (
 FAMILY_BASELINE_WITNESS: Final = StoredFamily(
     family="baseline_witness",
     namespace=_BASELINE_NAMESPACE,
-    decode=_decode_baseline_witness_row,
+    decode=decode_baseline_witness_row,
     row_type=BaselineWitnessRecord,
 )
 FAMILY_METRICS_BASELINE_WITNESS: Final = StoredFamily(
     family="metrics_baseline_witness",
     namespace=_METRICS_BASELINE_NAMESPACE,
-    decode=_decode_metrics_baseline_witness_row,
+    decode=decode_metrics_baseline_witness_row,
     row_type=MetricsBaselineWitnessRecord,
 )
 FAMILY_LANE_TRUST: Final = StoredFamily(
     family="lane_trust",
     namespace=_BASELINE_NAMESPACE,
-    decode=_decode_lane_trust_row,
+    decode=decode_lane_trust_row,
     row_type=LaneTrustRow,
 )
 FAMILY_COMPARISON_AVAILABILITY: Final = StoredFamily(
     family="comparison_availability",
     namespace=_BASELINE_NAMESPACE,
-    decode=_decode_comparison_availability_row,
+    decode=decode_comparison_availability_row,
     row_type=ComparisonAvailabilityRow,
 )
 FAMILY_DISABLED_CAPABILITY: Final = StoredFamily(
     family="disabled_capability",
     namespace=_BASELINE_NAMESPACE,
-    decode=_decode_disabled_capability_row,
+    decode=decode_disabled_capability_row,
     row_type=DisabledCapabilityRow,
 )
 FAMILY_CLONE_NOVELTY: Final = StoredFamily(
     family="clone_novelty",
     namespace=f"clone_fingerprint:{BASELINE_FINGERPRINT_VERSION}:{_BASELINE_NAMESPACE}",
-    decode=_decode_finding_novelty_row,
+    decode=decode_finding_novelty_row,
     row_type=FindingNoveltyRow,
 )
 FAMILY_COMPLEXITY_NOVELTY: Final = StoredFamily(
@@ -2703,37 +2289,37 @@ FAMILY_COMPLEXITY_NOVELTY: Final = StoredFamily(
     namespace=(
         f"complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}:{_BASELINE_NAMESPACE}"
     ),
-    decode=_decode_finding_novelty_row,
+    decode=decode_finding_novelty_row,
     row_type=FindingNoveltyRow,
 )
 FAMILY_COUPLING_NOVELTY: Final = StoredFamily(
     family="coupling_novelty",
     namespace=f"design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}:{_BASELINE_NAMESPACE}",
-    decode=_decode_finding_novelty_row,
+    decode=decode_finding_novelty_row,
     row_type=FindingNoveltyRow,
 )
 FAMILY_DEAD_SYMBOL_NOVELTY: Final = StoredFamily(
     family="dead_symbol_novelty",
     namespace=f"liveness:{LIVENESS_POLICY_VERSION}:{_BASELINE_NAMESPACE}",
-    decode=_decode_finding_novelty_row,
+    decode=decode_finding_novelty_row,
     row_type=FindingNoveltyRow,
 )
 FAMILY_DEPENDENCY_CYCLE_NOVELTY: Final = StoredFamily(
     family="dependency_cycle_novelty",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}:{_BASELINE_NAMESPACE}",
-    decode=_decode_finding_novelty_row,
+    decode=decode_finding_novelty_row,
     row_type=FindingNoveltyRow,
 )
 FAMILY_ADOPTION_DELTA: Final = StoredFamily(
     family="adoption_delta",
     namespace=_METRICS_BASELINE_NAMESPACE,
-    decode=_decode_metric_delta_row,
+    decode=decode_metric_delta_row,
     row_type=MetricDeltaRow,
 )
 FAMILY_API_SURFACE_DELTA: Final = StoredFamily(
     family="api_surface_delta",
     namespace=_METRICS_BASELINE_NAMESPACE,
-    decode=_decode_metric_delta_row,
+    decode=decode_metric_delta_row,
     row_type=MetricDeltaRow,
 )
 
@@ -2743,7 +2329,7 @@ FAMILY_HEALTH_DELTA: Final = StoredFamily(
         f"{_METRICS_BASELINE_NAMESPACE}:health_algorithm:{HEALTH_ALGORITHM_REVISION}"
         f":health_input_manifest:{HEALTH_INPUT_MANIFEST_VERSION}"
     ),
-    decode=_decode_metric_delta_row,
+    decode=decode_metric_delta_row,
     row_type=MetricDeltaRow,
 )
 
@@ -2767,25 +2353,25 @@ _HEALTH_NAMESPACE: Final = (
 FAMILY_EVALUATION_CONTRACT: Final = StoredFamily(
     family="evaluation_contract",
     namespace=f"{_GATE_NAMESPACE}:{_HEALTH_NAMESPACE}",
-    decode=_decode_evaluation_contract_row,
+    decode=decode_evaluation_contract_row,
     row_type=EvaluationContractRecord,
 )
 FAMILY_EVALUATION_REQUEST: Final = StoredFamily(
     family="evaluation_request",
     namespace=_GATE_NAMESPACE,
-    decode=_decode_evaluation_request_row,
+    decode=decode_evaluation_request_row,
     row_type=EvaluationRequestRecord,
 )
 FAMILY_GATE_OUTCOME: Final = StoredFamily(
     family="gate_outcome",
     namespace=_GATE_NAMESPACE,
-    decode=_decode_gate_outcome_row,
+    decode=decode_gate_outcome_row,
     row_type=GateOutcomeRecord,
 )
 FAMILY_HEALTH_RESULT: Final = StoredFamily(
     family="health_result",
     namespace=_HEALTH_NAMESPACE,
-    decode=_decode_health_result_row,
+    decode=decode_health_result_row,
     row_type=HealthResultRecord,
 )
 FAMILY_UNIT_RISK_RESULT: Final = StoredFamily(
@@ -2794,19 +2380,19 @@ FAMILY_UNIT_RISK_RESULT: Final = StoredFamily(
         f"{_HEALTH_NAMESPACE}:complexity_metrics:{COMPLEXITY_ALGORITHM_REVISION}"
         f":design_metrics:{DESIGN_METRICS_ALGORITHM_REVISION}"
     ),
-    decode=_decode_unit_risk_row,
+    decode=decode_unit_risk_row,
     row_type=UnitRiskRow,
 )
 FAMILY_FINDING_EVALUATION: Final = StoredFamily(
     family="finding_evaluation",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    decode=_decode_finding_evaluation_row,
+    decode=decode_finding_evaluation_row,
     row_type=FindingEvaluationRow,
 )
 FAMILY_HOTLIST_SELECTION: Final = StoredFamily(
     family="hotlist_selection",
     namespace=f"canonical_model:{CANONICAL_MODEL_REVISION}",
-    decode=_decode_hotlist_row,
+    decode=decode_hotlist_row,
     row_type=HotlistRow,
 )
 
@@ -2874,6 +2460,30 @@ _FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
 # the SAME declarations, so a family cannot exist for one and be missing for
 # the other.  Dispatch is total over _FAMILY_NAMESPACE by construction; an
 # unknown family is a typed integrity refusal, never a silent skip.
+#: The families of the comparison and evaluation houses -- the part of a run
+#: the bounded export streams as the wire's two tier members.
+_TIER_FAMILIES: Final[tuple[_FamilyEntry, ...]] = (
+    FAMILY_ADOPTION_DELTA,
+    FAMILY_API_SURFACE_DELTA,
+    FAMILY_BASELINE_WITNESS,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COMPARISON_AVAILABILITY,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_DISABLED_CAPABILITY,
+    FAMILY_HEALTH_DELTA,
+    FAMILY_LANE_TRUST,
+    FAMILY_METRICS_BASELINE_WITNESS,
+    FAMILY_EVALUATION_CONTRACT,
+    FAMILY_EVALUATION_REQUEST,
+    FAMILY_FINDING_EVALUATION,
+    FAMILY_GATE_OUTCOME,
+    FAMILY_HEALTH_RESULT,
+    FAMILY_HOTLIST_SELECTION,
+    FAMILY_UNIT_RISK_RESULT,
+)
 _FAMILY_READER: Final[dict[str, _FamilyEntry]] = {
     entry.family: entry for entry in _FAMILIES
 }
@@ -3852,6 +3462,19 @@ def _family_facts(
     return _collected_model(rows).facts.analysis
 
 
+def _tier_houses(
+    connection: sqlite3.Connection, run_pk: int, namespace: str
+) -> tuple[ComparisonFacts, EvaluationFacts]:
+    """The comparison and evaluation houses of one run, for the second export
+    pass: only their own families are read, each proven against its content
+    address, and assembled by the same laws as the materializing read."""
+    rows: dict[str, list[object]] = {}
+    object_ids: list[str] = []
+    for entry in _TIER_FAMILIES:
+        _scan_run_family(connection, run_pk, namespace, entry.family, object_ids, rows)
+    return _collected_comparison(rows), _collected_evaluation(rows)
+
+
 def _export_plan(
     connection: sqlite3.Connection,
     *,
@@ -3964,6 +3587,7 @@ def _stream_export(
         plan,
         lambda family: _family_facts(connection, run_pk, namespace, family),
         stream.write,
+        lambda: _tier_houses(connection, run_pk, namespace),
     )
     return ExportEnvelope(
         run_id=run_id,

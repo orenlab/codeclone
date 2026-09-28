@@ -2272,11 +2272,11 @@ require_analysis_wire_families(
 # ---------------------------------------------------------------------------
 # Canonical epoch E2 (2026-09-26): the comparison tier.
 #
-# These families are internal model and store state until the wire-revision
-# bump: every declaration is ``wire=False``, the wire order above never names
-# them, and the analysis wire gate refuses them.  The declaration still
-# carries the same epistemics — a stored comparison fact, or a value derived
-# from one through its named owner, declared and never stored.
+# Model and store state from E2; on the wire from the generation bump (E4),
+# as the ``comparison`` root member -- never inside ``facts``: the wire order
+# above never names them and the analysis wire gate refuses them.  A stored
+# comparison fact is a wire cell (``wire=True``); a value derived from one
+# through its named owner is declared and neither stored nor emitted.
 # ---------------------------------------------------------------------------
 
 _COMPARISON_FACT: Final = "comparison_fact"
@@ -2284,7 +2284,7 @@ _COMPARISON_FACT: Final = "comparison_fact"
 
 def _stored(field: str, owner: str, derivation: str) -> FieldDeclaration:
     return FieldDeclaration(
-        field, _COMPARISON_FACT, owner, derivation, stored=True, wire=False
+        field, _COMPARISON_FACT, owner, derivation, stored=True, wire=True
     )
 
 
@@ -2498,11 +2498,11 @@ def comparison_stored_fields(family: str) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 # Canonical epoch E3 (2026-09-27): the evaluation tier.
 #
-# Internal model and store state until the wire-revision bump, exactly as the
-# comparison tier: every declaration is ``wire=False`` and the analysis wire
-# gate refuses the families.  A stored evaluation fact is what THIS run
-# concluded under its own request; a value derived from one through its named
-# owner is declared and never stored.
+# Model and store state from E3; on the wire from the generation bump (E4) as
+# the ``evaluation`` root member, exactly as the comparison tier, and the
+# analysis wire gate still refuses the families.  A stored evaluation fact is
+# what THIS run concluded under its own request, and a wire cell; a value
+# derived from one through its named owner is declared and never stored.
 # ---------------------------------------------------------------------------
 
 _EVALUATION_FACT: Final = "evaluation_fact"
@@ -2510,7 +2510,7 @@ _EVALUATION_FACT: Final = "evaluation_fact"
 
 def _evaluated(field: str, owner: str, derivation: str) -> FieldDeclaration:
     return FieldDeclaration(
-        field, _EVALUATION_FACT, owner, derivation, stored=True, wire=False
+        field, _EVALUATION_FACT, owner, derivation, stored=True, wire=True
     )
 
 

@@ -110,12 +110,12 @@ from codeclone.canonical.store import (
     _decode_source_locations,
     _decode_symbol_set,
     _payload_bytes,
-    _require_bool,
-    _require_field,
     _require_publish_inputs,
-    _require_str,
-    _require_str_list,
 )
+from codeclone.canonical.stored_fields import require_bool as _require_bool
+from codeclone.canonical.stored_fields import require_field as _require_field
+from codeclone.canonical.stored_fields import require_str as _require_str
+from codeclone.canonical.stored_fields import require_str_list as _require_str_list
 from codeclone.contracts import STORAGE_SCHEMA_REVISION
 from tests.test_canonical_roundtrip import evaluated_fixture_model, fixture_model
 

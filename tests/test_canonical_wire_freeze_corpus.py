@@ -21,17 +21,14 @@ Phase 39S test-import law.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from codeclone.canonical import (
     ADOPTION_FEATURES,
     AdoptionCountRow,
     CanonicalModel,
-    ComparisonFacts,
     DeadCodeObservationRow,
     DependencyCycleRow,
-    EvaluationFacts,
     FileId,
     ModuleId,
     ModuleSymbol,
@@ -311,12 +308,13 @@ def test_f5_canonical_family_carries_the_overload_corpus_symbols(
 
 
 def _wire_view(model: CanonicalModel) -> CanonicalModel:
-    """What the wire of this revision carries of an ingested model.
+    """What the wire carries of an ingested model: all of it.
 
-    Canonical epoch E2: the document witnessed its comparison (no container:
-    ``missing``) and the model carries it — the store keeps it, the wire of
-    this revision does not, so the decode answers the house empty.  Canonical
-    epoch E3: the same for the evaluation the document witnessed.
+    Canonical epochs E2 and E3: the document witnessed its comparison (no
+    container: ``missing``) and its evaluation, and the model carries both.
+    Until the E4 generation bump the wire did not, so the decode answered
+    both houses empty; from E4 it carries them, and the decode answers the
+    model whole (reason: generation bump).
     """
     normalized = model.normalize()
     witnesses = (
@@ -324,14 +322,7 @@ def _wire_view(model: CanonicalModel) -> CanonicalModel:
         normalized.facts.evaluation.gate_outcome,
     )
     assert None not in witnesses
-    return replace(
-        normalized,
-        facts=replace(
-            normalized.facts,
-            comparison=ComparisonFacts(),
-            evaluation=EvaluationFacts(),
-        ),
-    )
+    return normalized
 
 
 def test_f5_overload_corpus_ingests_whole_and_satisfies_l8(

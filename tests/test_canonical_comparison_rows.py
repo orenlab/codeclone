@@ -680,13 +680,13 @@ def test_two_stored_comparison_records_of_one_run_are_a_writer_defect(
         _collected_model({family: [value, value]})
 
 
-def test_the_comparison_house_enters_the_store_run_and_not_the_wire(
+def test_the_comparison_house_enters_the_store_run_and_the_wire(
     tmp_path: Path,
 ) -> None:
     """The comparison facts are MEMBERS of the run — its identity names the
-    comparison it made — while the artifact the run exports is the
-    analysis-only wire, byte for byte: until the wire-revision bump the
-    export carries no comparison section."""
+    comparison it made — and, from the generation bump, of the artifact the
+    run exports: the compared run exports the compared model's bytes, not
+    the analysis-only ones (the E2 negative pin, flipped at E4)."""
     analysis_only = fixture_model()
     compared = comparison_fixture_model()
     with RunStore(tmp_path / "runs.sqlite3") as store:
@@ -695,46 +695,41 @@ def test_the_comparison_house_enters_the_store_run_and_not_the_wire(
         plain_bytes, full_bytes = io.BytesIO(), io.BytesIO()
         plain_envelope = export_run(store, plain, plain_bytes)
         full_envelope = export_run(store, full, full_bytes)
-        assert store.project_run(full) == encode_canonical_json(analysis_only)
+        assert store.project_run(full) == encode_canonical_json(compared)
     assert plain != full
-    assert full_bytes.getvalue() == plain_bytes.getvalue()
-    assert full_envelope.artifact_digest == plain_envelope.artifact_digest
+    assert full_bytes.getvalue() == encode_canonical_json(compared)
+    assert full_bytes.getvalue() != plain_bytes.getvalue()
+    assert full_envelope.artifact_digest != plain_envelope.artifact_digest
     assert full_envelope.wire_revision == CANONICAL_WIRE_REVISION
 
 
 # ---------------------------------------------------------------------------
-# The negative contract: no comparison byte on the wire of this revision.
+# The emission contract (flipped at the E4 generation bump): the comparison
+# house on the wire, outside ``facts``, read back whole.
 # ---------------------------------------------------------------------------
 
 
-def test_the_wire_carries_no_comparison_section() -> None:
+def test_the_wire_carries_the_comparison_section() -> None:
     """Byte for byte AND semantically: the encoding of a model compared
-    against a baseline is the encoding of the same analysis uncompared, no
-    member of it names a comparison family, and a decode answers the house
-    empty — "not witnessed by this artifact", never "compared, nothing"."""
+    against a baseline is NOT the encoding of the same analysis uncompared;
+    the house rides its own root member, never ``facts``; and a decode
+    answers the house exactly as the model states it."""
     compared = comparison_fixture_model()
     data = encode_canonical_json(compared)
-    assert data == encode_canonical_json(fixture_model())
+    assert data != encode_canonical_json(fixture_model())
     document = json.loads(data)
-    assert "comparison" not in document
+    assert set(document["comparison"]) == set(ComparisonFacts.__annotations__)
     assert not set(document["facts"]) & set(ComparisonFacts.__annotations__)
-    for family in (entry.family for entry in _COMPARISON_FAMILIES):
-        assert f'"{family}"'.encode() not in data
     decoded = decode_canonical_json(data)
-    assert decoded.facts.comparison == ComparisonFacts()
-    assert decoded == replace(
-        compared.normalize(),
-        facts=replace(compared.normalize().facts, comparison=ComparisonFacts()),
-    )
+    assert decoded.facts.comparison == compared.normalize().facts.comparison
+    assert decoded == compared.normalize()
 
 
-def test_a_revision_one_document_carrying_a_comparison_section_is_refused() -> None:
-    """The reader's half of the fence: a comparison member under wire
-    revision 1 is not a document this revision reads."""
+def test_a_document_without_the_comparison_member_is_refused() -> None:
+    """The reader's half: a document of this revision that lacks the member
+    is not one this revision reads."""
     document = json.loads(encode_canonical_json(fixture_model()))
-    integrity = document.pop("integrity")
-    document["comparison"] = {}
-    document["integrity"] = integrity
+    del document["comparison"]
     with pytest.raises(WireDecodeError) as refusal:
         decode_canonical_json(json.dumps(document, separators=(",", ":")).encode())
     assert refusal.value.code == "W01"

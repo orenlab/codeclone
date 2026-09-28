@@ -10,14 +10,23 @@ The codec owns its own serializer: the legacy ``orjson OPT_SORT_KEYS``
 canonizer sorts the top level and silently turns NaN into ``null`` — both
 violate this contract, so it is never called here.
 
-Wire revision 0 grammar (root keys, declared order — every reference points
-backward, never forward)::
+Wire grammar (root keys, declared order — every reference points backward,
+never forward)::
 
-    format · revisions · values · domains · sets · scope · facts · integrity
+    format · revisions · values · domains · sets · scope · facts ·
+    comparison · evaluation · integrity
 
-``comparison`` and ``evaluation`` join in later waves with a wire revision
-bump: emitting an empty object today would present "not populated by this
-model revision" as "measured empty", which the four-state law forbids.
+``comparison`` and ``evaluation`` (canonical epoch E4, the generation that
+also moved the wire revision) carry the two houses the model grew in epochs
+E2 and E3.  Each names every family of its house, in sorted order, even when
+the house is empty -- an unwitnessed run is a ``comparison`` member whose
+witness record is ``{}``, never a member a reader could take for "not
+emitted".  A record family is ONE object of its stored fields (``{}`` is its
+absence); a row family is one column per stored field.  The cells are the
+store's own row form (:mod:`codeclone.canonical.tier_storage`) and admit
+what that form holds and the analysis tables do not: ``null``, ``true`` /
+``false`` and signed integers.  A cell no row decoder admits is refused
+(``W27``); well-formed rows whose house breaks its law are refused (``W28``).
 
 Canonical byte laws implemented here:
 
@@ -85,7 +94,11 @@ from codeclone.canonical.authority_identity import (
     legacy_symbol_key,
     violation_handle,
 )
-from codeclone.canonical.errors import CanonicalModelError, WireDecodeError
+from codeclone.canonical.errors import (
+    CanonicalModelError,
+    StoreIntegrityError,
+    WireDecodeError,
+)
 from codeclone.canonical.identity import (
     ADOPTION_FEATURES,
     API_PARAMETER_KINDS,
@@ -169,12 +182,14 @@ from codeclone.canonical.model import (
     CanonicalFacts,
     CanonicalModel,
     CloneGroupRow,
+    ComparisonFacts,
     ContractRow,
     CouplingCohesionRow,
     DeadCodeObservationRow,
     DependencyCycleRow,
     DependencyOccurrenceRow,
     DependencyRelationRow,
+    EvaluationFacts,
     FileModuleRelation,
     GraphNodeRow,
     ImportObservationRow,
@@ -186,12 +201,21 @@ from codeclone.canonical.model import (
     SinkRoleRow,
     UnitSpanRow,
     ViolationRow,
+    prove_tier_facts,
 )
 from codeclone.canonical.registry import (
     is_record_family,
     sparse_bool_wire_columns,
     wire_columns,
     wire_fact_family_order,
+)
+from codeclone.canonical.tier_storage import (
+    TierFamily,
+    TierHouse,
+    comparison_house,
+    evaluation_house,
+    tier_families,
+    tier_rows,
 )
 from codeclone.contracts import (
     AUTHORITY_ANALYSIS_REVISION,
@@ -210,8 +234,13 @@ _ROOT_KEYS = (
     "sets",
     "scope",
     "facts",
+    "comparison",
+    "evaluation",
     "integrity",
 )
+#: A tier cell's integer range: the analysis ordinal range, mirrored below
+#: zero, because a delta is signed.
+_MIN_TIER_INT = -(2**31)
 _DOMAIN_KEYS = ("files", "modules", "symbols", "effect_roots")
 _SET_KEYS = ("coupled_sets", "producer_sets", "root_sets")
 _REVISION_KEYS = (
@@ -365,6 +394,33 @@ def _write(value: object) -> str:
     if isinstance(value, (list, tuple)):
         return "[" + ",".join(_write(item) for item in value) + "]"
     raise CanonicalModelError(f"value has no wire form: {value!r}")
+
+
+def _write_tier(value: object) -> str:
+    """The one lexical form of a comparison or evaluation cell.
+
+    The analysis grammar declares no boolean, null or negative slot and
+    :func:`_write` refuses all three; a tier row holds each of them (a
+    witness's ``loaded``, an absent reason, a negative delta), so its cells
+    are written here, under the same string, float and array laws.
+    """
+    if isinstance(value, _Obj):
+        members = ",".join(
+            f"{canonical_string_lexeme(key)}:{_write_tier(item)}"
+            for key, item in value.items
+        )
+        return "{" + members + "}"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        if not _MIN_TIER_INT <= value <= _MAX_INT:
+            raise CanonicalModelError(f"integer out of wire range: {value}")
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ",".join(_write_tier(item) for item in value) + "]"
+    return _write(value)
 
 
 # ---------------------------------------------------------------------------
@@ -1637,6 +1693,35 @@ def _family_member(family: str, rows: Sequence[dict[str, object]]) -> _Obj:
     return _Obj(members)
 
 
+def _tier_family_member(
+    family: TierFamily, rows: Sequence[Mapping[str, object]]
+) -> _Obj:
+    """One family of a house: a record object (``{}`` when absent) or one
+    column per stored field, rows in the storage writer's order."""
+    columns = family.columns
+    for row in rows:
+        if tuple(sorted(row)) != columns:
+            raise CanonicalModelError(
+                f"{family.name} row fields {sorted(row)!r} are not the declared "
+                f"stored fields {list(columns)!r}"
+            )
+    if family.record:
+        return _Obj([(column, rows[0][column]) for column in columns] if rows else [])
+    return _Obj([(column, [row[column] for row in rows]) for column in columns])
+
+
+def _tier_member(house: TierHouse, facts: ComparisonFacts | EvaluationFacts) -> str:
+    """The lexeme of one house's root member, every family named."""
+    rows = tier_rows(house, facts)
+    member = _Obj(
+        [
+            (family.name, _tier_family_member(family, rows.get(family.name, [])))
+            for family in tier_families(house)
+        ]
+    )
+    return f"{canonical_string_lexeme(house)}:{_write_tier(member)}"
+
+
 def _integrity_tail(digest: str) -> str:
     """The sealing tail after the hashed body: the integrity member only."""
     integrity = _Obj([("algorithm", "sha256"), ("value", digest)])
@@ -1647,6 +1732,7 @@ def stream_canonical_wire(
     plan: WirePlan,
     facts_for_family: Callable[[str], AnalysisFacts],
     write: Callable[[bytes], object],
+    tiers: Callable[[], tuple[ComparisonFacts, EvaluationFacts]],
 ) -> None:
     """Write the one canonical byte encoding of one model state.
 
@@ -1657,7 +1743,10 @@ def stream_canonical_wire(
     11) is the provider's right by construction, never an accident.  The
     ``integrity`` member seals the body exactly as the decoder recomputes
     it: sha256 over the wire domain plus every emitted byte between the
-    outer braces that precedes the integrity tail.
+    outer braces that precedes the integrity tail.  ``tiers`` is called once,
+    after the facts, for the comparison and evaluation houses: they are small
+    beside the analysis, and a house is emitted whole or its laws cannot be
+    read off it.
     """
     hasher = hashlib.sha256(_wire_integrity_domain(CANONICAL_WIRE_REVISION))
 
@@ -1677,6 +1766,9 @@ def stream_canonical_wire(
             + _member_lexeme(family, _family_member(family, rows))
         )
     emit("}")
+    comparison, evaluation = tiers()
+    emit("," + _tier_member("comparison", comparison))
+    emit("," + _tier_member("evaluation", evaluation))
     write(_integrity_tail(hasher.hexdigest()).encode("utf-8"))
     write(b"}")
 
@@ -1696,7 +1788,12 @@ def encode_canonical_json(model: CanonicalModel) -> bytes:
         file_modules=model.file_modules,
     )
     out = bytearray()
-    stream_canonical_wire(plan, lambda _family: facts, out.extend)
+    stream_canonical_wire(
+        plan,
+        lambda _family: facts,
+        out.extend,
+        lambda: (model.facts.comparison, model.facts.evaluation),
+    )
     return bytes(out)
 
 
@@ -2050,7 +2147,7 @@ def _decode_columns(
     return columns, flags, row_count
 
 
-def _parse_document(data: bytes) -> Mapping[str, object]:
+def _parse_document(data: bytes) -> object:
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as error:
@@ -2066,11 +2163,20 @@ def _parse_document(data: bytes) -> Mapping[str, object]:
         raise _refuse("W01", f"document is not a JSON object: {error}") from error
     if text[end:]:
         raise _refuse("W04", "bytes after the end of the document")
-    return _expect_object(document, _ROOT_KEYS, "document root")
+    return document
 
 
-def _decode_format_and_revisions(root: Mapping[str, object]) -> None:
-    fmt = _expect_object(root["format"], ("name", "wire"), "format")
+def _root_member(document: object, key: str) -> object:
+    """One root member of a document not yet judged by its shape."""
+    return document.get(key) if isinstance(document, dict) else None
+
+
+def _decode_format_and_revisions(document: object) -> None:
+    """The revision fence: taken BEFORE the root's shape is judged, so a
+    document of another generation -- whose root the declared member list
+    of this one need not fit -- is named for its generation (``W21``), never
+    for its shape (``W01``)."""
+    fmt = _expect_object(_root_member(document, "format"), ("name", "wire"), "format")
     name = _expect_string(fmt["name"], "format.name")
     if name != _FORMAT_NAME:
         raise _refuse(
@@ -2089,7 +2195,7 @@ def _decode_format_and_revisions(root: Mapping[str, object]) -> None:
             "from a store this build can open, or re-run the analysis with the "
             "run store enabled to publish it under this generation",
         )
-    revisions_raw = root["revisions"]
+    revisions_raw = _root_member(document, "revisions")
     if not isinstance(revisions_raw, dict):
         raise _refuse("W21", "revisions member is not an object")
     revisions_view = cast("dict[str, object]", revisions_raw)
@@ -4107,14 +4213,77 @@ def _check_integrity(data: bytes, root: Mapping[str, object]) -> None:
         )
 
 
+def _tier_family_rows(
+    member: object, family: TierFamily, where: str
+) -> list[Mapping[str, object]]:
+    """The stored rows one family member of a house spells, before any
+    cell is judged: a record object (``{}`` is no record) or equal-length
+    columns, one per stored field, in the declared order."""
+    if family.record:
+        if member == {}:
+            return []
+        return [_expect_object(member, family.columns, where)]
+    table = _expect_object(member, family.columns, where)
+    columns = [
+        _expect_list(table[column], f"{where}.{column}") for column in family.columns
+    ]
+    lengths = sorted({len(column) for column in columns})
+    if len(lengths) > 1:
+        raise _refuse("W15", f"{where} columns have diverging lengths {lengths!r}")
+    return [
+        dict(zip(family.columns, cells, strict=True))
+        for cells in zip(*columns, strict=True)
+    ]
+
+
+def _decode_tier_house(
+    root: Mapping[str, object], house: TierHouse
+) -> dict[str, list[object]]:
+    """One house member's rows, each read by its family's one decoder.  A
+    cell that decoder does not admit is ``W27``, named with its family."""
+    families = tier_families(house)
+    section = _expect_object(root[house], [family.name for family in families], house)
+    decoded: dict[str, list[object]] = {}
+    for family in families:
+        where = f"{house}.{family.name}"
+        try:
+            decoded[family.name] = [
+                family.decode(row, where)
+                for row in _tier_family_rows(section[family.name], family, where)
+            ]
+        except (StoreIntegrityError, CanonicalModelError) as error:
+            raise _refuse("W27", f"{where}: {error}") from error
+    return decoded
+
+
+def _decode_tiers(
+    root: Mapping[str, object], analysis: AnalysisFacts, files: frozenset[FileId]
+) -> CanonicalFacts:
+    """The facts of the document: its analysis house and the two tier houses
+    it carries, the tiers' laws proven before the seal (``W28``)."""
+    facts = CanonicalFacts(
+        analysis=analysis,
+        comparison=comparison_house(_decode_tier_house(root, "comparison")),
+        evaluation=evaluation_house(_decode_tier_house(root, "evaluation")),
+    )
+    try:
+        prove_tier_facts(facts, files)
+    except CanonicalModelError as error:
+        raise _refuse(
+            "W28", f"a comparison or evaluation law refuses: {error}"
+        ) from error
+    return facts
+
+
 def decode_canonical_json(data: bytes) -> CanonicalModel:
     """Decode canonical bytes into the canonical semantic model.
 
     Refusals are typed (``W``-codes) and never degrade silently; a document
     that decodes successfully re-encodes to the identical bytes.
     """
-    root = _parse_document(data)
-    _decode_format_and_revisions(root)
+    document = _parse_document(data)
+    _decode_format_and_revisions(document)
+    root = _expect_object(document, _ROOT_KEYS, "document root")
     labels = _decode_values(root)
     domains = _expect_object(root["domains"], _DOMAIN_KEYS, "domains")
     files = _decode_files(domains)
@@ -4213,6 +4382,41 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
     _verify_public_handles(
         candidates, candidate_handles, violations, violation_handles, file_modules
     )
+    analysis = AnalysisFacts(
+        contracts=contracts,
+        graph_nodes=graph_nodes,
+        sink_roles=sink_roles,
+        candidates=frozenset(candidates),
+        semantic_edges=semantic_edges,
+        dependency_relations=dependency_relations,
+        dependency_occurrences=dependency_occurrences,
+        dependency_cycles=dependency_cycles,
+        import_observations=import_observations,
+        relationship_observations=relationship_observations,
+        clone_groups=clone_groups,
+        dead_code_observations=dead_code_observations,
+        violations=frozenset(violations),
+        coupling_cohesion_observations=coupling_cohesion,
+        api_symbols=api_symbols,
+        risk_observations=risk_observations,
+        unit_spans=unit_spans,
+        adoption_counts=adoption_counts,
+        security_surfaces=security_surfaces,
+        suppressed_clone_groups=suppressed_clone_groups,
+        structural_groups=structural_groups,
+        dead_symbol_groups=dead_symbol_groups,
+        unreachable_statement_groups=unreachable_statement_groups,
+        complexity_hotspots=complexity_hotspots,
+        coupling_hotspots=coupling_hotspots,
+        cohesion_hotspots=cohesion_hotspots,
+        overloaded_modules=overloaded_modules,
+        coverage_units=coverage_units,
+        run_scalars=run_scalars,
+        analysis_population=analysis_population,
+        coverage_join=coverage_join,
+        dead_code_summary=dead_code_summary,
+    )
+    facts = _decode_tiers(root, analysis, frozenset(files))
     _check_integrity(data, root)
 
     model = CanonicalModel(
@@ -4220,42 +4424,7 @@ def decode_canonical_json(data: bytes) -> CanonicalModel:
         modules=frozenset(modules),
         analyzed_files=frozenset(files[o] for o in analyzed_ordinals),
         file_modules=file_modules,
-        facts=CanonicalFacts(
-            analysis=AnalysisFacts(
-                contracts=contracts,
-                graph_nodes=graph_nodes,
-                sink_roles=sink_roles,
-                candidates=frozenset(candidates),
-                semantic_edges=semantic_edges,
-                dependency_relations=dependency_relations,
-                dependency_occurrences=dependency_occurrences,
-                dependency_cycles=dependency_cycles,
-                import_observations=import_observations,
-                relationship_observations=relationship_observations,
-                clone_groups=clone_groups,
-                dead_code_observations=dead_code_observations,
-                violations=frozenset(violations),
-                coupling_cohesion_observations=coupling_cohesion,
-                api_symbols=api_symbols,
-                risk_observations=risk_observations,
-                unit_spans=unit_spans,
-                adoption_counts=adoption_counts,
-                security_surfaces=security_surfaces,
-                suppressed_clone_groups=suppressed_clone_groups,
-                structural_groups=structural_groups,
-                dead_symbol_groups=dead_symbol_groups,
-                unreachable_statement_groups=unreachable_statement_groups,
-                complexity_hotspots=complexity_hotspots,
-                coupling_hotspots=coupling_hotspots,
-                cohesion_hotspots=cohesion_hotspots,
-                overloaded_modules=overloaded_modules,
-                coverage_units=coverage_units,
-                run_scalars=run_scalars,
-                analysis_population=analysis_population,
-                coverage_join=coverage_join,
-                dead_code_summary=dead_code_summary,
-            )
-        ),
+        facts=facts,
         coupled_sets=frozenset(
             frozenset(labels[o] for o in table) for table in coupled_tables
         ),
