@@ -171,9 +171,11 @@ def test_spawn_without_operation_inherits_env(
         return proc
 
     monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-    # Observability disabled -> no active operation -> inherit parent env.
+    # Observability disabled -> no active operation -> the inherited parent
+    # env, no correlation handoff (what the worker must not hold is pinned in
+    # test_memory_jobs_spawn_isolation).
     spawn.spawn_projection_jobs_worker(root_path=tmp_path)
-    assert captured["env"] is None
+    assert captured["env"] == spawn._inherited_env()
 
 
 def test_mcp_analyze_repository_emits_pipeline_spans(tmp_path: Path) -> None:
