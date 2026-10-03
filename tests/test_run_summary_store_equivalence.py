@@ -145,14 +145,6 @@ DECLARED_DIVERGENCES: dict[str, tuple[str, ...]] = {
         "diff.api_signature_changes",
         "diff.new_api_symbols",
     ),
-    # Store WRONG, a producer defect outside this wave: a clones-only rerun
-    # over a warm cache publishes three authority groups its own population
-    # declares disabled (a cold run publishes none).
-    "clones_only_warm": (
-        "findings.total",
-        "findings.unavailable",
-        "findings.by_family",
-    ),
 }
 
 _ABSENT = "<absent>"
