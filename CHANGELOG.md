@@ -14,6 +14,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Design finding kind `cycle` is now `import_cycle`/`deferred_cycle`; `--fail-cycles`/`--fail-on-new-metrics` fail on import-time cycles only (deferred-only exits `0`, was `3`; hardening into `import_cycle` fails; messages say import-time).
 - Dependencies lane payload schema `8` and `HEALTH_INPUT_MANIFEST_VERSION` `2`: stored dependencies lanes are untrusted until `--update-baseline`.
 - Dead-code lane payload schema `4`: rows carry their declaration line, so a baseline recorded by an earlier build is untrusted for dead code (and health) and `--ci` exits `2`; record it again once with `codeclone . --update-baseline`.
+- A path in the repository's own `pyproject.toml` (`html_out`/`json_out`/`md_out`/`sarif_out`/`text_out`, `baseline`, `coverage_xml`, `cache_path`, the memory and analytics store paths) must resolve inside the repository: an outside path is refused when the configuration is read (exit `2`); pass it on the command line instead. A CodeClone database is no longer opened through a symbolic link inside `.codeclone/` (`.codeclone` itself may still be a link).
 
 ### Added
 
@@ -32,6 +33,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - `.pre-commit-hooks.yaml`: hook `codeclone` (`codeclone . --ci`) for `repo: https://github.com/orenlab/codeclone`.
 - First-argument `codeclone --mcp` runs `codeclone-mcp` with the rest; without the `mcp` extra: same install hint, exit `2`.
 - Canonical run store: the comparison tier (baseline and metrics-baseline witnesses, per-lane trust, comparison availability, disabled capabilities, novelty of five finding families, adoption and API deltas) is published as run-store rows beside the analysis rows; report and MCP answers are unchanged byte for byte.
+- MCP `get_run_summary` carries a `serving` block naming the source of the answer and why. With the run store enabled and `CODECLONE_SERVE_FROM=run_store` the summary is read from the 32 store families its fields come from and served only when it equals the in-memory answer byte for byte; otherwise memory is served and the differing fields are named (temporary switch, default `memory`).
 
 ### Changed
 
@@ -85,6 +87,14 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Tests: the suite no longer writes `.codeclone/report.html` into the checkout it runs from, and the live-state residue gate names files added, rewritten or removed inside the host's `.codeclone/`.
 - Run store: a published run resolves its baseline trust once; the stored comparison reads the trust vector the report is sealed with instead of resolving it a second time (report, wire and store bytes unchanged).
 - Run store: the report-document reader accepts a section the document declares its producer never ran (`integrity.semantic.population.producers`): `source_facts.semantic` null with the authority lane `disabled`, and the clones-only dead-code summary; such reports (every run without the authority lane, empty and unparsable scopes, clones-only) now read equal to the stored run, and an undeclared absence is still refused.
+- A metrics-skipping run (`--skip-metrics`, MCP `clones_only`) over a warm cache no longer takes back the cached semantic events, contract summaries and relationship facts its cold run drops: it gets the same run id and facts as on a cold cache and publishes no authority tier.
+
+### Security
+
+- The Engineering Memory projection worker starts isolated from the repository it analyses (`-P` on Python 3.11+, `-I` on 3.10; outside the repository, the root passed explicitly, without the MCP HTTP auth token), so a module in that repository named like a dependency is never imported. On Python 3.10 a user-site or `PYTHONPATH` install cannot start the background worker; run `codeclone memory jobs run-once` instead.
+- A repository's own `pyproject.toml` can no longer point report, baseline, coverage or cache paths outside the repository.
+- A report is never written through a symbolic link, either in place of the report file or as a directory on the way to it, that leads outside the repository; a path given on the command line that points outside is still written.
+- CodeClone no longer opens its databases through a symbolic link, so a link committed in place of the cache or the run store cannot modify a file outside the repository.
 
 ### Performance
 
