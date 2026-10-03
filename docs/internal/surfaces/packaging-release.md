@@ -25,8 +25,8 @@ This surface documents the **packaging topology**, **release automation**, and *
 graph TD
     A["pyproject.toml"] -->|base deps| B["codeclone wheel"]
     A -->|optional[mcp]| C["MCP runtime extra"]
-    C -->|requires| D["mcp &ge;1.28.1,<2"]
-    C -->|requires| E["httpx &ge;0.27.1,<1"]
+    C -->|requires| D["mcp &ge;1.30.0,<2"]
+    C -->|requires| E["httpx &ge;0.28.1,<1"]
     B -->|read-only access| F["Controller artifacts"]
     C -->|write to| G["Intent registry<br/>.codeclone/db/"]
     C -->|write to| H["Audit log<br/>.codeclone/db/"]
@@ -46,13 +46,13 @@ graph TD
 
 | Extra group       | When to install                          | Critical pins                  |
 |-------------------|------------------------------------------|--------------------------------|
-| `mcp`             | Agent-assisted CI, IDE workflows         | `mcp>=1.28.1,<2`, `httpx>=0.27.1,<1` |
-| `token-bench`     | Token budgeting experiments              | `tiktoken>=0.13.0`             |
+| `mcp`             | Agent-assisted CI, IDE workflows         | `mcp>=1.30.0,<2`, `httpx>=0.28.1,<1` |
+| `token-bench`     | Token budgeting experiments              | `tiktoken>=0.14.0`             |
 | `coverage-xml`    | External Cobertura import                | `defusedxml>=0.7.1,<0.8`       |
-| `semantic-*`      | Semantic memory backend selection        | `lancedb>=0.33.0`, `fastembed>=0.8.0,<0.9` |
+| `semantic-*`      | Semantic memory backend selection        | `lancedb>=0.39.0`, `fastembed>=0.8.1,<0.9` |
 | `analytics`       | Corpus metrics and clustering (heavy)    | `scikit-learn>=1.5.0`, `umap-learn` (Python <3.14) |
-| `perf`            | Runtime timing and profiling             | `psutil>=7,<8`                 |
-| `dev`             | Testing, type checking, release build    | `pytest>=9.1.0`, `mypy>=1.20.1`, `ruff>=0.15.20` |
+| `perf`            | Runtime timing and profiling             | `psutil>=7.2.2,<8`             |
+| `dev`             | Testing, type checking, release build    | `pytest>=9.1.1`, `mypy>=2.3.1`, `ruff>=0.16.9` |
 
 **Wheel size:** Base ~5 MB (sdist) → ~2–3 MB (wheel); `[mcp]` adds ~0.5 MB. Analytics bundle ~15 MB installed.
 
